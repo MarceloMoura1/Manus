@@ -1,5 +1,5 @@
-import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure } from "./_core/trpc";
 import { COOKIE_NAME } from "@shared/const";
 import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb } from "./db";
@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { SignJWT } from "jose";
 import { MEGAADMIN_COOKIE } from "./_core/context";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { createNewTenant, releaseTenantAccess, pauseTenantAccess, getTenantInfo, deleteTenant, listAllTenants } from "./_core/tenant-operations";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";

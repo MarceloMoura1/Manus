@@ -1,0 +1,67 @@
+ATUALIZAR createClient PARA:
+
+    createClient: adminProcedure.input(z.object({
+      company: z.string().min(2),
+      contact: z.string().min(2),
+      email: z.string().email(),
+      phone: z.string().min(8),
+      cnpj: z.string().default(""),
+      plan: z.string().min(2),
+      maxUsers: z.number().int().min(1).default(5),
+      statusType: z.enum(["active", "test"]).default("test"),
+    })).mutation(async ({ input }) => {
+      try {
+        await hydrateSyncState();
+        
+        // Cria novo tenant com banco de dados isolado automaticamente
+        const tenantInfo = await createNewTenant({
+          company: input.company,
+          contact: input.contact,
+          email: input.email,
+          phone: input.phone,
+          cnpj: input.cnpj,
+          plan: input.plan,
+          maxUsers: input.maxUsers,
+        });
+
+        const idNumber = clients.length + 1;
+        const token = `mdsk_live_${tenantInfo.clientId}_${Math.random().toString(16).slice(2, 10)}`;
+        const client: MegaClient = {
+          id: `client-${String(idNumber).padStart(3, "0")}`,
+          clientId: tenantInfo.clientId,
+          tenantDatabaseName: tenantInfo.databaseName,
+          company: input.company,
+          contact: input.contact,
+          email: input.email,
+          phone: input.phone,
+          cnpj: input.cnpj,
+          plan: input.plan,
+          maxUsers: input.maxUsers,
+          statusType: input.statusType,
+          status: "setup",
+          accessReleased: false,
+          apiToken: token,
+          modules: [],
+          integrations: {},
+          users: [{ id: `user-${Date.now()}`, name: input.contact, email: input.email, role: "admin", status: "blocked" }],
+        };
+        clients.push(client);
+        audit("MegaAdmin", `Cliente criado com banco isolado: ${tenantInfo.databaseName}`, client.clientId);
+        await persistSyncState();
+        await recordMegaDeskMetric(client.clientId, "client_created", 1, { platform: "MegaAdmin", database: tenantInfo.databaseName });
+        
+        return { 
+          ok: true, 
+          client: sanitizeClient(client), 
+          integrationToken: token,
+          databaseName: tenantInfo.databaseName,
+          message: `Tenant criado com banco de dados isolado: ${tenantInfo.databaseName}`
+        };
+      } catch (error) {
+        console.error("Erro ao criar cliente:", error);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: error instanceof Error ? error.message : "Erro ao criar cliente",
+        });
+      }
+    }),
