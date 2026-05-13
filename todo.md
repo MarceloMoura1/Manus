@@ -61,3 +61,9 @@
 - [x] Criar checkpoint final
 - [x] Validar ambiente de produção
 - [x] Expor URLs públicas
+
+
+## Fase 10: Correção de Bugs
+- [x] Corrigir falha no login do MegaAdmin
+- [x] Validar autenticação JWT
+- [x] Testar roteamento entre MegaAdmin e MegaDesk
