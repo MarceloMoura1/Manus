@@ -57,7 +57,7 @@ export async function withTenantConnection(
   ctx: TrpcContext,
   clientId: string,
   databaseName: string
-): Promise<TrpcContext & { tenantDb: Awaited<ReturnType<typeof getTenantConnection>>["db"] }> {
+): Promise<any> {
   try {
     const tenantConnection = await getTenantConnection(clientId, databaseName);
 

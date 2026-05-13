@@ -5,8 +5,7 @@
 
 import { createTenantDatabase, generateTenantDatabaseName, deleteTenantDatabase } from "./tenant-db-manager";
 import { getDb } from "../db";
-import { megadeskDomainClients } from "../drizzle/schema";
-import type { megadeskDomainClients as MegadeskDomainClientsType } from "../drizzle/schema";
+import { megadeskDomainClients } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 

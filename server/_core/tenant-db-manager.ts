@@ -18,7 +18,7 @@ interface TenantDatabaseConfig {
 
 interface TenantConnection {
   pool: mysql.Pool;
-  db: ReturnType<typeof drizzle>;
+  db: any; // ReturnType<typeof drizzle>
   config: TenantDatabaseConfig;
 }
 
@@ -352,8 +352,15 @@ export async function deleteTenantDatabase(databaseName: string): Promise<void> 
       console.log(`✅ Banco de dados deletado: ${databaseName}`);
 
       // Remove do cache
-      for (const [clientId, conn] of tenantConnections.entries()) {
+      const keysToDelete: string[] = [];
+      tenantConnections.forEach((conn, clientId) => {
         if (conn.config.databaseName === databaseName) {
+          keysToDelete.push(clientId);
+        }
+      });
+      for (const clientId of keysToDelete) {
+        const conn = tenantConnections.get(clientId);
+        if (conn) {
           await conn.pool.end();
           tenantConnections.delete(clientId);
         }
