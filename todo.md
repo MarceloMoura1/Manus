@@ -85,3 +85,9 @@
 - [x] Remover seção de Módulos do Sistema da aba de Permissões
 - [x] Melhorar layout da seção de Permissões por Usuário (cards com fundo preto e borda laranja)
 - [x] Corrigir erro de sincronização de senha entre MegaAdmin e MegaDesk (adicionado password_hash)
+
+
+## Fase 14: BUG CRÍTICO - Clientes Desaparecendo
+- [x] Investigar persistência de clientes após cadastro (causa: DELETE FROM megadesk_domain_clients)
+- [x] Corrigir desaparecimento de clientes (solução: usar UPSERT em vez de DELETE/INSERT)
+- [x] Implementar persistência em banco de dados (convertido para INSERT ... ON DUPLICATE KEY UPDATE)
