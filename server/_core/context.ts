@@ -1,28 +1,88 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
 import { sdk } from "./sdk";
+import { jwtVerify } from "jose";
+
+export const MEGAADMIN_COOKIE = "megaadmin_session";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
   res: CreateExpressContextOptions["res"];
   user: User | null;
+  tenantId?: string; // clientId para isolamento multitenante
+  userRole?: string; // role do usuário no tenant
 };
+
+async function tryMegaAdminSession(req: CreateExpressContextOptions["req"]): Promise<User | null> {
+  try {
+    // Try cookie first, then Authorization Bearer header (localStorage-based auth)
+    let raw = req.cookies?.[MEGAADMIN_COOKIE];
+    if (!raw) {
+      const authHeader = req.headers?.authorization;
+      if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+        raw = authHeader.slice(7);
+      }
+    }
+    if (!raw) return null;
+    const secret = new TextEncoder().encode(process.env.JWT_SECRET ?? "fallback");
+    const { payload } = await jwtVerify(raw, secret);
+    if (payload.type !== "megaadmin" || payload.role !== "admin") return null;
+    // Construct a synthetic User object that satisfies adminProcedure checks
+    return {
+      id: 0,
+      openId: String(payload.sub ?? ""),
+      name: String(payload.name ?? "Admin"),
+      email: String(payload.sub ?? ""),
+      loginMethod: "megaadmin",
+      role: "admin",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+    } as User;
+  } catch {
+    return null;
+  }
+}
 
 export async function createContext(
   opts: CreateExpressContextOptions
 ): Promise<TrpcContext> {
   let user: User | null = null;
+  let tenantId: string | undefined;
+  let userRole: string | undefined;
 
+  // 1. Try Manus OAuth session
   try {
     user = await sdk.authenticateRequest(opts.req);
-  } catch (error) {
-    // Authentication is optional for public procedures.
+  } catch {
     user = null;
+  }
+
+  // 2. Fallback: try MegaAdmin own session cookie
+  if (!user) {
+    user = await tryMegaAdminSession(opts.req);
+  }
+
+  // 3. Extract tenant info from headers or session
+  try {
+    const sessionData = opts.req.headers?.["x-tenant-id"];
+    if (typeof sessionData === "string") {
+      tenantId = sessionData;
+    }
+
+    const roleData = opts.req.headers?.["x-user-role"];
+    if (typeof roleData === "string") {
+      userRole = roleData;
+    }
+  } catch {
+    // Ignore errors extracting tenant info
   }
 
   return {
     req: opts.req,
     res: opts.res,
     user,
+    tenantId,
+    userRole,
   };
 }

@@ -1,42 +1,57 @@
-import { Toaster } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
-import ErrorBoundary from "./components/ErrorBoundary";
-import { ThemeProvider } from "./contexts/ThemeContext";
+import { useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { httpBatchLink } from "@trpc/client";
+import superjson from "superjson";
 import Home from "./pages/Home";
+import AdminPanel from "./pages/AdminPanel";
+import { AIAssistant } from "./components/AIAssistant";
+import { trpc } from "./lib/trpc";
 
-function Router() {
-  // make sure to consider if you need authentication for certain routes
-  return (
-    <Switch>
-      <Route path={"/"} component={Home} />
-      <Route path={"/404"} component={NotFound} />
-      {/* Final fallback route */}
-      <Route component={NotFound} />
-    </Switch>
-  );
+function isAdminRoute() {
+  const pathname = window.location.pathname.toLowerCase();
+  return pathname === "/admin" || pathname.startsWith("/admin/");
 }
 
-// NOTE: About Theme
-// - First choose a default theme according to your design style (dark or light bg), than change color palette in index.css
-//   to keep consistent foreground/background color across components
-// - If you want to make theme switchable, pass `switchable` ThemeProvider and use `useTheme` hook
+export default function App() {
+  const [queryClient] = useState(() => new QueryClient());
+  const [trpcClient] = useState(() =>
+    trpc.createClient({
+      links: [
+        httpBatchLink({
+          url: "/api/trpc",
+          transformer: superjson,
+          headers() {
+            // Forward local session token for megaadmin procedures if present
+            const token = localStorage.getItem("megadesk-session-token");
+            return token ? { Authorization: `Bearer ${token}` } : {};
+          },
+        }),
+      ],
+    }),
+  );
 
-function App() {
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
+  const platform = isAdminRoute() ? "megaadmin" : "megadesk";
+
   return (
-    <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-        // switchable
-      >
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
-      </ThemeProvider>
-    </ErrorBoundary>
+    <trpc.Provider client={trpcClient} queryClient={queryClient}>
+      <QueryClientProvider client={queryClient}>
+        {isAdminRoute() ? <AdminPanel /> : <Home />}
+        <AIAssistant
+          isOpen={isAssistantOpen}
+          onClose={() => setIsAssistantOpen(false)}
+          platform={platform}
+        />
+        {!isAssistantOpen && (
+          <button
+            onClick={() => setIsAssistantOpen(true)}
+            className="fixed bottom-4 right-4 w-14 h-14 bg-blue-500 text-white rounded-full shadow-lg hover:bg-blue-600 transition flex items-center justify-center z-40"
+            title="Abrir assistente IA"
+          >
+            <span className="text-2xl">✨</span>
+          </button>
+        )}
+      </QueryClientProvider>
+    </trpc.Provider>
   );
 }
-
-export default App;
