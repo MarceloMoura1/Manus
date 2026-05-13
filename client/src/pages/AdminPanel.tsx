@@ -784,7 +784,8 @@ export default function AdminPanel() {
 
   const summaryQuery = trpc.megaadmin.summary.useQuery(undefined, {
     enabled: authQuery.data?.user?.role === "admin",
-    refetchInterval: 30_000,
+    refetchInterval: 60_000, // Aumentado para 60 segundos para evitar perda de dados
+    staleTime: 30_000, // Dados considerados frescos por 30 segundos
   });
   const refresh = () => {
     utils.megaadmin.summary.invalidate();

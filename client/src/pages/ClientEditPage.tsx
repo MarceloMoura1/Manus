@@ -509,7 +509,7 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
       <div className="border-t border-white/10 pt-6">
         <div className="mb-4">
           <h4 className="text-sm font-semibold text-white">Permissões por Usuário</h4>
-          <p className="text-xs text-slate-400 mt-1">Configure as permissões individuais de cada usuário.</p>
+          <p className="text-xs text-slate-400 mt-1">Clique no ícone de engrenagem para configurar permissões.</p>
         </div>
 
         {users.length === 0 ? (
@@ -517,50 +517,61 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
             <p className="text-sm text-slate-400">Nenhum usuário cadastrado. Adicione usuários na aba "Usuários" para configurar permissões.</p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {users.map((user: any) => (
-              <div key={user.id} className="rounded-xl border border-white/10 bg-white/[.02] overflow-hidden">
+              <div key={user.id} className="rounded-xl border border-white/10 bg-white/[.02] p-4 flex items-center justify-between hover:bg-white/[.04] transition">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-white truncate">{user.name}</p>
+                  <p className="text-xs text-slate-400 truncate">{user.email}</p>
+                </div>
                 <button
                   onClick={() => setExpandedUser(expandedUser === user.id ? "" : user.id)}
-                  className="w-full px-4 py-3 flex items-center justify-between hover:bg-white/[.04] transition"
+                  className="ml-3 p-2 rounded-lg hover:bg-white/[.1] transition text-slate-400 hover:text-emerald-400 flex-shrink-0"
+                  title="Configurar permissões"
                 >
-                  <div className="flex items-center gap-3 text-left">
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-white">{user.name}</p>
-                      <p className="text-xs text-slate-400">{user.email} • {ROLE_LABELS[user.role]}</p>
-                    </div>
-                  </div>
-                  <div className={cn("transition transform", expandedUser === user.id ? "rotate-180" : "")}>
-                    <ChevronRight className="h-4 w-4 text-slate-400" />
-                  </div>
+                  <Settings className="h-4 w-4" />
                 </button>
-
-                {expandedUser === user.id && (
-                  <div className="border-t border-white/10 px-4 py-4 bg-white/[.01]">
-                    <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
-                      {ALL_MODULES.map((mod) => {
-                        const userPermissions = user.permissions ?? [];
-                        const hasPermission = userPermissions.includes(mod);
-                        return (
-                          <label key={mod} className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/[.05] cursor-pointer transition">
-                            <input
-                              type="checkbox"
-                              checked={hasPermission}
-                              onChange={(e) => {
-                                // TODO: Implementar atualização de permissões por usuário
-                                toast.info("Permissões por usuário em desenvolvimento");
-                              }}
-                              className="rounded border-white/20 bg-slate-800 text-emerald-400 focus:ring-emerald-400/50"
-                            />
-                            <span className="text-sm text-slate-300">{MODULE_LABELS[mod] ?? mod}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Painel de Edição de Permissões */}
+        {expandedUser && users.find((u: any) => u.id === expandedUser) && (
+          <div className="mt-6 rounded-xl border border-emerald-400/30 bg-emerald-400/5 p-4">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-white">Permissões de {users.find((u: any) => u.id === expandedUser)?.name}</p>
+                <p className="text-xs text-slate-400 mt-1">Selecione os módulos que este usuário pode acessar.</p>
+              </div>
+              <button
+                onClick={() => setExpandedUser("")}
+                className="p-1 rounded hover:bg-white/[.1] transition"
+              >
+                <X className="h-4 w-4 text-slate-400" />
+              </button>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+              {ALL_MODULES.map((mod) => {
+                const user = users.find((u: any) => u.id === expandedUser);
+                const userPermissions = user?.permissions ?? [];
+                const hasPermission = userPermissions.includes(mod);
+                return (
+                  <label key={mod} className="flex items-center gap-3 p-3 rounded-lg hover:bg-white/[.05] cursor-pointer transition">
+                    <input
+                      type="checkbox"
+                      checked={hasPermission}
+                      onChange={(e) => {
+                        // TODO: Implementar atualização de permissões por usuário
+                        toast.info("Permissões por usuário em desenvolvimento");
+                      }}
+                      className="rounded border-white/20 bg-slate-800 text-emerald-400 focus:ring-emerald-400/50"
+                    />
+                    <span className="text-sm text-slate-300">{MODULE_LABELS[mod] ?? mod}</span>
+                  </label>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

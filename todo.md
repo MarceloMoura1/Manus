@@ -73,3 +73,9 @@
 - [x] Refatorar permissões para ser por usuário individual
 - [x] Remover seção de "Permissões por função"
 - [x] Melhorar layout da página de permissões
+
+
+## Fase 12: Correções Críticas
+- [x] Investigar e corrigir cliente teste desaparecendo (aumentado refetchInterval)
+- [x] Refatorar layout de permissões com ícone de engrenagem
+- [x] Simplificar interface de permissões por usuário
