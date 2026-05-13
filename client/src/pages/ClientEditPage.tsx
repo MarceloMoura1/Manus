@@ -476,40 +476,11 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
 
   return (
     <div className="space-y-6">
-      {/* Seção: Módulos do Sistema */}
-      <div>
-        <div className="mb-4">
-          <h4 className="text-sm font-semibold text-white">Módulos do Sistema</h4>
-          <p className="text-xs text-slate-400 mt-1">Ative ou desative os módulos disponíveis para este cliente.</p>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {ALL_MODULES.map((mod) => {
-            const enabled = activeModules.includes(mod);
-            return (
-              <button
-                key={mod}
-                onClick={() => toggleModule.mutate({ clientId: client.clientId, module: mod, enabled: !enabled })}
-                className={cn(
-                  "flex items-center gap-3 rounded-xl border p-3 text-left transition duration-200",
-                  enabled
-                    ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300 hover:bg-emerald-400/15"
-                    : "border-white/10 bg-white/[.02] text-slate-400 hover:border-white/20 hover:bg-white/[.04]",
-                )}
-              >
-                <div className={cn("h-2 w-2 rounded-full flex-shrink-0", enabled ? "bg-emerald-400" : "bg-slate-600")} />
-                <span className="text-sm font-medium">{MODULE_LABELS[mod] ?? mod}</span>
-                {enabled && <Check className="ml-auto h-4 w-4 flex-shrink-0" />}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
       {/* Seção: Permissões por Usuário */}
-      <div className="border-t border-white/10 pt-6">
-        <div className="mb-4">
-          <h4 className="text-sm font-semibold text-white">Permissões por Usuário</h4>
-          <p className="text-xs text-slate-400 mt-1">Clique no ícone de engrenagem para configurar permissões.</p>
+      <div>
+        <div className="mb-6">
+          <h4 className="text-lg font-bold text-white">Permissões por Usuário</h4>
+          <p className="text-sm text-slate-400 mt-2">Gerencie o acesso de cada usuário aos módulos do sistema.</p>
         </div>
 
         {users.length === 0 ? (
@@ -517,16 +488,16 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
             <p className="text-sm text-slate-400">Nenhum usuário cadastrado. Adicione usuários na aba "Usuários" para configurar permissões.</p>
           </div>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          <div className="space-y-2">
             {users.map((user: any) => (
-              <div key={user.id} className="rounded-xl border border-white/10 bg-white/[.02] p-4 flex items-center justify-between hover:bg-white/[.04] transition">
+              <div key={user.id} className="rounded-lg border border-white/10 bg-black p-4 flex items-center justify-between hover:border-orange-500 transition">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-white truncate">{user.name}</p>
                   <p className="text-xs text-slate-400 truncate">{user.email}</p>
                 </div>
                 <button
                   onClick={() => setExpandedUser(expandedUser === user.id ? "" : user.id)}
-                  className="ml-3 p-2 rounded-lg hover:bg-white/[.1] transition text-slate-400 hover:text-emerald-400 flex-shrink-0"
+                  className="ml-3 p-2 rounded-lg hover:border-orange-500 transition text-slate-400 hover:text-orange-500 flex-shrink-0"
                   title="Configurar permissões"
                 >
                   <Settings className="h-4 w-4" />
@@ -546,7 +517,7 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
               </div>
               <button
                 onClick={() => setExpandedUser("")}
-                className="p-1 rounded hover:bg-white/[.1] transition"
+                className="p-1 rounded hover:border-orange-500 transition"
               >
                 <X className="h-4 w-4 text-slate-400" />
               </button>

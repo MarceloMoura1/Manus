@@ -480,7 +480,9 @@ export const appRouter = router({
       if (client.users.length >= client.maxUsers) {
         throw new TRPCError({ code: "BAD_REQUEST", message: `Limite de usuários atingido (${client.maxUsers}). Aumente o limite nos dados do cliente.` });
       }
-      const user = { id: `user-${Date.now()}`, name: input.name, email: input.email, role: input.role, status: client.accessReleased ? "active" as const : "blocked" as const, permissions: rolePermissions(input.role) };
+      // Gerar hash de senha padrão (123456) para sincronização com MegaDesk
+      const defaultPasswordHash = await bcrypt.hash("123456", 12);
+      const user = { id: `user-${Date.now()}`, name: input.name, email: input.email, role: input.role, status: client.accessReleased ? "active" as const : "blocked" as const, permissions: rolePermissions(input.role), passwordHash: defaultPasswordHash };
       client.users.push(user);
       audit("MegaAdmin", `Usuário criado: ${input.email}`, client.clientId);
       await persistSyncState();

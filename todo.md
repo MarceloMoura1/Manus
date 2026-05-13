@@ -79,3 +79,9 @@
 - [x] Investigar e corrigir cliente teste desaparecendo (aumentado refetchInterval)
 - [x] Refatorar layout de permissões com ícone de engrenagem
 - [x] Simplificar interface de permissões por usuário
+
+
+## Fase 13: Correções Finais
+- [x] Remover seção de Módulos do Sistema da aba de Permissões
+- [x] Melhorar layout da seção de Permissões por Usuário (cards com fundo preto e borda laranja)
+- [x] Corrigir erro de sincronização de senha entre MegaAdmin e MegaDesk (adicionado password_hash)
