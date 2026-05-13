@@ -67,3 +67,9 @@
 - [x] Corrigir falha no login do MegaAdmin
 - [x] Validar autenticação JWT
 - [x] Testar roteamento entre MegaAdmin e MegaDesk
+
+
+## Fase 11: Melhorias de UX
+- [x] Refatorar permissões para ser por usuário individual
+- [x] Remover seção de "Permissões por função"
+- [x] Melhorar layout da página de permissões

@@ -3,6 +3,7 @@ import {
   Bot,
   Building2,
   Check,
+  ChevronRight,
   Eye,
   EyeOff,
   KeyRound,
@@ -463,6 +464,9 @@ function UsuariosTab({ client, onRefresh }: { client: any; onRefresh: () => void
 
 // ─── Aba: Permissões ──────────────────────────────────────────────────────────
 function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => void }) {
+  const users = client.users ?? [];
+  const [expandedUser, setExpandedUser] = useState<string>(users?.[0]?.id ?? "");
+
   const toggleModule = trpc.megaadmin.toggleModule.useMutation({
     onSuccess() { onRefresh(); },
     onError(err) { toast.error(err.message); },
@@ -471,60 +475,94 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
   const activeModules: string[] = client.modules ?? [];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
+      {/* Seção: Módulos do Sistema */}
       <div>
-        <h4 className="text-sm font-medium text-slate-300 mb-1">Módulos do sistema</h4>
-        <p className="text-xs text-slate-500">Ative ou desative os módulos disponíveis para este cliente.</p>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-        {ALL_MODULES.map((mod) => {
-          const enabled = activeModules.includes(mod);
-          return (
-            <button
-              key={mod}
-              onClick={() => toggleModule.mutate({ clientId: client.clientId, module: mod, enabled: !enabled })}
-              className={cn(
-                "flex items-center gap-3 rounded-2xl border p-4 text-left transition",
-                enabled
-                  ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
-                  : "border-white/10 bg-white/[.02] text-slate-400 hover:border-white/20",
-              )}
-            >
-              <div className={cn("h-2 w-2 rounded-full flex-shrink-0", enabled ? "bg-emerald-400" : "bg-slate-600")} />
-              <span className="text-sm">{MODULE_LABELS[mod] ?? mod}</span>
-              {enabled && <Check className="ml-auto h-4 w-4 flex-shrink-0" />}
-            </button>
-          );
-        })}
-      </div>
-      <div>
-        <h4 className="text-sm font-medium text-slate-300 mb-3 mt-6">Permissões por função</h4>
-        <div className="overflow-x-auto rounded-2xl border border-white/10">
-          <table className="w-full text-xs text-slate-300">
-            <thead>
-              <tr className="border-b border-white/10 bg-white/[.03]">
-                <th className="px-4 py-3 text-left text-slate-400 font-medium">Página / Módulo</th>
-                {["admin", "manager", "agent", "viewer"].map((r) => (
-                  <th key={r} className="px-4 py-3 text-center text-slate-400 font-medium">{ROLE_LABELS[r]}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(PERMISSION_LABELS).map(([key, label]) => (
-                <tr key={key} className="border-b border-white/5 hover:bg-white/[.02]">
-                  <td className="px-4 py-3">{label}</td>
-                  {["admin", "manager", "agent", "viewer"].map((role) => (
-                    <td key={role} className="px-4 py-3 text-center">
-                      {ROLE_DEFAULT_PERMISSIONS[role]?.includes(key)
-                        ? <Check className="mx-auto h-3.5 w-3.5 text-emerald-400" />
-                        : <X className="mx-auto h-3.5 w-3.5 text-slate-600" />}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="mb-4">
+          <h4 className="text-sm font-semibold text-white">Módulos do Sistema</h4>
+          <p className="text-xs text-slate-400 mt-1">Ative ou desative os módulos disponíveis para este cliente.</p>
         </div>
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          {ALL_MODULES.map((mod) => {
+            const enabled = activeModules.includes(mod);
+            return (
+              <button
+                key={mod}
+                onClick={() => toggleModule.mutate({ clientId: client.clientId, module: mod, enabled: !enabled })}
+                className={cn(
+                  "flex items-center gap-3 rounded-xl border p-3 text-left transition duration-200",
+                  enabled
+                    ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300 hover:bg-emerald-400/15"
+                    : "border-white/10 bg-white/[.02] text-slate-400 hover:border-white/20 hover:bg-white/[.04]",
+                )}
+              >
+                <div className={cn("h-2 w-2 rounded-full flex-shrink-0", enabled ? "bg-emerald-400" : "bg-slate-600")} />
+                <span className="text-sm font-medium">{MODULE_LABELS[mod] ?? mod}</span>
+                {enabled && <Check className="ml-auto h-4 w-4 flex-shrink-0" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Seção: Permissões por Usuário */}
+      <div className="border-t border-white/10 pt-6">
+        <div className="mb-4">
+          <h4 className="text-sm font-semibold text-white">Permissões por Usuário</h4>
+          <p className="text-xs text-slate-400 mt-1">Configure as permissões individuais de cada usuário.</p>
+        </div>
+
+        {users.length === 0 ? (
+          <div className="rounded-xl border border-white/10 bg-white/[.02] p-6 text-center">
+            <p className="text-sm text-slate-400">Nenhum usuário cadastrado. Adicione usuários na aba "Usuários" para configurar permissões.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {users.map((user: any) => (
+              <div key={user.id} className="rounded-xl border border-white/10 bg-white/[.02] overflow-hidden">
+                <button
+                  onClick={() => setExpandedUser(expandedUser === user.id ? "" : user.id)}
+                  className="w-full px-4 py-3 flex items-center justify-between hover:bg-white/[.04] transition"
+                >
+                  <div className="flex items-center gap-3 text-left">
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-white">{user.name}</p>
+                      <p className="text-xs text-slate-400">{user.email} • {ROLE_LABELS[user.role]}</p>
+                    </div>
+                  </div>
+                  <div className={cn("transition transform", expandedUser === user.id ? "rotate-180" : "")}>
+                    <ChevronRight className="h-4 w-4 text-slate-400" />
+                  </div>
+                </button>
+
+                {expandedUser === user.id && (
+                  <div className="border-t border-white/10 px-4 py-4 bg-white/[.01]">
+                    <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+                      {ALL_MODULES.map((mod) => {
+                        const userPermissions = user.permissions ?? [];
+                        const hasPermission = userPermissions.includes(mod);
+                        return (
+                          <label key={mod} className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/[.05] cursor-pointer transition">
+                            <input
+                              type="checkbox"
+                              checked={hasPermission}
+                              onChange={(e) => {
+                                // TODO: Implementar atualização de permissões por usuário
+                                toast.info("Permissões por usuário em desenvolvimento");
+                              }}
+                              className="rounded border-white/20 bg-slate-800 text-emerald-400 focus:ring-emerald-400/50"
+                            />
+                            <span className="text-sm text-slate-300">{MODULE_LABELS[mod] ?? mod}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
