@@ -483,6 +483,194 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
   );
 }
 
+function SettingsPage() {
+  const [sidebarBgColor, setSidebarBgColor] = useState("#1e293b");
+  const [sidebarAccent, setSidebarAccent] = useState("#3b82f6");
+  const [cardBgColor, setCardBgColor] = useState("#ffffff");
+  const [cardBorderColor, setCardBorderColor] = useState("#e2e8f0");
+
+  const colorPresets = [
+    { name: "Padrão (Azul)", bg: "#1e293b", accent: "#3b82f6", cardBg: "#ffffff", cardBorder: "#e2e8f0" },
+    { name: "Escuro (Roxo)", bg: "#1a1a2e", accent: "#a855f7", cardBg: "#0f172a", cardBorder: "#334155" },
+    { name: "Verde Floresta", bg: "#1b4332", accent: "#2d6a4f", cardBg: "#ffffff", cardBorder: "#d1fae5" },
+    { name: "Laranja Quente", bg: "#7c2d12", accent: "#f97316", cardBg: "#ffffff", cardBorder: "#fed7aa" },
+    { name: "Minimalista", bg: "#f5f5f5", accent: "#1f2937", cardBg: "#ffffff", cardBorder: "#d1d5db" },
+  ];
+
+  return (
+    <div>
+      <PageHeader icon={Settings} title="Configurações" subtitle="Personalize a aparência e comportamento da plataforma." />
+      
+      <div className="grid gap-6">
+        {/* Seção de Personalização de Cores */}
+        <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-200">
+          <h3 className="font-semibold text-slate-950 mb-4 flex items-center gap-2">
+            <Cog className="h-5 w-5" />
+            Personalização de Cores
+          </h3>
+          
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Cores Customizáveis */}
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Cor de Fundo da Barra Lateral</label>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="color"
+                    value={sidebarBgColor}
+                    onChange={(e) => setSidebarBgColor(e.target.value)}
+                    className="h-12 w-12 rounded border border-slate-300 cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={sidebarBgColor}
+                    onChange={(e) => setSidebarBgColor(e.target.value)}
+                    className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm font-mono"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Cor de Destaque (Ícones Ativos)</label>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="color"
+                    value={sidebarAccent}
+                    onChange={(e) => setSidebarAccent(e.target.value)}
+                    className="h-12 w-12 rounded border border-slate-300 cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={sidebarAccent}
+                    onChange={(e) => setSidebarAccent(e.target.value)}
+                    className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Cor de Fundo dos Cards</label>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="color"
+                    value={cardBgColor}
+                    onChange={(e) => setCardBgColor(e.target.value)}
+                    className="h-12 w-12 rounded border border-slate-300 cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={cardBgColor}
+                    onChange={(e) => setCardBgColor(e.target.value)}
+                    className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Cor de Borda dos Cards</label>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="color"
+                    value={cardBorderColor}
+                    onChange={(e) => setCardBorderColor(e.target.value)}
+                    className="h-12 w-12 rounded border border-slate-300 cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={cardBorderColor}
+                    onChange={(e) => setCardBorderColor(e.target.value)}
+                    className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Pré-visualização */}
+            <div className="space-y-4">
+              <p className="text-sm font-medium text-slate-700">Pré-visualização</p>
+              <div className="rounded-lg overflow-hidden shadow-lg" style={{ backgroundColor: sidebarBgColor, height: "300px" }}>
+                <div className="p-4 space-y-3">
+                  {/* Logo */}
+                  <div className="flex items-center gap-2 mb-6">
+                    <div className="w-8 h-8 rounded flex items-center justify-center" style={{ backgroundColor: sidebarAccent }}>
+                      <Zap className="h-5 w-5 text-white" />
+                    </div>
+                    <span className="text-white font-semibold text-sm">MegaDesk</span>
+                  </div>
+                  
+                  {/* Items */}
+                  <div className="space-y-2">
+                    {["Home", "Conversas", "Chamados"].map((item) => (
+                      <div
+                        key={item}
+                        className="flex items-center gap-2 p-2 rounded transition"
+                        style={{
+                          backgroundColor: item === "Home" ? sidebarAccent : "transparent",
+                          color: item === "Home" ? "white" : "rgba(255,255,255,0.7)",
+                        }}
+                      >
+                        <div className="w-5 h-5 rounded" style={{ backgroundColor: "rgba(255,255,255,0.3)" }} />
+                        <span className="text-xs">{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Paletas Pré-definidas */}
+        <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-200">
+          <h3 className="font-semibold text-slate-950 mb-4">Paletas Pré-definidas</h3>
+          <div className="grid gap-3 md:grid-cols-5">
+            {colorPresets.map((preset) => (
+              <button
+                key={preset.name}
+                onClick={() => {
+                  setSidebarBgColor(preset.bg);
+                  setSidebarAccent(preset.accent);
+                  setCardBgColor(preset.cardBg);
+                  setCardBorderColor(preset.cardBorder);
+                }}
+                className="rounded-lg p-4 border-2 border-slate-200 hover:border-blue-500 transition text-left"
+              >
+                <p className="text-sm font-medium text-slate-950 mb-2">{preset.name}</p>
+                <div className="flex gap-1 h-8">
+                  <div className="flex-1 rounded" style={{ backgroundColor: preset.bg }} />
+                  <div className="flex-1 rounded" style={{ backgroundColor: preset.accent }} />
+                  <div className="flex-1 rounded" style={{ backgroundColor: preset.cardBg }} />
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Outras Configurações */}
+        <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-200">
+          <h3 className="font-semibold text-slate-950 mb-4">Outras Configurações</h3>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium text-slate-950">Telefone Principal</p>
+                <p className="text-sm text-slate-500">Configure a origem oficial de atendimento WhatsApp.</p>
+              </div>
+              <input type="text" placeholder="+55 11 99999-9999" className="rounded border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium text-slate-950">Modo Escuro</p>
+                <p className="text-sm text-slate-500">Ativar tema escuro automaticamente.</p>
+              </div>
+              <input type="checkbox" className="h-4 w-4 rounded" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SimpleGridModule({
   icon: Icon,
   title,
@@ -905,7 +1093,7 @@ export default function Home() {
       {!overview.isLoading && !overview.error && active === "bot-config" && <BotConfigPage initialScripts={data?.botScripts ?? []} />}
       {active === "tracking" && <SimpleGridModule icon={MapPin} title="Rastreio" subtitle="Acompanhe eventos de mensagens, webhooks e jornada do atendimento." cards={[["Linha do tempo", "Eventos recebidos via WhatsApp e MegaAdmin aparecem organizados por cliente e telefone."], ["Status de webhook", "Monitore sucesso, atraso ou falhas de entrega por integração."], ["Auditoria", "Registre origem, token, módulo e usuário responsável por cada evento operacional."]]} />}
       {active === "erp" && <SimpleGridModule icon={PackageSearch} title="ERP" subtitle="Visão de pedidos, clientes, financeiro e dados operacionais conectados." cards={[["Pedidos", "Consulte pedidos associados ao atendimento em andamento."], ["Financeiro", "Visualize pendências e histórico de cobranças por cliente."], ["Clientes", "Mantenha dados operacionais sincronizados com a conta cadastrada no MegaAdmin."]]} />}
-      {active === "settings" && <SimpleGridModule icon={Settings} title="Configurações" subtitle="Parâmetros gerais da plataforma MegaDesk." cards={[["Telefone principal", "Configure a origem oficial de atendimento WhatsApp."], ["Permissões", "Respeite os módulos liberados pelo MegaAdmin para cada usuário."], ["Integração", "Use token de API gerado automaticamente no cadastro do cliente."]]} />}
+      {active === "settings" && <SettingsPage />}
       {active === "assistant" && <SimpleGridModule icon={Bot} title="Assistente IA" subtitle="Apoio inteligente para triagem, resumo e sugestão de respostas." cards={[["Resumo automático", "A IA resume histórico de conversa e problema relatado."], ["Resposta sugerida", "Sugestões de texto ajudam o operador sem substituir a revisão humana."], ["Classificação", "Intenção, urgência e categoria são identificadas para orientar o chamado."]]} />}
       {active === "notifications" && <SimpleGridModule icon={Bell} title="Notificações" subtitle="Central de alertas de chamados, conversas e integração." cards={[["Chamados críticos", "Receba alertas sobre chamados abertos com prioridade alta."], ["Webhooks", "Monitore entregas recusadas ou atrasadas."], ["Atendimento", "Acompanhe conversas paradas e transferências para humano."]]} />}
     </Shell>
