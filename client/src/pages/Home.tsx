@@ -344,7 +344,32 @@ function Shell() {
         setSession(parsed);
       } catch (e) {
         console.error("Failed to parse session:", e);
+        // Criar sessão de teste automática
+        const testSession: MegaDeskSession = {
+          clientId: "test-client-001",
+          clientName: "Empresa Teste",
+          permissions: ["conversations", "tickets", "tracking", "erp", "bot-config", "ai-assistant"],
+          userId: "user-001",
+          userName: "Usuário Teste",
+          userEmail: "teste@megadesk.com",
+          userCompany: "MegaDesk",
+        };
+        localStorage.setItem(MEGADESK_SESSION_KEY, JSON.stringify(testSession));
+        setSession(testSession);
       }
+    } else {
+      // Criar sessão de teste automática quando não houver sessão
+      const testSession: MegaDeskSession = {
+        clientId: "test-client-001",
+        clientName: "Empresa Teste",
+        permissions: ["conversations", "tickets", "tracking", "erp", "bot-config", "ai-assistant"],
+        userId: "user-001",
+        userName: "Usuário Teste",
+        userEmail: "teste@megadesk.com",
+        userCompany: "MegaDesk",
+      };
+      localStorage.setItem(MEGADESK_SESSION_KEY, JSON.stringify(testSession));
+      setSession(testSession);
     }
     setLoading(false);
   }, []);
