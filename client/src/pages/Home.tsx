@@ -32,7 +32,7 @@ import {
   ChevronLeft,
   LogOut,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
 
@@ -484,10 +484,39 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
 }
 
 function SettingsPage() {
-  const [sidebarBgColor, setSidebarBgColor] = useState("#1e293b");
-  const [sidebarAccent, setSidebarAccent] = useState("#3b82f6");
-  const [cardBgColor, setCardBgColor] = useState("#ffffff");
-  const [cardBorderColor, setCardBorderColor] = useState("#e2e8f0");
+  // Carregar cores do localStorage ao inicializar
+  const [sidebarBgColor, setSidebarBgColor] = useState(() => {
+    try {
+      const stored = localStorage.getItem("megadesk_sidebar_bg");
+      return stored || "#1e293b";
+    } catch {
+      return "#1e293b";
+    }
+  });
+  const [sidebarAccent, setSidebarAccent] = useState(() => {
+    try {
+      const stored = localStorage.getItem("megadesk_sidebar_accent");
+      return stored || "#3b82f6";
+    } catch {
+      return "#3b82f6";
+    }
+  });
+  const [cardBgColor, setCardBgColor] = useState(() => {
+    try {
+      const stored = localStorage.getItem("megadesk_card_bg");
+      return stored || "#ffffff";
+    } catch {
+      return "#ffffff";
+    }
+  });
+  const [cardBorderColor, setCardBorderColor] = useState(() => {
+    try {
+      const stored = localStorage.getItem("megadesk_card_border");
+      return stored || "#e2e8f0";
+    } catch {
+      return "#e2e8f0";
+    }
+  });
 
   const colorPresets = [
     { name: "Padrão (Azul)", bg: "#1e293b", accent: "#3b82f6", cardBg: "#ffffff", cardBorder: "#e2e8f0" },
@@ -496,6 +525,18 @@ function SettingsPage() {
     { name: "Laranja Quente", bg: "#7c2d12", accent: "#f97316", cardBg: "#ffffff", cardBorder: "#fed7aa" },
     { name: "Minimalista", bg: "#f5f5f5", accent: "#1f2937", cardBg: "#ffffff", cardBorder: "#d1d5db" },
   ];
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("megadesk_sidebar_bg", sidebarBgColor);
+      localStorage.setItem("megadesk_sidebar_accent", sidebarAccent);
+      localStorage.setItem("megadesk_card_bg", cardBgColor);
+      localStorage.setItem("megadesk_card_border", cardBorderColor);
+    } catch (error) {
+      console.error("Erro ao salvar preferencias de cores:", error);
+    }
+  }, [sidebarBgColor, sidebarAccent, cardBgColor, cardBorderColor]);
+
 
   return (
     <div>
