@@ -180,8 +180,19 @@ function rolePermissions(role: MegaClient["users"][number]["role"]) {
   return map[role];
 }
 
+// Resolve permissões finais do usuário, respeitando customizações
+function resolveUserPermissions(user: MegaClient["users"][number]) {
+  // Se o usuário tem permissões customizadas, usa APENAS essas (não combina com role defaults)
+  if (user.permissions && user.permissions.length > 0) {
+    const base = ["home", "settings", "notifications"];
+    return Array.from(new Set([...base, ...user.permissions]));
+  }
+  // Caso contrário, usa permissões padrão da role
+  return rolePermissions(user.role);
+}
+
 function assertClientUserPermission(client: MegaClient, permission: string, userEmail?: string) {
-  const activeUsers = client.users.map((user) => ({ ...user, permissions: Array.from(new Set([...rolePermissions(user.role), ...(user.permissions ?? [])])) })).filter((user) => user.status === "active");
+  const activeUsers = client.users.map((user) => ({ ...user, permissions: resolveUserPermissions(user) })).filter((user) => user.status === "active");
   const user = userEmail ? activeUsers.find((item) => item.email === userEmail) : activeUsers.find((item) => item.permissions.includes(permission));
   if (!user) {
     audit("MegaDesk", `Permissão negada para ${permission}`, client.clientId, false);
@@ -195,7 +206,7 @@ function assertClientUserPermission(client: MegaClient, permission: string, user
 }
 
 function sanitizeClient(client: MegaClient) {
-  return { ...client, apiToken: undefined, tokenHint: tokenHint(client.apiToken), users: client.users.map((user) => ({ ...user, permissions: Array.from(new Set([...rolePermissions(user.role), ...(user.permissions ?? [])])) })) };
+  return { ...client, apiToken: undefined, tokenHint: tokenHint(client.apiToken), users: client.users.map((user) => ({ ...user, permissions: resolveUserPermissions(user) })) };
 }
 
 export const appRouter = router({
@@ -582,7 +593,7 @@ export const appRouter = router({
       const client = getReleasedClientOrThrow(input.clientId);
       // Busca o usuário ativo — sem exigir nenhuma permissão específica, apenas que esteja ativo
       const activeUsers = client.users
-        .map((user) => ({ ...user, permissions: Array.from(new Set([...rolePermissions(user.role), ...(user.permissions ?? [])])) }))
+        .map((user) => ({ ...user, permissions: resolveUserPermissions(user) }))
         .filter((user) => user.status === "active");
       const activeUser = activeUsers.find((u) => u.email.toLowerCase() === input.userEmail.toLowerCase());
       if (!activeUser) {
@@ -735,7 +746,7 @@ export const appRouter = router({
             });
           }
 
-          const permissions = Array.from(new Set([...rolePermissions(user.role), ...(user.permissions ?? [])]));
+          const permissions = resolveUserPermissions(user);
           audit("MegaDesk", `Login realizado: ${email}`, client.clientId);
           await persistSyncState();
 

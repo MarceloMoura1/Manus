@@ -105,10 +105,10 @@
 - [x] Garantir persistência real em banco de dados (dados agora são carregados do banco)
 
 ## Fase 17: Implementar Sistema de Permissões de Usuário
-- [ ] Investigar estrutura de permissões no banco de dados
-- [ ] Criar interface de edição de permissões no MegaAdmin
-- [ ] Implementar API de atualização de permissões
-- [ ] Sincronizar permissões com MegaDesk
-- [ ] Remover fundo branco da seção de permissões
-- [ ] Aplicar design consistente com MegaAdmin
-- [ ] Testar fluxo completo de permissões
+- [x] Investigar estrutura de permissões no banco de dados
+- [x] Criar interface de edição de permissões no MegaAdmin
+- [x] Implementar API de atualização de permissões
+- [x] Sincronizar permissões com MegaDesk
+- [x] Remover fundo branco da seção de permissões
+- [x] Aplicar design consistente com MegaAdmin
+- [x] Testar fluxo completo de permissões (testes automatizados passando)
