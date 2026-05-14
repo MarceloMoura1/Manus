@@ -288,56 +288,46 @@ function PageHeader({ icon: Icon, title, subtitle }: { icon: IconComponent; titl
 
 function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId) => void; indicadores?: { conversasAbertas: number; chamadosAbertos: number; tempoMedio: string; resolucaoBot: string } }) {
   const kpiCards = [
-    { label: "Conversas Abertas", value: String(indicadores?.conversasAbertas ?? 0), accent: "from-blue-500 to-cyan-400", icon: MessageCircle, note: "em andamento" },
-    { label: "Taxa de Resolução", value: indicadores?.resolucaoBot ?? "0%", accent: "from-emerald-500 to-teal-400", icon: CheckCircle2, note: "bot inteligente" },
-    { label: "Chamados Ativos", value: String(indicadores?.chamadosAbertos ?? 0), accent: "from-orange-500 to-red-400", icon: AlertCircle, note: "aguardando" },
-    { label: "Tempo Médio", value: indicadores?.tempoMedio ?? "0m", accent: "from-purple-500 to-pink-500", icon: Ticket, note: "resposta" },
+    { label: "Conversas Abertas", value: String(indicadores?.conversasAbertas ?? 0), accent: "bg-blue-50 border-blue-200", icon: MessageCircle, note: "em andamento", iconColor: "text-blue-600" },
+    { label: "Taxa de Resolução", value: indicadores?.resolucaoBot ?? "0%", accent: "bg-emerald-50 border-emerald-200", icon: CheckCircle2, note: "bot inteligente", iconColor: "text-emerald-600" },
+    { label: "Chamados Ativos", value: String(indicadores?.chamadosAbertos ?? 0), accent: "bg-slate-50 border-slate-200", icon: AlertCircle, note: "aguardando", iconColor: "text-slate-600" },
+    { label: "Tempo Médio", value: indicadores?.tempoMedio ?? "0m", accent: "bg-slate-50 border-slate-200", icon: Ticket, note: "resposta", iconColor: "text-slate-600" },
   ];
 
   const quickActions = [
-    { title: "Conversas", subtitle: "Central de atendimento", route: "conversations" as RouteId, color: "from-blue-600 to-blue-700" },
-    { title: "Chamados", subtitle: "Gerenciar tickets", route: "tickets" as RouteId, color: "from-orange-600 to-orange-700" },
-    { title: "Rastreio", subtitle: "Monitorar atividades", route: "tracking" as RouteId, color: "from-purple-600 to-purple-700" },
+    { title: "Conversas", subtitle: "Central de atendimento", route: "conversations" as RouteId, color: "bg-blue-600 hover:bg-blue-700" },
+    { title: "Chamados", subtitle: "Gerenciar tickets", route: "tickets" as RouteId, color: "bg-slate-700 hover:bg-slate-800" },
+    { title: "Rastreio", subtitle: "Monitorar atividades", route: "tracking" as RouteId, color: "bg-slate-600 hover:bg-slate-700" },
   ];
 
   return (
     <div className="space-y-8">
       {/* Hero Section */}
-      <section className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 p-12 shadow-2xl shadow-blue-900/20">
-        <div className="absolute inset-0 opacity-30">
-          <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500 rounded-full blur-3xl" />
-          <div className="absolute bottom-0 left-0 w-96 h-96 bg-purple-500 rounded-full blur-3xl" />
-        </div>
-        <div className="relative z-10 grid gap-8 lg:grid-cols-2 lg:items-center">
+      <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-50 to-slate-100 p-12 shadow-sm border border-slate-200">
+        <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
           <div className="space-y-6 animate-fade-in">
-            <div className="inline-flex items-center gap-3 rounded-full bg-white/10 backdrop-blur px-4 py-2 border border-white/20">
-              <Zap className="h-4 w-4 text-yellow-400" />
-              <span className="text-xs font-bold uppercase tracking-wider text-white/80">Plataforma de Atendimento</span>
+            <div className="inline-flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-1.5 border border-blue-200">
+              <Zap className="h-3.5 w-3.5 text-blue-600" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-blue-700">Plataforma de Atendimento</span>
             </div>
             <div>
-              <h1 className="text-6xl font-black text-white leading-tight mb-2 animate-slide-up" style={{ animationDelay: '0.1s' }}>
-                Mega<span className="bg-gradient-to-r from-blue-400 via-cyan-300 to-blue-400 bg-clip-text text-transparent">Desk</span>
+              <h1 className="text-5xl font-bold text-slate-900 leading-tight mb-2 animate-slide-up" style={{ animationDelay: '0.1s' }}>
+                MegaDesk
               </h1>
-              <p className="text-xl text-blue-200 font-semibold animate-slide-up" style={{ animationDelay: '0.2s' }}>Sistema Inteligente de Atendimento</p>
+              <p className="text-lg text-slate-600 font-medium animate-slide-up" style={{ animationDelay: '0.2s' }}>Sistema Inteligente de Atendimento</p>
             </div>
-            <p className="text-lg text-slate-300 leading-relaxed max-w-md animate-slide-up" style={{ animationDelay: '0.3s' }}>
-              Gerencie conversas WhatsApp, chamados e atendimento com IA em um único lugar. Integrado com MegaAdmin.
+            <p className="text-base text-slate-600 leading-relaxed max-w-md animate-slide-up" style={{ animationDelay: '0.3s' }}>
+              Gerencie conversas WhatsApp, chamados e atendimento com IA em um único lugar.
             </p>
-            <div className="flex gap-4 pt-4 animate-slide-up" style={{ animationDelay: '0.4s' }}>
-              <button onClick={() => setActive('conversations')} className="px-8 py-3 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-full transition-all duration-200 hover:shadow-lg hover:shadow-blue-500/50 hover:-translate-y-0.5">
+            <div className="flex gap-3 pt-4 animate-slide-up" style={{ animationDelay: '0.4s' }}>
+              <button onClick={() => setActive('conversations')} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
                 Começar
-              </button>
-              <button onClick={() => navigateToPlatform('megaadmin')} className="px-8 py-3 bg-white/10 hover:bg-white/20 text-white font-bold rounded-full border border-white/30 transition-all duration-200 backdrop-blur">
-                MegaAdmin
               </button>
             </div>
           </div>
-          <div className="hidden lg:flex items-center justify-center animate-float">
-            <div className="relative w-64 h-64">
-              <div className="absolute inset-0 bg-gradient-to-br from-blue-400 to-purple-500 rounded-3xl blur-2xl opacity-50" />
-              <div className="relative bg-gradient-to-br from-blue-500 to-purple-600 rounded-3xl p-8 shadow-2xl flex items-center justify-center">
-                <Zap className="w-32 h-32 text-white opacity-80" />
-              </div>
+          <div className="hidden lg:flex items-center justify-center">
+            <div className="relative w-48 h-48 bg-gradient-to-br from-blue-100 to-slate-100 rounded-2xl flex items-center justify-center shadow-sm border border-blue-200">
+              <Zap className="w-24 h-24 text-blue-600 opacity-60" />
             </div>
           </div>
         </div>
@@ -350,18 +340,16 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
           return (
             <div
               key={card.label}
-              className="group relative overflow-hidden rounded-2xl bg-white shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1 cursor-pointer animate-fade-in"
+              className={cn("group relative overflow-hidden rounded-xl p-6 border transition-all duration-300 hover:shadow-md cursor-pointer animate-fade-in bg-white", card.accent)}
               style={{ animationDelay: `${idx * 0.1}s` }}
             >
-              <div className={cn("absolute inset-0 bg-gradient-to-r opacity-0 group-hover:opacity-10 transition-opacity duration-300", card.accent)} />
-              <div className="relative p-6">
-                <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center text-white mb-4 bg-gradient-to-br", card.accent)}>
-                  <Icon className="w-6 h-6" />
+              <div className="relative">
+                <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center mb-4", card.iconColor.replace('text-', 'bg-').replace('-600', '-100'))}>
+                  <Icon className={cn("w-5 h-5", card.iconColor)} />
                 </div>
-                <p className="text-sm font-semibold text-slate-500 uppercase tracking-wide">{card.label}</p>
-                <p className="mt-3 text-4xl font-black text-slate-950">{card.value}</p>
-                <p className="mt-2 text-xs font-medium text-slate-400">{card.note}</p>
-                <div className={cn("absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300", card.accent)} />
+                <p className="text-sm font-semibold text-slate-600 uppercase tracking-wide">{card.label}</p>
+                <p className="mt-3 text-3xl font-bold text-slate-900">{card.value}</p>
+                <p className="mt-2 text-xs font-medium text-slate-500">{card.note}</p>
               </div>
             </div>
           );
@@ -371,9 +359,9 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
       {/* Actions and Activity */}
       <section className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
         {/* Quick Actions */}
-        <div className="rounded-2xl bg-white p-8 shadow-lg animate-fade-in" style={{ animationDelay: '0.4s' }}>
-          <h2 className="text-2xl font-black text-slate-950 mb-6">Ações Rápidas</h2>
-          <div className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-xl bg-white p-8 shadow-sm border border-slate-200 animate-fade-in" style={{ animationDelay: '0.4s' }}>
+          <h2 className="text-xl font-bold text-slate-900 mb-6">Ações Rápidas</h2>
+          <div className="grid gap-3 md:grid-cols-3">
             {quickActions.map((action, idx) => {
               const Icon = action.title === "Conversas" ? MessageCircle : action.title === "Chamados" ? ClipboardList : Zap;
               return (
@@ -381,16 +369,16 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
                   key={action.route}
                   onClick={() => setActive(action.route)}
                   className={cn(
-                    "group relative overflow-hidden rounded-2xl p-6 text-left text-white shadow-lg transition-all duration-300 hover:shadow-2xl hover:-translate-y-1 bg-gradient-to-br",
+                    "group relative overflow-hidden rounded-lg p-5 text-left text-white shadow-sm transition-all duration-300 hover:shadow-md hover:-translate-y-0.5",
                     action.color
                   )}
                   style={{ animationDelay: `${0.4 + idx * 0.1}s` }}
                 >
-                  <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                   <div className="relative z-10">
-                    <Icon className="h-8 w-8 mb-3 group-hover:scale-110 transition-transform duration-300" />
-                    <p className="text-lg font-black">{action.title}</p>
-                    <p className="text-sm text-white/80 mt-1">{action.subtitle}</p>
+                    <Icon className="h-6 w-6 mb-2 group-hover:scale-110 transition-transform duration-300" />
+                    <p className="text-base font-semibold">{action.title}</p>
+                    <p className="text-xs text-white/80 mt-0.5">{action.subtitle}</p>
                   </div>
                 </button>
               );
@@ -399,21 +387,21 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
         </div>
 
         {/* Recent Activity */}
-        <div className="rounded-2xl bg-white p-8 shadow-lg animate-fade-in" style={{ animationDelay: '0.5s' }}>
-          <h2 className="text-2xl font-black text-slate-950 mb-6">Atividade</h2>
+        <div className="rounded-xl bg-white p-8 shadow-sm border border-slate-200 animate-fade-in" style={{ animationDelay: '0.5s' }}>
+          <h2 className="text-xl font-bold text-slate-900 mb-6">Atividade Recente</h2>
           <div className="space-y-3">
             {[
               { title: "Novo chamado", desc: "Solicitação de backup", time: "Agora", color: "bg-blue-500" },
               { title: "BOT ativo", desc: "Cliente em triagem", time: "5 min", color: "bg-emerald-500" },
-              { title: "Token OK", desc: "MegaAdmin validado", time: "12 min", color: "bg-purple-500" },
+              { title: "Token OK", desc: "MegaAdmin validado", time: "12 min", color: "bg-slate-500" },
             ].map(({ title, desc, time, color }, idx) => (
-              <div key={title} className="flex items-start gap-3 p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors duration-200 animate-fade-in" style={{ animationDelay: `${0.5 + idx * 0.1}s` }}>
-                <div className={cn("mt-1 h-2.5 w-2.5 rounded-full flex-shrink-0", color)} />
+              <div key={title} className="flex items-start gap-3 p-3 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors duration-200 animate-fade-in border border-slate-200" style={{ animationDelay: `${0.5 + idx * 0.1}s` }}>
+                <div className={cn("mt-1 h-2 w-2 rounded-full flex-shrink-0", color)} />
                 <div className="min-w-0 flex-1">
-                  <p className="font-bold text-slate-900 text-sm">{title}</p>
-                  <p className="text-xs text-slate-500">{desc}</p>
+                  <p className="font-semibold text-slate-900 text-sm">{title}</p>
+                  <p className="text-xs text-slate-600">{desc}</p>
                 </div>
-                <span className="text-xs font-bold text-slate-400 flex-shrink-0">{time}</span>
+                <span className="text-xs font-medium text-slate-500 flex-shrink-0">{time}</span>
               </div>
             ))}
           </div>
