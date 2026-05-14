@@ -410,7 +410,12 @@ function Shell() {
       )}>
         {/* Header com botao X */}
         <div className="p-4 flex items-center justify-between border-b border-slate-800">
-          {sidebarOpen && <span className="font-bold text-2xl">Menu</span>}
+          {sidebarOpen && (
+            <div className="flex items-center gap-2">
+              <Zap className="w-6 h-6 text-blue-400" />
+              <span className="font-bold text-xl">MegaDesk</span>
+            </div>
+          )}
           <button
             onClick={() => setSidebarOpen(false)}
             className="text-slate-400 hover:text-white transition-colors"
@@ -436,7 +441,7 @@ function Shell() {
         )}
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+        <nav className="flex-1 overflow-y-auto p-3 space-y-1 pt-6">
           {mainNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = active === item.id;
