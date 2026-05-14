@@ -103,3 +103,12 @@
 - [x] Investigar perda de dados ao fazer logout (causa: syncStateHydrated não era resetado)
 - [x] Implementar carregamento de clientes do banco ao iniciar (reset do flag ao logout)
 - [x] Garantir persistência real em banco de dados (dados agora são carregados do banco)
+
+## Fase 17: Implementar Sistema de Permissões de Usuário
+- [ ] Investigar estrutura de permissões no banco de dados
+- [ ] Criar interface de edição de permissões no MegaAdmin
+- [ ] Implementar API de atualização de permissões
+- [ ] Sincronizar permissões com MegaDesk
+- [ ] Remover fundo branco da seção de permissões
+- [ ] Aplicar design consistente com MegaAdmin
+- [ ] Testar fluxo completo de permissões

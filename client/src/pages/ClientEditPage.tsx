@@ -466,9 +466,19 @@ function UsuariosTab({ client, onRefresh }: { client: any; onRefresh: () => void
 function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => void }) {
   const users = client.users ?? [];
   const [expandedUser, setExpandedUser] = useState<string>(users?.[0]?.id ?? "");
+  const [editingPermissions, setEditingPermissions] = useState<Record<string, string[]>>({});
 
   const toggleModule = trpc.megaadmin.toggleModule.useMutation({
     onSuccess() { onRefresh(); },
+    onError(err) { toast.error(err.message); },
+  });
+
+  const updatePermissions = trpc.megaadmin.updateUserPermissions.useMutation({
+    onSuccess() {
+      toast.success("Permissões atualizadas com sucesso!");
+      setEditingPermissions({});
+      onRefresh();
+    },
     onError(err) { toast.error(err.message); },
   });
 
@@ -484,20 +494,20 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
         </div>
 
         {users.length === 0 ? (
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center">
-            <p className="text-sm text-slate-600">Nenhum usuário cadastrado. Adicione usuários na aba "Usuários" para configurar permissões.</p>
+          <div className="rounded-xl border border-slate-700 bg-slate-900/50 p-6 text-center">
+            <p className="text-sm text-slate-400">Nenhum usuário cadastrado. Adicione usuários na aba "Usuários" para configurar permissões.</p>
           </div>
         ) : (
           <div className="space-y-3">
             {users.map((user: any) => (
-              <div key={user.id} className="rounded-lg border border-slate-200 bg-white p-4 flex items-center justify-between hover:border-blue-500 hover:shadow-sm transition">
+              <div key={user.id} className="rounded-lg border border-slate-700 bg-slate-900/50 p-4 flex items-center justify-between hover:border-blue-500 hover:shadow-md transition">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-slate-900 truncate">{user.name}</p>
-                  <p className="text-xs text-slate-500 truncate">{user.email}</p>
+                  <p className="text-sm font-semibold text-white truncate">{user.name}</p>
+                  <p className="text-xs text-slate-400 truncate">{user.email}</p>
                 </div>
                 <button
                   onClick={() => setExpandedUser(expandedUser === user.id ? "" : user.id)}
-                  className="ml-3 p-2 rounded-lg hover:bg-blue-50 transition text-slate-600 hover:text-blue-600 flex-shrink-0"
+                  className="ml-3 p-2 rounded-lg hover:bg-blue-900/30 transition text-slate-400 hover:text-blue-400 flex-shrink-0"
                   title="Configurar permissões"
                 >
                   <Settings className="h-4 w-4" />
@@ -509,39 +519,64 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
 
         {/* Painel de Edição de Permissões */}
         {expandedUser && users.find((u: any) => u.id === expandedUser) && (
-          <div className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-4">
-            <div className="mb-4 flex items-center justify-between">
+          <div className="mt-6 rounded-xl border border-slate-700 bg-slate-900/50 p-6">
+            <div className="mb-6 flex items-center justify-between">
               <div>
-                <p className="text-sm font-semibold text-slate-900">Permissões de {users.find((u: any) => u.id === expandedUser)?.name}</p>
-                <p className="text-xs text-slate-600 mt-1">Selecione os módulos que este usuário pode acessar.</p>
+                <p className="text-sm font-semibold text-white">Permissões de {users.find((u: any) => u.id === expandedUser)?.name}</p>
+                <p className="text-xs text-slate-400 mt-1">Selecione os módulos que este usuário pode acessar.</p>
               </div>
               <button
                 onClick={() => setExpandedUser("")}
-                className="p-1 rounded hover:bg-blue-100 transition"
+                className="p-1 rounded hover:bg-slate-800 transition"
               >
-                <X className="h-4 w-4 text-slate-600" />
+                <X className="h-4 w-4 text-slate-400" />
               </button>
             </div>
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               {ALL_MODULES.map((mod) => {
                 const user = users.find((u: any) => u.id === expandedUser);
-                const userPermissions = user?.permissions ?? [];
-                const hasPermission = userPermissions.includes(mod);
+                const currentPermissions = editingPermissions[expandedUser] ?? user?.permissions ?? [];
+                const hasPermission = currentPermissions.includes(mod);
                 return (
-                  <label key={mod} className="flex items-center gap-3 p-3 rounded-lg bg-white hover:bg-blue-50 cursor-pointer transition border border-slate-200 hover:border-blue-300">
+                  <label key={mod} className="flex items-center gap-3 p-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 cursor-pointer transition border border-slate-700 hover:border-blue-500">
                     <input
                       type="checkbox"
                       checked={hasPermission}
                       onChange={(e) => {
-                        // TODO: Implementar atualização de permissões por usuário
-                        toast.info("Permissões por usuário em desenvolvimento");
+                        const newPermissions = e.target.checked
+                          ? [...currentPermissions, mod]
+                          : currentPermissions.filter((p) => p !== mod);
+                        setEditingPermissions((prev) => ({ ...prev, [expandedUser]: newPermissions }));
                       }}
-                      className="rounded border-slate-300 bg-white text-blue-600 focus:ring-blue-500/50"
+                      className="rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500/50"
                     />
-                    <span className="text-sm text-slate-700">{MODULE_LABELS[mod] ?? mod}</span>
+                    <span className="text-sm text-slate-300">{MODULE_LABELS[mod] ?? mod}</span>
                   </label>
                 );
               })}
+            </div>
+            {/* Botões de Ação */}
+            <div className="mt-6 flex gap-3 justify-end">
+              <button
+                onClick={() => setExpandedUser("")}
+                className="px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  const newPermissions = editingPermissions[expandedUser] ?? users.find((u: any) => u.id === expandedUser)?.permissions ?? [];
+                  updatePermissions.mutate({
+                    clientId: client.clientId,
+                    userId: expandedUser,
+                    permissions: newPermissions,
+                  });
+                }}
+                disabled={updatePermissions.isPending}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition disabled:opacity-50"
+              >
+                {updatePermissions.isPending ? "Salvando..." : "Salvar Permissões"}
+              </button>
             </div>
           </div>
         )}

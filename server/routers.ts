@@ -558,6 +558,23 @@ export const appRouter = router({
       await persistSyncState();
       return { ok: true, record };
     }),
+    updateUserPermissions: adminProcedure.input(z.object({
+      clientId: z.string(),
+      userId: z.string(),
+      permissions: z.array(z.string()),
+    })).mutation(async ({ input }) => {
+      await hydrateSyncState();
+      const client = getClientOrThrow(input.clientId);
+      const user = client.users.find((u) => u.id === input.userId);
+      if (!user) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado neste cliente." });
+      }
+      // Atualizar permissões do usuário
+      user.permissions = input.permissions;
+      audit("MegaAdmin", `Permissões atualizadas para usuário ${user.email}`, client.clientId);
+      await persistSyncState();
+      return { ok: true, user: { ...user, permissions: Array.from(new Set([...rolePermissions(user.role), ...user.permissions])) } };
+    }),
   }),
   megadesk: router({
     overview: publicProcedure.input(z.object({ clientId: z.string().optional(), userEmail: z.string().email() })).query(async ({ input }) => {
