@@ -133,3 +133,13 @@
 - [x] Implementar API de exclusão de cliente no backend (função deleteClient com sincronização de banco)
 - [x] Implementar botão de exclusão de cliente no frontend (botão com ícone de lixeira e confirmação)
 - [ ] Testar fluxo completo de exclusão (aguardando login no MegaAdmin)
+
+## Fase 21: Redesign da Barra Lateral do MegaDesk
+- [ ] Criar componente de barra lateral melhorado com animações suaves
+- [ ] Implementar botão de expandir/recolher com visual claro
+- [ ] Adicionar fundo com detalhe de luz branca sutil
+- [ ] Implementar sistema de personalização de cores nas configurações
+- [ ] Melhorar ícones com design mais detalhado
+- [ ] Adicionar detalhes de sombreamento e luz nos itens
+- [ ] Estilizar logo MegaDesk com raio e nome profissional
+- [ ] Testar layout completo da barra lateral

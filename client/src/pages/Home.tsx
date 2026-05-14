@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+'use client';
+
 import { navigateToPlatform } from "@/lib/platformRouting";
 import { trpc } from "@/lib/trpc";
 import {
@@ -28,7 +29,10 @@ import {
   Trash2,
   User,
   Zap,
+  ChevronLeft,
+  LogOut,
 } from "lucide-react";
+import { useMemo, useState } from "react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
 
@@ -145,9 +149,248 @@ function cn(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-function Sidebar({ active, onNavigate, session, onLogout }: { active: RouteId; onNavigate: (route: RouteId) => void; session?: MegaDeskSession | null; onLogout?: () => void }) {
-  const [expanded, setExpanded] = useState(false);
+// ============================================================================
+// NOVO MEGADESK SIDEBAR - INTEGRADO
+// ============================================================================
 
+interface MegaDeskSidebarContentProps {
+  active: RouteId;
+  onNavigate: (route: RouteId) => void;
+  session?: MegaDeskSession | null;
+  onLogout?: () => void;
+  visibleItems: NavItem[];
+}
+
+function MegaDeskSidebarContent({
+  active,
+  onNavigate,
+  session,
+  onLogout,
+  visibleItems,
+}: MegaDeskSidebarContentProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const mainItems = visibleItems.filter((item) => item.group === "main");
+  const toolsItems = visibleItems.filter((item) => item.group === "tools");
+
+  const handleMouseDown = () => {
+    setIsResizing(true);
+  };
+
+  return (
+    <>
+      {/* Sidebar */}
+      <aside
+        className={cn(
+          "relative flex flex-col bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 text-white shadow-2xl transition-all duration-300 border-r border-white/10",
+          expanded ? "w-64" : "w-20"
+        )}
+        style={{ width: expanded ? `${sidebarWidth}px` : "80px" }}
+        onMouseMove={(e) => {
+          if (!isResizing || !expanded) return;
+          const newWidth = e.clientX;
+          if (newWidth >= 200 && newWidth <= 480) {
+            setSidebarWidth(newWidth);
+          }
+        }}
+        onMouseUp={() => setIsResizing(false)}
+        onMouseLeave={() => setIsResizing(false)}
+      >
+        {/* Detalhe de luz sutil */}
+        <div className="absolute inset-0 bg-gradient-to-r from-white/5 via-transparent to-transparent opacity-40 pointer-events-none" />
+
+        {/* Conteúdo do Sidebar */}
+        <div className="relative z-10 flex flex-col h-full">
+          {/* Header com Logo */}
+          <div className="h-16 flex items-center justify-between px-4 border-b border-white/10">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              {/* Logo com Raio */}
+              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg flex-shrink-0">
+                <Zap className="w-5 h-5 text-white" />
+              </div>
+
+              {expanded && (
+                <div className="flex flex-col min-w-0">
+                  <span className="font-bold text-sm tracking-tight text-white truncate">
+                    MegaDesk
+                  </span>
+                  <span className="text-xs text-blue-300/70 truncate">
+                    Platform
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Botão de Expandir/Recolher */}
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              className="h-8 w-8 flex items-center justify-center hover:bg-white/10 rounded-lg transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ml-2 flex-shrink-0"
+              aria-label="Toggle navigation"
+              title={expanded ? "Recolher" : "Expandir"}
+            >
+              <ChevronLeft
+                className={`h-4 w-4 text-white/70 transition-transform duration-300 ${
+                  expanded ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Menu Items - Main */}
+          <div className="flex-1 overflow-y-auto py-4 px-2 space-y-2">
+            {mainItems.map((item) => {
+              const isActive = active === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => onNavigate(item.id)}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group relative overflow-hidden",
+                    isActive
+                      ? "bg-slate-800/50 border border-slate-700 shadow-lg"
+                      : "hover:bg-white/5"
+                  )}
+                  title={expanded ? "" : item.label}
+                >
+                  {/* Ícone */}
+                  <div
+                    className={cn(
+                      "flex-shrink-0 p-1.5 rounded-lg transition-all duration-200",
+                      isActive
+                        ? "bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-md"
+                        : "text-white/60 group-hover:text-white/80 group-hover:bg-white/10"
+                    )}
+                  >
+                    <item.icon className="w-4 h-4" />
+                  </div>
+
+                  {/* Label */}
+                  {expanded && (
+                    <span
+                      className={cn(
+                        "text-sm font-medium truncate transition-colors duration-200",
+                        isActive ? "text-white" : "text-white/70 group-hover:text-white/90"
+                      )}
+                    >
+                      {item.label}
+                    </span>
+                  )}
+
+                  {/* Indicador de ativo */}
+                  {isActive && expanded && (
+                    <div className="ml-auto w-1 h-1 rounded-full bg-gradient-to-r from-blue-400 to-blue-500 shadow-lg" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Menu Items - Tools */}
+          {toolsItems.length > 0 && (
+            <div className="border-t border-white/10 py-4 px-2 space-y-2">
+              {toolsItems.map((item) => {
+                const isActive = active === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => onNavigate(item.id)}
+                    className={cn(
+                      "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group relative overflow-hidden",
+                      isActive
+                        ? "bg-slate-800/50 border border-slate-700 shadow-lg"
+                        : "hover:bg-white/5"
+                    )}
+                    title={expanded ? "" : item.label}
+                  >
+                    {/* Ícone */}
+                    <div
+                      className={cn(
+                        "flex-shrink-0 p-1.5 rounded-lg transition-all duration-200",
+                        isActive
+                          ? "bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-md"
+                          : "text-white/60 group-hover:text-white/80 group-hover:bg-white/10"
+                      )}
+                    >
+                      <item.icon className="w-4 h-4" />
+                    </div>
+
+                    {/* Label */}
+                    {expanded && (
+                      <span
+                        className={cn(
+                          "text-sm font-medium truncate transition-colors duration-200",
+                          isActive ? "text-white" : "text-white/70 group-hover:text-white/90"
+                        )}
+                      >
+                        {item.label}
+                      </span>
+                    )}
+
+                    {/* Indicador de ativo */}
+                    {isActive && expanded && (
+                      <div className="ml-auto w-1 h-1 rounded-full bg-gradient-to-r from-blue-400 to-blue-500 shadow-lg" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Footer */}
+          <div className="border-t border-white/10 p-3 space-y-3">
+            {session && (
+              <div className={cn("rounded-lg bg-white/5 px-3 py-2", expanded ? "text-left" : "text-center")}>
+                {expanded ? (
+                  <>
+                    <p className="text-xs font-bold text-slate-300 truncate">{session.userName}</p>
+                    <p className="text-[11px] text-slate-500 truncate">{session.company}</p>
+                  </>
+                ) : (
+                  <User className="mx-auto h-4 w-4 text-slate-400" />
+                )}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => navigateToPlatform("megaadmin")}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-3 text-xs font-bold text-slate-300 transition hover:bg-white/10 hover:text-white"
+              title="Abrir URL MegaAdmin"
+            >
+              {expanded ? <span className="truncate">MegaAdmin</span> : <ShieldCheck className="h-4 w-4 text-emerald-300" />}
+            </button>
+            {onLogout && (
+              <button
+                type="button"
+                onClick={onLogout}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-900/30 px-3 py-2 text-xs font-bold text-red-300 transition hover:bg-red-900/50"
+                title="Sair"
+              >
+                {expanded ? <span>Sair</span> : <LogOut className="h-4 w-4" />}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Divisor de redimensionamento */}
+        {expanded && (
+          <div
+            className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-500/30 transition-colors"
+            onMouseDown={handleMouseDown}
+            style={{ zIndex: 50 }}
+          />
+        )}
+      </aside>
+    </>
+  );
+}
+
+// ============================================================================
+// SHELL - REFATORADA PARA USAR O NOVO SIDEBAR
+// ============================================================================
+
+function Shell({ active, setActive, children, session, onLogout }: { active: RouteId; setActive: (route: RouteId) => void; children: React.ReactNode; session?: MegaDeskSession | null; onLogout?: () => void }) {
   // Filtra itens visíveis com base nas permissões da sessão
   const visibleItems = useMemo(() => {
     const perms = new Set(session?.permissions ?? []);
@@ -158,90 +401,15 @@ function Sidebar({ active, onNavigate, session, onLogout }: { active: RouteId; o
   }, [session?.permissions]);
 
   return (
-    <aside className={cn("fixed inset-y-0 left-0 z-30 flex flex-col bg-slate-950 text-white shadow-2xl transition-all duration-300", expanded ? "w-64" : "w-20")}>
-      <div className="flex h-20 items-center justify-center border-b border-white/10 px-4">
-        <button
-          type="button"
-          onClick={() => setExpanded((value) => !value)}
-          className="flex h-11 w-full items-center justify-center gap-3 rounded-2xl bg-white/10 text-sm font-bold transition hover:bg-white/15"
-          aria-label="Expandir menu"
-        >
-          <Bot className="h-5 w-5 text-yellow-300" />
-          {expanded && <span>MegaDesk</span>}
-        </button>
-      </div>
-      <nav className="flex flex-1 flex-col justify-between overflow-y-auto px-3 py-4">
-        <div className="space-y-2">
-          {visibleItems.filter((item) => item.group === "main").map((item) => (
-            <SidebarButton key={item.id} item={item} active={active === item.id} expanded={expanded} onNavigate={onNavigate} />
-          ))}
-        </div>
-        <div className="space-y-2 border-t border-white/10 pt-4">
-          {visibleItems.filter((item) => item.group === "tools").map((item) => (
-            <SidebarButton key={item.id} item={item} active={active === item.id} expanded={expanded} onNavigate={onNavigate} />
-          ))}
-        </div>
-      </nav>
-      <div className="space-y-2 border-t border-white/10 p-3">
-        {session && onLogout && (
-          <div className={cn("rounded-2xl bg-white/5 px-3 py-2", expanded ? "text-left" : "text-center")}>
-            {expanded ? (
-              <>
-                <p className="text-xs font-bold text-slate-300 truncate">{session.userName}</p>
-                <p className="text-[11px] text-slate-500 truncate">{session.company}</p>
-              </>
-            ) : (
-              <User className="mx-auto h-4 w-4 text-slate-400" />
-            )}
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={() => navigateToPlatform("megaadmin")}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-3 py-3 text-xs font-bold text-slate-300 transition hover:bg-white/10 hover:text-white"
-          title="Abrir URL MegaAdmin"
-        >
-          {expanded ? <span className="truncate">MegaAdmin separado</span> : <ShieldCheck className="h-4 w-4 text-emerald-300" />}
-        </button>
-        {onLogout && (
-          <button
-            type="button"
-            onClick={onLogout}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-red-900/30 px-3 py-2 text-xs font-bold text-red-300 transition hover:bg-red-900/50"
-            title="Sair"
-          >
-            {expanded ? <span>Sair</span> : <Zap className="h-4 w-4 rotate-180" />}
-          </button>
-        )}
-      </div>
-    </aside>
-  );
-}
-
-function SidebarButton({ item, active, expanded, onNavigate }: { item: NavItem; active: boolean; expanded: boolean; onNavigate: (route: RouteId) => void }) {
-  const Icon = item.icon;
-  return (
-    <button
-      type="button"
-      title={item.label}
-      onClick={() => onNavigate(item.id)}
-      className={cn(
-        "group flex h-12 w-full items-center rounded-2xl px-3 text-left text-sm font-semibold transition",
-        expanded ? "justify-start gap-3" : "justify-center",
-        active ? "bg-yellow-400 text-slate-950 shadow-lg shadow-yellow-500/20" : "text-slate-300 hover:bg-white/10 hover:text-white",
-      )}
-    >
-      <Icon className="h-5 w-5 shrink-0" />
-      {expanded && <span className="truncate">{item.label}</span>}
-    </button>
-  );
-}
-
-function Shell({ active, setActive, children, session, onLogout }: { active: RouteId; setActive: (route: RouteId) => void; children: React.ReactNode; session?: MegaDeskSession | null; onLogout?: () => void }) {
-  return (
-    <div className="min-h-screen bg-[#f6f8fb] text-slate-950">
-      <Sidebar active={active} onNavigate={setActive} session={session} onLogout={onLogout} />
-      <main className="ml-20 min-h-screen px-6 py-6 transition-all lg:px-8">
+    <div className="flex h-screen bg-[#f6f8fb] text-slate-950">
+      <MegaDeskSidebarContent
+        active={active}
+        onNavigate={setActive}
+        session={session}
+        onLogout={onLogout}
+        visibleItems={visibleItems}
+      />
+      <main className="flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto max-w-[1440px]">{children}</div>
       </main>
     </div>
@@ -278,623 +446,433 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
 
   return (
     <div>
-      <section className="rounded-[2rem] bg-white p-8 shadow-sm shadow-slate-200/70">
-        <div className="flex flex-col justify-between gap-8 lg:flex-row lg:items-center">
-          <div className="max-w-3xl">
-            <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.2em] text-blue-700">
-              <Sparkles className="h-4 w-4" /> Sistema Inteligente de Atendimento
-            </div>
-            <h1 className="mt-5 text-5xl font-black tracking-tight text-slate-950">MegaDesk</h1>
-            <p className="mt-4 text-lg leading-8 text-slate-600">
-              Plataforma operacional para atendimento WhatsApp, triagem por IA, chamados e integração por token com o MegaAdmin.
-            </p>
-          </div>
-          <div className="grid min-w-[280px] grid-cols-2 gap-3 rounded-[1.5rem] bg-slate-950 p-4 text-white">
-            <div className="rounded-2xl bg-white/10 p-4">
-              <p className="text-xs text-slate-300">Status</p>
-              <p className="mt-2 font-black text-emerald-300">Ativo</p>
-            </div>
-            <div className="rounded-2xl bg-white/10 p-4">
-              <p className="text-xs text-slate-300">Origem</p>
-              <button type="button" onClick={() => navigateToPlatform("megaadmin")} className="mt-2 text-left font-black text-yellow-300 underline-offset-4 transition hover:underline">MegaAdmin</button>
-            </div>
-          </div>
-        </div>
-      </section>
+      <PageHeader icon={HomeIcon} title="Dashboard" subtitle="Visão geral de conversas, chamados e operações." />
 
-      <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
         {cards.map((card) => (
-          <div key={card.label} className="overflow-hidden rounded-[1.5rem] bg-white shadow-sm shadow-slate-200/70">
-            <div className={cn("h-2 bg-gradient-to-r", card.accent)} />
-            <div className="p-5">
-              <p className="text-sm font-semibold text-slate-500">{card.label}</p>
-              <p className="mt-3 text-4xl font-black text-slate-950">{card.value}</p>
-              <p className="mt-2 text-xs font-semibold text-slate-400">{card.note}</p>
+          <div key={card.label} className="rounded-2xl bg-white p-6 shadow-sm border border-slate-200">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{card.label}</p>
+            <div className={`bg-gradient-to-r ${card.accent} bg-clip-text text-4xl font-black text-transparent mt-3`}>
+              {card.value}
             </div>
+            <p className="text-xs text-slate-400 mt-2">{card.note}</p>
           </div>
         ))}
-      </section>
+      </div>
 
-      <section className="mt-6 grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-        <div className="rounded-[2rem] bg-white p-6 shadow-sm shadow-slate-200/70">
-          <h2 className="text-xl font-black">Ações Rápidas</h2>
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            {actions.map((action) => {
-              const Icon = action.icon;
-              return (
-                <button key={action.route} type="button" onClick={() => setActive(action.route)} className="rounded-3xl bg-blue-600 p-5 text-left text-white shadow-lg shadow-blue-200 transition hover:-translate-y-1 hover:bg-blue-700">
-                  <Icon className="h-6 w-6" />
-                  <p className="mt-4 text-lg font-black">{action.title}</p>
-                  <p className="mt-1 text-sm text-blue-100">{action.subtitle}</p>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <div className="rounded-[2rem] bg-white p-6 shadow-sm shadow-slate-200/70">
-          <h2 className="text-xl font-black">Atividade Recente</h2>
-          <div className="mt-4 space-y-3">
-            {[
-              ["Novo chamado 0004", "Empresa D abriu solicitação de backup", "Agora"],
-              ["BOT em atendimento", "Cliente 5510303936399 em triagem", "5 min"],
-              ["Token validado", "Integração MegaAdmin conferida", "12 min"],
-            ].map(([title, text, time]) => (
-              <div key={title} className="flex items-start gap-3 rounded-2xl bg-slate-50 p-4">
-                <span className="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                <div className="min-w-0 flex-1">
-                  <p className="font-bold text-slate-900">{title}</p>
-                  <p className="text-sm text-slate-500">{text}</p>
-                </div>
-                <span className="text-xs font-bold text-slate-400">{time}</span>
+      <div className="grid gap-4 md:grid-cols-3">
+        {actions.map((action) => (
+          <button
+            key={action.route}
+            onClick={() => setActive(action.route)}
+            className="rounded-2xl bg-white p-6 shadow-sm border border-slate-200 text-left hover:shadow-md hover:border-blue-300 transition"
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                <action.icon className="h-5 w-5" />
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
+              <div>
+                <h3 className="font-semibold text-slate-950">{action.title}</h3>
+                <p className="text-xs text-slate-500 mt-1">{action.subtitle}</p>
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
 
-function ConversationsPage({ conversations, userEmail }: { conversations: Conversation[]; userEmail: string }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<ConversationStatus>("open");
-  const [search, setSearch] = useState("");
-  const [reply, setReply] = useState("");
-  const sendMessage = trpc.megadesk.sendMessage.useMutation({ onSuccess: () => setReply("") });
-  const selected = conversations.find((conversation) => conversation.id === selectedId) ?? null;
-  const filtered = conversations.filter((conversation) => conversation.status === filter && `${conversation.phone} ${conversation.name}`.toLowerCase().includes(search.toLowerCase()));
+function SimpleGridModule({
+  icon: Icon,
+  title,
+  subtitle,
+  cards,
+}: {
+  icon: IconComponent;
+  title: string;
+  subtitle: string;
+  cards: Array<[string, string]>;
+}) {
+  return (
+    <div>
+      <PageHeader icon={Icon} title={title} subtitle={subtitle} />
+      <div className="grid gap-4 md:grid-cols-3">
+        {cards.map(([cardTitle, cardDesc]) => (
+          <div key={cardTitle} className="rounded-2xl bg-white p-6 shadow-sm border border-slate-200">
+            <h3 className="font-semibold text-slate-950">{cardTitle}</h3>
+            <p className="text-sm text-slate-500 mt-2">{cardDesc}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
-  const filterButtons: Array<{ status: ConversationStatus; label: string; color: string }> = [
-    { status: "open", label: "🟢 Abertas", color: "text-emerald-700" },
-    { status: "bot", label: "🤖 Atendimento BOT", color: "text-blue-700" },
-    { status: "closed", label: "⚫ Fechadas", color: "text-slate-700" },
-  ];
+function ConversationsPage({
+  conversations,
+  userEmail,
+}: {
+  conversations: Conversation[];
+  userEmail: string;
+}) {
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(
+    conversations[0] ?? null
+  );
 
   return (
     <div>
-      <PageHeader icon={MessageCircle} title="Conversas" subtitle={`${conversations.length} conversas`} />
-      <section className="grid min-h-[calc(100vh-8rem)] gap-6 lg:grid-cols-[380px_1fr]">
-        <aside className="rounded-[2rem] bg-white p-5 shadow-sm shadow-slate-200/70">
-          <label className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 focus-within:ring-4 focus-within:ring-blue-100">
-            <Search className="h-4 w-4" />
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar número..." className="w-full bg-transparent outline-none" />
-          </label>
-          <div className="mt-4 flex gap-2 overflow-x-auto pb-2">
-            {filterButtons.map((button) => (
-              <button key={button.status} type="button" onClick={() => setFilter(button.status)} className={cn("shrink-0 rounded-full px-3 py-2 text-xs font-bold transition", filter === button.status ? "bg-slate-950 text-white" : "bg-slate-100", filter !== button.status && button.color)}>
-                {button.label}
+      <PageHeader
+        icon={MessageCircle}
+        title="Conversas"
+        subtitle="Central de atendimento com histórico de mensagens."
+      />
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        {/* Lista de Conversas */}
+        <div className="rounded-2xl bg-white p-4 shadow-sm border border-slate-200 lg:col-span-1">
+          <h3 className="font-semibold text-slate-950 mb-4">Conversas Ativas</h3>
+          <div className="space-y-2">
+            {conversations.map((conv) => (
+              <button
+                key={conv.id}
+                onClick={() => setSelectedConversation(conv)}
+                className={cn(
+                  "w-full text-left rounded-lg p-3 transition",
+                  selectedConversation?.id === conv.id
+                    ? "bg-blue-50 border border-blue-300"
+                    : "hover:bg-slate-50 border border-transparent"
+                )}
+              >
+                <p className="font-medium text-sm text-slate-950">{conv.name}</p>
+                <p className="text-xs text-slate-500">{conv.phone}</p>
+                <p className="text-xs text-slate-400 mt-1 line-clamp-1">{conv.lastMessage}</p>
               </button>
             ))}
           </div>
-          <div className="mt-4 max-h-[620px] space-y-3 overflow-y-auto pr-1">
-            {filtered.map((conversation) => (
-              <button key={conversation.id} type="button" onClick={() => setSelectedId(conversation.id)} className={cn("w-full rounded-3xl border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md", selectedId === conversation.id ? "border-blue-300 bg-blue-50" : "border-transparent bg-white hover:border-slate-200")}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-black text-slate-950">{conversation.name}</p>
-                    <p className="text-sm text-slate-500">{conversation.phone}</p>
-                  </div>
-                  <span className={cn("rounded-full px-2.5 py-1 text-xs font-bold", conversation.status === "closed" ? "bg-slate-100 text-slate-600" : conversation.status === "bot" ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700")}>{conversation.status === "closed" ? "Fechada" : conversation.status === "bot" ? "BOT" : "Ativa"}</span>
-                </div>
-                <p className="mt-3 line-clamp-2 text-sm text-slate-600">{conversation.lastMessage}</p>
-                <p className="mt-2 text-xs font-semibold text-slate-400">{conversation.time}</p>
-              </button>
-            ))}
-          </div>
-        </aside>
-        <main className="rounded-[2rem] bg-white shadow-sm shadow-slate-200/70">
-          {selected ? (
-            <div className="flex h-full min-h-[680px] flex-col">
-              <header className="flex items-center justify-between border-b border-slate-100 p-5">
-                <div>
-                  <h2 className="text-xl font-black">{selected.name}</h2>
-                  <p className="text-sm text-slate-500">{selected.company} · {selected.phone}</p>
-                </div>
-                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">Atendimento ativo</span>
-              </header>
-              <div className="flex-1 space-y-4 bg-slate-50/70 p-6">
-                {selected.messages.map((message, index) => (
-                  <div key={`${message.time}-${index}`} className={cn("flex", message.from === "customer" ? "justify-start" : "justify-end")}>
-                    <div className={cn("max-w-[70%] rounded-3xl px-4 py-3 shadow-sm", message.from === "customer" ? "bg-white text-slate-700" : message.from === "bot" ? "bg-yellow-100 text-slate-800" : "bg-blue-600 text-white")}>
-                      <p className="text-sm leading-6">{message.text}</p>
-                      <p className={cn("mt-1 text-[11px]", message.from === "agent" ? "text-blue-100" : "text-slate-400")}>{message.time}</p>
+        </div>
+
+        {/* Detalhes da Conversa */}
+        <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-200 lg:col-span-2">
+          {selectedConversation ? (
+            <>
+              <div className="mb-4 pb-4 border-b border-slate-200">
+                <h3 className="font-semibold text-slate-950">{selectedConversation.name}</h3>
+                <p className="text-sm text-slate-500">{selectedConversation.phone}</p>
+              </div>
+
+              <div className="space-y-3 mb-4 max-h-96 overflow-y-auto">
+                {selectedConversation.messages.map((msg, idx) => (
+                  <div
+                    key={idx}
+                    className={cn(
+                      "flex gap-2",
+                      msg.from === "agent" ? "justify-end" : "justify-start"
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "max-w-xs rounded-lg p-3 text-sm",
+                        msg.from === "agent"
+                          ? "bg-blue-500 text-white"
+                          : "bg-slate-100 text-slate-950"
+                      )}
+                    >
+                      {msg.text}
                     </div>
                   </div>
                 ))}
               </div>
-              <footer className="flex items-center gap-3 border-t border-slate-100 p-4">
-                <input value={reply} onChange={(event) => setReply(event.target.value)} placeholder="Digite uma resposta..." className="h-12 flex-1 rounded-2xl border border-slate-200 px-4 text-sm outline-none focus:ring-4 focus:ring-blue-100" />
-                <button type="button" disabled={!selected || !reply.trim() || sendMessage.isPending} onClick={() => selected && sendMessage.mutate({ conversationId: selected.id, message: reply, userEmail })} className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-200 disabled:opacity-50"><Send className="h-5 w-5" /></button>
-              </footer>
-            </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Digite uma mensagem..."
+                  className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 transition">
+                  <Send className="h-4 w-4" />
+                </button>
+              </div>
+            </>
           ) : (
-            <div className="flex h-full min-h-[680px] flex-col items-center justify-center text-center text-slate-500">
-              <MessageCircle className="h-14 w-14 text-slate-300" />
-              <p className="mt-4 font-semibold">Selecione uma conversa para visualizar</p>
-            </div>
+            <p className="text-slate-500">Selecione uma conversa para visualizar</p>
           )}
-        </main>
-      </section>
+        </div>
+      </div>
     </div>
   );
 }
 
-function TicketsPage({ tickets, userEmail }: { tickets: TicketRecord[]; userEmail: string }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const updateTicket = trpc.megadesk.updateTicketStatus.useMutation();
-  const selected = tickets.find((ticket) => ticket.id === selectedId) ?? null;
-  const stats = useMemo(() => ({
-    total: tickets.length,
-    open: tickets.filter((ticket) => ticket.status === "open").length,
-    inProgress: tickets.filter((ticket) => ticket.status === "in_progress").length,
-    waiting: tickets.filter((ticket) => ticket.status === "waiting").length,
-    closed: tickets.filter((ticket) => ticket.status === "closed").length,
-  }), [tickets]);
+function TicketsPage({
+  tickets,
+  userEmail,
+}: {
+  tickets: TicketRecord[];
+  userEmail: string;
+}) {
+  const [filter, setFilter] = useState<TicketStatus | "all">("all");
+
+  const filtered =
+    filter === "all" ? tickets : tickets.filter((t) => t.status === filter);
 
   return (
     <div>
-      <PageHeader icon={Ticket} title="Chamados" subtitle="Gerencie todos os chamados de atendimento" />
-      <section className="grid gap-4 md:grid-cols-5">
-        <StatCard label="Total" value={stats.total} className="bg-slate-950 text-white" />
-        <StatCard label="Abertos" value={stats.open} className="bg-blue-50 text-blue-700" />
-        <StatCard label="Em Progresso" value={stats.inProgress} className="bg-yellow-50 text-yellow-700" />
-        <StatCard label="Aguardando" value={stats.waiting} className="bg-orange-50 text-orange-700" />
-        <StatCard label="Fechados" value={stats.closed} className="bg-emerald-50 text-emerald-700" />
-      </section>
-      <section className="mt-5 rounded-[2rem] bg-white p-4 shadow-sm shadow-slate-200/70">
-        <div className="flex flex-col gap-3 md:flex-row">
-          <label className="flex flex-1 items-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-500">
-            <Search className="h-4 w-4" />
-            <input placeholder="Buscar por nome, número ou problema..." className="w-full bg-transparent outline-none" />
-          </label>
-          <select className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 outline-none">
-            <option>Todas as categorias</option>
-            <option>Suporte</option>
-            <option>Comercial</option>
-            <option>Financeiro</option>
-          </select>
-        </div>
-      </section>
-      <section className="mt-5 grid gap-6 lg:grid-cols-[320px_1fr]">
-        <aside className="max-h-[620px] space-y-3 overflow-y-auto pr-1">
-          {tickets.map((ticket) => (
-            <button key={ticket.id} type="button" onClick={() => setSelectedId(ticket.id)} className={cn("w-full rounded-[1.5rem] border border-slate-100 border-l-4 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md", statusConfig[ticket.status].card, selectedId === ticket.id && "ring-4 ring-blue-100")}>
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-400">N° do chamado</p>
-                <span className={cn("h-2.5 w-2.5 rounded-full", statusConfig[ticket.status].dot)} />
-              </div>
-              <p className="mt-3 text-2xl font-black text-slate-950">{ticket.id}</p>
-              <p className="mt-2 flex items-center gap-2 text-sm font-bold text-slate-700"><User className="h-4 w-4" />{ticket.company}</p>
-              <p className="mt-4 text-sm leading-6 text-slate-600">{ticket.problem}</p>
-              <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
-                <div><p className="font-bold text-slate-400">Categoria</p><p className="font-bold text-blue-700">{ticket.category}</p></div>
-                <div><p className="font-bold text-slate-400">Status</p><span className={cn("rounded-full px-2 py-1 font-bold", statusConfig[ticket.status].badge)}>{statusConfig[ticket.status].label}</span></div>
-              </div>
-              <p className="mt-4 text-xs font-semibold text-slate-400">{ticket.createdAt}</p>
+      <PageHeader
+        icon={Ticket}
+        title="Chamados"
+        subtitle="Gerenciar tickets de atendimento."
+      />
+
+      <div className="mb-6 flex gap-2">
+        {(["all", "open", "in_progress", "waiting", "closed"] as const).map(
+          (status) => (
+            <button
+              key={status}
+              onClick={() => setFilter(status)}
+              className={cn(
+                "rounded-lg px-4 py-2 text-sm font-medium transition",
+                filter === status
+                  ? "bg-blue-500 text-white"
+                  : "bg-white text-slate-950 border border-slate-200 hover:bg-slate-50"
+              )}
+            >
+              {status === "all" ? "Todos" : statusConfig[status]?.label || status}
             </button>
-          ))}
-        </aside>
-        <main className="min-h-[620px] rounded-[2rem] bg-white p-8 shadow-sm shadow-slate-200/70">
-          {selected ? (
-            <div>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-sm font-bold uppercase tracking-[0.2em] text-slate-400">Chamado {selected.id}</p>
-                  <h2 className="mt-2 text-3xl font-black text-slate-950">{selected.problem}</h2>
-                  <p className="mt-2 text-slate-500">{selected.company} · {selected.customer}</p>
-                </div>
-                <span className={cn("rounded-full px-3 py-1 text-sm font-bold", statusConfig[selected.status].badge)}>{statusConfig[selected.status].label}</span>
+          )
+        )}
+      </div>
+
+      <div className="space-y-3">
+        {filtered.map((ticket) => (
+          <div
+            key={ticket.id}
+            className={cn(
+              "rounded-2xl bg-white p-4 shadow-sm border-l-4",
+              statusConfig[ticket.status]?.card
+            )}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="font-semibold text-slate-950">{ticket.problem}</h3>
+                <p className="text-sm text-slate-500 mt-1">{ticket.customer}</p>
+                <p className="text-xs text-slate-400 mt-1">{ticket.description}</p>
               </div>
-              <div className="mt-8 grid gap-4 md:grid-cols-3">
-                <InfoTile label="Categoria" value={selected.category} />
-                <InfoTile label="Criado em" value={selected.createdAt} />
-                <InfoTile label="Origem" value="WhatsApp" />
-              </div>
-              <div className="mt-8 rounded-3xl bg-slate-50 p-6">
-                <h3 className="font-black">Descrição</h3>
-                <p className="mt-3 leading-7 text-slate-600">{selected.description}</p>
-              </div>
-              <div className="mt-6 flex flex-wrap gap-3">
-                <button type="button" disabled={updateTicket.isPending} onClick={() => updateTicket.mutate({ ticketId: selected.id, status: selected.status === "closed" ? "open" : "closed", userEmail })} className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-blue-200 disabled:opacity-50">{updateTicket.isPending ? "Atualizando..." : "Atualizar status"}</button>
-                <button className="rounded-2xl bg-slate-100 px-5 py-3 text-sm font-bold text-slate-700">Adicionar nota</button>
-              </div>
+              <span
+                className={cn(
+                  "rounded-lg px-3 py-1 text-xs font-medium whitespace-nowrap",
+                  statusConfig[ticket.status]?.badge
+                )}
+              >
+                {statusConfig[ticket.status]?.label}
+              </span>
             </div>
-          ) : (
-            <div className="flex h-full min-h-[560px] flex-col items-center justify-center text-center text-slate-500">
-              <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-blue-50 text-blue-600"><ClipboardList className="h-8 w-8" /></div>
-              <p className="mt-5 text-lg font-black text-slate-900">Selecione um chamado</p>
-              <p className="mt-1 text-sm">Clique em um chamado da lista para ver os detalhes</p>
-            </div>
-          )}
-        </main>
-      </section>
+          </div>
+        ))}
+      </div>
     </div>
   );
-}
-
-function StatCard({ label, value, className }: { label: string; value: number | string; className: string }) {
-  return <div className={cn("rounded-[1.3rem] p-5 shadow-sm", className)}><p className="text-2xl font-black">{value}</p><p className="mt-2 text-sm font-semibold opacity-80">{label}</p></div>;
-}
-
-function InfoTile({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-3xl bg-slate-50 p-5"><p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">{label}</p><p className="mt-2 font-black text-slate-900">{value}</p></div>;
-}
-
-function BotConfigPage({ initialScripts }: { initialScripts: BotScript[] }) {
-  const [scripts, setScripts] = useState(initialScripts);
-  const saveBotScript = trpc.megadesk.saveBotScript.useMutation({ onSuccess: ({ script }) => setScripts((items) => [...items, script]) });
-  const [selectedId, setSelectedId] = useState("script-1");
-  const selected = scripts.find((script) => script.id === selectedId) ?? scripts[0];
-
-  function activateScript(id: string) {
-    setScripts((current) => current.map((script) => ({ ...script, active: script.id === id })));
-    setSelectedId(id);
-  }
-
-  function removeScript(id: string) {
-    setScripts((current) => current.filter((script) => script.id !== id));
-    if (selectedId === id) setSelectedId("script-1");
-  }
-
-  return (
-    <div>
-      <PageHeader icon={Bot} title="Configurar Bot & Testador" subtitle="Crie roteiros, edite prompts e teste seu bot em tempo real" />
-      <section className="grid gap-6 xl:grid-cols-[280px_280px_1fr]">
-        <div className="rounded-[2rem] bg-white p-5 shadow-sm shadow-slate-200/70">
-          <h2 className="flex items-center gap-2 text-lg font-black"><Plus className="h-5 w-5" /> Novo Roteiro</h2>
-          <div className="mt-5 space-y-4">
-            <Field label="Nome" placeholder="Ex: Suporte Técnico" />
-            <Field label="Descrição" placeholder="Descrição do roteiro" />
-            <Field label="Mensagem Inicial" placeholder="Ex: Olá! Como posso ajudar?" />
-            <label className="block text-sm font-bold text-slate-600">Instruções do Bot<textarea placeholder="Digite as instruções para o bot..." className="mt-2 min-h-40 w-full resize-none rounded-2xl border border-slate-200 px-4 py-3 text-sm font-normal outline-none focus:ring-4 focus:ring-blue-100" /></label>
-            <button className="w-full rounded-2xl bg-blue-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-blue-200">Salvar</button>
-          </div>
-        </div>
-        <div className="max-h-[680px] space-y-3 overflow-y-auto pr-1">
-          {scripts.map((script) => (
-            <div key={script.id} className={cn("rounded-[1.4rem] bg-white p-4 shadow-sm shadow-slate-200/70", selected?.id === script.id && "ring-4 ring-blue-100")}>
-              <button type="button" onClick={() => setSelectedId(script.id)} className="w-full text-left">
-                <div className="flex items-start justify-between gap-3">
-                  <div><h3 className="font-black text-slate-950">{script.name}</h3><p className="mt-1 text-sm text-slate-500">{script.description}</p></div>
-                  {script.active && <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700">Ativo</span>}
-                </div>
-              </button>
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <button type="button" onClick={() => activateScript(script.id)} className={cn("rounded-xl px-3 py-2 text-xs font-bold", script.active ? "bg-emerald-100 text-emerald-700" : "bg-yellow-100 text-yellow-800")}><Zap className="mr-1 inline h-3.5 w-3.5" />{script.active ? "Ativo" : "Ativar"}</button>
-                <button type="button" onClick={() => removeScript(script.id)} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white"><Trash2 className="mr-1 inline h-3.5 w-3.5" />Excluir</button>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="rounded-[2rem] bg-white p-5 shadow-sm shadow-slate-200/70">
-          <h2 className="flex items-center gap-2 text-lg font-black"><MessageCircle className="h-5 w-5 text-blue-600" /> Testador de Bot</h2>
-          <div className="mt-5 flex min-h-[470px] flex-col justify-center rounded-3xl border border-slate-200 bg-slate-50 p-6 text-center text-slate-500">
-            <Bot className="mx-auto h-12 w-12 text-slate-300" />
-            <p className="mt-4 font-semibold">{selected ? selected.initialMessage : "Selecione um roteiro para começar"}</p>
-          </div>
-          <div className="mt-4 flex gap-3">
-            <input placeholder="Selecione um roteiro primeiro" className="h-12 flex-1 rounded-2xl border border-slate-200 px-4 text-sm outline-none focus:ring-4 focus:ring-blue-100" />
-            <button className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-white"><Send className="h-5 w-5" /></button>
-          </div>
-          <button className="mt-3 w-full rounded-2xl bg-slate-100 py-3 text-sm font-bold text-slate-500">Limpar Histórico</button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function Field({ label, placeholder }: { label: string; placeholder: string }) {
-  return <label className="block text-sm font-bold text-slate-600">{label}<input placeholder={placeholder} className="mt-2 h-11 w-full rounded-2xl border border-slate-200 px-4 text-sm font-normal outline-none focus:ring-4 focus:ring-blue-100" /></label>;
 }
 
 function ActiveAttendancePage() {
   return (
-    <ModulePage icon={PhoneCall} title="Atendimento Ativo" subtitle="Inicie um atendimento por telefone, confira contato e abra chamado integrado.">
-      <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-        <div className="rounded-[2rem] bg-white p-6 shadow-sm shadow-slate-200/70">
-          <h2 className="text-xl font-black">Novo atendimento</h2>
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            <Field label="Número WhatsApp" placeholder="Ex: 5511999999999" />
-            <Field label="Nome do contato" placeholder="Nome do cliente" />
-            <Field label="Empresa" placeholder="Empresa vinculada" />
-            <Field label="Título do chamado" placeholder="Resumo do problema" />
-          </div>
-          <button className="mt-6 rounded-2xl bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-blue-200">Iniciar atendimento</button>
-        </div>
-        <div className="rounded-[2rem] bg-slate-950 p-6 text-white shadow-xl shadow-slate-200">
-          <p className="text-sm font-bold uppercase tracking-[0.2em] text-yellow-300">Fluxo sugerido</p>
-          <ol className="mt-5 space-y-4 text-sm text-slate-300">
-            <li>1. Buscar telefone normalizado.</li>
-            <li>2. Confirmar dados do contato.</li>
-            <li>3. Criar ou vincular chamado.</li>
-            <li>4. Redirecionar para Conversas.</li>
-          </ol>
-        </div>
-      </div>
-    </ModulePage>
+    <SimpleGridModule
+      icon={PhoneCall}
+      title="Atendimento Ativo"
+      subtitle="Conversas em tempo real com clientes."
+      cards={[
+        ["Chamadas Ativas", "Monitore conversas em andamento com clientes."],
+        ["Fila de Espera", "Gerencie clientes aguardando atendimento."],
+        ["Transferências", "Redirecione para especialistas quando necessário."],
+      ]}
+    />
   );
 }
 
-function SimpleGridModule({ icon, title, subtitle, cards }: { icon: IconComponent; title: string; subtitle: string; cards: Array<[string, string]> }) {
-  return (
-    <ModulePage icon={icon} title={title} subtitle={subtitle}>
-      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-        {cards.map(([cardTitle, text]) => (
-          <div key={cardTitle} className="rounded-[2rem] bg-white p-6 shadow-sm shadow-slate-200/70">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-600"><CheckCircle2 className="h-5 w-5" /></div>
-            <h2 className="mt-5 text-xl font-black">{cardTitle}</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
-          </div>
-        ))}
-      </div>
-    </ModulePage>
-  );
-}
-
-function ModulePage({ icon, title, subtitle, children }: { icon: IconComponent; title: string; subtitle: string; children: React.ReactNode }) {
-  return <div><PageHeader icon={icon} title={title} subtitle={subtitle} />{children}</div>;
-}
-
-function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) => void }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
-  const [error, setError] = useState("");
-  const [forgotSent, setForgotSent] = useState(false);
-
-  const loginMutation = trpc.megadesk.loginByEmail.useMutation({
-    onSuccess: (data) => {
-      // Se "Lembrar login" estiver marcado, persiste no localStorage; caso contrário, usa sessionStorage
-      if (rememberMe) {
-        saveSession(data.session);
-      } else {
-        sessionStorage.setItem(MEGADESK_SESSION_KEY, JSON.stringify(data.session));
-      }
-      onLogin(data.session);
-    },
-    onError: (err) => setError(err.message),
-  });
-
-  function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-    setError("");
-    if (!email.trim() || !password.trim()) return;
-    loginMutation.mutate({ email: email.trim(), password });
-  }
-
-  function handleForgot() {
-    if (!email.trim()) {
-      setError("Digite seu e-mail antes de solicitar recuperação de acesso.");
-      return;
-    }
-    // Abre WhatsApp do suporte com mensagem pré-preenchida contendo o e-mail
-    const msg = encodeURIComponent(`Olá! Preciso de ajuda para acessar o MegaDesk. Meu e-mail cadastrado é: ${email.trim()}`);
-    window.open(`https://wa.me/5541995484515?text=${msg}`, "_blank", "noopener,noreferrer");
-    setForgotSent(true);
-    setTimeout(() => setForgotSent(false), 5000);
-  }
-
-  const features = [
-    { icon: MessageCircle, label: "Atendimento WhatsApp centralizado" },
-    { icon: Bot, label: "Triagem inteligente com IA" },
-    { icon: ClipboardList, label: "Chamados e histórico unificados" },
-  ];
+function BotConfigPage({ initialScripts }: { initialScripts: BotScript[] }) {
+  const [scripts, setScripts] = useState<BotScript[]>(initialScripts);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [newScript, setNewScript] = useState<Partial<BotScript>>({});
 
   return (
-    <div className="flex min-h-screen bg-white">
-      {/* Painel esquerdo — identidade visual */}
-      <div className="relative hidden w-[52%] flex-col justify-between overflow-hidden bg-slate-950 p-12 lg:flex">
-        {/* Gradiente decorativo animado */}
-        <div className="pointer-events-none absolute inset-0">
-          <div className="login-orb-1 absolute -left-32 -top-32 h-[500px] w-[500px] rounded-full bg-blue-600/20 blur-[120px]" />
-          <div className="login-orb-2 absolute -bottom-40 -right-20 h-[400px] w-[400px] rounded-full bg-cyan-500/15 blur-[100px]" />
-          <div className="login-orb-3 absolute left-1/2 top-1/2 h-[300px] w-[300px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-600/10 blur-[80px]" />
-        </div>
+    <div>
+      <PageHeader
+        icon={Cog}
+        title="Configurar Bot"
+        subtitle="Gerencie roteiros e respostas automáticas."
+      />
 
-        {/* Logo */}
-        <div className="login-anim-logo relative flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 shadow-lg shadow-blue-900">
-            <Zap className="h-5 w-5 text-white" />
-          </div>
-          <span className="text-lg font-black tracking-tight text-white">MegaDesk</span>
-        </div>
-
-        {/* Hero */}
-        <div className="relative">
-          <p className="login-anim-badge mb-4 inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            <Sparkles className="h-3.5 w-3.5" /> Plataforma de Atendimento
-          </p>
-          <h1 className="login-anim-hero text-5xl font-black leading-[1.1] tracking-tight text-white">
-            Atendimento<br />
-            <span className="login-gradient-text">inteligente</span><br />
-            em um lugar só.
-          </h1>
-          <p className="login-anim-hero mt-6 max-w-sm text-base leading-7 text-slate-400">
-            Gerencie conversas WhatsApp, chamados e integrações com IA de forma unificada e segura.
-          </p>
-
-          <div className="mt-10 space-y-4">
-            {features.map(({ icon: Icon, label }, i) => (
-              <div key={label} className={`login-anim-feat-${i} flex items-center gap-3 rounded-2xl border border-white/5 bg-white/[0.04] px-4 py-3 transition hover:bg-white/[0.08]`}>
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-blue-500/20">
-                  <Icon className="h-4 w-4 text-blue-300" />
-                </div>
-                <span className="text-sm font-medium text-slate-300">{label}</span>
-              </div>
+      <div className="grid gap-4 lg:grid-cols-3">
+        {/* Lista de Scripts */}
+        <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-200 lg:col-span-1">
+          <h3 className="font-semibold text-slate-950 mb-4">Scripts Disponíveis</h3>
+          <div className="space-y-2">
+            {scripts.map((script) => (
+              <button
+                key={script.id}
+                onClick={() => setEditingId(script.id)}
+                className={cn(
+                  "w-full text-left rounded-lg p-3 transition",
+                  editingId === script.id
+                    ? "bg-blue-50 border border-blue-300"
+                    : "hover:bg-slate-50 border border-transparent"
+                )}
+              >
+                <p className="font-medium text-sm text-slate-950">{script.name}</p>
+                <p className="text-xs text-slate-500 mt-1">{script.description}</p>
+              </button>
             ))}
           </div>
         </div>
 
-        {/* Rodapé esquerdo */}
-        <div className="login-anim-footer relative">
-          <p className="text-xs text-slate-600">© {new Date().getFullYear()} MegaDesk. Todos os direitos reservados.</p>
-        </div>
-      </div>
-
-      {/* Painel direito — formulário */}
-      <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 lg:px-16">
-        {/* Logo mobile */}
-        <div className="mb-8 flex items-center gap-3 lg:hidden">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600">
-            <Zap className="h-5 w-5 text-white" />
-          </div>
-          <span className="text-xl font-black text-slate-950">MegaDesk</span>
-        </div>
-
-        <div className="login-anim-form w-full max-w-[400px]">
-          {/* Cabeçalho do form */}
-          <div className="mb-8">
-            <h2 className="text-3xl font-black text-slate-950">Bem-vindo de volta</h2>
-            <p className="mt-2 text-slate-500">Entre com seu e-mail para continuar.</p>
-          </div>
-
-          {/* Formulário */}
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Campo e-mail */}
-            <div>
-              <label className="mb-2 block text-sm font-bold text-slate-700">E-mail</label>
-              <div className="relative">
-                <Mail className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        {/* Editor de Script */}
+        <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-200 lg:col-span-2">
+          {editingId ? (
+            <>
+              <h3 className="font-semibold text-slate-950 mb-4">Editar Script</h3>
+              <div className="space-y-4">
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => { setEmail(e.target.value); setError(""); }}
-                  placeholder="seu@email.com"
-                  autoFocus
-                  className="h-13 w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                  type="text"
+                  placeholder="Nome do script"
+                  defaultValue={scripts.find((s) => s.id === editingId)?.name}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-              </div>
-            </div>
-
-            {/* Campo senha */}
-            <div>
-              <label className="mb-2 block text-sm font-bold text-slate-700">Senha</label>
-              <div className="relative">
-                <Lock className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => { setPassword(e.target.value); setError(""); }}
-                  placeholder="Sua senha de acesso"
-                  className="h-13 w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-11 pr-12 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                <textarea
+                  placeholder="Descrição"
+                  defaultValue={scripts.find((s) => s.id === editingId)?.description}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-24"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                <textarea
+                  placeholder="Mensagem inicial"
+                  defaultValue={scripts.find((s) => s.id === editingId)?.initialMessage}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-24"
+                />
+                <button className="w-full rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 transition">
+                  Salvar Alterações
                 </button>
               </div>
-            </div>
-
-            {/* Lembrar + Esqueceu */}
-            <div className="flex items-center justify-between">
-              <label className="flex cursor-pointer items-center gap-2.5">
-                <div
-                  onClick={() => setRememberMe((v) => !v)}
-                  className={cn(
-                    "flex h-5 w-5 items-center justify-center rounded-md border-2 transition",
-                    rememberMe ? "border-blue-600 bg-blue-600" : "border-slate-300 bg-white"
-                  )}
-                >
-                  {rememberMe && <CheckCircle2 className="h-3.5 w-3.5 text-white" />}
-                </div>
-                <span className="text-sm text-slate-600">Lembrar meu acesso</span>
-              </label>
-              <button
-                type="button"
-                onClick={handleForgot}
-                className="text-sm font-semibold text-blue-600 transition hover:text-blue-700"
-              >
-                Esqueceu o acesso?
-              </button>
-            </div>
-
-            {/* Feedback de erro */}
-            {error && (
-              <div className="flex items-center gap-3 rounded-2xl bg-red-50 px-4 py-3">
-                <Lock className="h-4 w-4 shrink-0 text-red-500" />
-                <p className="text-sm font-semibold text-red-700">{error}</p>
-              </div>
-            )}
-
-            {/* Feedback de esqueceu senha */}
-            {forgotSent && (
-              <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 px-4 py-3">
-                <Mail className="h-4 w-4 shrink-0 text-emerald-600" />
-                <p className="text-sm font-semibold text-emerald-700">Solicitação enviada. Aguarde o contato do suporte.</p>
-              </div>
-            )}
-
-            {/* Botão entrar */}
-            <button
-              type="submit"
-              disabled={loginMutation.isPending || !email.trim() || !password.trim()}
-              className="login-anim-btn group flex h-13 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700 hover:shadow-blue-300 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
-            >
-              {loginMutation.isPending ? (
-                <span className="flex items-center gap-2">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                  Verificando...
-                </span>
-              ) : (
-                <span className="flex items-center gap-2">
-                  Entrar na plataforma
-                  <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
-                </span>
-              )}
-            </button>
-          </form>
-
-          {/* Divisor */}
-          <div className="my-8 flex items-center gap-4">
-            <div className="h-px flex-1 bg-slate-100" />
-            <span className="text-xs font-semibold text-slate-400">Precisa de ajuda?</span>
-            <div className="h-px flex-1 bg-slate-100" />
-          </div>
-
-          {/* Botão suporte */}
-          <a
-            href="https://wa.me/5541995484515?text=Ol%C3%A1%2C%20preciso%20de%20suporte%20para%20acessar%20o%20MegaDesk."
-            target="_blank"
-            rel="noopener noreferrer"
-            className="login-anim-support flex h-12 w-full items-center justify-center gap-3 rounded-2xl border-2 border-slate-200 bg-white text-sm font-bold text-slate-700 transition hover:border-green-400 hover:bg-green-50 hover:text-green-700 hover:scale-[1.02] active:scale-[0.98]"
-          >
-            <MessageSquare className="h-4 w-4" />
-            Falar com o suporte
-          </a>
-
-          {/* Rodapé */}
-          <p className="mt-8 text-center text-xs text-slate-400">
-            MegaDesk · Powered by MegaAdmin
-          </p>
+            </>
+          ) : (
+            <p className="text-slate-500">Selecione um script para editar</p>
+          )}
         </div>
       </div>
     </div>
   );
 }
+
+// ============================================================================
+// TELA DE LOGIN
+// ============================================================================
+
+function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) => void }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const login = trpc.megadesk.loginByEmail.useMutation({
+    onSuccess: (data) => {
+      const session: MegaDeskSession = {
+        userEmail: data.session.userEmail,
+        userName: data.session.userName,
+        userRole: data.session.userRole,
+        permissions: data.session.permissions,
+        clientId: data.session.clientId,
+        company: data.session.company,
+        plan: data.session.plan,
+        modules: data.session.modules,
+      };
+      saveSession(session);
+      onLogin(session);
+    },
+    onError: (err) => {
+      setError(err.message || "Erro ao fazer login");
+      setLoading(false);
+    },
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    login.mutate({
+      email,
+      password,
+    });
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-4">
+      <div className="w-full max-w-md">
+        <div className="rounded-2xl bg-white p-8 shadow-2xl">
+          {/* Logo */}
+          <div className="flex items-center justify-center gap-3 mb-8">
+            <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg">
+              <Zap className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h1 className="font-bold text-lg text-slate-950">MegaDesk</h1>
+              <p className="text-xs text-slate-500">Platform</p>
+            </div>
+          </div>
+
+          <h2 className="text-2xl font-bold text-slate-950 mb-2">Bem-vindo</h2>
+          <p className="text-sm text-slate-500 mb-6">Faça login para acessar a plataforma</p>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-950 mb-2">
+                Email
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="seu@email.com"
+                className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-950 mb-2">
+                Senha
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+
+            {error && (
+              <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full rounded-lg bg-blue-500 px-4 py-2 text-sm font-bold text-white hover:bg-blue-600 transition disabled:opacity-50"
+            >
+              {loading ? "Entrando..." : "Entrar"}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// COMPONENTE PRINCIPAL
+// ============================================================================
 
 export default function Home() {
   const [session, setSession] = useState<MegaDeskSession | null>(() => loadSession());
