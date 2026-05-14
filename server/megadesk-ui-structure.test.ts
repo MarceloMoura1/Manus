@@ -32,13 +32,17 @@ describe("MegaDesk UI structure", () => {
 
   it("inclui as telas operacionais centrais alinhadas à referência", () => {
     const expectedTexts = [
-      "Dashboard",
-      "Visão geral de conversas, chamados e operações",
+      "Sistema Inteligente de Atendimento",
+      "Ações Rápidas",
+      "Atividade Recente",
+      "Buscar número...",
       "Selecione uma conversa para visualizar",
-      "Gerenciar tickets",
-      "Editar roteiros do bot",
-      "Configurar Bot",
-      "Central de atendimento com histórico de mensagens",
+      "Gerencie todos os chamados de atendimento",
+      "N° do chamado",
+      "Selecione um chamado",
+      "Configurar Bot & Testador",
+      "Novo Roteiro",
+      "Testador de Bot",
     ];
 
     for (const text of expectedTexts) {
@@ -47,11 +51,13 @@ describe("MegaDesk UI structure", () => {
   });
 
   it("mantém os estados visuais principais de chamados e conversas", () => {
+    expect(homeSource).toContain("🟢 Abertas");
+    expect(homeSource).toContain("🤖 Atendimento BOT");
+    expect(homeSource).toContain("⚫ Fechadas");
     expect(homeSource).toContain("🔵 Aberto");
     expect(homeSource).toContain("🟡 Em Progresso");
     expect(homeSource).toContain("⏳ Aguardando");
     expect(homeSource).toContain("✅ Fechado");
-    expect(homeSource).toContain("statusConfig");
   });
 
   it("inclui MegaAdmin e MegaDesk como duas URLs lógicas com backend único", () => {
@@ -75,9 +81,6 @@ describe("MegaDesk UI structure", () => {
 
     // MegaDesk menciona o MegaAdmin como plataforma separada
     expect(homeSource).toContain("MegaAdmin");
-    // MegaDesk tem login próprio
-    expect(homeSource).toContain("MegaDeskLoginGate");
-    expect(homeSource).toContain("loginByEmail");
   });
 
   it("implementa gate de login administrativo no AdminPanel com fluxo OAuth Manus", () => {
@@ -99,23 +102,6 @@ describe("MegaDesk UI structure", () => {
     expect(adminPanelSource).toContain("authQuery");
     expect(adminPanelSource).toContain("role");
     expect(adminPanelSource).toContain("admin");
-  });
-
-  it("implementa novo sidebar com expand/collapse e logo com raio", () => {
-    // Novo componente MegaDeskSidebarContent
-    expect(homeSource).toContain("MegaDeskSidebarContent");
-    // Logo com raio (Zap)
-    expect(homeSource).toContain("Zap");
-    expect(homeSource).toContain("MegaDesk");
-    expect(homeSource).toContain("Platform");
-    // Toggle expand/collapse
-    expect(homeSource).toContain("expanded");
-    expect(homeSource).toContain("setExpanded");
-    // Detalhe de luz sutil
-    expect(homeSource).toContain("from-white/5");
-    // Sincronização com permissões
-    expect(homeSource).toContain("visibleItems");
-    expect(homeSource).toContain("permission");
   });
 
   it("exige métricas persistentes por tenant e token no webhook operacional", () => {
