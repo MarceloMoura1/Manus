@@ -266,8 +266,8 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
       for (const client of state.clients) {
         await connection.execute("INSERT INTO megadesk_domain_clients (client_id, internal_id, tenant_database_name, company, contact, phone, plan, status, access_released, api_token, modules_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE company=VALUES(company), contact=VALUES(contact), phone=VALUES(phone), plan=VALUES(plan), status=VALUES(status), access_released=VALUES(access_released), api_token=VALUES(api_token), modules_json=VALUES(modules_json)", [client.clientId, client.id, client.tenantDatabaseName, client.company, client.contact, client.phone, client.plan, client.status, client.accessReleased ? 1 : 0, client.apiToken, JSON.stringify(client.modules ?? [])]);
         for (const user of client.users ?? []) {
-          const savedHash = passwordHashMap.get(user.id) ?? null;
-          await connection.execute("INSERT INTO megadesk_domain_client_users (user_id, client_id, name, email, role, status, permissions_json, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), email=VALUES(email), role=VALUES(role), status=VALUES(status), permissions_json=VALUES(permissions_json)", [user.id, client.clientId, user.name, user.email, user.role, user.status, JSON.stringify(user.permissions ?? []), savedHash]);
+          const passwordHash = (user as any).passwordHash ?? null;
+          await connection.execute("INSERT INTO megadesk_domain_client_users (user_id, client_id, name, email, role, status, permissions_json, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), email=VALUES(email), role=VALUES(role), status=VALUES(status), permissions_json=VALUES(permissions_json), password_hash=VALUES(password_hash)", [user.id, client.clientId, user.name, user.email, user.role, user.status, JSON.stringify(user.permissions ?? []), passwordHash]);
         }
       }
       for (const conversation of state.conversations) {
