@@ -410,7 +410,7 @@ function Shell() {
       )}>
         {/* Header com botao X */}
         <div className="p-4 flex items-center justify-between border-b border-slate-800">
-          {sidebarOpen && <span className="font-bold text-lg">Menu</span>}
+          {sidebarOpen && <span className="font-bold text-2xl">Menu</span>}
           <button
             onClick={() => setSidebarOpen(false)}
             className="text-slate-400 hover:text-white transition-colors"
@@ -454,7 +454,7 @@ function Shell() {
                 title={item.label}
               >
                 <Icon className="w-5 h-5 flex-shrink-0" />
-                {sidebarOpen && <span className="text-sm font-medium">{item.label}</span>}
+                {sidebarOpen && <span className="text-base font-medium">{item.label}</span>}
                 {/* Indicador de notificacoes */}
                 {item.id === "notifications" && (
                   <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
@@ -486,7 +486,7 @@ function Shell() {
                 title={item.label}
               >
                 <Icon className="w-5 h-5 flex-shrink-0" />
-                {sidebarOpen && <span className="text-sm font-medium">{item.label}</span>}
+                {sidebarOpen && <span className="text-base font-medium">{item.label}</span>}
                 {/* Indicador de notificacoes */}
                 {item.id === "notifications" && (
                   <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
@@ -507,7 +507,7 @@ function Shell() {
             title={`Mudar para modo ${theme === 'light' ? 'escuro' : 'claro'}`}
           >
             {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
-            {sidebarOpen && <span className="text-sm font-medium">{theme === 'light' ? 'Modo Escuro' : 'Modo Claro'}</span>}
+            {sidebarOpen && <span className="text-base font-medium">{theme === 'light' ? 'Modo Escuro' : 'Modo Claro'}</span>}
           </button>
           
           {/* Logout Button */}
@@ -522,7 +522,7 @@ function Shell() {
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
             </svg>
-            {sidebarOpen && <span className="text-sm font-medium">Sair</span>}
+            {sidebarOpen && <span className="text-base font-medium">Sair</span>}
           </button>
         </div>
       </div>
