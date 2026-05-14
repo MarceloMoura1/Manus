@@ -30,6 +30,7 @@ import {
   User,
   Zap,
   AlertCircle,
+  X,
 } from "lucide-react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
@@ -401,81 +402,62 @@ function Shell() {
     <div className={`flex h-screen bg-slate-50 ${theme === 'dark' ? 'dark bg-slate-950' : ''}`}>
       {/* Sidebar */}
       <div className={cn(
-        "fixed lg:relative z-40 h-full bg-gradient-to-b from-slate-900 to-slate-800 text-white transition-all duration-300",
+        "fixed lg:relative z-40 h-full bg-slate-950 text-white transition-all duration-300 flex flex-col",
         sidebarOpen ? "w-64" : "w-20"
       )}>
-        <div className="flex flex-col h-full">
-          {/* Logo */}
-          <div className="p-4 border-b border-slate-700 flex items-center justify-between">
-            <div className={cn("flex items-center gap-3", !sidebarOpen && "justify-center w-full")}>
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-400 to-cyan-300 rounded-lg flex items-center justify-center flex-shrink-0">
-                <Zap className="w-6 h-6 text-white" />
-              </div>
-              {sidebarOpen && <span className="font-bold text-lg">MegaDesk</span>}
-            </div>
-          </div>
-
-          {/* Navigation */}
-          <nav className="flex-1 overflow-y-auto p-4 space-y-2">
-            {filteredNavItems.map(item => {
-              const Icon = item.icon;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setActive(item.id)}
-                  className={cn(
-                    "w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200",
-                    active === item.id
-                      ? "bg-blue-600 text-white shadow-lg"
-                      : "text-slate-300 hover:bg-slate-700 hover:text-white"
-                  )}
-                  title={item.label}
-                >
-                  <Icon className="w-5 h-5 flex-shrink-0" />
-                  {sidebarOpen && <span className="text-sm font-medium">{item.label}</span>}
-                </button>
-              );
-            })}
-          </nav>
-
-          {/* Bottom Actions */}
-          <div className="border-t border-slate-700 p-4 space-y-2">
-            <button
-              onClick={toggleTheme}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
-              title={`Mudar para modo ${theme === 'light' ? 'escuro' : 'claro'}`}
-            >
-              {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
-              {sidebarOpen && <span className="text-sm font-medium">{theme === 'light' ? 'Modo Escuro' : 'Modo Claro'}</span>}
-            </button>
-            <button
-              onClick={() => navigateToPlatform('megaadmin')}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
-              title="Abrir URL MegaAdmin"
-            >
-              <Settings className="w-5 h-5" />
-              {sidebarOpen && <span className="text-sm font-medium">MegaAdmin</span>}
-            </button>
-            <button
-              onClick={() => {
-                localStorage.removeItem(MEGADESK_SESSION_KEY);
-                window.location.reload();
-              }}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-slate-300 hover:bg-red-600/20 hover:text-red-300 transition-all duration-200"
-              title="Sair"
-            >
-              <Lock className="w-5 h-5" />
-              {sidebarOpen && <span className="text-sm font-medium">Sair</span>}
-            </button>
-          </div>
-
-          {/* Sidebar Toggle */}
+        {/* Header com botao X */}
+        <div className="p-4 flex items-center justify-between border-b border-slate-800">
+          {sidebarOpen && <span className="font-bold text-lg">Menu</span>}
           <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="w-full flex items-center justify-center py-4 text-slate-400 hover:text-white transition-colors border-t border-slate-700"
-            title="Expandir menu"
+            onClick={() => setSidebarOpen(false)}
+            className="text-slate-400 hover:text-white transition-colors"
+            title="Fechar menu"
           >
-            <ArrowRight className={cn("w-5 h-5 transition-transform", sidebarOpen && "rotate-180")} />
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+          {filteredNavItems.map((item, index) => {
+            const Icon = item.icon;
+            const isActive = active === item.id;
+            
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActive(item.id)}
+                className={cn(
+                  "w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 relative",
+                  isActive
+                    ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-lg"
+                    : "text-slate-300 hover:text-white hover:bg-slate-800/50"
+                )}
+                title={item.label}
+              >
+                <Icon className="w-5 h-5 flex-shrink-0" />
+                {sidebarOpen && <span className="text-sm font-medium">{item.label}</span>}
+                {/* Indicador de notificacoes */}
+                {item.id === "notifications" && (
+                  <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Separador */}
+        <div className="border-t border-slate-800"></div>
+
+        {/* Bottom Actions */}
+        <div className="p-3 space-y-1">
+          <button
+            onClick={toggleTheme}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all duration-200"
+            title={`Mudar para modo ${theme === 'light' ? 'escuro' : 'claro'}`}
+          >
+            {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+            {sidebarOpen && <span className="text-sm font-medium">{theme === 'light' ? 'Modo Escuro' : 'Modo Claro'}</span>}
           </button>
         </div>
       </div>
