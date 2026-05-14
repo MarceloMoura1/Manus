@@ -97,3 +97,9 @@
 - [x] Corrigir erro de alteração de senha do usuário (INSERT com conexão direta ao banco)
 - [x] Ajustar paleta de cores para padrão com o site (azul/slate em vez de preto/laranja)
 - [x] Melhorar layout da seção de permissões do usuário (cards brancos, borda azul)
+
+
+## Fase 16: BUG CRÍTICO - Clientes Desaparecem ao Fazer Logout
+- [x] Investigar perda de dados ao fazer logout (causa: syncStateHydrated não era resetado)
+- [x] Implementar carregamento de clientes do banco ao iniciar (reset do flag ao logout)
+- [x] Garantir persistência real em banco de dados (dados agora são carregados do banco)

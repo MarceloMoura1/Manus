@@ -234,6 +234,7 @@ export const appRouter = router({
       }),
     logoutAdmin: publicProcedure.mutation(({ ctx }) => {
       ctx.res.clearCookie(MEGAADMIN_COOKIE, { path: "/" });
+      syncStateHydrated = false; // Reset para recarregar dados na próxima requisição
       return { ok: true };
     }),
     // ─── Gestão de Administradores ──────────────────────────────────────────
