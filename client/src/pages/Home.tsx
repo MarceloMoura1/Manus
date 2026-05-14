@@ -405,7 +405,7 @@ function Shell() {
     <div className={`flex h-screen bg-slate-50 ${theme === 'dark' ? 'dark bg-slate-950' : ''}`}>
       {/* Sidebar */}
       <div className={cn(
-        "fixed lg:relative z-40 h-full bg-slate-950 text-white transition-all duration-300 flex flex-col",
+        "fixed lg:relative z-40 h-full bg-slate-950 text-white flex flex-col transition-all duration-300",
         sidebarOpen ? "w-64" : "w-20"
       )}>
         {/* Header com botao X */}
@@ -425,7 +425,7 @@ function Shell() {
           <div className="p-3 flex justify-center">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-800/50 rounded-lg"
+              className="hamburger-icon text-slate-400 hover:text-white p-2 hover:bg-slate-800/50 rounded-lg"
               title="Expandir menu"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
