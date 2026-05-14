@@ -383,20 +383,23 @@ function Shell() {
     { id: "active-attendance" as RouteId, label: "Atendimento Ativo", icon: PhoneCall },
     { id: "conversations" as RouteId, label: "Conversas", icon: MessageCircle },
     { id: "tickets" as RouteId, label: "Chamados", icon: ClipboardList },
-    { id: "tracking" as RouteId, label: "Rastreio", icon: MapPin },
+    { id: "tracking" as RouteId, label: "Rastreamento", icon: MapPin },
     { id: "erp" as RouteId, label: "ERP", icon: PackageSearch },
     { id: "settings" as RouteId, label: "Configurações", icon: Cog },
     { id: "bot-config" as RouteId, label: "Configurar Bot", icon: Bot },
     { id: "ai-assistant" as RouteId, label: "Assistente IA", icon: Sparkles },
+    { id: "help" as RouteId, label: "Ajuda", icon: AlertCircle },
     { id: "notifications" as RouteId, label: "Notificações", icon: Bell },
   ];
 
   const filteredNavItems = navItems.filter(item => {
-    if (item.id === "home") return true;
-    if (item.id === "settings") return true;
-    if (item.id === "notifications") return true;
+    if (["home", "active-attendance", "settings", "help", "notifications"].includes(item.id)) return true;
     return session.permissions.includes(item.id);
   });
+
+  // Separar itens em seções
+  const mainNavItems = filteredNavItems.filter(item => !["settings", "bot-config", "ai-assistant", "help", "notifications"].includes(item.id));
+  const settingsNavItems = filteredNavItems.filter(item => ["settings", "bot-config", "ai-assistant", "help", "notifications"].includes(item.id));
 
   return (
     <div className={`flex h-screen bg-slate-50 ${theme === 'dark' ? 'dark bg-slate-950' : ''}`}>
@@ -417,9 +420,24 @@ function Shell() {
           </button>
         </div>
 
+        {/* Botao de Expandir quando recolhido */}
+        {!sidebarOpen && (
+          <div className="p-3 flex justify-center">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-800/50 rounded-lg"
+              title="Expandir menu"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          </div>
+        )}
+
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto p-3 space-y-1">
-          {filteredNavItems.map((item, index) => {
+          {mainNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = active === item.id;
             
