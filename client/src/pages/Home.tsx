@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { navigateToPlatform } from "@/lib/platformRouting";
 import { trpc } from "@/lib/trpc";
+import { useTheme } from "@/contexts/ThemeContext";
 import {
   ArrowRight,
   Bell,
@@ -145,7 +146,7 @@ function cn(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-function Sidebar({ active, onNavigate, session, onLogout }: { active: RouteId; onNavigate: (route: RouteId) => void; session?: MegaDeskSession | null; onLogout?: () => void }) {
+function Sidebar({ active, onNavigate, session, onLogout, onToggleTheme, currentTheme }: { active: RouteId; onNavigate: (route: RouteId) => void; session?: MegaDeskSession | null; onLogout?: () => void; onToggleTheme?: () => void; currentTheme?: string }) {
   const [expanded, setExpanded] = useState(false);
 
   // Filtra itens visíveis com base nas permissões da sessão
@@ -195,6 +196,26 @@ function Sidebar({ active, onNavigate, session, onLogout }: { active: RouteId; o
             )}
           </div>
         )}
+        {onToggleTheme && (
+          <button
+            type="button"
+            onClick={onToggleTheme}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-3 py-3 text-xs font-bold text-slate-300 transition hover:bg-white/10 hover:text-white"
+            title={`Mudar para modo ${currentTheme === 'light' ? 'escuro' : 'claro'}`}
+          >
+            {currentTheme === 'light' ? (
+              <>
+                <span className="text-lg">🌙</span>
+                {expanded && <span className="truncate">Modo Escuro</span>}
+              </>
+            ) : (
+              <>
+                <span className="text-lg">☀️</span>
+                {expanded && <span className="truncate">Modo Claro</span>}
+              </>
+            )}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => navigateToPlatform("megaadmin")}
@@ -238,9 +259,11 @@ function SidebarButton({ item, active, expanded, onNavigate }: { item: NavItem; 
 }
 
 function Shell({ active, setActive, children, session, onLogout }: { active: RouteId; setActive: (route: RouteId) => void; children: React.ReactNode; session?: MegaDeskSession | null; onLogout?: () => void }) {
+  const { toggleTheme, theme } = useTheme();
+  
   return (
-    <div className="min-h-screen bg-[#f6f8fb] text-slate-950">
-      <Sidebar active={active} onNavigate={setActive} session={session} onLogout={onLogout} />
+    <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] transition-colors duration-300">
+      <Sidebar active={active} onNavigate={setActive} session={session} onLogout={onLogout} onToggleTheme={toggleTheme} currentTheme={theme} />
       <main className="ml-20 min-h-screen px-6 py-6 transition-all lg:px-8">
         <div className="mx-auto max-w-[1440px]">{children}</div>
       </main>
