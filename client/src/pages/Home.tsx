@@ -29,6 +29,7 @@ import {
   Trash2,
   User,
   Zap,
+  AlertCircle,
 } from "lucide-react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
@@ -286,89 +287,133 @@ function PageHeader({ icon: Icon, title, subtitle }: { icon: IconComponent; titl
 }
 
 function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId) => void; indicadores?: { conversasAbertas: number; chamadosAbertos: number; tempoMedio: string; resolucaoBot: string } }) {
-  const cards = [
-    { label: "Conversas Abertas", value: String(indicadores?.conversasAbertas ?? 0), accent: "from-blue-500 to-cyan-400", note: "dados vindos do servidor" },
-    { label: "Atendimento BOT", value: indicadores?.resolucaoBot ?? "0%", accent: "from-yellow-400 to-orange-400", note: "triagem ativa" },
-    { label: "Chamados Ativos", value: String(indicadores?.chamadosAbertos ?? 0), accent: "from-emerald-500 to-teal-400", note: "contrato tRPC" },
-    { label: "Tempo Médio", value: indicadores?.tempoMedio ?? "0m", accent: "from-purple-500 to-indigo-500", note: "resposta inicial" },
+  const kpiCards = [
+    { label: "Conversas Abertas", value: String(indicadores?.conversasAbertas ?? 0), accent: "from-blue-500 to-cyan-400", icon: MessageCircle, note: "em andamento" },
+    { label: "Taxa de Resolução", value: indicadores?.resolucaoBot ?? "0%", accent: "from-emerald-500 to-teal-400", icon: CheckCircle2, note: "bot inteligente" },
+    { label: "Chamados Ativos", value: String(indicadores?.chamadosAbertos ?? 0), accent: "from-orange-500 to-red-400", icon: AlertCircle, note: "aguardando" },
+    { label: "Tempo Médio", value: indicadores?.tempoMedio ?? "0m", accent: "from-purple-500 to-pink-500", icon: Ticket, note: "resposta" },
   ];
 
-  const actions: Array<{ title: string; subtitle: string; route: RouteId; icon: IconComponent }> = [
-    { title: "Conversas", subtitle: "Abrir central de atendimento", route: "conversations", icon: MessageCircle },
-    { title: "Chamados", subtitle: "Gerenciar tickets", route: "tickets", icon: ClipboardList },
-    { title: "Configuração", subtitle: "Editar roteiros do bot", route: "bot-config", icon: Cog },
+  const quickActions = [
+    { title: "Conversas", subtitle: "Central de atendimento", route: "conversations" as RouteId, color: "from-blue-600 to-blue-700" },
+    { title: "Chamados", subtitle: "Gerenciar tickets", route: "tickets" as RouteId, color: "from-orange-600 to-orange-700" },
+    { title: "Rastreio", subtitle: "Monitorar atividades", route: "tracking" as RouteId, color: "from-purple-600 to-purple-700" },
   ];
 
   return (
-    <div>
-      <section className="rounded-[2rem] bg-white p-8 shadow-sm shadow-slate-200/70">
-        <div className="flex flex-col justify-between gap-8 lg:flex-row lg:items-center">
-          <div className="max-w-3xl">
-            <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.2em] text-blue-700">
-              <Sparkles className="h-4 w-4" /> Sistema Inteligente de Atendimento
+    <div className="space-y-8">
+      {/* Hero Section */}
+      <section className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 p-12 shadow-2xl shadow-blue-900/20">
+        <div className="absolute inset-0 opacity-30">
+          <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500 rounded-full blur-3xl" />
+          <div className="absolute bottom-0 left-0 w-96 h-96 bg-purple-500 rounded-full blur-3xl" />
+        </div>
+        <div className="relative z-10 grid gap-8 lg:grid-cols-2 lg:items-center">
+          <div className="space-y-6 animate-fade-in">
+            <div className="inline-flex items-center gap-3 rounded-full bg-white/10 backdrop-blur px-4 py-2 border border-white/20">
+              <Zap className="h-4 w-4 text-yellow-400" />
+              <span className="text-xs font-bold uppercase tracking-wider text-white/80">Plataforma de Atendimento</span>
             </div>
-            <h1 className="mt-5 text-5xl font-black tracking-tight text-slate-950">MegaDesk</h1>
-            <p className="mt-4 text-lg leading-8 text-slate-600">
-              Plataforma operacional para atendimento WhatsApp, triagem por IA, chamados e integração por token com o MegaAdmin.
+            <div>
+              <h1 className="text-6xl font-black text-white leading-tight mb-2 animate-slide-up" style={{ animationDelay: '0.1s' }}>
+                Mega<span className="bg-gradient-to-r from-blue-400 via-cyan-300 to-blue-400 bg-clip-text text-transparent">Desk</span>
+              </h1>
+              <p className="text-xl text-blue-200 font-semibold animate-slide-up" style={{ animationDelay: '0.2s' }}>Sistema Inteligente de Atendimento</p>
+            </div>
+            <p className="text-lg text-slate-300 leading-relaxed max-w-md animate-slide-up" style={{ animationDelay: '0.3s' }}>
+              Gerencie conversas WhatsApp, chamados e atendimento com IA em um único lugar. Integrado com MegaAdmin.
             </p>
-          </div>
-          <div className="grid min-w-[280px] grid-cols-2 gap-3 rounded-[1.5rem] bg-slate-950 p-4 text-white">
-            <div className="rounded-2xl bg-white/10 p-4">
-              <p className="text-xs text-slate-300">Status</p>
-              <p className="mt-2 font-black text-emerald-300">Ativo</p>
+            <div className="flex gap-4 pt-4 animate-slide-up" style={{ animationDelay: '0.4s' }}>
+              <button onClick={() => setActive('conversations')} className="px-8 py-3 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-full transition-all duration-200 hover:shadow-lg hover:shadow-blue-500/50 hover:-translate-y-0.5">
+                Começar
+              </button>
+              <button onClick={() => navigateToPlatform('megaadmin')} className="px-8 py-3 bg-white/10 hover:bg-white/20 text-white font-bold rounded-full border border-white/30 transition-all duration-200 backdrop-blur">
+                MegaAdmin
+              </button>
             </div>
-            <div className="rounded-2xl bg-white/10 p-4">
-              <p className="text-xs text-slate-300">Origem</p>
-              <button type="button" onClick={() => navigateToPlatform("megaadmin")} className="mt-2 text-left font-black text-yellow-300 underline-offset-4 transition hover:underline">MegaAdmin</button>
+          </div>
+          <div className="hidden lg:flex items-center justify-center animate-float">
+            <div className="relative w-64 h-64">
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-400 to-purple-500 rounded-3xl blur-2xl opacity-50" />
+              <div className="relative bg-gradient-to-br from-blue-500 to-purple-600 rounded-3xl p-8 shadow-2xl flex items-center justify-center">
+                <Zap className="w-32 h-32 text-white opacity-80" />
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {cards.map((card) => (
-          <div key={card.label} className="overflow-hidden rounded-[1.5rem] bg-white shadow-sm shadow-slate-200/70">
-            <div className={cn("h-2 bg-gradient-to-r", card.accent)} />
-            <div className="p-5">
-              <p className="text-sm font-semibold text-slate-500">{card.label}</p>
-              <p className="mt-3 text-4xl font-black text-slate-950">{card.value}</p>
-              <p className="mt-2 text-xs font-semibold text-slate-400">{card.note}</p>
+      {/* KPI Cards */}
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {kpiCards.map((card, idx) => {
+          const Icon = card.icon;
+          return (
+            <div
+              key={card.label}
+              className="group relative overflow-hidden rounded-2xl bg-white shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1 cursor-pointer animate-fade-in"
+              style={{ animationDelay: `${idx * 0.1}s` }}
+            >
+              <div className={cn("absolute inset-0 bg-gradient-to-r opacity-0 group-hover:opacity-10 transition-opacity duration-300", card.accent)} />
+              <div className="relative p-6">
+                <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center text-white mb-4 bg-gradient-to-br", card.accent)}>
+                  <Icon className="w-6 h-6" />
+                </div>
+                <p className="text-sm font-semibold text-slate-500 uppercase tracking-wide">{card.label}</p>
+                <p className="mt-3 text-4xl font-black text-slate-950">{card.value}</p>
+                <p className="mt-2 text-xs font-medium text-slate-400">{card.note}</p>
+                <div className={cn("absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300", card.accent)} />
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </section>
 
-      <section className="mt-6 grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-        <div className="rounded-[2rem] bg-white p-6 shadow-sm shadow-slate-200/70">
-          <h2 className="text-xl font-black">Ações Rápidas</h2>
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            {actions.map((action) => {
-              const Icon = action.icon;
+      {/* Actions and Activity */}
+      <section className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
+        {/* Quick Actions */}
+        <div className="rounded-2xl bg-white p-8 shadow-lg animate-fade-in" style={{ animationDelay: '0.4s' }}>
+          <h2 className="text-2xl font-black text-slate-950 mb-6">Ações Rápidas</h2>
+          <div className="grid gap-4 md:grid-cols-3">
+            {quickActions.map((action, idx) => {
+              const Icon = action.title === "Conversas" ? MessageCircle : action.title === "Chamados" ? ClipboardList : Zap;
               return (
-                <button key={action.route} type="button" onClick={() => setActive(action.route)} className="rounded-3xl bg-blue-600 p-5 text-left text-white shadow-lg shadow-blue-200 transition hover:-translate-y-1 hover:bg-blue-700">
-                  <Icon className="h-6 w-6" />
-                  <p className="mt-4 text-lg font-black">{action.title}</p>
-                  <p className="mt-1 text-sm text-blue-100">{action.subtitle}</p>
+                <button
+                  key={action.route}
+                  onClick={() => setActive(action.route)}
+                  className={cn(
+                    "group relative overflow-hidden rounded-2xl p-6 text-left text-white shadow-lg transition-all duration-300 hover:shadow-2xl hover:-translate-y-1 bg-gradient-to-br",
+                    action.color
+                  )}
+                  style={{ animationDelay: `${0.4 + idx * 0.1}s` }}
+                >
+                  <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  <div className="relative z-10">
+                    <Icon className="h-8 w-8 mb-3 group-hover:scale-110 transition-transform duration-300" />
+                    <p className="text-lg font-black">{action.title}</p>
+                    <p className="text-sm text-white/80 mt-1">{action.subtitle}</p>
+                  </div>
                 </button>
               );
             })}
           </div>
         </div>
-        <div className="rounded-[2rem] bg-white p-6 shadow-sm shadow-slate-200/70">
-          <h2 className="text-xl font-black">Atividade Recente</h2>
-          <div className="mt-4 space-y-3">
+
+        {/* Recent Activity */}
+        <div className="rounded-2xl bg-white p-8 shadow-lg animate-fade-in" style={{ animationDelay: '0.5s' }}>
+          <h2 className="text-2xl font-black text-slate-950 mb-6">Atividade</h2>
+          <div className="space-y-3">
             {[
-              ["Novo chamado 0004", "Empresa D abriu solicitação de backup", "Agora"],
-              ["BOT em atendimento", "Cliente 5510303936399 em triagem", "5 min"],
-              ["Token validado", "Integração MegaAdmin conferida", "12 min"],
-            ].map(([title, text, time]) => (
-              <div key={title} className="flex items-start gap-3 rounded-2xl bg-slate-50 p-4">
-                <span className="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-500" />
+              { title: "Novo chamado", desc: "Solicitação de backup", time: "Agora", color: "bg-blue-500" },
+              { title: "BOT ativo", desc: "Cliente em triagem", time: "5 min", color: "bg-emerald-500" },
+              { title: "Token OK", desc: "MegaAdmin validado", time: "12 min", color: "bg-purple-500" },
+            ].map(({ title, desc, time, color }, idx) => (
+              <div key={title} className="flex items-start gap-3 p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors duration-200 animate-fade-in" style={{ animationDelay: `${0.5 + idx * 0.1}s` }}>
+                <div className={cn("mt-1 h-2.5 w-2.5 rounded-full flex-shrink-0", color)} />
                 <div className="min-w-0 flex-1">
-                  <p className="font-bold text-slate-900">{title}</p>
-                  <p className="text-sm text-slate-500">{text}</p>
+                  <p className="font-bold text-slate-900 text-sm">{title}</p>
+                  <p className="text-xs text-slate-500">{desc}</p>
                 </div>
-                <span className="text-xs font-bold text-slate-400">{time}</span>
+                <span className="text-xs font-bold text-slate-400 flex-shrink-0">{time}</span>
               </div>
             ))}
           </div>
