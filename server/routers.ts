@@ -619,6 +619,24 @@ export const appRouter = router({
       await persistSyncState();
       return { ok: true, user: { ...user, permissions: Array.from(new Set([...rolePermissions(user.role), ...user.permissions])) } };
     }),
+    deleteClient: adminProcedure.input(z.object({ clientId: z.string() })).mutation(async ({ input }) => {
+      await hydrateSyncState();
+      const clientIndex = clients.findIndex((c) => c.clientId === input.clientId);
+      if (clientIndex === -1) throw new TRPCError({ code: "NOT_FOUND", message: "Cliente nao encontrado." });
+      const client = clients[clientIndex];
+      clients.splice(clientIndex, 1);
+      const conversationIndices = conversations.map((c, i) => c.clientId === input.clientId ? i : -1).filter((i) => i !== -1).reverse();
+      conversationIndices.forEach((i) => conversations.splice(i, 1));
+      const ticketIndices = tickets.map((t, i) => t.clientId === input.clientId ? i : -1).filter((i) => i !== -1).reverse();
+      ticketIndices.forEach((i) => tickets.splice(i, 1));
+      const recordIndices = operationalRecords.map((r, i) => r.clientId === input.clientId ? i : -1).filter((i) => i !== -1).reverse();
+      recordIndices.forEach((i) => operationalRecords.splice(i, 1));
+      const db = await getDb();
+      await db.delete(megadeskDomainClientUsers).where(eq(megadeskDomainClientUsers.clientId, input.clientId));
+      audit("MegaAdmin", `Cliente removido: ${client.company}`, input.clientId);
+      await persistSyncState();
+      return { ok: true, deletedClientId: input.clientId };
+    }),
   }),
   megadesk: router({
     overview: publicProcedure.input(z.object({ clientId: z.string().optional(), userEmail: z.string().email() })).query(async ({ input }) => {

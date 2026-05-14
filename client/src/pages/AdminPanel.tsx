@@ -791,6 +791,11 @@ export default function AdminPanel() {
     utils.megaadmin.summary.invalidate();
   };
 
+  const deleteClientMutation = trpc.megaadmin.deleteClient.useMutation({
+    onSuccess() { toast.success("Cliente excluido com sucesso."); refresh(); },
+    onError(err) { toast.error(err.message); },
+  });
+
   // Loading
   if (authQuery.isLoading) {
     return (
@@ -993,12 +998,30 @@ export default function AdminPanel() {
                                   {client.statusType === "active" ? "Ativo" : "Teste"}
                                 </span>
                               </td>
-                              <td className="px-4 py-3 text-right">
+                              <td className="px-4 py-3 text-right flex gap-2 justify-end">
                                 <button
                                   onClick={() => setSelectedClient(client)}
                                   className="rounded-xl border border-white/10 px-3 py-1.5 text-xs text-slate-300 hover:border-cyan-400/40 transition"
                                 >
                                   Editar
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (confirm(`Tem certeza que deseja excluir o cliente "${client.company}"? Esta acao nao pode ser desfeita.`)) {
+                                      deleteClientMutation.mutate({ clientId: client.clientId }, {
+                                        onSuccess: () => {
+                                          toast.success(`Cliente "${client.company}" excluido com sucesso.`);
+                                          refresh();
+                                        },
+                                        onError: (error: any) => {
+                                          toast.error(`Erro ao excluir cliente: ${error.message}`);
+                                        },
+                                      });
+                                    }
+                                  }}
+                                  className="rounded-xl border border-red-400/20 px-3 py-1.5 text-xs text-red-400 hover:border-red-400/40 hover:bg-red-400/5 transition"
+                                >
+                                  <Trash2 className="h-4 w-4" />
                                 </button>
                               </td>
                             </tr>
