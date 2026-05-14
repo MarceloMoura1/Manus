@@ -234,6 +234,13 @@ export const appRouter = router({
       }),
     logoutAdmin: publicProcedure.mutation(({ ctx }) => {
       ctx.res.clearCookie(MEGAADMIN_COOKIE, { path: "/" });
+      // LIMPAR TODOS OS ARRAYS EM MEMÓRIA PARA FORÇAR RECARREGAMENTO DO BANCO
+      clients.splice(0, clients.length);
+      conversations.splice(0, conversations.length);
+      tickets.splice(0, tickets.length);
+      botScripts.splice(0, botScripts.length);
+      operationalRecords.splice(0, operationalRecords.length);
+      auditLogs.splice(0, auditLogs.length);
       syncStateHydrated = false; // Reset para recarregar dados na próxima requisição
       return { ok: true };
     }),

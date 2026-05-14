@@ -225,7 +225,7 @@ export async function loadMegaDeskStructuredState(defaultState: MegaDeskStructur
       usersByClient.set(row.client_id, list);
     }
 
-    return {
+    const loadedState = {
       clients: (clientRows as any[]).map((row) => ({ id: row.internal_id, clientId: row.client_id, tenantDatabaseName: row.tenant_database_name, company: row.company, contact: row.contact, phone: row.phone, plan: row.plan, status: row.status, accessReleased: Boolean(row.access_released), apiToken: row.api_token, modules: JSON.parse(row.modules_json || "[]"), users: usersByClient.get(row.client_id) ?? [] })),
       conversations: (conversationRows as any[]).map((row) => ({ id: row.conversation_id, clientId: row.client_id, name: row.customer_name, phone: row.phone, company: row.company, status: row.status, lastMessage: row.last_message, time: row.time_label, messages: JSON.parse(row.messages_json || "[]") })),
       tickets: (ticketRows as any[]).map((row) => ({ id: row.ticket_id, clientId: row.client_id, company: row.company, customer: row.customer, problem: row.problem, category: row.category, status: row.status, createdAt: row.created_label, description: row.description })),
@@ -233,9 +233,15 @@ export async function loadMegaDeskStructuredState(defaultState: MegaDeskStructur
       operationalRecords: (recordRows as any[]).map((row) => ({ id: row.record_id, clientId: row.client_id, tenantDatabaseName: row.tenant_database_name, type: row.record_type, ownerPhone: row.owner_phone, title: row.title, status: row.status, payload: JSON.parse(row.payload_json || "{}"), createdAt: row.created_at?.toISOString?.() ?? String(row.created_at) })),
       auditLogs: (auditRows as any[]).map((row) => ({ id: row.audit_id, platform: row.platform, action: row.action, clientId: row.client_id ?? undefined, success: Boolean(row.success), createdAt: row.created_at?.toISOString?.() ?? String(row.created_at) })),
     };
+    // ATUALIZAR inMemoryState COM DADOS DO BANCO (SEMPRE SINCRONIZADO)
+    inMemoryState = loadedState;
+    return loadedState;
   } catch (error) {
-    if (!inMemoryState) inMemoryState = cloneState(defaultState);
-    console.warn("[MegaDesk Sync] Falha ao carregar persistência estruturada; usando fallback em memória.", error);
+    console.warn("[MegaDesk Sync] Falha ao carregar persistência estruturada; tentando usar fallback em memória.", error);
+    // SE HOUVER ERRO, RETORNAR ESTADO EM MEMÓRIA (QUE FOI SINCRONIZADO ANTERIORMENTE)
+    if (inMemoryState) return inMemoryState;
+    // ÚLTIMO RECURSO: USAR ESTADO PADRÃO
+    inMemoryState = cloneState(defaultState);
     return inMemoryState;
   }
 }
