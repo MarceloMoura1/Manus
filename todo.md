@@ -112,3 +112,10 @@
 - [x] Remover fundo branco da seção de permissões
 - [x] Aplicar design consistente com MegaAdmin
 - [x] Testar fluxo completo de permissões (testes automatizados passando)
+
+## Fase 18: BUG CRÍTICO - Login do MegaDesk Falha Após Cadastro
+- [x] Investigar sincronização de dados entre MegaAdmin e MegaDesk
+- [x] Validar se cliente está sendo criado corretamente
+- [x] Verificar se usuários estão sendo sincronizados (bug: status era sempre "blocked")
+- [x] Corrigir fluxo de login no MegaDesk (usuários agora respeitam statusType)
+- [x] Testar login completo (cadastro → login) - VALIDADO NO NAVEGADOR: cliente Ativo criado com sucesso, usuário com status active

@@ -369,12 +369,12 @@ export const appRouter = router({
         plan: input.plan,
         maxUsers: input.maxUsers,
         statusType: input.statusType,
-        status: "setup",
-        accessReleased: false,
+        status: input.statusType === "active" ? "active" : "setup",
+        accessReleased: input.statusType === "active",
         apiToken: token,
         modules: [],
         integrations: {},
-        users: [{ id: `user-${Date.now()}`, name: input.contact, email: input.email, role: "admin", status: "blocked" }],
+        users: [{ id: `user-${Date.now()}`, name: input.contact, email: input.email, role: "admin", status: input.statusType === "active" ? "active" : "blocked" }],
       };
       clients.push(client);
       audit("MegaAdmin", "Cliente criado e aguardando liberação", client.clientId);
