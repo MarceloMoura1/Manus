@@ -43,7 +43,7 @@ type MegaClient = {
   apiToken: string;
   modules: string[];
   integrations: ClientIntegrations;
-  users: Array<{ id: string; name: string; email: string; role: "admin" | "manager" | "agent" | "viewer"; status: "active" | "blocked"; permissions?: string[] }>;
+  users: Array<{ id: string; name: string; email: string; role: "admin" | "manager" | "agent" | "viewer"; status: "active" | "blocked"; permissions?: string[]; passwordHash?: string }>;
 };
 
 type Conversation = {
@@ -357,6 +357,8 @@ export const appRouter = router({
       const idNumber = clients.length + 1;
       const clientId = `cliente-${String(idNumber).padStart(3, "0")}`;
       const token = `mdsk_live_${clientId}_${Math.random().toString(16).slice(2, 10)}`;
+      // Gerar hash de senha padrão para o usuário inicial
+      const defaultPasswordHash = await bcrypt.hash("123456", 12);
       const client: MegaClient = {
         id: `client-${String(idNumber).padStart(3, "0")}`,
         clientId,
@@ -374,11 +376,27 @@ export const appRouter = router({
         apiToken: token,
         modules: [],
         integrations: {},
-        users: [{ id: `user-${Date.now()}`, name: input.contact, email: input.email, role: "admin", status: input.statusType === "active" ? "active" : "blocked" }],
+        users: [{ id: `user-${Date.now()}`, name: input.contact, email: input.email, role: "admin", status: input.statusType === "active" ? "active" : "blocked", permissions: rolePermissions("admin"), passwordHash: defaultPasswordHash }],
       };
       clients.push(client);
       audit("MegaAdmin", "Cliente criado e aguardando liberação", client.clientId);
       await persistSyncState();
+      
+      // Sincronizar usuário inicial para a tabela megadeskDomainClientUsers
+      const initialUser = client.users[0];
+      const connection = await getPool().getConnection();
+      try {
+        await connection.execute(
+          "INSERT INTO megadesk_domain_client_users (user_id, client_id, name, email, role, status, permissions_json, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [initialUser.id, client.clientId, initialUser.name, initialUser.email.toLowerCase().trim(), initialUser.role, initialUser.status, JSON.stringify(initialUser.permissions ?? []), initialUser.passwordHash]
+        );
+      } catch (err: any) {
+        // Se o usuário já existe, apenas atualizar
+        if (err.code !== "ER_DUP_ENTRY") throw err;
+      } finally {
+        connection.release();
+      }
+      
       await recordMegaDeskMetric(client.clientId, "client_created", 1, { platform: "MegaAdmin" });
       return { ok: true, client: sanitizeClient(client), integrationToken: token };
     }),
@@ -505,6 +523,21 @@ export const appRouter = router({
       client.users.push(user);
       audit("MegaAdmin", `Usuário criado: ${input.email}`, client.clientId);
       await persistSyncState();
+      
+      // Sincronizar usuário imediatamente para a tabela megadeskDomainClientUsers
+      const connection = await getPool().getConnection();
+      try {
+        await connection.execute(
+          "INSERT INTO megadesk_domain_client_users (user_id, client_id, name, email, role, status, permissions_json, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [user.id, client.clientId, user.name, user.email.toLowerCase().trim(), user.role, user.status, JSON.stringify(user.permissions ?? []), user.passwordHash]
+        );
+      } catch (err: any) {
+        // Se o usuário já existe, apenas atualizar
+        if (err.code !== "ER_DUP_ENTRY") throw err;
+      } finally {
+        connection.release();
+      }
+      
       return { ok: true, user };
     }),
     updateClientUser: adminProcedure.input(z.object({ clientId: z.string(), userId: z.string(), role: z.enum(["admin", "manager", "agent", "viewer"]).optional(), status: z.enum(["active", "blocked"]).optional() })).mutation(async ({ input }) => {

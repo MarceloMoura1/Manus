@@ -119,3 +119,10 @@
 - [x] Verificar se usuários estão sendo sincronizados (bug: status era sempre "blocked")
 - [x] Corrigir fluxo de login no MegaDesk (usuários agora respeitam statusType)
 - [x] Testar login completo (cadastro → login) - VALIDADO NO NAVEGADOR: cliente Ativo criado com sucesso, usuário com status active
+
+## Fase 19: BUG CRÍTICO - Senha Não Sincroniza Entre MegaAdmin e MegaDesk
+- [x] Investigar como a senha é armazenada no MegaAdmin (problema: usuários não eram criados com passwordHash na tabela megadeskDomainClientUsers)
+- [x] Verificar como o MegaDesk valida a senha no login (procura por passwordHash na tabela megadeskDomainClientUsers)
+- [x] Diagnosticar se há problema na sincronização de dados (usuários criados em memória mas não sincronizados com banco)
+- [x] Implementar correção de sincronização de senha (adicionar passwordHash ao tipo MegaClient e sincronizar ao criar usuário)
+- [x] Testar login com senha configurada (VALIDADO COMPLETO: login com senha padrão 123456, redefinir senha para SenhaNovaTest123, sincronizacao 100% funcional)
