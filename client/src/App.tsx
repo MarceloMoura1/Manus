@@ -6,6 +6,7 @@ import Home from "./pages/Home";
 import AdminPanel from "./pages/AdminPanel";
 import { AIAssistant } from "./components/AIAssistant";
 import { trpc } from "./lib/trpc";
+import { ThemeProvider } from "./contexts/ThemeContext";
 
 function isAdminRoute() {
   const pathname = window.location.pathname.toLowerCase();
@@ -34,9 +35,10 @@ export default function App() {
   const platform = isAdminRoute() ? "megaadmin" : "megadesk";
 
   return (
-    <trpc.Provider client={trpcClient} queryClient={queryClient}>
-      <QueryClientProvider client={queryClient}>
-        {isAdminRoute() ? <AdminPanel /> : <Home />}
+    <ThemeProvider>
+      <trpc.Provider client={trpcClient} queryClient={queryClient}>
+        <QueryClientProvider client={queryClient}>
+          {isAdminRoute() ? <AdminPanel /> : <Home />}
         <AIAssistant
           isOpen={isAssistantOpen}
           onClose={() => setIsAssistantOpen(false)}
@@ -53,5 +55,6 @@ export default function App() {
         )}
       </QueryClientProvider>
     </trpc.Provider>
+    </ThemeProvider>
   );
 }
