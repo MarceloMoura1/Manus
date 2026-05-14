@@ -484,20 +484,20 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
         </div>
 
         {users.length === 0 ? (
-          <div className="rounded-xl border border-white/10 bg-white/[.02] p-6 text-center">
-            <p className="text-sm text-slate-400">Nenhum usuário cadastrado. Adicione usuários na aba "Usuários" para configurar permissões.</p>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center">
+            <p className="text-sm text-slate-600">Nenhum usuário cadastrado. Adicione usuários na aba "Usuários" para configurar permissões.</p>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {users.map((user: any) => (
-              <div key={user.id} className="rounded-lg border border-white/10 bg-black p-4 flex items-center justify-between hover:border-orange-500 transition">
+              <div key={user.id} className="rounded-lg border border-slate-200 bg-white p-4 flex items-center justify-between hover:border-blue-500 hover:shadow-sm transition">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-white truncate">{user.name}</p>
-                  <p className="text-xs text-slate-400 truncate">{user.email}</p>
+                  <p className="text-sm font-semibold text-slate-900 truncate">{user.name}</p>
+                  <p className="text-xs text-slate-500 truncate">{user.email}</p>
                 </div>
                 <button
                   onClick={() => setExpandedUser(expandedUser === user.id ? "" : user.id)}
-                  className="ml-3 p-2 rounded-lg hover:border-orange-500 transition text-slate-400 hover:text-orange-500 flex-shrink-0"
+                  className="ml-3 p-2 rounded-lg hover:bg-blue-50 transition text-slate-600 hover:text-blue-600 flex-shrink-0"
                   title="Configurar permissões"
                 >
                   <Settings className="h-4 w-4" />
@@ -509,26 +509,26 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
 
         {/* Painel de Edição de Permissões */}
         {expandedUser && users.find((u: any) => u.id === expandedUser) && (
-          <div className="mt-6 rounded-xl border border-emerald-400/30 bg-emerald-400/5 p-4">
+          <div className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-4">
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-white">Permissões de {users.find((u: any) => u.id === expandedUser)?.name}</p>
-                <p className="text-xs text-slate-400 mt-1">Selecione os módulos que este usuário pode acessar.</p>
+                <p className="text-sm font-semibold text-slate-900">Permissões de {users.find((u: any) => u.id === expandedUser)?.name}</p>
+                <p className="text-xs text-slate-600 mt-1">Selecione os módulos que este usuário pode acessar.</p>
               </div>
               <button
                 onClick={() => setExpandedUser("")}
-                className="p-1 rounded hover:border-orange-500 transition"
+                className="p-1 rounded hover:bg-blue-100 transition"
               >
-                <X className="h-4 w-4 text-slate-400" />
+                <X className="h-4 w-4 text-slate-600" />
               </button>
             </div>
-            <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               {ALL_MODULES.map((mod) => {
                 const user = users.find((u: any) => u.id === expandedUser);
                 const userPermissions = user?.permissions ?? [];
                 const hasPermission = userPermissions.includes(mod);
                 return (
-                  <label key={mod} className="flex items-center gap-3 p-3 rounded-lg hover:bg-white/[.05] cursor-pointer transition">
+                  <label key={mod} className="flex items-center gap-3 p-3 rounded-lg bg-white hover:bg-blue-50 cursor-pointer transition border border-slate-200 hover:border-blue-300">
                     <input
                       type="checkbox"
                       checked={hasPermission}
@@ -536,9 +536,9 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
                         // TODO: Implementar atualização de permissões por usuário
                         toast.info("Permissões por usuário em desenvolvimento");
                       }}
-                      className="rounded border-white/20 bg-slate-800 text-emerald-400 focus:ring-emerald-400/50"
+                      className="rounded border-slate-300 bg-white text-blue-600 focus:ring-blue-500/50"
                     />
-                    <span className="text-sm text-slate-300">{MODULE_LABELS[mod] ?? mod}</span>
+                    <span className="text-sm text-slate-700">{MODULE_LABELS[mod] ?? mod}</span>
                   </label>
                 );
               })}

@@ -91,3 +91,9 @@
 - [x] Investigar persistência de clientes após cadastro (causa: DELETE FROM megadesk_domain_clients)
 - [x] Corrigir desaparecimento de clientes (solução: usar UPSERT em vez de DELETE/INSERT)
 - [x] Implementar persistência em banco de dados (convertido para INSERT ... ON DUPLICATE KEY UPDATE)
+
+
+## Fase 15: Correções Finais de UX
+- [x] Corrigir erro de alteração de senha do usuário (INSERT com conexão direta ao banco)
+- [x] Ajustar paleta de cores para padrão com o site (azul/slate em vez de preto/laranja)
+- [x] Melhorar layout da seção de permissões do usuário (cards brancos, borda azul)

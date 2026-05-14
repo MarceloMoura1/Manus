@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure } from "./_core/trpc";
 import { COOKIE_NAME } from "@shared/const";
-import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb } from "./db";
+import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool } from "./db";
 import bcrypt from "bcryptjs";
 import { adminCredentials, megadeskDomainClientUsers } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
@@ -448,16 +448,16 @@ export const appRouter = router({
       if (existing.length > 0) {
         await getDb().update(megadeskDomainClientUsers).set({ passwordHash }).where(eq(megadeskDomainClientUsers.userId, user.id));
       } else {
-        await getDb().insert(megadeskDomainClientUsers).values({
-          userId: user.id,
-          clientId: client.clientId,
-          name: user.name,
-          email: user.email.toLowerCase().trim(),
-          role: user.role,
-          status: user.status,
-          permissionsJson: JSON.stringify(user.permissions ?? []),
-          passwordHash,
-        });
+        // Usar conexão direta ao banco para evitar conflitos de campo
+        const connection = await getPool().getConnection();
+        try {
+          await connection.execute(
+            "INSERT INTO megadesk_domain_client_users (user_id, client_id, name, email, role, status, permissions_json, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [user.id, client.clientId, user.name, user.email.toLowerCase().trim(), user.role, user.status, JSON.stringify(user.permissions ?? []), passwordHash]
+          );
+        } finally {
+          connection.release();
+        }
       }
       audit("MegaAdmin", `Senha redefinida para usuário: ${user.email}`, client.clientId);
       await persistSyncState();
