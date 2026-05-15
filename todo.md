@@ -558,3 +558,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [ ] Testar fluxo de conversas
 - [ ] Testar exportação de relatórios
 - [ ] Testar integração entre módulos
+
+
+## Fase 58: Melhorar Layout do Formulário de Novo Chamado
+- [x] Melhorar fundo e borda do modal
+- [x] Adicionar cores e estilos profissionais
+- [x] Melhorar visibilidade dos campos
+- [x] Adicionar sombras e efeitos visuais
+- [x] Testar no navegador

@@ -1150,89 +1150,105 @@ export function TicketsPage() {
 
       {/* Modal de Novo Chamado */}
       <Dialog open={showNewChamadoModal} onOpenChange={setShowNewChamadoModal}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Novo Chamado</DialogTitle>
+        <DialogContent className="max-w-md bg-white dark:bg-slate-800 border-2 border-blue-200 dark:border-blue-900 shadow-xl rounded-lg">
+          <DialogHeader className="bg-gradient-to-r from-blue-500 to-blue-600 -m-6 mb-4 p-6 rounded-t-lg">
+            <DialogTitle className="text-white text-lg font-bold flex items-center gap-2">
+              <Plus className="w-5 h-5" />
+              Novo Chamado
+            </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <div className="space-y-4 px-2">
             <div>
-              <label className="text-sm font-medium text-slate-700 block mb-1">Nome do Cliente</label>
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 block mb-2">Nome do Cliente</label>
               <Input
                 placeholder="Ex: Joao Silva"
                 value={newChamadoForm.customerName}
                 onChange={e => setNewChamadoForm({...newChamadoForm, customerName: e.target.value})}
-                className={validationErrors.find(e => e.field === 'customerName') ? 'border-red-500' : ''}
+                className={`bg-slate-50 dark:bg-slate-700 border-2 transition-colors ${
+                  validationErrors.find(e => e.field === 'customerName')
+                    ? 'border-red-500 dark:border-red-500'
+                    : 'border-slate-200 dark:border-slate-600 focus:border-blue-500'
+                }`}
               />
               {validationErrors.find(e => e.field === 'customerName') && (
-                <p className="text-xs text-red-500 mt-1">{validationErrors.find(e => e.field === 'customerName')?.message}</p>
+                <p className="text-xs text-red-500 dark:text-red-400 mt-1 font-medium">{validationErrors.find(e => e.field === 'customerName')?.message}</p>
               )}
             </div>
 
             <div>
-              <label className="text-sm font-medium text-slate-700 block mb-1">Empresa</label>
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 block mb-2">Empresa</label>
               <Input
                 placeholder="Ex: Empresa XYZ"
                 value={newChamadoForm.company}
                 onChange={e => setNewChamadoForm({...newChamadoForm, company: e.target.value})}
-                className={validationErrors.find(e => e.field === 'company') ? 'border-red-500' : ''}
+                className={`bg-slate-50 dark:bg-slate-700 border-2 transition-colors ${
+                  validationErrors.find(e => e.field === 'company')
+                    ? 'border-red-500 dark:border-red-500'
+                    : 'border-slate-200 dark:border-slate-600 focus:border-blue-500'
+                }`}
               />
               {validationErrors.find(e => e.field === 'company') && (
-                <p className="text-xs text-red-500 mt-1">{validationErrors.find(e => e.field === 'company')?.message}</p>
+                <p className="text-xs text-red-500 dark:text-red-400 mt-1 font-medium">{validationErrors.find(e => e.field === 'company')?.message}</p>
               )}
             </div>
 
             <div>
-              <label className="text-sm font-medium text-slate-700 block mb-1">Titulo</label>
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 block mb-2">Título</label>
               <Input
                 placeholder="Ex: Problema com login"
                 value={newChamadoForm.title}
                 onChange={e => setNewChamadoForm({...newChamadoForm, title: e.target.value})}
-                className={validationErrors.find(e => e.field === 'title') ? 'border-red-500' : ''}
+                className={`bg-slate-50 dark:bg-slate-700 border-2 transition-colors ${
+                  validationErrors.find(e => e.field === 'title')
+                    ? 'border-red-500 dark:border-red-500'
+                    : 'border-slate-200 dark:border-slate-600 focus:border-blue-500'
+                }`}
               />
               {validationErrors.find(e => e.field === 'title') && (
-                <p className="text-xs text-red-500 mt-1">{validationErrors.find(e => e.field === 'title')?.message}</p>
+                <p className="text-xs text-red-500 dark:text-red-400 mt-1 font-medium">{validationErrors.find(e => e.field === 'title')?.message}</p>
               )}
             </div>
 
             <div>
-              <label className="text-sm font-medium text-slate-700 block mb-1">Observacoes</label>
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 block mb-2">Observações</label>
               <Input
                 placeholder="Detalhes adicionais..."
                 value={newChamadoForm.observations}
                 onChange={e => setNewChamadoForm({...newChamadoForm, observations: e.target.value})}
+                className="bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-blue-500 transition-colors"
               />
             </div>
 
             <div>
-              <label className="text-sm font-medium text-slate-700 block mb-1">Prioridade</label>
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 block mb-2">Prioridade</label>
               <Select value={newChamadoForm.priority} onValueChange={priority => setNewChamadoForm({...newChamadoForm, priority})}>
-                <SelectTrigger>
+                <SelectTrigger className="bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-blue-500 transition-colors">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="baixa">Baixa</SelectItem>
-                  <SelectItem value="media">Media</SelectItem>
-                  <SelectItem value="alta">Alta</SelectItem>
-                  <SelectItem value="critica">Critica</SelectItem>
+                <SelectContent className="bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-600">
+                  <SelectItem value="baixa">🟢 Baixa</SelectItem>
+                  <SelectItem value="media">🟡 Média</SelectItem>
+                  <SelectItem value="alta">🔴 Alta</SelectItem>
+                  <SelectItem value="critica">🔴 Crítica</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="flex gap-2 pt-4">
+            <div className="flex gap-3 pt-6 border-t border-slate-200 dark:border-slate-700 mt-6">
               <Button
                 onClick={handleCreateChamado}
                 disabled={createChamadoMutation.isPending}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold shadow-md hover:shadow-lg transition-all"
               >
-                Criar Chamado
+                {createChamadoMutation.isPending ? '⏳ Criando...' : '✅ Criar Chamado'}
               </Button>
               <Button
                 onClick={() => setShowNewChamadoModal(false)}
                 variant="outline"
-                className="flex-1"
+                className="flex-1 border-2 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 font-semibold transition-colors"
               >
-                Cancelar
+                ✕ Cancelar
               </Button>
             </div>
           </div>
