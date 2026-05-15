@@ -16,7 +16,7 @@ import {
   megadeskDomainChamadoActivities,
   megadeskDomainChamadoSequence,
 } from '../drizzle/schema';
-import { eq, and, desc, ne, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 
 export type ChamadoWithActivities = {
@@ -353,17 +353,18 @@ export async function listChamados(
 
     console.log(`[LOG] Listando ${chamados.length} chamados para cliente ${clientId}, status: ${status || 'todos'}`);
 
-    // Para cada chamado, buscar atividades
-    const result: ChamadoWithActivities[] = [];
-    for (const c of chamados) {
-      let activities: any[] = [];
+    // Otimização: Buscar TODAS as atividades em uma única query (evitar N+1)
+    const chamadoIds = chamados.map((c: any) => c.chamadoId);
+    let allActivities: any[] = [];
+    
+    if (chamadoIds.length > 0) {
       try {
-        activities = await db
+        allActivities = await db
           .select()
           .from(megadeskDomainChamadoActivities)
           .where(
             and(
-              eq(megadeskDomainChamadoActivities.chamadoId, c.chamadoId),
+              inArray(megadeskDomainChamadoActivities.chamadoId, chamadoIds),
               eq(megadeskDomainChamadoActivities.clientId, clientId)
             )
           )
@@ -371,31 +372,41 @@ export async function listChamados(
       } catch (error: any) {
         if (error.code === 'ER_NO_SUCH_TABLE' || error.message?.includes('doesn\'t exist')) {
           console.warn(`[WARN] Tabela megadesk_domain_chamado_activities nao existe, continuando sem atividades`);
-          activities = [];
+          allActivities = [];
         } else {
           throw error;
         }
       }
-
-      result.push({
-        id: c.chamadoId,
-        number: c.chamadoNumber,
-        customerName: c.customerName,
-        company: c.company,
-        title: c.title,
-        observations: c.observations,
-        status: c.status,
-        priority: c.priority,
-        assignedTo: c.assignedTo,
-        createdAt: c.createdAt,
-        activities: activities.map(a => ({
-          id: a.activityId,
-          date: a.createdAt,
-          description: a.description,
-          attendant: a.attendant,
-        })),
-      });
     }
+
+    // Agrupar atividades por chamado_id
+    const activitiesByChamado: Record<string, any[]> = {};
+    allActivities.forEach(a => {
+      if (!activitiesByChamado[a.chamadoId]) {
+        activitiesByChamado[a.chamadoId] = [];
+      }
+      activitiesByChamado[a.chamadoId].push(a);
+    });
+
+    // Mapear chamados com suas atividades
+    const result: ChamadoWithActivities[] = chamados.map((c: any) => ({
+      id: c.chamadoId,
+      number: c.chamadoNumber,
+      customerName: c.customerName,
+      company: c.company,
+      title: c.title,
+      observations: c.observations,
+      status: c.status,
+      priority: c.priority,
+      assignedTo: c.assignedTo,
+      createdAt: c.createdAt,
+      activities: (activitiesByChamado[c.chamadoId] || []).map(a => ({
+        id: a.activityId,
+        date: a.createdAt,
+        description: a.description,
+        attendant: a.attendant,
+      })),
+    }));
 
     return result;
   });
