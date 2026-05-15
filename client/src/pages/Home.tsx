@@ -388,8 +388,8 @@ function ConversationsPage() {
               <div className="flex flex-col h-full">
                 <div className="border-b border-slate-200 pb-4 mb-4">
                   <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-lg font-bold text-slate-900">{selectedConv.name}</h3>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-lg font-bold text-slate-900">{selectedConv.name}</h3>
                       <button
                         onClick={() => {
                           setEditName(selectedConv.name);
@@ -401,13 +401,13 @@ function ConversationsPage() {
                       >
                         <Cog className="w-4 h-4 text-slate-500 hover:text-slate-700" />
                       </button>
-                      <button
-                        onClick={() => setCloseConfirmOpen(true)}
-                        className="px-3 py-1 text-sm bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-colors font-medium"
-                      >
-                        Encerrar Conversa
-                      </button>
                     </div>
+                    <button
+                      onClick={() => setCloseConfirmOpen(true)}
+                      className="px-3 py-1 text-sm bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-colors font-medium"
+                    >
+                      Encerrar Conversa
+                    </button>
                   </div>
                   <p className="text-sm text-slate-600">{selectedConv.phone} • {selectedConv.company}</p>
                 </div>
