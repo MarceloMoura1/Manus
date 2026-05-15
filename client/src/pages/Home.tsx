@@ -592,24 +592,22 @@ function ConversationsPage() {
                 Não
               </button>
               <button
-                onClick={async () => {
+                onClick={() => {
                   if (selectedConversation) {
-                    try {
-                      await closeConversationMutation.mutateAsync({
-                        conversationId: selectedConversation,
-                      });
-                      
-                      const updatedConversations = conversations.map(c =>
-                        c.id === selectedConversation ? { ...c, status: 'closed' } : c
-                      );
-                      setConversations(updatedConversations);
-                      setSelectedConversation(null);
-                      setSelectedFilter('closed');
-                      setCloseConfirmOpen(false);
-                      showToast('Conversa encerrada com sucesso', 'success');
-                    } catch (error) {
-                      console.error('Erro ao encerrar conversa:', error);
-                    }
+                    // Atualizar UI instantaneamente
+                    const updatedConversations = conversations.map(c =>
+                      c.id === selectedConversation ? { ...c, status: 'closed' } : c
+                    );
+                    setConversations(updatedConversations);
+                    setSelectedConversation(null);
+                    setSelectedFilter('closed');
+                    setCloseConfirmOpen(false);
+                    showToast('Conversa encerrada com sucesso', 'success');
+                    
+                    // Enviar para backend em background (sem bloquear UI)
+                    closeConversationMutation.mutate({
+                      conversationId: selectedConversation,
+                    });
                   }
                 }}
                 className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
