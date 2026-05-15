@@ -438,8 +438,13 @@ function Shell() {
           )}
         </div>
 
+        {/* Faixa de luz roxo minimalista */}
+        {sidebarOpen && (
+          <div className="h-1 bg-gradient-to-r from-purple-600/0 via-purple-500 to-purple-600/0 mx-4 my-3"></div>
+        )}
+
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto p-3 space-y-1 pt-6">
+        <nav className="flex-1 overflow-y-auto p-3 space-y-1 pt-8">
           {mainNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = active === item.id;
