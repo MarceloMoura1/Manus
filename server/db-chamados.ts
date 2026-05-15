@@ -4,10 +4,10 @@
 
 import { getDb } from './db';
 const db = getDb();
-import { 
-  megadeskDomainChamados, 
+import {
+  megadeskDomainTickets,
   megadeskDomainChamadoActivities,
-  megadeskDomainChamadoSequence 
+  megadeskDomainChamadoSequence,
 } from '../drizzle/schema';
 import { eq, and, desc, ne } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
@@ -77,18 +77,17 @@ export async function createChamado(
   const chamadoNumber = await getNextChamadoNumber(clientId);
   const chamadoId = uuidv4();
 
-  const chamado = await db.insert(megadeskDomainChamados).values({
-    chamadoId,
+  await db.insert(megadeskDomainTickets).values({
+    ticketId: chamadoId,
     clientId,
     chamadoNumber,
-    customerId,
-    customerName,
+    customer: customerName,
     company,
-    title,
-    observations,
+    problem: title,
+    category: 'Geral',
+    description: observations,
     status: 'open',
-    priority: priority as any,
-    assignedTo,
+    createdLabel: new Date().toISOString(),
     createdAt: new Date(),
   });
 
@@ -100,7 +99,7 @@ export async function createChamado(
     title,
     observations,
     status: 'open',
-    priority,
+    priority: priority || 'media',
     assignedTo,
     createdAt: new Date(),
     activities: [],
@@ -116,11 +115,11 @@ export async function getChamadoWithActivities(
 ): Promise<ChamadoWithActivities | null> {
   const chamado = await db
     .select()
-    .from(megadeskDomainChamados)
+    .from(megadeskDomainTickets)
     .where(
       and(
-        eq(megadeskDomainChamados.chamadoId, chamadoId),
-        eq(megadeskDomainChamados.clientId, clientId)
+        eq(megadeskDomainTickets.ticketId, chamadoId),
+        eq(megadeskDomainTickets.clientId, clientId)
       )
     )
     .limit(1);
@@ -143,15 +142,15 @@ export async function getChamadoWithActivities(
   const c = chamado[0];
 
   return {
-    id: c.chamadoId,
+    id: c.ticketId,
     number: c.chamadoNumber,
-    customerName: c.customerName,
+    customerName: c.customer,
     company: c.company,
-    title: c.title,
-    observations: c.observations,
+    title: c.problem,
+    observations: c.description,
     status: c.status,
-    priority: c.priority,
-    assignedTo: c.assignedTo || undefined,
+    priority: 'media',
+    assignedTo: undefined,
     createdAt: c.createdAt,
     activities: activities.map(a => ({
       id: a.activityId,
@@ -173,20 +172,20 @@ export async function listChamados(
 ): Promise<ChamadoWithActivities[]> {
   let query = db
     .select()
-    .from(megadeskDomainChamados)
-    .where(eq(megadeskDomainChamados.clientId, clientId));
+    .from(megadeskDomainTickets)
+    .where(eq(megadeskDomainTickets.clientId, clientId));
 
   if (status && status !== 'total') {
-    query = query.where(eq(megadeskDomainChamados.status, status));
+    query = query.where(eq(megadeskDomainTickets.status, status));
   } else if (status === 'total') {
     // Excluir fechados
     query = db
       .select()
-      .from(megadeskDomainChamados)
+      .from(megadeskDomainTickets)
       .where(
         and(
-          eq(megadeskDomainChamados.clientId, clientId),
-          ne(megadeskDomainChamados.status, 'closed')
+          eq(megadeskDomainTickets.clientId, clientId),
+          ne(megadeskDomainTickets.status, 'closed')
         )
       );
   }
@@ -201,22 +200,22 @@ export async function listChamados(
       .from(megadeskDomainChamadoActivities)
       .where(
         and(
-          eq(megadeskDomainChamadoActivities.chamadoId, c.chamadoId),
+          eq(megadeskDomainChamadoActivities.chamadoId, c.ticketId),
           eq(megadeskDomainChamadoActivities.clientId, clientId)
         )
       )
       .orderBy(desc(megadeskDomainChamadoActivities.createdAt));
 
     result.push({
-      id: c.chamadoId,
+      id: c.ticketId,
       number: c.chamadoNumber,
-      customerName: c.customerName,
+      customerName: c.customer,
       company: c.company,
-      title: c.title,
-      observations: c.observations,
+      title: c.problem,
+      observations: c.description,
       status: c.status,
-      priority: c.priority,
-      assignedTo: c.assignedTo || undefined,
+      priority: 'media',
+      assignedTo: undefined,
       createdAt: c.createdAt,
       activities: activities.map(a => ({
         id: a.activityId,
@@ -244,13 +243,21 @@ export async function updateChamado(
     assignedTo?: string;
   }
 ): Promise<void> {
+  const updateData: any = {};
+  
+  if (updates.title) updateData.problem = updates.title;
+  if (updates.observations) updateData.description = updates.observations;
+  if (updates.status) updateData.status = updates.status;
+  if (updates.priority) updateData.priority = updates.priority;
+  if (updates.assignedTo) updateData.assignedTo = updates.assignedTo;
+
   await db
-    .update(megadeskDomainChamados)
-    .set(updates as any)
+    .update(megadeskDomainTickets)
+    .set(updateData)
     .where(
       and(
-        eq(megadeskDomainChamados.chamadoId, chamadoId),
-        eq(megadeskDomainChamados.clientId, clientId)
+        eq(megadeskDomainTickets.ticketId, chamadoId),
+        eq(megadeskDomainTickets.clientId, clientId)
       )
     );
 }
@@ -283,16 +290,27 @@ export async function editActivity(
   activityId: string,
   chamadoId: string,
   clientId: string,
-  newDescription: string
+  description: string
 ): Promise<void> {
-  await db
-    .update(megadeskDomainChamadoActivities)
-    .set({ description: newDescription })
+  // Verificar se atividade existe e pertence ao cliente
+  const activity = await db
+    .select()
+    .from(megadeskDomainChamadoActivities)
     .where(
       and(
         eq(megadeskDomainChamadoActivities.activityId, activityId),
-        eq(megadeskDomainChamadoActivities.chamadoId, chamadoId),
         eq(megadeskDomainChamadoActivities.clientId, clientId)
       )
-    );
+    )
+    .limit(1);
+
+  if (activity.length === 0) {
+    throw new Error('Atividade não encontrada');
+  }
+
+  // Atualizar descrição
+  await db
+    .update(megadeskDomainChamadoActivities)
+    .set({ description })
+    .where(eq(megadeskDomainChamadoActivities.activityId, activityId));
 }

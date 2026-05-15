@@ -323,3 +323,98 @@
 - [x] Implementar salto para página específica
 - [x] Testar paginação com diferentes tamanhos de página
 - [x] Otimizar performance com paginação (10 registros por página)
+
+
+## Fase 42: Teste Manual de 5 Chamados Reais
+
+### Instruções para Testar:
+
+1. **Acessar o Dashboard:**
+   - Clique em "Acessar Dashboard" na página inicial
+   - Faça login com sua conta Manus
+
+2. **Navegar para Chamados:**
+   - No sidebar, clique no ícone de "Chamados" (📋)
+   - Você verá a página de chamados com tabela tipo Excel
+
+3. **Criar 5 Chamados:**
+   - Clique no botão "+ Novo Chamado" (se disponível) ou use a interface
+   - Preencha os dados:
+
+   **Chamado 1 - CRÍTICO:**
+   - Nome: João Silva
+   - Empresa: Empresa XYZ Ltda
+   - Título: Sistema de login não funciona
+   - Observações: Erro 500 ao tentar fazer login. Afeta todos os usuários.
+   - Prioridade: Crítica
+
+   **Chamado 2 - ALTA:**
+   - Nome: Maria Santos
+   - Empresa: Consultoria ABC
+   - Título: Relatório de vendas com erro
+   - Observações: Números não batem com o período anterior
+   - Prioridade: Alta
+
+   **Chamado 3 - MÉDIA:**
+   - Nome: Pedro Costa
+   - Empresa: Indústria DEF
+   - Título: Integração com sistema ERP
+   - Observações: Precisa conectar com SAP para sincronizar dados
+   - Prioridade: Média
+
+   **Chamado 4 - ALTA:**
+   - Nome: João Silva
+   - Empresa: Empresa XYZ Ltda
+   - Título: Backup automático não está funcionando
+   - Observações: Última execução foi há 5 dias
+   - Prioridade: Alta
+
+   **Chamado 5 - MÉDIA:**
+   - Nome: Ana Oliveira
+   - Empresa: Startup Tech
+   - Título: Configurar autenticação de dois fatores
+   - Observações: Implementar 2FA para aumentar segurança
+   - Prioridade: Média
+
+4. **Validar Persistência:**
+   - Após criar cada chamado, verifique se aparece na tabela
+   - Clique em um chamado para abrir o modal de detalhes
+   - Verifique se os dados estão corretos
+   - Adicione uma atividade ao chamado
+   - Feche e reabra o modal - a atividade deve estar lá
+
+5. **Testar Filtros:**
+   - Clique nos cards de status (Total, Abertos, etc)
+   - Verifique se a tabela filtra corretamente
+
+6. **Testar Paginação:**
+   - Com 5 chamados, a paginação deve funcionar
+   - Clique em "Próxima" e "Anterior"
+
+### Checklist de Validação:
+
+- [ ] 5 chamados criados com sucesso
+- [ ] Todos os chamados aparecem na tabela
+- [ ] Dados persistem após recarregar página
+- [ ] Modal de detalhes abre corretamente
+- [ ] Atividades são salvas e exibidas
+- [ ] Filtros funcionam corretamente
+- [ ] Paginação funciona
+- [ ] Status badges mostram cores corretas
+- [ ] Números de chamado incrementam (#0001, #0002, etc)
+- [ ] Datas de criação estão corretas
+
+### Diagnóstico do Banco:
+
+Após criar os chamados, execute:
+```bash
+# Verificar tabela de chamados
+SELECT COUNT(*) FROM megadesk_domain_tickets WHERE clientId = 'seu-cliente-id';
+
+# Ver últimos chamados
+SELECT chamadoNumber, problem, status, createdAt FROM megadesk_domain_tickets 
+ORDER BY createdAt DESC LIMIT 5;
+
+# Verificar atividades
+SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
+```
