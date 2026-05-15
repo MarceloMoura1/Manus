@@ -1,4 +1,4 @@
-import { boolean, index, int, mysqlEnum, mysqlTable, serial, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { uniqueIndex, boolean, index, int, mysqlEnum, mysqlTable, serial, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: serial("id").primaryKey(),
@@ -123,7 +123,7 @@ export const megadeskDomainTickets = mysqlTable("megadesk_domain_tickets", {
 export const megadeskDomainChamados = mysqlTable("megadesk_domain_chamados", {
   chamadoId: varchar("chamado_id", { length: 80 }).primaryKey(),
   clientId: varchar("client_id", { length: 80 }).notNull(),
-  chamadoNumber: int("chamado_number").notNull().unique(),
+  chamadoNumber: int("chamado_number").notNull(),
   customerId: varchar("customer_id", { length: 80 }).notNull(),
   customerName: varchar("customer_name", { length: 180 }).notNull(),
   company: varchar("company", { length: 255 }).notNull(),
@@ -140,6 +140,7 @@ export const megadeskDomainChamados = mysqlTable("megadesk_domain_chamados", {
   chamadoNumberIdx: index("idx_mdc_chamado_number").on(table.chamadoNumber),
   priorityIdx: index("idx_mdc_priority").on(table.priority),
   assignedToIdx: index("idx_mdc_assigned_to").on(table.assignedTo),
+  clientChamadoNumberUniqueIdx: uniqueIndex("idx_mdc_client_chamado_number_unique").on(table.clientId, table.chamadoNumber),
 }));
 
 export const megadeskDomainChamadoSequence = mysqlTable("megadesk_domain_chamado_sequence", {

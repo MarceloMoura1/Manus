@@ -171,13 +171,13 @@ export async function listChamados(
   limit: number = 10,
   offset: number = 0
 ): Promise<ChamadoWithActivities[]> {
-  let query = db
+  let query: any = db
     .select()
     .from(megadeskDomainChamados)
     .where(eq(megadeskDomainChamados.clientId, clientId));
 
   if (status && status !== 'total') {
-    query = query.where(eq(megadeskDomainChamados.status, status));
+    query = query.where(eq(megadeskDomainChamados.status, status as 'open' | 'in_progress' | 'waiting' | 'closed'));
   } else if (status === 'total') {
     // Excluir fechados
     query = db
@@ -186,7 +186,7 @@ export async function listChamados(
       .where(
         and(
           eq(megadeskDomainChamados.clientId, clientId),
-          ne(megadeskDomainChamados.status, 'closed')
+          ne(megadeskDomainChamados.status, 'closed' as 'open' | 'in_progress' | 'waiting' | 'closed')
         )
       );
   }

@@ -58,7 +58,13 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [currentPage, setCurrentPage] = React.useState(1);
   const [showNewChamadoModal, setShowNewChamadoModal] = React.useState(false);
-  const [newChamadoForm, setNewChamadoForm] = React.useState({
+  const [newChamadoForm, setNewChamadoForm] = React.useState<{
+    customerName: string;
+    company: string;
+    title: string;
+    observations: string;
+    priority: 'media' | 'baixa' | 'alta' | 'critica';
+  }>({
     customerName: '',
     company: '',
     title: '',
@@ -325,7 +331,6 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
     try {
       const result = await updateChamadoMutation.mutateAsync({
         chamadoId: selectedChamado.id,
-        clientId: user?.id || '',
         assignedTo: attendant,
       });
 

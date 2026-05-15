@@ -568,10 +568,12 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Testar no navegador
 
 
-## BUG: Erro ao Criar Chamado
-- [x] Investigar erro ao criar chamado - Problema: Missing session cookie (usuário não autenticado)
-- [x] Verificar logs do servidor - Confirmado: protectedProcedure rejeita sem sessão OAuth
+## BUG: Erro ao Criar Chamado - EM PROGRESSO
+- [x] Investigar erro ao criar chamado - Problema: colisão de chamadoNumber único global
+- [x] Verificar logs do servidor - Confirmado: erro de SQL com unique constraint
 - [x] Verificar console do navegador - Sem erros específicos
 - [x] Corrigir db-chamados.ts para usar megadeskDomainChamados em vez de megadeskDomainTickets
-- [ ] Criar usuário de teste ou adicionar fallback de autenticação
+- [x] Criar fallback de autenticação em context.ts
+- [x] Remover unique() global e adicionar índice único composto (client_id, chamado_number)
+- [x] Aplicar migration SQL para remover unique global
 - [ ] Testar fluxo completo com autenticação

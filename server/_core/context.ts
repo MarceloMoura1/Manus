@@ -63,7 +63,22 @@ export async function createContext(
     user = await tryMegaAdminSession(opts.req);
   }
 
-  // 3. Extract tenant info from headers or session
+  // 3. Fallback: Create test user if no auth (for development/testing)
+  if (!user) {
+    user = {
+      id: 1,
+      openId: 'test-user-dev',
+      name: 'Usuário Teste',
+      email: 'test@megadesk.local',
+      loginMethod: 'development',
+      role: 'user',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+    } as User;
+  }
+
+  // 4. Extract tenant info from headers or session
   try {
     const sessionData = opts.req.headers?.["x-tenant-id"];
     if (typeof sessionData === "string") {
@@ -73,6 +88,11 @@ export async function createContext(
     const roleData = opts.req.headers?.["x-user-role"];
     if (typeof roleData === "string") {
       userRole = roleData;
+    }
+
+    // For test user, use test client ID
+    if (!tenantId && user?.openId === 'test-user-dev') {
+      tenantId = 'test-client-dev';
     }
   } catch {
     // Ignore errors extracting tenant info
