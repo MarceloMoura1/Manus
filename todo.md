@@ -233,3 +233,14 @@
 - [x] Reduzir tamanho do botão para ícone
 - [x] Usar ícone apropriado (X ou Close)
 - [x] Testar layout responsivo
+
+## Fase 32: Reorganizar Abas de Conversas e Ajustar UI
+- [x] Reorganizar lógica de filtro para separar conversas por status correto
+  - [x] "Abertas" = status "open" (atendimento ativo)
+  - [x] "Bot" = status "bot" (mensagens receptivas)
+  - [x] "Fechadas" = status "closed" (atendimentos finalizados)
+- [x] Mover engrenagem de edição para inline com nome do cliente
+- [x] Remover botão X de encerrar do header
+- [x] Adicionar botão "Encerrar Conversa" com texto no painel de chat
+- [x] Implementar dialog de confirmação (Sim/Não) para encerrar
+- [x] Testar fluxo completo de criação, edição e encerramento

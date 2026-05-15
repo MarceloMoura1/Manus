@@ -225,6 +225,7 @@ function ConversationsPage() {
   const [editModalOpen, setEditModalOpen] = React.useState(false);
   const [editName, setEditName] = React.useState('');
   const [editCompany, setEditCompany] = React.useState('');
+  const [closeConfirmOpen, setCloseConfirmOpen] = React.useState(false);
 
   // Mutations tRPC
   const closeConversationMutation = trpc.megadesk.closeConversation.useMutation();
@@ -340,7 +341,13 @@ function ConversationsPage() {
         {/* Conversations List */}
         <div className="flex-1 overflow-y-auto space-y-2">
           {mockConversations && mockConversations.length > 0 ? (
-            mockConversations.map((conv) => (
+            mockConversations
+              .filter((conv) => {
+                const matchesFilter = conv.status === selectedFilter;
+                const matchesSearch = searchTerm === '' || conv.phone.includes(searchTerm) || conv.name.toLowerCase().includes(searchTerm.toLowerCase());
+                return matchesFilter && matchesSearch;
+              })
+              .map((conv) => (
               <button
                 key={conv.id}
                 onClick={() => setSelectedConversation(conv.id)}
@@ -380,45 +387,19 @@ function ConversationsPage() {
             return selectedConv ? (
               <div className="flex flex-col h-full">
                 <div className="border-b border-slate-200 pb-4 mb-4">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2 mb-2">
                     <h3 className="text-lg font-bold text-slate-900">{selectedConv.name}</h3>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => {
-                          setEditName(selectedConv.name);
-                          setEditCompany(selectedConv.company);
-                          setEditModalOpen(true);
-                        }}
-                        className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-                        title="Editar cliente"
-                      >
-                        <Cog className="w-5 h-5 text-slate-600 hover:text-slate-900" />
-                      </button>
-                      <button
-                        onClick={async () => {
-                          if (selectedConversation) {
-                            try {
-                              await closeConversationMutation.mutateAsync({
-                                conversationId: selectedConversation,
-                              });
-                              
-                              const updatedConversations = conversations.map(c =>
-                                c.id === selectedConversation ? { ...c, status: 'closed' } : c
-                              );
-                              setConversations(updatedConversations);
-                              setSelectedConversation(null);
-                              setSelectedFilter('closed');
-                            } catch (error) {
-                              console.error('Erro ao encerrar conversa:', error);
-                            }
-                          }
-                        }}
-                        className="p-2 hover:bg-red-100 rounded-lg transition-colors"
-                        title="Encerrar conversa"
-                      >
-                        <X className="w-5 h-5 text-red-600 hover:text-red-900" />
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => {
+                        setEditName(selectedConv.name);
+                        setEditCompany(selectedConv.company);
+                        setEditModalOpen(true);
+                      }}
+                      className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
+                      title="Editar cliente"
+                    >
+                      <Cog className="w-4 h-4 text-slate-500 hover:text-slate-700" />
+                    </button>
                   </div>
                   <p className="text-sm text-slate-600">{selectedConv.phone} • {selectedConv.company}</p>
                 </div>
@@ -428,8 +409,8 @@ function ConversationsPage() {
                     <p className="text-xs text-slate-500 mt-2">{selectedConv.timestamp}</p>
                   </div>
                 </div>
-                <div className="border-t border-slate-200 pt-4">
-                  <div className="flex gap-2 mb-4">
+                <div className="border-t border-slate-200 pt-4 space-y-3">
+                  <div className="flex gap-2">
                     <input
                       type="text"
                       placeholder="Digite sua mensagem..."
@@ -439,6 +420,12 @@ function ConversationsPage() {
                       <Send className="w-4 h-4" />
                     </button>
                   </div>
+                  <button
+                    onClick={() => setCloseConfirmOpen(true)}
+                    className="w-full px-4 py-2 bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-colors font-medium text-sm"
+                  >
+                    Encerrar Conversa
+                  </button>
                 </div>
               </div>
             ) : (
@@ -528,6 +515,48 @@ function ConversationsPage() {
           </div>
         ) : null;
       })()}
+
+      {/* Dialog de Confirmação para Encerrar Conversa */}
+      {closeConfirmOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-80">
+            <h2 className="text-lg font-bold text-slate-900 mb-4">Encerrar Conversa?</h2>
+            <p className="text-slate-600 mb-6">Tem certeza que deseja encerrar esta conversa? Ela será movida para a aba "Fechadas".</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCloseConfirmOpen(false)}
+                className="flex-1 px-4 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-colors font-medium"
+              >
+                Não
+              </button>
+              <button
+                onClick={async () => {
+                  if (selectedConversation) {
+                    try {
+                      await closeConversationMutation.mutateAsync({
+                        conversationId: selectedConversation,
+                      });
+                      
+                      const updatedConversations = conversations.map(c =>
+                        c.id === selectedConversation ? { ...c, status: 'closed' } : c
+                      );
+                      setConversations(updatedConversations);
+                      setSelectedConversation(null);
+                      setSelectedFilter('closed');
+                      setCloseConfirmOpen(false);
+                    } catch (error) {
+                      console.error('Erro ao encerrar conversa:', error);
+                    }
+                  }
+                }}
+                className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
+              >
+                Sim
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
