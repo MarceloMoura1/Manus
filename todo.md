@@ -566,3 +566,12 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Melhorar visibilidade dos campos
 - [x] Adicionar sombras e efeitos visuais
 - [x] Testar no navegador
+
+
+## BUG: Erro ao Criar Chamado
+- [x] Investigar erro ao criar chamado - Problema: Missing session cookie (usuário não autenticado)
+- [x] Verificar logs do servidor - Confirmado: protectedProcedure rejeita sem sessão OAuth
+- [x] Verificar console do navegador - Sem erros específicos
+- [x] Corrigir db-chamados.ts para usar megadeskDomainChamados em vez de megadeskDomainTickets
+- [ ] Criar usuário de teste ou adicionar fallback de autenticação
+- [ ] Testar fluxo completo com autenticação

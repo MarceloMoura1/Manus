@@ -5,7 +5,7 @@
 import { getDb } from './db';
 const db = getDb();
 import {
-  megadeskDomainTickets,
+  megadeskDomainChamados,
   megadeskDomainChamadoActivities,
   megadeskDomainChamadoSequence,
 } from '../drizzle/schema';
@@ -77,17 +77,18 @@ export async function createChamado(
   const chamadoNumber = await getNextChamadoNumber(clientId);
   const chamadoId = uuidv4();
 
-  await db.insert(megadeskDomainTickets).values({
-    ticketId: chamadoId,
+  await db.insert(megadeskDomainChamados).values({
+    chamadoId,
     clientId,
     chamadoNumber,
-    customer: customerName,
+    customerId: customerId || 'cust-' + Date.now(),
+    customerName,
     company,
-    problem: title,
-    category: 'Geral',
-    description: observations,
+    title,
+    observations,
     status: 'open',
-    createdLabel: new Date().toISOString(),
+    priority: (priority || 'media') as 'baixa' | 'media' | 'alta' | 'critica',
+    assignedTo,
     createdAt: new Date(),
   });
 
@@ -115,11 +116,11 @@ export async function getChamadoWithActivities(
 ): Promise<ChamadoWithActivities | null> {
   const chamado = await db
     .select()
-    .from(megadeskDomainTickets)
+    .from(megadeskDomainChamados)
     .where(
       and(
-        eq(megadeskDomainTickets.ticketId, chamadoId),
-        eq(megadeskDomainTickets.clientId, clientId)
+        eq(megadeskDomainChamados.chamadoId, chamadoId),
+        eq(megadeskDomainChamados.clientId, clientId)
       )
     )
     .limit(1);
@@ -142,15 +143,15 @@ export async function getChamadoWithActivities(
   const c = chamado[0];
 
   return {
-    id: c.ticketId,
+    id: c.chamadoId,
     number: c.chamadoNumber,
-    customerName: c.customer,
+    customerName: c.customerName,
     company: c.company,
-    title: c.problem,
-    observations: c.description,
+    title: c.title,
+    observations: c.observations,
     status: c.status,
-    priority: 'media',
-    assignedTo: undefined,
+    priority: c.priority,
+    assignedTo: c.assignedTo,
     createdAt: c.createdAt,
     activities: activities.map(a => ({
       id: a.activityId,
@@ -172,20 +173,20 @@ export async function listChamados(
 ): Promise<ChamadoWithActivities[]> {
   let query = db
     .select()
-    .from(megadeskDomainTickets)
-    .where(eq(megadeskDomainTickets.clientId, clientId));
+    .from(megadeskDomainChamados)
+    .where(eq(megadeskDomainChamados.clientId, clientId));
 
   if (status && status !== 'total') {
-    query = query.where(eq(megadeskDomainTickets.status, status));
+    query = query.where(eq(megadeskDomainChamados.status, status));
   } else if (status === 'total') {
     // Excluir fechados
     query = db
       .select()
-      .from(megadeskDomainTickets)
+      .from(megadeskDomainChamados)
       .where(
         and(
-          eq(megadeskDomainTickets.clientId, clientId),
-          ne(megadeskDomainTickets.status, 'closed')
+          eq(megadeskDomainChamados.clientId, clientId),
+          ne(megadeskDomainChamados.status, 'closed')
         )
       );
   }
@@ -200,22 +201,22 @@ export async function listChamados(
       .from(megadeskDomainChamadoActivities)
       .where(
         and(
-          eq(megadeskDomainChamadoActivities.chamadoId, c.ticketId),
+          eq(megadeskDomainChamadoActivities.chamadoId, c.chamadoId),
           eq(megadeskDomainChamadoActivities.clientId, clientId)
         )
       )
       .orderBy(desc(megadeskDomainChamadoActivities.createdAt));
 
     result.push({
-      id: c.ticketId,
+      id: c.chamadoId,
       number: c.chamadoNumber,
-      customerName: c.customer,
+      customerName: c.customerName,
       company: c.company,
-      title: c.problem,
-      observations: c.description,
+      title: c.title,
+      observations: c.observations,
       status: c.status,
-      priority: 'media',
-      assignedTo: undefined,
+      priority: c.priority,
+      assignedTo: c.assignedTo,
       createdAt: c.createdAt,
       activities: activities.map(a => ({
         id: a.activityId,
@@ -245,19 +246,19 @@ export async function updateChamado(
 ): Promise<void> {
   const updateData: any = {};
   
-  if (updates.title) updateData.problem = updates.title;
-  if (updates.observations) updateData.description = updates.observations;
+  if (updates.title) updateData.title = updates.title;
+  if (updates.observations) updateData.observations = updates.observations;
   if (updates.status) updateData.status = updates.status;
   if (updates.priority) updateData.priority = updates.priority;
   if (updates.assignedTo) updateData.assignedTo = updates.assignedTo;
 
   await db
-    .update(megadeskDomainTickets)
+    .update(megadeskDomainChamados)
     .set(updateData)
     .where(
       and(
-        eq(megadeskDomainTickets.ticketId, chamadoId),
-        eq(megadeskDomainTickets.clientId, clientId)
+        eq(megadeskDomainChamados.chamadoId, chamadoId),
+        eq(megadeskDomainChamados.clientId, clientId)
       )
     );
 }
