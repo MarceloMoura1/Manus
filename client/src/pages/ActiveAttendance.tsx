@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MessageCircle } from 'lucide-react';
+import { Phone, User, Building2, CheckCircle, AlertCircle, Loader2, ArrowRight, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 import { useLocation } from 'wouter';
@@ -17,6 +17,7 @@ export function ActiveAttendancePage() {
   const [ticketObservation, setTicketObservation] = useState('');
   const [searchAttempted, setSearchAttempted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // tRPC mutations
   const searchCustomerMutation = trpc.megadesk.searchCustomer.useMutation();
@@ -30,6 +31,7 @@ export function ActiveAttendancePage() {
     }
 
     setError(null);
+    setSuccessMessage(null);
     setIsSearching(true);
     setSearchAttempted(true);
 
@@ -44,6 +46,7 @@ export function ActiveAttendancePage() {
           exists: true,
         });
         setShowNewCustomerForm(false);
+        setSuccessMessage('Cliente encontrado com sucesso!');
       } else {
         setCustomerData(null);
         setShowNewCustomerForm(true);
@@ -64,6 +67,7 @@ export function ActiveAttendancePage() {
     }
 
     setError(null);
+    setSuccessMessage(null);
     setIsSearching(true);
 
     try {
@@ -80,6 +84,7 @@ export function ActiveAttendancePage() {
         exists: false,
       });
       setShowNewCustomerForm(false);
+      setSuccessMessage('Cliente criado com sucesso!');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao criar cliente');
     } finally {
@@ -91,6 +96,7 @@ export function ActiveAttendancePage() {
     if (!customerData) return;
 
     setError(null);
+    setSuccessMessage(null);
     setIsSearching(true);
 
     try {
@@ -108,9 +114,9 @@ export function ActiveAttendancePage() {
           company: customerData.company,
           customer: customerData.name,
         });
+        setSuccessMessage('Chamado criado com sucesso!');
       }
-      // Redirecionar para a página de Conversas após sucesso
-      setLocation('/conversas');
+      setTimeout(() => setLocation('/conversas'), 800);
       return;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao processar solicitação');
@@ -119,115 +125,185 @@ export function ActiveAttendancePage() {
     }
   };
 
-  return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-6">Atendimento Ativo</h2>
+  const handleReset = () => {
+    setCustomerData(null);
+    setPhoneNumber('');
+    setNewCustomerName('');
+    setNewCustomerCompany('');
+    setOpenTicket(null);
+    setTicketTitle('');
+    setTicketObservation('');
+    setSearchAttempted(false);
+    setError(null);
+    setSuccessMessage(null);
+  };
 
-        {/* Mensagem de Erro */}
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-50 p-4 md:p-8">
+      <div className="max-w-2xl mx-auto">
+        {/* Header */}
+        <div className="mb-8 animate-fade-in">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
+              <Phone className="w-6 h-6 text-white" />
+            </div>
+            <h1 className="text-3xl font-bold text-slate-900">Atendimento Ativo</h1>
+          </div>
+          <p className="text-slate-600 ml-15">Inicie um atendimento com um cliente</p>
+        </div>
+
+        {/* Success Message */}
+        {successMessage && (
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl flex items-center gap-3 animate-slide-down">
+            <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+            <p className="text-sm text-green-700 font-medium">{successMessage}</p>
+          </div>
+        )}
+
+        {/* Error Message */}
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-sm text-red-700">{error}</p>
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 animate-slide-down">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+            <p className="text-sm text-red-700 font-medium">{error}</p>
           </div>
         )}
 
         {/* Etapa 1: Buscar Cliente */}
         {!customerData && (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Número do Cliente
-              </label>
-              <div className="flex gap-3">
-                <input
-                  type="text"
-                  placeholder="Digite o número de telefone..."
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSearchCustomer()}
-                  className="flex-1 px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <button
-                  onClick={handleSearchCustomer}
-                  disabled={isSearching}
-                  className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-slate-400 transition-colors font-medium"
-                >
-                  {isSearching ? 'Buscando...' : 'Buscar'}
-                </button>
+          <div className="space-y-6 animate-fade-in">
+            {/* Search Card */}
+            <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100 hover:shadow-xl transition-shadow duration-300">
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+                    <Phone className="w-4 h-4 text-blue-600" />
+                    Número do Cliente
+                  </label>
+                  <div className="flex gap-3">
+                    <input
+                      type="text"
+                      placeholder="Digite o número de telefone..."
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleSearchCustomer()}
+                      className="flex-1 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400"
+                    />
+                    <button
+                      onClick={handleSearchCustomer}
+                      disabled={isSearching}
+                      className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center gap-2 group"
+                    >
+                      {isSearching ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Buscando...
+                        </>
+                      ) : (
+                        <>
+                          Buscar
+                          <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Novo Cliente Form */}
+                {showNewCustomerForm && searchAttempted && (
+                  <div className="mt-6 p-6 bg-gradient-to-br from-blue-50 to-slate-50 rounded-xl border border-blue-200 animate-slide-down">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Plus className="w-5 h-5 text-blue-600" />
+                      <p className="text-sm font-semibold text-slate-900">Cliente não encontrado. Crie um novo:</p>
+                    </div>
+                    <div className="space-y-3">
+                      <input
+                        type="text"
+                        placeholder="Nome do cliente"
+                        value={newCustomerName}
+                        onChange={(e) => setNewCustomerName(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Nome da empresa"
+                        value={newCustomerCompany}
+                        onChange={(e) => setNewCustomerCompany(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400"
+                      />
+                      <button
+                        onClick={handleCreateCustomer}
+                        disabled={isSearching}
+                        className="w-full px-4 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg hover:from-green-600 hover:to-green-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2"
+                      >
+                        {isSearching ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Criando...
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="w-4 h-4" />
+                            Criar Cliente
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-
-            {/* Formulário de Novo Cliente */}
-            {showNewCustomerForm && searchAttempted && (
-              <div className="mt-6 p-6 bg-slate-50 rounded-lg border border-slate-200">
-                <p className="text-sm text-slate-600 mb-4">Cliente não encontrado. Crie um novo:</p>
-                <div className="space-y-3">
-                  <input
-                    type="text"
-                    placeholder="Nome do cliente"
-                    value={newCustomerName}
-                    onChange={(e) => setNewCustomerName(e.target.value)}
-                    className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Nome da empresa"
-                    value={newCustomerCompany}
-                    onChange={(e) => setNewCustomerCompany(e.target.value)}
-                    className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <button
-                    onClick={handleCreateCustomer}
-                    disabled={isSearching}
-                    className="w-full px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:bg-slate-400 transition-colors font-medium"
-                  >
-                    {isSearching ? 'Criando...' : 'Criar Cliente'}
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         )}
 
         {/* Etapa 2: Dados do Cliente e Opção de Chamado */}
         {customerData && (
-          <div className="space-y-6">
-            {/* Informações do Cliente */}
-            <div className="p-6 bg-blue-50 rounded-lg border border-blue-200">
-              <h3 className="text-lg font-semibold text-slate-900 mb-4">Dados do Cliente</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-slate-600">Nome</p>
-                  <p className="text-lg font-medium text-slate-900">{customerData.name}</p>
+          <div className="space-y-6 animate-fade-in">
+            {/* Customer Info Card */}
+            <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-lg p-8 text-white">
+              <h3 className="text-lg font-semibold mb-6 flex items-center gap-2">
+                <User className="w-5 h-5" />
+                Dados do Cliente
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
+                  <p className="text-sm text-blue-100 mb-1">Nome</p>
+                  <p className="text-xl font-bold">{customerData.name}</p>
                 </div>
-                <div>
-                  <p className="text-sm text-slate-600">Empresa</p>
-                  <p className="text-lg font-medium text-slate-900">{customerData.company}</p>
+                <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
+                  <p className="text-sm text-blue-100 mb-1">Empresa</p>
+                  <p className="text-xl font-bold flex items-center gap-2">
+                    <Building2 className="w-5 h-5" />
+                    {customerData.company}
+                  </p>
                 </div>
-                <div>
-                  <p className="text-sm text-slate-600">Telefone</p>
-                  <p className="text-lg font-medium text-slate-900">{customerData.phone}</p>
+                <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
+                  <p className="text-sm text-blue-100 mb-1">Telefone</p>
+                  <p className="text-xl font-bold flex items-center gap-2">
+                    <Phone className="w-5 h-5" />
+                    {customerData.phone}
+                  </p>
                 </div>
-                <div>
-                  <p className="text-sm text-slate-600">Status</p>
-                  <p className="text-lg font-medium text-green-600">
+                <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
+                  <p className="text-sm text-blue-100 mb-1">Status</p>
+                  <p className="text-xl font-bold flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5" />
                     {customerData.exists ? 'Existente' : 'Novo'}
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Opção de Abrir Chamado */}
-            <div className="p-6 bg-slate-50 rounded-lg border border-slate-200">
-              <h3 className="text-lg font-semibold text-slate-900 mb-4">Abrir Chamado?</h3>
+            {/* Ticket Option Card */}
+            <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
+              <h3 className="text-lg font-semibold text-slate-900 mb-6">Deseja abrir um chamado?</h3>
               <div className="flex gap-3 mb-6">
                 <button
                   onClick={() => setOpenTicket(false)}
                   className={cn(
-                    'flex-1 px-4 py-2 rounded-lg font-medium transition-colors',
+                    'flex-1 px-4 py-3 rounded-xl font-semibold transition-all duration-200 transform hover:scale-105',
                     openTicket === false
-                      ? 'bg-slate-900 text-white'
-                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                      ? 'bg-gradient-to-r from-slate-700 to-slate-800 text-white shadow-lg'
+                      : 'bg-slate-100 border-2 border-slate-200 text-slate-700 hover:border-slate-300'
                   )}
                 >
                   Não
@@ -235,66 +311,97 @@ export function ActiveAttendancePage() {
                 <button
                   onClick={() => setOpenTicket(true)}
                   className={cn(
-                    'flex-1 px-4 py-2 rounded-lg font-medium transition-colors',
+                    'flex-1 px-4 py-3 rounded-xl font-semibold transition-all duration-200 transform hover:scale-105',
                     openTicket === true
-                      ? 'bg-blue-500 text-white'
-                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                      ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg'
+                      : 'bg-slate-100 border-2 border-slate-200 text-slate-700 hover:border-slate-300'
                   )}
                 >
                   Sim
                 </button>
               </div>
 
-              {/* Formulário de Chamado */}
+              {/* Ticket Form */}
               {openTicket === true && (
-                <div className="space-y-3 p-4 bg-white rounded-lg border border-blue-200">
+                <div className="space-y-4 p-6 bg-gradient-to-br from-blue-50 to-slate-50 rounded-xl border-2 border-blue-200 animate-slide-down">
                   <input
                     type="text"
                     placeholder="Título do chamado"
                     value={ticketTitle}
                     onChange={(e) => setTicketTitle(e.target.value)}
-                    className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400"
                   />
                   <textarea
                     placeholder="Observações (opcional)"
                     value={ticketObservation}
                     onChange={(e) => setTicketObservation(e.target.value)}
-                    className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px]"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 min-h-[100px] resize-none"
                   />
                 </div>
               )}
             </div>
 
-            {/* Botão de Ação */}
+            {/* Action Buttons */}
             <div className="flex gap-3">
               <button
-                onClick={() => {
-                  setCustomerData(null);
-                  setPhoneNumber('');
-                  setNewCustomerName('');
-                  setNewCustomerCompany('');
-                  setOpenTicket(null);
-                  setTicketTitle('');
-                  setTicketObservation('');
-                  setSearchAttempted(false);
-                  setError(null);
-                }}
-                className="flex-1 px-6 py-3 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-colors font-medium"
+                onClick={handleReset}
+                className="flex-1 px-6 py-3 bg-slate-100 text-slate-900 rounded-xl hover:bg-slate-200 transition-all duration-200 font-semibold border border-slate-200 hover:shadow-md"
               >
                 Voltar
               </button>
               <button
                 onClick={handleStartConversation}
                 disabled={isSearching}
-                className="flex-1 px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:bg-slate-400 transition-colors font-medium flex items-center justify-center gap-2"
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg hover:from-green-600 hover:to-green-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2 group transform hover:scale-105 disabled:scale-100"
               >
-                <MessageCircle className="w-5 h-5" />
-                {isSearching ? 'Processando...' : 'Abrir Conversa'}
+                {isSearching ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Processando...
+                  </>
+                ) : (
+                  <>
+                    <Phone className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                    Abrir Conversa
+                    <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                  </>
+                )}
               </button>
             </div>
           </div>
         )}
       </div>
+
+      {/* CSS Animations */}
+      <style>{`
+        @keyframes fade-in {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+
+        @keyframes slide-down {
+          from {
+            opacity: 0;
+            transform: translateY(-10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        .animate-fade-in {
+          animation: fade-in 0.3s ease-out;
+        }
+
+        .animate-slide-down {
+          animation: slide-down 0.3s ease-out;
+        }
+      `}</style>
     </div>
   );
 }
