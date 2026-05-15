@@ -457,22 +457,14 @@ function Shell() {
                 className={cn(
                   "flex items-center py-3 rounded-lg transition-all duration-300 relative px-2",
                   isActive
-                    ? "text-white shadow-2xl shadow-purple-500/60"
+                    ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-lg"
                     : "text-slate-300 hover:text-white hover:bg-slate-800/50"
                 )}
                 title={item.label}
               >
-                {isActive && (
-                  <div className={cn(
-                    "absolute rounded-lg transition-all duration-300 pointer-events-none",
-                    sidebarOpen
-                      ? "inset-0 bg-gradient-to-r from-purple-600/10 to-magenta-600/10 shadow-lg shadow-purple-500/40"
-                      : "inset-0 bg-purple-600/20 shadow-lg shadow-purple-500/50"
-                  )} />
-                )}
-                <Icon className={cn("w-5 h-5 flex-shrink-0 relative z-10", isActive && "text-purple-300")} />
+                <Icon className="w-5 h-5 flex-shrink-0" />
                 {sidebarOpen && (
-                  <span className={cn("text-base font-medium transition-opacity duration-300 overflow-hidden whitespace-nowrap ml-3 relative z-10", isActive && "text-white")}>
+                  <span className="text-base font-medium transition-opacity duration-300 overflow-hidden whitespace-nowrap ml-3">
                     {item.label}
                   </span>
                 )}
@@ -501,22 +493,14 @@ function Shell() {
                 className={cn(
                   "flex items-center py-3 rounded-lg transition-all duration-300 relative px-2",
                   isActive
-                    ? "text-white shadow-2xl shadow-purple-500/60"
+                    ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-lg"
                     : "text-slate-300 hover:text-white hover:bg-slate-800/50"
                 )}
                 title={item.label}
               >
-                {isActive && (
-                  <div className={cn(
-                    "absolute rounded-lg transition-all duration-300 pointer-events-none",
-                    sidebarOpen
-                      ? "inset-0 bg-gradient-to-r from-purple-600/10 to-magenta-600/10 shadow-lg shadow-purple-500/40"
-                      : "inset-0 bg-purple-600/20 shadow-lg shadow-purple-500/50"
-                  )} />
-                )}
-                <Icon className={cn("w-5 h-5 flex-shrink-0 relative z-10", isActive && "text-purple-300")} />
+                <Icon className="w-5 h-5 flex-shrink-0" />
                 {sidebarOpen && (
-                  <span className={cn("text-base font-medium transition-opacity duration-300 overflow-hidden whitespace-nowrap ml-3 relative z-10", isActive && "text-white")}>
+                  <span className="text-base font-medium transition-opacity duration-300 overflow-hidden whitespace-nowrap ml-3">
                     {item.label}
                   </span>
                 )}
