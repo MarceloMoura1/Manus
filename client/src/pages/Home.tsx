@@ -15,6 +15,7 @@ import {
   Lock,
   Mail,
   MapPin,
+  Menu,
   MessageCircle,
   MessageSquare,
   PackageSearch,
@@ -408,37 +409,34 @@ function Shell() {
         "fixed lg:relative z-40 h-full bg-slate-950 text-white flex flex-col transition-all duration-300",
         sidebarOpen ? "w-64" : "w-20"
       )}>
-        {/* Header com botao X */}
-        <div className="p-4 flex items-center justify-between border-b border-slate-800">
-          {sidebarOpen && (
-            <div className="flex items-center gap-2">
-              <Zap className="w-6 h-6 text-blue-400" />
-              <span className="font-bold text-xl">MegaDesk</span>
-            </div>
-          )}
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="text-slate-400 hover:text-white transition-colors"
-            title="Fechar menu"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Botao de Expandir quando recolhido */}
-        {!sidebarOpen && (
-          <div className="p-3 flex justify-center">
+        {/* Header com Logo */}
+        <div className="p-4 flex items-center justify-between border-b border-slate-800 transition-all duration-300">
+          {sidebarOpen ? (
+            <>
+              <div className="flex items-center gap-2 overflow-hidden">
+                <Zap className="w-6 h-6 text-blue-400 flex-shrink-0" />
+                <span className="font-bold text-xl whitespace-nowrap transition-opacity duration-300">
+                  MegaDesk
+                </span>
+              </div>
+              <button
+                onClick={() => setSidebarOpen(false)}
+                className="text-slate-400 hover:text-white transition-colors flex-shrink-0"
+                title="Fechar menu"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </>
+          ) : (
             <button
               onClick={() => setSidebarOpen(true)}
-              className="hamburger-icon text-slate-400 hover:text-white p-2 hover:bg-slate-800/50 rounded-lg"
-              title="Expandir menu"
+              className="w-full flex items-center justify-center text-slate-400 hover:text-white transition-colors py-2"
+              title="Abrir menu"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
+              <Menu className="w-6 h-6" />
             </button>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto p-3 space-y-1 pt-6">
@@ -451,7 +449,8 @@ function Shell() {
                 key={item.id}
                 onClick={() => setActive(item.id)}
                 className={cn(
-                  "w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 relative",
+                  "w-full flex items-center gap-3 py-3 rounded-lg transition-all duration-300 relative",
+                  sidebarOpen ? "justify-start px-4" : "justify-center px-0",
                   isActive
                     ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-lg"
                     : "text-slate-300 hover:text-white hover:bg-slate-800/50"
@@ -459,7 +458,11 @@ function Shell() {
                 title={item.label}
               >
                 <Icon className="w-5 h-5 flex-shrink-0" />
-                {sidebarOpen && <span className="text-base font-medium">{item.label}</span>}
+                {sidebarOpen && (
+                  <span className="text-base font-medium transition-opacity duration-300 overflow-hidden whitespace-nowrap">
+                    {item.label}
+                  </span>
+                )}
                 {/* Indicador de notificacoes */}
                 {item.id === "notifications" && (
                   <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
@@ -483,7 +486,8 @@ function Shell() {
                 key={item.id}
                 onClick={() => setActive(item.id)}
                 className={cn(
-                  "w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 relative",
+                  "w-full flex items-center gap-3 py-3 rounded-lg transition-all duration-300 relative",
+                  sidebarOpen ? "justify-start px-4" : "justify-center px-0",
                   isActive
                     ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-lg"
                     : "text-slate-300 hover:text-white hover:bg-slate-800/50"
@@ -491,7 +495,11 @@ function Shell() {
                 title={item.label}
               >
                 <Icon className="w-5 h-5 flex-shrink-0" />
-                {sidebarOpen && <span className="text-base font-medium">{item.label}</span>}
+                {sidebarOpen && (
+                  <span className="text-base font-medium transition-opacity duration-300 overflow-hidden whitespace-nowrap">
+                    {item.label}
+                  </span>
+                )}
                 {/* Indicador de notificacoes */}
                 {item.id === "notifications" && (
                   <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
@@ -508,7 +516,10 @@ function Shell() {
         <div className="p-3 space-y-1">
           <button
             onClick={toggleTheme}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all duration-200"
+            className={cn(
+              "w-full flex items-center gap-3 py-3 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all duration-200",
+              sidebarOpen ? "justify-start px-4" : "justify-center px-0"
+            )}
             title={`Mudar para modo ${theme === 'light' ? 'escuro' : 'claro'}`}
           >
             {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
@@ -521,7 +532,10 @@ function Shell() {
               localStorage.removeItem(MEGADESK_SESSION_KEY);
               setSession(null);
             }}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-slate-300 hover:text-red-400 hover:bg-red-900/20 transition-all duration-200"
+            className={cn(
+              "w-full flex items-center gap-3 py-3 rounded-lg text-slate-300 hover:text-red-400 hover:bg-red-900/20 transition-all duration-200",
+              sidebarOpen ? "justify-start px-4" : "justify-center px-0"
+            )}
             title="Sair"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
