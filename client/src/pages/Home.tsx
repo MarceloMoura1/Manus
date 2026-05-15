@@ -229,16 +229,16 @@ function ConversationsPage() {
     <div className="flex h-full gap-6">
       {/* Left Panel - Conversations List */}
       <div className="w-1/3 bg-white rounded-2xl shadow-lg border border-slate-100 p-6 flex flex-col">
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-2">
+        <div className="mb-4">
+          <div className="flex items-center gap-2 mb-1">
             <MessageCircle className="w-5 h-5 text-slate-600" />
             <h2 className="text-xl font-bold text-slate-900">Conversas</h2>
           </div>
-          <p className="text-slate-500 text-sm">0 conversas</p>
+          <p className="text-slate-500 text-sm ml-7">0 conversas</p>
         </div>
 
         {/* Search Bar */}
-        <div className="relative mb-6">
+        <div className="relative mb-4">
           <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
           <input
             type="text"
@@ -250,15 +250,15 @@ function ConversationsPage() {
         </div>
 
         {/* Filter Tabs */}
-        <div className="flex gap-2 mb-6 border-b border-slate-200 pb-3">
+        <div className="flex gap-3 mb-6 border-b border-slate-200 pb-3">
           {filters.map(filter => (
             <button
               key={filter.id}
               onClick={() => setSelectedFilter(filter.id)}
               className={cn(
-                'flex items-center gap-2 px-3 py-2 rounded-lg font-medium text-sm transition-all duration-200 whitespace-nowrap',
+                'flex items-center gap-2 px-0 py-2 font-medium text-sm transition-all duration-200 whitespace-nowrap',
                 selectedFilter === filter.id
-                  ? 'text-slate-900 border-b-2 border-slate-900 pb-2 -mb-3'
+                  ? 'text-slate-900'
                   : 'text-slate-600 hover:text-slate-900'
               )}
             >
