@@ -217,3 +217,12 @@
 - [x] Persistir nova conversa criada no localStorage/estado
 - [x] Garantir que conversa criada apareça na lista antes de auto-selecionar
 - [x] Testar fluxo completo: Atendimento Ativo → Criar Conversa → Aparecer em Abertas
+
+## Fase 30: Encerramento de Conversa e Edição de Cliente
+- [x] Criar procedure tRPC para encerrar conversa (mover para status "closed")
+- [x] Criar procedure tRPC para atualizar dados do cliente (nome e empresa)
+- [x] Implementar botão de encerrar conversa na UI
+- [x] Implementar modal de edição de cliente com ícone de engrenagem
+- [x] Integrar mutations no frontend (ConversationsPage)
+- [x] Adicionar testes Vitest para as novas procedures
+- [x] Testar fluxo completo: encerrar conversa e editar cliente

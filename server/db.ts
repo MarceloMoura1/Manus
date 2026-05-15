@@ -447,3 +447,25 @@ export async function readMegaDeskTenantObservability(clientId: string) {
     return { metrics: [], auditLogs: [], botScripts: [] };
   }
 }
+
+export async function updateConversationStatus(conversationId: string, status: "open" | "bot" | "closed") {
+  const now = new Date();
+  await getDb().update(megadeskDomainConversations)
+    .set({ status, updatedAt: now })
+    .where(eq(megadeskDomainConversations.conversationId, conversationId));
+}
+
+export async function updateCustomer(input: {
+  customerId: string;
+  name?: string;
+  company?: string;
+}) {
+  const now = new Date();
+  const updates: any = { updatedAt: now };
+  if (input.name) updates.name = input.name;
+  if (input.company) updates.company = input.company;
+  
+  await getDb().update(megadeskDomainCustomers)
+    .set(updates)
+    .where(eq(megadeskDomainCustomers.customerId, input.customerId));
+}

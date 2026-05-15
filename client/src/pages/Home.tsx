@@ -222,6 +222,13 @@ function ConversationsPage() {
   const [selectedFilter, setSelectedFilter] = React.useState('open');
   const [selectedConversation, setSelectedConversation] = React.useState<string | null>(null);
   const [conversations, setConversations] = React.useState<any[]>([]);
+  const [editModalOpen, setEditModalOpen] = React.useState(false);
+  const [editName, setEditName] = React.useState('');
+  const [editCompany, setEditCompany] = React.useState('');
+
+  // Mutations tRPC
+  const closeConversationMutation = trpc.megadesk.closeConversation.useMutation();
+  const updateCustomerMutation = trpc.megadesk.updateCustomerInfo.useMutation();
 
   // Capturar parâmetros da URL e localStorage ao carregar a página
   React.useEffect(() => {
@@ -373,7 +380,20 @@ function ConversationsPage() {
             return selectedConv ? (
               <div className="flex flex-col h-full">
                 <div className="border-b border-slate-200 pb-4 mb-4">
-                  <h3 className="text-lg font-bold text-slate-900">{selectedConv.name}</h3>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-lg font-bold text-slate-900">{selectedConv.name}</h3>
+                    <button
+                      onClick={() => {
+                        setEditName(selectedConv.name);
+                        setEditCompany(selectedConv.company);
+                        setEditModalOpen(true);
+                      }}
+                      className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                      title="Editar cliente"
+                    >
+                      <Cog className="w-5 h-5 text-slate-600 hover:text-slate-900" />
+                    </button>
+                  </div>
                   <p className="text-sm text-slate-600">{selectedConv.phone} • {selectedConv.company}</p>
                 </div>
                 <div className="flex-1 overflow-y-auto space-y-4 mb-4">
@@ -383,7 +403,7 @@ function ConversationsPage() {
                   </div>
                 </div>
                 <div className="border-t border-slate-200 pt-4">
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 mb-4">
                     <input
                       type="text"
                       placeholder="Digite sua mensagem..."
@@ -393,6 +413,30 @@ function ConversationsPage() {
                       <Send className="w-4 h-4" />
                     </button>
                   </div>
+                  <button
+                    onClick={async () => {
+                      if (selectedConversation) {
+                        try {
+                          await closeConversationMutation.mutateAsync({
+                            conversationId: selectedConversation,
+                          });
+                          
+                          // Atualizar lista local
+                          const updatedConversations = conversations.map(c =>
+                            c.id === selectedConversation ? { ...c, status: 'closed' } : c
+                          );
+                          setConversations(updatedConversations);
+                          setSelectedConversation(null);
+                          setSelectedFilter('closed');
+                        } catch (error) {
+                          console.error('Erro ao encerrar conversa:', error);
+                        }
+                      }
+                    }}
+                    className="w-full px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-medium"
+                  >
+                    Encerrar Conversa
+                  </button>
                 </div>
               </div>
             ) : (
@@ -415,6 +459,73 @@ function ConversationsPage() {
           </div>
         )}
       </div>
+
+      {/* Modal de Edição de Cliente */}
+      {editModalOpen && selectedConversation && mockConversations && (() => {
+        const selectedConv = mockConversations.find((c) => c.id === selectedConversation);
+        return selectedConv ? (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-96">
+              <h2 className="text-xl font-bold text-slate-900 mb-4">Editar Cliente</h2>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Nome do Cliente</label>
+                  <input
+                    type="text"
+                    value={editName || selectedConv.name}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Empresa</label>
+                  <input
+                    type="text"
+                    value={editCompany || selectedConv.company}
+                    onChange={(e) => setEditCompany(e.target.value)}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => setEditModalOpen(false)}
+                  className="flex-1 px-4 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-colors font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={async () => {
+                    if (selectedConversation && (editName || editCompany)) {
+                      try {
+                        await updateCustomerMutation.mutateAsync({
+                          customerId: selectedConversation,
+                          name: editName,
+                          company: editCompany,
+                        });
+                        
+                        // Atualizar lista local
+                        const updatedConversations = conversations.map(c =>
+                          c.id === selectedConversation
+                            ? { ...c, name: editName || c.name, company: editCompany || c.company }
+                            : c
+                        );
+                        setConversations(updatedConversations);
+                        setEditModalOpen(false);
+                      } catch (error) {
+                        console.error('Erro ao atualizar cliente:', error);
+                      }
+                    }
+                  }}
+                  className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
+                >
+                  Salvar
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null;
+      })()}
     </div>
   );
 }

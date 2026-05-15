@@ -890,6 +890,63 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao buscar conversas" });
         }
       }),
+    closeConversation: publicProcedure
+      .input(z.object({ conversationId: z.string() }))
+      .mutation(async ({ input }) => {
+        try {
+          const { updateConversationStatus } = await import("./db");
+          await hydrateSyncState();
+          const client = clients[0];
+          if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
+          
+          await updateConversationStatus(input.conversationId, "closed");
+          
+          const conv = conversations.find(c => c.id === input.conversationId);
+          if (conv) {
+            conv.status = "closed";
+          }
+          
+          audit("MegaDesk", `Conversa encerrada: ${input.conversationId}`, client.clientId);
+          await persistSyncState();
+          return { ok: true };
+        } catch (error) {
+          console.error("Erro ao encerrar conversa:", error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao encerrar conversa" });
+        }
+      }),
+    updateCustomerInfo: publicProcedure
+      .input(z.object({ customerId: z.string(), name: z.string().optional(), company: z.string().optional() }))
+      .mutation(async ({ input }) => {
+        try {
+          const { updateCustomer } = await import("./db");
+          await hydrateSyncState();
+          const client = clients[0];
+          if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
+          
+          if (!input.name && !input.company) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Forneça pelo menos um campo para atualizar" });
+          }
+          
+          await updateCustomer({
+            customerId: input.customerId,
+            name: input.name,
+            company: input.company,
+          });
+          
+          const conversation = conversations.find(c => c.id === input.customerId);
+          if (conversation) {
+            if (input.name) conversation.name = input.name;
+            if (input.company) conversation.company = input.company;
+          }
+          
+          audit("MegaDesk", `Cliente atualizado: ${input.customerId}`, client.clientId);
+          await persistSyncState();
+          return { ok: true, customerId: input.customerId };
+        } catch (error) {
+          console.error("Erro ao atualizar cliente:", error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao atualizar cliente" });
+        }
+      }),
     loginByEmail: publicProcedure
       .input(z.object({ email: z.string().email(), password: z.string().min(1) }))
       .mutation(async ({ input }) => {
