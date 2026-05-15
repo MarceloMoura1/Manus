@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 import { navigateToPlatform } from "@/lib/platformRouting";
 import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -982,8 +983,7 @@ export function TicketsPage() {
                 <tr
                   key={chamado.id}
                   onClick={() => {
-                    setSelectedChamado(chamado);
-                    setShowDetailModal(true);
+                    window.location.href = `/chamado/${chamado.id}`;
                   }}
                   className="border-b border-slate-200 hover:bg-blue-50 cursor-pointer transition-colors"
                 >

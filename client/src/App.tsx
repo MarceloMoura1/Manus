@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { Router } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
 import { Home } from "./pages/Home";
 import AdminPanel from "./pages/AdminPanel";
+import { ChamadoDetail } from "./pages/ChamadoDetail";
 import { AIAssistant } from "./components/AIAssistant";
 import { trpc } from "./lib/trpc";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -38,23 +40,32 @@ export default function App() {
     <ThemeProvider>
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
-          {isAdminRoute() ? <AdminPanel /> : <Home />}
-        <AIAssistant
-          isOpen={isAssistantOpen}
-          onClose={() => setIsAssistantOpen(false)}
-          platform={platform}
-        />
-        {!isAssistantOpen && (
-          <button
-            onClick={() => setIsAssistantOpen(true)}
-            className="fixed bottom-4 right-4 w-14 h-14 bg-blue-500 text-white rounded-full shadow-lg hover:bg-blue-600 transition flex items-center justify-center z-40"
-            title="Abrir assistente IA"
-          >
-            <span className="text-2xl">✨</span>
-          </button>
-        )}
-      </QueryClientProvider>
-    </trpc.Provider>
+          <Router>
+            {isAdminRoute() ? (
+              <AdminPanel />
+            ) : (
+              <>
+                <Home />
+                <ChamadoDetail />
+              </>
+            )}
+          </Router>
+          <AIAssistant
+            isOpen={isAssistantOpen}
+            onClose={() => setIsAssistantOpen(false)}
+            platform={platform}
+          />
+          {!isAssistantOpen && (
+            <button
+              onClick={() => setIsAssistantOpen(true)}
+              className="fixed bottom-4 right-4 w-14 h-14 bg-blue-500 text-white rounded-full shadow-lg hover:bg-blue-600 transition flex items-center justify-center z-40"
+              title="Abrir assistente IA"
+            >
+              <span className="text-2xl">✨</span>
+            </button>
+          )}
+        </QueryClientProvider>
+      </trpc.Provider>
     </ThemeProvider>
   );
 }

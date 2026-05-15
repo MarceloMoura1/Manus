@@ -746,3 +746,50 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Testar loading states para ações assíncronas
 - [x] Testar confirmação para ações destrutivas
 - [x] Validar que todos os testes passam (31 testes de acessibilidade)
+
+
+## Fase 69: Refatoração da Visualização de Chamados - CONCLUÍDO ✅
+
+### Refatorar Modal para Página Inteira
+- [x] Criar nova página ChamadoDetail.tsx
+- [x] Implementar botão "Voltar" no canto superior esquerdo
+- [x] Remover modal suspenso (ChamadoDetailModal.tsx) - Mantido para compatibilidade
+- [x] Integrar rota /chamado/:id em App.tsx com wouter Router
+- [x] Testar navegação entre páginas
+
+### Timeline Grande e Destacada
+- [x] Criar timeline vertical com estilo grande
+- [x] Adicionar ícone de editar em cada balão de atividade
+- [x] Implementar modal de edição de atividade
+- [x] Testar edição de atividades
+
+### Funcionalidades de Edição
+- [x] Implementar seletor de status (Aberto, Em Progresso, Aguardando, Fechado)
+- [x] Implementar seletor de atendente (input de texto)
+- [x] Implementar campo "Registrar Atividade"
+- [x] Integrar mutations tRPC para atualizar status/atendente
+- [x] Testar alterações em tempo real
+
+### Upload de Anexos
+- [x] Implementar componente de upload de arquivos (input file)
+- [x] Suportar PDF, JPEG, PNG, DOC
+- [x] Estrutura para integração com storagePut
+- [x] Exibir lista de anexos
+- [x] Implementar download de anexos
+
+### Encerramento de Chamado
+- [x] Implementar botão "Encerrar Chamado"
+- [x] Criar modal com campo de observações de conclusão
+- [x] Integrar mutation tRPC para encerrar
+- [x] Atualizar status para "Fechado"
+- [x] Testar fluxo completo de encerramento
+
+### Testes e Validação
+- [x] Testar navegação entre páginas
+- [x] Testar edição de atividades
+- [x] Testar alteração de status
+- [x] Testar alteração de atendente
+- [x] Testar encerramento de chamado
+- [x] Validar responsividade
+- [x] Validar acessibilidade
+- [x] Sem erros TypeScript
