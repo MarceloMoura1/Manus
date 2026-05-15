@@ -289,7 +289,7 @@
 - [x] Criar helpers de banco de dados para chamados
 - [x] Implementar isolamento de chamados por cliente autenticado
 - [x] Adicionar filtro "Total" excluindo chamados fechados
-- [ ] Integrar TicketsPage com dados reais do banco
-- [ ] Implementar busca avançada (nome, nº cliente, nº chamado)
-- [ ] Adicionar testes Vitest para procedures tRPC
-- [ ] Testar fluxo completo com persistência real
+- [x] Integrar TicketsPage com dados reais do banco (tabela Excel + modal timeline)
+- [x] Implementar busca avançada (nome, nº cliente, nº chamado)
+- [x] Adicionar testes Vitest para procedures tRPC (22 testes passando)
+- [x] Testar fluxo completo com persistência real

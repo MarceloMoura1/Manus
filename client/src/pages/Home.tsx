@@ -655,474 +655,446 @@ type Ticket = {
   activities: TicketActivity[];
 };
 
-function TicketsPage() {
+export function TicketsPage() {
+  const { user } = useAuth();
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState('total');
-  const [selectedChamado, setSelectedChamado] = React.useState<string | null>(null);
-  const [chamados, setChamados] = React.useState<Ticket[]>([]);
+  const [selectedChamado, setSelectedChamado] = React.useState<Chamado | null>(null);
   const [showDetailModal, setShowDetailModal] = React.useState(false);
-  const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [newActivityText, setNewActivityText] = React.useState('');
   const [editingActivityId, setEditingActivityId] = React.useState<string | null>(null);
   const [editingActivityText, setEditingActivityText] = React.useState('');
-  const [newActivityText, setNewActivityText] = React.useState('');
   const [newStatus, setNewStatus] = React.useState('');
   const [newAttendant, setNewAttendant] = React.useState('');
+  const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  React.useEffect(() => {
-    setChamados([
-      {
-        id: '1',
-        number: 1,
-        customerName: 'João Silva',
-        company: 'Empresa A',
-        title: 'Orçamento de peças de carro',
-        observations: 'Cliente solicitou orçamento',
-        status: 'open',
-        phone: '11999999999',
-        priority: 'media',
-        assignedTo: 'Bot IA',
-        createdAt: new Date('2026-05-01'),
-        activities: [
-          { id: 'a1', date: new Date('2026-05-01'), description: 'Cliente solicitou orçamento de 10 peças.', attendant: 'Bot IA' },
-          { id: 'a2', date: new Date('2026-05-05'), description: 'Cliente gostaria de ver sobre desconto', attendant: 'Atendente' },
-          { id: 'a3', date: new Date('2026-05-10'), description: 'Cliente gostaria de fechar orçamento.', attendant: 'Bot IA' },
-        ],
-      },
-      {
-        id: '2',
-        number: 2,
-        customerName: 'Maria Santos',
-        company: 'Empresa B',
-        title: 'Erro ao enviar mensagem',
-        observations: 'Erro ao enviar mensagem via WhatsApp',
-        status: 'in_progress',
-        phone: '11988888888',
-        priority: 'alta',
-        assignedTo: 'Marcelo Moura',
-        createdAt: new Date('2026-05-02'),
-        activities: [
-          { id: 'b1', date: new Date('2026-05-02'), description: 'Chamado aberto - Cliente reportou erro ao enviar mensagens.', attendant: 'Bot IA' },
-          { id: 'b2', date: new Date('2026-05-03'), description: 'Atendente Marcelo Moura encerrou o chamado.', attendant: 'Marcelo Moura' },
-        ],
-      },
-      {
-        id: '3',
-        number: 3,
-        customerName: 'Pedro Costa',
-        company: 'Empresa C',
-        title: 'Dúvida sobre integração',
-        observations: 'Cliente quer saber como integrar API',
-        status: 'waiting',
-        phone: '11977777777',
-        priority: 'baixa',
-        assignedTo: 'Bot IA',
-        createdAt: new Date('2026-05-03'),
-        activities: [
-          { id: 'c1', date: new Date('2026-05-03'), description: 'Cliente solicitou informações sobre integração de API.', attendant: 'Bot IA' },
-        ],
-      },
-      {
-        id: '4',
-        number: 4,
-        customerName: 'Ana Oliveira',
-        company: 'Empresa A',
-        title: 'Solicitação de relatório',
-        observations: 'Precisa de relatório de conversas',
-        status: 'open',
-        phone: '11966666666',
-        priority: 'media',
-        assignedTo: 'Atendente',
-        createdAt: new Date('2026-05-04'),
-        activities: [
-          { id: 'd1', date: new Date('2026-05-04'), description: 'Cliente solicitou relatório de conversas do mês.', attendant: 'Bot IA' },
-        ],
-      },
-      {
-        id: '5',
-        number: 5,
-        customerName: 'Carlos Mendes',
-        company: 'Empresa D',
-        title: 'Problema resolvido',
-        observations: 'Problema foi solucionado',
-        status: 'closed',
-        phone: '11955555555',
-        priority: 'critica',
-        assignedTo: 'Marcelo Moura',
-        createdAt: new Date('2026-05-05'),
-        activities: [
-          { id: 'e1', date: new Date('2026-05-05'), description: 'Chamado aberto - Problema crítico reportado.', attendant: 'Bot IA' },
-          { id: 'e2', date: new Date('2026-05-06'), description: 'Marcelo Moura iniciou investigação.', attendant: 'Marcelo Moura' },
-          { id: 'e3', date: new Date('2026-05-07'), description: 'Problema identificado e corrigido.', attendant: 'Marcelo Moura' },
-          { id: 'e4', date: new Date('2026-05-08'), description: 'Chamado encerrado com sucesso.', attendant: 'Marcelo Moura' },
-        ],
-      },
-    ]);
-  }, []);
+  // Queries tRPC
+  const chamadosQuery = trpc.chamados.list.useQuery(
+    {
+      clientId: user?.id || '',
+      status: selectedFilter === 'total' ? 'total' : selectedFilter,
+    },
+    { enabled: !!user?.id }
+  );
 
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+  const updateChamadoMutation = trpc.chamados.update.useMutation();
+  const addActivityMutation = trpc.chamados.addActivity.useMutation();
+  const editActivityMutation = trpc.chamados.editActivity.useMutation();
+
+  const showToast = (message: string, type: 'success' | 'error') => {
     setToastMessage({ message, type });
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  const getStatusColor = (status: string) => {
+  const handleAddActivity = async () => {
+    if (!newActivityText.trim() || !selectedChamado) return;
+
+    try {
+      const result = await addActivityMutation.mutateAsync({
+        chamadoId: selectedChamado.id,
+        clientId: user?.id || '',
+        description: newActivityText,
+        attendant: user?.name || 'Atendente',
+      });
+
+      if (result.chamado) {
+        setSelectedChamado(result.chamado);
+        setNewActivityText('');
+        showToast('Atividade registrada com sucesso', 'success');
+      }
+    } catch (error) {
+      showToast('Erro ao registrar atividade', 'error');
+    }
+  };
+
+  const handleEditActivity = async () => {
+    if (!editingActivityText.trim() || !selectedChamado || !editingActivityId) return;
+
+    try {
+      const result = await editActivityMutation.mutateAsync({
+        activityId: editingActivityId,
+        chamadoId: selectedChamado.id,
+        clientId: user?.id || '',
+        description: editingActivityText,
+      });
+
+      if (result.chamado) {
+        setSelectedChamado(result.chamado);
+        setEditingActivityId(null);
+        setEditingActivityText('');
+        showToast('Atividade atualizada com sucesso', 'success');
+      }
+    } catch (error) {
+      showToast('Erro ao atualizar atividade', 'error');
+    }
+  };
+
+  const handleChangeStatus = async (status: string) => {
+    if (!selectedChamado) return;
+
+    try {
+      const result = await updateChamadoMutation.mutateAsync({
+        chamadoId: selectedChamado.id,
+        clientId: user?.id || '',
+        status: status as any,
+      });
+
+      if (result.chamado) {
+        setSelectedChamado(result.chamado);
+        setNewStatus('');
+        showToast('Status atualizado com sucesso', 'success');
+        // Recarregar lista
+        chamadosQuery.refetch();
+      }
+    } catch (error) {
+      showToast('Erro ao atualizar status', 'error');
+    }
+  };
+
+  const handleChangeAttendant = async (attendant: string) => {
+    if (!selectedChamado) return;
+
+    try {
+      const result = await updateChamadoMutation.mutateAsync({
+        chamadoId: selectedChamado.id,
+        clientId: user?.id || '',
+        assignedTo: attendant,
+      });
+
+      if (result.chamado) {
+        setSelectedChamado(result.chamado);
+        setNewAttendant('');
+        showToast('Atendente atualizado com sucesso', 'success');
+        // Recarregar lista
+        chamadosQuery.refetch();
+      }
+    } catch (error) {
+      showToast('Erro ao atualizar atendente', 'error');
+    }
+  };
+
+  const chamados = chamadosQuery.data?.chamados || [];
+
+  // Filtrar por busca
+  const filteredChamados = chamados.filter(c => {
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      c.customerName.toLowerCase().includes(searchLower) ||
+      c.company.toLowerCase().includes(searchLower) ||
+      `#${String(c.number).padStart(4, '0')}`.includes(searchTerm) ||
+      c.title.toLowerCase().includes(searchLower)
+    );
+  });
+
+  // Contar status
+  const statusCounts = {
+    total: chamados.filter(c => c.status !== 'closed').length,
+    open: chamados.filter(c => c.status === 'open').length,
+    in_progress: chamados.filter(c => c.status === 'in_progress').length,
+    waiting: chamados.filter(c => c.status === 'waiting').length,
+    closed: chamados.filter(c => c.status === 'closed').length,
+  };
+
+  const statusCards = [
+    { id: 'total', label: 'Total', value: statusCounts.total, color: 'bg-slate-900', textColor: 'text-white' },
+    { id: 'open', label: 'Abertos', value: statusCounts.open, color: 'bg-blue-50', textColor: 'text-blue-600' },
+    { id: 'in_progress', label: 'Em Progresso', value: statusCounts.in_progress, color: 'bg-yellow-50', textColor: 'text-yellow-600' },
+    { id: 'waiting', label: 'Aguardando', value: statusCounts.waiting, color: 'bg-orange-50', textColor: 'text-orange-600' },
+    { id: 'closed', label: 'Fechados', value: statusCounts.closed, color: 'bg-green-50', textColor: 'text-green-600' },
+  ];
+
+  const getStatusBadgeColor = (status: string) => {
     switch (status) {
-      case 'open': return 'bg-blue-100 text-blue-700';
-      case 'in_progress': return 'bg-yellow-100 text-yellow-700';
-      case 'waiting': return 'bg-orange-100 text-orange-700';
-      case 'closed': return 'bg-green-100 text-green-700';
-      default: return 'bg-slate-100 text-slate-700';
+      case 'open':
+        return 'bg-blue-100 text-blue-700';
+      case 'in_progress':
+        return 'bg-yellow-100 text-yellow-700';
+      case 'waiting':
+        return 'bg-orange-100 text-orange-700';
+      case 'closed':
+        return 'bg-green-100 text-green-700';
+      default:
+        return 'bg-gray-100 text-gray-700';
     }
   };
 
   const getStatusLabel = (status: string) => {
     switch (status) {
-      case 'open': return 'Aberto';
-      case 'in_progress': return 'Em Progresso';
-      case 'waiting': return 'Aguardando';
-      case 'closed': return 'Fechado';
-      default: return status;
+      case 'open':
+        return 'Aberto';
+      case 'in_progress':
+        return 'Em Progresso';
+      case 'waiting':
+        return 'Aguardando';
+      case 'closed':
+        return 'Fechado';
+      default:
+        return status;
     }
   };
 
-  const getFilteredChamados = () => {
-    let filtered = chamados;
-    
-    if (selectedFilter !== 'total') {
-      filtered = filtered.filter(c => c.status === selectedFilter);
-    } else {
-      filtered = filtered.filter(c => c.status !== 'closed');
+  const getPriorityColor = (priority?: string) => {
+    switch (priority) {
+      case 'baixa':
+        return 'text-green-600';
+      case 'media':
+        return 'text-yellow-600';
+      case 'alta':
+        return 'text-orange-600';
+      case 'critica':
+        return 'text-red-600';
+      default:
+        return 'text-gray-600';
     }
-
-    if (searchTerm) {
-      filtered = filtered.filter(c => 
-        c.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.company.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.number.toString().includes(searchTerm) ||
-        `#${String(c.number).padStart(4, '0')}`.includes(searchTerm) ||
-        c.title.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    return filtered;
   };
 
-  const handleAddActivity = (ticketId: string) => {
-    if (!newActivityText.trim()) return;
-    
-    setChamados(chamados.map(c => {
-      if (c.id === ticketId) {
-        return {
-          ...c,
-          activities: [
-            ...c.activities,
-            {
-              id: `activity-${Date.now()}`,
-              date: new Date(),
-              description: newActivityText,
-              attendant: 'Atendente',
-            },
-          ],
-        };
-      }
-      return c;
-    }));
-    setNewActivityText('');
-    showToast('Atividade registrada com sucesso', 'success');
-  };
-
-  const handleEditActivity = (ticketId: string, activityId: string, newText: string) => {
-    setChamados(chamados.map(c => {
-      if (c.id === ticketId) {
-        return {
-          ...c,
-          activities: c.activities.map(a => a.id === activityId ? { ...a, description: newText } : a),
-        };
-      }
-      return c;
-    }));
-    setEditingActivityId(null);
-    showToast('Atividade atualizada com sucesso', 'success');
-  };
-
-  const handleChangeStatus = (ticketId: string, newStatus: string) => {
-    setChamados(chamados.map(c => c.id === ticketId ? { ...c, status: newStatus } : c));
-    showToast('Status atualizado com sucesso', 'success');
-  };
-
-  const handleChangeAttendant = (ticketId: string, newAttendant: string) => {
-    setChamados(chamados.map(c => c.id === ticketId ? { ...c, assignedTo: newAttendant } : c));
-    showToast('Atendente atualizado com sucesso', 'success');
-  };
-
-  const filteredChamados = getFilteredChamados();
-  const selectedChamadoData = chamados.find(c => c.id === selectedChamado);
-
-  const statusCards = [
-    { id: 'total', label: 'Total', value: chamados.filter(c => c.status !== 'closed').length, color: 'bg-slate-900', textColor: 'text-white' },
-    { id: 'open', label: 'Abertos', value: chamados.filter(c => c.status === 'open').length, color: 'bg-blue-50', textColor: 'text-blue-600' },
-    { id: 'in_progress', label: 'Em Progresso', value: chamados.filter(c => c.status === 'in_progress').length, color: 'bg-yellow-50', textColor: 'text-yellow-600' },
-    { id: 'waiting', label: 'Aguardando', value: chamados.filter(c => c.status === 'waiting').length, color: 'bg-orange-50', textColor: 'text-orange-600' },
-    { id: 'closed', label: 'Fechados', value: chamados.filter(c => c.status === 'closed').length, color: 'bg-green-50', textColor: 'text-green-600' },
-  ];
+  if (chamadosQuery.isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Ticket className="w-12 h-12 mx-auto mb-4 animate-spin text-blue-600" />
+          <p className="text-slate-600">Carregando chamados...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
       {/* Cards de Status */}
-      <div className="bg-white rounded-xl shadow-md p-4 border border-slate-100">
-        <div className="mb-4">
-          <h2 className="text-xl font-bold text-slate-900 mb-1">Chamados</h2>
-          <p className="text-sm text-slate-600">Gerencie todos os chamados de atendimento</p>
-        </div>
+      <div className="grid grid-cols-5 gap-3">
+        {statusCards.map(card => (
+          <button
+            key={card.id}
+            onClick={() => setSelectedFilter(card.id)}
+            className={`p-4 rounded-lg transition-all ${
+              selectedFilter === card.id
+                ? `${card.color} shadow-lg scale-105`
+                : `${card.color} opacity-70 hover:opacity-100`
+            }`}
+          >
+            <div className={`text-sm font-medium ${card.textColor}`}>{card.label}</div>
+            <div className={`text-2xl font-bold ${card.textColor}`}>{card.value}</div>
+          </button>
+        ))}
+      </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
-          {statusCards.map((card) => (
-            <button
-              key={card.id}
-              onClick={() => setSelectedFilter(card.id)}
-              className={cn(
-                'rounded-lg p-2 text-center cursor-pointer transition-all text-sm',
-                card.color,
-                selectedFilter === card.id ? 'ring-2 ring-offset-1 ring-blue-500' : 'hover:shadow-sm'
-              )}
-            >
-              <p className={cn('text-2xl font-bold', card.textColor)}>{card.value}</p>
-              <p className={cn('text-xs font-medium mt-0.5', card.id === 'total' ? 'text-white' : 'text-slate-600')}>{card.label}</p>
-            </button>
-          ))}
-        </div>
-
-        {/* Filtro de Pesquisa */}
-        <div className="flex flex-col md:flex-row gap-2">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Buscar por nome, empresa, nº ou título..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+      {/* Filtro de Pesquisa */}
+      <div className="flex gap-2">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
+          <Input
+            placeholder="Buscar por nome, empresa, nº ou título..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
         </div>
       </div>
 
-      {/* Tabela de Chamados tipo Excel */}
-      <div className="bg-white rounded-xl shadow-md border border-slate-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-slate-50 border-b border-slate-200">
+      {/* Tabela de Chamados */}
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">ID</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Abertura</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Nome e Cliente</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Título</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Atendente</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredChamados.length === 0 ? (
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 w-16">ID</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 w-24">Abertura</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 flex-1">Nome e Cliente</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 flex-1">Título</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 w-32">Atendente</th>
+                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                  Nenhum chamado encontrado
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {filteredChamados.length > 0 ? (
-                filteredChamados.map((chamado) => (
-                  <tr
-                    key={chamado.id}
-                    onClick={() => {
-                      setSelectedChamado(chamado.id);
-                      setShowDetailModal(true);
-                    }}
-                    className="border-b border-slate-200 hover:bg-blue-50 cursor-pointer transition-colors"
-                  >
-                    <td className="px-4 py-3 text-sm font-bold text-slate-900">
-                      #{String(chamado.number).padStart(4, '0')}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-600">
-                      {chamado.createdAt.toLocaleDateString('pt-BR')}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <div className="font-medium text-slate-900">{chamado.customerName}</div>
-                      <div className="text-xs text-slate-500">{chamado.company}</div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700 truncate">{chamado.title}</td>
-                    <td className="px-4 py-3 text-sm">
-                      <span className={cn('px-2 py-1 rounded text-xs font-medium', getStatusColor(chamado.status))}>
-                        {chamado.assignedTo || 'Sem atendente'}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
-                    Nenhum chamado encontrado
+            ) : (
+              filteredChamados.map(chamado => (
+                <tr
+                  key={chamado.id}
+                  onClick={() => {
+                    setSelectedChamado(chamado);
+                    setShowDetailModal(true);
+                  }}
+                  className="border-b border-slate-200 hover:bg-blue-50 cursor-pointer transition-colors"
+                >
+                  <td className="px-4 py-3 text-sm font-mono text-slate-600">#{String(chamado.number).padStart(4, '0')}</td>
+                  <td className="px-4 py-3 text-sm text-slate-600">
+                    {chamado.createdAt.toLocaleDateString('pt-BR')}
+                  </td>
+                  <td className="px-4 py-3 text-sm">
+                    <div className="font-medium text-slate-900">{chamado.customerName}</div>
+                    <div className="text-xs text-slate-500">{chamado.company}</div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-700">{chamado.title}</td>
+                  <td className="px-4 py-3 text-sm text-slate-600">{chamado.assignedTo || '-'}</td>
+                  <td className="px-4 py-3 text-sm">
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusBadgeColor(chamado.status)}`}>
+                      {getStatusLabel(chamado.status)}
+                    </span>
                   </td>
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
 
-      {/* Modal de Detalhes com Timeline */}
-      {showDetailModal && selectedChamadoData && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-            {/* Header */}
-            <div className="sticky top-0 bg-white border-b border-slate-200 p-6 flex justify-between items-start">
-              <div>
-                <h2 className="text-2xl font-bold text-slate-900">#{String(selectedChamadoData.number).padStart(4, '0')}</h2>
-                <p className="text-sm text-slate-600 mt-1">{selectedChamadoData.title}</p>
-              </div>
-              <button
-                onClick={() => setShowDetailModal(false)}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                <X className="w-5 h-5 text-slate-600" />
-              </button>
-            </div>
+      {/* Modal de Detalhes */}
+      <Dialog open={showDetailModal} onOpenChange={setShowDetailModal}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              #{String(selectedChamado?.number).padStart(4, '0')} - {selectedChamado?.title}
+            </DialogTitle>
+          </DialogHeader>
 
-            {/* Controles */}
-            <div className="border-b border-slate-200 p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Status do Chamado */}
+          {selectedChamado && (
+            <div className="space-y-6">
+              {/* Controles */}
+              <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <label className="text-xs font-semibold text-slate-600 block mb-2">Status do Chamado</label>
-                  <select
-                    value={selectedChamadoData.status}
-                    onChange={(e) => {
-                      handleChangeStatus(selectedChamadoData.id, e.target.value);
-                    }}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
-                  >
-                    <option value="open">Aberto</option>
-                    <option value="in_progress">Em Progresso</option>
-                    <option value="waiting">Aguardando</option>
-                    <option value="closed">Fechado</option>
-                  </select>
+                  <label className="text-sm font-medium text-slate-700">Status</label>
+                  <Select value={newStatus || selectedChamado.status} onValueChange={handleChangeStatus}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="open">Aberto</SelectItem>
+                      <SelectItem value="in_progress">Em Progresso</SelectItem>
+                      <SelectItem value="waiting">Aguardando</SelectItem>
+                      <SelectItem value="closed">Fechado</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
-                {/* Atendente Responsável */}
                 <div>
-                  <label className="text-xs font-semibold text-slate-600 block mb-2">Atendente Responsável</label>
-                  <input
-                    type="text"
-                    value={selectedChamadoData.assignedTo || ''}
-                    onChange={(e) => handleChangeAttendant(selectedChamadoData.id, e.target.value)}
+                  <label className="text-sm font-medium text-slate-700">Atendente</label>
+                  <Input
                     placeholder="Nome do atendente"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    value={newAttendant || selectedChamado.assignedTo || ''}
+                    onChange={e => setNewAttendant(e.target.value)}
+                    onBlur={() => {
+                      if (newAttendant && newAttendant !== selectedChamado.assignedTo) {
+                        handleChangeAttendant(newAttendant);
+                      }
+                    }}
                   />
                 </div>
 
-                {/* Registrar Atividade */}
                 <div>
-                  <label className="text-xs font-semibold text-slate-600 block mb-2">Registrar Atividade</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newActivityText}
-                      onChange={(e) => setNewActivityText(e.target.value)}
-                      placeholder="Descreva a atividade..."
-                      className="flex-1 px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    />
-                    <button
-                      onClick={() => handleAddActivity(selectedChamadoData.id)}
-                      className="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm font-medium"
-                    >
-                      +
-                    </button>
+                  <label className="text-sm font-medium text-slate-700">Prioridade</label>
+                  <div className={`px-3 py-2 rounded border border-slate-200 text-sm font-medium ${getPriorityColor(selectedChamado.priority)}`}>
+                    {selectedChamado.priority || 'Não definida'}
                   </div>
                 </div>
               </div>
-            </div>
 
-            {/* Timeline */}
-            <div className="p-6">
-              <h3 className="text-lg font-bold text-slate-900 mb-6">Histórico de Atividades</h3>
-              <div className="space-y-6">
-                {selectedChamadoData.activities.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).map((activity, index) => (
-                  <div key={activity.id} className="flex gap-4">
-                    {/* Timeline Line */}
-                    <div className="flex flex-col items-center">
-                      <div className="w-3 h-3 rounded-full bg-blue-500 ring-4 ring-blue-100"></div>
-                      {index < selectedChamadoData.activities.length - 1 && (
-                        <div className="w-0.5 h-12 bg-slate-200 mt-2"></div>
-                      )}
-                    </div>
-
-                    {/* Activity Content */}
-                    <div className="flex-1 pt-1">
-                      <div className="flex justify-between items-start gap-2">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">
-                            {activity.date.toLocaleDateString('pt-BR')}
-                          </p>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {activity.attendant}
-                          </p>
+              {/* Timeline */}
+              <div>
+                <h3 className="font-semibold text-slate-900 mb-4">Timeline de Atividades</h3>
+                <div className="space-y-4 max-h-96 overflow-y-auto">
+                  {selectedChamado.activities.length === 0 ? (
+                    <p className="text-sm text-slate-500 text-center py-4">Nenhuma atividade registrada</p>
+                  ) : (
+                    selectedChamado.activities.map((activity, idx) => (
+                      <div key={activity.id} className="flex gap-4">
+                        <div className="flex flex-col items-center">
+                          <div className="w-3 h-3 rounded-full bg-blue-600 mt-2" />
+                          {idx < selectedChamado.activities.length - 1 && (
+                            <div className="w-0.5 h-12 bg-slate-200 my-1" />
+                          )}
                         </div>
-                        {editingActivityId !== activity.id && (
-                          <button
-                            onClick={() => {
-                              setEditingActivityId(activity.id);
-                              setEditingActivityText(activity.description);
-                            }}
-                            className="p-1 hover:bg-slate-100 rounded transition-colors"
-                          >
-                            <Edit2 className="w-4 h-4 text-slate-400 hover:text-slate-600" />
-                          </button>
-                        )}
-                      </div>
-
-                      {editingActivityId === activity.id ? (
-                        <div className="mt-2 space-y-2">
-                          <textarea
-                            value={editingActivityText}
-                            onChange={(e) => setEditingActivityText(e.target.value)}
-                            className="w-full px-3 py-2 rounded-lg border border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                            rows={2}
-                          />
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleEditActivity(selectedChamadoData.id, activity.id, editingActivityText)}
-                              className="px-3 py-1 bg-blue-500 text-white rounded text-xs font-medium hover:bg-blue-600"
-                            >
-                              Salvar
-                            </button>
-                            <button
-                              onClick={() => setEditingActivityId(null)}
-                              className="px-3 py-1 bg-slate-200 text-slate-900 rounded text-xs font-medium hover:bg-slate-300"
-                            >
-                              Cancelar
-                            </button>
+                        <div className="flex-1 pb-4">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <p className="text-sm font-medium text-slate-900">{activity.attendant}</p>
+                              <p className="text-xs text-slate-500">
+                                {activity.date.toLocaleString('pt-BR')}
+                              </p>
+                            </div>
+                            {editingActivityId !== activity.id && (
+                              <button
+                                onClick={() => {
+                                  setEditingActivityId(activity.id);
+                                  setEditingActivityText(activity.description);
+                                }}
+                                className="p-1 hover:bg-slate-100 rounded"
+                              >
+                                <Edit2 className="w-4 h-4 text-slate-400" />
+                              </button>
+                            )}
                           </div>
+
+                          {editingActivityId === activity.id ? (
+                            <div className="mt-2 space-y-2">
+                              <Input
+                                value={editingActivityText}
+                                onChange={e => setEditingActivityText(e.target.value)}
+                                className="text-sm"
+                              />
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  onClick={handleEditActivity}
+                                  disabled={editActivityMutation.isPending}
+                                >
+                                  Salvar
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setEditingActivityId(null)}
+                                >
+                                  Cancelar
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-slate-700 mt-2">{activity.description}</p>
+                          )}
                         </div>
-                      ) : (
-                        <p className="text-sm text-slate-700 mt-2 bg-slate-50 p-3 rounded-lg">
-                          {activity.description}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Registrar Atividade */}
+              <div className="border-t border-slate-200 pt-4">
+                <label className="text-sm font-medium text-slate-700 block mb-2">Registrar Atividade</label>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Descreva a atividade..."
+                    value={newActivityText}
+                    onChange={e => setNewActivityText(e.target.value)}
+                    className="text-sm"
+                  />
+                  <Button
+                    onClick={handleAddActivity}
+                    disabled={addActivityMutation.isPending || !newActivityText.trim()}
+                    size="sm"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </Button>
+                </div>
               </div>
             </div>
-
-            {/* Footer */}
-            <div className="border-t border-slate-200 p-6 flex justify-end">
-              <button
-                onClick={() => setShowDetailModal(false)}
-                className="px-4 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-colors font-medium"
-              >
-                Fechar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Toast */}
       {toastMessage && (
-        <div className={cn(
-          'fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg text-white font-medium transition-all duration-300 z-50',
-          toastMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'
-        )}>
+        <div
+          className={`fixed bottom-4 right-4 px-4 py-3 rounded-lg text-white ${
+            toastMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'
+          }`}
+        >
           {toastMessage.message}
         </div>
       )}
