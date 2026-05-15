@@ -663,7 +663,7 @@ function Shell() {
 
         {/* Navigation */}
         <nav className={cn(
-          "flex-1 p-3 space-y-1 pt-8 transition-all duration-300",
+          "flex-1 p-3 space-y-1 pt-8 transition-all duration-300 scrollbar-hide",
           sidebarOpen ? "overflow-y-auto" : "overflow-hidden"
         )}>
           {mainNavItems.map((item) => {

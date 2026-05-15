@@ -245,3 +245,13 @@ select:focus-visible {
   background-clip: text;
   animation: shimmer 3s linear infinite;
 }
+
+/* Remover barra de scroll */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
