@@ -226,10 +226,18 @@ function ConversationsPage() {
   const [editName, setEditName] = React.useState('');
   const [editCompany, setEditCompany] = React.useState('');
   const [closeConfirmOpen, setCloseConfirmOpen] = React.useState(false);
+  const [reopenConfirmOpen, setReopenConfirmOpen] = React.useState(false);
+  const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // Mutations tRPC
   const closeConversationMutation = trpc.megadesk.closeConversation.useMutation();
   const updateCustomerMutation = trpc.megadesk.updateCustomerInfo.useMutation();
+
+  // Função para exibir toast
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage({ message, type });
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
   // Capturar parâmetros da URL e localStorage ao carregar a página
   React.useEffect(() => {
@@ -416,12 +424,7 @@ function ConversationsPage() {
                     <button
                       onClick={() => {
                         if (selectedConv.status === 'closed') {
-                          // Lógica para abrir conversa
-                          const updatedConversations = conversations.map(c =>
-                            c.id === selectedConversation ? { ...c, status: 'open' } : c
-                          );
-                          setConversations(updatedConversations);
-                          setSelectedFilter('open');
+                          setReopenConfirmOpen(true);
                         } else {
                           setCloseConfirmOpen(true);
                         }
@@ -540,6 +543,41 @@ function ConversationsPage() {
         ) : null;
       })()}
 
+      {/* Dialog de Confirmação para Reabrir Conversa */}
+      {reopenConfirmOpen && (() => {
+        const selectedConv = conversations.find((c) => c.id === selectedConversation);
+        return selectedConv ? (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-80">
+              <h2 className="text-lg font-bold text-slate-900 mb-4">Reabrir Conversa?</h2>
+              <p className="text-slate-600 mb-6">Tem certeza que deseja reabrir esta conversa? Ela será movida para a aba "Abertas".</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setReopenConfirmOpen(false)}
+                  className="flex-1 px-4 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-colors font-medium"
+                >
+                  Não
+                </button>
+                <button
+                  onClick={() => {
+                    const updatedConversations = conversations.map(c =>
+                      c.id === selectedConversation ? { ...c, status: 'open' } : c
+                    );
+                    setConversations(updatedConversations);
+                    setSelectedFilter('open');
+                    setReopenConfirmOpen(false);
+                    showToast('Conversa reaberida com sucesso', 'success');
+                  }}
+                  className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
+                >
+                  Sim
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null;
+      })()}
+
       {/* Dialog de Confirmação para Encerrar Conversa */}
       {closeConfirmOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -568,6 +606,7 @@ function ConversationsPage() {
                       setSelectedConversation(null);
                       setSelectedFilter('closed');
                       setCloseConfirmOpen(false);
+                      showToast('Conversa encerrada com sucesso', 'success');
                     } catch (error) {
                       console.error('Erro ao encerrar conversa:', error);
                     }
@@ -579,6 +618,16 @@ function ConversationsPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className={cn(
+          'fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg text-white font-medium transition-all duration-300 z-50',
+          toastMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'
+        )}>
+          {toastMessage.message}
         </div>
       )}
     </div>
