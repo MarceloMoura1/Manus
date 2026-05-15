@@ -370,7 +370,9 @@ function ConversationsPage() {
                     </p>
                   </div>
                   <span className="text-xs text-slate-400 ml-2 flex-shrink-0">
-                    {new Date(conv.timestamp).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                    {typeof conv.timestamp === 'string' && conv.timestamp.includes(':')
+                      ? new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+                      : new Date(conv.timestamp).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
                   </span>
                 </div>
               </button>
