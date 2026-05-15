@@ -387,19 +387,27 @@ function ConversationsPage() {
             return selectedConv ? (
               <div className="flex flex-col h-full">
                 <div className="border-b border-slate-200 pb-4 mb-4">
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="flex items-center justify-between mb-2">
                     <h3 className="text-lg font-bold text-slate-900">{selectedConv.name}</h3>
-                    <button
-                      onClick={() => {
-                        setEditName(selectedConv.name);
-                        setEditCompany(selectedConv.company);
-                        setEditModalOpen(true);
-                      }}
-                      className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
-                      title="Editar cliente"
-                    >
-                      <Cog className="w-4 h-4 text-slate-500 hover:text-slate-700" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => {
+                          setEditName(selectedConv.name);
+                          setEditCompany(selectedConv.company);
+                          setEditModalOpen(true);
+                        }}
+                        className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
+                        title="Editar cliente"
+                      >
+                        <Cog className="w-4 h-4 text-slate-500 hover:text-slate-700" />
+                      </button>
+                      <button
+                        onClick={() => setCloseConfirmOpen(true)}
+                        className="px-3 py-1 text-sm bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-colors font-medium"
+                      >
+                        Encerrar Conversa
+                      </button>
+                    </div>
                   </div>
                   <p className="text-sm text-slate-600">{selectedConv.phone} • {selectedConv.company}</p>
                 </div>
@@ -420,12 +428,6 @@ function ConversationsPage() {
                       <Send className="w-4 h-4" />
                     </button>
                   </div>
-                  <button
-                    onClick={() => setCloseConfirmOpen(true)}
-                    className="w-full px-4 py-2 bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-colors font-medium text-sm"
-                  >
-                    Encerrar Conversa
-                  </button>
                 </div>
               </div>
             ) : (
