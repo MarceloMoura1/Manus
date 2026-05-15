@@ -220,38 +220,24 @@ function ConversationsPage() {
   const [selectedFilter, setSelectedFilter] = React.useState('open');
 
   const filters = [
-    { id: 'open', label: '🟢 Abertas', count: 0 },
-    { id: 'bot', label: '🤖 Atendimento BOT', count: 0 },
-    { id: 'closed', label: '⚫ Fechadas', count: 0 },
+    { id: 'open', label: 'Abertas', color: 'bg-green-500' },
+    { id: 'bot', label: 'Atendimento BOT', color: 'bg-slate-700' },
+    { id: 'closed', label: 'Fechadas', color: 'bg-slate-900' },
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900">Conversas</h2>
-            <p className="text-slate-600 text-sm mt-1">0 conversas</p>
+    <div className="flex h-full gap-6">
+      {/* Left Panel - Conversations List */}
+      <div className="w-1/3 bg-white rounded-2xl shadow-lg border border-slate-100 p-6 flex flex-col">
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-2">
+            <MessageCircle className="w-5 h-5 text-slate-600" />
+            <h2 className="text-xl font-bold text-slate-900">Conversas</h2>
           </div>
-        </div>
-        
-        <div className="flex flex-wrap gap-3 mb-6">
-          {filters.map(filter => (
-            <button
-              key={filter.id}
-              onClick={() => setSelectedFilter(filter.id)}
-              className={cn(
-                'px-4 py-2 rounded-lg font-medium transition-all duration-200',
-                selectedFilter === filter.id
-                  ? 'bg-blue-500 text-white shadow-lg'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              )}
-            >
-              {filter.label}
-            </button>
-          ))}
+          <p className="text-slate-500 text-sm">0 conversas</p>
         </div>
 
+        {/* Search Bar */}
         <div className="relative mb-6">
           <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
           <input
@@ -259,23 +245,43 @@ function ConversationsPage() {
             placeholder="Buscar número..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
           />
+        </div>
+
+        {/* Filter Tabs */}
+        <div className="flex gap-2 mb-6 border-b border-slate-200 pb-3">
+          {filters.map(filter => (
+            <button
+              key={filter.id}
+              onClick={() => setSelectedFilter(filter.id)}
+              className={cn(
+                'flex items-center gap-2 px-3 py-2 rounded-lg font-medium text-sm transition-all duration-200 whitespace-nowrap',
+                selectedFilter === filter.id
+                  ? 'text-slate-900 border-b-2 border-slate-900 pb-2 -mb-3'
+                  : 'text-slate-600 hover:text-slate-900'
+              )}
+            >
+              <div className={cn('w-2 h-2 rounded-full', filter.color)}></div>
+              {filter.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Conversations List */}
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <MessageCircle className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+            <p className="text-slate-500 text-sm">Nenhuma conversa neste filtro</p>
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1 bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
-          <h3 className="text-lg font-bold text-slate-900 mb-4">Lista de Conversas</h3>
-          <div className="flex items-center justify-center h-40 text-center">
-            <p className="text-slate-500">Nenhuma conversa neste filtro</p>
-          </div>
-        </div>
-        <div className="lg:col-span-2 bg-white rounded-2xl shadow-lg p-6 border border-slate-100 flex flex-col items-center justify-center h-80">
-          <MessageCircle className="w-16 h-16 text-slate-300 mb-4" />
-          <h3 className="text-lg font-bold text-slate-900 mb-2">Selecione uma conversa para visualizar</h3>
-          <p className="text-slate-600">Clique em uma conversa da lista para ver os detalhes</p>
-        </div>
+      {/* Right Panel - Chat View */}
+      <div className="flex-1 bg-white rounded-2xl shadow-lg border border-slate-100 p-6 flex flex-col items-center justify-center">
+        <MessageCircle className="w-16 h-16 text-slate-300 mb-4" />
+        <h3 className="text-lg font-bold text-slate-900 mb-2">Selecione uma conversa para visualizar</h3>
+        <p className="text-slate-600 text-sm">Clique em uma conversa da lista para ver os detalhes</p>
       </div>
     </div>
   );
