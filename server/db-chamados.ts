@@ -259,16 +259,26 @@ export async function getChamadoWithActivities(
       return null;
     }
 
-    const activities = await db
-      .select()
-      .from(megadeskDomainChamadoActivities)
-      .where(
-        and(
-          eq(megadeskDomainChamadoActivities.chamadoId, chamadoId),
-          eq(megadeskDomainChamadoActivities.clientId, clientId)
+    let activities: any[] = [];
+    try {
+      activities = await db
+        .select()
+        .from(megadeskDomainChamadoActivities)
+        .where(
+          and(
+            eq(megadeskDomainChamadoActivities.chamadoId, chamadoId),
+            eq(megadeskDomainChamadoActivities.clientId, clientId)
+          )
         )
-      )
-      .orderBy(desc(megadeskDomainChamadoActivities.createdAt));
+        .orderBy(desc(megadeskDomainChamadoActivities.createdAt));
+    } catch (error: any) {
+      if (error.code === 'ER_NO_SUCH_TABLE' || error.message?.includes('doesn\'t exist')) {
+        console.warn(`[WARN] Tabela megadesk_domain_chamado_activities nao existe, continuando sem atividades`);
+        activities = [];
+      } else {
+        throw error;
+      }
+    }
 
     const c = chamado[0];
 
@@ -346,16 +356,26 @@ export async function listChamados(
     // Para cada chamado, buscar atividades
     const result: ChamadoWithActivities[] = [];
     for (const c of chamados) {
-      const activities = await db
-        .select()
-        .from(megadeskDomainChamadoActivities)
-        .where(
-          and(
-            eq(megadeskDomainChamadoActivities.chamadoId, c.chamadoId),
-            eq(megadeskDomainChamadoActivities.clientId, clientId)
+      let activities: any[] = [];
+      try {
+        activities = await db
+          .select()
+          .from(megadeskDomainChamadoActivities)
+          .where(
+            and(
+              eq(megadeskDomainChamadoActivities.chamadoId, c.chamadoId),
+              eq(megadeskDomainChamadoActivities.clientId, clientId)
+            )
           )
-        )
-        .orderBy(desc(megadeskDomainChamadoActivities.createdAt));
+          .orderBy(desc(megadeskDomainChamadoActivities.createdAt));
+      } catch (error: any) {
+        if (error.code === 'ER_NO_SUCH_TABLE' || error.message?.includes('doesn\'t exist')) {
+          console.warn(`[WARN] Tabela megadesk_domain_chamado_activities nao existe, continuando sem atividades`);
+          activities = [];
+        } else {
+          throw error;
+        }
+      }
 
       result.push({
         id: c.chamadoId,

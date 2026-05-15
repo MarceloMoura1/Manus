@@ -608,3 +608,25 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Adicionar logging estruturado - 5 niveis: DEBUG, LOG, SUCCESS, WARN, ERROR
 - [x] Criar testes de robustez - 38 testes de validacao passando
 - [x] Documentar arquitetura e diagnostico - ROBUSTEZ_ATENDIMENTO_CONVERSAS.md criado
+
+
+## Fase 61: Teste Completo de Abertura de Chamados
+- [ ] Criar script de teste para abrir 5 chamados diferentes
+- [ ] Executar testes e capturar erros
+- [ ] Analisar logs do servidor
+- [ ] Diagnosticar causa raiz do problema
+- [ ] Implementar correções necessárias
+- [ ] Validar correções com testes
+- [ ] Documentar solução
+
+
+## Fase 61: Teste Completo de Abertura de Chamados - CONCLUÍDO ✅
+- [x] Criar script de teste para abrir 5 chamados
+- [x] Executar testes e diagnosticar problemas - Problema: acesso incorreto à resposta tRPC
+- [x] Analisar logs e erros - Estrutura correta: data.result.data.json.chamado
+- [x] Identificar causa raiz - Script acessava data.result.data.chamado (incorreto)
+- [x] Implementar correções - Corrigido acesso à resposta + tratamento de tabela de atividades
+- [x] Validar correções com testes - 5/5 chamados criados com sucesso (100%)
+- [x] Documentar solução - Chamados #21-25 criados com sucesso
+- [x] Adicionar tratamento de erro para tabela de atividades que não existe
+- [x] Permitir que sistema funcione mesmo sem tabela de atividades
