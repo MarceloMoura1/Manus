@@ -9,6 +9,7 @@ import { useAuth } from '@/hooks/useAuth';
 import {
   AlertCircle,
   Clock,
+  Download,
   Edit2,
   MessageSquare,
   Plus,
@@ -53,6 +54,22 @@ export function TicketsPageNew() {
   const [newAttendant, setNewAttendant] = React.useState('');
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [currentPage, setCurrentPage] = React.useState(1);
+  const [showNewChamadoModal, setShowNewChamadoModal] = React.useState(false);
+  const [newChamadoForm, setNewChamadoForm] = React.useState({
+    customerName: '',
+    company: '',
+    title: '',
+    observations: '',
+    priority: 'media',
+  });
+  const [showAdvancedSearch, setShowAdvancedSearch] = React.useState(false);
+  const [advancedSearch, setAdvancedSearch] = React.useState({
+    ticketNumber: '',
+    customerName: '',
+    attendant: '',
+    dateFrom: '',
+    dateTo: '',
+  });
   const pageSize = 10;
 
   // Queries tRPC
@@ -68,6 +85,7 @@ export function TicketsPageNew() {
   const updateChamadoMutation = trpc.chamados.update.useMutation();
   const addActivityMutation = trpc.chamados.addActivity.useMutation();
   const editActivityMutation = trpc.chamados.editActivity.useMutation();
+  const createChamadoMutation = trpc.chamados.create.useMutation();
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToastMessage({ message, type });
@@ -137,6 +155,109 @@ export function TicketsPageNew() {
     }
   };
 
+  // Funcoes de exportacao
+  const exportToCSV = () => {
+    if (filteredChamados.length === 0) {
+      showToast('Nenhum chamado para exportar', 'error');
+      return;
+    }
+
+    const headers = ['ID', 'Abertura', 'Cliente', 'Empresa', 'Titulo', 'Status', 'Prioridade', 'Atendente'];
+    const rows = filteredChamados.map(c => [
+      `#${String(c.number).padStart(4, '0')}`,
+      new Date(c.createdAt).toLocaleDateString('pt-BR'),
+      c.customerName,
+      c.company,
+      c.title,
+      getStatusLabel(c.status),
+      c.priority || 'N/A',
+      c.assignedTo || 'N/A',
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(',')),
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `chamados_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('Relatorio exportado com sucesso!', 'success');
+  };
+
+  const exportToPDF = () => {
+    if (filteredChamados.length === 0) {
+      showToast('Nenhum chamado para exportar', 'error');
+      return;
+    }
+
+    let pdfContent = 'RELATORIO DE CHAMADOS\n';
+    pdfContent += `Data: ${new Date().toLocaleDateString('pt-BR')}\n`;
+    pdfContent += `Total de chamados: ${filteredChamados.length}\n\n`;
+    pdfContent += '='.repeat(100) + '\n';
+
+    filteredChamados.forEach(c => {
+      pdfContent += `ID: #${String(c.number).padStart(4, '0')}\n`;
+      pdfContent += `Cliente: ${c.customerName} (${c.company})\n`;
+      pdfContent += `Titulo: ${c.title}\n`;
+      pdfContent += `Status: ${getStatusLabel(c.status)}\n`;
+      pdfContent += `Prioridade: ${c.priority || 'N/A'}\n`;
+      pdfContent += `Atendente: ${c.assignedTo || 'N/A'}\n`;
+      pdfContent += `Abertura: ${new Date(c.createdAt).toLocaleDateString('pt-BR')}\n`;
+      pdfContent += '-'.repeat(100) + '\n\n';
+    });
+
+    const blob = new Blob([pdfContent], { type: 'text/plain;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `chamados_${new Date().toISOString().split('T')[0]}.txt`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('Relatorio exportado com sucesso!', 'success');
+  };
+
+  const handleCreateChamado = async () => {
+    if (!newChamadoForm.customerName.trim() || !newChamadoForm.company.trim() || !newChamadoForm.title.trim()) {
+      showToast('Preencha todos os campos obrigatorios', 'error');
+      return;
+    }
+
+    try {
+      const result = await createChamadoMutation.mutateAsync({
+        customerId: 'cust-' + Date.now(),
+        customerName: newChamadoForm.customerName,
+        company: newChamadoForm.company,
+        title: newChamadoForm.title,
+        observations: newChamadoForm.observations,
+        priority: newChamadoForm.priority,
+      });
+
+      if (result.chamado) {
+        showToast('Chamado criado com sucesso!', 'success');
+        setShowNewChamadoModal(false);
+        setNewChamadoForm({
+          customerName: '',
+          company: '',
+          title: '',
+          observations: '',
+          priority: 'media',
+        });
+        chamadosQuery.refetch();
+      }
+    } catch (error) {
+      showToast('Erro ao criar chamado', 'error');
+    }
+  };
+
   const handleChangeAttendant = async (attendant: string) => {
     if (!selectedChamado) return;
 
@@ -161,15 +282,26 @@ export function TicketsPageNew() {
 
   const chamados = chamadosQuery.data?.chamados || [];
 
-  // Filtrar por busca
+  // Filtrar por busca e busca avancada
   const filteredChamados = chamados.filter(c => {
     const searchLower = searchTerm.toLowerCase();
-    return (
+    const basicMatch = !searchTerm || (
       c.customerName.toLowerCase().includes(searchLower) ||
       c.company.toLowerCase().includes(searchLower) ||
       `#${String(c.number).padStart(4, '0')}`.includes(searchTerm) ||
       c.title.toLowerCase().includes(searchLower)
     );
+    if (!basicMatch) return false;
+    if (advancedSearch.ticketNumber && !`#${String(c.number).padStart(4, '0')}`.includes(advancedSearch.ticketNumber)) return false;
+    if (advancedSearch.customerName && !c.customerName.toLowerCase().includes(advancedSearch.customerName.toLowerCase())) return false;
+    if (advancedSearch.attendant && c.assignedTo !== advancedSearch.attendant) return false;
+    if (advancedSearch.dateFrom && c.createdAt < new Date(advancedSearch.dateFrom)) return false;
+    if (advancedSearch.dateTo) {
+      const dateTo = new Date(advancedSearch.dateTo);
+      dateTo.setHours(23, 59, 59, 999);
+      if (c.createdAt > dateTo) return false;
+    }
+    return true;
   });
 
   // Contar status
@@ -265,7 +397,7 @@ export function TicketsPageNew() {
         ))}
       </div>
 
-      {/* Filtro de Pesquisa */}
+      {/* Filtro de Pesquisa e Botão Novo Chamado */}
       <div className="flex gap-2">
         <div className="flex-1 relative">
           <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
@@ -276,7 +408,97 @@ export function TicketsPageNew() {
             className="pl-10"
           />
         </div>
+        <Button
+          onClick={() => setShowAdvancedSearch(!showAdvancedSearch)}
+          variant="outline"
+          className="flex items-center gap-2"
+        >
+          <AlertCircle className="w-4 h-4" />
+          Avancado
+        </Button>
+        <Button
+          onClick={() => setShowNewChamadoModal(true)}
+          className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4" />
+          Novo Chamado
+        </Button>
+        <Button
+          onClick={exportToCSV}
+          variant="outline"
+          className="flex items-center gap-2"
+        >
+          <Download className="w-4 h-4" />
+          CSV
+        </Button>
+        <Button
+          onClick={exportToPDF}
+          variant="outline"
+          className="flex items-center gap-2"
+        >
+          <Download className="w-4 h-4" />
+          Relatorio
+        </Button>
       </div>
+
+      {/* Painel de Busca Avancada */}
+      {showAdvancedSearch && (
+        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1">No Chamado</label>
+              <Input
+                placeholder="#0001"
+                value={advancedSearch.ticketNumber}
+                onChange={e => setAdvancedSearch({...advancedSearch, ticketNumber: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Nome Cliente</label>
+              <Input
+                placeholder="Ex: Joao Silva"
+                value={advancedSearch.customerName}
+                onChange={e => setAdvancedSearch({...advancedSearch, customerName: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Data Inicio</label>
+              <Input
+                type="date"
+                value={advancedSearch.dateFrom}
+                onChange={e => setAdvancedSearch({...advancedSearch, dateFrom: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Data Fim</label>
+              <Input
+                type="date"
+                value={advancedSearch.dateTo}
+                onChange={e => setAdvancedSearch({...advancedSearch, dateTo: e.target.value})}
+              />
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setAdvancedSearch({ticketNumber: '', customerName: '', attendant: '', dateFrom: '', dateTo: ''})}
+            >
+              Limpar Filtros
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setShowAdvancedSearch(false)}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              Aplicar
+            </Button>
+          </div>
+          <div className="text-sm text-slate-600">
+            Resultados: <span className="font-semibold">{filteredChamados.length}</span> chamado(s)
+          </div>
+        </div>
+      )}
 
       {/* Tabela de Chamados */}
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
@@ -496,6 +718,80 @@ export function TicketsPageNew() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Novo Chamado */}
+      <Dialog open={showNewChamadoModal} onOpenChange={setShowNewChamadoModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Novo Chamado</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Nome do Cliente *</label>
+              <Input
+                placeholder="Ex: João Silva"
+                value={newChamadoForm.customerName}
+                onChange={e => setNewChamadoForm({...newChamadoForm, customerName: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Empresa *</label>
+              <Input
+                placeholder="Ex: Empresa XYZ Ltda"
+                value={newChamadoForm.company}
+                onChange={e => setNewChamadoForm({...newChamadoForm, company: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Título *</label>
+              <Input
+                placeholder="Ex: Sistema de login não funciona"
+                value={newChamadoForm.title}
+                onChange={e => setNewChamadoForm({...newChamadoForm, title: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Observações</label>
+              <textarea
+                placeholder="Detalhes adicionais..."
+                value={newChamadoForm.observations}
+                onChange={e => setNewChamadoForm({...newChamadoForm, observations: e.target.value})}
+                className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                rows={3}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Prioridade</label>
+              <Select value={newChamadoForm.priority} onValueChange={value => setNewChamadoForm({...newChamadoForm, priority: value})}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="baixa">Baixa</SelectItem>
+                  <SelectItem value="media">Média</SelectItem>
+                  <SelectItem value="alta">Alta</SelectItem>
+                  <SelectItem value="critica">Crítica</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-2 justify-end pt-4">
+              <Button
+                variant="outline"
+                onClick={() => setShowNewChamadoModal(false)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleCreateChamado}
+                disabled={createChamadoMutation.isPending}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {createChamadoMutation.isPending ? 'Criando...' : 'Criar Chamado'}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

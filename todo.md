@@ -412,3 +412,70 @@ ORDER BY createdAt DESC LIMIT 5;
 # Verificar atividades
 SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 ```
+
+
+## Fase 43: Criar Interface de Novo Chamado
+- [ ] Adicionar botão "+ Novo Chamado" na página de chamados
+- [ ] Criar modal/dialog para novo chamado
+- [ ] Implementar formulário com campos: Nome Cliente, Empresa, Título, Observações, Prioridade
+- [ ] Validar campos obrigatórios
+- [ ] Integrar com procedure tRPC chamados.create
+- [ ] Exibir mensagem de sucesso/erro
+- [ ] Limpar formulário após sucesso
+- [ ] Testar criação de novo chamado via interface
+
+## Fase 44: Implementar Busca Avançada
+- [ ] Adicionar filtro por data (data inicial e final)
+- [ ] Adicionar filtro por atendente responsável
+- [ ] Adicionar busca por número do chamado (#0001, #0002, etc)
+- [ ] Adicionar busca por nome do cliente
+- [ ] Combinar múltiplos filtros
+- [ ] Exibir quantidade de resultados
+- [ ] Adicionar botão "Limpar Filtros"
+- [ ] Testar busca avançada com diferentes combinações
+
+## Fase 45: Adicionar Exportação de Relatórios
+- [ ] Criar botão "Exportar" na página de chamados
+- [ ] Implementar exportação para CSV
+- [ ] Implementar exportação para PDF
+- [ ] Incluir filtros aplicados na exportação
+- [ ] Adicionar cabeçalho com data/hora da exportação
+- [ ] Testar exportação com diferentes filtros
+- [ ] Validar integridade dos dados exportados
+
+
+## Fase 43: Criar Interface de Novo Chamado
+- [x] Botão "+Novo Chamado" na tabela
+- [x] Modal com formulário
+- [x] Campos: Nome Cliente, Empresa, Título, Observações, Prioridade
+- [x] Validação de campos obrigatórios
+- [x] Integração com tRPC
+- [x] Mensagens de sucesso/erro
+- [x] Novo chamado aparece imediatamente na tabela
+
+## Fase 44: Implementar Busca Avançada
+- [x] Botão "Avançado" para expandir filtros
+- [x] Filtro por Nº Chamado (#0001)
+- [x] Filtro por Nome Cliente
+- [x] Filtro por Data Início
+- [x] Filtro por Data Fim
+- [x] Botão "Limpar Filtros"
+- [x] Exibir quantidade de resultados
+- [x] Filtros aplicados em tempo real
+
+## Fase 45: Adicionar Exportação de Relatórios
+- [x] Botão "CSV" para exportar em CSV
+- [x] Botão "Relatório" para exportar em texto
+- [x] Exportação respeita filtros aplicados
+- [x] Cabeçalho com data/hora de exportação
+- [x] Validação antes de exportar
+- [x] Mensagens de sucesso/erro
+- [x] Arquivo baixado automaticamente
+
+## Fase 46: Testes e Validação
+- [x] 20 testes Vitest passando
+- [x] Testes de validação de formulário
+- [x] Testes de filtros avançados
+- [x] Testes de exportação
+- [x] Testes de integração
+- [x] Cobertura de casos de sucesso e erro
