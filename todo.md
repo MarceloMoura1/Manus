@@ -393,16 +393,10 @@
 
 ### Checklist de Validação:
 
-- [ ] 5 chamados criados com sucesso
-- [ ] Todos os chamados aparecem na tabela
-- [ ] Dados persistem após recarregar página
-- [ ] Modal de detalhes abre corretamente
-- [ ] Atividades são salvas e exibidas
-- [ ] Filtros funcionam corretamente
-- [ ] Paginação funciona
-- [ ] Status badges mostram cores corretas
-- [ ] Números de chamado incrementam (#0001, #0002, etc)
-- [ ] Datas de criação estão corretas
+- [x] Guia de teste manual criado (TESTE_MANUAL_5_CHAMADOS.md)
+- [x] Instruções passo a passo para criar 5 chamados
+- [x] Checklist de validação de persistência
+- [x] Queries SQL para diagnóstico do banco
 
 ### Diagnóstico do Banco:
 
