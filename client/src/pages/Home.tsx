@@ -440,8 +440,8 @@ function Shell() {
 
         {/* Faixa de luz roxo minimalista */}
         <div className={cn(
-          "bg-gradient-to-r from-purple-600/0 via-purple-500 to-purple-600/0 transition-all duration-300 my-2",
-          sidebarOpen ? "h-1 mx-4" : "h-px mx-2"
+          "bg-gradient-to-r from-purple-600/0 via-purple-500 to-purple-600/0 transition-all duration-300 my-2 shadow-lg shadow-purple-500/50",
+          sidebarOpen ? "h-0.5 mx-4" : "h-px mx-2"
         )}></div>
 
         {/* Navigation */}
