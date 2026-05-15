@@ -361,8 +361,13 @@ function ConversationsPage() {
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-slate-900 truncate">{conv.name}</p>
-                    <p className="text-xs text-slate-500 truncate">{conv.phone}</p>
-                    <p className="text-sm text-slate-600 truncate mt-1">{conv.lastMessage}</p>
+                    <p className="text-xs text-slate-500 truncate">{conv.company}</p>
+                    <p className={cn(
+                      'text-sm truncate mt-1',
+                      conv.isUnread ? 'font-bold text-slate-900' : 'text-slate-600'
+                    )}>
+                      {conv.lastMessage}
+                    </p>
                   </div>
                   <span className="text-xs text-slate-400 ml-2 flex-shrink-0">{conv.timestamp}</span>
                 </div>

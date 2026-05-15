@@ -244,3 +244,9 @@
 - [x] Adicionar botão "Encerrar Conversa" com texto no painel de chat
 - [x] Implementar dialog de confirmação (Sim/Não) para encerrar
 - [x] Testar fluxo completo de criação, edição e encerramento
+
+## Fase 33: Ajustar Card de Conversa na Aba Abertas
+- [x] Mostrar nome da empresa no lugar do número
+- [x] Substituir "Conversa Iniciada" pela última mensagem
+- [x] Destacar em negrito mensagens não lidas do cliente
+- [x] Adicionar campo de status de leitura na conversa
