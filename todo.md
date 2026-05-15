@@ -139,3 +139,14 @@
 - [x] Adicionar animação de slide-down no ponto colorido do filtro
 - [x] Usar easing cubic-bezier(0.23, 1, 0.32, 1) para animações suaves
 - [x] Testar animações em todos os filtros (Abertas, Atendimento BOT, Fechadas)
+
+## Fase 22: Sistema de Atendimento Ativo com Busca de Cliente
+- [x] Criar campo de entrada para numero do cliente
+- [x] Implementar busca no banco de dados por numero de telefone
+- [x] Exibir dados do cliente se existir (nome, empresa)
+- [x] Criar formulario para novo cliente (nome, empresa) se nao existir
+- [x] Adicionar opcao "abrir chamado?" com sim/nao
+- [x] Se sim: adicionar campos de titulo e observacao do chamado
+- [x] Se nao: redirecionar para pagina de Conversas
+- [ ] Integrar com banco de dados (criar/atualizar cliente)
+- [x] Testar fluxo completo (cliente existente e novo cliente)

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { navigateToPlatform } from "@/lib/platformRouting";
 import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/contexts/ThemeContext";
+import { ActiveAttendancePage } from "./ActiveAttendance";
 import {
   ArrowRight,
   Bell,
@@ -546,16 +547,7 @@ function NotificationsPage() {
   );
 }
 
-function ActiveAttendancePage() {
-  return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-4">Atendimento Ativo</h2>
-        <p className="text-slate-600">Acompanhe os atendimentos em tempo real.</p>
-      </div>
-    </div>
-  );
-}
+
 
 function Shell() {
   const { theme, toggleTheme } = useTheme();
