@@ -414,10 +414,21 @@ function ConversationsPage() {
                       </button>
                     </div>
                     <button
-                      onClick={() => setCloseConfirmOpen(true)}
+                      onClick={() => {
+                        if (selectedConv.status === 'closed') {
+                          // Lógica para abrir conversa
+                          const updatedConversations = conversations.map(c =>
+                            c.id === selectedConversation ? { ...c, status: 'open' } : c
+                          );
+                          setConversations(updatedConversations);
+                          setSelectedFilter('open');
+                        } else {
+                          setCloseConfirmOpen(true);
+                        }
+                      }}
                       className="px-3 py-1 text-sm bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-colors font-medium"
                     >
-                      Encerrar Conversa
+                      {selectedConv.status === 'closed' ? 'Abrir Conversa' : 'Encerrar Conversa'}
                     </button>
                   </div>
                   <p className="text-sm text-slate-600">{selectedConv.phone} • {selectedConv.company}</p>
