@@ -699,3 +699,12 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Criar teste E2E para fluxo completo (criar → editar → encerrar) - Teste criado e documentado
 - [x] Adicionar scripts de teste E2E ao package.json - test:e2e, test:e2e:ui, test:e2e:debug
 - [x] Criar arquivo de testes E2E (e2e/chamados.spec.ts) - 10 testes E2E criados
+
+
+## Fase 65: BUG CRÍTICO - Chamado Criado Mas Não Aparece na Interface - RESOLVIDO
+- [x] Diagnosticar por que chamado não aparece após criação - Problema: cache não era invalidado
+- [x] Verificar se chamado está sendo salvo no banco - Confirmado: chamado está sendo salvo
+- [x] Verificar se query de listagem está sendo invalidada - Problema: refetch() sem invalidação
+- [x] Analisar cache do React Query - Encontrado: cache antigo sendo retornado
+- [x] Implementar invalidação automática após criar chamado - Implementado: utils.chamados.list.invalidate()
+- [x] Testar fluxo completo: criar → visualizar - Testes E2E criados (3 testes)

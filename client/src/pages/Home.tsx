@@ -696,6 +696,7 @@ export function TicketsPage() {
     { enabled: !!user?.user?.id }
   );
 
+  const utils = trpc.useUtils();
   const updateChamadoMutation = trpc.chamados.update.useMutation();
   const addActivityMutation = trpc.chamados.addActivity.useMutation();
   const editActivityMutation = trpc.chamados.editActivity.useMutation();
@@ -819,7 +820,10 @@ export function TicketsPage() {
           observations: '',
           priority: 'media',
         });
-        chamadosQuery.refetch();
+        // Invalidar cache de todas as queries de chamados
+        await utils.chamados.list.invalidate();
+        // Refetch para garantir que os dados mais recentes sejam carregados
+        await chamadosQuery.refetch();
       }
     } catch (error) {
       showToast('Erro ao criar chamado', 'error');
