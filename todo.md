@@ -708,3 +708,12 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Analisar cache do React Query - Encontrado: cache antigo sendo retornado
 - [x] Implementar invalidação automática após criar chamado - Implementado: utils.chamados.list.invalidate()
 - [x] Testar fluxo completo: criar → visualizar - Testes E2E criados (3 testes)
+
+
+## Fase 66: Implementar Modal de Detalhes com Timeline
+- [ ] Analisar imagem de referência do layout
+- [ ] Verificar implementação atual do modal
+- [ ] Criar componente de timeline com estilo
+- [ ] Implementar modal com layout correto
+- [ ] Integrar com dados de chamado
+- [ ] Testar visualização de detalhes
