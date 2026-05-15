@@ -634,68 +634,322 @@ function ConversationsPage() {
 
 function TicketsPage() {
   const [searchTerm, setSearchTerm] = React.useState('');
+  const [selectedFilter, setSelectedFilter] = React.useState('total');
+  const [selectedChamado, setSelectedChamado] = React.useState<string | null>(null);
+  const [chamados, setChamados] = React.useState<any[]>([]);
+  const [editingField, setEditingField] = React.useState<string | null>(null);
+  const [editingValue, setEditingValue] = React.useState('');
+  const [closeConfirmOpen, setCloseConfirmOpen] = React.useState(false);
+  const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  React.useEffect(() => {
+    setChamados([
+      { id: '1', number: 1, customerName: 'João Silva', company: 'Empresa A', title: 'Problema com login', observations: 'Usuário não consegue fazer login', status: 'open', phone: '11999999999' },
+      { id: '2', number: 2, customerName: 'Maria Santos', company: 'Empresa B', title: 'Erro ao enviar mensagem', observations: 'Erro ao enviar mensagem via WhatsApp', status: 'in_progress', phone: '11988888888' },
+      { id: '3', number: 3, customerName: 'Pedro Costa', company: 'Empresa C', title: 'Dúvida sobre integração', observations: 'Cliente quer saber como integrar API', status: 'waiting', phone: '11977777777' },
+      { id: '4', number: 4, customerName: 'Ana Oliveira', company: 'Empresa A', title: 'Solicitação de relatório', observations: 'Precisa de relatório de conversas', status: 'open', phone: '11966666666' },
+      { id: '5', number: 5, customerName: 'Carlos Mendes', company: 'Empresa D', title: 'Problema resolvido', observations: 'Problema foi solucionado', status: 'closed', phone: '11955555555' },
+    ]);
+  }, []);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage({ message, type });
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'open': return 'bg-blue-100 text-blue-700';
+      case 'in_progress': return 'bg-yellow-100 text-yellow-700';
+      case 'waiting': return 'bg-orange-100 text-orange-700';
+      case 'closed': return 'bg-green-100 text-green-700';
+      default: return 'bg-slate-100 text-slate-700';
+    }
+  };
+
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case 'open': return 'Aberto';
+      case 'in_progress': return 'Em Progresso';
+      case 'waiting': return 'Aguardando';
+      case 'closed': return 'Fechado';
+      default: return status;
+    }
+  };
+
+  const updateChamado = (id: string, field: string, value: any) => {
+    setChamados(chamados.map(c => c.id === id ? { ...c, [field]: value } : c));
+    setEditingField(null);
+    showToast(`${field === 'title' ? 'Título' : 'Observações'} atualizado com sucesso`, 'success');
+  };
+
+  const getFilteredChamados = () => {
+    let filtered = chamados;
+    
+    if (selectedFilter !== 'total') {
+      filtered = filtered.filter(c => c.status === selectedFilter);
+    } else {
+      filtered = filtered.filter(c => c.status !== 'closed');
+    }
+
+    if (searchTerm) {
+      filtered = filtered.filter(c => 
+        c.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.number.toString().includes(searchTerm) ||
+        `#${String(c.number).padStart(4, '0')}`.includes(searchTerm)
+      );
+    }
+
+    return filtered;
+  };
+
+  const filteredChamados = getFilteredChamados();
+  const selectedChamadoData = chamados.find(c => c.id === selectedChamado);
 
   const statusCards = [
-    { label: 'Total', value: 10, color: 'bg-slate-900', textColor: 'text-white' },
-    { label: 'Abertos', value: 4, color: 'bg-blue-50', textColor: 'text-blue-600' },
-    { label: 'Em Progresso', value: 2, color: 'bg-yellow-50', textColor: 'text-yellow-600' },
-    { label: 'Aguardando', value: 3, color: 'bg-orange-50', textColor: 'text-orange-600' },
-    { label: 'Fechados', value: 1, color: 'bg-green-50', textColor: 'text-green-600' },
+    { id: 'total', label: 'Total', value: chamados.filter(c => c.status !== 'closed').length, color: 'bg-slate-900', textColor: 'text-white' },
+    { id: 'open', label: 'Abertos', value: chamados.filter(c => c.status === 'open').length, color: 'bg-blue-50', textColor: 'text-blue-600' },
+    { id: 'in_progress', label: 'Em Progresso', value: chamados.filter(c => c.status === 'in_progress').length, color: 'bg-yellow-50', textColor: 'text-yellow-600' },
+    { id: 'waiting', label: 'Aguardando', value: chamados.filter(c => c.status === 'waiting').length, color: 'bg-orange-50', textColor: 'text-orange-600' },
+    { id: 'closed', label: 'Fechados', value: chamados.filter(c => c.status === 'closed').length, color: 'bg-green-50', textColor: 'text-green-600' },
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <div className="mb-6">
-          <h2 className="text-2xl font-bold text-slate-900 mb-2">Chamados</h2>
-          <p className="text-slate-600">Gerencie todos os chamados de atendimento</p>
+    <div className="space-y-4">
+      <div className="bg-white rounded-xl shadow-md p-4 border border-slate-100">
+        <div className="mb-4">
+          <h2 className="text-xl font-bold text-slate-900 mb-1">Chamados</h2>
+          <p className="text-sm text-slate-600">Gerencie todos os chamados de atendimento</p>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-          {statusCards.map((card, idx) => (
-            <div
-              key={idx}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
+          {statusCards.map((card) => (
+            <button
+              key={card.id}
+              onClick={() => setSelectedFilter(card.id)}
               className={cn(
-                'rounded-xl p-4 text-center',
-                card.color
+                'rounded-lg p-2 text-center cursor-pointer transition-all text-sm',
+                card.color,
+                selectedFilter === card.id ? 'ring-2 ring-offset-1 ring-blue-500' : 'hover:shadow-sm'
               )}
             >
-              <p className={cn('text-3xl font-bold', card.textColor)}>{card.value}</p>
-              <p className={cn('text-sm font-medium mt-1', idx === 0 ? 'text-white' : 'text-slate-600')}>{card.label}</p>
-            </div>
+              <p className={cn('text-2xl font-bold', card.textColor)}>{card.value}</p>
+              <p className={cn('text-xs font-medium mt-0.5', card.id === 'total' ? 'text-white' : 'text-slate-600')}>{card.label}</p>
+            </button>
           ))}
         </div>
 
-        <div className="flex flex-col md:flex-row gap-4 mb-6">
+        <div className="flex flex-col md:flex-row gap-2">
           <div className="flex-1 relative">
-            <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
+            <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Buscar por nome, número ou problema..."
+              placeholder="Buscar por nome, nº ou chamado..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          <select className="px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-            <option>Todas as categorias</option>
-          </select>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1 bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
-          <h3 className="text-lg font-bold text-slate-900 mb-4">Lista de Chamados</h3>
-          <div className="flex items-center justify-center h-40 text-center">
-            <p className="text-slate-500">Nenhum chamado neste filtro</p>
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        <div className="lg:col-span-1 bg-white rounded-xl shadow-md p-4 border border-slate-100">
+          <h3 className="text-base font-bold text-slate-900 mb-3">Chamados</h3>
+          <div className="space-y-2 max-h-[calc(100vh-300px)] overflow-y-auto">
+            {filteredChamados.length > 0 ? (
+              filteredChamados.map((chamado) => (
+                <button
+                  key={chamado.id}
+                  onClick={() => setSelectedChamado(chamado.id)}
+                  className={cn(
+                    'w-full text-left p-3 rounded-lg border transition-all text-sm',
+                    selectedChamado === chamado.id
+                      ? 'bg-blue-50 border-blue-500 shadow-sm'
+                      : 'bg-slate-50 border-slate-200 hover:border-slate-300'
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-xs text-slate-900">#{String(chamado.number).padStart(4, '0')}</p>
+                      <p className="text-xs text-slate-700 font-medium truncate mt-1">{chamado.customerName}</p>
+                      <p className="text-xs text-slate-500 truncate">{chamado.company}</p>
+                    </div>
+                    <span className={cn('px-2 py-1 rounded text-xs font-medium whitespace-nowrap', getStatusColor(chamado.status))}>
+                      {getStatusLabel(chamado.status)}
+                    </span>
+                  </div>
+                </button>
+              ))
+            ) : (
+              <p className="text-slate-500 text-center py-8 text-sm">Nenhum chamado</p>
+            )}
           </div>
         </div>
-        <div className="lg:col-span-2 bg-white rounded-2xl shadow-lg p-6 border border-slate-100 flex flex-col items-center justify-center h-80">
-          <Ticket className="w-16 h-16 text-slate-300 mb-4" />
-          <h3 className="text-lg font-bold text-slate-900 mb-2">Selecione um chamado</h3>
-          <p className="text-slate-600">Clique em um chamado da lista para ver os detalhes</p>
+
+        <div className="lg:col-span-3 bg-white rounded-xl shadow-md p-6 border border-slate-100">
+          {selectedChamadoData ? (
+            <div className="space-y-5">
+              <div className="flex justify-between items-start pb-4 border-b border-slate-200">
+                <div>
+                  <h3 className="text-2xl font-bold text-slate-900">#{String(selectedChamadoData.number).padStart(4, '0')}</h3>
+                  <p className="text-sm text-slate-600 mt-2">{selectedChamadoData.customerName} • {selectedChamadoData.company}</p>
+                </div>
+                <button
+                  onClick={() => setCloseConfirmOpen(true)}
+                  className="px-4 py-2 text-sm bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-colors font-medium"
+                >
+                  Encerrar
+                </button>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <p className="text-sm font-bold text-slate-700">Título</p>
+                  {editingField !== 'title' && (
+                    <button
+                      onClick={() => {
+                        setEditingField('title');
+                        setEditingValue(selectedChamadoData.title);
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                    >
+                      Editar
+                    </button>
+                  )}
+                </div>
+                {editingField === 'title' ? (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={editingValue}
+                      onChange={(e) => setEditingValue(e.target.value)}
+                      className="flex-1 px-3 py-2 rounded-lg border border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      autoFocus
+                    />
+                    <button
+                      onClick={() => updateChamado(selectedChamadoData.id, 'title', editingValue)}
+                      className="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm font-medium"
+                    >
+                      Salvar
+                    </button>
+                    <button
+                      onClick={() => setEditingField(null)}
+                      className="px-3 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 text-sm font-medium"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-slate-900 font-medium">{selectedChamadoData.title}</p>
+                )}
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <p className="text-sm font-bold text-slate-700">Observações</p>
+                  {editingField !== 'observations' && (
+                    <button
+                      onClick={() => {
+                        setEditingField('observations');
+                        setEditingValue(selectedChamadoData.observations);
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                    >
+                      Editar
+                    </button>
+                  )}
+                </div>
+                {editingField === 'observations' ? (
+                  <div className="flex flex-col gap-2">
+                    <textarea
+                      value={editingValue}
+                      onChange={(e) => setEditingValue(e.target.value)}
+                      className="flex-1 px-3 py-2 rounded-lg border border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm min-h-24"
+                      autoFocus
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => updateChamado(selectedChamadoData.id, 'observations', editingValue)}
+                        className="flex-1 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm font-medium"
+                      >
+                        Salvar
+                      </button>
+                      <button
+                        onClick={() => setEditingField(null)}
+                        className="flex-1 px-3 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 text-sm font-medium"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-slate-900">{selectedChamadoData.observations}</p>
+                )}
+              </div>
+
+              <div className="border-t border-slate-200 pt-4">
+                <p className="text-sm font-bold text-slate-700 mb-2">Status</p>
+                <select
+                  value={selectedChamadoData.status}
+                  onChange={(e) => {
+                    updateChamado(selectedChamadoData.id, 'status', e.target.value);
+                  }}
+                  className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                >
+                  <option value="open">Aberto</option>
+                  <option value="in_progress">Em Progresso</option>
+                  <option value="waiting">Aguardando</option>
+                </select>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-96">
+              <Ticket className="w-16 h-16 text-slate-300 mb-4" />
+              <h3 className="text-lg font-bold text-slate-900 mb-2">Selecione um chamado</h3>
+              <p className="text-slate-600 text-sm">Clique em um chamado da lista para ver os detalhes</p>
+            </div>
+          )}
         </div>
       </div>
+
+      {closeConfirmOpen && selectedChamadoData && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-80">
+            <h2 className="text-lg font-bold text-slate-900 mb-4">Encerrar Chamado?</h2>
+            <p className="text-slate-600 mb-6">Tem certeza que deseja encerrar o chamado #{String(selectedChamadoData.number).padStart(4, '0')}?</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCloseConfirmOpen(false)}
+                className="flex-1 px-4 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-colors font-medium"
+              >
+                Não
+              </button>
+              <button
+                onClick={() => {
+                  setCloseConfirmOpen(false);
+                  updateChamado(selectedChamadoData.id, 'status', 'closed');
+                  setSelectedChamado(null);
+                  setSelectedFilter('closed');
+                  showToast('Chamado encerrado com sucesso', 'success');
+                }}
+                className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
+              >
+                Sim
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toastMessage && (
+        <div className={cn(
+          'fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg text-white font-medium transition-all duration-300 z-50',
+          toastMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'
+        )}>
+          {toastMessage.message}
+        </div>
+      )}
     </div>
   );
 }

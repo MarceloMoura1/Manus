@@ -120,6 +120,32 @@ export const megadeskDomainTickets = mysqlTable("megadesk_domain_tickets", {
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 });
 
+export const megadeskDomainChamados = mysqlTable("megadesk_domain_chamados", {
+  chamadoId: varchar("chamado_id", { length: 80 }).primaryKey(),
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  chamadoNumber: int("chamado_number").notNull().unique(),
+  customerId: varchar("customer_id", { length: 80 }).notNull(),
+  customerName: varchar("customer_name", { length: 180 }).notNull(),
+  company: varchar("company", { length: 255 }).notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  observations: text("observations").notNull().default(""),
+  status: mysqlEnum("status", ["open", "in_progress", "waiting", "closed"]).notNull().default("open"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+}, (table) => ({
+  clientIdx: index("idx_mdc_client").on(table.clientId),
+  statusIdx: index("idx_mdc_status").on(table.status),
+  chamadoNumberIdx: index("idx_mdc_chamado_number").on(table.chamadoNumber),
+}));
+
+export const megadeskDomainChamadoSequence = mysqlTable("megadesk_domain_chamado_sequence", {
+  clientId: varchar("client_id", { length: 80 }).primaryKey(),
+  nextChamadoNumber: int("next_chamado_number").notNull().default(1),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+}, (table) => ({
+  clientIdx: index("idx_mdcs_client").on(table.clientId),
+}));
+
 export const megadeskDomainBotScripts = mysqlTable("megadesk_domain_bot_scripts", {
   scriptId: varchar("script_id", { length: 80 }).primaryKey(),
   clientId: varchar("client_id", { length: 80 }).notNull(),

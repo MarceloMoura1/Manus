@@ -250,3 +250,24 @@
 - [x] Substituir "Conversa Iniciada" pela última mensagem
 - [x] Destacar em negrito mensagens não lidas do cliente
 - [x] Adicionar campo de status de leitura na conversa
+
+## Fase 34: Reorganizar Sistema de Chamados
+- [ ] Criar schema para tabela de chamados com numeração sequencial
+- [ ] Criar procedures tRPC para CRUD de chamados
+- [ ] Implementar UI com cards clicáveis por status
+- [ ] Exibir apenas chamados não-fechados no card "Total"
+- [ ] Adicionar detalhes do chamado (cliente, título, observações)
+- [ ] Implementar controle de status (Aberto, Em Progresso, Aguardando)
+- [ ] Adicionar botão de encerrar chamado no canto superior direito
+- [ ] Implementar busca avançada (nome, nº cliente, nº chamado)
+- [ ] Adicionar testes Vitest
+- [ ] Testar fluxo completo
+
+## Fase 35: Melhorias no Sistema de Chamados
+- [x] Melhorar layout dos cards da lista de chamados com status badges
+- [x] Adicionar campos editáveis para título e observações
+- [x] Reorganizar layout: diminuir cards de status, aumentar lista e detalhes
+- [ ] Diagnosticar schema do banco de dados para isolamento por cliente
+- [ ] Implementar procedures tRPC para CRUD de chamados com filtro de cliente
+- [ ] Integrar persistência no banco de dados
+- [ ] Adicionar testes Vitest para operações de chamados
