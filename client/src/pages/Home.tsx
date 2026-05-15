@@ -257,13 +257,13 @@ function ConversationsPage() {
                 <button
                   onClick={() => setSelectedFilter(filter.id)}
                   className={cn(
-                    'flex items-center gap-2 px-0 py-2 font-medium text-sm transition-all duration-200 whitespace-nowrap cursor-pointer',
+                    'filter-button flex items-center gap-2 px-0 py-2 font-medium text-sm transition-all duration-200 whitespace-nowrap cursor-pointer',
                     selectedFilter === filter.id
-                      ? 'text-slate-900 font-semibold'
+                      ? 'active text-slate-900 font-semibold'
                       : 'text-slate-600 hover:text-slate-900'
                   )}
                 >
-                  <div className={cn('w-2 h-2 rounded-full', filter.color)}></div>
+                  <div className={cn('filter-dot w-2 h-2 rounded-full', filter.color)}></div>
                   {filter.label}
                 </button>
                 {index < filters.length - 1 && (

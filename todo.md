@@ -132,3 +132,10 @@
 - [x] Adicionar efeito visual ao filtro selecionado (font-semibold)
 - [x] Adicionar linhas finas separando os filtros
 - [x] Testar interatividade dos filtros
+
+## Fase 21: Animações dos Filtros
+- [x] Implementar animação de pulse ao clicar nos filtros (scale 1 -> 1.05 -> 1)
+- [x] Adicionar animação de underline ao filtro selecionado
+- [x] Adicionar animação de slide-down no ponto colorido do filtro
+- [x] Usar easing cubic-bezier(0.23, 1, 0.32, 1) para animações suaves
+- [x] Testar animações em todos os filtros (Abertas, Atendimento BOT, Fechadas)

@@ -255,3 +255,67 @@ select:focus-visible {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* ── Animações dos Filtros ── */
+@keyframes filterPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+@keyframes filterSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes filterUnderline {
+  from {
+    width: 0;
+    opacity: 0;
+  }
+  to {
+    width: 100%;
+    opacity: 1;
+  }
+}
+
+.filter-button {
+  position: relative;
+  transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.filter-button.active {
+  animation: filterPulse 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.filter-button::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  height: 2px;
+  background: currentColor;
+  border-radius: 1px;
+  opacity: 0;
+  width: 0;
+  transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.filter-button.active::after {
+  animation: filterUnderline 0.4s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+.filter-dot {
+  transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.filter-button.active .filter-dot {
+  animation: filterSlideDown 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+  transform: scale(1.2);
+}
