@@ -126,3 +126,9 @@
 - [x] Diagnosticar se há problema na sincronização de dados (usuários criados em memória mas não sincronizados com banco)
 - [x] Implementar correção de sincronização de senha (adicionar passwordHash ao tipo MegaClient e sincronizar ao criar usuário)
 - [x] Testar login com senha configurada (VALIDADO COMPLETO: login com senha padrão 123456, redefinir senha para SenhaNovaTest123, sincronizacao 100% funcional)
+
+## Fase 20: Melhorias de UX - Filtros Clicáveis
+- [x] Filtros clicáveis (Abertas, Atendimento BOT, Fechadas) com linhas separadoras
+- [x] Adicionar efeito visual ao filtro selecionado (font-semibold)
+- [x] Adicionar linhas finas separando os filtros
+- [x] Testar interatividade dos filtros

@@ -250,22 +250,28 @@ function ConversationsPage() {
         </div>
 
         {/* Filter Tabs */}
-        <div className="flex gap-3 mb-6 border-b border-slate-200 pb-3">
-          {filters.map(filter => (
-            <button
-              key={filter.id}
-              onClick={() => setSelectedFilter(filter.id)}
-              className={cn(
-                'flex items-center gap-2 px-0 py-2 font-medium text-sm transition-all duration-200 whitespace-nowrap',
-                selectedFilter === filter.id
-                  ? 'text-slate-900'
-                  : 'text-slate-600 hover:text-slate-900'
-              )}
-            >
-              <div className={cn('w-2 h-2 rounded-full', filter.color)}></div>
-              {filter.label}
-            </button>
-          ))}
+        <div className="mb-6">
+          <div className="flex gap-4 pb-3 border-b border-slate-200">
+            {filters.map((filter, index) => (
+              <div key={filter.id} className="flex items-center">
+                <button
+                  onClick={() => setSelectedFilter(filter.id)}
+                  className={cn(
+                    'flex items-center gap-2 px-0 py-2 font-medium text-sm transition-all duration-200 whitespace-nowrap cursor-pointer',
+                    selectedFilter === filter.id
+                      ? 'text-slate-900 font-semibold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  )}
+                >
+                  <div className={cn('w-2 h-2 rounded-full', filter.color)}></div>
+                  {filter.label}
+                </button>
+                {index < filters.length - 1 && (
+                  <div className="w-px h-5 bg-slate-300 mx-2"></div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* Conversations List */}
