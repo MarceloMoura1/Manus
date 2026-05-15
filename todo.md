@@ -205,8 +205,15 @@
 - [x] Testar fluxo completo (Atendimento Ativo → Conversas → Aba Abertas com nova conversa)
 
 ## Fase 28: Melhorias na Navegação e Exibição de Conversas
-- [ ] Atualizar navegação de ActiveAttendance para sempre enviar conversationId
-- [ ] Substituir mockConversations por dados reais em ConversationsPage
-- [ ] Auto-selecionar conversa criada no filtro "Abertas"
-- [ ] Adicionar testes Vitest para createConversation
-- [ ] Testar fluxo completo no navegador
+- [x] Atualizar navegação de ActiveAttendance para sempre enviar conversationId
+- [x] Substituir mockConversations por dados reais em ConversationsPage
+- [x] Auto-selecionar conversa criada no filtro "Abertas"
+- [x] Adicionar testes Vitest para createConversation
+- [x] Testar fluxo completo no navegador
+
+## Fase 29: Integração de Conversas com Backend
+- [x] Criar tRPC query para carregar conversas do banco de dados
+- [x] Integrar query em ConversationsPage para carregar dados reais
+- [x] Persistir nova conversa criada no localStorage/estado
+- [x] Garantir que conversa criada apareça na lista antes de auto-selecionar
+- [x] Testar fluxo completo: Atendimento Ativo → Criar Conversa → Aparecer em Abertas

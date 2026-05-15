@@ -125,6 +125,10 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
       
       // Redirecionar para conversas com ID da conversa
       setTimeout(() => {
+        // Armazenar ID da conversa no localStorage para recuperar na página de Conversas
+        localStorage.setItem('MEGADESK_NEW_CONVERSATION_ID', conversationId);
+        localStorage.setItem('MEGADESK_NEW_CONVERSATION_PHONE', customerData.phone);
+        
         // Chamar callback para trocar a view ativa
         if (onNavigate) {
           onNavigate('conversations');

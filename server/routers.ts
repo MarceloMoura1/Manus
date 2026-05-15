@@ -867,6 +867,29 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao criar conversa" });
         }
       }),
+    getConversations: publicProcedure
+      .query(async () => {
+        try {
+          await hydrateSyncState();
+          const client = clients[0];
+          if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
+          
+          // Retornar conversas do cliente
+          const clientConversations = conversations.filter(c => c.clientId === client.clientId);
+          return clientConversations.map(c => ({
+            id: c.id,
+            name: c.name,
+            phone: c.phone,
+            company: c.company,
+            status: c.status,
+            lastMessage: c.lastMessage,
+            timestamp: c.time,
+          }));
+        } catch (error) {
+          console.error("Erro ao buscar conversas:", error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao buscar conversas" });
+        }
+      }),
     loginByEmail: publicProcedure
       .input(z.object({ email: z.string().email(), password: z.string().min(1) }))
       .mutation(async ({ input }) => {

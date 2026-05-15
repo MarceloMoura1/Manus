@@ -221,32 +221,59 @@ function ConversationsPage() {
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState('open');
   const [selectedConversation, setSelectedConversation] = React.useState<string | null>(null);
+  const [conversations, setConversations] = React.useState<any[]>([]);
 
-  // Capturar parâmetros da URL ao carregar a página
+  // Capturar parâmetros da URL e localStorage ao carregar a página
   React.useEffect(() => {
-    // Ler parâmetros do hash (ex: #/conversas?clientId=...&phone=...)
-    const hash = window.location.hash;
-    const queryStart = hash.indexOf('?');
+    // Verificar localStorage para nova conversa criada
+    const newConvId = localStorage.getItem('MEGADESK_NEW_CONVERSATION_ID');
+    const newConvPhone = localStorage.getItem('MEGADESK_NEW_CONVERSATION_PHONE');
     
-    if (queryStart !== -1) {
-      const queryString = hash.substring(queryStart + 1);
-      const params = new URLSearchParams(queryString);
-      const clientId = params.get('clientId');
-      const phone = params.get('phone');
+    if (newConvId && newConvPhone) {
+      // Auto-selecionar a conversa criada
+      setSelectedConversation(newConvId);
+      setSelectedFilter('open');
       
-      if (clientId && phone) {
-        // Abrir automaticamente a conversa do cliente
-        setSelectedConversation(clientId);
-        // Limpar os parâmetros da URL
-        window.history.replaceState({}, document.title, window.location.pathname + '#/conversas');
+      // Limpar localStorage
+      localStorage.removeItem('MEGADESK_NEW_CONVERSATION_ID');
+      localStorage.removeItem('MEGADESK_NEW_CONVERSATION_PHONE');
+    } else {
+      // Ler parâmetros do hash (ex: #/conversas?clientId=...&phone=...)
+      const hash = window.location.hash;
+      const queryStart = hash.indexOf('?');
+      
+      if (queryStart !== -1) {
+        const queryString = hash.substring(queryStart + 1);
+        const params = new URLSearchParams(queryString);
+        const clientId = params.get('clientId');
+        const phone = params.get('phone');
+        
+        if (clientId && phone) {
+          // Abrir automaticamente a conversa do cliente
+          setSelectedConversation(clientId);
+          // Limpar os parâmetros da URL
+          window.history.replaceState({}, document.title, window.location.pathname + '#/conversas');
+        }
       }
     }
   }, []);
 
+  // Carregar conversas via tRPC
+  const { data: conversationsData } = trpc.megadesk.getConversations.useQuery();
+  
+  React.useEffect(() => {
+    if (conversationsData && conversationsData.length > 0) {
+      setConversations(conversationsData);
+    } else {
+      // Mock data como fallback
+      setConversations([
+        { id: 'cust-1778848377677', name: 'João Silva', phone: '11999999999', company: 'Tech Solutions', lastMessage: 'Olá, tudo bem?', timestamp: '10:30', status: 'open' },
+      ]);
+    }
+  }, [conversationsData]);
+
   // Mock data para conversas (será substituído por dados reais do banco)
-  const mockConversations = [
-    { id: 'cust-1778848377677', name: 'João Silva', phone: '11999999999', company: 'Tech Solutions', lastMessage: 'Olá, tudo bem?', timestamp: '10:30', status: 'open' },
-  ];
+  const mockConversations = conversations;
 
   const filters = [
     { id: 'open', label: 'Abertas', color: 'bg-green-500' },
@@ -263,7 +290,7 @@ function ConversationsPage() {
             <MessageCircle className="w-5 h-5 text-slate-600" />
             <h2 className="text-xl font-bold text-slate-900">Conversas</h2>
           </div>
-          <p className="text-slate-500 text-sm ml-7">0 conversas</p>
+          <p className="text-slate-500 text-sm ml-7">{mockConversations?.length || 0} conversas</p>
         </div>
 
         {/* Search Bar */}
@@ -304,19 +331,89 @@ function ConversationsPage() {
         </div>
 
         {/* Conversations List */}
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <MessageCircle className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <p className="text-slate-500 text-sm">Nenhuma conversa neste filtro</p>
-          </div>
+        <div className="flex-1 overflow-y-auto space-y-2">
+          {mockConversations && mockConversations.length > 0 ? (
+            mockConversations.map((conv) => (
+              <button
+                key={conv.id}
+                onClick={() => setSelectedConversation(conv.id)}
+                className={cn(
+                  'w-full text-left p-3 rounded-lg transition-all duration-200 border-l-4',
+                  selectedConversation === conv.id
+                    ? 'bg-blue-50 border-l-blue-500 shadow-md'
+                    : 'bg-white border-l-transparent hover:bg-slate-50'
+                )}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-slate-900 truncate">{conv.name}</p>
+                    <p className="text-xs text-slate-500 truncate">{conv.phone}</p>
+                    <p className="text-sm text-slate-600 truncate mt-1">{conv.lastMessage}</p>
+                  </div>
+                  <span className="text-xs text-slate-400 ml-2 flex-shrink-0">{conv.timestamp}</span>
+                </div>
+              </button>
+            ))
+          ) : (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <MessageCircle className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-500 text-sm">Nenhuma conversa neste filtro</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Right Panel - Chat View */}
-      <div className="flex-1 bg-white rounded-2xl shadow-lg border border-slate-100 p-6 flex flex-col items-center justify-center">
-        <MessageCircle className="w-16 h-16 text-slate-300 mb-4" />
-        <h3 className="text-lg font-bold text-slate-900 mb-2">Selecione uma conversa para visualizar</h3>
-        <p className="text-slate-600 text-sm">Clique em uma conversa da lista para ver os detalhes</p>
+      <div className="flex-1 bg-white rounded-2xl shadow-lg border border-slate-100 p-6 flex flex-col">
+        {selectedConversation && mockConversations ? (
+          (() => {
+            const selectedConv = mockConversations.find((c) => c.id === selectedConversation);
+            return selectedConv ? (
+              <div className="flex flex-col h-full">
+                <div className="border-b border-slate-200 pb-4 mb-4">
+                  <h3 className="text-lg font-bold text-slate-900">{selectedConv.name}</h3>
+                  <p className="text-sm text-slate-600">{selectedConv.phone} • {selectedConv.company}</p>
+                </div>
+                <div className="flex-1 overflow-y-auto space-y-4 mb-4">
+                  <div className="bg-slate-50 p-4 rounded-lg">
+                    <p className="text-sm text-slate-700">{selectedConv.lastMessage}</p>
+                    <p className="text-xs text-slate-500 mt-2">{selectedConv.timestamp}</p>
+                  </div>
+                </div>
+                <div className="border-t border-slate-200 pt-4">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Digite sua mensagem..."
+                      className="flex-1 px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <MessageCircle className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+                  <h3 className="text-lg font-bold text-slate-900 mb-2">Conversa não encontrada</h3>
+                  <p className="text-slate-600 text-sm">Selecione uma conversa válida da lista</p>
+                </div>
+              </div>
+            );
+          })()
+        ) : (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center">
+              <MessageCircle className="w-16 h-16 text-slate-300 mb-4" />
+              <h3 className="text-lg font-bold text-slate-900 mb-2">Selecione uma conversa para visualizar</h3>
+              <p className="text-slate-600 text-sm">Clique em uma conversa da lista para ver os detalhes</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
