@@ -151,7 +151,7 @@ export async function getChamadoWithActivities(
     observations: c.observations,
     status: c.status,
     priority: c.priority,
-    assignedTo: c.assignedTo,
+    assignedTo: c.assignedTo || undefined,
     createdAt: c.createdAt,
     activities: activities.map(a => ({
       id: a.activityId,

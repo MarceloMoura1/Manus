@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { trpc } from '@/lib/trpc';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth } from '@/_core/hooks/useAuth';
 import { useDebounce } from '@/hooks/useDebounce';
 import {
   AlertCircle,
@@ -47,13 +47,13 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = React.useState('');
   const debouncedSearchTerm = useDebounce(searchTerm, 500);
-  const [selectedFilter, setSelectedFilter] = React.useState('total');
+  const [selectedFilter, setSelectedFilter] = React.useState<'total' | 'open' | 'in_progress' | 'waiting' | 'closed'>('total');
   const [selectedChamado, setSelectedChamado] = React.useState<Chamado | null>(null);
   const [showDetailModal, setShowDetailModal] = React.useState(false);
   const [newActivityText, setNewActivityText] = React.useState('');
   const [editingActivityId, setEditingActivityId] = React.useState<string | null>(null);
   const [editingActivityText, setEditingActivityText] = React.useState('');
-  const [newStatus, setNewStatus] = React.useState('');
+  const [newStatus, setNewStatus] = React.useState<'open' | 'in_progress' | 'waiting' | 'closed'>('open');
   const [newAttendant, setNewAttendant] = React.useState('');
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [currentPage, setCurrentPage] = React.useState(1);
@@ -95,12 +95,16 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
   // Queries tRPC
   const chamadosQuery = trpc.chamados.list.useQuery(
     {
-      status: selectedFilter === 'total' ? 'total' : selectedFilter,
+      status: selectedFilter,
       limit: pageSize,
       offset: (currentPage - 1) * pageSize,
     },
-    { enabled: !!user?.id }
+    { enabled: !!user?.user?.id }
   );
+  
+  React.useEffect(() => {
+    console.log('[DEBUG] User:', user, 'Query enabled:', !!user?.user?.id);
+  }, [user]);
 
   const updateChamadoMutation = trpc.chamados.update.useMutation();
   const addActivityMutation = trpc.chamados.addActivity.useMutation();
@@ -119,7 +123,7 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
       const result = await addActivityMutation.mutateAsync({
         chamadoId: selectedChamado.id,
         description: newActivityText,
-        attendant: user?.name || 'Atendente',
+        attendant: user?.user?.name || 'Atendente',
       });
 
       if (result.chamado) {
@@ -159,13 +163,12 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
     try {
       const result = await updateChamadoMutation.mutateAsync({
         chamadoId: selectedChamado.id,
-        clientId: user?.id || '',
         status: status as any,
       });
 
       if (result.chamado) {
         setSelectedChamado(result.chamado);
-        setNewStatus('');
+        setNewStatus('open');
         showToast('Status atualizado com sucesso', 'success');
         // Recarregar lista
         chamadosQuery.refetch();
@@ -276,7 +279,6 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
       } else if (confirmDialog.action === 'close') {
         const result = await updateChamadoMutation.mutateAsync({
           chamadoId: selectedChamado.id,
-          clientId: user?.id || '',
           status: 'closed',
         });
         if (result.chamado) {
@@ -336,7 +338,7 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
 
       if (result.chamado) {
         setSelectedChamado(result.chamado);
-        setNewAttendant('');
+        setNewAttendant('media');
         showToast('Atendente atualizado com sucesso', 'success');
         // Recarregar lista
         chamadosQuery.refetch();
@@ -379,7 +381,7 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
     closed: chamados.filter(c => c.status === 'closed').length,
   };
 
-  const statusCards = [
+  const statusCards: Array<{ id: 'total' | 'open' | 'in_progress' | 'waiting' | 'closed'; label: string; value: number; color: string; textColor: string }> = [
     { id: 'total', label: 'Total', value: statusCounts.total, color: 'bg-slate-900', textColor: 'text-white' },
     { id: 'open', label: 'Abertos', value: statusCounts.open, color: 'bg-blue-50', textColor: 'text-blue-600' },
     { id: 'in_progress', label: 'Em Progresso', value: statusCounts.in_progress, color: 'bg-yellow-50', textColor: 'text-yellow-600' },
@@ -845,7 +847,7 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700 block mb-1">Prioridade</label>
-              <Select value={newChamadoForm.priority} onValueChange={value => setNewChamadoForm({...newChamadoForm, priority: value})}>
+              <Select value={newChamadoForm.priority} onValueChange={(value: 'media' | 'baixa' | 'alta' | 'critica') => setNewChamadoForm({...newChamadoForm, priority: value})}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>

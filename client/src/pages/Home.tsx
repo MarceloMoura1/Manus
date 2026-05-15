@@ -226,7 +226,7 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
 
 function ConversationsPage() {
   const [searchTerm, setSearchTerm] = React.useState('');
-  const [selectedFilter, setSelectedFilter] = React.useState('open');
+  const [selectedFilter, setSelectedFilter] = React.useState<'open' | 'bot' | 'closed'>('open');
   const [selectedConversation, setSelectedConversation] = React.useState<string | null>(null);
   const [conversations, setConversations] = React.useState<any[]>([]);
   const [editModalOpen, setEditModalOpen] = React.useState(false);
@@ -298,7 +298,7 @@ function ConversationsPage() {
   // Mock data para conversas (será substituído por dados reais do banco)
   const mockConversations = conversations;
 
-  const filters = [
+  const filters: Array<{ id: 'open' | 'bot' | 'closed'; label: string; color: string }> = [
     { id: 'open', label: 'Abertas', color: 'bg-green-500' },
     { id: 'bot', label: 'Atendimento BOT', color: 'bg-slate-700' },
     { id: 'closed', label: 'Fechadas', color: 'bg-slate-900' },
@@ -654,7 +654,6 @@ type Ticket = {
   title: string;
   observations: string;
   status: string;
-  phone: string;
   priority?: string;
   assignedTo?: string;
   createdAt: Date;
@@ -664,17 +663,23 @@ type Ticket = {
 export function TicketsPage() {
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = React.useState('');
-  const [selectedFilter, setSelectedFilter] = React.useState('total');
-  const [selectedChamado, setSelectedChamado] = React.useState<Chamado | null>(null);
+  const [selectedFilter, setSelectedFilter] = React.useState<'total' | 'open' | 'in_progress' | 'waiting' | 'closed'>('total');
+  const [selectedChamado, setSelectedChamado] = React.useState<Ticket | null>(null);
   const [showDetailModal, setShowDetailModal] = React.useState(false);
   const [newActivityText, setNewActivityText] = React.useState('');
   const [editingActivityId, setEditingActivityId] = React.useState<string | null>(null);
   const [editingActivityText, setEditingActivityText] = React.useState('');
-  const [newStatus, setNewStatus] = React.useState('');
+  const [newStatus, setNewStatus] = React.useState<'open' | 'in_progress' | 'waiting' | 'closed'>('open');
   const [newAttendant, setNewAttendant] = React.useState('');
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [showNewChamadoModal, setShowNewChamadoModal] = React.useState(false);
-  const [newChamadoForm, setNewChamadoForm] = React.useState({
+  const [newChamadoForm, setNewChamadoForm] = React.useState<{
+    customerName: string;
+    company: string;
+    title: string;
+    observations: string;
+    priority: 'media' | 'baixa' | 'alta' | 'critica';
+  }>({
     customerName: '',
     company: '',
     title: '',
@@ -686,10 +691,9 @@ export function TicketsPage() {
   // Queries tRPC
   const chamadosQuery = trpc.chamados.list.useQuery(
     {
-      clientId: user?.id || '',
-      status: selectedFilter === 'total' ? 'total' : selectedFilter,
+      status: selectedFilter,
     },
-    { enabled: !!user?.id }
+    { enabled: !!user?.user?.id }
   );
 
   const updateChamadoMutation = trpc.chamados.update.useMutation();
@@ -708,9 +712,8 @@ export function TicketsPage() {
     try {
       const result = await addActivityMutation.mutateAsync({
         chamadoId: selectedChamado.id,
-        clientId: user?.id || '',
         description: newActivityText,
-        attendant: user?.name || 'Atendente',
+        attendant: user?.user?.name || 'Atendente',
       });
 
       if (result.chamado) {
@@ -730,7 +733,6 @@ export function TicketsPage() {
       const result = await editActivityMutation.mutateAsync({
         activityId: editingActivityId,
         chamadoId: selectedChamado.id,
-        clientId: user?.id || '',
         description: editingActivityText,
       });
 
@@ -751,13 +753,12 @@ export function TicketsPage() {
     try {
       const result = await updateChamadoMutation.mutateAsync({
         chamadoId: selectedChamado.id,
-        clientId: user?.id || '',
-        status: status as any,
+        status: newStatus,
       });
 
       if (result.chamado) {
         setSelectedChamado(result.chamado);
-        setNewStatus('');
+        setNewStatus('open');
         showToast('Status atualizado com sucesso', 'success');
         // Recarregar lista
         chamadosQuery.refetch();
@@ -773,8 +774,7 @@ export function TicketsPage() {
     try {
       const result = await updateChamadoMutation.mutateAsync({
         chamadoId: selectedChamado.id,
-        clientId: user?.id || '',
-        assignedTo: attendant,
+        assignedTo: newAttendant,
       });
 
       if (result.chamado) {
@@ -848,7 +848,7 @@ export function TicketsPage() {
     closed: chamados.filter(c => c.status === 'closed').length,
   };
 
-  const statusCards = [
+  const statusCards: Array<{ id: 'total' | 'open' | 'in_progress' | 'waiting' | 'closed'; label: string; value: number; color: string; textColor: string }> = [
     { id: 'total', label: 'Total', value: statusCounts.total, color: 'bg-slate-900', textColor: 'text-white' },
     { id: 'open', label: 'Abertos', value: statusCounts.open, color: 'bg-blue-50', textColor: 'text-blue-600' },
     { id: 'in_progress', label: 'Em Progresso', value: statusCounts.in_progress, color: 'bg-yellow-50', textColor: 'text-yellow-600' },
@@ -1061,7 +1061,7 @@ export function TicketsPage() {
                   {selectedChamado.activities.length === 0 ? (
                     <p className="text-sm text-slate-500 text-center py-4">Nenhuma atividade registrada</p>
                   ) : (
-                    selectedChamado.activities.map((activity, idx) => (
+                    selectedChamado.activities.map((activity: TicketActivity, idx: number) => (
                       <div key={activity.id} className="flex gap-4">
                         <div className="flex flex-col items-center">
                           <div className="w-3 h-3 rounded-full bg-blue-600 mt-2" />
@@ -1222,7 +1222,7 @@ export function TicketsPage() {
 
             <div>
               <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 block mb-2">Prioridade</label>
-              <Select value={newChamadoForm.priority} onValueChange={priority => setNewChamadoForm({...newChamadoForm, priority})}>
+              <Select value={newChamadoForm.priority} onValueChange={priority => setNewChamadoForm({...newChamadoForm, priority: priority as 'media' | 'baixa' | 'alta' | 'critica'})}>
                 <SelectTrigger className="bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-blue-500 transition-colors">
                   <SelectValue />
                 </SelectTrigger>

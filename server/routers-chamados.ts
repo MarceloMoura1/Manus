@@ -32,7 +32,10 @@ export const chamadosRouter = router({
     )
     .query(async ({ input, ctx }) => {
       try {
-        const chamados = await listChamados(String(ctx.user.id), input.status, input.limit, input.offset);
+        const clientId = ctx.tenantId || String(ctx.user.id);
+        console.log('[DEBUG] Listing chamados for clientId:', clientId, 'status:', input.status);
+        const chamados = await listChamados(clientId, input.status, input.limit, input.offset);
+        console.log('[DEBUG] Found chamados:', chamados.length);
         return { chamados, limit: input.limit, offset: input.offset };
       } catch (error) {
         throw new TRPCError({
@@ -54,7 +57,8 @@ export const chamadosRouter = router({
     )
     .query(async ({ input, ctx }) => {
       try {
-        const chamado = await getChamadoWithActivities(input.chamadoId, String(ctx.user.id));
+        const clientId = ctx.tenantId || String(ctx.user.id);
+        const chamado = await getChamadoWithActivities(input.chamadoId, clientId);
         if (!chamado) {
           throw new TRPCError({
             code: "NOT_FOUND",
@@ -89,8 +93,10 @@ export const chamadosRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
+        const clientId = ctx.tenantId || String(ctx.user.id);
+        console.log('[DEBUG] Creating chamado with clientId:', clientId, 'input:', input);
         const chamado = await createChamado(
-          String(ctx.user.id),
+          clientId,
           input.customerId,
           input.customerName,
           input.company,
@@ -101,6 +107,7 @@ export const chamadosRouter = router({
         );
         return { chamado };
       } catch (error) {
+        console.error('[ERROR] Failed to create chamado:', error);
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: `Erro ao criar chamado: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
@@ -125,9 +132,10 @@ export const chamadosRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
+        const clientId = ctx.tenantId || String(ctx.user.id);
         const { chamadoId, ...updates } = input;
-        await updateChamado(chamadoId, String(ctx.user.id), updates);
-        const chamado = await getChamadoWithActivities(chamadoId, String(ctx.user.id));
+        await updateChamado(chamadoId, clientId, updates);
+        const chamado = await getChamadoWithActivities(chamadoId, clientId);
         if (!chamado) {
           throw new TRPCError({
             code: "NOT_FOUND",
@@ -158,6 +166,7 @@ export const chamadosRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
+        const clientId = ctx.tenantId || String(ctx.user.id);
         if (!input.description.trim()) {
           throw new TRPCError({
             code: "BAD_REQUEST",
@@ -167,12 +176,12 @@ export const chamadosRouter = router({
 
         await addActivityToChamado(
           input.chamadoId,
-          String(ctx.user.id),
+          clientId,
           input.description,
           input.attendant
         );
 
-        const chamado = await getChamadoWithActivities(input.chamadoId, String(ctx.user.id));
+        const chamado = await getChamadoWithActivities(input.chamadoId, clientId);
         if (!chamado) {
           throw new TRPCError({
             code: "NOT_FOUND",
@@ -203,6 +212,7 @@ export const chamadosRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
+        const clientId = ctx.tenantId || String(ctx.user.id);
         if (!input.description.trim()) {
           throw new TRPCError({
             code: "BAD_REQUEST",
@@ -213,11 +223,11 @@ export const chamadosRouter = router({
         await editActivity(
           input.activityId,
           input.chamadoId,
-          String(ctx.user.id),
+          clientId,
           input.description
         );
 
-        const chamado = await getChamadoWithActivities(input.chamadoId, String(ctx.user.id));
+        const chamado = await getChamadoWithActivities(input.chamadoId, clientId);
         if (!chamado) {
           throw new TRPCError({
             code: "NOT_FOUND",
