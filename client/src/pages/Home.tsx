@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
+const MEGADESK_ACTIVE_PAGE_KEY = "megadesk_active_page_v1";
 
 type MegaDeskSession = {
   clientId: string;
@@ -551,13 +552,21 @@ function NotificationsPage() {
 
 function Shell() {
   const { theme, toggleTheme } = useTheme();
-  const [active, setActive] = useState<RouteId>("home");
+  const [active, setActive] = useState<RouteId>(() => {
+    const stored = localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY);
+    return (stored as RouteId) || "home";
+  });
   const [session, setSession] = useState<MegaDeskSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [indicadores, setIndicadores] = useState<any>(null);
 
   const loginMutation = trpc.megadesk.loginByEmail.useMutation();
+
+  // Persistir página ativa no localStorage
+  useEffect(() => {
+    localStorage.setItem(MEGADESK_ACTIVE_PAGE_KEY, active);
+  }, [active]);
 
   useEffect(() => {
     const storedSession = localStorage.getItem(MEGADESK_SESSION_KEY);
