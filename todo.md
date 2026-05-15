@@ -171,3 +171,6 @@
 - [x] Testar se a página persiste após recarregar
 - [x] Validar que a interface não pisca mais
 - [x] Bug corrigido com sucesso - página persiste após recarregar
+- [x] Remover useLocation do wouter para evitar re-renderizações
+- [x] Remover animações de fade-in que causavam piscar
+- [x] Validar que o piscar foi eliminado (COMPLETO - interface renderiza suavemente)

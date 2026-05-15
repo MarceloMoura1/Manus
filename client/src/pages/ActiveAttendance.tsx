@@ -2,10 +2,8 @@ import React, { useState } from 'react';
 import { Phone, User, Building2, CheckCircle, AlertCircle, Loader2, ArrowRight, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
-import { useLocation } from 'wouter';
 
 export function ActiveAttendancePage() {
-  const [, setLocation] = useLocation();
   const [phoneNumber, setPhoneNumber] = useState('');
   const [customerData, setCustomerData] = useState<any>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -116,7 +114,11 @@ export function ActiveAttendancePage() {
         });
         setSuccessMessage('Chamado criado com sucesso!');
       }
-      setTimeout(() => setLocation('/conversas'), 800);
+      // Redirecionar para conversas após sucesso
+      setTimeout(() => {
+        // Usar window.location para evitar re-renderizações do wouter
+        window.location.hash = '#/conversas';
+      }, 800);
       return;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao processar solicitação');
@@ -142,7 +144,7 @@ export function ActiveAttendancePage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-50 p-4 md:p-8">
       <div className="max-w-2xl mx-auto">
         {/* Header */}
-        <div className="mb-8 animate-fade-in">
+        <div className="mb-8">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
               <Phone className="w-6 h-6 text-white" />
@@ -154,7 +156,7 @@ export function ActiveAttendancePage() {
 
         {/* Success Message */}
         {successMessage && (
-          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl flex items-center gap-3 animate-slide-down">
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl flex items-center gap-3">
             <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
             <p className="text-sm text-green-700 font-medium">{successMessage}</p>
           </div>
@@ -162,7 +164,7 @@ export function ActiveAttendancePage() {
 
         {/* Error Message */}
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 animate-slide-down">
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3">
             <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
             <p className="text-sm text-red-700 font-medium">{error}</p>
           </div>
