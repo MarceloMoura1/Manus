@@ -455,8 +455,7 @@ function Shell() {
                 key={item.id}
                 onClick={() => setActive(item.id)}
                 className={cn(
-                  "w-full flex items-center py-3 rounded-lg transition-all duration-300 relative",
-                  sidebarOpen ? "px-4" : "px-2 justify-center",
+                  "flex items-center py-3 rounded-lg transition-all duration-300 relative px-2 justify-center",
                   isActive
                     ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-lg"
                     : "text-slate-300 hover:text-white hover:bg-slate-800/50"
@@ -465,7 +464,7 @@ function Shell() {
               >
                 <Icon className="w-5 h-5 flex-shrink-0" />
                 {sidebarOpen && (
-                  <span className="text-base font-medium transition-opacity duration-300 overflow-hidden whitespace-nowrap ml-3">
+                  <span className="text-base font-medium transition-opacity duration-300 overflow-hidden whitespace-nowrap ml-3 w-40">
                     {item.label}
                   </span>
                 )}
@@ -492,8 +491,7 @@ function Shell() {
                 key={item.id}
                 onClick={() => setActive(item.id)}
                 className={cn(
-                  "w-full flex items-center py-3 rounded-lg transition-all duration-300 relative",
-                  sidebarOpen ? "px-4" : "px-2 justify-center",
+                  "flex items-center py-3 rounded-lg transition-all duration-300 relative px-2 justify-center",
                   isActive
                     ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-lg"
                     : "text-slate-300 hover:text-white hover:bg-slate-800/50"
@@ -502,7 +500,7 @@ function Shell() {
               >
                 <Icon className="w-5 h-5 flex-shrink-0" />
                 {sidebarOpen && (
-                  <span className="text-base font-medium transition-opacity duration-300 overflow-hidden whitespace-nowrap ml-3">
+                  <span className="text-base font-medium transition-opacity duration-300 overflow-hidden whitespace-nowrap ml-3 w-40">
                     {item.label}
                   </span>
                 )}
@@ -523,13 +521,12 @@ function Shell() {
           <button
             onClick={toggleTheme}
             className={cn(
-              "w-full flex items-center py-3 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all duration-200",
-              sidebarOpen ? "px-4" : "px-2 justify-center"
+              "flex items-center py-3 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all duration-200 px-2 justify-center"
             )}
             title={`Mudar para modo ${theme === 'light' ? 'escuro' : 'claro'}`}
           >
             {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
-            {sidebarOpen && <span className="text-base font-medium ml-3">{theme === 'light' ? 'Modo Escuro' : 'Modo Claro'}</span>}
+            {sidebarOpen && <span className="text-base font-medium ml-3 w-40">{theme === 'light' ? 'Modo Escuro' : 'Modo Claro'}</span>}
           </button>
           
           {/* Logout Button */}
@@ -539,15 +536,14 @@ function Shell() {
               setSession(null);
             }}
             className={cn(
-              "w-full flex items-center py-3 rounded-lg text-slate-300 hover:text-red-400 hover:bg-red-900/20 transition-all duration-200",
-              sidebarOpen ? "px-4" : "px-2 justify-center"
+              "flex items-center py-3 rounded-lg text-slate-300 hover:text-red-400 hover:bg-red-900/20 transition-all duration-200 px-2 justify-center"
             )}
             title="Sair"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
             </svg>
-            {sidebarOpen && <span className="text-base font-medium ml-3">Sair</span>}
+            {sidebarOpen && <span className="text-base font-medium ml-3 w-40">Sair</span>}
           </button>
         </div>
       </div>
