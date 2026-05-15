@@ -457,7 +457,9 @@ function Shell() {
                 className={cn(
                   "flex items-center py-3 rounded-lg transition-all duration-300 relative px-2",
                   isActive
-                    ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50"
+                    ? sidebarOpen
+                      ? "-mx-3 px-3 bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50"
+                      : "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50"
                     : "text-slate-300 hover:text-white hover:bg-slate-800/50"
                 )}
                 title={item.label}
@@ -493,7 +495,9 @@ function Shell() {
                 className={cn(
                   "flex items-center py-3 rounded-lg transition-all duration-300 relative px-2",
                   isActive
-                    ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50"
+                    ? sidebarOpen
+                      ? "-mx-3 px-3 bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50"
+                      : "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50"
                     : "text-slate-300 hover:text-white hover:bg-slate-800/50"
                 )}
                 title={item.label}
