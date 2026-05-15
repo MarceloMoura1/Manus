@@ -680,6 +680,7 @@ function Shell() {
                     ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50 rounded-xl"
                     : "text-slate-300 hover:text-white hover:bg-slate-800/50"
                 )}
+                style={isActive && sidebarOpen ? { width: '215px' } : {}}
                 title={item.label}
               >
                 <Icon className="w-5 h-5 flex-shrink-0" />
@@ -716,6 +717,7 @@ function Shell() {
                     ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50 rounded-xl"
                     : "text-slate-300 hover:text-white hover:bg-slate-800/50"
                 )}
+                style={isActive && sidebarOpen ? { width: '215px' } : {}}
                 title={item.label}
               >
                 <Icon className="w-5 h-5 flex-shrink-0" />
