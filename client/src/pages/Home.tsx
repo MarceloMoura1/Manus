@@ -5,7 +5,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { validateNewChamado, ValidationError } from "@/lib/validations";
 import { ActiveAttendancePage } from "./ActiveAttendance";
-import { ChamadoDetailOverlay } from "@/components/ChamadoDetailOverlay";
+import { ChamadoDetailPage } from "./ChamadoDetailPage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -1009,12 +1009,13 @@ export function TicketsPage() {
         </table>
       </div>
 
-      {/* Overlay de Detalhes */}
-      <ChamadoDetailOverlay
-        chamado={selectedChamado}
-        isOpen={showDetailModal}
-        onClose={() => setShowDetailModal(false)}
-      />
+      {/* Página de Detalhes */}
+      {showDetailModal && selectedChamado && (
+        <ChamadoDetailPage
+          chamado={selectedChamado}
+          onBack={() => setShowDetailModal(false)}
+        />
+      )}
 
       {/* Modal de Novo Chamado */}
       <Dialog open={showNewChamadoModal} onOpenChange={setShowNewChamadoModal}>
