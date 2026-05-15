@@ -1,165 +1,280 @@
-import React from 'react';
-import { Menu, X, Home as HomeIcon, Phone, MessageCircle, Clipboard, MapPin, Building2, Settings, Zap, Moon, LogOut, Bell, Sparkles, Clock, ChevronRight } from 'lucide-react';
+import React, { useState, useEffect } from "react";
+import { navigateToPlatform } from "@/lib/platformRouting";
+import { trpc } from "@/lib/trpc";
+import { useTheme } from "@/contexts/ThemeContext";
+import {
+  ArrowRight,
+  Bell,
+  Bot,
+  CheckCircle2,
+  Clock,
+  ClipboardList,
+  Cog,
+  Eye,
+  EyeOff,
+  Home as HomeIcon,
+  Lock,
+  Mail,
+  MapPin,
+  Menu,
+  MessageCircle,
+  MessageSquare,
+  PackageSearch,
+  PhoneCall,
+  Plus,
+  Search,
+  Send,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  Ticket,
+  Trash2,
+  User,
+  Zap,
+  AlertCircle,
+  X,
+} from "lucide-react";
 
-function HomePage() {
+const MEGADESK_SESSION_KEY = "megadesk_session_v1";
+
+type MegaDeskSession = {
+  clientId: string;
+  clientName: string;
+  permissions: string[];
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userCompany: string;
+};
+
+type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp" | "settings" | "bot-config" | "ai-assistant" | "notifications";
+
+const cn = (...classes: any[]) => classes.filter(Boolean).join(" ");
+
+function LoadingSpinner() {
   return (
-    <div className="space-y-6">
-      <div className="bg-gradient-to-br from-blue-900 to-blue-800 rounded-2xl shadow-lg p-8 text-white">
-        <div className="flex items-center gap-2 mb-4 w-fit px-3 py-1 rounded-full border border-blue-400/30 bg-blue-400/10">
-          <Sparkles className="w-4 h-4" />
-          <span className="text-xs font-medium">PLATAFORMA INTELIGENTE</span>
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="space-y-4 text-center">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-100 animate-pulse">
+          <Zap className="w-8 h-8 text-blue-600" />
         </div>
-        <h1 className="text-5xl font-bold mb-2">
-          Mega<span className="text-blue-300">Desk</span>
-        </h1>
-        <p className="text-xl text-blue-100 mb-6">Atendimento Inteligente em Um Lugar</p>
-        <p className="text-blue-100 mb-8">Gerencie conversas WhatsApp, chamados, rastreio e atendimento com IA. Tudo integrado e sincronizado.</p>
-        <div className="flex gap-3">
-          <button className="px-6 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg font-medium transition-colors">Acessar Dashboard</button>
-          <button className="px-6 py-2 border border-blue-300 hover:bg-blue-400/10 rounded-lg font-medium transition-colors">Documentação</button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
-              <MessageCircle className="w-5 h-5 text-blue-600" />
-            </div>
-            <span className="text-xs font-medium text-slate-500 uppercase">Conversas Abertas</span>
-          </div>
-          <p className="text-3xl font-bold text-slate-900">0</p>
-          <p className="text-sm text-slate-600">em andamento</p>
-        </div>
-
-        <div className="bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
-              <Clipboard className="w-5 h-5 text-green-600" />
-            </div>
-            <span className="text-xs font-medium text-slate-500 uppercase">Taxa de Resolução</span>
-          </div>
-          <p className="text-3xl font-bold text-slate-900">0%</p>
-          <p className="text-sm text-slate-600">bot inteligente</p>
-        </div>
-
-        <div className="bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
-              <Clipboard className="w-5 h-5 text-purple-600" />
-            </div>
-            <span className="text-xs font-medium text-slate-500 uppercase">Chamados Ativos</span>
-          </div>
-          <p className="text-3xl font-bold text-slate-900">0</p>
-          <p className="text-sm text-slate-600">aguardando</p>
-        </div>
-
-        <div className="bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-lg bg-orange-100 flex items-center justify-center">
-              <Clock className="w-5 h-5 text-orange-600" />
-            </div>
-            <span className="text-xs font-medium text-slate-500 uppercase">Tempo Médio</span>
-          </div>
-          <p className="text-3xl font-bold text-slate-900">0m</p>
-          <p className="text-sm text-slate-600">resposta</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-          <h2 className="text-xl font-bold text-slate-900 mb-4">Atalhos Principais</h2>
-          <div className="space-y-3">
-            <button className="w-full p-4 rounded-lg bg-blue-500 hover:bg-blue-600 text-white font-medium transition-colors flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <MessageCircle className="w-5 h-5" />
-                <div className="text-left">
-                  <p className="font-medium">Conversas</p>
-                  <p className="text-xs text-blue-100">Central de atendimento</p>
-                </div>
-              </div>
-              <ChevronRight className="w-5 h-5" />
-            </button>
-            <button className="w-full p-4 rounded-lg bg-purple-500 hover:bg-purple-600 text-white font-medium transition-colors flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Clipboard className="w-5 h-5" />
-                <div className="text-left">
-                  <p className="font-medium">Chamados</p>
-                  <p className="text-xs text-purple-100">Gerenciar tickets</p>
-                </div>
-              </div>
-              <ChevronRight className="w-5 h-5" />
-            </button>
-            <button className="w-full p-4 rounded-lg bg-green-500 hover:bg-green-600 text-white font-medium transition-colors flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <MapPin className="w-5 h-5" />
-                <div className="text-left">
-                  <p className="font-medium">Rastreio</p>
-                  <p className="text-xs text-green-100">Monitorar atividades</p>
-                </div>
-              </div>
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-          <h2 className="text-xl font-bold text-slate-900 mb-4">Atividades Recentes</h2>
-          <div className="space-y-3">
-            <div className="p-3 rounded-lg bg-slate-50 border border-slate-100">
-              <p className="font-medium text-slate-900">Novo chamado</p>
-              <p className="text-sm text-slate-600">Solicitação de backup</p>
-              <p className="text-xs text-slate-500 mt-1">Agora</p>
-            </div>
-            <div className="p-3 rounded-lg bg-slate-50 border border-slate-100">
-              <p className="font-medium text-slate-900">BOT ativo</p>
-              <p className="text-sm text-slate-600">Cliente em triagem</p>
-              <p className="text-xs text-slate-500 mt-1">5 min</p>
-            </div>
-            <div className="p-3 rounded-lg bg-slate-50 border border-slate-100">
-              <p className="font-medium text-slate-900">Token OK</p>
-              <p className="text-sm text-slate-600">MegaAdmin validado</p>
-              <p className="text-xs text-slate-500 mt-1">12 min</p>
-            </div>
-          </div>
-        </div>
+        <p className="text-slate-600 font-medium">Carregando dados operacionais do servidor...</p>
       </div>
     </div>
   );
 }
 
+function AccessDeniedPage() {
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+      <div className="text-center space-y-4">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-100">
+          <AlertCircle className="w-8 h-8 text-red-600" />
+        </div>
+        <h2 className="text-2xl font-bold text-slate-900">Acesso Negado</h2>
+        <p className="text-slate-600">Usuário sem acesso ativo neste cliente.</p>
+      </div>
+    </div>
+  );
+}
+
+function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId) => void; indicadores?: { conversasAbertas: number; chamadosAbertos: number; tempoMedio: string; resolucaoBot: string } }) {
+  const kpiCards = [
+    { label: "Conversas Abertas", value: String(indicadores?.conversasAbertas ?? 0), icon: MessageCircle, note: "em andamento" },
+    { label: "Taxa de Resolução", value: indicadores?.resolucaoBot ?? "0%", icon: CheckCircle2, note: "bot inteligente" },
+    { label: "Chamados Ativos", value: String(indicadores?.chamadosAbertos ?? 0), icon: AlertCircle, note: "aguardando" },
+    { label: "Tempo Médio", value: indicadores?.tempoMedio ?? "0m", icon: Ticket, note: "resposta" },
+  ];
+
+  const quickActions = [
+    { title: "Conversas", subtitle: "Central de atendimento", route: "conversations" as RouteId },
+    { title: "Chamados", subtitle: "Gerenciar tickets", route: "tickets" as RouteId },
+    { title: "Rastreio", subtitle: "Monitorar atividades", route: "tracking" as RouteId },
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Hero Section - Profissional e Estilizado */}
+      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-blue-900 to-slate-900 p-16 shadow-2xl">
+        <div className="absolute inset-0 opacity-20">
+          <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500 rounded-full blur-3xl" />
+          <div className="absolute bottom-0 left-0 w-96 h-96 bg-slate-500 rounded-full blur-3xl" />
+        </div>
+        <div className="relative z-10 grid gap-12 lg:grid-cols-2 lg:items-center">
+          <div className="space-y-8 animate-fade-in">
+            <div className="space-y-4">
+              <div className="inline-flex items-center gap-3 rounded-full bg-blue-500/20 backdrop-blur px-4 py-2 border border-blue-400/30">
+                <Zap className="h-4 w-4 text-blue-300 animate-pulse" />
+                <span className="text-sm font-semibold uppercase tracking-wider text-blue-200">Plataforma Inteligente</span>
+              </div>
+              <h1 className="text-7xl font-black text-white leading-tight animate-slide-up" style={{ animationDelay: '0.1s' }}>
+                Mega<span className="bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">Desk</span>
+              </h1>
+              <p className="text-2xl text-blue-100 font-semibold animate-slide-up" style={{ animationDelay: '0.2s' }}>Atendimento Inteligente em Um Lugar</p>
+            </div>
+            <p className="text-lg text-slate-300 leading-relaxed max-w-lg animate-slide-up" style={{ animationDelay: '0.3s' }}>
+              Gerencie conversas WhatsApp, chamados, rastreio e atendimento com IA. Tudo integrado e sincronizado.
+            </p>
+            <div className="flex gap-4 pt-4 animate-slide-up" style={{ animationDelay: '0.4s' }}>
+              <button onClick={() => setActive('conversations')} className="px-8 py-3 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-blue-500/50 hover:-translate-y-1 active:scale-95">
+                Acessar Dashboard
+              </button>
+              <button className="px-8 py-3 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl border border-white/30 transition-all duration-200 backdrop-blur hover:shadow-lg">
+                Documentação
+              </button>
+            </div>
+          </div>
+          <div className="hidden lg:flex items-center justify-center animate-float">
+            <div className="relative">
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-400 to-cyan-300 rounded-3xl blur-2xl opacity-40 animate-pulse" />
+              <div className="relative bg-gradient-to-br from-blue-400 to-cyan-300 rounded-3xl p-12 shadow-2xl flex items-center justify-center">
+                <Zap className="w-40 h-40 text-white opacity-90 animate-bounce" style={{ animationDuration: '2s' }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* KPI Cards - Profissionais */}
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {kpiCards.map((card, idx) => {
+          const Icon = card.icon;
+          return (
+            <div
+              key={card.label}
+              className="group relative overflow-hidden rounded-2xl bg-white p-8 shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1 cursor-pointer animate-fade-in border border-slate-100"
+              style={{ animationDelay: `${idx * 0.1}s` }}
+            >
+              <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-blue-400/10 to-cyan-300/10 rounded-full blur-2xl group-hover:from-blue-400/20 group-hover:to-cyan-300/20 transition-all duration-300" />
+              <div className="relative z-10">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center group-hover:from-blue-200 group-hover:to-cyan-200 transition-all duration-300">
+                    <Icon className="w-6 h-6 text-blue-600" />
+                  </div>
+                </div>
+                <p className="text-sm font-semibold text-slate-600 uppercase tracking-wide mb-2">{card.label}</p>
+                <p className="text-4xl font-black text-slate-900 mb-1">{card.value}</p>
+                <p className="text-xs font-medium text-slate-500">{card.note}</p>
+              </div>
+              <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-400 to-cyan-300 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left" />
+            </div>
+          );
+        })}
+      </section>
+
+      {/* Actions and Activity - Profissional */}
+      <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
+        {/* Quick Actions */}
+        <div className="rounded-2xl bg-white p-10 shadow-lg border border-slate-100 animate-fade-in" style={{ animationDelay: '0.4s' }}>
+          <h2 className="text-2xl font-bold text-slate-900 mb-8">Atalhos Principais</h2>
+          <div className="grid gap-4 md:grid-cols-3">
+            {quickActions.map((action, idx) => {
+              const Icon = action.title === "Conversas" ? MessageCircle : action.title === "Chamados" ? ClipboardList : Zap;
+              return (
+                <button
+                  key={action.route}
+                  onClick={() => setActive(action.route)}
+                  className="group relative overflow-hidden rounded-2xl p-6 text-left text-white shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-2 active:scale-95 bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
+                  style={{ animationDelay: `${0.4 + idx * 0.1}s` }}
+                >
+                  <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  <div className="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full blur-xl group-hover:bg-white/20 transition-all duration-300" />
+                  <div className="relative z-10">
+                    <Icon className="h-8 w-8 mb-3 group-hover:scale-125 transition-transform duration-300" />
+                    <p className="text-lg font-bold">{action.title}</p>
+                    <p className="text-sm text-white/90 mt-1">{action.subtitle}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Recent Activity */}
+        <div className="rounded-2xl bg-white p-10 shadow-lg border border-slate-100 animate-fade-in" style={{ animationDelay: '0.5s' }}>
+          <h2 className="text-2xl font-bold text-slate-900 mb-8">Atividades Recentes</h2>
+          <div className="space-y-4">
+            {[
+              { title: "Novo chamado", desc: "Solicitação de backup", time: "Agora", color: "bg-blue-500" },
+              { title: "BOT ativo", desc: "Cliente em triagem", time: "5 min", color: "bg-emerald-500" },
+              { title: "Token OK", desc: "MegaAdmin validado", time: "12 min", color: "bg-slate-500" },
+            ].map(({ title, desc, time, color }, idx) => (
+              <div key={title} className="flex items-start gap-3 p-4 rounded-xl bg-gradient-to-r from-slate-50 to-slate-100 hover:from-slate-100 hover:to-slate-200 transition-all duration-200 animate-fade-in border border-slate-200 group cursor-pointer" style={{ animationDelay: `${0.5 + idx * 0.1}s` }}>
+                <div className={cn("mt-1 h-3 w-3 rounded-full flex-shrink-0 group-hover:scale-125 transition-transform duration-300", color)} />
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold text-slate-900 text-sm">{title}</p>
+                  <p className="text-xs text-slate-600 mt-0.5">{desc}</p>
+                </div>
+                <span className="text-xs font-semibold text-slate-600 flex-shrink-0 bg-white px-2 py-1 rounded-lg group-hover:bg-blue-50 transition-colors duration-200">{time}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function ConversationsPage() {
+  const [searchTerm, setSearchTerm] = React.useState('');
+  const [selectedFilter, setSelectedFilter] = React.useState('open');
+
+  const filters = [
+    { id: 'open', label: '🟢 Abertas', count: 0 },
+    { id: 'bot', label: '🤖 Atendimento BOT', count: 0 },
+    { id: 'closed', label: '⚫ Fechadas', count: 0 },
+  ];
+
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">Conversas</h2>
-        <p className="text-slate-600 mb-6">Gerencie suas conversas WhatsApp.</p>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">Conversas</h2>
+            <p className="text-slate-600 text-sm mt-1">0 conversas</p>
+          </div>
+        </div>
         
-        <div className="flex gap-2 mb-6">
-          <button className="px-4 py-2 rounded-lg bg-blue-100 text-blue-700 font-medium hover:bg-blue-200 transition-colors">Abertas</button>
-          <button className="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors">Atendimento BOT</button>
-          <button className="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors">Fechadas</button>
+        <div className="flex flex-wrap gap-3 mb-6">
+          {filters.map(filter => (
+            <button
+              key={filter.id}
+              onClick={() => setSelectedFilter(filter.id)}
+              className={cn(
+                'px-4 py-2 rounded-lg font-medium transition-all duration-200',
+                selectedFilter === filter.id
+                  ? 'bg-blue-500 text-white shadow-lg'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              )}
+            >
+              {filter.label}
+            </button>
+          ))}
         </div>
 
-        <div className="space-y-3">
-          <div className="p-4 rounded-lg border border-slate-200 hover:border-slate-300 cursor-pointer transition-colors">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium text-slate-900">Cliente #001</p>
-                <p className="text-sm text-slate-600">Última mensagem: Olá, tudo bem?</p>
-              </div>
-              <span className="text-xs text-slate-500">5 min</span>
-            </div>
+        <div className="relative mb-6">
+          <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Buscar número..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1 bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
+          <h3 className="text-lg font-bold text-slate-900 mb-4">Lista de Conversas</h3>
+          <div className="flex items-center justify-center h-40 text-center">
+            <p className="text-slate-500">Nenhuma conversa neste filtro</p>
           </div>
-          <div className="p-4 rounded-lg border border-slate-200 hover:border-slate-300 cursor-pointer transition-colors">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium text-slate-900">Cliente #002</p>
-                <p className="text-sm text-slate-600">Última mensagem: Preciso de ajuda</p>
-              </div>
-              <span className="text-xs text-slate-500">12 min</span>
-            </div>
-          </div>
+        </div>
+        <div className="lg:col-span-2 bg-white rounded-2xl shadow-lg p-6 border border-slate-100 flex flex-col items-center justify-center h-80">
+          <MessageCircle className="w-16 h-16 text-slate-300 mb-4" />
+          <h3 className="text-lg font-bold text-slate-900 mb-2">Selecione uma conversa para visualizar</h3>
+          <p className="text-slate-600">Clique em uma conversa da lista para ver os detalhes</p>
         </div>
       </div>
     </div>
@@ -167,38 +282,67 @@ function ConversationsPage() {
 }
 
 function TicketsPage() {
+  const [searchTerm, setSearchTerm] = React.useState('');
+
+  const statusCards = [
+    { label: 'Total', value: 10, color: 'bg-slate-900', textColor: 'text-white' },
+    { label: 'Abertos', value: 4, color: 'bg-blue-50', textColor: 'text-blue-600' },
+    { label: 'Em Progresso', value: 2, color: 'bg-yellow-50', textColor: 'text-yellow-600' },
+    { label: 'Aguardando', value: 3, color: 'bg-orange-50', textColor: 'text-orange-600' },
+    { label: 'Fechados', value: 1, color: 'bg-green-50', textColor: 'text-green-600' },
+  ];
+
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">Chamados</h2>
-        <p className="text-slate-600 mb-6">Gerenciar seus tickets de suporte.</p>
-        
-        <div className="flex gap-2 mb-6">
-          <button className="px-4 py-2 rounded-lg bg-blue-100 text-blue-700 font-medium hover:bg-blue-200 transition-colors">Abertos</button>
-          <button className="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors">Em Progresso</button>
-          <button className="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors">Aguardando</button>
-          <button className="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors">Fechados</button>
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold text-slate-900 mb-2">Chamados</h2>
+          <p className="text-slate-600">Gerencie todos os chamados de atendimento</p>
         </div>
 
-        <div className="space-y-3">
-          <div className="p-4 rounded-lg border border-slate-200 hover:border-slate-300 cursor-pointer transition-colors">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium text-slate-900">#TICKET-001 - Problema de acesso</p>
-                <p className="text-sm text-slate-600">Prioridade: Alta</p>
-              </div>
-              <span className="px-3 py-1 rounded-full bg-yellow-100 text-yellow-700 text-xs font-medium">Em Progresso</span>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+          {statusCards.map((card, idx) => (
+            <div
+              key={idx}
+              className={cn(
+                'rounded-xl p-4 text-center',
+                card.color
+              )}
+            >
+              <p className={cn('text-3xl font-bold', card.textColor)}>{card.value}</p>
+              <p className={cn('text-sm font-medium mt-1', idx === 0 ? 'text-white' : 'text-slate-600')}>{card.label}</p>
             </div>
+          ))}
+        </div>
+
+        <div className="flex flex-col md:flex-row gap-4 mb-6">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Buscar por nome, número ou problema..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
-          <div className="p-4 rounded-lg border border-slate-200 hover:border-slate-300 cursor-pointer transition-colors">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium text-slate-900">#TICKET-002 - Erro no sistema</p>
-                <p className="text-sm text-slate-600">Prioridade: Média</p>
-              </div>
-              <span className="px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-medium">Aberto</span>
-            </div>
+          <select className="px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+            <option>Todas as categorias</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1 bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
+          <h3 className="text-lg font-bold text-slate-900 mb-4">Lista de Chamados</h3>
+          <div className="flex items-center justify-center h-40 text-center">
+            <p className="text-slate-500">Nenhum chamado neste filtro</p>
           </div>
+        </div>
+        <div className="lg:col-span-2 bg-white rounded-2xl shadow-lg p-6 border border-slate-100 flex flex-col items-center justify-center h-80">
+          <Ticket className="w-16 h-16 text-slate-300 mb-4" />
+          <h3 className="text-lg font-bold text-slate-900 mb-2">Selecione um chamado</h3>
+          <p className="text-slate-600">Clique em um chamado da lista para ver os detalhes</p>
         </div>
       </div>
     </div>
@@ -206,33 +350,48 @@ function TicketsPage() {
 }
 
 function TrackingPage() {
+  const [searchTerm, setSearchTerm] = React.useState('');
+
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">Rastreamento</h2>
-        <p className="text-slate-600 mb-6">Monitore suas atividades e eventos.</p>
-        
-        <input type="text" placeholder="Buscar rastreamento..." className="w-full px-4 py-2 border border-slate-200 rounded-lg mb-6 focus:outline-none focus:border-blue-500" />
+        <h2 className="text-2xl font-bold text-slate-900 mb-6">Rastreamentos</h2>
 
-        <div className="space-y-3">
-          <div className="p-4 rounded-lg border border-slate-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium text-slate-900">Rastreamento #001</p>
-                <p className="text-sm text-slate-600">Status: Em trânsito</p>
-              </div>
-              <span className="text-xs text-slate-500">Hoje</span>
-            </div>
+        <div className="flex flex-col md:flex-row gap-4 mb-6">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Buscar código..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
-          <div className="p-4 rounded-lg border border-slate-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium text-slate-900">Rastreamento #002</p>
-                <p className="text-sm text-slate-600">Status: Entregue</p>
-              </div>
-              <span className="text-xs text-slate-500">Ontem</span>
-            </div>
+          <select className="px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+            <option value="all">Todas</option>
+          </select>
+          <select className="px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+            <option value="all">Todos</option>
+          </select>
+          <button className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors flex items-center gap-2">
+            <Plus className="w-5 h-5" />
+            Novo
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1 bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
+          <h3 className="text-lg font-bold text-slate-900 mb-4">Lista de Rastreamentos</h3>
+          <div className="flex items-center justify-center h-40 text-center">
+            <p className="text-slate-500">Carregando...</p>
           </div>
+        </div>
+        <div className="lg:col-span-2 bg-white rounded-2xl shadow-lg p-6 border border-slate-100 flex flex-col items-center justify-center h-80">
+          <PackageSearch className="w-16 h-16 text-slate-300 mb-4" />
+          <h3 className="text-lg font-bold text-slate-900 mb-2">Selecione um rastreamento para ver detalhes</h3>
+          <p className="text-slate-600">Clique em um rastreamento da lista</p>
         </div>
       </div>
     </div>
@@ -240,26 +399,103 @@ function TrackingPage() {
 }
 
 function ERPPage() {
+  const [timeRange, setTimeRange] = React.useState('today');
+
+  const kpis = [
+    { label: 'Vendas Hoje', value: 'R$ 12.540', change: '↑ 12% vs ontem', color: 'text-green-600' },
+    { label: 'Pedidos Pendentes', value: '0', change: 'Aguardando ação', color: 'text-orange-600' },
+    { label: 'Pedidos Atrasados', value: '3', change: 'Requer atenção', color: 'text-red-600' },
+    { label: 'Clientes Ativos', value: '0', change: 'Total registrado', color: 'text-blue-600' },
+    { label: 'Faturamento Total', value: 'R$ 0.00', change: 'Mês atual', color: 'text-slate-600' },
+    { label: 'Chamados Abertos', value: '8', change: 'Aguardando resposta', color: 'text-purple-600' },
+    { label: 'Entregues Hoje', value: '24', change: 'Pedidos completados', color: 'text-green-600' },
+    { label: 'Pagamentos Pendentes', value: 'R$ 0', change: 'Aguardando recebimento', color: 'text-slate-600' },
+  ];
+
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">ERP</h2>
-        <p className="text-slate-600 mb-6">Dashboard operacional e métricas.</p>
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="p-4 rounded-lg bg-slate-50 border border-slate-200">
-            <p className="text-sm text-slate-600 mb-2">Vendas Hoje</p>
-            <p className="text-2xl font-bold text-slate-900">R$ 0,00</p>
-          </div>
-          <div className="p-4 rounded-lg bg-slate-50 border border-slate-200">
-            <p className="text-sm text-slate-600 mb-2">Pedidos Pendentes</p>
-            <p className="text-2xl font-bold text-slate-900">0</p>
-          </div>
-          <div className="p-4 rounded-lg bg-slate-50 border border-slate-200">
-            <p className="text-sm text-slate-600 mb-2">Clientes Ativos</p>
-            <p className="text-2xl font-bold text-slate-900">0</p>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">Dashboard Operacional</h2>
+            <p className="text-slate-600 text-sm mt-1">Acompanhe as métricas principais do negócio</p>
           </div>
         </div>
+
+        <div className="flex gap-3 mb-8">
+          {['today', 'week', 'month'].map((range) => (
+            <button
+              key={range}
+              onClick={() => setTimeRange(range)}
+              className={cn(
+                'px-4 py-2 rounded-lg font-medium transition-all duration-200',
+                timeRange === range
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              )}
+            >
+              {range === 'today' ? 'Hoje' : range === 'week' ? 'Esta Semana' : 'Este Mês'}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {kpis.map((kpi, idx) => (
+            <div key={idx} className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-6 border border-slate-200">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-slate-600">{kpi.label}</h3>
+              </div>
+              <p className="text-2xl font-bold text-slate-900 mb-1">{kpi.value}</p>
+              <p className="text-xs text-slate-600">{kpi.change}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
+          <h3 className="text-lg font-bold text-slate-900 mb-4">Vendas vs Pedidos</h3>
+          <div className="h-64 flex items-center justify-center bg-slate-50 rounded-lg">
+            <p className="text-slate-500">Gráfico de vendas vs pedidos</p>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
+          <h3 className="text-lg font-bold text-slate-900 mb-4">Distribuição de Status</h3>
+          <div className="space-y-3">
+            {['Aguardando Pagamento', 'Separando', 'Em Produção', 'Enviado', 'Entregue'].map((status, idx) => (
+              <div key={idx} className="flex items-center justify-between">
+                <span className="text-sm text-slate-600">{status}</span>
+                <span className="text-sm font-bold text-slate-900">{[0, 12, 8, 24, 156][idx]}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
+        <h3 className="text-lg font-bold text-slate-900 mb-4">Atividade Recente</h3>
+        <div className="space-y-3">
+          {[1, 2, 3, 4, 5].map((item) => (
+            <div key={item} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+              <div>
+                <p className="font-semibold text-slate-900">Pedido #PED-100{item} criado</p>
+                <p className="text-xs text-slate-600">Cliente: João Silva</p>
+              </div>
+              <span className="text-xs text-slate-600">há {item} minutos</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsPage() {
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
+        <h2 className="text-2xl font-bold text-slate-900 mb-4">Configurações</h2>
+        <p className="text-slate-600">Personalize sua experiência no MegaDesk.</p>
       </div>
     </div>
   );
@@ -269,21 +505,8 @@ function BotConfigPage() {
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">Configurar Bot</h2>
-        <p className="text-slate-600 mb-6">Treine e configure seu assistente IA.</p>
-        
-        <div className="space-y-4">
-          <div className="p-4 rounded-lg border border-slate-200">
-            <p className="font-medium text-slate-900 mb-2">Treinar com Documentos</p>
-            <p className="text-sm text-slate-600 mb-3">Faça upload de arquivos para treinar o bot</p>
-            <button className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition-colors">Upload de Arquivo</button>
-          </div>
-          <div className="p-4 rounded-lg border border-slate-200">
-            <p className="font-medium text-slate-900 mb-2">Comportamento do Bot</p>
-            <p className="text-sm text-slate-600 mb-3">Ajuste como o bot responde aos clientes</p>
-            <textarea placeholder="Digite as instruções..." className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500" rows={4}></textarea>
-          </div>
-        </div>
+        <h2 className="text-2xl font-bold text-slate-900 mb-4">Configurar Bot</h2>
+        <p className="text-slate-600">Treine e configure o bot de IA.</p>
       </div>
     </div>
   );
@@ -293,431 +516,314 @@ function AIAssistantPage() {
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">Assistente IA</h2>
-        <p className="text-slate-600 mb-6">Converse com seu assistente inteligente.</p>
-        
-        <div className="bg-slate-50 rounded-lg p-4 h-96 border border-slate-200 mb-4 flex items-center justify-center">
-          <p className="text-slate-500">Chat carregando...</p>
-        </div>
-        
-        <div className="flex gap-2">
-          <input type="text" placeholder="Digite sua mensagem..." className="flex-1 px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500" />
-          <button className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition-colors">Enviar</button>
-        </div>
+        <h2 className="text-2xl font-bold text-slate-900 mb-4">Assistente IA</h2>
+        <p className="text-slate-600">Converse com o assistente inteligente.</p>
       </div>
     </div>
   );
 }
 
-function HelpPage() {
+function NotificationsPage() {
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">Ajuda</h2>
-        <p className="text-slate-600 mb-6">Encontre respostas para suas dúvidas.</p>
-        
-        <div className="space-y-3">
-          <div className="p-4 rounded-lg border border-slate-200 hover:border-slate-300 cursor-pointer transition-colors">
-            <p className="font-medium text-slate-900">Como criar uma conversa?</p>
-            <p className="text-sm text-slate-600">Clique em Conversas e selecione novo cliente</p>
-          </div>
-          <div className="p-4 rounded-lg border border-slate-200 hover:border-slate-300 cursor-pointer transition-colors">
-            <p className="font-medium text-slate-900">Como treinar o bot?</p>
-            <p className="text-sm text-slate-600">Acesse Configurar Bot e faça upload de documentos</p>
-          </div>
-          <div className="p-4 rounded-lg border border-slate-200 hover:border-slate-300 cursor-pointer transition-colors">
-            <p className="font-medium text-slate-900">Como criar um chamado?</p>
-            <p className="text-sm text-slate-600">Clique em Chamados e selecione novo ticket</p>
-          </div>
-        </div>
+        <h2 className="text-2xl font-bold text-slate-900 mb-4">Notificações</h2>
+        <p className="text-slate-600">Gerencie suas notificações e alertas.</p>
       </div>
     </div>
   );
 }
 
-function LayoutEditorPage({ onBack }: { onBack: () => void }) {
-  const [sidebarColors, setSidebarColors] = React.useState(() => {
-    const saved = localStorage.getItem('sidebarColors');
-    return saved ? JSON.parse(saved) : {
-      background: '#0f172a',
-      accentStart: '#9333ea',
-      accentEnd: '#ec4899',
-      glowColor: '#a855f7',
-      textPrimary: '#ffffff',
-      textSecondary: '#cbd5e1',
-    };
-  });
-
-  const [saved, setSaved] = React.useState(false);
-
-  const handleSave = () => {
-    localStorage.setItem('sidebarColors', JSON.stringify(sidebarColors));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
-  const presets = [
-    {
-      name: 'Roxo Padrão',
-      colors: {
-        background: '#0f172a',
-        accentStart: '#9333ea',
-        accentEnd: '#ec4899',
-        glowColor: '#a855f7',
-        textPrimary: '#ffffff',
-        textSecondary: '#cbd5e1',
-      }
-    },
-    {
-      name: 'Azul Profissional',
-      colors: {
-        background: '#0c1222',
-        accentStart: '#0ea5e9',
-        accentEnd: '#06b6d4',
-        glowColor: '#0284c7',
-        textPrimary: '#ffffff',
-        textSecondary: '#cbd5e1',
-      }
-    },
-    {
-      name: 'Verde Moderno',
-      colors: {
-        background: '#051f1f',
-        accentStart: '#10b981',
-        accentEnd: '#14b8a6',
-        glowColor: '#059669',
-        textPrimary: '#ffffff',
-        textSecondary: '#cbd5e1',
-      }
-    },
-    {
-      name: 'Laranja Vibrante',
-      colors: {
-        background: '#1f1209',
-        accentStart: '#f97316',
-        accentEnd: '#ea580c',
-        glowColor: '#fb923c',
-        textPrimary: '#ffffff',
-        textSecondary: '#cbd5e1',
-      }
-    },
-  ];
-
+function ActiveAttendancePage() {
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900">Edição de Layout</h2>
-            <p className="text-slate-600">Personalize as cores da barra lateral</p>
-          </div>
-          <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
-            <X className="w-5 h-5 text-slate-600" />
-          </button>
-        </div>
-
-        {/* Temas Pré-definidos */}
-        <div className="mb-8">
-          <h3 className="text-lg font-bold text-slate-900 mb-4">Temas Pré-definidos</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            {presets.map((preset) => (
-              <button
-                key={preset.name}
-                onClick={() => setSidebarColors(preset.colors)}
-                className="p-4 rounded-lg border-2 border-slate-200 hover:border-purple-400 transition-all duration-200 text-left"
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className="w-6 h-6 rounded-full"
-                    style={{
-                      background: `linear-gradient(135deg, ${preset.colors.accentStart} 0%, ${preset.colors.accentEnd} 100%)`
-                    }}
-                  ></div>
-                  <span className="text-sm font-medium text-slate-900">{preset.name}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Editor de Cores */}
-        <div className="mb-8 pb-8 border-b border-slate-200">
-          <h3 className="text-lg font-bold text-slate-900 mb-4">Cores Personalizadas</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {[
-              { key: 'background', label: 'Fundo da Barra' },
-              { key: 'accentStart', label: 'Gradiente Início' },
-              { key: 'accentEnd', label: 'Gradiente Fim' },
-              { key: 'glowColor', label: 'Cor do Glow' },
-            ].map((color) => (
-              <div key={color.key} className="flex flex-col gap-2">
-                <label className="text-sm font-medium text-slate-700">{color.label}</label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="color"
-                    value={sidebarColors[color.key as keyof typeof sidebarColors]}
-                    onChange={(e) => setSidebarColors((prev: any) => ({ ...prev, [color.key]: e.target.value }))}
-                    className="w-12 h-12 rounded-lg cursor-pointer border border-slate-300"
-                  />
-                  <input
-                    type="text"
-                    value={sidebarColors[color.key as keyof typeof sidebarColors]}
-                    onChange={(e) => setSidebarColors((prev: any) => ({ ...prev, [color.key]: e.target.value }))}
-                    className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono"
-                    placeholder="#000000"
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Pré-visualização e Botão Salvar */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div>
-              <p className="text-sm font-medium text-slate-600 mb-2">Pré-visualização:</p>
-              <div
-                className="w-20 h-40 rounded-lg shadow-lg flex flex-col items-center justify-center gap-2 p-2"
-                style={{
-                  backgroundColor: sidebarColors.background,
-                  boxShadow: `0 0 20px ${sidebarColors.glowColor}40`
-                }}
-              >
-                <div
-                  className="w-10 h-10 rounded-lg"
-                  style={{
-                    background: `linear-gradient(135deg, ${sidebarColors.accentStart} 0%, ${sidebarColors.accentEnd} 100%)`
-                  }}
-                ></div>
-                <div
-                  className="w-12 h-1 rounded-full"
-                  style={{
-                    background: `linear-gradient(90deg, ${sidebarColors.accentStart}00 0%, ${sidebarColors.glowColor} 50%, ${sidebarColors.accentEnd}00 100%)`
-                  }}
-                ></div>
-              </div>
-            </div>
-          </div>
-
-          <button
-            onClick={handleSave}
-            className={`px-6 py-3 rounded-lg font-medium transition-all duration-200 ${
-              saved
-                ? 'bg-green-500 text-white'
-                : 'bg-blue-500 hover:bg-blue-600 text-white'
-            }`}
-          >
-            {saved ? '✓ Salvo!' : 'Salvar Cores'}
-          </button>
-        </div>
+        <h2 className="text-2xl font-bold text-slate-900 mb-4">Atendimento Ativo</h2>
+        <p className="text-slate-600">Acompanhe os atendimentos em tempo real.</p>
       </div>
     </div>
   );
 }
 
-function SettingsPage() {
-  const [editingLayout, setEditingLayout] = React.useState(false);
+function Shell() {
+  const { theme, toggleTheme } = useTheme();
+  const [active, setActive] = useState<RouteId>("home");
+  const [session, setSession] = useState<MegaDeskSession | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [indicadores, setIndicadores] = useState<any>(null);
 
-  if (editingLayout) {
-    return <LayoutEditorPage onBack={() => setEditingLayout(false)} />;
-  }
+  const loginMutation = trpc.megadesk.loginByEmail.useMutation();
 
-  return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">Configurações</h2>
-        <p className="text-slate-600 mb-8">Personalize sua experiência no MegaDesk.</p>
+  useEffect(() => {
+    const storedSession = localStorage.getItem(MEGADESK_SESSION_KEY);
+    if (storedSession) {
+      try {
+        const parsed = JSON.parse(storedSession);
+        setSession(parsed);
+      } catch (e) {
+        console.error("Failed to parse session:", e);
+        // Criar sessão de teste automática
+        const testSession: MegaDeskSession = {
+          clientId: "test-client-001",
+          clientName: "Empresa Teste",
+          permissions: ["conversations", "tickets", "tracking", "erp", "bot-config", "ai-assistant"],
+          userId: "user-001",
+          userName: "Usuário Teste",
+          userEmail: "teste@megadesk.com",
+          userCompany: "MegaDesk",
+        };
+        localStorage.setItem(MEGADESK_SESSION_KEY, JSON.stringify(testSession));
+        setSession(testSession);
+      }
+    } else {
+      // Criar sessão de teste automática quando não houver sessão
+      const testSession: MegaDeskSession = {
+        clientId: "test-client-001",
+        clientName: "Empresa Teste",
+        permissions: ["conversations", "tickets", "tracking", "erp", "bot-config", "ai-assistant"],
+        userId: "user-001",
+        userName: "Usuário Teste",
+        userEmail: "teste@megadesk.com",
+        userCompany: "MegaDesk",
+      };
+      localStorage.setItem(MEGADESK_SESSION_KEY, JSON.stringify(testSession));
+      setSession(testSession);
+    }
+    setLoading(false);
+  }, []);
 
-        {/* Menu de Opções */}
-        <div className="space-y-3">
-          <button
-            onClick={() => setEditingLayout(true)}
-            className="w-full p-4 rounded-lg border border-slate-200 hover:border-purple-400 hover:bg-purple-50 transition-all duration-200 text-left flex items-center justify-between"
-          >
-            <div>
-              <p className="font-medium text-slate-900">Edição de Layout</p>
-              <p className="text-sm text-slate-600">Personalize as cores da barra lateral</p>
-            </div>
-            <ChevronRight className="w-5 h-5 text-slate-400" />
-          </button>
-          
-          <button className="w-full p-4 rounded-lg border border-slate-200 hover:border-purple-400 hover:bg-purple-50 transition-all duration-200 text-left flex items-center justify-between">
-            <div>
-              <p className="font-medium text-slate-900">Notificações</p>
-              <p className="text-sm text-slate-600">Gerenciar alertas e notificações</p>
-            </div>
-            <ChevronRight className="w-5 h-5 text-slate-400" />
-          </button>
-          
-          <button className="w-full p-4 rounded-lg border border-slate-200 hover:border-purple-400 hover:bg-purple-50 transition-all duration-200 text-left flex items-center justify-between">
-            <div>
-              <p className="font-medium text-slate-900">Privacidade</p>
-              <p className="text-sm text-slate-600">Controlar dados e privacidade</p>
-            </div>
-            <ChevronRight className="w-5 h-5 text-slate-400" />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function Home() {
-  const [sidebarOpen, setSidebarOpen] = React.useState(true);
-  const [currentPage, setCurrentPage] = React.useState('home');
-  const [isDark, setIsDark] = React.useState(false);
-
-  const pages: { [key: string]: React.ReactNode } = {
-    home: <HomePage />,
-    conversations: <ConversationsPage />,
-    tickets: <TicketsPage />,
-    tracking: <TrackingPage />,
-    erp: <ERPPage />,
-    bot: <BotConfigPage />,
-    assistant: <AIAssistantPage />,
-    help: <HelpPage />,
-    settings: <SettingsPage />,
-  };
+  if (loading) return <LoadingSpinner />;
+  if (!session) return <AccessDeniedPage />;
 
   const navItems = [
-    { id: 'home', label: 'Home', icon: HomeIcon },
-    { id: 'conversations', label: 'Atendimento Ativo', icon: Phone },
-    { id: 'conversations', label: 'Conversas', icon: MessageCircle },
-    { id: 'tickets', label: 'Chamados', icon: Clipboard },
-    { id: 'tracking', label: 'Rastreamento', icon: MapPin },
-    { id: 'erp', label: 'ERP', icon: Building2 },
+    { id: "home" as RouteId, label: "Home", icon: HomeIcon },
+    { id: "active-attendance" as RouteId, label: "Atendimento Ativo", icon: PhoneCall },
+    { id: "conversations" as RouteId, label: "Conversas", icon: MessageCircle },
+    { id: "tickets" as RouteId, label: "Chamados", icon: ClipboardList },
+    { id: "tracking" as RouteId, label: "Rastreamento", icon: MapPin },
+    { id: "erp" as RouteId, label: "ERP", icon: PackageSearch },
+    { id: "settings" as RouteId, label: "Configurações", icon: Cog },
+    { id: "bot-config" as RouteId, label: "Configurar Bot", icon: Bot },
+    { id: "ai-assistant" as RouteId, label: "Assistente IA", icon: Sparkles },
+    { id: "help" as RouteId, label: "Ajuda", icon: AlertCircle },
+    { id: "notifications" as RouteId, label: "Notificações", icon: Bell },
   ];
 
-  const bottomItems = [
-    { id: 'bot', label: 'Configurar Bot', icon: Zap },
-    { id: 'assistant', label: 'Assistente IA', icon: Sparkles },
-    { id: 'help', label: 'Ajuda', icon: MessageCircle },
-    { id: 'settings', label: 'Configurações', icon: Settings },
-  ];
+  const filteredNavItems = navItems.filter(item => {
+    if (["home", "active-attendance", "settings", "help", "notifications"].includes(item.id)) return true;
+    return session.permissions.includes(item.id);
+  });
+
+  // Separar itens em seções
+  const mainNavItems = filteredNavItems.filter(item => !["settings", "bot-config", "ai-assistant", "help", "notifications"].includes(item.id));
+  const settingsNavItems = filteredNavItems.filter(item => ["settings", "bot-config", "ai-assistant", "help", "notifications"].includes(item.id));
 
   return (
-    <div className="flex h-screen bg-slate-100">
+    <div className={`flex h-screen bg-slate-50 ${theme === 'dark' ? 'dark bg-slate-950' : ''}`}>
       {/* Sidebar */}
-      <div
-        className={`${
-          sidebarOpen ? 'w-64' : 'w-20'
-        } bg-slate-900 text-white transition-all duration-300 flex flex-col border-r border-slate-800 overflow-hidden`}
-      >
-        {/* Header */}
-        <div className="p-4 flex items-center justify-between">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            <Zap className="w-8 h-8 text-purple-400 flex-shrink-0" />
-            {sidebarOpen && <span className="font-bold text-lg whitespace-nowrap">MegaDesk</span>}
-          </div>
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-1 hover:bg-slate-800 rounded-lg transition-colors flex-shrink-0"
-          >
-            {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-          </button>
+      <div className={cn(
+        "fixed lg:relative z-40 h-full bg-slate-950 text-white flex flex-col transition-all duration-300",
+        sidebarOpen ? "w-64" : "w-20"
+      )}>
+        {/* Header com Logo */}
+        <div className="p-4 flex items-center justify-between transition-all duration-300">
+          {sidebarOpen ? (
+            <>
+              <div className="flex items-center gap-3 overflow-hidden">
+                <Zap className="w-8 h-8 text-blue-400 flex-shrink-0" />
+                <span className="font-bold text-2xl whitespace-nowrap transition-opacity duration-300">
+                  MegaDesk
+                </span>
+              </div>
+              <button
+                onClick={() => setSidebarOpen(false)}
+                className="text-slate-400 hover:text-white transition-colors flex-shrink-0"
+                title="Fechar menu"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="w-full flex items-center justify-center text-slate-400 hover:text-white transition-colors py-2"
+              title="Abrir menu"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
+          )}
         </div>
 
-        {/* Divider */}
-        <div
-          className={`${sidebarOpen ? 'h-1' : 'h-px'} bg-gradient-to-r from-purple-600/0 via-purple-500 to-purple-600/0 transition-all duration-300 mx-2`}
-        ></div>
+        {/* Faixa de luz roxo minimalista */}
+        <div className={cn(
+          "bg-gradient-to-r from-purple-600/0 via-purple-500 to-purple-600/0 transition-all duration-300 my-2 shadow-lg shadow-purple-500/50",
+          sidebarOpen ? "h-0.5 mx-4" : "h-px mx-2"
+        )}></div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto pt-8 px-2">
-          <div className="space-y-2">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = currentPage === item.id;
-              return (
-                <button
-                  key={`${item.id}-${item.label}`}
-                  onClick={() => setCurrentPage(item.id)}
-                  className={`w-full px-2 py-3 rounded-xl transition-all duration-200 flex items-center gap-3 ${
-                    isActive
-                      ? `bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50 rounded-xl ${sidebarOpen ? 'w-[215px]' : ''}`
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
-                  }`}
-                  style={isActive && sidebarOpen ? { width: '215px' } : {}}
-                  title={item.label}
-                >
-                  <Icon className="w-5 h-5 flex-shrink-0" />
-                  {sidebarOpen && <span className="text-sm font-medium truncate">{item.label}</span>}
-                </button>
-              );
-            })}
-          </div>
-        </nav>
-
-        {/* Bottom Items */}
-        <div className="border-t border-slate-800 p-2 space-y-2">
-          {bottomItems.map((item) => {
+        <nav className={cn(
+          "flex-1 p-3 space-y-1 pt-8 transition-all duration-300",
+          sidebarOpen ? "overflow-y-auto" : "overflow-hidden"
+        )}>
+          {mainNavItems.map((item) => {
             const Icon = item.icon;
-            const isActive = currentPage === item.id;
+            const isActive = active === item.id;
+            
             return (
               <button
                 key={item.id}
-                onClick={() => setCurrentPage(item.id)}
-                className={`w-full px-2 py-3 rounded-xl transition-all duration-200 flex items-center gap-3 ${
+                onClick={() => setActive(item.id)}
+                className={cn(
+                  "flex items-center py-3 rounded-lg transition-all duration-300 relative px-3 mx-2",
                   isActive
-                    ? `bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50 rounded-xl ${sidebarOpen ? 'w-[215px]' : ''}`
-                    : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
-                }`}
+                    ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50 rounded-xl"
+                    : "text-slate-300 hover:text-white hover:bg-slate-800/50"
+                )}
                 style={isActive && sidebarOpen ? { width: '215px' } : {}}
                 title={item.label}
               >
                 <Icon className="w-5 h-5 flex-shrink-0" />
-                {sidebarOpen && <span className="text-sm font-medium truncate">{item.label}</span>}
+                {sidebarOpen && (
+                  <span className="text-base font-medium transition-opacity duration-300 overflow-hidden whitespace-nowrap ml-3">
+                    {item.label}
+                  </span>
+                )}
+                {/* Indicador de notificacoes */}
+                {item.id === "notifications" && (
+                  <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
+                )}
               </button>
             );
           })}
+        </nav>
 
-          {/* Theme & Logout */}
-          <div className="pt-2 border-t border-slate-800 space-y-2">
-            <button
-              onClick={() => setIsDark(!isDark)}
-              className="w-full px-2 py-3 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all duration-200 flex items-center gap-3"
-              title="Mudar para modo escuro"
-            >
-              <Moon className="w-5 h-5 flex-shrink-0" />
-              {sidebarOpen && <span className="text-sm font-medium truncate">Modo Escuro</span>}
-            </button>
-            <button
-              className="w-full px-2 py-3 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all duration-200 flex items-center gap-3"
-              title="Sair"
-            >
-              <LogOut className="w-5 h-5 flex-shrink-0" />
-              {sidebarOpen && <span className="text-sm font-medium truncate">Sair</span>}
-            </button>
-          </div>
+        {/* Separador */}
+        <div className="border-t border-slate-800"></div>
+
+        {/* Settings Section */}
+        <nav className="p-3 space-y-1">
+          {settingsNavItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = active === item.id;
+            
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActive(item.id)}
+                className={cn(
+                  "flex items-center py-3 rounded-lg transition-all duration-300 relative px-3 mx-2",
+                  isActive
+                    ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50 rounded-xl"
+                    : "text-slate-300 hover:text-white hover:bg-slate-800/50"
+                )}
+                style={isActive && sidebarOpen ? { width: '215px' } : {}}
+                title={item.label}
+              >
+                <Icon className="w-5 h-5 flex-shrink-0" />
+                {sidebarOpen && (
+                  <span className="text-base font-medium transition-opacity duration-300 overflow-hidden whitespace-nowrap ml-3">
+                    {item.label}
+                  </span>
+                )}
+                {/* Indicador de notificacoes */}
+                {item.id === "notifications" && (
+                  <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Separador */}
+        <div className="border-t border-slate-800"></div>
+
+        {/* Bottom Actions */}
+        <div className="p-3 space-y-1">
+          <button
+            onClick={toggleTheme}
+            className={cn(
+              "flex items-center py-3 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all duration-200 px-2"
+            )}
+            title={`Mudar para modo ${theme === 'light' ? 'escuro' : 'claro'}`}
+          >
+            {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+            {sidebarOpen && <span className="text-base font-medium ml-3">{theme === 'light' ? 'Modo Escuro' : 'Modo Claro'}</span>}
+          </button>
+          
+          {/* Logout Button */}
+          <button
+            onClick={() => {
+              localStorage.removeItem(MEGADESK_SESSION_KEY);
+              setSession(null);
+            }}
+            className={cn(
+              "flex items-center py-3 rounded-lg text-slate-300 hover:text-red-400 hover:bg-red-900/20 transition-all duration-200 px-2"
+            )}
+            title="Sair"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            {sidebarOpen && <span className="text-base font-medium ml-3">Sair</span>}
+          </button>
         </div>
       </div>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top Bar */}
-        <div className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between">
+        {/* Header */}
+        <header className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">
-              {navItems.find((item) => item.id === currentPage)?.label || 'Configurações'}
-            </h1>
-            <p className="text-sm text-slate-600">Empresa Teste • Usuário Teste</p>
+            <h1 className="text-2xl font-bold text-slate-900">{navItems.find(i => i.id === active)?.label || 'MegaDesk'}</h1>
+            <p className="text-sm text-slate-600">{session.clientName} • {session.userName}</p>
           </div>
           <div className="flex items-center gap-4">
-            <button className="p-2 hover:bg-slate-100 rounded-lg transition-colors" title="Notificações">
-              <Bell className="w-5 h-5 text-slate-600" />
-            </button>
             <button className="p-2 hover:bg-slate-100 rounded-lg transition-colors" title="Abrir assistente IA">
-              <Sparkles className="w-5 h-5 text-slate-600" />
+              <Sparkles className="w-6 h-6 text-slate-600" />
             </button>
           </div>
-        </div>
+        </header>
 
-        {/* Page Content */}
-        <div className="flex-1 overflow-auto p-8">
-          {pages[currentPage]}
-        </div>
+        {/* Content */}
+        <main className="flex-1 overflow-auto p-8">
+          {active === "home" && <DashboardPage setActive={setActive} indicadores={indicadores} />}
+          {active === "conversations" && <ConversationsPage />}
+          {active === "tickets" && <TicketsPage />}
+          {active === "tracking" && <TrackingPage />}
+          {active === "erp" && <ERPPage />}
+          {active === "settings" && <SettingsPage />}
+          {active === "bot-config" && <BotConfigPage />}
+          {active === "ai-assistant" && <AIAssistantPage />}
+          {active === "notifications" && <NotificationsPage />}
+          {active === "active-attendance" && <ActiveAttendancePage />}
+        </main>
       </div>
+
+      {/* Mobile Overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 lg:hidden z-30"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
     </div>
   );
+}
+
+// Import Moon and Sun icons
+const Moon = (props: any) => (
+  <svg {...props} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+  </svg>
+);
+
+const Sun = (props: any) => (
+  <svg {...props} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1m-16 0H1m15.364 1.636l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+  </svg>
+);
+
+export function Home() {
+  return <Shell />;
 }
