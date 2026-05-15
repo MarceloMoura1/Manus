@@ -413,9 +413,9 @@ function Shell() {
         <div className="p-4 flex items-center justify-between transition-all duration-300">
           {sidebarOpen ? (
             <>
-              <div className="flex items-center gap-2 overflow-hidden">
-                <Zap className="w-6 h-6 text-blue-400 flex-shrink-0" />
-                <span className="font-bold text-xl whitespace-nowrap transition-opacity duration-300">
+              <div className="flex items-center gap-3 overflow-hidden">
+                <Zap className="w-8 h-8 text-blue-400 flex-shrink-0" />
+                <span className="font-bold text-2xl whitespace-nowrap transition-opacity duration-300">
                   MegaDesk
                 </span>
               </div>
