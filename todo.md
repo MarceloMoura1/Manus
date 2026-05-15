@@ -226,3 +226,10 @@
 - [x] Integrar mutations no frontend (ConversationsPage)
 - [x] Adicionar testes Vitest para as novas procedures
 - [x] Testar fluxo completo: encerrar conversa e editar cliente
+
+## Fase 31: Ajustes de UI - Botão de Encerrar Conversa
+- [x] Mover botão de encerrar conversa para canto superior direito
+- [x] Posicionar ao lado da engrenagem de edição
+- [x] Reduzir tamanho do botão para ícone
+- [x] Usar ícone apropriado (X ou Close)
+- [x] Testar layout responsivo

@@ -382,17 +382,43 @@ function ConversationsPage() {
                 <div className="border-b border-slate-200 pb-4 mb-4">
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-lg font-bold text-slate-900">{selectedConv.name}</h3>
-                    <button
-                      onClick={() => {
-                        setEditName(selectedConv.name);
-                        setEditCompany(selectedConv.company);
-                        setEditModalOpen(true);
-                      }}
-                      className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-                      title="Editar cliente"
-                    >
-                      <Cog className="w-5 h-5 text-slate-600 hover:text-slate-900" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => {
+                          setEditName(selectedConv.name);
+                          setEditCompany(selectedConv.company);
+                          setEditModalOpen(true);
+                        }}
+                        className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                        title="Editar cliente"
+                      >
+                        <Cog className="w-5 h-5 text-slate-600 hover:text-slate-900" />
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (selectedConversation) {
+                            try {
+                              await closeConversationMutation.mutateAsync({
+                                conversationId: selectedConversation,
+                              });
+                              
+                              const updatedConversations = conversations.map(c =>
+                                c.id === selectedConversation ? { ...c, status: 'closed' } : c
+                              );
+                              setConversations(updatedConversations);
+                              setSelectedConversation(null);
+                              setSelectedFilter('closed');
+                            } catch (error) {
+                              console.error('Erro ao encerrar conversa:', error);
+                            }
+                          }
+                        }}
+                        className="p-2 hover:bg-red-100 rounded-lg transition-colors"
+                        title="Encerrar conversa"
+                      >
+                        <X className="w-5 h-5 text-red-600 hover:text-red-900" />
+                      </button>
+                    </div>
                   </div>
                   <p className="text-sm text-slate-600">{selectedConv.phone} • {selectedConv.company}</p>
                 </div>
@@ -413,30 +439,6 @@ function ConversationsPage() {
                       <Send className="w-4 h-4" />
                     </button>
                   </div>
-                  <button
-                    onClick={async () => {
-                      if (selectedConversation) {
-                        try {
-                          await closeConversationMutation.mutateAsync({
-                            conversationId: selectedConversation,
-                          });
-                          
-                          // Atualizar lista local
-                          const updatedConversations = conversations.map(c =>
-                            c.id === selectedConversation ? { ...c, status: 'closed' } : c
-                          );
-                          setConversations(updatedConversations);
-                          setSelectedConversation(null);
-                          setSelectedFilter('closed');
-                        } catch (error) {
-                          console.error('Erro ao encerrar conversa:', error);
-                        }
-                      }
-                    }}
-                    className="w-full px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-medium"
-                  >
-                    Encerrar Conversa
-                  </button>
                 </div>
               </div>
             ) : (
