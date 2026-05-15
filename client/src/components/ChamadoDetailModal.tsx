@@ -1,5 +1,5 @@
 import React from "react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -53,6 +53,9 @@ export function ChamadoDetailModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[95vh] overflow-y-auto bg-slate-50">
+        <DialogTitle className="sr-only">
+          Detalhes do Chamado #{String(chamado?.number).padStart(4, "0")} - {chamado?.title}
+        </DialogTitle>
         <div className="space-y-6 p-6">
           {/* Header com Título */}
           <div className="border-b border-slate-200 pb-4">
