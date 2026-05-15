@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { useLocation } from "wouter";
 import { navigateToPlatform } from "@/lib/platformRouting";
 import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { validateNewChamado, ValidationError } from "@/lib/validations";
 import { ActiveAttendancePage } from "./ActiveAttendance";
-import { ChamadoDetailModal } from "@/components/ChamadoDetailModal";
+import { ChamadoDetailOverlay } from "@/components/ChamadoDetailOverlay";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -663,7 +662,6 @@ type Ticket = {
 };
 
 export function TicketsPage() {
-  const [, navigate] = useLocation();
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState<'total' | 'open' | 'in_progress' | 'waiting' | 'closed'>('total');
@@ -984,7 +982,8 @@ export function TicketsPage() {
                 <tr
                   key={chamado.id}
                   onClick={() => {
-                    navigate(`/chamado/${chamado.id}`);
+                    setSelectedChamado(chamado);
+                    setShowDetailModal(true);
                   }}
                   className="border-b border-slate-200 hover:bg-blue-50 cursor-pointer transition-colors"
                 >
@@ -1010,29 +1009,11 @@ export function TicketsPage() {
         </table>
       </div>
 
-      {/* Modal de Detalhes */}
-      <ChamadoDetailModal
-        open={showDetailModal}
-        onOpenChange={setShowDetailModal}
+      {/* Overlay de Detalhes */}
+      <ChamadoDetailOverlay
         chamado={selectedChamado}
-        newStatus={newStatus}
-        onStatusChange={handleChangeStatus}
-        newAttendant={newAttendant}
-        onAttendantChange={setNewAttendant}
-        newActivityText={newActivityText}
-        onActivityTextChange={setNewActivityText}
-        onAddActivity={handleAddActivity}
-        editingActivityId={editingActivityId}
-        editingActivityText={editingActivityText}
-        onEditingActivityTextChange={setEditingActivityText}
-        onEditActivity={handleEditActivity}
-        onCancelEdit={() => setEditingActivityId(null)}
-        onStartEdit={(id, text) => {
-          setEditingActivityId(id);
-          setEditingActivityText(text);
-        }}
-        addActivityMutation={addActivityMutation}
-        editActivityMutation={editActivityMutation}
+        isOpen={showDetailModal}
+        onClose={() => setShowDetailModal(false)}
       />
 
       {/* Modal de Novo Chamado */}
