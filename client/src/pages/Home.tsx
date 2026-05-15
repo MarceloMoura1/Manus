@@ -672,6 +672,14 @@ export function TicketsPage() {
   const [newStatus, setNewStatus] = React.useState('');
   const [newAttendant, setNewAttendant] = React.useState('');
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [showNewChamadoModal, setShowNewChamadoModal] = React.useState(false);
+  const [newChamadoForm, setNewChamadoForm] = React.useState({
+    customerName: '',
+    company: '',
+    title: '',
+    observations: '',
+    priority: 'media',
+  });
 
   // Queries tRPC
   const chamadosQuery = trpc.chamados.list.useQuery(
@@ -685,6 +693,7 @@ export function TicketsPage() {
   const updateChamadoMutation = trpc.chamados.update.useMutation();
   const addActivityMutation = trpc.chamados.addActivity.useMutation();
   const editActivityMutation = trpc.chamados.editActivity.useMutation();
+  const createChamadoMutation = trpc.chamados.create.useMutation();
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToastMessage({ message, type });
@@ -775,6 +784,39 @@ export function TicketsPage() {
       }
     } catch (error) {
       showToast('Erro ao atualizar atendente', 'error');
+    }
+  };
+
+  const handleCreateChamado = async () => {
+    if (!newChamadoForm.customerName.trim() || !newChamadoForm.company.trim() || !newChamadoForm.title.trim()) {
+      showToast('Preencha todos os campos obrigatorios', 'error');
+      return;
+    }
+
+    try {
+      const result = await createChamadoMutation.mutateAsync({
+        customerId: 'cust-' + Date.now(),
+        customerName: newChamadoForm.customerName,
+        company: newChamadoForm.company,
+        title: newChamadoForm.title,
+        observations: newChamadoForm.observations,
+        priority: newChamadoForm.priority,
+      });
+
+      if (result.chamado) {
+        showToast('Chamado criado com sucesso!', 'success');
+        setShowNewChamadoModal(false);
+        setNewChamadoForm({
+          customerName: '',
+          company: '',
+          title: '',
+          observations: '',
+          priority: 'media',
+        });
+        chamadosQuery.refetch();
+      }
+    } catch (error) {
+      showToast('Erro ao criar chamado', 'error');
     }
   };
 
@@ -884,7 +926,7 @@ export function TicketsPage() {
         ))}
       </div>
 
-      {/* Filtro de Pesquisa */}
+      {/* Filtro de Pesquisa e Botao Novo Chamado */}
       <div className="flex gap-2">
         <div className="flex-1 relative">
           <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
@@ -895,6 +937,13 @@ export function TicketsPage() {
             className="pl-10"
           />
         </div>
+        <Button
+          onClick={() => setShowNewChamadoModal(true)}
+          className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4" />
+          Novo Chamado
+        </Button>
       </div>
 
       {/* Tabela de Chamados */}
@@ -1090,6 +1139,85 @@ export function TicketsPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Novo Chamado */}
+      <Dialog open={showNewChamadoModal} onOpenChange={setShowNewChamadoModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Novo Chamado</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Nome do Cliente</label>
+              <Input
+                placeholder="Ex: Joao Silva"
+                value={newChamadoForm.customerName}
+                onChange={e => setNewChamadoForm({...newChamadoForm, customerName: e.target.value})}
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Empresa</label>
+              <Input
+                placeholder="Ex: Empresa XYZ"
+                value={newChamadoForm.company}
+                onChange={e => setNewChamadoForm({...newChamadoForm, company: e.target.value})}
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Titulo</label>
+              <Input
+                placeholder="Ex: Problema com login"
+                value={newChamadoForm.title}
+                onChange={e => setNewChamadoForm({...newChamadoForm, title: e.target.value})}
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Observacoes</label>
+              <Input
+                placeholder="Detalhes adicionais..."
+                value={newChamadoForm.observations}
+                onChange={e => setNewChamadoForm({...newChamadoForm, observations: e.target.value})}
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Prioridade</label>
+              <Select value={newChamadoForm.priority} onValueChange={priority => setNewChamadoForm({...newChamadoForm, priority})}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="baixa">Baixa</SelectItem>
+                  <SelectItem value="media">Media</SelectItem>
+                  <SelectItem value="alta">Alta</SelectItem>
+                  <SelectItem value="critica">Critica</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex gap-2 pt-4">
+              <Button
+                onClick={handleCreateChamado}
+                disabled={createChamadoMutation.isPending}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                Criar Chamado
+              </Button>
+              <Button
+                onClick={() => setShowNewChamadoModal(false)}
+                variant="outline"
+                className="flex-1"
+              >
+                Cancelar
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

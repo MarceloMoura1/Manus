@@ -509,3 +509,10 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Testar abrir conversa da página de Chamados (TESTADO)
 - [x] Validar persistência de dados (VALIDADO)
 - [x] Criar testes Vitest para novas funcionalidades (80+ testes passando)
+
+## Fase 51: Adicionar Botão "Novo Chamado" em Home.tsx
+- [x] Adicionar estado para modal de novo chamado em Home.tsx
+- [x] Adicionar botão "Novo Chamado" na barra de filtro
+- [x] Implementar modal de criação de chamado com validação
+- [x] Integrar com mutation tRPC para criar chamado
+- [x] Testar fluxo completo de criação de chamado
