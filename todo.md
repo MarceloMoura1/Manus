@@ -251,23 +251,44 @@
 - [x] Destacar em negrito mensagens não lidas do cliente
 - [x] Adicionar campo de status de leitura na conversa
 
-## Fase 34: Reorganizar Sistema de Chamados
-- [ ] Criar schema para tabela de chamados com numeração sequencial
-- [ ] Criar procedures tRPC para CRUD de chamados
-- [ ] Implementar UI com cards clicáveis por status
-- [ ] Exibir apenas chamados não-fechados no card "Total"
-- [ ] Adicionar detalhes do chamado (cliente, título, observações)
-- [ ] Implementar controle de status (Aberto, Em Progresso, Aguardando)
-- [ ] Adicionar botão de encerrar chamado no canto superior direito
-- [ ] Implementar busca avançada (nome, nº cliente, nº chamado)
-- [ ] Adicionar testes Vitest
-- [ ] Testar fluxo completo
+## Fase 34: Reorganizar Sistema de Chamados (UI/Mock Data)
+- [x] Implementar UI com cards clicáveis por status
+- [x] Adicionar detalhes do chamado (cliente, título, observações)
+- [x] Implementar controle de status (Aberto, Em Progresso, Aguardando)
+- [x] Adicionar botão de encerrar chamado no canto superior direito
+- [x] Implementar busca básica com mock data
+- [x] Testar layout e interações
 
-## Fase 35: Melhorias no Sistema de Chamados
+## Fase 35: Melhorias no Sistema de Chamados (UI/Layout)
 - [x] Melhorar layout dos cards da lista de chamados com status badges
 - [x] Adicionar campos editáveis para título e observações
 - [x] Reorganizar layout: diminuir cards de status, aumentar lista e detalhes
-- [ ] Diagnosticar schema do banco de dados para isolamento por cliente
-- [ ] Implementar procedures tRPC para CRUD de chamados com filtro de cliente
-- [ ] Integrar persistência no banco de dados
-- [ ] Adicionar testes Vitest para operações de chamados
+- [x] Refatorar painel de detalhes com status/prioridade/responsável em 1 linha
+- [x] Implementar modo de edição geral com botão "Salvar Edição"
+
+## Fase 36: REFATORAÇÃO COMPLETA - Layout Tipo Excel
+- [x] Remover painel de detalhes do lado direito
+- [x] Manter cards de status (Total, Abertos, Em Progresso, etc) no topo
+- [x] Manter filtro de pesquisa
+- [x] Criar tabela tipo Excel com colunas: ID | Abertura | Nome e Cliente | Título | Atendente
+- [x] Implementar clique em linha para abrir modal de detalhes com timeline
+- [x] Refatorar TicketsPage com novo layout e mock data com timeline
+
+## Fase 37: Modal de Detalhes com Timeline
+- [x] Criar modal que abre ao clicar em linha da tabela
+- [x] Exibir título geral do chamado no topo
+- [x] Implementar timeline vertical com atividades cronológicas
+- [x] Adicionar botões: "Registrar atividade", "Status do chamado", "Atendente Responsável"
+- [x] Implementar ícone de edição em cada balão de atividade
+- [x] Permitir edição de atividades existentes
+- [ ] Adicionar testes Vitest para timeline
+
+## Fase 38: Integração de Chamados com Backend
+- [ ] Criar schema de chamados com numeração sequencial no banco
+- [ ] Criar procedures tRPC para CRUD de chamados
+- [ ] Integrar TicketsPage com dados reais do banco
+- [ ] Implementar isolamento de chamados por cliente autenticado
+- [ ] Adicionar filtro "Total" excluindo chamados fechados
+- [ ] Implementar busca avançada (nome, nº cliente, nº chamado)
+- [ ] Adicionar testes Vitest para CRUD e filtros
+- [ ] Testar fluxo completo com persistência real
