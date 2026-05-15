@@ -982,6 +982,7 @@ export function TicketsPage() {
                 <tr
                   key={chamado.id}
                   onClick={() => {
+                    console.log('Clicou no chamado:', chamado);
                     setSelectedChamado(chamado);
                     setShowDetailModal(true);
                   }}
@@ -1009,13 +1010,152 @@ export function TicketsPage() {
         </table>
       </div>
 
-      {/* Página de Detalhes */}
-      {showDetailModal && selectedChamado && (
-        <ChamadoDetailPage
-          chamado={selectedChamado}
-          onBack={() => setShowDetailModal(false)}
-        />
-      )}
+      {/* Modal de Detalhes - Dialog da shadcn */}
+      <Dialog open={showDetailModal} onOpenChange={setShowDetailModal}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              #{String(selectedChamado?.number).padStart(4, '0')} - {selectedChamado?.title}
+            </DialogTitle>
+          </DialogHeader>
+
+          {selectedChamado && (
+            <div className="space-y-6">
+              {/* Controles */}
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-slate-700">Status</label>
+                  <Select value={newStatus || selectedChamado.status} onValueChange={(value: any) => {
+                    setNewStatus(value);
+                    handleChangeStatus(value);
+                  }}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="open">Aberto</SelectItem>
+                      <SelectItem value="in_progress">Em Progresso</SelectItem>
+                      <SelectItem value="waiting">Aguardando</SelectItem>
+                      <SelectItem value="closed">Fechado</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-slate-700">Atendente</label>
+                  <Input
+                    placeholder="Nome do atendente"
+                    value={newAttendant || selectedChamado.assignedTo || ''}
+                    onChange={e => setNewAttendant(e.target.value)}
+                    onBlur={() => {
+                      if (newAttendant && newAttendant !== selectedChamado.assignedTo) {
+                        handleChangeAttendant(newAttendant);
+                      }
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-slate-700">Prioridade</label>
+                  <div className={`px-3 py-2 rounded border border-slate-200 text-sm font-medium ${getPriorityColor(selectedChamado.priority)}`}>
+                    {selectedChamado.priority || 'Não definida'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Timeline */}
+              <div>
+                <h3 className="font-semibold text-slate-900 mb-4">Timeline de Atividades</h3>
+                <div className="space-y-4 max-h-96 overflow-y-auto">
+                  {selectedChamado.activities.length === 0 ? (
+                    <p className="text-sm text-slate-500 text-center py-4">Nenhuma atividade registrada</p>
+                  ) : (
+                    selectedChamado.activities.map((activity, idx) => (
+                      <div key={activity.id} className="flex gap-4">
+                        <div className="flex flex-col items-center">
+                          <div className="w-3 h-3 rounded-full bg-blue-600 mt-2" />
+                          {idx < selectedChamado.activities.length - 1 && (
+                            <div className="w-0.5 h-12 bg-slate-200 my-1" />
+                          )}
+                        </div>
+                        <div className="flex-1 pb-4">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <p className="text-sm font-medium text-slate-900">{activity.attendant}</p>
+                              <p className="text-xs text-slate-500">
+                                {new Date(activity.date || new Date()).toLocaleString('pt-BR')}
+                              </p>
+                            </div>
+                            {editingActivityId !== activity.id && (
+                              <button
+                                onClick={() => {
+                                  setEditingActivityId(activity.id);
+                                  setEditingActivityText(activity.description);
+                                }}
+                                className="p-1 hover:bg-slate-100 rounded"
+                              >
+                                <Edit2 className="w-4 h-4 text-slate-400" />
+                              </button>
+                            )}
+                          </div>
+
+                          {editingActivityId === activity.id ? (
+                            <div className="mt-2 space-y-2">
+                              <Input
+                                value={editingActivityText}
+                                onChange={e => setEditingActivityText(e.target.value)}
+                                className="text-sm"
+                              />
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  onClick={handleEditActivity}
+                                  disabled={editActivityMutation.isPending}
+                                >
+                                  Salvar
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setEditingActivityId(null)}
+                                >
+                                  Cancelar
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-slate-700 mt-2">{activity.description}</p>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Registrar Atividade */}
+              <div className="border-t border-slate-200 pt-4">
+                <label className="text-sm font-medium text-slate-700 block mb-2">Registrar Atividade</label>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Descreva a atividade..."
+                    value={newActivityText}
+                    onChange={e => setNewActivityText(e.target.value)}
+                    className="text-sm"
+                  />
+                  <Button
+                    onClick={handleAddActivity}
+                    disabled={addActivityMutation.isPending || !newActivityText.trim()}
+                    size="sm"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Modal de Novo Chamado */}
       <Dialog open={showNewChamadoModal} onOpenChange={setShowNewChamadoModal}>

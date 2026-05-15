@@ -35,6 +35,7 @@ interface ChamadoDetailPageProps {
 
 export function ChamadoDetailPage({ chamado, onBack }: ChamadoDetailPageProps) {
   const { user } = useAuth();
+  console.log('ChamadoDetailPage renderizado com chamado:', chamado);
   const [showActivityModal, setShowActivityModal] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showAttendantModal, setShowAttendantModal] = useState(false);
