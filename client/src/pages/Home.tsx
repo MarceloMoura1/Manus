@@ -369,7 +369,9 @@ function ConversationsPage() {
                       {conv.lastMessage}
                     </p>
                   </div>
-                  <span className="text-xs text-slate-400 ml-2 flex-shrink-0">{conv.timestamp}</span>
+                  <span className="text-xs text-slate-400 ml-2 flex-shrink-0">
+                    {new Date(conv.timestamp).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                  </span>
                 </div>
               </button>
             ))
