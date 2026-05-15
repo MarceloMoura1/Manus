@@ -827,6 +827,46 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao criar chamado" });
         }
       }),
+    createConversation: publicProcedure
+      .input(z.object({ customerId: z.string(), customerName: z.string(), phone: z.string(), company: z.string() }))
+      .mutation(async ({ input }) => {
+        try {
+          const { createConversation: createConversationDb } = await import("./db");
+          await hydrateSyncState();
+          const client = clients[0];
+          if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
+          
+          const conversationId = `conv-${Date.now()}`;
+          await createConversationDb({
+            conversationId,
+            clientId: client.clientId,
+            customerName: input.customerName,
+            phone: input.phone,
+            company: input.company,
+            lastMessage: "Conversa iniciada",
+            messages: [],
+          });
+          
+          const newConversation: any = {
+            id: conversationId,
+            clientId: client.clientId,
+            name: input.customerName,
+            phone: input.phone,
+            company: input.company,
+            status: "open" as const,
+            lastMessage: "Conversa iniciada",
+            time: new Date().toLocaleString('pt-BR'),
+            messages: [],
+          };
+          conversations.push(newConversation);
+          audit("MegaDesk", `Conversa iniciada com ${input.customerName}`, client.clientId);
+          await persistSyncState();
+          return { ok: true, conversationId };
+        } catch (error) {
+          console.error("Erro ao criar conversa:", error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao criar conversa" });
+        }
+      }),
     loginByEmail: publicProcedure
       .input(z.object({ email: z.string().email(), password: z.string().min(1) }))
       .mutation(async ({ input }) => {

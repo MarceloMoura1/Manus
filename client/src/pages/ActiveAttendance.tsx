@@ -21,6 +21,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
   const searchCustomerMutation = trpc.megadesk.searchCustomer.useMutation();
   const createCustomerMutation = trpc.megadesk.createCustomer.useMutation();
   const createTicketMutation = trpc.megadesk.createTicket.useMutation();
+  const createConversationMutation = trpc.megadesk.createConversation.useMutation();
 
   const handleSearchCustomer = async () => {
     if (!phoneNumber.trim()) {
@@ -111,6 +112,16 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
         });
         setSuccessMessage('Chamado criado com sucesso!');
       }
+      
+      // Criar conversa
+      const conversationResult = await createConversationMutation.mutateAsync({
+        customerId: customerData.id || customerData.customerId,
+        customerName: customerData.name,
+        phone: customerData.phone,
+        company: customerData.company,
+      });
+      conversationId = conversationResult.conversationId;
+      setSuccessMessage('Conversa iniciada com sucesso!');
       
       // Redirecionar para conversas com ID da conversa
       setTimeout(() => {

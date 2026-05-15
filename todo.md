@@ -196,3 +196,17 @@
 - [x] Limpar parâmetros da URL após captura
 - [x] Corrigir redirecionamento para chamar onNavigate('conversations')
 - [x] FASE COMPLETA - Redirecionamento 100% funcional! (TESTADO E VALIDADO NO NAVEGADOR)
+
+## Fase 27: Criar Conversa e Exibir na Aba Abertas
+- [x] Criar procedure tRPC para criar conversa no banco
+- [x] Chamar procedure ao clicar em "Abrir Conversa"
+- [x] Passar ID da conversa criada para página de Conversas
+- [x] Exibir conversa automaticamente na aba "Abertas"
+- [x] Testar fluxo completo (Atendimento Ativo → Conversas → Aba Abertas com nova conversa)
+
+## Fase 28: Melhorias na Navegação e Exibição de Conversas
+- [ ] Atualizar navegação de ActiveAttendance para sempre enviar conversationId
+- [ ] Substituir mockConversations por dados reais em ConversationsPage
+- [ ] Auto-selecionar conversa criada no filtro "Abertas"
+- [ ] Adicionar testes Vitest para createConversation
+- [ ] Testar fluxo completo no navegador

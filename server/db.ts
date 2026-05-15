@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import { eq } from "drizzle-orm";
-import { users, megadeskDomainCustomers, megadeskDomainTickets } from "../drizzle/schema";
+import { users, megadeskDomainCustomers, megadeskDomainTickets, megadeskDomainConversations } from "../drizzle/schema";
 
 type Database = ReturnType<typeof drizzle>;
 type UpsertUserInput = {
@@ -70,6 +70,14 @@ export async function upsertUser(input: UpsertUserInput) {
 }
 
 // Customer/Client Helpers
+export async function getConversationsByClientId(clientId: string) {
+  const rows = await getDb()
+    .select()
+    .from(megadeskDomainConversations)
+    .where(eq(megadeskDomainConversations.clientId, clientId));
+  return rows;
+}
+
 export async function searchCustomerByPhone(phone: string) {
   const rows = await getDb()
     .select()
@@ -118,6 +126,30 @@ export async function createTicket(input: {
     status: "open",
     createdLabel: new Date().toLocaleString("pt-BR"),
     description: input.description,
+  });
+  return input;
+}
+
+export async function createConversation(input: {
+  conversationId: string;
+  clientId: string;
+  customerName: string;
+  phone: string;
+  company: string;
+  lastMessage?: string;
+  messages?: any[];
+}) {
+  const now = new Date();
+  await getDb().insert(megadeskDomainConversations).values({
+    conversationId: input.conversationId,
+    clientId: input.clientId,
+    customerName: input.customerName,
+    phone: input.phone,
+    company: input.company,
+    status: "open",
+    lastMessage: input.lastMessage ?? "Conversa iniciada",
+    timeLabel: now.toLocaleString("pt-BR"),
+    messagesJson: JSON.stringify(input.messages ?? []),
   });
   return input;
 }
