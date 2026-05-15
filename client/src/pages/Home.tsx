@@ -491,11 +491,163 @@ function ERPPage() {
 }
 
 function SettingsPage() {
+  const [sidebarColors, setSidebarColors] = React.useState({
+    background: '#0f172a',
+    accentStart: '#9333ea',
+    accentEnd: '#ec4899',
+    glowColor: '#a855f7',
+    textPrimary: '#ffffff',
+    textSecondary: '#cbd5e1',
+  });
+
+  const handleColorChange = (key: string, value: string) => {
+    setSidebarColors(prev => ({ ...prev, [key]: value }));
+    localStorage.setItem('sidebarColors', JSON.stringify({ ...sidebarColors, [key]: value }));
+  };
+
+  const presets = [
+    {
+      name: 'Roxo Padrão',
+      colors: {
+        background: '#0f172a',
+        accentStart: '#9333ea',
+        accentEnd: '#ec4899',
+        glowColor: '#a855f7',
+        textPrimary: '#ffffff',
+        textSecondary: '#cbd5e1',
+      }
+    },
+    {
+      name: 'Azul Profissional',
+      colors: {
+        background: '#0c1222',
+        accentStart: '#0ea5e9',
+        accentEnd: '#06b6d4',
+        glowColor: '#0284c7',
+        textPrimary: '#ffffff',
+        textSecondary: '#cbd5e1',
+      }
+    },
+    {
+      name: 'Verde Moderno',
+      colors: {
+        background: '#051f1f',
+        accentStart: '#10b981',
+        accentEnd: '#14b8a6',
+        glowColor: '#059669',
+        textPrimary: '#ffffff',
+        textSecondary: '#cbd5e1',
+      }
+    },
+    {
+      name: 'Laranja Vibrante',
+      colors: {
+        background: '#1f1209',
+        accentStart: '#f97316',
+        accentEnd: '#ea580c',
+        glowColor: '#fb923c',
+        textPrimary: '#ffffff',
+        textSecondary: '#cbd5e1',
+      }
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-4">Configurações</h2>
-        <p className="text-slate-600">Personalize sua experiência no MegaDesk.</p>
+        <h2 className="text-2xl font-bold text-slate-900 mb-2">Configurações</h2>
+        <p className="text-slate-600 mb-8">Personalize sua experiência no MegaDesk.</p>
+
+        {/* Paleta de Cores */}
+        <div className="mb-8">
+          <h3 className="text-lg font-bold text-slate-900 mb-4">Personalizar Cores da Barra Lateral</h3>
+          
+          {/* Presets */}
+          <div className="mb-6">
+            <p className="text-sm font-medium text-slate-600 mb-3">Temas Pré-definidos:</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              {presets.map((preset) => (
+                <button
+                  key={preset.name}
+                  onClick={() => {
+                    setSidebarColors(preset.colors);
+                    localStorage.setItem('sidebarColors', JSON.stringify(preset.colors));
+                  }}
+                  className="p-4 rounded-lg border-2 border-slate-200 hover:border-slate-400 transition-all duration-200 text-left"
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <div
+                      className="w-6 h-6 rounded-full"
+                      style={{
+                        background: `linear-gradient(135deg, ${preset.colors.accentStart} 0%, ${preset.colors.accentEnd} 100%)`
+                      }}
+                    ></div>
+                    <span className="text-sm font-medium text-slate-900">{preset.name}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Editor de Cores Personalizado */}
+          <div className="border-t pt-6">
+            <p className="text-sm font-medium text-slate-600 mb-4">Cores Personalizadas:</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[
+                { key: 'background', label: 'Fundo da Barra' },
+                { key: 'accentStart', label: 'Gradiente Início' },
+                { key: 'accentEnd', label: 'Gradiente Fim' },
+                { key: 'glowColor', label: 'Cor do Glow' },
+                { key: 'textPrimary', label: 'Texto Primário' },
+                { key: 'textSecondary', label: 'Texto Secundário' },
+              ].map((color) => (
+                <div key={color.key} className="flex flex-col gap-2">
+                  <label className="text-sm font-medium text-slate-700">{color.label}</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={sidebarColors[color.key as keyof typeof sidebarColors]}
+                      onChange={(e) => handleColorChange(color.key, e.target.value)}
+                      className="w-12 h-12 rounded-lg cursor-pointer border border-slate-300"
+                    />
+                    <input
+                      type="text"
+                      value={sidebarColors[color.key as keyof typeof sidebarColors]}
+                      onChange={(e) => handleColorChange(color.key, e.target.value)}
+                      className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono"
+                      placeholder="#000000"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Preview */}
+          <div className="mt-8 p-6 rounded-lg border border-slate-200 bg-slate-50">
+            <p className="text-sm font-medium text-slate-600 mb-4">Pré-visualização:</p>
+            <div
+              className="w-20 h-40 rounded-lg shadow-lg flex flex-col items-center justify-center gap-2 p-2 transition-all duration-300"
+              style={{
+                backgroundColor: sidebarColors.background,
+                boxShadow: `0 0 20px ${sidebarColors.glowColor}40`
+              }}
+            >
+              <div
+                className="w-10 h-10 rounded-lg"
+                style={{
+                  background: `linear-gradient(135deg, ${sidebarColors.accentStart} 0%, ${sidebarColors.accentEnd} 100%)`
+                }}
+              ></div>
+              <div
+                className="w-12 h-1 rounded-full"
+                style={{
+                  background: `linear-gradient(90deg, ${sidebarColors.accentStart}00 0%, ${sidebarColors.glowColor} 50%, ${sidebarColors.accentEnd}00 100%)`
+                }}
+              ></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
