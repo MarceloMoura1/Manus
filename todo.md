@@ -284,11 +284,12 @@
 - [x] Adicionar testes Vitest para timeline (27 testes de integração passando)
 
 ## Fase 38: Integração de Chamados com Backend
-- [ ] Criar schema de chamados com numeração sequencial no banco
-- [ ] Criar procedures tRPC para CRUD de chamados
+- [x] Criar schema de chamados com numeração sequencial no banco
+- [x] Criar procedures tRPC para CRUD de chamados (list, getDetail, create, update, addActivity, editActivity)
+- [x] Criar helpers de banco de dados para chamados
+- [x] Implementar isolamento de chamados por cliente autenticado
+- [x] Adicionar filtro "Total" excluindo chamados fechados
 - [ ] Integrar TicketsPage com dados reais do banco
-- [ ] Implementar isolamento de chamados por cliente autenticado
-- [ ] Adicionar filtro "Total" excluindo chamados fechados
 - [ ] Implementar busca avançada (nome, nº cliente, nº chamado)
-- [ ] Adicionar testes Vitest para CRUD e filtros
+- [ ] Adicionar testes Vitest para procedures tRPC
 - [ ] Testar fluxo completo com persistência real
