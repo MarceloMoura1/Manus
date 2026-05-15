@@ -644,11 +644,11 @@ function TicketsPage() {
 
   React.useEffect(() => {
     setChamados([
-      { id: '1', number: 1, customerName: 'João Silva', company: 'Empresa A', title: 'Problema com login', observations: 'Usuário não consegue fazer login', status: 'open', phone: '11999999999' },
-      { id: '2', number: 2, customerName: 'Maria Santos', company: 'Empresa B', title: 'Erro ao enviar mensagem', observations: 'Erro ao enviar mensagem via WhatsApp', status: 'in_progress', phone: '11988888888' },
-      { id: '3', number: 3, customerName: 'Pedro Costa', company: 'Empresa C', title: 'Dúvida sobre integração', observations: 'Cliente quer saber como integrar API', status: 'waiting', phone: '11977777777' },
-      { id: '4', number: 4, customerName: 'Ana Oliveira', company: 'Empresa A', title: 'Solicitação de relatório', observations: 'Precisa de relatório de conversas', status: 'open', phone: '11966666666' },
-      { id: '5', number: 5, customerName: 'Carlos Mendes', company: 'Empresa D', title: 'Problema resolvido', observations: 'Problema foi solucionado', status: 'closed', phone: '11955555555' },
+      { id: '1', number: 1, customerName: 'João Silva', company: 'Empresa A', title: 'Problema com login', observations: 'Usuário não consegue fazer login', status: 'open', priority: 'alta', assignedTo: 'João', phone: '11999999999' },
+      { id: '2', number: 2, customerName: 'Maria Santos', company: 'Empresa B', title: 'Erro ao enviar mensagem', observations: 'Erro ao enviar mensagem via WhatsApp', status: 'in_progress', priority: 'media', assignedTo: 'Maria', phone: '11988888888' },
+      { id: '3', number: 3, customerName: 'Pedro Costa', company: 'Empresa C', title: 'Dúvida sobre integração', observations: 'Cliente quer saber como integrar API', status: 'waiting', priority: 'baixa', assignedTo: 'Pedro', phone: '11977777777' },
+      { id: '4', number: 4, customerName: 'Ana Oliveira', company: 'Empresa A', title: 'Solicitação de relatório', observations: 'Precisa de relatório de conversas', status: 'open', priority: 'critica', assignedTo: 'Ana', phone: '11966666666' },
+      { id: '5', number: 5, customerName: 'Carlos Mendes', company: 'Empresa D', title: 'Problema resolvido', observations: 'Problema foi solucionado', status: 'closed', priority: 'media', assignedTo: 'Carlos', phone: '11955555555' },
     ]);
   }, []);
 
@@ -674,6 +674,25 @@ function TicketsPage() {
       case 'waiting': return 'Aguardando';
       case 'closed': return 'Fechado';
       default: return status;
+    }
+  };
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'baixa': return 'bg-blue-100 text-blue-700';
+      case 'media': return 'bg-yellow-100 text-yellow-700';
+      case 'alta': return 'bg-orange-100 text-orange-700';
+      case 'critica': return 'bg-red-100 text-red-700';
+      default: return 'bg-slate-100 text-slate-700';
+    }
+  };
+
+  const getPriorityLabel = (priority: string) => {
+    switch (priority) {
+      case 'baixa': return 'Baixa';
+      case 'media': return 'Média';
+      case 'alta': return 'Alta';
+      case 'critica': return 'Crítica';
+      default: return priority;
     }
   };
 
@@ -888,19 +907,50 @@ function TicketsPage() {
                 )}
               </div>
 
+              <div className="border-t border-slate-200 pt-4 grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-bold text-slate-700 mb-2">Status</p>
+                  <select
+                    value={selectedChamadoData.status}
+                    onChange={(e) => {
+                      updateChamado(selectedChamadoData.id, 'status', e.target.value);
+                    }}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                  >
+                    <option value="open">Aberto</option>
+                    <option value="in_progress">Em Progresso</option>
+                    <option value="waiting">Aguardando</option>
+                  </select>
+                </div>
+
+                <div>
+                  <p className="text-sm font-bold text-slate-700 mb-2">Prioridade</p>
+                  <select
+                    value={selectedChamadoData.priority || 'media'}
+                    onChange={(e) => {
+                      updateChamado(selectedChamadoData.id, 'priority', e.target.value);
+                    }}
+                    className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                  >
+                    <option value="baixa">Baixa</option>
+                    <option value="media">Média</option>
+                    <option value="alta">Alta</option>
+                    <option value="critica">Crítica</option>
+                  </select>
+                </div>
+              </div>
+
               <div className="border-t border-slate-200 pt-4">
-                <p className="text-sm font-bold text-slate-700 mb-2">Status</p>
-                <select
-                  value={selectedChamadoData.status}
+                <p className="text-sm font-bold text-slate-700 mb-2">Responsável</p>
+                <input
+                  type="text"
+                  value={selectedChamadoData.assignedTo || ''}
                   onChange={(e) => {
-                    updateChamado(selectedChamadoData.id, 'status', e.target.value);
+                    updateChamado(selectedChamadoData.id, 'assignedTo', e.target.value);
                   }}
+                  placeholder="Nome do responsável"
                   className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
-                >
-                  <option value="open">Aberto</option>
-                  <option value="in_progress">Em Progresso</option>
-                  <option value="waiting">Aguardando</option>
-                </select>
+                />
               </div>
             </div>
           ) : (

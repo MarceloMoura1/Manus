@@ -271,3 +271,27 @@
 - [ ] Implementar procedures tRPC para CRUD de chamados com filtro de cliente
 - [ ] Integrar persistência no banco de dados
 - [ ] Adicionar testes Vitest para operações de chamados
+
+## Fase 36: Integração de Banco de Dados para Chamados
+- [x] Criar schema de chamados com campos: id, número sequencial, cliente, título, observações, status, prioridade, responsável
+- [x] Criar tabela de histórico de alterações de chamados
+- [x] Gerar migração SQL e executar no banco
+- [ ] Criar helpers de banco em server/db.ts para CRUD de chamados
+- [ ] Implementar procedures tRPC para: createTicket, updateTicket, getTickets, closeTicket
+- [ ] Adicionar filtro de cliente (isolamento de dados por tenant)
+- [ ] Adicionar testes Vitest para procedures
+
+## Fase 37: Funcionalidades Adicionais - Responsável e Prioridade
+- [x] Adicionar campo de responsável (usuário) no chamado
+- [x] Adicionar campo de prioridade (baixa, média, alta, crítica)
+- [x] Implementar UI para selecionar responsável (dropdown com usuários)
+- [x] Implementar UI para selecionar prioridade (dropdown com cores)
+- [x] Adicionar ícones visuais para prioridade (cores diferentes)
+- [x] Integrar mutations para atualizar responsável e prioridade
+
+## Fase 38: Histórico de Alterações
+- [ ] Criar tabela de histórico com: id, chamado_id, campo_alterado, valor_anterior, valor_novo, usuário, data
+- [ ] Implementar logging automático ao alterar chamado
+- [ ] Criar UI para exibir histórico (timeline ou lista)
+- [ ] Adicionar filtro por tipo de alteração
+- [ ] Mostrar quem alterou e quando
