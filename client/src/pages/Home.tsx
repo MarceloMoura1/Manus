@@ -7,6 +7,7 @@ import {
   Bell,
   Bot,
   CheckCircle2,
+  Clock,
   ClipboardList,
   Cog,
   Eye,
@@ -215,25 +216,65 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
 }
 
 function ConversationsPage() {
+  const [searchTerm, setSearchTerm] = React.useState('');
+  const [selectedFilter, setSelectedFilter] = React.useState('open');
+
+  const filters = [
+    { id: 'open', label: '🟢 Abertas', count: 0 },
+    { id: 'bot', label: '🤖 Atendimento BOT', count: 0 },
+    { id: 'closed', label: '⚫ Fechadas', count: 0 },
+  ];
+
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-4">Conversas</h2>
-        <p className="text-slate-600">Central de atendimento com histórico de mensagens.</p>
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1 bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
-          <h3 className="text-lg font-bold text-slate-900 mb-4">Conversas Ativas</h3>
-          <div className="space-y-2">
-            <div className="p-3 rounded-lg bg-slate-50 hover:bg-slate-100 cursor-pointer transition-colors">
-              <p className="font-semibold text-slate-900">Cliente A</p>
-              <p className="text-xs text-slate-600">Última mensagem: 2 min</p>
-            </div>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">Conversas</h2>
+            <p className="text-slate-600 text-sm mt-1">0 conversas</p>
           </div>
         </div>
-        <div className="lg:col-span-2 bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
-          <h3 className="text-lg font-bold text-slate-900 mb-4">Conversa</h3>
-          <p className="text-slate-600">Selecione uma conversa para visualizar</p>
+        
+        <div className="flex flex-wrap gap-3 mb-6">
+          {filters.map(filter => (
+            <button
+              key={filter.id}
+              onClick={() => setSelectedFilter(filter.id)}
+              className={cn(
+                'px-4 py-2 rounded-lg font-medium transition-all duration-200',
+                selectedFilter === filter.id
+                  ? 'bg-blue-500 text-white shadow-lg'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              )}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="relative mb-6">
+          <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Buscar número..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1 bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
+          <h3 className="text-lg font-bold text-slate-900 mb-4">Lista de Conversas</h3>
+          <div className="flex items-center justify-center h-40 text-center">
+            <p className="text-slate-500">Nenhuma conversa neste filtro</p>
+          </div>
+        </div>
+        <div className="lg:col-span-2 bg-white rounded-2xl shadow-lg p-6 border border-slate-100 flex flex-col items-center justify-center h-80">
+          <MessageCircle className="w-16 h-16 text-slate-300 mb-4" />
+          <h3 className="text-lg font-bold text-slate-900 mb-2">Selecione uma conversa para visualizar</h3>
+          <p className="text-slate-600">Clique em uma conversa da lista para ver os detalhes</p>
         </div>
       </div>
     </div>
@@ -241,33 +282,209 @@ function ConversationsPage() {
 }
 
 function TicketsPage() {
+  const [searchTerm, setSearchTerm] = React.useState('');
+
+  const statusCards = [
+    { label: 'Total', value: 10, color: 'bg-slate-900', textColor: 'text-white' },
+    { label: 'Abertos', value: 4, color: 'bg-blue-50', textColor: 'text-blue-600' },
+    { label: 'Em Progresso', value: 2, color: 'bg-yellow-50', textColor: 'text-yellow-600' },
+    { label: 'Aguardando', value: 3, color: 'bg-orange-50', textColor: 'text-orange-600' },
+    { label: 'Fechados', value: 1, color: 'bg-green-50', textColor: 'text-green-600' },
+  ];
+
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-4">Chamados</h2>
-        <p className="text-slate-600">Gerenciar e acompanhar todos os chamados abertos.</p>
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold text-slate-900 mb-2">Chamados</h2>
+          <p className="text-slate-600">Gerencie todos os chamados de atendimento</p>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+          {statusCards.map((card, idx) => (
+            <div
+              key={idx}
+              className={cn(
+                'rounded-xl p-4 text-center',
+                card.color
+              )}
+            >
+              <p className={cn('text-3xl font-bold', card.textColor)}>{card.value}</p>
+              <p className={cn('text-sm font-medium mt-1', idx === 0 ? 'text-white' : 'text-slate-600')}>{card.label}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex flex-col md:flex-row gap-4 mb-6">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Buscar por nome, número ou problema..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <select className="px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+            <option>Todas as categorias</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1 bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
+          <h3 className="text-lg font-bold text-slate-900 mb-4">Lista de Chamados</h3>
+          <div className="flex items-center justify-center h-40 text-center">
+            <p className="text-slate-500">Nenhum chamado neste filtro</p>
+          </div>
+        </div>
+        <div className="lg:col-span-2 bg-white rounded-2xl shadow-lg p-6 border border-slate-100 flex flex-col items-center justify-center h-80">
+          <Ticket className="w-16 h-16 text-slate-300 mb-4" />
+          <h3 className="text-lg font-bold text-slate-900 mb-2">Selecione um chamado</h3>
+          <p className="text-slate-600">Clique em um chamado da lista para ver os detalhes</p>
+        </div>
       </div>
     </div>
   );
 }
 
 function TrackingPage() {
+  const [searchTerm, setSearchTerm] = React.useState('');
+
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-4">Rastreio</h2>
-        <p className="text-slate-600">Monitorar atividades e status dos atendimentos.</p>
+        <h2 className="text-2xl font-bold text-slate-900 mb-6">Rastreamentos</h2>
+
+        <div className="flex flex-col md:flex-row gap-4 mb-6">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Buscar código..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <select className="px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+            <option value="all">Todas</option>
+          </select>
+          <select className="px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+            <option value="all">Todos</option>
+          </select>
+          <button className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors flex items-center gap-2">
+            <Plus className="w-5 h-5" />
+            Novo
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1 bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
+          <h3 className="text-lg font-bold text-slate-900 mb-4">Lista de Rastreamentos</h3>
+          <div className="flex items-center justify-center h-40 text-center">
+            <p className="text-slate-500">Carregando...</p>
+          </div>
+        </div>
+        <div className="lg:col-span-2 bg-white rounded-2xl shadow-lg p-6 border border-slate-100 flex flex-col items-center justify-center h-80">
+          <PackageSearch className="w-16 h-16 text-slate-300 mb-4" />
+          <h3 className="text-lg font-bold text-slate-900 mb-2">Selecione um rastreamento para ver detalhes</h3>
+          <p className="text-slate-600">Clique em um rastreamento da lista</p>
+        </div>
       </div>
     </div>
   );
 }
 
 function ERPPage() {
+  const [timeRange, setTimeRange] = React.useState('today');
+
+  const kpis = [
+    { label: 'Vendas Hoje', value: 'R$ 12.540', change: '↑ 12% vs ontem', color: 'text-green-600' },
+    { label: 'Pedidos Pendentes', value: '0', change: 'Aguardando ação', color: 'text-orange-600' },
+    { label: 'Pedidos Atrasados', value: '3', change: 'Requer atenção', color: 'text-red-600' },
+    { label: 'Clientes Ativos', value: '0', change: 'Total registrado', color: 'text-blue-600' },
+    { label: 'Faturamento Total', value: 'R$ 0.00', change: 'Mês atual', color: 'text-slate-600' },
+    { label: 'Chamados Abertos', value: '8', change: 'Aguardando resposta', color: 'text-purple-600' },
+    { label: 'Entregues Hoje', value: '24', change: 'Pedidos completados', color: 'text-green-600' },
+    { label: 'Pagamentos Pendentes', value: 'R$ 0', change: 'Aguardando recebimento', color: 'text-slate-600' },
+  ];
+
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-4">ERP</h2>
-        <p className="text-slate-600">Integração com sistema de gestão empresarial.</p>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">Dashboard Operacional</h2>
+            <p className="text-slate-600 text-sm mt-1">Acompanhe as métricas principais do negócio</p>
+          </div>
+        </div>
+
+        <div className="flex gap-3 mb-8">
+          {['today', 'week', 'month'].map((range) => (
+            <button
+              key={range}
+              onClick={() => setTimeRange(range)}
+              className={cn(
+                'px-4 py-2 rounded-lg font-medium transition-all duration-200',
+                timeRange === range
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              )}
+            >
+              {range === 'today' ? 'Hoje' : range === 'week' ? 'Esta Semana' : 'Este Mês'}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {kpis.map((kpi, idx) => (
+            <div key={idx} className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-6 border border-slate-200">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-slate-600">{kpi.label}</h3>
+              </div>
+              <p className="text-2xl font-bold text-slate-900 mb-1">{kpi.value}</p>
+              <p className="text-xs text-slate-600">{kpi.change}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
+          <h3 className="text-lg font-bold text-slate-900 mb-4">Vendas vs Pedidos</h3>
+          <div className="h-64 flex items-center justify-center bg-slate-50 rounded-lg">
+            <p className="text-slate-500">Gráfico de vendas vs pedidos</p>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
+          <h3 className="text-lg font-bold text-slate-900 mb-4">Distribuição de Status</h3>
+          <div className="space-y-3">
+            {['Aguardando Pagamento', 'Separando', 'Em Produção', 'Enviado', 'Entregue'].map((status, idx) => (
+              <div key={idx} className="flex items-center justify-between">
+                <span className="text-sm text-slate-600">{status}</span>
+                <span className="text-sm font-bold text-slate-900">{[0, 12, 8, 24, 156][idx]}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
+        <h3 className="text-lg font-bold text-slate-900 mb-4">Atividade Recente</h3>
+        <div className="space-y-3">
+          {[1, 2, 3, 4, 5].map((item) => (
+            <div key={item} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+              <div>
+                <p className="font-semibold text-slate-900">Pedido #PED-100{item} criado</p>
+                <p className="text-xs text-slate-600">Cliente: João Silva</p>
+              </div>
+              <span className="text-xs text-slate-600">há {item} minutos</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
