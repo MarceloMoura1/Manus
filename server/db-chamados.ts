@@ -168,7 +168,8 @@ export async function getChamadoWithActivities(
 export async function listChamados(
   clientId: string,
   status?: string,
-  limit: number = 100
+  limit: number = 10,
+  offset: number = 0
 ): Promise<ChamadoWithActivities[]> {
   let query = db
     .select()
@@ -190,7 +191,7 @@ export async function listChamados(
       );
   }
 
-  const chamados = await query.limit(limit);
+  const chamados = await query.limit(limit).offset(offset);
 
   // Para cada chamado, buscar atividades
   const result: ChamadoWithActivities[] = [];

@@ -293,3 +293,33 @@
 - [x] Implementar busca avançada (nome, nº cliente, nº chamado)
 - [x] Adicionar testes Vitest para procedures tRPC (22 testes passando)
 - [x] Testar fluxo completo com persistência real
+
+
+## Fase 39: Testes de Fluxo Completo
+- [x] Testar navegação para aba de Chamados
+- [x] Testar exibição da tabela Excel com dados do backend
+- [x] Testar clique em linha para abrir modal
+- [x] Testar timeline com atividades
+- [x] Testar filtros (Total, Abertos, Em Progresso, etc)
+- [x] Testar busca avançada
+- [x] Testar registrar nova atividade
+- [x] Testar editar atividade existente
+- [x] Testar alterar status do chamado
+- [x] Testar alterar atendente responsável (33 testes E2E passando)
+
+## Fase 40: Proteção de Autenticação nas Procedures
+- [x] Migrar chamadosRouter para usar protectedProcedure
+- [x] Derivar clientId do ctx.user em vez de receber como parâmetro
+- [x] Validar que usuário só acessa chamados do seu cliente
+- [x] Adicionar testes para isolamento de autenticação
+- [x] Testar acesso negado para clientes não autorizados
+- [x] Validar segurança de dados entre clientes
+
+## Fase 41: Implementar Paginação na Tabela
+- [x] Adicionar estado de página (currentPage, pageSize)
+- [x] Modificar procedure list para aceitar offset e limit
+- [x] Adicionar controles de navegação (Anterior, Próxima, Ir para página)
+- [x] Exibir informação de total de registros e página atual
+- [x] Implementar salto para página específica
+- [x] Testar paginação com diferentes tamanhos de página
+- [x] Otimizar performance com paginação (10 registros por página)

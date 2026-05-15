@@ -52,12 +52,15 @@ export function TicketsPageNew() {
   const [newStatus, setNewStatus] = React.useState('');
   const [newAttendant, setNewAttendant] = React.useState('');
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const pageSize = 10;
 
   // Queries tRPC
   const chamadosQuery = trpc.chamados.list.useQuery(
     {
-      clientId: user?.id || '',
       status: selectedFilter === 'total' ? 'total' : selectedFilter,
+      limit: pageSize,
+      offset: (currentPage - 1) * pageSize,
     },
     { enabled: !!user?.id }
   );
@@ -77,7 +80,6 @@ export function TicketsPageNew() {
     try {
       const result = await addActivityMutation.mutateAsync({
         chamadoId: selectedChamado.id,
-        clientId: user?.id || '',
         description: newActivityText,
         attendant: user?.name || 'Atendente',
       });
@@ -99,7 +101,6 @@ export function TicketsPageNew() {
       const result = await editActivityMutation.mutateAsync({
         activityId: editingActivityId,
         chamadoId: selectedChamado.id,
-        clientId: user?.id || '',
         description: editingActivityText,
       });
 
@@ -327,6 +328,31 @@ export function TicketsPageNew() {
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Controles de Paginação */}
+      <div className="flex items-center justify-between bg-white rounded-lg border border-slate-200 p-4">
+        <div className="text-sm text-slate-600">
+          Página <span className="font-semibold">{currentPage}</span> • Mostrando até {pageSize} registros
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+          >
+            ← Anterior
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage(p => p + 1)}
+            disabled={(chamadosQuery.data?.chamados?.length || 0) < pageSize}
+          >
+            Próxima →
+          </Button>
+        </div>
       </div>
 
       {/* Modal de Detalhes */}
