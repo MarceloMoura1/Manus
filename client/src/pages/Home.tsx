@@ -639,6 +639,7 @@ function TicketsPage() {
   const [chamados, setChamados] = React.useState<any[]>([]);
   const [editingField, setEditingField] = React.useState<string | null>(null);
   const [editingValue, setEditingValue] = React.useState('');
+  const [editingData, setEditingData] = React.useState<{title: string; observations: string}>({title: '', observations: ''});
   const [closeConfirmOpen, setCloseConfirmOpen] = React.useState(false);
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
@@ -888,19 +889,119 @@ function TicketsPage() {
                 )}
               </div>
 
-              <div className="border-t border-slate-200 pt-4">
-                <p className="text-sm font-bold text-slate-700 mb-2">Status</p>
-                <select
-                  value={selectedChamadoData.status}
-                  onChange={(e) => {
-                    updateChamado(selectedChamadoData.id, 'status', e.target.value);
-                  }}
-                  className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
-                >
-                  <option value="open">Aberto</option>
-                  <option value="in_progress">Em Progresso</option>
-                  <option value="waiting">Aguardando</option>
-                </select>
+              {/* Status, Prioridade, Responsável em 1 linha */}
+              <div className="py-3 border-t border-b border-slate-200">
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-600 block mb-1">Status</label>
+                    <select
+                      value={selectedChamadoData.status}
+                      onChange={(e) => updateChamado(selectedChamadoData.id, 'status', e.target.value)}
+                      className="w-full px-2 py-1 rounded border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-xs"
+                    >
+                      <option value="open">Aberto</option>
+                      <option value="in_progress">Em Progresso</option>
+                      <option value="waiting">Aguardando</option>
+                      <option value="closed">Fechado</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-600 block mb-1">Prioridade</label>
+                    <select
+                      value={selectedChamadoData.priority}
+                      onChange={(e) => updateChamado(selectedChamadoData.id, 'priority', e.target.value)}
+                      className="w-full px-2 py-1 rounded border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-xs"
+                    >
+                      <option value="baixa">Baixa</option>
+                      <option value="media">Média</option>
+                      <option value="alta">Alta</option>
+                      <option value="critica">Crítica</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-600 block mb-1">Responsável</label>
+                    <input
+                      type="text"
+                      value={selectedChamadoData.assignedTo}
+                      onChange={(e) => updateChamado(selectedChamadoData.id, 'assignedTo', e.target.value)}
+                      className="w-full px-2 py-1 rounded border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Título e Observações */}
+              <div className="flex-1 flex flex-col gap-4 py-4">
+                {/* Título */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 block mb-2">Título</label>
+                  {editingField === 'edit' ? (
+                    <input
+                      type="text"
+                      value={editingData.title}
+                      onChange={(e) => setEditingData({...editingData, title: e.target.value})}
+                      className="w-full px-3 py-2 rounded-lg border border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-medium"
+                      autoFocus
+                    />
+                  ) : (
+                    <p className="text-slate-900 font-medium text-sm">{selectedChamadoData.title}</p>
+                  )}
+                </div>
+
+                {/* Observações */}
+                <div className="flex-1 flex flex-col">
+                  <label className="text-xs font-semibold text-slate-600 block mb-2">Observações</label>
+                  {editingField === 'edit' ? (
+                    <textarea
+                      value={editingData.observations}
+                      onChange={(e) => setEditingData({...editingData, observations: e.target.value})}
+                      className="flex-1 px-3 py-2 rounded-lg border border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none"
+                      autoFocus
+                    />
+                  ) : (
+                    <div className="flex-1 px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-900 text-sm overflow-y-auto whitespace-pre-wrap">
+                      {selectedChamadoData.observations}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer com botões */}
+              <div className="pt-4 border-t border-slate-200 flex gap-2 justify-end">
+                {editingField === 'edit' ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        updateChamado(selectedChamadoData.id, 'title', editingData.title);
+                        updateChamado(selectedChamadoData.id, 'observations', editingData.observations);
+                        setEditingField(null);
+                        setEditingData({title: '', observations: ''});
+                      }}
+                      className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm font-medium"
+                    >
+                      Salvar Edição
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditingField(null);
+                        setEditingData({title: '', observations: ''});
+                      }}
+                      className="px-4 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 text-sm font-medium"
+                    >
+                      Cancelar
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setEditingField('edit');
+                      setEditingData({title: selectedChamadoData.title, observations: selectedChamadoData.observations});
+                    }}
+                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm font-medium"
+                  >
+                    Editar
+                  </button>
+                )}
               </div>
             </div>
           ) : (
