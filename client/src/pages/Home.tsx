@@ -410,7 +410,7 @@ function Shell() {
         sidebarOpen ? "w-64" : "w-20"
       )}>
         {/* Header com Logo */}
-        <div className="p-4 flex items-center justify-between border-b border-slate-800 transition-all duration-300">
+        <div className="p-4 flex items-center justify-between transition-all duration-300">
           {sidebarOpen ? (
             <>
               <div className="flex items-center gap-2 overflow-hidden">
@@ -439,9 +439,10 @@ function Shell() {
         </div>
 
         {/* Faixa de luz roxo minimalista */}
-        {sidebarOpen && (
-          <div className="h-1 bg-gradient-to-r from-purple-600/0 via-purple-500 to-purple-600/0 mx-4 my-3"></div>
-        )}
+        <div className={cn(
+          "bg-gradient-to-r from-purple-600/0 via-purple-500 to-purple-600/0 transition-all duration-300",
+          sidebarOpen ? "h-1 mx-4 my-3" : "h-px mx-0 my-0"
+        )}></div>
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto p-3 space-y-1 pt-8">
