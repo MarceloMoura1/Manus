@@ -5,7 +5,6 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { validateNewChamado, ValidationError } from "@/lib/validations";
 import { ActiveAttendancePage } from "./ActiveAttendance";
-import { ChamadoDetailPage } from "./ChamadoDetailPage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -484,148 +483,7 @@ function ConversationsPage() {
         )}
       </div>
 
-      {/* Modal de Edição de Cliente */}
-      {editModalOpen && selectedConversation && mockConversations && (() => {
-        const selectedConv = mockConversations.find((c) => c.id === selectedConversation);
-        return selectedConv ? (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl p-6 w-96">
-              <h2 className="text-xl font-bold text-slate-900 mb-4">Editar Cliente</h2>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Nome do Cliente</label>
-                  <input
-                    type="text"
-                    value={editName || selectedConv.name}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Empresa</label>
-                  <input
-                    type="text"
-                    value={editCompany || selectedConv.company}
-                    onChange={(e) => setEditCompany(e.target.value)}
-                    className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-3 mt-6">
-                <button
-                  onClick={() => setEditModalOpen(false)}
-                  className="flex-1 px-4 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-colors font-medium"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={async () => {
-                    if (selectedConversation && (editName || editCompany)) {
-                      try {
-                        await updateCustomerMutation.mutateAsync({
-                          customerId: selectedConversation,
-                          name: editName,
-                          company: editCompany,
-                        });
-                        
-                        // Atualizar lista local
-                        const updatedConversations = conversations.map(c =>
-                          c.id === selectedConversation
-                            ? { ...c, name: editName || c.name, company: editCompany || c.company }
-                            : c
-                        );
-                        setConversations(updatedConversations);
-                        setEditModalOpen(false);
-                      } catch (error) {
-                        console.error('Erro ao atualizar cliente:', error);
-                      }
-                    }
-                  }}
-                  className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
-                >
-                  Salvar
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null;
-      })()}
 
-      {/* Dialog de Confirmação para Reabrir Conversa */}
-      {reopenConfirmOpen && (() => {
-        const selectedConv = conversations.find((c) => c.id === selectedConversation);
-        return selectedConv ? (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl p-6 w-80">
-              <h2 className="text-lg font-bold text-slate-900 mb-4">Reabrir Conversa?</h2>
-              <p className="text-slate-600 mb-6">Tem certeza que deseja reabrir esta conversa? Ela será movida para a aba "Abertas".</p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setReopenConfirmOpen(false)}
-                  className="flex-1 px-4 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-colors font-medium"
-                >
-                  Não
-                </button>
-                <button
-                  onClick={() => {
-                    const updatedConversations = conversations.map(c =>
-                      c.id === selectedConversation ? { ...c, status: 'open' } : c
-                    );
-                    setConversations(updatedConversations);
-                    setSelectedFilter('open');
-                    setReopenConfirmOpen(false);
-                    showToast('Conversa reaberida com sucesso', 'success');
-                  }}
-                  className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
-                >
-                  Sim
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null;
-      })()}
-
-      {/* Dialog de Confirmação para Encerrar Conversa */}
-      {closeConfirmOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-80">
-            <h2 className="text-lg font-bold text-slate-900 mb-4">Encerrar Conversa?</h2>
-            <p className="text-slate-600 mb-6">Tem certeza que deseja encerrar esta conversa? Ela será movida para a aba "Fechadas".</p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setCloseConfirmOpen(false)}
-                className="flex-1 px-4 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-colors font-medium"
-              >
-                Não
-              </button>
-              <button
-                onClick={() => {
-                  if (selectedConversation) {
-                    // Atualizar UI instantaneamente
-                    const updatedConversations = conversations.map(c =>
-                      c.id === selectedConversation ? { ...c, status: 'closed' } : c
-                    );
-                    setConversations(updatedConversations);
-                    setSelectedConversation(null);
-                    setSelectedFilter('closed');
-                    setCloseConfirmOpen(false);
-                    showToast('Conversa encerrada com sucesso', 'success');
-                    
-                    // Enviar para backend em background (sem bloquear UI)
-                    closeConversationMutation.mutate({
-                      conversationId: selectedConversation,
-                    });
-                  }
-                }}
-                className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
-              >
-                Sim
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Toast Notification */}
       {toastMessage && (
@@ -1729,13 +1587,6 @@ function Shell() {
         </main>
       </div>
 
-      {/* Mobile Overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 lg:hidden z-30"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
     </div>
   );
 }
