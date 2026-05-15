@@ -130,16 +130,12 @@ export const megadeskDomainChamados = mysqlTable("megadesk_domain_chamados", {
   title: varchar("title", { length: 255 }).notNull(),
   observations: text("observations").notNull().default(""),
   status: mysqlEnum("status", ["open", "in_progress", "waiting", "closed"]).notNull().default("open"),
-  priority: mysqlEnum("priority", ["baixa", "media", "alta", "critica"]).notNull().default("media"),
-  assignedTo: varchar("assigned_to", { length: 80 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 }, (table) => ({
   clientIdx: index("idx_mdc_client").on(table.clientId),
   statusIdx: index("idx_mdc_status").on(table.status),
   chamadoNumberIdx: index("idx_mdc_chamado_number").on(table.chamadoNumber),
-  priorityIdx: index("idx_mdc_priority").on(table.priority),
-  assignedToIdx: index("idx_mdc_assigned_to").on(table.assignedTo),
 }));
 
 export const megadeskDomainChamadoSequence = mysqlTable("megadesk_domain_chamado_sequence", {
@@ -148,22 +144,6 @@ export const megadeskDomainChamadoSequence = mysqlTable("megadesk_domain_chamado
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 }, (table) => ({
   clientIdx: index("idx_mdcs_client").on(table.clientId),
-}));
-
-
-export const megadeskDomainChamadoHistory = mysqlTable("megadesk_domain_chamado_history", {
-  historyId: varchar("history_id", { length: 80 }).primaryKey(),
-  chamadoId: varchar("chamado_id", { length: 80 }).notNull(),
-  clientId: varchar("client_id", { length: 80 }).notNull(),
-  fieldChanged: varchar("field_changed", { length: 120 }).notNull(),
-  oldValue: text("old_value"),
-  newValue: text("new_value"),
-  changedBy: varchar("changed_by", { length: 80 }).notNull(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (table) => ({
-  chamadoIdx: index("idx_mdch_chamado").on(table.chamadoId),
-  clientIdx: index("idx_mdch_client").on(table.clientId),
-  createdAtIdx: index("idx_mdch_created_at").on(table.createdAt),
 }));
 
 export const megadeskDomainBotScripts = mysqlTable("megadesk_domain_bot_scripts", {
