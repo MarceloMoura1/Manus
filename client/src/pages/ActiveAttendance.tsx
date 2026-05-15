@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
 import { MessageCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { trpc } from '@/lib/trpc';
+import { useLocation } from 'wouter';
 
 export function ActiveAttendancePage() {
+  const [, setLocation] = useLocation();
   const [phoneNumber, setPhoneNumber] = useState('');
   const [customerData, setCustomerData] = useState<any>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -13,25 +16,31 @@ export function ActiveAttendancePage() {
   const [ticketTitle, setTicketTitle] = useState('');
   const [ticketObservation, setTicketObservation] = useState('');
   const [searchAttempted, setSearchAttempted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // tRPC mutations
+  const searchCustomerMutation = trpc.megadesk.searchCustomer.useMutation();
+  const createCustomerMutation = trpc.megadesk.createCustomer.useMutation();
+  const createTicketMutation = trpc.megadesk.createTicket.useMutation();
 
   const handleSearchCustomer = async () => {
     if (!phoneNumber.trim()) {
-      alert('Por favor, insira um número de telefone');
+      setError('Por favor, insira um número de telefone');
       return;
     }
 
+    setError(null);
     setIsSearching(true);
     setSearchAttempted(true);
 
-    // Simular busca no banco de dados
-    setTimeout(() => {
-      // Exemplo: se o número for "11999999999", retorna um cliente existente
-      if (phoneNumber === '11999999999') {
+    try {
+      const result = await searchCustomerMutation.mutateAsync({ phone: phoneNumber });
+      if (result.found) {
         setCustomerData({
-          id: '1',
+          id: result.id,
           phone: phoneNumber,
-          name: 'João Silva',
-          company: 'Tech Solutions',
+          name: result.name,
+          company: result.company,
           exists: true,
         });
         setShowNewCustomerForm(false);
@@ -39,51 +48,88 @@ export function ActiveAttendancePage() {
         setCustomerData(null);
         setShowNewCustomerForm(true);
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao buscar cliente');
+      setCustomerData(null);
+      setShowNewCustomerForm(false);
+    } finally {
       setIsSearching(false);
-    }, 500);
+    }
   };
 
-  const handleCreateCustomer = () => {
+  const handleCreateCustomer = async () => {
     if (!newCustomerName.trim() || !newCustomerCompany.trim()) {
-      alert('Por favor, preencha nome e empresa');
+      setError('Por favor, preencha nome e empresa');
       return;
     }
 
-    setCustomerData({
-      id: Math.random().toString(),
-      phone: phoneNumber,
-      name: newCustomerName,
-      company: newCustomerCompany,
-      exists: false,
-    });
-    setShowNewCustomerForm(false);
+    setError(null);
+    setIsSearching(true);
+
+    try {
+      const result = await createCustomerMutation.mutateAsync({
+        phone: phoneNumber,
+        name: newCustomerName,
+        company: newCustomerCompany,
+      });
+      setCustomerData({
+        id: result.id,
+        phone: phoneNumber,
+        name: newCustomerName,
+        company: newCustomerCompany,
+        exists: false,
+      });
+      setShowNewCustomerForm(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao criar cliente');
+    } finally {
+      setIsSearching(false);
+    }
   };
 
-  const handleStartConversation = () => {
+  const handleStartConversation = async () => {
     if (!customerData) return;
 
-    if (openTicket === true) {
-      if (!ticketTitle.trim()) {
-        alert('Por favor, insira o título do chamado');
-        return;
-      }
-      // Aqui você salvaria o chamado no banco de dados
-      console.log('Criando chamado:', {
-        customer: customerData,
-        title: ticketTitle,
-        observation: ticketObservation,
-      });
-    }
+    setError(null);
+    setIsSearching(true);
 
-    // Redirecionar para a página de Conversas
-    console.log('Abrindo conversa com:', customerData);
-    // Você pode usar o router aqui para navegar
+    try {
+      if (openTicket === true) {
+        if (!ticketTitle.trim()) {
+          setError('Por favor, insira o título do chamado');
+          setIsSearching(false);
+          return;
+        }
+        await createTicketMutation.mutateAsync({
+          customerId: customerData.id,
+          phone: customerData.phone,
+          title: ticketTitle,
+          observation: ticketObservation,
+          company: customerData.company,
+          customer: customerData.name,
+        });
+      }
+      // Redirecionar para a página de Conversas após sucesso
+      setLocation('/conversas');
+      return;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao processar solicitação');
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
         <h2 className="text-2xl font-bold text-slate-900 mb-6">Atendimento Ativo</h2>
+
+        {/* Mensagem de Erro */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-sm text-red-700">{error}</p>
+          </div>
+        )}
 
         {/* Etapa 1: Buscar Cliente */}
         {!customerData && (
@@ -132,9 +178,10 @@ export function ActiveAttendancePage() {
                   />
                   <button
                     onClick={handleCreateCustomer}
-                    className="w-full px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors font-medium"
+                    disabled={isSearching}
+                    className="w-full px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:bg-slate-400 transition-colors font-medium"
                   >
-                    Criar Cliente
+                    {isSearching ? 'Criando...' : 'Criar Cliente'}
                   </button>
                 </div>
               </div>
@@ -230,6 +277,7 @@ export function ActiveAttendancePage() {
                   setTicketTitle('');
                   setTicketObservation('');
                   setSearchAttempted(false);
+                  setError(null);
                 }}
                 className="flex-1 px-6 py-3 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-colors font-medium"
               >
@@ -237,10 +285,11 @@ export function ActiveAttendancePage() {
               </button>
               <button
                 onClick={handleStartConversation}
-                className="flex-1 px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors font-medium flex items-center justify-center gap-2"
+                disabled={isSearching}
+                className="flex-1 px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:bg-slate-400 transition-colors font-medium flex items-center justify-center gap-2"
               >
                 <MessageCircle className="w-5 h-5" />
-                Abrir Conversa
+                {isSearching ? 'Processando...' : 'Abrir Conversa'}
               </button>
             </div>
           </div>

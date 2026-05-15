@@ -1,5 +1,13 @@
 {
   "version": "7",
   "dialect": "mysql",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1778846962025,
+      "tag": "0000_youthful_tana_nile",
+      "breakpoints": true
+    }
+  ]
 }

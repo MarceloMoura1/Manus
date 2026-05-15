@@ -148,5 +148,11 @@
 - [x] Adicionar opcao "abrir chamado?" com sim/nao
 - [x] Se sim: adicionar campos de titulo e observacao do chamado
 - [x] Se nao: redirecionar para pagina de Conversas
-- [ ] Integrar com banco de dados (criar/atualizar cliente)
+- [x] Integrar com tRPC (procedures searchCustomer, createCustomer, createTicket)
 - [x] Testar fluxo completo (cliente existente e novo cliente)
+- [x] Testar criacao de chamado com redirecionamento para Conversas
+- [x] Criar tabela de clientes no banco de dados (megadesk_domain_customers)
+- [x] Adicionar helpers de banco (searchCustomerByPhone, createCustomer, createTicket)
+- [x] Corrigir procedures tRPC para usar banco de dados real
+- [x] Adicionar testes Vitest para as procedures (7 testes passando)
+- [x] Corrigir redirecionamento para pagina de Conversas

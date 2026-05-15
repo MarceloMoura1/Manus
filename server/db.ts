@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import { eq } from "drizzle-orm";
-import { users } from "../drizzle/schema";
+import { users, megadeskDomainCustomers, megadeskDomainTickets } from "../drizzle/schema";
 
 type Database = ReturnType<typeof drizzle>;
 type UpsertUserInput = {
@@ -67,6 +67,59 @@ export async function upsertUser(input: UpsertUserInput) {
       updatedAt: now,
     },
   });
+}
+
+// Customer/Client Helpers
+export async function searchCustomerByPhone(phone: string) {
+  const rows = await getDb()
+    .select()
+    .from(megadeskDomainCustomers)
+    .where(eq(megadeskDomainCustomers.phone, phone))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function createCustomer(input: {
+  customerId: string;
+  clientId: string;
+  name: string;
+  phone: string;
+  company: string;
+  email?: string;
+}) {
+  await getDb().insert(megadeskDomainCustomers).values({
+    customerId: input.customerId,
+    clientId: input.clientId,
+    name: input.name,
+    phone: input.phone,
+    company: input.company,
+    email: input.email ?? null,
+    status: "active",
+  });
+  return input;
+}
+
+export async function createTicket(input: {
+  ticketId: string;
+  clientId: string;
+  company: string;
+  customer: string;
+  problem: string;
+  category: string;
+  description: string;
+}) {
+  await getDb().insert(megadeskDomainTickets).values({
+    ticketId: input.ticketId,
+    clientId: input.clientId,
+    company: input.company,
+    customer: input.customer,
+    problem: input.problem,
+    category: input.category,
+    status: "open",
+    createdLabel: new Date().toLocaleString("pt-BR"),
+    description: input.description,
+  });
+  return input;
 }
 
 function cloneState(state: MegaDeskStructuredState): MegaDeskStructuredState {

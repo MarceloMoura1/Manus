@@ -77,6 +77,21 @@ export const megadeskDomainClientUsers = mysqlTable("megadesk_domain_client_user
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 });
 
+export const megadeskDomainCustomers = mysqlTable("megadesk_domain_customers", {
+  customerId: varchar("customer_id", { length: 80 }).primaryKey(),
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  name: varchar("name", { length: 180 }).notNull(),
+  phone: varchar("phone", { length: 40 }).notNull().unique(),
+  company: varchar("company", { length: 255 }).notNull(),
+  email: varchar("email", { length: 255 }),
+  status: mysqlEnum("status", ["active", "inactive"]).notNull().default("active"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+}, (table) => ({
+  clientIdx: index("idx_mdc_client").on(table.clientId),
+  phoneIdx: index("idx_mdc_phone").on(table.phone),
+}));
+
 export const megadeskDomainConversations = mysqlTable("megadesk_domain_conversations", {
   conversationId: varchar("conversation_id", { length: 80 }).primaryKey(),
   clientId: varchar("client_id", { length: 80 }).notNull(),

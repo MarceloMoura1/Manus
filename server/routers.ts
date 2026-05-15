@@ -727,6 +727,106 @@ export const appRouter = router({
      *   3. O cliente do usuário tem accessReleased=true e status="active".
      * Retorna dados da sessão que são armazenados no localStorage do browser.
      */
+    searchCustomer: publicProcedure
+      .input(z.object({ phone: z.string().min(1) }))
+      .mutation(async ({ input }) => {
+        try {
+          const { searchCustomerByPhone } = await import("./db");
+          const customer = await searchCustomerByPhone(input.phone);
+          if (customer) {
+            return {
+              found: true,
+              id: customer.customerId,
+              name: customer.name,
+              company: customer.company,
+              phone: customer.phone,
+            };
+          }
+          return { found: false };
+        } catch (error) {
+          console.error("Erro ao buscar cliente:", error);
+          return { found: false };
+        }
+      }),
+    createCustomer: publicProcedure
+      .input(z.object({ phone: z.string().min(1), name: z.string().min(1), company: z.string().min(1) }))
+      .mutation(async ({ input }) => {
+        try {
+          const { createCustomer: createCustomerDb } = await import("./db");
+          await hydrateSyncState();
+          const client = clients[0];
+          if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
+          
+          const customerId = `cust-${Date.now()}`;
+          await createCustomerDb({
+            customerId,
+            clientId: client.clientId,
+            name: input.name,
+            phone: input.phone,
+            company: input.company,
+          });
+          
+          const conversationId = `conv-${Date.now()}`;
+          const newConversation: Conversation = {
+            id: conversationId,
+            clientId: client.clientId,
+            name: input.name,
+            phone: input.phone,
+            company: input.company,
+            status: "open",
+            lastMessage: "Conversa iniciada",
+            time: new Date().toLocaleTimeString('pt-BR'),
+            messages: [{ from: "customer", text: "Olá, gostaria de atendimento", time: new Date().toLocaleTimeString('pt-BR') }],
+          };
+          conversations.push(newConversation);
+          audit("MegaDesk", `Cliente criado: ${input.name}`, client.clientId);
+          await persistSyncState();
+          return { id: customerId, name: input.name, company: input.company, phone: input.phone };
+        } catch (error) {
+          console.error("Erro ao criar cliente:", error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao criar cliente" });
+        }
+      }),
+    createTicket: publicProcedure
+      .input(z.object({ customerId: z.string(), phone: z.string(), title: z.string().min(1), observation: z.string().optional(), company: z.string(), customer: z.string() }))
+      .mutation(async ({ input }) => {
+        try {
+          const { createTicket: createTicketDb } = await import("./db");
+          await hydrateSyncState();
+          const client = clients[0];
+          if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
+          
+          const ticketId = `ticket-${Date.now()}`;
+          await createTicketDb({
+            ticketId,
+            clientId: client.clientId,
+            company: input.company,
+            customer: input.customer,
+            problem: input.title,
+            category: "suporte",
+            description: input.observation || "Sem observações",
+          });
+          
+          const newTicket: TicketRecord = {
+            id: ticketId,
+            clientId: client.clientId,
+            company: input.company,
+            customer: input.customer,
+            problem: input.title,
+            category: "suporte",
+            status: "open",
+            createdAt: new Date().toLocaleString('pt-BR'),
+            description: input.observation || "Sem observações",
+          };
+          tickets.push(newTicket);
+          audit("MegaDesk", `Chamado criado: ${input.title}`, client.clientId);
+          await persistSyncState();
+          return { ok: true, ticketId, title: input.title };
+        } catch (error) {
+          console.error("Erro ao criar chamado:", error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao criar chamado" });
+        }
+      }),
     loginByEmail: publicProcedure
       .input(z.object({ email: z.string().email(), password: z.string().min(1) }))
       .mutation(async ({ input }) => {
