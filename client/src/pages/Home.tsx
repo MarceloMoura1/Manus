@@ -3,6 +3,7 @@ import { navigateToPlatform } from "@/lib/platformRouting";
 import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { validateNewChamado, ValidationError } from "@/lib/validations";
 import { ActiveAttendancePage } from "./ActiveAttendance";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -680,6 +681,7 @@ export function TicketsPage() {
     observations: '',
     priority: 'media',
   });
+  const [validationErrors, setValidationErrors] = React.useState<ValidationError[]>([]);
 
   // Queries tRPC
   const chamadosQuery = trpc.chamados.list.useQuery(
@@ -788,10 +790,14 @@ export function TicketsPage() {
   };
 
   const handleCreateChamado = async () => {
-    if (!newChamadoForm.customerName.trim() || !newChamadoForm.company.trim() || !newChamadoForm.title.trim()) {
-      showToast('Preencha todos os campos obrigatorios', 'error');
+    // Validar formulário
+    const errors = validateNewChamado(newChamadoForm);
+    if (errors.length > 0) {
+      setValidationErrors(errors);
+      showToast(errors[0].message, 'error');
       return;
     }
+    setValidationErrors([]);
 
     try {
       const result = await createChamadoMutation.mutateAsync({
@@ -1156,7 +1162,11 @@ export function TicketsPage() {
                 placeholder="Ex: Joao Silva"
                 value={newChamadoForm.customerName}
                 onChange={e => setNewChamadoForm({...newChamadoForm, customerName: e.target.value})}
+                className={validationErrors.find(e => e.field === 'customerName') ? 'border-red-500' : ''}
               />
+              {validationErrors.find(e => e.field === 'customerName') && (
+                <p className="text-xs text-red-500 mt-1">{validationErrors.find(e => e.field === 'customerName')?.message}</p>
+              )}
             </div>
 
             <div>
@@ -1165,7 +1175,11 @@ export function TicketsPage() {
                 placeholder="Ex: Empresa XYZ"
                 value={newChamadoForm.company}
                 onChange={e => setNewChamadoForm({...newChamadoForm, company: e.target.value})}
+                className={validationErrors.find(e => e.field === 'company') ? 'border-red-500' : ''}
               />
+              {validationErrors.find(e => e.field === 'company') && (
+                <p className="text-xs text-red-500 mt-1">{validationErrors.find(e => e.field === 'company')?.message}</p>
+              )}
             </div>
 
             <div>
@@ -1174,7 +1188,11 @@ export function TicketsPage() {
                 placeholder="Ex: Problema com login"
                 value={newChamadoForm.title}
                 onChange={e => setNewChamadoForm({...newChamadoForm, title: e.target.value})}
+                className={validationErrors.find(e => e.field === 'title') ? 'border-red-500' : ''}
               />
+              {validationErrors.find(e => e.field === 'title') && (
+                <p className="text-xs text-red-500 mt-1">{validationErrors.find(e => e.field === 'title')?.message}</p>
+              )}
             </div>
 
             <div>

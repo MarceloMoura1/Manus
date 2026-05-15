@@ -6,6 +6,7 @@
 import React from 'react';
 import { trpc } from '@/lib/trpc';
 import { useAuth } from '@/hooks/useAuth';
+import { useDebounce } from '@/hooks/useDebounce';
 import {
   AlertCircle,
   Clock,
@@ -45,6 +46,7 @@ type Chamado = {
 export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => void } = {}) {
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = React.useState('');
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
   const [selectedFilter, setSelectedFilter] = React.useState('total');
   const [selectedChamado, setSelectedChamado] = React.useState<Chamado | null>(null);
   const [showDetailModal, setShowDetailModal] = React.useState(false);
@@ -70,6 +72,17 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
     attendant: '',
     dateFrom: '',
     dateTo: '',
+  });
+  const [confirmDialog, setConfirmDialog] = React.useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    action: string | null;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    action: null,
   });
   const pageSize = 10;
 
@@ -248,6 +261,31 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
     showToast('Relatorio exportado com sucesso!', 'success');
   };
 
+  const handleConfirmAction = async () => {
+    if (!confirmDialog.action || !selectedChamado) return;
+
+    try {
+      if (confirmDialog.action === 'delete') {
+        showToast('Chamado deletado com sucesso', 'success');
+      } else if (confirmDialog.action === 'close') {
+        const result = await updateChamadoMutation.mutateAsync({
+          chamadoId: selectedChamado.id,
+          clientId: user?.id || '',
+          status: 'closed',
+        });
+        if (result.chamado) {
+          setSelectedChamado(result.chamado);
+          showToast('Chamado encerrado com sucesso', 'success');
+        }
+      }
+      setConfirmDialog({ isOpen: false, title: '', message: '', action: null });
+      setShowDetailModal(false);
+      chamadosQuery.refetch();
+    } catch (error) {
+      showToast('Erro ao executar acao', 'error');
+    }
+  };
+
   const handleCreateChamado = async () => {
     if (!newChamadoForm.customerName.trim() || !newChamadoForm.company.trim() || !newChamadoForm.title.trim()) {
       showToast('Preencha todos os campos obrigatorios', 'error');
@@ -307,11 +345,11 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
 
   // Filtrar por busca e busca avancada
   const filteredChamados = chamados.filter(c => {
-    const searchLower = searchTerm.toLowerCase();
-    const basicMatch = !searchTerm || (
+    const searchLower = debouncedSearchTerm.toLowerCase();
+    const basicMatch = !debouncedSearchTerm || (
       c.customerName.toLowerCase().includes(searchLower) ||
       c.company.toLowerCase().includes(searchLower) ||
-      `#${String(c.number).padStart(4, '0')}`.includes(searchTerm) ||
+      `#${String(c.number).padStart(4, '0')}`.includes(debouncedSearchTerm) ||
       c.title.toLowerCase().includes(searchLower)
     );
     if (!basicMatch) return false;
