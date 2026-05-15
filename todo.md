@@ -479,3 +479,33 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Testes de exportação
 - [x] Testes de integração
 - [x] Cobertura de casos de sucesso e erro
+
+
+## Fase 47: Verificar Funcionalidade de Abrir Chamado no Atendimento Ativo
+- [ ] Verificar se botão "Abrir Chamado?" está funcional
+- [ ] Validar se chamado é criado corretamente
+- [ ] Verificar se dados do cliente são sincronizados
+- [ ] Testar redirecionamento para página de Conversas
+- [ ] Confirmar que chamado aparece na aba "Abertas" de Chamados
+
+## Fase 48: Adicionar Opção de Abrir Chamado na Página de Chamados
+- [ ] Adicionar botão "Abrir Conversa" em cada linha da tabela
+- [ ] Implementar funcionalidade de abrir conversa do cliente
+- [ ] Sincronizar com página de Conversas
+- [ ] Passar dados do cliente e chamado para Conversas
+- [ ] Testar fluxo completo
+
+## Fase 49: Integração com WhatsApp - Sincronizar Chamados
+- [ ] Criar estrutura de integração com WhatsApp API
+- [ ] Implementar webhook para receber mensagens do WhatsApp
+- [ ] Criar procedure tRPC para sincronizar mensagens com chamados
+- [ ] Adicionar campo de número WhatsApp no cliente
+- [ ] Sincronizar conversas do WhatsApp com chamados
+- [ ] Testar recebimento de mensagens do WhatsApp
+
+## Fase 50: Testes e Validação
+- [ ] Testar fluxo completo de Atendimento Ativo → Chamado → Conversa
+- [ ] Testar sincronização de WhatsApp com chamados
+- [ ] Testar abrir conversa da página de Chamados
+- [ ] Validar persistência de dados
+- [ ] Criar testes Vitest para novas funcionalidades

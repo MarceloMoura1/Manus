@@ -12,6 +12,7 @@ import {
   Download,
   Edit2,
   MessageSquare,
+  PhoneCall,
   Plus,
   Search,
   Ticket,
@@ -41,7 +42,7 @@ type Chamado = {
   }>;
 };
 
-export function TicketsPageNew() {
+export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => void } = {}) {
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState('total');
@@ -152,6 +153,28 @@ export function TicketsPageNew() {
       }
     } catch (error) {
       showToast('Erro ao atualizar status', 'error');
+    }
+  };
+
+
+  // Abrir conversa com cliente
+  const handleOpenConversation = async (chamado: Chamado) => {
+    try {
+      // Armazenar dados do chamado para sincronizacao
+      localStorage.setItem('MEGADESK_TICKET_ID', chamado.id);
+      localStorage.setItem('MEGADESK_TICKET_NUMBER', String(chamado.number));
+      localStorage.setItem('MEGADESK_CUSTOMER_NAME', chamado.customerName);
+      localStorage.setItem('MEGADESK_CUSTOMER_COMPANY', chamado.company);
+      
+      // Redirecionar para pagina de Conversas
+      if (onNavigate) {
+        onNavigate('conversations');
+      } else {
+        window.location.hash = '#/conversas';
+      }
+      showToast('Abrindo conversa com cliente...', 'success');
+    } catch (error) {
+      showToast('Erro ao abrir conversa', 'error');
     }
   };
 
@@ -511,12 +534,13 @@ export function TicketsPageNew() {
               <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Título</th>
               <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Atendente</th>
               <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Status</th>
+              <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">Ação</th>
             </tr>
           </thead>
           <tbody>
             {filteredChamados.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
                   Nenhum chamado encontrado
                 </td>
               </tr>
@@ -544,6 +568,20 @@ export function TicketsPageNew() {
                     <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusBadgeColor(chamado.status)}`}>
                       {getStatusLabel(chamado.status)}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenConversation(chamado);
+                      }}
+                      className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                      title="Abrir conversa com cliente"
+                    >
+                      <PhoneCall className="w-4 h-4" />
+                    </Button>
                   </td>
                 </tr>
               ))
