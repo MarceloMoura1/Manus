@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Router } from "wouter";
+import { Router, Route, Switch } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
@@ -41,15 +41,19 @@ export default function App() {
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
           <Router>
-            {isAdminRoute() ? (
-              <AdminPanel />
-            ) : (
-              <>
-                <Home />
-                <ChamadoDetail />
-              </>
-            )}
+            <Switch>
+              {/* Admin routes */}
+              <Route path="/admin/:rest*" component={AdminPanel} />
+              
+              {/* MegaDesk routes */}
+              <Route path="/chamado/:id" component={ChamadoDetail} />
+              <Route path="/" component={Home} />
+              
+              {/* Fallback to home */}
+              <Route component={Home} />
+            </Switch>
           </Router>
+
           <AIAssistant
             isOpen={isAssistantOpen}
             onClose={() => setIsAssistantOpen(false)}

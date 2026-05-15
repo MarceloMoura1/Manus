@@ -222,7 +222,7 @@ export function ChamadoDetail() {
         <div className="text-center">
           <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-slate-900 mb-2">Chamado não encontrado</h2>
-          <Button onClick={() => navigate("/home")} className="mt-4">
+          <Button onClick={() => navigate("/")} className="mt-4">
             Voltar para Chamados
           </Button>
         </div>
@@ -235,7 +235,7 @@ export function ChamadoDetail() {
       {/* Header */}
       <div className="max-w-6xl mx-auto mb-6">
         <button
-          onClick={() => navigate("/home")}
+          onClick={() => navigate("/")}
           className="flex items-center gap-2 text-blue-600 hover:text-blue-700 font-medium mb-4"
         >
           <ArrowLeft className="w-4 h-4" />

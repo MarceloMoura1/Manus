@@ -663,6 +663,7 @@ type Ticket = {
 };
 
 export function TicketsPage() {
+  const [, navigate] = useLocation();
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState<'total' | 'open' | 'in_progress' | 'waiting' | 'closed'>('total');
@@ -983,7 +984,7 @@ export function TicketsPage() {
                 <tr
                   key={chamado.id}
                   onClick={() => {
-                    window.location.href = `/chamado/${chamado.id}`;
+                    navigate(`/chamado/${chamado.id}`);
                   }}
                   className="border-b border-slate-200 hover:bg-blue-50 cursor-pointer transition-colors"
                 >
