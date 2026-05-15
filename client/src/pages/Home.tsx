@@ -364,9 +364,11 @@ function ConversationsPage() {
                     <p className="text-xs text-slate-500 truncate">{conv.company}</p>
                     <p className={cn(
                       'text-sm truncate mt-1',
-                      conv.isUnread ? 'font-bold text-slate-900' : 'text-slate-600'
+                      conv.status === 'closed'
+                        ? 'text-slate-500 italic'
+                        : conv.isUnread ? 'font-bold text-slate-900' : 'text-slate-600'
                     )}>
-                      {conv.lastMessage}
+                      {conv.status === 'closed' ? 'Conversa encerrada' : conv.lastMessage}
                     </p>
                   </div>
                   <span className="text-xs text-slate-400 ml-2 flex-shrink-0">
