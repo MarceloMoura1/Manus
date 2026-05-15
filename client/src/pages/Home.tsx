@@ -455,11 +455,9 @@ function Shell() {
                 key={item.id}
                 onClick={() => setActive(item.id)}
                 className={cn(
-                  "flex items-center py-3 rounded-lg transition-all duration-300 relative px-2",
+                  "flex items-center py-3 rounded-lg transition-all duration-300 relative px-3 -mx-3",
                   isActive
-                    ? sidebarOpen
-                      ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50 -mr-3 pr-3"
-                      : "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50"
+                    ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50 mx-0 px-3"
                     : "text-slate-300 hover:text-white hover:bg-slate-800/50"
                 )}
                 title={item.label}
@@ -493,11 +491,9 @@ function Shell() {
                 key={item.id}
                 onClick={() => setActive(item.id)}
                 className={cn(
-                  "flex items-center py-3 rounded-lg transition-all duration-300 relative px-2",
+                  "flex items-center py-3 rounded-lg transition-all duration-300 relative px-3 -mx-3",
                   isActive
-                    ? sidebarOpen
-                      ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50 -mr-3 pr-3"
-                      : "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50"
+                    ? "bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50 mx-0 px-3"
                     : "text-slate-300 hover:text-white hover:bg-slate-800/50"
                 )}
                 title={item.label}
