@@ -568,7 +568,7 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Testar no navegador
 
 
-## BUG: Erro ao Criar Chamado - EM PROGRESSO
+## BUG: Erro ao Criar Chamado - RESOLVIDO ✅
 - [x] Investigar erro ao criar chamado - Problema: colisão de chamadoNumber único global
 - [x] Verificar logs do servidor - Confirmado: erro de SQL com unique constraint
 - [x] Verificar console do navegador - Sem erros específicos
@@ -576,4 +576,4 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Criar fallback de autenticação em context.ts
 - [x] Remover unique() global e adicionar índice único composto (client_id, chamado_number)
 - [x] Aplicar migration SQL para remover unique global
-- [ ] Testar fluxo completo com autenticação
+- [x] Testar fluxo completo com autenticação - RESOLVIDO: Removido clientId de todas as queries/mutations, agora derivado de ctx.tenantId
