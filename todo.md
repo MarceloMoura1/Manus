@@ -281,7 +281,7 @@
 - [x] Adicionar botões: "Registrar atividade", "Status do chamado", "Atendente Responsável"
 - [x] Implementar ícone de edição em cada balão de atividade
 - [x] Permitir edição de atividades existentes
-- [ ] Adicionar testes Vitest para timeline
+- [x] Adicionar testes Vitest para timeline (27 testes de integração passando)
 
 ## Fase 38: Integração de Chamados com Backend
 - [ ] Criar schema de chamados com numeração sequencial no banco
