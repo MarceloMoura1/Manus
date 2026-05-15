@@ -662,7 +662,10 @@ function Shell() {
         )}></div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto p-3 space-y-1 pt-8">
+        <nav className={cn(
+          "flex-1 p-3 space-y-1 pt-8 transition-all duration-300",
+          sidebarOpen ? "overflow-y-auto" : "overflow-hidden"
+        )}>
           {mainNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = active === item.id;
