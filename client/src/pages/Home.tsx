@@ -220,6 +220,33 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
 function ConversationsPage() {
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState('open');
+  const [selectedConversation, setSelectedConversation] = React.useState<string | null>(null);
+
+  // Capturar parâmetros da URL ao carregar a página
+  React.useEffect(() => {
+    // Ler parâmetros do hash (ex: #/conversas?clientId=...&phone=...)
+    const hash = window.location.hash;
+    const queryStart = hash.indexOf('?');
+    
+    if (queryStart !== -1) {
+      const queryString = hash.substring(queryStart + 1);
+      const params = new URLSearchParams(queryString);
+      const clientId = params.get('clientId');
+      const phone = params.get('phone');
+      
+      if (clientId && phone) {
+        // Abrir automaticamente a conversa do cliente
+        setSelectedConversation(clientId);
+        // Limpar os parâmetros da URL
+        window.history.replaceState({}, document.title, window.location.pathname + '#/conversas');
+      }
+    }
+  }, []);
+
+  // Mock data para conversas (será substituído por dados reais do banco)
+  const mockConversations = [
+    { id: 'cust-1778848377677', name: 'João Silva', phone: '11999999999', company: 'Tech Solutions', lastMessage: 'Olá, tudo bem?', timestamp: '10:30', status: 'open' },
+  ];
 
   const filters = [
     { id: 'open', label: 'Abertas', color: 'bg-green-500' },
@@ -809,7 +836,7 @@ function Shell() {
           {active === "bot-config" && <BotConfigPage />}
           {active === "ai-assistant" && <AIAssistantPage />}
           {active === "notifications" && <NotificationsPage />}
-          {active === "active-attendance" && <ActiveAttendancePage />}
+          {active === "active-attendance" && <ActiveAttendancePage onNavigate={(route) => setActive(route as RouteId)} />}
         </main>
       </div>
 

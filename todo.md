@@ -186,3 +186,13 @@
 - [x] Corrigir mapeamento de dados do cliente (customerId vs id)
 - [x] Testar fluxo completo com criação de chamado (100% FUNCIONAL)
 - [x] FASE COMPLETA - Interface estável, bonita e totalmente funcional!
+
+## Fase 26: Correção de Redirecionamento - Abrir Conversa
+- [x] Implementar redirecionamento para página de Conversas ao clicar em "Abrir Conversa"
+- [x] Passar ID da conversa como parâmetro na URL (clientId e phone)
+- [x] Abrir automaticamente a conversa do cliente na página de Conversas
+- [x] Testar fluxo completo (Atendimento Ativo → Conversas com parâmetros)
+- [x] Capturar parâmetros na página de Conversas com useEffect
+- [x] Limpar parâmetros da URL após captura
+- [x] Corrigir redirecionamento para chamar onNavigate('conversations')
+- [x] FASE COMPLETA - Redirecionamento 100% funcional! (TESTADO E VALIDADO NO NAVEGADOR)

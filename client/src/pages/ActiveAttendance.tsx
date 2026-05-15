@@ -3,7 +3,7 @@ import { Phone, User, Building2, CheckCircle, AlertCircle, Loader2, ArrowRight, 
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 
-export function ActiveAttendancePage() {
+export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any) => void }) {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [customerData, setCustomerData] = useState<any>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -92,6 +92,8 @@ export function ActiveAttendancePage() {
     setIsSearching(true);
 
     try {
+      let conversationId = customerData.id || customerData.customerId;
+      
       if (openTicket === true) {
         if (!ticketTitle.trim()) {
           setError('Por favor, insira o título do chamado');
@@ -99,7 +101,7 @@ export function ActiveAttendancePage() {
           return;
         }
 
-        await createTicketMutation.mutateAsync({
+        const ticketResult = await createTicketMutation.mutateAsync({
           customerId: customerData.id || customerData.customerId,
           phone: customerData.phone,
           title: ticketTitle,
@@ -109,10 +111,16 @@ export function ActiveAttendancePage() {
         });
         setSuccessMessage('Chamado criado com sucesso!');
       }
-      // Redirecionar para conversas após sucesso
+      
+      // Redirecionar para conversas com ID da conversa
       setTimeout(() => {
-        // Usar window.location para evitar re-renderizações do wouter
-        window.location.hash = '#/conversas';
+        // Chamar callback para trocar a view ativa
+        if (onNavigate) {
+          onNavigate('conversations');
+        } else {
+          // Fallback: redirecionar via hash
+          window.location.hash = `#/conversas?clientId=${conversationId}&phone=${customerData.phone}`;
+        }
       }, 800);
       return;
     } catch (err) {
@@ -131,9 +139,9 @@ export function ActiveAttendancePage() {
     setOpenTicket(null);
     setTicketTitle('');
     setTicketObservation('');
-    setSearchAttempted(false);
-    setError(null);
     setSuccessMessage(null);
+    setError(null);
+    setSearchAttempted(false);
   };
 
   return (
