@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import { eq } from "drizzle-orm";
-import { users, megadeskDomainCustomers, megadeskDomainTickets, megadeskDomainConversations } from "../drizzle/schema";
+import { users, megadeskDomainCustomers, megadeskDomainTickets, megadeskDomainConversations, megadeskDomainChamados } from "../drizzle/schema";
 
 type Database = ReturnType<typeof drizzle>;
 type UpsertUserInput = {
@@ -116,27 +116,22 @@ export async function createTicket(input: {
   category: string;
   description: string;
 }) {
-  const now = new Date();
-  const day = String(now.getDate()).padStart(2, '0');
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const year = now.getFullYear();
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  const seconds = String(now.getSeconds()).padStart(2, '0');
-  const createdLabel = `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+  const chamadoNumber = Math.floor(Math.random() * 10000) + 1;
+  const chamadoId = `chamado-${Date.now()}`;
   
-  await getDb().insert(megadeskDomainTickets).values({
-    ticketId: input.ticketId,
+  await getDb().insert(megadeskDomainChamados).values({
+    chamadoId: chamadoId,
     clientId: input.clientId,
+    chamadoNumber: chamadoNumber,
+    customerId: input.customer,
+    customerName: input.customer,
     company: input.company,
-    customer: input.customer,
-    problem: input.problem,
-    category: input.category,
+    title: input.problem,
+    observations: input.description,
     status: "open",
-    createdLabel: createdLabel,
-    description: input.description,
+    priority: "media",
   });
-  return input;
+  return { ...input, chamadoId, chamadoNumber };
 }
 
 export async function createConversation(input: {
