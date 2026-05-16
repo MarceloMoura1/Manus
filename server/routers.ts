@@ -647,7 +647,8 @@ export const appRouter = router({
     // Backup Management
     createBackup: adminProcedure.mutation(async () => {
       await hydrateSyncState();
-      const backupId = await createMegaDeskBackup(inMemoryState);
+      const state: MegaDeskStructuredState = { clients, conversations, tickets, botScripts, operationalRecords, auditLogs };
+      const backupId = await createMegaDeskBackup(state);
       if (!backupId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Falha ao criar backup" });
       audit("MegaAdmin", "Backup manual criado", undefined);
       return { ok: true, backupId };

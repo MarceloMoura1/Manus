@@ -50,7 +50,8 @@ async function startServer() {
       }
       
       const { loadMegaDeskStructuredState, createMegaDeskBackup, cleanupOldBackups } = await import("../db");
-      const state = await loadMegaDeskStructuredState();
+      const defaultState = { clients: [], conversations: [], tickets: [], botScripts: [], operationalRecords: [], auditLogs: [] };
+      const state = await loadMegaDeskStructuredState(defaultState);
       
       if (!state) {
         return res.status(500).json({ error: "Falha ao carregar estado", taskUid: user.taskUid });
