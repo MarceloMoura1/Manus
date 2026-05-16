@@ -23,10 +23,17 @@ async function tryMegaAdminSession(req: CreateExpressContextOptions["req"]): Pro
         raw = authHeader.slice(7);
       }
     }
-    if (!raw) return null;
+    if (!raw) {
+      console.log('[DEBUG] No MegaAdmin token found in cookie or Authorization header');
+      return null;
+    }
     const secret = new TextEncoder().encode(process.env.JWT_SECRET ?? "fallback");
     const { payload } = await jwtVerify(raw, secret);
-    if (payload.type !== "megaadmin" || payload.role !== "admin") return null;
+    console.log('[DEBUG] MegaAdmin JWT verified:', { type: payload.type, role: payload.role, sub: payload.sub });
+    if (payload.type !== "megaadmin" || payload.role !== "admin") {
+      console.log('[DEBUG] Token is not megaadmin admin type');
+      return null;
+    }
     // Construct a synthetic User object that satisfies adminProcedure checks
     return {
       id: 0,
@@ -39,7 +46,8 @@ async function tryMegaAdminSession(req: CreateExpressContextOptions["req"]): Pro
       updatedAt: new Date(),
       lastSignedIn: new Date(),
     } as User;
-  } catch {
+  } catch (err) {
+    console.log('[DEBUG] MegaAdmin session error:', err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -63,8 +71,9 @@ export async function createContext(
     user = await tryMegaAdminSession(opts.req);
   }
 
-  // 3. Fallback: Create test user if no auth (for development/testing)
-  if (!user) {
+  // 3. Fallback: Create test user ONLY if explicitly requested via header
+  // This prevents accidentally creating non-admin users when auth fails
+  if (!user && opts.req.headers?.['x-allow-test-user'] === 'true') {
     user = {
       id: 1,
       openId: 'test-user-dev',
