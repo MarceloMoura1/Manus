@@ -1277,23 +1277,6 @@ export function TicketsPage() {
                 </div>
 
                 <div className="space-y-4">
-                  {/* Tipo de Atividade */}
-                  <div>
-                    <label className="text-sm font-semibold text-slate-700 block mb-2">Tipo de Atividade</label>
-                    <Select value={activityType} onValueChange={(value: any) => setActivityType(value)}>
-                      <SelectTrigger className="bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-blue-500 transition-colors">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-600">
-                        <SelectItem value="note">Nota</SelectItem>
-                        <SelectItem value="register">Apontamento</SelectItem>
-                        <SelectItem value="edit">Edicao</SelectItem>
-                        <SelectItem value="close">Encerramento</SelectItem>
-                        <SelectItem value="forward">Encaminhamento</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
                   {/* Descricao */}
                   <div>
                     <label className="text-sm font-semibold text-slate-700 block mb-2">Descricao</label>
