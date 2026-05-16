@@ -2226,8 +2226,13 @@ function Shell() {
     { id: "notifications" as RouteId, label: "Notificações", icon: Bell },
   ];
 
+  // Itens que são sempre visíveis independente de permissões
+  const alwaysVisibleItems = ["home", "settings", "help", "notifications"];
+  
   const filteredNavItems = navItems.filter(item => {
-    if (["home", "active-attendance", "settings", "help", "notifications"].includes(item.id)) return true;
+    // Itens sempre visíveis
+    if (alwaysVisibleItems.includes(item.id)) return true;
+    // Itens que dependem de permissões: active-attendance, conversations, tickets, tracking, erp, bot-config, ai-assistant
     return session.permissions.includes(item.id);
   });
 
