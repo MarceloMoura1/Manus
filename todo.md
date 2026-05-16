@@ -915,3 +915,8 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Remover DEFAULT das migrações ALTER TABLE com LONGTEXT
 - [x] Verificar que INSERTs sempre fornecem valor para integrations_json
 - [x] 6 testes de validação de schema SQL passando
+
+## Fase 82: Remover card "Conversas ativas e chamados" do dashboard MegaAdmin
+- [x] Localizar o card no código do MegaAdmin (AdminPanel.tsx linhas 952-953)
+- [x] Remover os cards "Conversas" e "Chamados" do grid de MetricCards
+- [x] Servidor compilando sem erros

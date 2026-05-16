@@ -949,8 +949,6 @@ export default function AdminPanel() {
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <MetricCard title="Clientes" value={summary?.totals.clients ?? 0} caption="Contas cadastradas" icon={Building2} />
                   <MetricCard title="Liberados" value={summary?.totals.released ?? 0} caption="Acesso ativo na MegaDesk" icon={ShieldCheck} />
-                  <MetricCard title="Conversas" value={summary?.totals.conversations ?? 0} caption="Registradas no sistema" icon={Bot} />
-                  <MetricCard title="Chamados" value={summary?.totals.tickets ?? 0} caption="Abertos e em andamento" icon={KeyRound} />
                 </div>
 
                 <div className="rounded-[2rem] border border-white/10 bg-slate-950/70 p-6">
