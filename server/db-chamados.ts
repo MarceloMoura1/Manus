@@ -510,6 +510,7 @@ export async function addActivityToChamado(
       description: sanitizedDescription,
       attendant: sanitizedAttendant,
       createdAt: new Date(),
+      updatedAt: new Date(),
     });
 
     console.log(`[SUCCESS] Atividade adicionada ao chamado ${chamadoId}`);

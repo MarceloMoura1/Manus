@@ -76,6 +76,14 @@ type Ticket = {
   }>;
 };
 
+type ClientUser = {
+  userId: string;
+  name: string;
+  email: string;
+  role: 'admin' | 'manager' | 'agent' | 'viewer';
+  status: 'active' | 'blocked';
+};
+
 const cn = (...classes: any[]) => classes.filter(Boolean).join(" ");
 
 function LoadingSpinner() {
@@ -530,6 +538,10 @@ export function TicketsPage() {
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState<'total' | 'open' | 'in_progress' | 'waiting' | 'closed'>('total');
   const [selectedChamado, setSelectedChamado] = React.useState<any | null>(null);
+  const [showForwardCard, setShowForwardCard] = React.useState(false);
+  const [forwardAttendant, setForwardAttendant] = React.useState<string>('');
+  const [forwardObservations, setForwardObservations] = React.useState<string>('');
+  const [clientUsers, setClientUsers] = React.useState<ClientUser[]>([]);
 
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [showNewChamadoModal, setShowNewChamadoModal] = React.useState(false);
@@ -562,9 +574,65 @@ export function TicketsPage() {
   const editActivityMutation = trpc.chamados.editActivity.useMutation();
   const createChamadoMutation = trpc.chamados.create.useMutation();
 
+  // Carregar usuários do cliente ao abrir o card de encaminhamento
+  const getClientUsersQuery = trpc.megadesk.getClientUsers.useQuery(
+    {},
+    { enabled: showForwardCard && !!selectedChamado }
+  );
+
+  React.useEffect(() => {
+    if (showForwardCard && selectedChamado && getClientUsersQuery.data) {
+      setClientUsers(getClientUsersQuery.data || []);
+    }
+  }, [showForwardCard, selectedChamado, getClientUsersQuery.data]);
+
   const showToast = (message: string, type: 'success' | 'error') => {
     setToastMessage({ message, type });
     setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleForwardChamado = async () => {
+    if (!selectedChamado || !forwardAttendant) {
+      showToast('Selecione um atendente', 'error');
+      return;
+    }
+
+    try {
+      // Atualizar o chamado com o novo atendente
+      await updateChamadoMutation.mutateAsync({
+        chamadoId: selectedChamado.id,
+        assignedTo: forwardAttendant,
+      });
+
+      // Adicionar atividade se houver observações
+      if (forwardObservations.trim()) {
+        await addActivityMutation.mutateAsync({
+          chamadoId: selectedChamado.id,
+          description: `Encaminhado para ${clientUsers.find(u => u.userId === forwardAttendant)?.name || forwardAttendant}. Observação: ${forwardObservations}`,
+          attendant: user?.user?.name || 'Atendente',
+        });
+      }
+
+      // Atualizar o chamado selecionado
+      setSelectedChamado({
+        ...selectedChamado,
+        assignedTo: forwardAttendant,
+      });
+
+      // Invalidar cache e refetch
+      await utils.chamados.list.invalidate();
+      await chamadosQuery.refetch();
+
+      // Limpar estados
+      setShowForwardCard(false);
+      setForwardAttendant('');
+      setForwardObservations('');
+
+      showToast('Chamado encaminhado com sucesso!', 'success');
+    } catch (error) {
+      console.error('Erro ao encaminhar chamado:', error);
+      showToast('Erro ao encaminhar chamado', 'error');
+    }
   };
 
 
@@ -949,7 +1017,7 @@ export function TicketsPage() {
 
           {/* Linha de Icones com Tooltips */}
           <div className="flex items-center justify-center gap-0 px-8 py-6 border-b border-slate-200" style={{height: '60px', marginBottom: '-5px'}}>
-            <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors">
+            <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors" onClick={() => setShowForwardCard(!showForwardCard)}>
               {/* Círculo com seta - Encaminhar */}
               <svg className="w-6 h-6 text-black hover:text-slate-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <circle cx="12" cy="12" r="10" />
@@ -1004,6 +1072,70 @@ export function TicketsPage() {
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Dossiê do cliente</div>
             </div>
           </div>
+
+          {/* Card Suspenso de Encaminhamento */}
+          {showForwardCard && selectedChamado && (
+            <div className="absolute top-[280px] left-1/2 transform -translate-x-1/2 z-50 bg-white rounded-lg shadow-2xl border border-slate-200 p-6 w-96">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-slate-900">Encaminhar Chamado</h3>
+                <button
+                  onClick={() => setShowForwardCard(false)}
+                  className="text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {/* Select de Atendentes */}
+                <div>
+                  <label className="text-sm font-semibold text-slate-700 block mb-2">Atendente</label>
+                  <Select value={forwardAttendant} onValueChange={setForwardAttendant}>
+                    <SelectTrigger className="bg-slate-50 border-2 border-slate-200 focus:border-blue-500 transition-colors">
+                      <SelectValue placeholder="Selecione um atendente" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white border-2 border-slate-200">
+                      {clientUsers.map(user => (
+                        <SelectItem key={user.userId} value={user.userId}>
+                          {user.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Campo de Observações */}
+                <div>
+                  <label className="text-sm font-semibold text-slate-700 block mb-2">Observações</label>
+                  <textarea
+                    placeholder="Ex: Entre em contato com esse cliente para fechar o orçamento"
+                    value={forwardObservations}
+                    onChange={e => setForwardObservations(e.target.value)}
+                    className="w-full px-3 py-2 border-2 border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 transition-colors resize-none"
+                    rows={3}
+                  />
+                </div>
+
+                {/* Botões */}
+                <div className="flex gap-3 pt-4 border-t border-slate-200">
+                  <Button
+                    onClick={handleForwardChamado}
+                    disabled={!forwardAttendant}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+                  >
+                    ✅ Encaminhar
+                  </Button>
+                  <Button
+                    onClick={() => setShowForwardCard(false)}
+                    variant="outline"
+                    className="flex-1 border-2 border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold"
+                  >
+                    ✕ Cancelar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Conteudo da Tela Branca */}
           <div className="p-8 max-w-6xl mx-auto">

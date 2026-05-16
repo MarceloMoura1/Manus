@@ -949,6 +949,23 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao atualizar cliente" });
         }
       }),
+    getClientUsers: publicProcedure
+      .input(z.object({ clientId: z.string().optional() }))
+      .query(async ({ input }) => {
+        await hydrateSyncState();
+        const client = getReleasedClientOrThrow(input.clientId);
+        // Retornar apenas usuários ativos do cliente
+        const activeUsers = client.users
+          .filter((u) => u.status === "active")
+          .map((u) => ({
+            userId: u.id,
+            name: u.name,
+            email: u.email,
+            role: u.role,
+            status: u.status,
+          }));
+        return activeUsers;
+      }),
     loginByEmail: publicProcedure
       .input(z.object({ email: z.string().email(), password: z.string().min(1) }))
       .mutation(async ({ input }) => {
