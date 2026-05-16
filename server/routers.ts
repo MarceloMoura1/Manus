@@ -1047,6 +1047,62 @@ export const appRouter = router({
           message: "E-mail não encontrado. Verifique se você foi cadastrado pelo administrador.",
         });
       }),
+    refreshSession: publicProcedure
+      .input(z.object({ userEmail: z.string().email() }))
+      .mutation(async ({ input }) => {
+        await hydrateSyncState();
+        const email = input.userEmail.trim().toLowerCase();
+
+        // Busca o usuário em todos os clientes
+        for (const client of clients) {
+          const user = client.users.find((u) => u.email.toLowerCase() === email);
+          if (!user) continue;
+
+          // Verifica se o usuário ainda está ativo
+          if (user.status !== "active") {
+            audit("MegaDesk", `Refresh negado: usuário bloqueado (${email})`, client.clientId, false);
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: "Seu acesso está bloqueado. Entre em contato com o administrador.",
+            });
+          }
+
+          // Verifica se o cliente ainda tem acesso liberado
+          if (!client.accessReleased || client.status !== "active") {
+            audit("MegaDesk", `Refresh negado: cliente sem acesso liberado (${email})`, client.clientId, false);
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: "Sua empresa ainda não tem acesso liberado na plataforma.",
+            });
+          }
+
+          // Renova a sessão com permissões atualizadas
+          const permissions = resolveUserPermissions(user);
+          audit("MegaDesk", `Sessão renovada: ${email}`, client.clientId);
+          await persistSyncState();
+
+          return {
+            ok: true,
+            session: {
+              userEmail: user.email,
+              userName: user.name,
+              userRole: user.role,
+              permissions,
+              clientId: client.clientId,
+              company: client.company,
+              plan: client.plan,
+              modules: client.modules,
+            },
+          };
+        }
+
+        // E-mail não encontrado
+        audit("MegaDesk", `Refresh negado: e-mail não encontrado (${email})`, undefined, false);
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Sessão expirada. Faça login novamente.",
+        });
+      }),
   }),
   assistant: router({
     chat: publicProcedure

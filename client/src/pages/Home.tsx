@@ -59,7 +59,26 @@ function loadSession(): MegaDeskSession | null {
 }
 
 function saveSession(session: MegaDeskSession) {
-  localStorage.setItem(MEGADESK_SESSION_KEY, JSON.stringify(session));
+  // Adicionar timestamps de expiração se não existirem
+  const now = Date.now();
+  const sessionWithTimestamps: MegaDeskSession = {
+    ...session,
+    expiresAt: session.expiresAt || now + SESSION_DURATION,
+    refreshedAt: session.refreshedAt || now,
+  };
+  localStorage.setItem(MEGADESK_SESSION_KEY, JSON.stringify(sessionWithTimestamps));
+  return sessionWithTimestamps;
+}
+
+function isSessionExpired(session: MegaDeskSession | null): boolean {
+  if (!session || !session.expiresAt) return false;
+  return Date.now() > session.expiresAt;
+}
+
+function shouldRefreshSession(session: MegaDeskSession | null): boolean {
+  if (!session || !session.expiresAt) return false;
+  const timeUntilExpiry = session.expiresAt - Date.now();
+  return timeUntilExpiry < REFRESH_THRESHOLD;
 }
 
 function clearSession() {
@@ -76,7 +95,15 @@ type MegaDeskSession = {
   userRole: 'admin' | 'manager' | 'agent' | 'viewer';
   plan: string;
   modules: string[];
+  // Token refresh management
+  expiresAt?: number; // timestamp em ms quando a sessão expira
+  refreshedAt?: number; // timestamp em ms da última renovação
 };
+
+// Constantes para renovação de token
+const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 horas em ms
+const REFRESH_THRESHOLD = 5 * 60 * 1000; // Renovar 5 minutos antes de expirar
+const REFRESH_INTERVAL = 10 * 60 * 1000; // Verificar renovação a cada 10 minutos
 
 type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp" | "settings" | "bot-config" | "ai-assistant" | "notifications";
 
@@ -2630,8 +2657,41 @@ function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) =>
   );
 }
 
+function useSessionRefresh(session: MegaDeskSession | null, setSession: (session: MegaDeskSession) => void) {
+  const refreshMutation = trpc.megadesk.refreshSession.useMutation();
+
+  React.useEffect(() => {
+    if (!session) return;
+
+    // Verificar se a sessão precisa ser renovada
+    const checkAndRefresh = async () => {
+      if (shouldRefreshSession(session)) {
+        try {
+          const result = await refreshMutation.mutateAsync({ userEmail: session.userEmail });
+          if (result.ok) {
+            const updatedSession = saveSession(result.session);
+            setSession(updatedSession);
+          }
+        } catch (error) {
+          console.error("Erro ao renovar sessão:", error);
+          // Se falhar, não fazer nada - deixar o usuário continuar
+        }
+      }
+    };
+
+    // Verificar renovação imediatamente
+    checkAndRefresh();
+
+    // Configurar intervalo para verificar periodicamente
+    const interval = setInterval(checkAndRefresh, REFRESH_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [session?.userEmail]);
+}
+
 export function Home() {
   const [session, setSession] = useState<MegaDeskSession | null>(() => loadSession());
+  useSessionRefresh(session, setSession);
 
   if (!session) {
     return <MegaDeskLoginGate onLogin={setSession} />;
