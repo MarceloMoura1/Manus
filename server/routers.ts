@@ -621,6 +621,29 @@ export const appRouter = router({
       await persistSyncState();
       return { ok: true, user: { ...user, permissions: Array.from(new Set([...rolePermissions(user.role), ...user.permissions])) } };
     }),
+    deleteClient: adminProcedure
+      .input(z.object({ clientId: z.string() }))
+      .mutation(async ({ input }) => {
+        await hydrateSyncState();
+        const clientIndex = clients.findIndex((c) => c.clientId === input.clientId);
+        if (clientIndex === -1) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Cliente não encontrado." });
+        }
+        const client = clients[clientIndex];
+        // Não permite excluir cliente com usuários ativos
+        const activeUsers = client.users.filter((u) => u.status === "active");
+        if (activeUsers.length > 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Não é possível excluir cliente com ${activeUsers.length} usuário(s) ativo(s). Desative todos os usuários primeiro.`,
+          });
+        }
+        // Remover cliente da lista
+        clients.splice(clientIndex, 1);
+        audit("MegaAdmin", `Cliente ${client.company} (${input.clientId}) excluído`, undefined);
+        await persistSyncState();
+        return { ok: true, message: `Cliente ${client.company} foi excluído com sucesso.` };
+      }),
   }),
   megadesk: router({
     overview: publicProcedure.input(z.object({ clientId: z.string().optional(), userEmail: z.string().email() })).query(async ({ input }) => {

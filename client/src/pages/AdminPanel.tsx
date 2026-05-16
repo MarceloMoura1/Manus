@@ -75,6 +75,32 @@ function EmptyState({ text }: { text: string }) {
   );
 }
 
+function DeleteClientButton({ client, onSuccess }: { client: any; onSuccess: () => void }) {
+  const deleteClientMutation = trpc.megaadmin.deleteClient.useMutation({
+    onSuccess() {
+      toast.success(`Cliente ${client.company} foi excluído com sucesso.`);
+      onSuccess();
+    },
+    onError(err: any) {
+      toast.error(err.message || "Erro ao excluir cliente");
+    },
+  });
+
+  return (
+    <button
+      onClick={() => {
+        if (confirm(`Tem certeza que deseja excluir o cliente "${client.company}"? Esta ação não pode ser desfeita.`)) {
+          deleteClientMutation.mutate({ clientId: client.clientId });
+        }
+      }}
+      disabled={deleteClientMutation.isPending}
+      className="rounded-xl border border-red-500/30 px-3 py-1.5 text-xs text-red-300 hover:border-red-400/60 hover:bg-red-500/10 transition disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {deleteClientMutation.isPending ? "Excluindo..." : "Excluir"}
+    </button>
+  );
+}
+
 function MetricCard({
   title,
   value,
@@ -994,12 +1020,15 @@ export default function AdminPanel() {
                                 </span>
                               </td>
                               <td className="px-4 py-3 text-right">
-                                <button
-                                  onClick={() => setSelectedClient(client)}
-                                  className="rounded-xl border border-white/10 px-3 py-1.5 text-xs text-slate-300 hover:border-cyan-400/40 transition"
-                                >
-                                  Editar
-                                </button>
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    onClick={() => setSelectedClient(client)}
+                                    className="rounded-xl border border-white/10 px-3 py-1.5 text-xs text-slate-300 hover:border-cyan-400/40 transition"
+                                  >
+                                    Editar
+                                  </button>
+                                  <DeleteClientButton client={client} onSuccess={() => { summaryQuery.refetch(); setSelectedClient(null); }} />
+                                </div>
                               </td>
                             </tr>
                           );
