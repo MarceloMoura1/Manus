@@ -125,6 +125,7 @@ function LoginPage({ onLoginSuccess }: { onLoginSuccess: (session: MegaDeskSessi
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const loginMutation = trpc.megadesk.loginByEmail.useMutation();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -142,44 +143,89 @@ function LoginPage({ onLoginSuccess }: { onLoginSuccess: (session: MegaDeskSessi
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 to-slate-950">
-      <div className="w-full max-w-md">
-        <div className="rounded-2xl border border-slate-700 bg-slate-900 p-8 shadow-2xl">
-          <div className="mb-8 text-center">
-            <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-blue-600 mb-4">
-              <Zap className="w-6 h-6 text-white" />
+    <div className="flex min-h-screen">
+      {/* Esquerda - Detalhes da Empresa (Azul Escuro) */}
+      <div className="hidden lg:flex w-1/2 bg-gradient-to-br from-blue-900 via-blue-800 to-slate-900 text-white flex-col justify-between p-12">
+        <div>
+          <div className="flex items-center gap-3 mb-12">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-blue-400 bg-opacity-20 border border-blue-400">
+              <Zap className="w-6 h-6 text-blue-300" />
             </div>
-            <h1 className="text-3xl font-bold text-white">MegaDesk</h1>
-            <p className="mt-2 text-sm text-slate-400">Plataforma de Atendimento</p>
+            <h1 className="text-3xl font-bold">MegaDesk</h1>
+          </div>
+          
+          <div className="space-y-8">
+            <div>
+              <p className="text-blue-200 text-sm font-semibold mb-2">PLATAFORMA INTELIGENTE</p>
+              <h2 className="text-4xl font-bold leading-tight">Atendimento Inteligente em Um Lugar</h2>
+            </div>
+            
+            <p className="text-blue-100 text-lg leading-relaxed">
+              Gerencie conversas WhatsApp, chamados, rastreio e atendimento com IA. Tudo integrado e sincronizado.
+            </p>
+            
+            <div className="grid grid-cols-2 gap-4 pt-4">
+              <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg p-4 border border-white border-opacity-20">
+                <div className="text-blue-300 text-sm font-semibold mb-1">Atendimento</div>
+                <div className="text-2xl font-bold">24/7</div>
+              </div>
+              <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-lg p-4 border border-white border-opacity-20">
+                <div className="text-blue-300 text-sm font-semibold mb-1">Resolução</div>
+                <div className="text-2xl font-bold">IA</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div className="text-blue-200 text-sm">
+          © 2024 MegaDesk. Todos os direitos reservados.
+        </div>
+      </div>
+
+      {/* Direita - Formulário de Login (Branco) */}
+      <div className="w-full lg:w-1/2 bg-white flex items-center justify-center p-6">
+        <div className="w-full max-w-md">
+          <div className="mb-8">
+            <h2 className="text-3xl font-bold text-slate-900 mb-2">Bem-vindo</h2>
+            <p className="text-slate-600">Faça login para acessar sua plataforma</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">E-mail</label>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">E-mail</label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="seu@email.com"
                 required
-                className="w-full rounded-lg border border-slate-600 bg-slate-800 px-4 py-2 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+                className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-10 transition"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Senha</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-                className="w-full rounded-lg border border-slate-600 bg-slate-800 px-4 py-2 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
-              />
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Senha</label>
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-10 transition"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-3 text-slate-500 hover:text-slate-700"
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
             </div>
 
             {error && (
-              <div className="rounded-lg border border-red-600/50 bg-red-600/10 p-3 text-sm text-red-400">
+              <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
                 {error}
               </div>
             )}
@@ -187,15 +233,18 @@ function LoginPage({ onLoginSuccess }: { onLoginSuccess: (session: MegaDeskSessi
             <button
               type="submit"
               disabled={loginMutation.isPending}
-              className="w-full rounded-lg bg-blue-600 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              className="w-full rounded-lg bg-blue-600 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-md hover:shadow-lg"
             >
-              {loginMutation.isPending ? "Entrando..." : "Entrar"}
+              {loginMutation.isPending ? "Entrando..." : "Entrar na Plataforma"}
             </button>
           </form>
 
-          <div className="mt-6 border-t border-slate-700 pt-6">
-            <p className="text-center text-sm text-slate-400">
-              Nao tem acesso? Entre em contato com o administrador.
+          <div className="mt-6 border-t border-slate-200 pt-6">
+            <p className="text-center text-sm text-slate-600">
+              Não tem acesso?{" "}
+              <a href="https://wa.me/5511999999999" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700 font-semibold">
+                Entre em contato via WhatsApp
+              </a>
             </p>
           </div>
         </div>
