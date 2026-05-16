@@ -24,7 +24,7 @@ export type MegaDeskStructuredState = {
 
 let cachedDb: Database | null = null;
 let cachedPool: mysql.Pool | null = null;
-let inMemoryState: MegaDeskStructuredState | null = null;
+export let inMemoryState: MegaDeskStructuredState | null = null;
 
 export function getDb(): Database {
   if (!cachedDb) {
@@ -272,6 +272,27 @@ async function ensureStructuredTables() {
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_mdm_client (client_id)
   )`);
+  await pool.execute(`CREATE TABLE IF NOT EXISTS megadesk_domain_backups (
+    backup_id VARCHAR(80) PRIMARY KEY,
+    backup_date DATE NOT NULL,
+    backup_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    clients_json LONGTEXT NOT NULL,
+    conversations_json LONGTEXT NOT NULL,
+    tickets_json LONGTEXT NOT NULL,
+    bot_scripts_json LONGTEXT NOT NULL,
+    operational_records_json LONGTEXT NOT NULL,
+    audit_logs_json LONGTEXT NOT NULL,
+    total_clients INT NOT NULL DEFAULT 0,
+    total_conversations INT NOT NULL DEFAULT 0,
+    total_tickets INT NOT NULL DEFAULT 0,
+    status ENUM('success','failed','partial') NOT NULL DEFAULT 'success',
+    error_message TEXT,
+    retention_days INT NOT NULL DEFAULT 30,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_mdb_date (backup_date),
+    INDEX idx_mdb_timestamp (backup_timestamp)
+  )`);
+
 }
 
 async function countClients(pool: mysql.Pool) {
@@ -471,4 +492,193 @@ export async function updateCustomer(input: {
   await getDb().update(megadeskDomainCustomers)
     .set(updates)
     .where(eq(megadeskDomainCustomers.customerId, input.customerId));
+}
+
+
+/**
+ * Criar backup automático de todos os dados de clientes
+ */
+export async function createMegaDeskBackup(state: MegaDeskStructuredState) {
+  if (!process.env.DATABASE_URL) return null;
+  try {
+    await ensureStructuredTables();
+    const pool = getPool();
+    const backupId = `backup-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const backupDate = new Date().toISOString().split('T')[0];
+    
+    const connection = await pool.getConnection();
+    try {
+      await connection.execute(
+        `INSERT INTO megadesk_domain_backups (
+          backup_id, backup_date, clients_json, conversations_json, tickets_json, 
+          bot_scripts_json, operational_records_json, audit_logs_json, 
+          total_clients, total_conversations, total_tickets, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          backupId,
+          backupDate,
+          JSON.stringify(state.clients),
+          JSON.stringify(state.conversations),
+          JSON.stringify(state.tickets),
+          JSON.stringify(state.botScripts),
+          JSON.stringify(state.operationalRecords),
+          JSON.stringify(state.auditLogs),
+          state.clients.length,
+          state.conversations.length,
+          state.tickets.length,
+          'success'
+        ]
+      );
+      connection.release();
+      console.log(`[MegaDesk Backup] Backup criado com sucesso: ${backupId}`);
+      return backupId;
+    } catch (error) {
+      connection.release();
+      console.error(`[MegaDesk Backup] Erro ao criar backup:`, error);
+      throw error;
+    }
+  } catch (error) {
+    console.warn("[MegaDesk Backup] Falha ao criar backup estruturado.", error);
+    return null;
+  }
+}
+
+/**
+ * Listar backups disponíveis
+ */
+export async function listMegaDeskBackups(limit = 30) {
+  if (!process.env.DATABASE_URL) return [];
+  try {
+    await ensureStructuredTables();
+    const [rows] = await getPool().execute(
+      `SELECT backup_id, backup_date, backup_timestamp, total_clients, total_conversations, 
+              total_tickets, status, created_at FROM megadesk_domain_backups 
+       ORDER BY backup_timestamp DESC LIMIT ?`,
+      [limit]
+    );
+    return (rows as any[]).map(row => ({
+      backupId: row.backup_id,
+      backupDate: row.backup_date,
+      backupTimestamp: row.backup_timestamp,
+      totalClients: row.total_clients,
+      totalConversations: row.total_conversations,
+      totalTickets: row.total_tickets,
+      status: row.status,
+      createdAt: row.created_at
+    }));
+  } catch (error) {
+    console.warn("[MegaDesk Backup] Falha ao listar backups.", error);
+    return [];
+  }
+}
+
+/**
+ * Recuperar dados de um backup específico
+ */
+export async function restoreMegaDeskBackup(backupId: string): Promise<MegaDeskStructuredState | null> {
+  if (!process.env.DATABASE_URL) return null;
+  try {
+    await ensureStructuredTables();
+    const [rows] = await getPool().execute(
+      `SELECT clients_json, conversations_json, tickets_json, bot_scripts_json, 
+              operational_records_json, audit_logs_json FROM megadesk_domain_backups 
+       WHERE backup_id = ? LIMIT 1`,
+      [backupId]
+    );
+    
+    const backup = (rows as any[])[0];
+    if (!backup) return null;
+
+    return {
+      clients: JSON.parse(backup.clients_json || '[]'),
+      conversations: JSON.parse(backup.conversations_json || '[]'),
+      tickets: JSON.parse(backup.tickets_json || '[]'),
+      botScripts: JSON.parse(backup.bot_scripts_json || '[]'),
+      operationalRecords: JSON.parse(backup.operational_records_json || '[]'),
+      auditLogs: JSON.parse(backup.audit_logs_json || '[]')
+    };
+  } catch (error) {
+    console.warn("[MegaDesk Backup] Falha ao restaurar backup.", error);
+    return null;
+  }
+}
+
+/**
+ * Aplicar backup restaurado ao estado em memória e banco de dados
+ */
+export async function applyMegaDeskBackup(backupId: string) {
+  const restoredState = await restoreMegaDeskBackup(backupId);
+  if (!restoredState) return false;
+
+  try {
+    // Atualizar estado em memória
+    inMemoryState = restoredState;
+    
+    // Persistir no banco
+    await saveMegaDeskStructuredState(restoredState);
+    
+    console.log(`[MegaDesk Backup] Backup ${backupId} aplicado com sucesso`);
+    return true;
+  } catch (error) {
+    console.error(`[MegaDesk Backup] Erro ao aplicar backup:`, error);
+    return false;
+  }
+}
+
+/**
+ * Limpar backups antigos (retenção de 30 dias por padrão)
+ */
+export async function cleanupOldBackups(retentionDays = 30) {
+  if (!process.env.DATABASE_URL) return 0;
+  try {
+    await ensureStructuredTables();
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+    
+    const [result] = await getPool().execute(
+      `DELETE FROM megadesk_domain_backups WHERE backup_date < ?`,
+      [cutoffDate.toISOString().split('T')[0]]
+    );
+    
+    const deletedCount = (result as any).affectedRows || 0;
+    console.log(`[MegaDesk Backup] ${deletedCount} backups antigos removidos`);
+    return deletedCount;
+  } catch (error) {
+    console.warn("[MegaDesk Backup] Falha ao limpar backups antigos.", error);
+    return 0;
+  }
+}
+
+/**
+ * Obter informações de um backup específico
+ */
+export async function getMegaDeskBackupInfo(backupId: string) {
+  if (!process.env.DATABASE_URL) return null;
+  try {
+    await ensureStructuredTables();
+    const [rows] = await getPool().execute(
+      `SELECT backup_id, backup_date, backup_timestamp, total_clients, total_conversations, 
+              total_tickets, status, error_message, created_at FROM megadesk_domain_backups 
+       WHERE backup_id = ? LIMIT 1`,
+      [backupId]
+    );
+    
+    const backup = (rows as any[])[0];
+    if (!backup) return null;
+
+    return {
+      backupId: backup.backup_id,
+      backupDate: backup.backup_date,
+      backupTimestamp: backup.backup_timestamp,
+      totalClients: backup.total_clients,
+      totalConversations: backup.total_conversations,
+      totalTickets: backup.total_tickets,
+      status: backup.status,
+      errorMessage: backup.error_message,
+      createdAt: backup.created_at
+    };
+  } catch (error) {
+    console.warn("[MegaDesk Backup] Falha ao obter informações do backup.", error);
+    return null;
+  }
 }

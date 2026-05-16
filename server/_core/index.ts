@@ -40,6 +40,42 @@ async function startServer() {
   registerOAuthRoutes(app);
   registerMetricWebhook(app);
   registerIntegrationApi(app);
+  // Backup scheduled handler
+  app.post("/api/scheduled/backup", async (req, res) => {
+    try {
+      const sdk = await import("./sdk").then(m => m.sdk);
+      const user = await sdk.authenticateRequest(req);
+      if (!user.isCron || !user.taskUid) {
+        return res.status(403).json({ error: "cron-only" });
+      }
+      
+      const { loadMegaDeskStructuredState, createMegaDeskBackup, cleanupOldBackups } = await import("../db");
+      const state = await loadMegaDeskStructuredState();
+      
+      if (!state) {
+        return res.status(500).json({ error: "Falha ao carregar estado", taskUid: user.taskUid });
+      }
+      
+      // Criar backup
+      const backupId = await createMegaDeskBackup(state);
+      if (!backupId) {
+        return res.status(500).json({ error: "Falha ao criar backup", taskUid: user.taskUid });
+      }
+      
+      // Limpar backups antigos (30 dias)
+      await cleanupOldBackups(30);
+      
+      res.json({ ok: true, backupId, message: "Backup automático criado com sucesso" });
+    } catch (error: any) {
+      console.error("[Backup Handler] Erro:", error);
+      res.status(500).json({ 
+        error: error?.message || "Erro desconhecido",
+        stack: error?.stack,
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+
   // tRPC API
   app.use(
     "/api/trpc",

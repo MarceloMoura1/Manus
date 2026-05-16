@@ -3,6 +3,7 @@ import {
   Building2,
   Check,
   ChevronRight,
+  Database,
   Eye,
   EyeOff,
   KeyRound,
@@ -54,7 +55,7 @@ const MODULE_LABELS: Record<ModuleName, string> = {
   assistente_ia: "Assistente IA",
 };
 
-type Section = "dashboard" | "clients" | "users" | "admins";
+type Section = "dashboard" | "clients" | "users" | "admins" | "backups";
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function getAdminLoginUrl() {
   const origin = window.location.origin;
@@ -358,6 +359,7 @@ const NAV_ITEMS = [
   { key: "clients" as Section, label: "Clientes", icon: Building2 },
   { key: "users" as Section, label: "Usuários", icon: Users },
   { key: "admins" as Section, label: "Administradores", icon: ShieldCheck },
+  { key: "backups" as Section, label: "Backups", icon: Database },
 ];
 
 function Sidebar({
@@ -1101,6 +1103,10 @@ export default function AdminPanel() {
             {active === "admins" && (
               <AdminsSection currentUserEmail={user.email ?? ""} />
             )}
+            {/* Backups */}
+            {active === "backups" && (
+              <BackupsSection />
+            )}
           </main>
         </div>
 
@@ -1111,5 +1117,167 @@ export default function AdminPanel() {
 
       </div>
     </DarkModeWrapper>
+  );
+}
+
+
+/**
+ * Backups Management Section
+ */
+function BackupsSection() {
+  const [selectedBackup, setSelectedBackup] = useState<string | null>(null);
+  const backupsQuery = trpc.megaadmin.listBackups.useQuery();
+  const createBackupMutation = trpc.megaadmin.createBackup.useMutation();
+  const restoreBackupMutation = trpc.megaadmin.restoreBackup.useMutation();
+  const backupInfoQuery = trpc.megaadmin.getBackupInfo.useQuery(
+    { backupId: selectedBackup || "" },
+    { enabled: !!selectedBackup }
+  );
+
+  const handleCreateBackup = async () => {
+    try {
+      await createBackupMutation.mutateAsync();
+      toast.success("Backup criado com sucesso!");
+      backupsQuery.refetch();
+    } catch (error: any) {
+      toast.error(error?.message || "Erro ao criar backup");
+    }
+  };
+
+  const handleRestoreBackup = async (backupId: string) => {
+    if (!confirm("Tem certeza que deseja restaurar este backup? Todos os dados atuais serão sobrescritos.")) {
+      return;
+    }
+    try {
+      await restoreBackupMutation.mutateAsync({ backupId });
+      toast.success("Backup restaurado com sucesso!");
+      backupsQuery.refetch();
+      setSelectedBackup(null);
+    } catch (error: any) {
+      toast.error(error?.message || "Erro ao restaurar backup");
+    }
+  };
+
+  return (
+    <section className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-white">Backups</h2>
+          <p className="text-sm text-gray-400 mt-1">Gerenciar snapshots diários de dados de clientes</p>
+        </div>
+        <button
+          onClick={handleCreateBackup}
+          disabled={createBackupMutation.isPending}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white rounded-lg font-medium transition-colors"
+        >
+          {createBackupMutation.isPending ? "Criando..." : "+ Criar Backup Manual"}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Backups List */}
+        <div className="lg:col-span-2 bg-gray-900 rounded-lg border border-gray-800 overflow-hidden">
+          <div className="p-4 border-b border-gray-800">
+            <h3 className="font-semibold text-white">Histórico de Backups</h3>
+          </div>
+          <div className="divide-y divide-gray-800 max-h-96 overflow-y-auto">
+            {backupsQuery.data?.backups && backupsQuery.data.backups.length > 0 ? (
+              backupsQuery.data.backups.map((backup: any) => (
+                <div
+                  key={backup.backupId}
+                  onClick={() => setSelectedBackup(backup.backupId)}
+                  className={`p-4 cursor-pointer transition-colors ${
+                    selectedBackup === backup.backupId
+                      ? "bg-blue-900/30 border-l-2 border-blue-500"
+                      : "hover:bg-gray-800/50"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-white text-sm">{backup.backupDate}</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {backup.totalClients} clientes • {backup.totalConversations} conversas • {backup.totalTickets} chamados
+                      </p>
+                    </div>
+                    <span
+                      className={`px-2 py-1 rounded text-xs font-medium ${
+                        backup.status === "success"
+                          ? "bg-green-900/30 text-green-400"
+                          : backup.status === "failed"
+                          ? "bg-red-900/30 text-red-400"
+                          : "bg-yellow-900/30 text-yellow-400"
+                      }`}
+                    >
+                      {backup.status === "success" ? "✓ OK" : backup.status === "failed" ? "✗ Erro" : "⚠ Parcial"}
+                    </span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="p-8 text-center text-gray-400">
+                <Database className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                <p>Nenhum backup disponível</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Backup Details */}
+        {selectedBackup && backupInfoQuery.data && (
+          <div className="bg-gray-900 rounded-lg border border-gray-800 p-4 space-y-4">
+            <div>
+              <h3 className="font-semibold text-white mb-3">Detalhes do Backup</h3>
+              <div className="space-y-2 text-sm">
+                <div>
+                  <p className="text-gray-400">ID</p>
+                  <p className="text-white font-mono text-xs break-all">{backupInfoQuery.data.backupId}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400">Data</p>
+                  <p className="text-white">{backupInfoQuery.data.backupDate}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400">Hora</p>
+                  <p className="text-white">{new Date(backupInfoQuery.data.backupTimestamp).toLocaleTimeString()}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400">Status</p>
+                  <p
+                    className={`font-medium ${
+                      backupInfoQuery.data.status === "success"
+                        ? "text-green-400"
+                        : backupInfoQuery.data.status === "failed"
+                        ? "text-red-400"
+                        : "text-yellow-400"
+                    }`}
+                  >
+                    {backupInfoQuery.data.status === "success" ? "✓ Sucesso" : backupInfoQuery.data.status === "failed" ? "✗ Falha" : "⚠ Parcial"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-400">Clientes</p>
+                  <p className="text-white">{backupInfoQuery.data.totalClients}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400">Conversas</p>
+                  <p className="text-white">{backupInfoQuery.data.totalConversations}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400">Chamados</p>
+                  <p className="text-white">{backupInfoQuery.data.totalTickets}</p>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => handleRestoreBackup(selectedBackup)}
+              disabled={restoreBackupMutation.isPending}
+              className="w-full px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-600 text-white rounded-lg font-medium transition-colors text-sm"
+            >
+              {restoreBackupMutation.isPending ? "Restaurando..." : "Restaurar Backup"}
+            </button>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }

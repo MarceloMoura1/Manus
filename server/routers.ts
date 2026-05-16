@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure } from "./_core/trpc";
 import { COOKIE_NAME } from "@shared/const";
-import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool } from "./db";
+import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool, createMegaDeskBackup, listMegaDeskBackups, getMegaDeskBackupInfo, applyMegaDeskBackup } from "./db";
 import bcrypt from "bcryptjs";
 import { adminCredentials, megadeskDomainClientUsers } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
@@ -644,6 +644,29 @@ export const appRouter = router({
         await persistSyncState();
         return { ok: true, message: `Cliente ${client.company} foi excluído com sucesso.` };
       }),
+    // Backup Management
+    createBackup: adminProcedure.mutation(async () => {
+      await hydrateSyncState();
+      const backupId = await createMegaDeskBackup(inMemoryState);
+      if (!backupId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Falha ao criar backup" });
+      audit("MegaAdmin", "Backup manual criado", undefined);
+      return { ok: true, backupId };
+    }),
+    listBackups: adminProcedure.query(async () => {
+      const backups = await listMegaDeskBackups(50);
+      return { backups };
+    }),
+    getBackupInfo: adminProcedure.input(z.object({ backupId: z.string() })).query(async ({ input }) => {
+      const info = await getMegaDeskBackupInfo(input.backupId);
+      if (!info) throw new TRPCError({ code: "NOT_FOUND", message: "Backup não encontrado" });
+      return info;
+    }),
+    restoreBackup: adminProcedure.input(z.object({ backupId: z.string() })).mutation(async ({ input }) => {
+      const success = await applyMegaDeskBackup(input.backupId);
+      if (!success) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Falha ao restaurar backup" });
+      audit("MegaAdmin", `Backup ${input.backupId} restaurado`, undefined);
+      return { ok: true, message: "Backup restaurado com sucesso" };
+    }),
   }),
   megadesk: router({
     overview: publicProcedure.input(z.object({ clientId: z.string().optional(), userEmail: z.string().email() })).query(async ({ input }) => {
