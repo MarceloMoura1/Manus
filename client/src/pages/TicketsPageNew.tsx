@@ -34,10 +34,10 @@ type Chamado = {
   status: string;
   priority?: string;
   assignedTo?: string;
-  createdAt: Date;
+  createdAt: number; // timestamp em millisegundos
   activities: Array<{
     id: string;
-    date: Date;
+    date: number; // timestamp em millisegundos
     description: string;
     attendant: string;
   }>;
@@ -363,11 +363,11 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
     if (advancedSearch.ticketNumber && !`#${String(c.number).padStart(4, '0')}`.includes(advancedSearch.ticketNumber)) return false;
     if (advancedSearch.customerName && !c.customerName.toLowerCase().includes(advancedSearch.customerName.toLowerCase())) return false;
     if (advancedSearch.attendant && c.assignedTo !== advancedSearch.attendant) return false;
-    if (advancedSearch.dateFrom && c.createdAt < new Date(advancedSearch.dateFrom)) return false;
+    if (advancedSearch.dateFrom && c.createdAt < new Date(advancedSearch.dateFrom).getTime()) return false;
     if (advancedSearch.dateTo) {
       const dateTo = new Date(advancedSearch.dateTo);
       dateTo.setHours(23, 59, 59, 999);
-      if (c.createdAt > dateTo) return false;
+      if (c.createdAt > dateTo.getTime()) return false;
     }
     return true;
   });
@@ -601,7 +601,7 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
                 >
                   <td className="px-4 py-3 text-sm font-mono text-slate-600">#{String(chamado.number).padStart(4, '0')}</td>
                   <td className="px-4 py-3 text-sm text-slate-600">
-                    {chamado.createdAt.toLocaleDateString('pt-BR')}
+                    {new Date(chamado.createdAt).toLocaleDateString('pt-BR')}
                   </td>
                   <td className="px-4 py-3 text-sm">
                     <div className="font-medium text-slate-900">{chamado.customerName}</div>

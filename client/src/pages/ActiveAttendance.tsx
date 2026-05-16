@@ -131,7 +131,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
           phone: customerData.phone,
           company: customerData.company,
         });
-        conversationId = conversationResult.conversationId || conversationResult.id;
+        conversationId = conversationResult.conversationId || (conversationResult as any).id;
         setSuccessMessage(ticketCreated ? 'Chamado e conversa criados com sucesso!' : 'Conversa iniciada com sucesso!');
         console.log('Conversa criada:', conversationResult);
       } catch (convError) {

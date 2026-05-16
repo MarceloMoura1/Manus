@@ -29,7 +29,7 @@ export type ChamadoWithActivities = {
   status: string;
   priority?: string;
   assignedTo?: string;
-  createdAt: Date;
+  createdAt: number; // timestamp em millisegundos
   activities: Array<{
     id: string;
     date: number; // timestamp em millisegundos
@@ -213,6 +213,7 @@ export async function createChamado(
 
     console.log(`[SUCCESS] Chamado #${chamadoNumber} criado com sucesso (ID: ${chamadoId})`);
 
+    const now = new Date();
     return {
       id: chamadoId,
       number: chamadoNumber,
@@ -223,7 +224,7 @@ export async function createChamado(
       status: 'open',
       priority: priority || 'media',
       assignedTo: sanitizedAssignedTo,
-      createdAt: new Date(),
+      createdAt: now.getTime(),
       activities: [],
     };
   });
@@ -293,7 +294,7 @@ export async function getChamadoWithActivities(
       status: c.status,
       priority: c.priority,
       assignedTo: c.assignedTo || undefined,
-      createdAt: c.createdAt,
+      createdAt: c.createdAt instanceof Date ? c.createdAt.getTime() : new Date(c.createdAt).getTime(),
       activities: activities.map(a => {
         let date = a.createdAt;
         let timestamp: number;
@@ -412,7 +413,7 @@ export async function listChamados(
       status: c.status,
       priority: c.priority,
       assignedTo: c.assignedTo,
-      createdAt: c.createdAt,
+      createdAt: c.createdAt instanceof Date ? c.createdAt.getTime() : new Date(c.createdAt).getTime(),
       activities: (activitiesByChamado[c.chamadoId] || []).map(a => {
         // Converter data para string ISO
         let isoDate: string;
@@ -440,9 +441,24 @@ export async function listChamados(
         } catch (e) {
           isoDate = new Date().toISOString();
         }
+        // Converter para timestamp em millisegundos
+        let timestamp: number;
+        try {
+          if (typeof a.createdAt === 'number') {
+            timestamp = a.createdAt;
+          } else if (a.createdAt instanceof Date) {
+            timestamp = a.createdAt.getTime();
+          } else if (typeof a.createdAt === 'string') {
+            timestamp = new Date(a.createdAt).getTime();
+          } else {
+            timestamp = Date.now();
+          }
+        } catch (e) {
+          timestamp = Date.now();
+        }
         return {
           id: a.activityId,
-          date: isoDate,
+          date: timestamp,
           description: a.description,
           attendant: a.attendant,
         };

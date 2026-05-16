@@ -843,7 +843,7 @@ export function TicketsPage() {
       id: `activity-${Date.now()}`,
       date: Date.now(),
       description: activityDescription.trim(),
-      attendant: user?.name || 'Atendente',
+      attendant: user?.user?.name || 'Atendente',
       actionType: activityType,
     };
 
@@ -893,7 +893,7 @@ export function TicketsPage() {
     }
   };
 
-  const handleUpdateStatus = async (newStatus: string) => {
+  const handleUpdateStatus = async (newStatus: 'open' | 'in_progress' | 'waiting' | 'closed') => {
     if (!selectedChamado) return;
 
     // Atualizacao otimista - atualiza status imediatamente
@@ -936,7 +936,7 @@ export function TicketsPage() {
       id: `activity-${Date.now()}`,
       date: Date.now(),
       description: `Encerramento: ${closeResolution.trim()}`,
-      attendant: user?.name || 'Atendente',
+      attendant: user?.user?.name || 'Atendente',
       actionType: 'close',
     };
 
@@ -1033,11 +1033,15 @@ export function TicketsPage() {
   };
 
   const chamados = chamadosQuery.data?.chamados || [];
+  console.log('[DEBUG] chamadosQuery.data:', chamadosQuery.data);
+  console.log('[DEBUG] chamados:', chamados);
+  console.log('[DEBUG] chamados.length:', chamados.length);
 
   // Filtrar por usuário (todos vs somente seu)
   const chamadosFiltrados = chamadoFilter === 'mine' 
     ? chamados.filter(c => c.assignedTo === user?.user?.name)
     : chamados;
+  console.log('[DEBUG] chamadosFiltrados:', chamadosFiltrados);
 
   // Filtrar por busca
   const filteredChamados = chamadosFiltrados.filter(c => {
@@ -1049,6 +1053,7 @@ export function TicketsPage() {
       c.title.toLowerCase().includes(searchLower)
     );
   });
+  console.log('[DEBUG] filteredChamados:', filteredChamados);
 
   // Contar status (com base no filtro de usuário)
   const statusCounts = {
@@ -1223,7 +1228,7 @@ export function TicketsPage() {
                 >
                   <td className="px-4 py-3 text-sm font-mono text-slate-600">#{String(chamado.number).padStart(4, '0')}</td>
                   <td className="px-4 py-3 text-sm text-slate-600">
-                    {chamado.createdAt.toLocaleDateString('pt-BR')}
+                    {new Date(chamado.createdAt).toLocaleDateString('pt-BR')}
                   </td>
                   <td className="px-4 py-3 text-sm">
                     <div className="font-medium text-slate-900">{chamado.customerName}</div>
@@ -1384,7 +1389,7 @@ export function TicketsPage() {
             
             {/* Status e Botao Encerrar */}
             <div className="flex items-center gap-3">
-              <Select value={selectedChamado.status} onValueChange={(value) => handleUpdateStatus(value)}>
+              <Select value={selectedChamado.status} onValueChange={(value) => handleUpdateStatus(value as 'open' | 'in_progress' | 'waiting' | 'closed')}>
                 <SelectTrigger className="w-40 bg-slate-50 border-2 border-slate-200 focus:border-blue-500">
                   <SelectValue />
                 </SelectTrigger>
