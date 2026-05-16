@@ -2487,8 +2487,233 @@ const Sun = (props: any) => (
   </svg>
 );
 
+function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) => void }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [error, setError] = useState("");
+  const [forgotSent, setForgotSent] = useState(false);
 
+  const loginMutation = trpc.megadesk.loginByEmail.useMutation({
+    onSuccess: (data) => {
+      if (rememberMe) {
+        saveSession(data.session);
+      } else {
+        sessionStorage.setItem(MEGADESK_SESSION_KEY, JSON.stringify(data.session));
+      }
+      onLogin(data.session);
+    },
+    onError: (err) => setError(err.message),
+  });
+
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setError("");
+    if (!email.trim() || !password.trim()) return;
+    loginMutation.mutate({ email: email.trim(), password });
+  }
+
+  function handleForgot() {
+    if (!email.trim()) {
+      setError("Digite seu e-mail antes de solicitar recuperação de acesso.");
+      return;
+    }
+    const msg = encodeURIComponent(`Olá! Preciso de ajuda para acessar o MegaDesk. Meu e-mail cadastrado é: ${email.trim()}`);
+    window.open(`https://wa.me/5541995484515?text=${msg}`, "_blank", "noopener,noreferrer");
+    setForgotSent(true);
+    setTimeout(() => setForgotSent(false), 5000);
+  }
+
+  const features = [
+    { icon: MessageCircle, label: "Atendimento WhatsApp centralizado" },
+    { icon: Bot, label: "Triagem inteligente com IA" },
+    { icon: ClipboardList, label: "Chamados e histórico unificados" },
+  ];
+
+  return (
+    <div className="flex min-h-screen bg-white">
+      <div className="relative hidden w-[52%] flex-col justify-between overflow-hidden bg-slate-950 p-12 lg:flex">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="login-orb-1 absolute -left-32 -top-32 h-[500px] w-[500px] rounded-full bg-blue-600/20 blur-[120px]" />
+          <div className="login-orb-2 absolute -bottom-40 -right-20 h-[400px] w-[400px] rounded-full bg-cyan-500/15 blur-[100px]" />
+          <div className="login-orb-3 absolute left-1/2 top-1/2 h-[300px] w-[300px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-600/10 blur-[80px]" />
+        </div>
+
+        <div className="login-anim-logo relative flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 shadow-lg shadow-blue-900">
+            <Zap className="h-5 w-5 text-white" />
+          </div>
+          <span className="text-lg font-black tracking-tight text-white">MegaDesk</span>
+        </div>
+
+        <div className="relative">
+          <p className="login-anim-badge mb-4 inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
+            <Sparkles className="h-3.5 w-3.5" /> Plataforma de Atendimento
+          </p>
+          <h1 className="login-anim-hero text-5xl font-black leading-[1.1] tracking-tight text-white">
+            Atendimento<br />
+            <span className="login-gradient-text">inteligente</span><br />
+            em um lugar só.
+          </h1>
+          <p className="login-anim-hero mt-6 max-w-sm text-base leading-7 text-slate-400">
+            Gerencie conversas WhatsApp, chamados e integrações com IA de forma unificada e segura.
+          </p>
+
+          <div className="mt-10 space-y-4">
+            {features.map(({ icon: Icon, label }, i) => (
+              <div key={label} className={`login-anim-feat-${i} flex items-center gap-3 rounded-2xl border border-white/5 bg-white/[0.04] px-4 py-3 transition hover:bg-white/[0.08]`}>
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-blue-500/20">
+                  <Icon className="h-4 w-4 text-blue-300" />
+                </div>
+                <span className="text-sm font-medium text-slate-300">{label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="login-anim-footer relative">
+          <p className="text-xs text-slate-600">© {new Date().getFullYear()} MegaDesk. Todos os direitos reservados.</p>
+        </div>
+      </div>
+
+      <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 lg:px-16">
+        <div className="mb-8 flex items-center gap-3 lg:hidden">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600">
+            <Zap className="h-5 w-5 text-white" />
+          </div>
+          <span className="text-xl font-black text-slate-950">MegaDesk</span>
+        </div>
+
+        <div className="login-anim-form w-full max-w-[400px]">
+          <div className="mb-8">
+            <h2 className="text-3xl font-black text-slate-950">Bem-vindo de volta</h2>
+            <p className="mt-2 text-slate-500">Entre com seu e-mail para continuar.</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div>
+              <label className="mb-2 block text-sm font-bold text-slate-700">E-mail</label>
+              <div className="relative">
+                <Mail className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => { setEmail(e.target.value); setError(""); }}
+                  placeholder="seu@email.com"
+                  autoFocus
+                  className="h-13 w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-bold text-slate-700">Senha</label>
+              <div className="relative">
+                <Lock className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setError(""); }}
+                  placeholder="Sua senha de acesso"
+                  className="h-13 w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-11 pr-12 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <label className="flex cursor-pointer items-center gap-2.5">
+                <div
+                  onClick={() => setRememberMe((v) => !v)}
+                  className={cn(
+                    "flex h-5 w-5 items-center justify-center rounded-md border-2 transition",
+                    rememberMe ? "border-blue-600 bg-blue-600" : "border-slate-300 bg-white"
+                  )}
+                >
+                  {rememberMe && <CheckCircle2 className="h-3.5 w-3.5 text-white" />}
+                </div>
+                <span className="text-sm text-slate-600">Lembrar meu acesso</span>
+              </label>
+              <button
+                type="button"
+                onClick={handleForgot}
+                className="text-sm font-semibold text-blue-600 transition hover:text-blue-700"
+              >
+                Esqueceu o acesso?
+              </button>
+            </div>
+
+            {error && (
+              <div className="flex items-center gap-3 rounded-2xl bg-red-50 px-4 py-3">
+                <Lock className="h-4 w-4 shrink-0 text-red-500" />
+                <p className="text-sm font-semibold text-red-700">{error}</p>
+              </div>
+            )}
+
+            {forgotSent && (
+              <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 px-4 py-3">
+                <Mail className="h-4 w-4 shrink-0 text-emerald-600" />
+                <p className="text-sm font-semibold text-emerald-700">Solicitação enviada. Aguarde o contato do suporte.</p>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loginMutation.isPending || !email.trim() || !password.trim()}
+              className="login-anim-btn group flex h-13 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700 hover:shadow-blue-300 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+            >
+              {loginMutation.isPending ? (
+                <span className="flex items-center gap-2">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                  Verificando...
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  Entrar na plataforma
+                  <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
+                </span>
+              )}
+            </button>
+          </form>
+
+          <div className="my-8 flex items-center gap-4">
+            <div className="h-px flex-1 bg-slate-100" />
+            <span className="text-xs font-semibold text-slate-400">Precisa de ajuda?</span>
+            <div className="h-px flex-1 bg-slate-100" />
+          </div>
+
+          <a
+            href="https://wa.me/5541995484515?text=Ol%C3%A1%2C%20preciso%20de%20suporte%20para%20acessar%20o%20MegaDesk."
+            target="_blank"
+            rel="noopener noreferrer"
+            className="login-anim-support flex h-12 w-full items-center justify-center gap-3 rounded-2xl border-2 border-slate-200 bg-white text-sm font-bold text-slate-700 transition hover:border-green-400 hover:bg-green-50 hover:text-green-700 hover:scale-[1.02] active:scale-[0.98]"
+          >
+            <MessageSquare className="h-4 w-4" />
+            Falar com o suporte
+          </a>
+
+          <p className="mt-8 text-center text-xs text-slate-400">
+            MegaDesk · Powered by MegaAdmin
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function Home() {
+  const [session, setSession] = useState<MegaDeskSession | null>(() => loadSession());
+
+  if (!session) {
+    return <MegaDeskLoginGate onLogin={setSession} />;
+  }
+
   return <Shell />;
 }

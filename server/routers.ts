@@ -159,13 +159,13 @@ function getReleasedClientOrThrow(clientId?: string, requiredModule?: string) {
 // Módulos configuráveis da MegaDesk (controlados pelo MegaAdmin por usuário)
 // home, settings, notifications são SEMPRE ativos — não aparecem como permissão configurável
 const CONFIGURABLE_MODULES = [
-  "active-attendance",
-  "conversations",
-  "tickets",
-  "tracking",
+  "atendimento_ativo",
+  "conversas",
+  "chamados",
+  "rastreio",
   "erp",
-  "bot-config",
-  "ai-assistant",
+  "configurar_bot",
+  "assistente_ia",
 ] as const;
 
 function rolePermissions(role: MegaClient["users"][number]["role"]) {
@@ -175,8 +175,8 @@ function rolePermissions(role: MegaClient["users"][number]["role"]) {
   const map: Record<MegaClient["users"][number]["role"], string[]> = {
     admin: all,
     manager: all,
-    agent: [...base, "active-attendance", "conversations", "tickets"],
-    viewer: [...base, "tickets"],
+    agent: [...base, "atendimento_ativo", "conversas", "chamados"],
+    viewer: [...base, "chamados"],
   };
   return map[role];
 }
