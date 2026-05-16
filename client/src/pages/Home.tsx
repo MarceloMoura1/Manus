@@ -785,10 +785,24 @@ export function TicketsPage() {
       return;
     }
 
+    // Obter o nome do atendente
+    const attendantName = clientUsers.find(u => u.userId === forwardAttendant)?.name || forwardAttendant;
+    const oldAssignedTo = selectedChamado.assignedTo;
+
+    // Atualizacao otimista - fecha card e atualiza imediatamente
+    setShowForwardCard(false);
+    setForwardAttendant('');
+    setForwardObservations('');
+    showToast('Chamado encaminhado!', 'success');
+
+    // Atualizar o chamado selecionado
+    setSelectedChamado({
+      ...selectedChamado,
+      assignedTo: attendantName,
+    });
+
+    // Enviar para backend em background
     try {
-      // Obter o nome do atendente
-      const attendantName = clientUsers.find(u => u.userId === forwardAttendant)?.name || forwardAttendant;
-      
       // Atualizar o chamado com o novo atendente
       await updateChamadoMutation.mutateAsync({
         chamadoId: selectedChamado.id,
@@ -799,30 +813,22 @@ export function TicketsPage() {
       if (forwardObservations.trim()) {
         await addActivityMutation.mutateAsync({
           chamadoId: selectedChamado.id,
-          description: `Encaminhado para ${clientUsers.find(u => u.userId === forwardAttendant)?.name || forwardAttendant}. Observação: ${forwardObservations}`,
+          description: `Encaminhado para ${attendantName}. Observação: ${forwardObservations}`,
           attendant: user?.user?.name || 'Atendente',
         });
       }
 
-      // Atualizar o chamado selecionado
-      setSelectedChamado({
-        ...selectedChamado,
-        assignedTo: attendantName,
-      });
-
       // Invalidar cache e refetch
       await utils.chamados.list.invalidate();
       await chamadosQuery.refetch();
-
-      // Limpar estados
-      setShowForwardCard(false);
-      setForwardAttendant('');
-      setForwardObservations('');
-
-      showToast('Chamado encaminhado com sucesso!', 'success');
     } catch (error) {
       console.error('Erro ao encaminhar chamado:', error);
-      showToast('Erro ao encaminhar chamado', 'error');
+      showToast('Erro ao sincronizar encaminhamento', 'error');
+      // Reverter para atendente anterior se falhar
+      setSelectedChamado({
+        ...selectedChamado,
+        assignedTo: oldAssignedTo,
+      });
     }
   };
 
@@ -832,6 +838,29 @@ export function TicketsPage() {
       return;
     }
 
+    // Atualizacao otimista - fecha modal e limpa estados imediatamente
+    const newActivity = {
+      id: `activity-${Date.now()}`,
+      date: Date.now(),
+      description: activityDescription.trim(),
+      attendant: user?.name || 'Atendente',
+      actionType: activityType,
+    };
+
+    setShowRegisterActivityModal(false);
+    setActivityDescription('');
+    setActivityType('note');
+    showToast('Atividade registrada!', 'success');
+
+    // Atualizar localmente a lista de atividades
+    if (selectedChamado.activities) {
+      setSelectedChamado({
+        ...selectedChamado,
+        activities: [...selectedChamado.activities, newActivity],
+      });
+    }
+
+    // Enviar para backend em background
     try {
       await registerActivityMutation.mutateAsync({
         chamadoId: selectedChamado.id,
@@ -839,7 +868,7 @@ export function TicketsPage() {
         actionType: activityType,
       });
 
-      // Recarregar chamado para atualizar atividades
+      // Recarregar para sincronizar com servidor
       const updatedChamado = await chamadosQuery.refetch();
       if (updatedChamado.data?.chamados) {
         const updated = updatedChamado.data.chamados.find((c: any) => c.id === selectedChamado.id);
@@ -850,42 +879,48 @@ export function TicketsPage() {
 
       // Invalidar cache
       await utils.chamados.list.invalidate();
-      await chamadosQuery.refetch();
-
-      // Limpar estados
-      setShowRegisterActivityModal(false);
-      setActivityDescription('');
-      setActivityType('note');
-
-      showToast('Atividade registrada com sucesso!', 'success');
     } catch (error) {
       console.error('Erro ao registrar atividade:', error);
-      showToast('Erro ao registrar atividade', 'error');
+      showToast('Erro ao sincronizar atividade', 'error');
+      // Recarregar para reverter mudanca
+      const reloadChamado = await chamadosQuery.refetch();
+      if (reloadChamado.data?.chamados) {
+        const updated = reloadChamado.data.chamados.find((c: any) => c.id === selectedChamado.id);
+        if (updated) {
+          setSelectedChamado(updated);
+        }
+      }
     }
   };
 
   const handleUpdateStatus = async (newStatus: string) => {
     if (!selectedChamado) return;
 
+    // Atualizacao otimista - atualiza status imediatamente
+    const oldStatus = selectedChamado.status;
+    setSelectedChamado({
+      ...selectedChamado,
+      status: newStatus,
+    });
+    showToast('Status atualizado!', 'success');
+
+    // Enviar para backend em background
     try {
       await updateChamadoMutation.mutateAsync({
         chamadoId: selectedChamado.id,
         status: newStatus,
       });
 
-      // Atualizar o chamado selecionado localmente
-      setSelectedChamado({
-        ...selectedChamado,
-        status: newStatus,
-      });
-
       // Recarregar a lista de chamados
       await chamadosQuery.refetch();
       await utils.chamados.list.invalidate();
-
-      showToast('Status atualizado com sucesso!', 'success');
     } catch (error) {
       console.error('Erro ao atualizar status:', error);
+      // Reverter para status anterior se falhar
+      setSelectedChamado({
+        ...selectedChamado,
+        status: oldStatus,
+      });
       showToast('Erro ao atualizar status', 'error');
     }
   };
@@ -896,6 +931,29 @@ export function TicketsPage() {
       return;
     }
 
+    // Atualizacao otimista - fecha modal e atualiza imediatamente
+    const newActivity = {
+      id: `activity-${Date.now()}`,
+      date: Date.now(),
+      description: `Encerramento: ${closeResolution.trim()}`,
+      attendant: user?.name || 'Atendente',
+      actionType: 'close',
+    };
+
+    setShowCloseModal(false);
+    setCloseResolution('');
+    showToast('Chamado encerrado!', 'success');
+
+    // Atualizar o chamado selecionado localmente
+    const updatedChamado = {
+      ...selectedChamado,
+      status: 'closed',
+      observations: closeResolution.trim(),
+      activities: selectedChamado.activities ? [...selectedChamado.activities, newActivity] : [newActivity],
+    };
+    setSelectedChamado(updatedChamado);
+
+    // Enviar para backend em background
     try {
       // Encerrar o chamado
       await updateChamadoMutation.mutateAsync({
@@ -911,31 +969,26 @@ export function TicketsPage() {
         actionType: 'close',
       });
 
-      // Atualizar o chamado selecionado localmente
-      setSelectedChamado({
-        ...selectedChamado,
-        status: 'closed',
-        observations: closeResolution.trim(),
-      });
-
       // Recarregar a lista de chamados
-      const updatedChamado = await chamadosQuery.refetch();
-      if (updatedChamado.data?.chamados) {
-        const updated = updatedChamado.data.chamados.find((c: any) => c.id === selectedChamado.id);
+      const refetchedChamado = await chamadosQuery.refetch();
+      if (refetchedChamado.data?.chamados) {
+        const updated = refetchedChamado.data.chamados.find((c: any) => c.id === selectedChamado.id);
         if (updated) {
           setSelectedChamado(updated);
         }
       }
       await utils.chamados.list.invalidate();
-
-      // Limpar estados
-      setShowCloseModal(false);
-      setCloseResolution('');
-
-      showToast('Chamado encerrado com sucesso!', 'success');
     } catch (error) {
       console.error('Erro ao encerrar chamado:', error);
-      showToast('Erro ao encerrar chamado', 'error');
+      showToast('Erro ao sincronizar encerramento', 'error');
+      // Recarregar para reverter mudanca
+      const reloadChamado = await chamadosQuery.refetch();
+      if (reloadChamado.data?.chamados) {
+        const updated = reloadChamado.data.chamados.find((c: any) => c.id === selectedChamado.id);
+        if (updated) {
+          setSelectedChamado(updated);
+        }
+      }
     }
   };
 
