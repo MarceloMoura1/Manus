@@ -2,7 +2,7 @@ import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
-import Home from "./pages/Home";
+import { Home } from "./pages/Home";
 import AdminPanel from "./pages/AdminPanel";
 import { AIAssistant } from "./components/AIAssistant";
 import { trpc } from "./lib/trpc";
