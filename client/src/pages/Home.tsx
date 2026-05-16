@@ -948,10 +948,10 @@ export function TicketsPage() {
           </div>
 
           {/* Linha de Icones com Tooltips */}
-          <div className="flex items-center justify-center gap-0 px-8 py-6 border-b border-slate-200">
+          <div className="flex items-center justify-center gap-0 px-8 py-6 border-b border-slate-200" style={{height: '60px', marginBottom: '-5px'}}>
             <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors">
               {/* Círculo com seta - Encaminhar */}
-              <svg className="w-8 h-8 text-black hover:text-slate-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <svg className="w-6 h-6 text-black hover:text-slate-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 8l4 4m-4-4l-4 4" />
                 <path d="M12 16v-4" />
@@ -961,7 +961,7 @@ export function TicketsPage() {
             <div className="border-l border-slate-300 h-8"></div>
             <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors">
               {/* Gerenciar colaboradores - mantém */}
-              <svg className="w-8 h-8 text-black hover:text-slate-700" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="w-6 h-6 text-black hover:text-slate-700" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
               </svg>
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Gerenciar colaboradores</div>
@@ -969,7 +969,7 @@ export function TicketsPage() {
             <div className="border-l border-slate-300 h-8"></div>
             <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors">
               {/* Editar chamado - mantém */}
-              <svg className="w-8 h-8 text-black hover:text-slate-700" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="w-6 h-6 text-black hover:text-slate-700" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" />
                 <path d="M20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
               </svg>
@@ -978,7 +978,7 @@ export function TicketsPage() {
             <div className="border-l border-slate-300 h-8"></div>
             <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors">
               {/* Balão retangular com 2 linhas - Atividade */}
-              <svg className="w-8 h-8 text-black hover:text-slate-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <svg className="w-6 h-6 text-black hover:text-slate-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <rect x="3" y="5" width="14" height="10" rx="2" />
                 <path d="M17 15l2 2" />
                 <line x1="6" y1="8" x2="12" y2="8" />
@@ -989,7 +989,7 @@ export function TicketsPage() {
             <div className="border-l border-slate-300 h-8"></div>
             <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors">
               {/* Clipe - Anexo */}
-              <svg className="w-8 h-8 text-black hover:text-slate-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <svg className="w-6 h-6 text-black hover:text-slate-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
               </svg>
@@ -998,7 +998,7 @@ export function TicketsPage() {
             <div className="border-l border-slate-300 h-8"></div>
             <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors">
               {/* Pasta bonita - Dossiê */}
-              <svg className="w-8 h-8 text-black hover:text-slate-700" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="w-6 h-6 text-black hover:text-slate-700" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" />
               </svg>
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Dossiê do cliente</div>
