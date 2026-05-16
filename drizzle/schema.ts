@@ -198,6 +198,7 @@ export const megadeskDomainChamadoActivities = mysqlTable("megadesk_domain_chama
   clientId: varchar("client_id", { length: 80 }).notNull(),
   description: text("description").notNull(),
   attendant: varchar("attendant", { length: 180 }).notNull(),
+  actionType: mysqlEnum("action_type", ["register", "edit", "close", "forward", "note"]).notNull().default("note"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 }, (table) => ({

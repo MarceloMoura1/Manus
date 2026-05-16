@@ -5,6 +5,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { validateNewChamado, ValidationError } from "@/lib/validations";
 import { ActiveAttendancePage } from "./ActiveAttendance";
+import { TimelineActivity } from "@/components/TimelineActivity";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -526,7 +527,7 @@ function ConversationsPage() {
 
 type TicketActivity = {
   id: string;
-  date: Date;
+  date: Date | number; // Date ou timestamp em millisegundos
   description: string;
   attendant: string;
 };
@@ -546,6 +547,9 @@ export function TicketsPage() {
   const [showManageCollaboratorsCard, setShowManageCollaboratorsCard] = React.useState(false);
   const [selectedCollaborators, setSelectedCollaborators] = React.useState<Array<{ userId: string; userName: string }>>([]);
   const [isEditingCollaborators, setIsEditingCollaborators] = React.useState(false);
+  const [showRegisterActivityModal, setShowRegisterActivityModal] = React.useState(false);
+  const [activityDescription, setActivityDescription] = React.useState('');
+  const [activityType, setActivityType] = React.useState<'register' | 'edit' | 'close' | 'forward' | 'note'>('note');
   const [showEditCard, setShowEditCard] = React.useState(false);
   const [editForm, setEditForm] = React.useState<{
     clientName: string;
@@ -590,6 +594,7 @@ export function TicketsPage() {
   const editActivityMutation = trpc.chamados.editActivity.useMutation();
   const createChamadoMutation = trpc.chamados.create.useMutation();
   const updateCollaboratorsMutation = trpc.chamados.updateCollaborators.useMutation();
+  const registerActivityMutation = trpc.chamados.registerActivity.useMutation();
 
   // Carregar usuários do cliente ao abrir o card de encaminhamento
   const getClientUsersQuery = trpc.megadesk.getClientUsers.useQuery(
@@ -719,7 +724,43 @@ export function TicketsPage() {
     }
   };
 
+  const handleRegisterActivity = async () => {
+    if (!selectedChamado || !activityDescription.trim()) {
+      showToast('Preencha a descricao da atividade', 'error');
+      return;
+    }
 
+    try {
+      await registerActivityMutation.mutateAsync({
+        chamadoId: selectedChamado.id,
+        description: activityDescription.trim(),
+        actionType: activityType,
+      });
+
+      // Recarregar chamado para atualizar atividades
+      const updatedChamado = await chamadosQuery.refetch();
+      if (updatedChamado.data?.chamados) {
+        const updated = updatedChamado.data.chamados.find((c: any) => c.id === selectedChamado.id);
+        if (updated) {
+          setSelectedChamado(updated);
+        }
+      }
+
+      // Invalidar cache
+      await utils.chamados.list.invalidate();
+      await chamadosQuery.refetch();
+
+      // Limpar estados
+      setShowRegisterActivityModal(false);
+      setActivityDescription('');
+      setActivityType('note');
+
+      showToast('Atividade registrada com sucesso!', 'success');
+    } catch (error) {
+      console.error('Erro ao registrar atividade:', error);
+      showToast('Erro ao registrar atividade', 'error');
+    }
+  };
 
   const handleCreateChamado = async () => {
     // Validar formulário
@@ -1202,7 +1243,92 @@ export function TicketsPage() {
             </div>
           )}
 
+          {/* Historico do Chamado */}
+          {selectedChamado && (
+            <div className="mx-8 mt-8 pb-8">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-slate-900">Historico do Chamado</h3>
+                <Button
+                  onClick={() => setShowRegisterActivityModal(true)}
+                  className="bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                >
+                  + Registrar Atividade
+                </Button>
+              </div>
+              
+              {selectedChamado.activities && selectedChamado.activities.length > 0 ? (
+                <TimelineActivity activities={selectedChamado.activities as any} />
+              ) : (
+                <div className="text-center py-8 text-slate-500">
+                  <p>Nenhuma atividade registrada ainda.</p>
+                </div>
+              )}
+            </div>
+          )}
 
+          {/* Modal de Registrar Atividade */}
+          {showRegisterActivityModal && selectedChamado && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg shadow-2xl border border-slate-200 p-6 w-full max-w-2xl mx-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-slate-900">Registrar Atividade</h3>
+                  <button
+                    onClick={() => setShowRegisterActivityModal(false)}
+                    className="text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Tipo de Atividade */}
+                  <div>
+                    <label className="text-sm font-semibold text-slate-700 block mb-2">Tipo de Atividade</label>
+                    <Select value={activityType} onValueChange={(value: any) => setActivityType(value)}>
+                      <SelectTrigger className="bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-blue-500 transition-colors">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-600">
+                        <SelectItem value="note">Nota</SelectItem>
+                        <SelectItem value="register">Apontamento</SelectItem>
+                        <SelectItem value="edit">Edicao</SelectItem>
+                        <SelectItem value="close">Encerramento</SelectItem>
+                        <SelectItem value="forward">Encaminhamento</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Descricao */}
+                  <div>
+                    <label className="text-sm font-semibold text-slate-700 block mb-2">Descricao</label>
+                    <textarea
+                      placeholder="Descreva a atividade realizada..."
+                      value={activityDescription}
+                      onChange={(e) => setActivityDescription(e.target.value)}
+                      className="w-full p-3 bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-blue-500 rounded-lg transition-colors resize-none h-32 text-sm"
+                    />
+                  </div>
+
+                  {/* Botoes */}
+                  <div className="flex gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
+                    <Button
+                      onClick={handleRegisterActivity}
+                      disabled={registerActivityMutation.isPending}
+                      className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold shadow-md hover:shadow-lg transition-all"
+                    >
+                      {registerActivityMutation.isPending ? 'Registrando...' : 'Registrar'}
+                    </Button>
+                    <Button
+                      onClick={() => setShowRegisterActivityModal(false)}
+                      className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-900 font-semibold transition-colors"
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Card Suspenso de Encaminhamento */}
           {showForwardCard && selectedChamado && (

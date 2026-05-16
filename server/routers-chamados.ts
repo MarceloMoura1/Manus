@@ -23,6 +23,7 @@ import {
   addCollaborator,
   removeCollaborator,
   updateCollaborators,
+  registerActivity,
   type ChamadoWithActivities,
 } from "./db-chamados";
 
@@ -535,6 +536,55 @@ export const chamadosRouter = router({
           error: error instanceof Error ? error.message : 'Erro desconhecido',
           timestamp: new Date().toISOString(),
         };
+      }
+    }),
+
+  registerActivity: protectedProcedure
+    .input(
+      z.object({
+        chamadoId: z.string().min(1, 'chamadoId é obrigatório'),
+        description: z.string().min(1, 'description é obrigatória').max(2000, 'description muito longa'),
+        actionType: z.enum(['register', 'edit', 'close', 'forward', 'note']).default('note'),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      if (!ctx.user) {
+        throw new TRPCError({
+          code: 'UNAUTHORIZED',
+          message: 'Usuário não autenticado',
+        });
+      }
+
+      // Obter clientId do contexto (geralmente passado no middleware)
+      const clientId = (ctx as any).tenantId || String(ctx.user.id);
+      const attendantName = ctx.user.name || ctx.user.email || 'Atendente';
+
+      if (!clientId || clientId.trim() === '') {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'clientId nao pode estar vazio',
+        });
+      }
+
+      try {
+        const result = await registerActivity(
+          input.chamadoId,
+          clientId,
+          input.description,
+          attendantName,
+          input.actionType
+        );
+
+        return {
+          success: true,
+          activityId: result.id,
+        };
+      } catch (error) {
+        console.error('[ERROR] Erro ao registrar atividade:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: error instanceof Error ? error.message : 'Erro ao registrar atividade',
+        });
       }
     }),
 });

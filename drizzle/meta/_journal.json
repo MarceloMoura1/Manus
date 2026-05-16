@@ -43,6 +43,13 @@
       "when": 1778932439766,
       "tag": "0005_wonderful_blade",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1778936302408,
+      "tag": "0006_sloppy_trish_tilby",
+      "breakpoints": true
     }
   ]
 }

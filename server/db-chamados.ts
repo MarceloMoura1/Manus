@@ -16,7 +16,7 @@ import {
   megadeskDomainChamadoActivities,
   megadeskDomainChamadoSequence,
 } from '../drizzle/schema';
-import { and, desc, eq, inArray, ne } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 
 export type ChamadoWithActivities = {
@@ -32,9 +32,10 @@ export type ChamadoWithActivities = {
   createdAt: Date;
   activities: Array<{
     id: string;
-    date: Date;
+    date: number; // timestamp em millisegundos
     description: string;
     attendant: string;
+    actionType?: string;
   }>;
 };
 
@@ -293,12 +294,24 @@ export async function getChamadoWithActivities(
       priority: c.priority,
       assignedTo: c.assignedTo || undefined,
       createdAt: c.createdAt,
-      activities: activities.map(a => ({
-        id: a.activityId,
-        date: a.createdAt,
-        description: a.description,
-        attendant: a.attendant,
-      })),
+      activities: activities.map(a => {
+        let date = a.createdAt;
+        let timestamp: number;
+        if (date instanceof Date) {
+          timestamp = date.getTime();
+        } else {
+          // Converte string MySQL (YYYY-MM-DD HH:MM:SS) para timestamp
+          const dateObj = new Date((a.createdAt as string).replace(' ', 'T') + 'Z');
+          timestamp = dateObj.getTime();
+        }
+        return {
+          id: a.activityId,
+          date: timestamp,
+          description: a.description,
+          attendant: a.attendant,
+          actionType: a.actionType || 'note',
+        };
+      }),
     };
   });
 }
@@ -400,12 +413,40 @@ export async function listChamados(
       priority: c.priority,
       assignedTo: c.assignedTo,
       createdAt: c.createdAt,
-      activities: (activitiesByChamado[c.chamadoId] || []).map(a => ({
-        id: a.activityId,
-        date: a.createdAt,
-        description: a.description,
-        attendant: a.attendant,
-      })),
+      activities: (activitiesByChamado[c.chamadoId] || []).map(a => {
+        // Converter data para string ISO
+        let isoDate: string;
+        try {
+          if (typeof a.createdAt === 'string') {
+            // Se já é string, garantir que está em formato ISO
+            isoDate = a.createdAt.replace(' ', 'T');
+            if (!isoDate.endsWith('Z')) {
+              isoDate += 'Z';
+            }
+            // Validar se é uma data válida
+            const testDate = new Date(isoDate);
+            if (isNaN(testDate.getTime())) {
+              isoDate = new Date().toISOString();
+            }
+          } else if (a.createdAt instanceof Date) {
+            if (isNaN(a.createdAt.getTime())) {
+              isoDate = new Date().toISOString();
+            } else {
+              isoDate = a.createdAt.toISOString();
+            }
+          } else {
+            isoDate = new Date().toISOString();
+          }
+        } catch (e) {
+          isoDate = new Date().toISOString();
+        }
+        return {
+          id: a.activityId,
+          date: isoDate,
+          description: a.description,
+          attendant: a.attendant,
+        };
+      }),
     }));
 
     return result;
@@ -718,5 +759,52 @@ export async function updateCollaborators(
     }
 
     console.log(`[LOG] Colaboradores do chamado ${chamadoId} atualizados: ${collaborators.length} colaboradores`);
+  });
+}
+
+/**
+ * Registrar nova atividade em um chamado
+ */
+export async function registerActivity(
+  chamadoId: string,
+  clientId: string,
+  description: string,
+  attendant: string,
+  actionType: 'register' | 'edit' | 'close' | 'forward' | 'note' = 'note'
+): Promise<{ id: string }> {
+  if (!chamadoId || !chamadoId.trim()) {
+    throw new Error('chamadoId não pode estar vazio');
+  }
+  if (!clientId || !clientId.trim()) {
+    throw new Error('clientId não pode estar vazio');
+  }
+  if (!description || !description.trim()) {
+    throw new Error('description não pode estar vazia');
+  }
+  if (!attendant || !attendant.trim()) {
+    throw new Error('attendant não pode estar vazio');
+  }
+
+  // Validar tamanho da descrição
+  if (description.length > MAX_OBSERVATIONS_LENGTH) {
+    throw new Error(`description não pode ter mais de ${MAX_OBSERVATIONS_LENGTH} caracteres`);
+  }
+
+  return retryWithBackoff(async () => {
+    const activityId = uuidv4();
+    
+    await db.insert(megadeskDomainChamadoActivities).values({
+      activityId,
+      chamadoId,
+      clientId,
+      description: description.trim(),
+      attendant: attendant.trim(),
+      actionType,
+      createdAt: sql`NOW()`,
+      updatedAt: sql`NOW()`,
+    });
+
+    console.log(`[LOG] Atividade registrada: ${activityId} para chamado ${chamadoId}`);
+    return { id: activityId };
   });
 }

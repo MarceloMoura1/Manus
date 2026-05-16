@@ -810,3 +810,47 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Reduzir espaçamento entre elementos
 - [x] Tornar label "Colabs:" mais sutil
 - [x] Testar responsividade da nova exibição
+
+## Fase 71: Registro de Atividade com Timeline - CONCLUÍDO ✅
+
+### Análise e Preparação
+- [x] Verificar schema de atividades no banco de dados
+- [x] Analisar estrutura atual do componente de chamado
+- [x] Revisar dados de atividades existentes
+
+### Backend (tRPC)
+- [x] Criar/atualizar mutation para registrar nova atividade
+- [x] Implementar query para listar atividades do chamado
+- [x] Adicionar campos: tipo de ação, data/hora, atendente, observação
+- [x] Adicionar campo actionType à tabela de atividades
+- [x] Usar sql`NOW()` para inserir data/hora corretamente
+
+### Frontend - Componente Timeline
+- [x] Criar componente TimelineActivity.tsx para exibir atividades
+- [x] Implementar ícones para diferentes tipos de ação (checkmark, edit, user, etc)
+- [x] Formatar data e hora no padrão DD/MM/YYYY - HH:MM
+- [x] Exibir balão com informação da atividade
+- [x] Exibir nome do atendente que registrou
+- [x] Implementar formatação correta de data com parseFloat
+
+### Frontend - Modal/Campo de Registro
+- [x] Criar modal para registrar nova atividade
+- [x] Campo de texto grande para observação
+- [x] Botão para enviar registro
+- [x] Validação de campos obrigatórios
+- [x] Dropdown de tipo de atividade (Nota, Apontamento, Edição, etc)
+
+### Integração
+- [x] Integrar modal com mutation tRPC
+- [x] Atualizar lista de atividades após novo registro
+- [x] Adicionar seção "Histórico do Chamado" na página
+- [x] Posicionar abaixo de "Mensagem Inicial"
+- [x] Implementar refetch automático de atividades
+
+### Testes
+- [x] Testar registro de nova atividade
+- [x] Verificar exibição na timeline
+- [x] Validar formatação de data/hora (16/05/2026 13:30)
+- [x] Testar responsividade da timeline
+- [x] Validar que múltiplas atividades aparecem corretamente
+- [x] Testar tipos de ação diferentes
