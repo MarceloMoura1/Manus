@@ -545,6 +545,18 @@ export function TicketsPage() {
   const [clientUsers, setClientUsers] = React.useState<ClientUser[]>([]);
   const [showManageCollaboratorsCard, setShowManageCollaboratorsCard] = React.useState(false);
   const [selectedCollaborators, setSelectedCollaborators] = React.useState<Array<{ userId: string; userName: string }>>([]);
+  const [showEditCard, setShowEditCard] = React.useState(false);
+  const [editForm, setEditForm] = React.useState<{
+    clientName: string;
+    title: string;
+    observations: string;
+    priority: 'media' | 'baixa' | 'alta' | 'critica';
+  }>({
+    clientName: '',
+    title: '',
+    observations: '',
+    priority: 'media',
+  });
 
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [showNewChamadoModal, setShowNewChamadoModal] = React.useState(false);
@@ -607,6 +619,17 @@ export function TicketsPage() {
       setSelectedCollaborators(getCollaboratorsQuery.data.collaborators || []);
     }
   }, [showManageCollaboratorsCard, selectedChamado, getCollaboratorsQuery.data]);
+
+  React.useEffect(() => {
+    if (showEditCard && selectedChamado) {
+      setEditForm({
+        clientName: selectedChamado.clientName || '',
+        title: selectedChamado.title || '',
+        observations: selectedChamado.observations || '',
+        priority: selectedChamado.priority || 'media',
+      });
+    }
+  }, [showEditCard, selectedChamado]);
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToastMessage({ message, type });
@@ -1110,7 +1133,7 @@ export function TicketsPage() {
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Gerenciar colaboradores</div>
             </div>
             <div className="border-l border-slate-300 h-8"></div>
-            <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors">
+            <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors" onClick={() => setShowEditCard(!showEditCard)}>
               {/* Editar chamado - mantém */}
               <svg className="w-6 h-6 text-black hover:text-slate-700" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" />
@@ -1275,6 +1298,109 @@ export function TicketsPage() {
                   </Button>
                   <Button
                     onClick={() => setShowManageCollaboratorsCard(false)}
+                    variant="outline"
+                    className="flex-1 border-2 border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold"
+                  >
+                    ✗ Cancelar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Card Suspenso de Editar Chamado */}
+          {showEditCard && selectedChamado && (
+            <div className="absolute top-[280px] left-1/2 transform -translate-x-1/2 z-50 bg-white rounded-lg shadow-2xl border border-slate-200 p-6 w-96 max-h-[500px] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-slate-900">Editar Chamado</h3>
+                <button
+                  onClick={() => setShowEditCard(false)}
+                  className="text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {/* Cliente */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Cliente</label>
+                  <Input
+                    type="text"
+                    value={editForm.clientName}
+                    onChange={(e) => setEditForm({ ...editForm, clientName: e.target.value })}
+                    placeholder="Nome do cliente"
+                    className="w-full"
+                  />
+                </div>
+
+                {/* Título */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Título</label>
+                  <Input
+                    type="text"
+                    value={editForm.title}
+                    onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                    placeholder="Título do chamado"
+                    className="w-full"
+                  />
+                </div>
+
+                {/* Observações */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Observações</label>
+                  <textarea
+                    value={editForm.observations}
+                    onChange={(e) => setEditForm({ ...editForm, observations: e.target.value })}
+                    placeholder="Observações iniciais"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    rows={3}
+                  />
+                </div>
+
+                {/* Prioridade */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Prioridade</label>
+                  <Select value={editForm.priority} onValueChange={(value) => setEditForm({ ...editForm, priority: value as 'media' | 'baixa' | 'alta' | 'critica' })}>
+                    <SelectTrigger className="bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-blue-500 transition-colors">
+                      <SelectValue placeholder="Selecione a prioridade" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-600">
+                      <SelectItem value="baixa">🟢 Baixa</SelectItem>
+                      <SelectItem value="media">🟡 Média</SelectItem>
+                      <SelectItem value="alta">🔴 Alta</SelectItem>
+                      <SelectItem value="critica">🔴 Crítica</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Botões */}
+                <div className="flex gap-3 pt-4 border-t border-slate-200">
+                  <Button
+                    onClick={() => {
+                      updateChamadoMutation.mutate({
+                        chamadoId: selectedChamado.id,
+                        title: editForm.title,
+                        clientName: editForm.clientName,
+                        observations: editForm.observations,
+                        priority: editForm.priority as 'media' | 'baixa' | 'alta' | 'critica',
+                      }, {
+                        onSuccess: () => {
+                          showToast('Chamado atualizado com sucesso', 'success');
+                          setShowEditCard(false);
+                          utils.chamados.list.invalidate();
+                        },
+                        onError: () => {
+                          showToast('Erro ao atualizar chamado', 'error');
+                        },
+                      });
+                    }}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+                  >
+                    ✅ Salvar
+                  </Button>
+                  <Button
+                    onClick={() => setShowEditCard(false)}
                     variant="outline"
                     className="flex-1 border-2 border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold"
                   >

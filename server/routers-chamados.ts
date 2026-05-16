@@ -247,6 +247,7 @@ export const chamadosRouter = router({
         status: StatusSchema.optional(),
         priority: PrioritySchema.optional(),
         assignedTo: z.string().optional(),
+        clientName: z.string().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
