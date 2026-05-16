@@ -181,19 +181,47 @@ function rolePermissions(role: MegaClient["users"][number]["role"]) {
   return map[role];
 }
 
-// Resolve permissões finais do usuário, respeitando customizações
-function resolveUserPermissions(user: MegaClient["users"][number]) {
-  // Se o usuário tem permissões customizadas, usa APENAS essas (não combina com role defaults)
+// Resolve permissões finais do usuário, respeitando customizações e módulos do cliente
+function resolveUserPermissions(user: MegaClient["users"][number], clientModules?: string[]) {
+  const base = ["home", "settings", "notifications"];
+  
+  // Determina as permissões base da role
+  let rolePerms = rolePermissions(user.role);
+  
+  // Se o usuário tem permissões customizadas, usa essas em vez das da role
   if (user.permissions && user.permissions.length > 0) {
-    const base = ["home", "settings", "notifications"];
-    return Array.from(new Set([...base, ...user.permissions]));
+    rolePerms = [...base, ...user.permissions];
   }
-  // Caso contrário, usa permissões padrão da role
-  return rolePermissions(user.role);
+  
+  // Se há módulos do cliente, filtra as permissões para apenas os módulos ativados
+  if (clientModules && clientModules.length > 0) {
+    // Mapeamento de módulos para permissões
+    const moduleToPermission: Record<string, string> = {
+      "active-attendance": "active-attendance",
+      "conversations": "conversations",
+      "tickets": "tickets",
+      "tracking": "tracking",
+      "erp": "erp",
+      "bot-config": "bot-config",
+      "ai-assistant": "ai-assistant",
+    };
+    
+    // Filtra permissões para apenas as que correspondem a módulos ativados
+    const modulePems = rolePerms.filter(perm => {
+      // Base permissions sempre incluídas
+      if (base.includes(perm)) return true;
+      // Permissões que correspondem a módulos ativados
+      return clientModules.some(mod => moduleToPermission[mod] === perm);
+    });
+    
+    return Array.from(new Set(modulePems));
+  }
+  
+  return Array.from(new Set(rolePerms));
 }
 
 function assertClientUserPermission(client: MegaClient, permission: string, userEmail?: string) {
-  const activeUsers = client.users.map((user) => ({ ...user, permissions: resolveUserPermissions(user) })).filter((user) => user.status === "active");
+  const activeUsers = client.users.map((user) => ({ ...user, permissions: resolveUserPermissions(user, client.modules) })).filter((user) => user.status === "active");
   const user = userEmail ? activeUsers.find((item) => item.email === userEmail) : activeUsers.find((item) => item.permissions.includes(permission));
   if (!user) {
     audit("MegaDesk", `Permissão negada para ${permission}`, client.clientId, false);
@@ -207,7 +235,7 @@ function assertClientUserPermission(client: MegaClient, permission: string, user
 }
 
 function sanitizeClient(client: MegaClient) {
-  return { ...client, apiToken: undefined, tokenHint: tokenHint(client.apiToken), users: client.users.map((user) => ({ ...user, permissions: resolveUserPermissions(user) })) };
+  return { ...client, apiToken: undefined, tokenHint: tokenHint(client.apiToken), users: client.users.map((user) => ({ ...user, permissions: resolveUserPermissions(user, client.modules) })) };
 }
 
 export const appRouter = router({
@@ -1068,7 +1096,7 @@ export const appRouter = router({
             });
           }
 
-          const permissions = resolveUserPermissions(user);
+          const permissions = resolveUserPermissions(user, client.modules);
           audit("MegaDesk", `Login realizado: ${email}`, client.clientId);
           await persistSyncState();
 
