@@ -117,10 +117,10 @@ function AccessDeniedPage() {
 
 function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId) => void; indicadores?: { conversasAbertas: number; chamadosAbertos: number; tempoMedio: string; resolucaoBot: string } }) {
   const kpiCards = [
-    { label: "Conversas Abertas", value: String(indicadores?.conversasAbertas ?? 0), icon: MessageCircle, note: "em andamento" },
-    { label: "Taxa de Resolução", value: indicadores?.resolucaoBot ?? "0%", icon: CheckCircle2, note: "bot inteligente" },
-    { label: "Chamados Ativos", value: String(indicadores?.chamadosAbertos ?? 0), icon: AlertCircle, note: "aguardando" },
-    { label: "Tempo Médio", value: indicadores?.tempoMedio ?? "0m", icon: Ticket, note: "resposta" },
+    { label: "Conversas Abertas", value: String(indicadores?.conversasAbertas ?? 0), icon: MessageCircle, note: "em andamento", gradient: "from-emerald-400 to-teal-600", bgGradient: "from-emerald-50 to-teal-50", iconBg: "from-emerald-100 to-teal-100", iconColor: "text-emerald-600" },
+    { label: "Taxa de Resolução", value: indicadores?.resolucaoBot ?? "0%", icon: CheckCircle2, note: "bot inteligente", gradient: "from-violet-400 to-purple-600", bgGradient: "from-violet-50 to-purple-50", iconBg: "from-violet-100 to-purple-100", iconColor: "text-violet-600" },
+    { label: "Chamados Ativos", value: String(indicadores?.chamadosAbertos ?? 0), icon: AlertCircle, note: "aguardando", gradient: "from-orange-400 to-red-600", bgGradient: "from-orange-50 to-red-50", iconBg: "from-orange-100 to-red-100", iconColor: "text-orange-600" },
+    { label: "Tempo Médio", value: indicadores?.tempoMedio ?? "0m", icon: Ticket, note: "resposta", gradient: "from-blue-400 to-indigo-600", bgGradient: "from-blue-50 to-indigo-50", iconBg: "from-blue-100 to-indigo-100", iconColor: "text-blue-600" },
   ];
 
   const quickActions = [
@@ -172,28 +172,36 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
         </div>
       </section>
 
-      {/* KPI Cards - Profissionais */}
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {kpiCards.map((card, idx) => {
+      {/* KPI Cards - Estilizados e Animados */}
+      <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+        {kpiCards.map((card: any, idx) => {
           const Icon = card.icon;
           return (
             <div
               key={card.label}
-              className="group relative overflow-hidden rounded-2xl bg-white p-8 shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1 cursor-pointer animate-fade-in border border-slate-100"
+              className={`group relative overflow-hidden rounded-3xl bg-gradient-to-br ${card.bgGradient} p-8 shadow-xl hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 cursor-pointer animate-fade-in border border-white/40 backdrop-blur-sm`}
               style={{ animationDelay: `${idx * 0.1}s` }}
             >
-              <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-blue-400/10 to-cyan-300/10 rounded-full blur-2xl group-hover:from-blue-400/20 group-hover:to-cyan-300/20 transition-all duration-300" />
-              <div className="relative z-10">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center group-hover:from-blue-200 group-hover:to-cyan-200 transition-all duration-300">
-                    <Icon className="w-6 h-6 text-blue-600" />
-                  </div>
-                </div>
-                <p className="text-sm font-semibold text-slate-600 uppercase tracking-wide mb-2">{card.label}</p>
-                <p className="text-4xl font-black text-slate-900 mb-1">{card.value}</p>
-                <p className="text-xs font-medium text-slate-500">{card.note}</p>
+              <div className={`absolute -top-12 -right-12 w-40 h-40 bg-gradient-to-br ${card.gradient} rounded-full blur-3xl opacity-20 group-hover:opacity-30 transition-all duration-500 animate-pulse`} />
+              <div className={`absolute -bottom-12 -left-12 w-40 h-40 bg-gradient-to-tr ${card.gradient} rounded-full blur-3xl opacity-15 group-hover:opacity-25 transition-all duration-500`} style={{ animationDelay: '0.5s' }} />
+              
+              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent transform -skew-x-12" style={{ animation: 'shimmer 2s infinite' }} />
               </div>
-              <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-400 to-cyan-300 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left" />
+              
+              <div className="relative z-10">
+                <div className="flex items-center justify-between mb-6">
+                  <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${card.iconBg} flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-lg`}>
+                    <Icon className={`w-8 h-8 ${card.iconColor} group-hover:animate-bounce`} style={{ animationDuration: '0.6s' }} />
+                  </div>
+                  <div className={`w-2 h-2 rounded-full bg-gradient-to-r ${card.gradient} animate-pulse`} />
+                </div>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-600 mb-3 opacity-75">{card.label}</p>
+                <p className={`text-5xl font-black bg-gradient-to-r ${card.gradient} bg-clip-text text-transparent mb-2 group-hover:scale-105 transition-transform duration-300 origin-left`}>{card.value}</p>
+                <p className="text-sm font-semibold text-slate-600 group-hover:text-slate-700 transition-colors">{card.note}</p>
+              </div>
+              
+              <div className={`absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r ${card.gradient} transform scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left`} />
             </div>
           );
         })}
