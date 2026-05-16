@@ -862,3 +862,55 @@ export async function countChamados(
     throw error;
   }
 }
+
+/**
+ * Obter contadores de chamados por status
+ */
+export async function getStatusCounts(clientId: string): Promise<{
+  total: number;
+  open: number;
+  in_progress: number;
+  waiting: number;
+  closed: number;
+}> {
+  const db = getDb();
+  
+  try {
+    // Buscar todos os chamados para contar por status
+    const allChamados = await db
+      .select({ status: megadeskDomainChamados.status })
+      .from(megadeskDomainChamados)
+      .where(eq(megadeskDomainChamados.clientId, clientId));
+
+    const counts = {
+      total: 0,
+      open: 0,
+      in_progress: 0,
+      waiting: 0,
+      closed: 0,
+    };
+
+    // Contar por status
+    for (const chamado of allChamados) {
+      if (chamado.status === 'closed') {
+        counts.closed++;
+      } else {
+        counts.total++;
+      }
+      
+      if (chamado.status === 'open') {
+        counts.open++;
+      } else if (chamado.status === 'in_progress') {
+        counts.in_progress++;
+      } else if (chamado.status === 'waiting') {
+        counts.waiting++;
+      }
+    }
+
+    console.log(`[LOG] Status counts for ${clientId}:`, counts);
+    return counts;
+  } catch (error) {
+    console.error(`[ERROR] Failed to get status counts for ${clientId}:`, error);
+    throw error;
+  }
+}

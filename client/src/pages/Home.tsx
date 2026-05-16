@@ -718,6 +718,12 @@ export function TicketsPage() {
     { enabled: !!selectedChamado }
   );
 
+  // Carregar contadores de status
+  const statusCountsQuery = trpc.chamados.getStatusCounts.useQuery(
+    undefined,
+    { enabled: !!user?.user?.id }
+  );
+
   // Resetar pagina quando o filtro muda
   React.useEffect(() => {
     setCurrentPage(1);
@@ -1068,14 +1074,15 @@ export function TicketsPage() {
   });
   console.log('[DEBUG] filteredChamados:', filteredChamados);
 
-  // Contar status (com base no filtro de usuário)
-  const statusCounts = {
-    total: chamadosFiltrados.filter(c => c.status !== 'closed').length,
-    open: chamadosFiltrados.filter(c => c.status === 'open').length,
-    in_progress: chamadosFiltrados.filter(c => c.status === 'in_progress').length,
-    waiting: chamadosFiltrados.filter(c => c.status === 'waiting').length,
-    closed: chamadosFiltrados.filter(c => c.status === 'closed').length,
+  // Contar status (usando dados da query)
+  const statusCounts = statusCountsQuery.data || {
+    total: 0,
+    open: 0,
+    in_progress: 0,
+    waiting: 0,
+    closed: 0,
   };
+  console.log('[DEBUG] statusCounts:', statusCounts);
 
   const statusCards: Array<{ id: 'total' | 'open' | 'in_progress' | 'waiting' | 'closed'; label: string; value: number; gradient: string; bgGradient: string; icon: any; iconColor: string }> = [
     { id: 'total', label: 'Total', value: statusCounts.total, gradient: 'from-slate-600 to-slate-900', bgGradient: 'from-slate-50 to-slate-100', icon: Ticket, iconColor: 'text-slate-700' },

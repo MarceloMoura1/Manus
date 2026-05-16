@@ -17,6 +17,7 @@ import {
   getChamadoWithActivities,
   listChamados,
   countChamados,
+  getStatusCounts,
   updateChamado,
   addActivityToChamado,
   editActivity,
@@ -588,6 +589,35 @@ export const chamadosRouter = router({
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: error instanceof Error ? error.message : 'Erro ao registrar atividade',
+        });
+      }
+    }),
+
+  /**
+   * Obter contadores de chamados por status
+   */
+  getStatusCounts: protectedProcedure
+    .query(async ({ ctx }) => {
+      try {
+        const clientId = ctx.tenantId || String(ctx.user.id);
+        
+        if (!clientId || clientId.trim() === '') {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Identificação de cliente inválida",
+          });
+        }
+
+        const counts = await getStatusCounts(clientId);
+        return counts;
+      } catch (error) {
+        console.error('[ERROR] Failed to get status counts:', error);
+        
+        if (error instanceof TRPCError) throw error;
+        
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Erro ao obter contadores: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
         });
       }
     }),
