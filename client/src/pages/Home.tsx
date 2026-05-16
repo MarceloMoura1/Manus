@@ -287,18 +287,22 @@ function ConversationsPage() {
   const handleCloseConversation = async () => {
     if (!selectedConversation) return;
     
+    // Atualizacao otimista - fecha o modal e atualiza a lista imediatamente
+    setCloseConfirmOpen(false);
+    setConversations(prev => prev.map(conv => 
+      conv.id === selectedConversation ? { ...conv, status: 'closed' } : conv
+    ));
+    showToast('Conversa encerrada!', 'success');
+    
+    // Envia a requisicao para o backend em background
     try {
       await closeConversationMutation.mutateAsync({ conversationId: selectedConversation });
-      
-      // Atualizar a conversa na lista
-      setConversations(prev => prev.map(conv => 
-        conv.id === selectedConversation ? { ...conv, status: 'closed' } : conv
-      ));
-      
-      setCloseConfirmOpen(false);
-      showToast('Conversa encerrada com sucesso!', 'success');
     } catch (error) {
       console.error('Erro ao encerrar conversa:', error);
+      // Reverter a mudanca se falhar
+      setConversations(prev => prev.map(conv => 
+        conv.id === selectedConversation ? { ...conv, status: 'open' } : conv
+      ));
       showToast('Erro ao encerrar conversa', 'error');
     }
   };
