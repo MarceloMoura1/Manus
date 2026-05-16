@@ -1396,6 +1396,13 @@ export function TicketsPage() {
                         onSuccess: () => {
                           showToast('Chamado atualizado com sucesso', 'success');
                           setShowEditCard(false);
+                          setSelectedChamado({
+                            ...selectedChamado,
+                            title: editForm.title,
+                            clientName: editForm.clientName,
+                            observations: editForm.observations,
+                            priority: editForm.priority,
+                          });
                           utils.chamados.list.invalidate();
                         },
                         onError: () => {
