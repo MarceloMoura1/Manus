@@ -537,6 +537,7 @@ export function TicketsPage() {
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState<'total' | 'open' | 'in_progress' | 'waiting' | 'closed'>('total');
+  const [chamadoFilter, setChamadoFilter] = React.useState<'all' | 'mine'>('all');
   const [selectedChamado, setSelectedChamado] = React.useState<any | null>(null);
   const [showForwardCard, setShowForwardCard] = React.useState(false);
   const [forwardAttendant, setForwardAttendant] = React.useState<string>('');
@@ -682,8 +683,13 @@ export function TicketsPage() {
 
   const chamados = chamadosQuery.data?.chamados || [];
 
+  // Filtrar por usuário (todos vs somente seu)
+  const chamadosFiltrados = chamadoFilter === 'mine' 
+    ? chamados.filter(c => c.assignedTo === user?.user?.name)
+    : chamados;
+
   // Filtrar por busca
-  const filteredChamados = chamados.filter(c => {
+  const filteredChamados = chamadosFiltrados.filter(c => {
     const searchLower = searchTerm.toLowerCase();
     return (
       c.customerName.toLowerCase().includes(searchLower) ||
@@ -693,13 +699,13 @@ export function TicketsPage() {
     );
   });
 
-  // Contar status
+  // Contar status (com base no filtro de usuário)
   const statusCounts = {
-    total: chamados.filter(c => c.status !== 'closed').length,
-    open: chamados.filter(c => c.status === 'open').length,
-    in_progress: chamados.filter(c => c.status === 'in_progress').length,
-    waiting: chamados.filter(c => c.status === 'waiting').length,
-    closed: chamados.filter(c => c.status === 'closed').length,
+    total: chamadosFiltrados.filter(c => c.status !== 'closed').length,
+    open: chamadosFiltrados.filter(c => c.status === 'open').length,
+    in_progress: chamadosFiltrados.filter(c => c.status === 'in_progress').length,
+    waiting: chamadosFiltrados.filter(c => c.status === 'waiting').length,
+    closed: chamadosFiltrados.filter(c => c.status === 'closed').length,
   };
 
   const statusCards: Array<{ id: 'total' | 'open' | 'in_progress' | 'waiting' | 'closed'; label: string; value: number; color: string; textColor: string }> = [
@@ -768,6 +774,19 @@ export function TicketsPage() {
 
   return (
     <div className="space-y-4">
+      {/* Filtro de Chamados */}
+      <div className="flex items-center gap-4">
+        <label className="text-sm font-medium text-slate-700">Chamados:</label>
+        <select
+          value={chamadoFilter}
+          onChange={e => setChamadoFilter(e.target.value as 'all' | 'mine')}
+          className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="all">Todos</option>
+          <option value="mine">Somente seu</option>
+        </select>
+      </div>
+
       {/* Cards de Status */}
       <div className="grid grid-cols-5 gap-3">
         {statusCards.map(card => (
