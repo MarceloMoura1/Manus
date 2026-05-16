@@ -923,7 +923,7 @@ export function TicketsPage() {
           </div>
 
           {/* Retangulo com Dados do Cliente */}
-          <div className="bg-slate-700 text-white p-6 mx-8 mt-6 rounded-lg">
+          <div className="bg-slate-700 text-white p-6 mx-8 mt-6 rounded-lg" style={{height: '103px', marginBottom: '6px', marginLeft: '31px', paddingBottom: '0px', paddingLeft: '16px', paddingTop: '0px', width: '1778px'}}>
             <h2 className="text-lg font-semibold mb-4">Dados do Cliente</h2>
             <div className="grid grid-cols-2 gap-6">
               <div>
