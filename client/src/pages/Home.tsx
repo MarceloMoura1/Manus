@@ -545,6 +545,7 @@ export function TicketsPage() {
   const [clientUsers, setClientUsers] = React.useState<ClientUser[]>([]);
   const [showManageCollaboratorsCard, setShowManageCollaboratorsCard] = React.useState(false);
   const [selectedCollaborators, setSelectedCollaborators] = React.useState<Array<{ userId: string; userName: string }>>([]);
+  const [isEditingCollaborators, setIsEditingCollaborators] = React.useState(false);
   const [showEditCard, setShowEditCard] = React.useState(false);
   const [editForm, setEditForm] = React.useState<{
     clientName: string;
@@ -609,14 +610,15 @@ export function TicketsPage() {
   }, [showForwardCard, showManageCollaboratorsCard, selectedChamado, getClientUsersQuery.data]);
 
   React.useEffect(() => {
-    if (getCollaboratorsQuery.data) {
+    if (getCollaboratorsQuery.data && !isEditingCollaborators) {
       setSelectedCollaborators(getCollaboratorsQuery.data.collaborators || []);
     }
-  }, [getCollaboratorsQuery.data]);
+  }, [getCollaboratorsQuery.data, isEditingCollaborators]);
 
   React.useEffect(() => {
     if (showManageCollaboratorsCard && selectedChamado && getCollaboratorsQuery.data) {
       setSelectedCollaborators(getCollaboratorsQuery.data.collaborators || []);
+      setIsEditingCollaborators(true);
     }
   }, [showManageCollaboratorsCard, selectedChamado, getCollaboratorsQuery.data]);
 
@@ -650,6 +652,8 @@ export function TicketsPage() {
 
       showToast('Colaboradores atualizados com sucesso', 'success');
       setShowManageCollaboratorsCard(false);
+      setIsEditingCollaborators(false);
+      await getCollaboratorsQuery.refetch();
       utils.chamados.list.invalidate();
     } catch (error) {
       showToast('Erro ao atualizar colaboradores', 'error');
@@ -1169,6 +1173,25 @@ export function TicketsPage() {
               </svg>
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Dossiê do cliente</div>
             </div>
+            <div className="border-l border-slate-300 h-8"></div>
+            {/* Colaboradores na linha de ferramentas */}
+            {selectedCollaborators && selectedCollaborators.length > 0 && (
+              <div className="flex items-center gap-1.5 px-3 py-2">
+                <span className="text-xs font-medium text-slate-500">Colabs:</span>
+                <div className="flex -space-x-1.5">
+                  {selectedCollaborators.slice(0, 3).map(collab => (
+                    <div key={collab.userId} className="w-5 h-5 rounded-full bg-slate-400 flex items-center justify-center text-white text-xs font-semibold border border-slate-200 hover:z-10 cursor-pointer hover:bg-slate-500 transition-colors" title={collab.userName}>
+                      {collab.userName.charAt(0).toUpperCase()}
+                    </div>
+                  ))}
+                  {selectedCollaborators.length > 3 && (
+                    <div className="w-5 h-5 rounded-full bg-slate-300 flex items-center justify-center text-slate-700 text-xs font-semibold border border-slate-200" title={`+${selectedCollaborators.length - 3} mais`}>
+                      +{selectedCollaborators.length - 3}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Mensagem Inicial do Chamado */}
@@ -1179,22 +1202,7 @@ export function TicketsPage() {
             </div>
           )}
 
-          {/* Seção de Colaboradores */}
-          {selectedCollaborators && selectedCollaborators.length > 0 && (
-            <div className="mx-8 mt-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">Colaboradores ({selectedCollaborators.length})</h3>
-              <div className="flex flex-wrap gap-3">
-                {selectedCollaborators.map(collab => (
-                  <div key={collab.userId} className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-300 rounded-lg">
-                    <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">
-                      {collab.userName.charAt(0).toUpperCase()}
-                    </div>
-                    <span className="text-sm font-medium text-slate-700">{collab.userName}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+
 
           {/* Card Suspenso de Encaminhamento */}
           {showForwardCard && selectedChamado && (
@@ -1305,7 +1313,10 @@ export function TicketsPage() {
                     ✅ Salvar
                   </Button>
                   <Button
-                    onClick={() => setShowManageCollaboratorsCard(false)}
+                    onClick={() => {
+                      setShowManageCollaboratorsCard(false);
+                      setIsEditingCollaborators(false);
+                    }}
                     variant="outline"
                     className="flex-1 border-2 border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold"
                   >

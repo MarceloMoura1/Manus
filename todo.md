@@ -793,3 +793,20 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Validar responsividade
 - [x] Validar acessibilidade
 - [x] Sem erros TypeScript
+
+## Fase 70: Correção de Colaboradores - CONCLUÍDO ✅
+
+### Bug Fix: Colaboradores não sendo salvos
+- [x] Identificar conflito entre useEffect que causava perda de dados
+- [x] Adicionar flag `isEditingCollaborators` para rastrear edição
+- [x] Corrigir resetagem de estado durante edição
+- [x] Adicionar refetch explícito após salvar colaboradores
+- [x] Testar salvamento de colaboradores
+
+### Melhoria Visual: Colaboradores mais discretos
+- [x] Reduzir padding da seção de colaboradores
+- [x] Diminuir tamanho dos avatares (6x6 → 5x5)
+- [x] Usar cores mais suaves (blue-500 → slate-400)
+- [x] Reduzir espaçamento entre elementos
+- [x] Tornar label "Colabs:" mais sutil
+- [x] Testar responsividade da nova exibição
