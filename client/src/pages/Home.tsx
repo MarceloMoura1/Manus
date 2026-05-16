@@ -922,6 +922,29 @@ export function TicketsPage() {
             </h1>
           </div>
 
+          {/* Retangulo com Dados do Cliente */}
+          <div className="bg-slate-700 text-white p-6 mx-8 mt-6 rounded-lg">
+            <h2 className="text-lg font-semibold mb-4">Dados do Cliente</h2>
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <p className="text-sm text-slate-300">Nome</p>
+                <p className="text-base font-medium">{selectedChamado.clientName || 'N/A'}</p>
+              </div>
+              <div>
+                <p className="text-sm text-slate-300">Telefone</p>
+                <p className="text-base font-medium">{selectedChamado.clientPhone || 'N/A'}</p>
+              </div>
+              <div>
+                <p className="text-sm text-slate-300">CNPJ</p>
+                <p className="text-base font-medium">{selectedChamado.clientCnpj || 'N/A'}</p>
+              </div>
+              <div>
+                <p className="text-sm text-slate-300">Email</p>
+                <p className="text-base font-medium">{selectedChamado.clientEmail || 'N/A'}</p>
+              </div>
+            </div>
+          </div>
+
           {/* Conteudo da Tela Branca */}
           <div className="p-8 max-w-6xl mx-auto">
             <p className="text-slate-600">Detalhes do chamado serao exibidos aqui...</p>
