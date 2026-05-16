@@ -5,6 +5,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { validateNewChamado, ValidationError } from "@/lib/validations";
 import { ActiveAttendancePage } from "./ActiveAttendance";
+import AssistentIA from "./AssistentIA";
 import { TimelineActivity } from "@/components/TimelineActivity";
 
 import { Button } from "@/components/ui/button";
@@ -2115,14 +2116,7 @@ function BotConfigPage() {
 }
 
 function AIAssistantPage() {
-  return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-4">Assistente IA</h2>
-        <p className="text-slate-600">Converse com o assistente inteligente.</p>
-      </div>
-    </div>
-  );
+  return <AssistentIA />;
 }
 
 function NotificationsPage() {
