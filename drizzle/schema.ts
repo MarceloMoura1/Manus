@@ -206,6 +206,20 @@ export const megadeskDomainChamadoActivities = mysqlTable("megadesk_domain_chama
   createdAtIdx: index("idx_mdca_created_at").on(table.createdAt),
 }));
 
+export const megadeskDomainChamadoCollaborators = mysqlTable("megadesk_domain_chamado_collaborators", {
+  collaboratorId: varchar("collaborator_id", { length: 80 }).primaryKey(),
+  chamadoId: varchar("chamado_id", { length: 80 }).notNull(),
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  userId: varchar("user_id", { length: 80 }).notNull(),
+  userName: varchar("user_name", { length: 180 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  chamadoIdx: index("idx_mdcc_chamado").on(table.chamadoId),
+  clientIdx: index("idx_mdcc_client").on(table.clientId),
+  userIdx: index("idx_mdcc_user").on(table.userId),
+  chamadoUserUniqueIdx: uniqueIndex("idx_mdcc_chamado_user_unique").on(table.chamadoId, table.userId),
+}));
+
 export const megadeskDomainAuditLogs = mysqlTable("megadesk_domain_audit_logs", {
   auditId: varchar("audit_id", { length: 100 }).primaryKey(),
   platform: mysqlEnum("platform", ["MegaAdmin", "MegaDesk"]).notNull(),

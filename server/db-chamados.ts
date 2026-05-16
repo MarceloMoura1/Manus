@@ -568,3 +568,155 @@ export async function editActivity(
     console.log(`[SUCCESS] Atividade ${activityId} atualizada com sucesso`);
   });
 }
+
+
+/**
+ * Listar colaboradores de um chamado
+ */
+export async function getCollaborators(chamadoId: string, clientId: string): Promise<Array<{ userId: string; userName: string }>> {
+  if (!chamadoId || !chamadoId.trim()) {
+    throw new Error('chamadoId não pode estar vazio');
+  }
+  if (!clientId || !clientId.trim()) {
+    throw new Error('clientId não pode estar vazio');
+  }
+
+  return retryWithBackoff(async () => {
+    const { megadeskDomainChamadoCollaborators } = await import('../drizzle/schema');
+    const collaborators = await db
+      .select({
+        userId: megadeskDomainChamadoCollaborators.userId,
+        userName: megadeskDomainChamadoCollaborators.userName,
+      })
+      .from(megadeskDomainChamadoCollaborators)
+      .where(
+        and(
+          eq(megadeskDomainChamadoCollaborators.chamadoId, chamadoId),
+          eq(megadeskDomainChamadoCollaborators.clientId, clientId)
+        )
+      );
+
+    return collaborators;
+  });
+}
+
+/**
+ * Adicionar colaborador a um chamado
+ */
+export async function addCollaborator(
+  chamadoId: string,
+  clientId: string,
+  userId: string,
+  userName: string
+): Promise<void> {
+  if (!chamadoId || !chamadoId.trim()) {
+    throw new Error('chamadoId não pode estar vazio');
+  }
+  if (!clientId || !clientId.trim()) {
+    throw new Error('clientId não pode estar vazio');
+  }
+  if (!userId || !userId.trim()) {
+    throw new Error('userId não pode estar vazio');
+  }
+
+  validateNonEmptyString(userName, 'userName');
+
+  return retryWithBackoff(async () => {
+    const { megadeskDomainChamadoCollaborators } = await import('../drizzle/schema');
+    const collaboratorId = uuidv4();
+
+    await db
+      .insert(megadeskDomainChamadoCollaborators)
+      .values({
+        collaboratorId,
+        chamadoId,
+        clientId,
+        userId,
+        userName,
+      })
+      .onDuplicateKeyUpdate({
+        set: { userName },
+      });
+
+    console.log(`[LOG] Colaborador ${userName} adicionado ao chamado ${chamadoId}`);
+  });
+}
+
+/**
+ * Remover colaborador de um chamado
+ */
+export async function removeCollaborator(
+  chamadoId: string,
+  clientId: string,
+  userId: string
+): Promise<void> {
+  if (!chamadoId || !chamadoId.trim()) {
+    throw new Error('chamadoId não pode estar vazio');
+  }
+  if (!clientId || !clientId.trim()) {
+    throw new Error('clientId não pode estar vazio');
+  }
+  if (!userId || !userId.trim()) {
+    throw new Error('userId não pode estar vazio');
+  }
+
+  return retryWithBackoff(async () => {
+    const { megadeskDomainChamadoCollaborators } = await import('../drizzle/schema');
+    await db
+      .delete(megadeskDomainChamadoCollaborators)
+      .where(
+        and(
+          eq(megadeskDomainChamadoCollaborators.chamadoId, chamadoId),
+          eq(megadeskDomainChamadoCollaborators.clientId, clientId),
+          eq(megadeskDomainChamadoCollaborators.userId, userId)
+        )
+      );
+
+    console.log(`[LOG] Colaborador ${userId} removido do chamado ${chamadoId}`);
+  });
+}
+
+/**
+ * Atualizar colaboradores de um chamado (substituir todos)
+ */
+export async function updateCollaborators(
+  chamadoId: string,
+  clientId: string,
+  collaborators: Array<{ userId: string; userName: string }>
+): Promise<void> {
+  if (!chamadoId || !chamadoId.trim()) {
+    throw new Error('chamadoId não pode estar vazio');
+  }
+  if (!clientId || !clientId.trim()) {
+    throw new Error('clientId não pode estar vazio');
+  }
+
+  return retryWithBackoff(async () => {
+    const { megadeskDomainChamadoCollaborators } = await import('../drizzle/schema');
+
+    // Remover todos os colaboradores existentes
+    await db
+      .delete(megadeskDomainChamadoCollaborators)
+      .where(
+        and(
+          eq(megadeskDomainChamadoCollaborators.chamadoId, chamadoId),
+          eq(megadeskDomainChamadoCollaborators.clientId, clientId)
+        )
+      );
+
+    // Adicionar novos colaboradores
+    if (collaborators.length > 0) {
+      const valuesToInsert = collaborators.map(c => ({
+        collaboratorId: uuidv4(),
+        chamadoId,
+        clientId,
+        userId: c.userId,
+        userName: c.userName,
+      }));
+
+      await db.insert(megadeskDomainChamadoCollaborators).values(valuesToInsert);
+    }
+
+    console.log(`[LOG] Colaboradores do chamado ${chamadoId} atualizados: ${collaborators.length} colaboradores`);
+  });
+}

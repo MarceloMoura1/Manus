@@ -543,6 +543,8 @@ export function TicketsPage() {
   const [forwardAttendant, setForwardAttendant] = React.useState<string>('');
   const [forwardObservations, setForwardObservations] = React.useState<string>('');
   const [clientUsers, setClientUsers] = React.useState<ClientUser[]>([]);
+  const [showManageCollaboratorsCard, setShowManageCollaboratorsCard] = React.useState(false);
+  const [selectedCollaborators, setSelectedCollaborators] = React.useState<Array<{ userId: string; userName: string }>>([]);
 
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [showNewChamadoModal, setShowNewChamadoModal] = React.useState(false);
@@ -574,22 +576,67 @@ export function TicketsPage() {
   const addActivityMutation = trpc.chamados.addActivity.useMutation();
   const editActivityMutation = trpc.chamados.editActivity.useMutation();
   const createChamadoMutation = trpc.chamados.create.useMutation();
+  const updateCollaboratorsMutation = trpc.chamados.updateCollaborators.useMutation();
 
   // Carregar usuários do cliente ao abrir o card de encaminhamento
   const getClientUsersQuery = trpc.megadesk.getClientUsers.useQuery(
     {},
-    { enabled: showForwardCard && !!selectedChamado }
+    { enabled: (showForwardCard || showManageCollaboratorsCard) && !!selectedChamado }
+  );
+
+  // Carregar colaboradores do chamado
+  const getCollaboratorsQuery = trpc.chamados.getCollaborators.useQuery(
+    { chamadoId: selectedChamado?.id || '' },
+    { enabled: showManageCollaboratorsCard && !!selectedChamado }
   );
 
   React.useEffect(() => {
-    if (showForwardCard && selectedChamado && getClientUsersQuery.data) {
+    if ((showForwardCard || showManageCollaboratorsCard) && selectedChamado && getClientUsersQuery.data) {
       setClientUsers(getClientUsersQuery.data || []);
     }
-  }, [showForwardCard, selectedChamado, getClientUsersQuery.data]);
+  }, [showForwardCard, showManageCollaboratorsCard, selectedChamado, getClientUsersQuery.data]);
+
+  React.useEffect(() => {
+    if (showManageCollaboratorsCard && getCollaboratorsQuery.data) {
+      setSelectedCollaborators(getCollaboratorsQuery.data.collaborators || []);
+    }
+  }, [showManageCollaboratorsCard, getCollaboratorsQuery.data]);
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToastMessage({ message, type });
     setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleUpdateCollaborators = async () => {
+    if (!selectedChamado) {
+      showToast('Nenhum chamado selecionado', 'error');
+      return;
+    }
+
+    try {
+      await updateCollaboratorsMutation.mutateAsync({
+        chamadoId: selectedChamado.id,
+        collaborators: selectedCollaborators,
+      });
+
+      showToast('Colaboradores atualizados com sucesso', 'success');
+      setShowManageCollaboratorsCard(false);
+      utils.chamados.list.invalidate();
+    } catch (error) {
+      showToast('Erro ao atualizar colaboradores', 'error');
+      console.error('Error updating collaborators:', error);
+    }
+  };
+
+  const toggleCollaborator = (userId: string, userName: string) => {
+    setSelectedCollaborators(prev => {
+      const isSelected = prev.some(c => c.userId === userId);
+      if (isSelected) {
+        return prev.filter(c => c.userId !== userId);
+      } else {
+        return [...prev, { userId, userName }];
+      }
+    });
   };
 
   const handleForwardChamado = async () => {
@@ -1049,7 +1096,7 @@ export function TicketsPage() {
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Encaminhar chamado</div>
             </div>
             <div className="border-l border-slate-300 h-8"></div>
-            <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors">
+            <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors" onClick={() => setShowManageCollaboratorsCard(!showManageCollaboratorsCard)}>
               {/* Gerenciar colaboradores - mantém */}
               <svg className="w-6 h-6 text-black hover:text-slate-700" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
@@ -1153,6 +1200,62 @@ export function TicketsPage() {
                     className="flex-1 border-2 border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold"
                   >
                     ✕ Cancelar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showManageCollaboratorsCard && selectedChamado && (
+            <div className="absolute top-[280px] left-1/2 transform -translate-x-1/2 z-50 bg-white rounded-lg shadow-2xl border border-slate-200 p-6 w-96 max-h-[500px] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-slate-900">Gerenciar Colaboradores</h3>
+                <button
+                  onClick={() => setShowManageCollaboratorsCard(false)}
+                  className="text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {/* Lista de Colaboradores com Checkboxes */}
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-slate-700 block mb-3">Selecione os colaboradores:</label>
+                  {clientUsers.length === 0 ? (
+                    <p className="text-sm text-slate-500">Nenhum usuário disponível</p>
+                  ) : (
+                    clientUsers.map(user => (
+                      <div key={user.userId} className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+                        <input
+                          type="checkbox"
+                          id={`collab-${user.userId}`}
+                          checked={selectedCollaborators.some(c => c.userId === user.userId)}
+                          onChange={() => toggleCollaborator(user.userId, user.name)}
+                          className="w-5 h-5 text-blue-600 rounded cursor-pointer"
+                        />
+                        <label htmlFor={`collab-${user.userId}`} className="flex-1 cursor-pointer text-slate-700 font-medium">
+                          {user.name}
+                        </label>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Botões */}
+                <div className="flex gap-3 pt-4 border-t border-slate-200">
+                  <Button
+                    onClick={handleUpdateCollaborators}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+                  >
+                    ✅ Salvar
+                  </Button>
+                  <Button
+                    onClick={() => setShowManageCollaboratorsCard(false)}
+                    variant="outline"
+                    className="flex-1 border-2 border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold"
+                  >
+                    ✗ Cancelar
                   </Button>
                 </div>
               </div>

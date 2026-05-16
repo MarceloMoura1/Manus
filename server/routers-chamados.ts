@@ -19,6 +19,10 @@ import {
   updateChamado,
   addActivityToChamado,
   editActivity,
+  getCollaborators,
+  addCollaborator,
+  removeCollaborator,
+  updateCollaborators,
   type ChamadoWithActivities,
 } from "./db-chamados";
 
@@ -409,6 +413,92 @@ export const chamadosRouter = router({
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: `Erro ao editar atividade: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
+        });
+      }
+    }),
+
+  /**
+   * Listar colaboradores de um chamado
+   */
+  getCollaborators: protectedProcedure
+    .input(z.object({
+      chamadoId: ChamadoIdSchema,
+    }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const clientId = ctx.tenantId || String(ctx.user.id);
+        if (!clientId || clientId.trim() === '') {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Identificação de cliente inválida",
+          });
+        }
+
+        checkRateLimit(clientId);
+
+        console.log('[DEBUG] Getting collaborators for chamado:', input.chamadoId);
+
+        const collaborators = await getCollaborators(input.chamadoId, clientId);
+        
+        return { collaborators };
+      } catch (error) {
+        console.error('[ERROR] Failed to get collaborators:', error);
+        if (error instanceof TRPCError) throw error;
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Erro ao buscar colaboradores: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
+        });
+      }
+    }),
+
+  /**
+   * Atualizar colaboradores de um chamado
+   */
+  updateCollaborators: protectedProcedure
+    .input(z.object({
+      chamadoId: ChamadoIdSchema,
+      collaborators: z.array(z.object({
+        userId: z.string().min(1),
+        userName: z.string().min(1),
+      })),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const clientId = ctx.tenantId || String(ctx.user.id);
+        if (!clientId || clientId.trim() === '') {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Identificação de cliente inválida",
+          });
+        }
+
+        checkRateLimit(clientId);
+
+        console.log('[DEBUG] Updating collaborators for chamado:', input.chamadoId);
+
+        await updateCollaborators(input.chamadoId, clientId, input.collaborators);
+
+        const chamado = await getChamadoWithActivities(input.chamadoId, clientId);
+        
+        if (!chamado) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Chamado não encontrado ou acesso negado",
+          });
+        }
+        
+        console.log('[SUCCESS] Collaborators updated for chamado:', input.chamadoId);
+        
+        return { 
+          chamado,
+          message: "Colaboradores atualizados com sucesso",
+        };
+      } catch (error) {
+        console.error('[ERROR] Failed to update collaborators:', error);
+        if (error instanceof TRPCError) throw error;
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Erro ao atualizar colaboradores: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
         });
       }
     }),
