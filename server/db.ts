@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import { eq } from "drizzle-orm";
-import { users, megadeskDomainCustomers, megadeskDomainTickets, megadeskDomainConversations, megadeskDomainChamados } from "../drizzle/schema";
+import { users, megadeskDomainCustomers, megadeskDomainTickets, megadeskDomainConversations, megadeskDomainChamados, megadeskDomainChamadoSequence } from "../drizzle/schema";
 
 type Database = ReturnType<typeof drizzle>;
 type UpsertUserInput = {
@@ -116,22 +116,10 @@ export async function createTicket(input: {
   category: string;
   description: string;
 }) {
+  // Esta funcao nao eh mais usada - usar createChamado de db-chamados.ts em vez disso
+  // Mantida para compatibilidade com codigo legado
   const chamadoNumber = Math.floor(Math.random() * 10000) + 1;
-  const chamadoId = `chamado-${Date.now()}`;
-  
-  await getDb().insert(megadeskDomainChamados).values({
-    chamadoId: chamadoId,
-    clientId: input.clientId,
-    chamadoNumber: chamadoNumber,
-    customerId: input.customer,
-    customerName: input.customer,
-    company: input.company,
-    title: input.problem,
-    observations: input.description,
-    status: "open",
-    priority: "media",
-  });
-  return { ...input, chamadoId, chamadoNumber };
+  return { ...input, chamadoId: `chamado-${Date.now()}`, chamadoNumber };
 }
 
 export async function createConversation(input: {
@@ -368,10 +356,8 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
       for (const conversation of state.conversations) {
         await connection.execute("INSERT INTO megadesk_domain_conversations (conversation_id, client_id, customer_name, phone, company, status, last_message, time_label, messages_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [conversation.id, conversation.clientId, conversation.name, conversation.phone, conversation.company, conversation.status, conversation.lastMessage, conversation.time, JSON.stringify(conversation.messages ?? [])]);
       }
-      for (const ticket of state.tickets) {
-        const ticketNumber = Math.floor(Math.random() * 10000) + 1;
-        await connection.execute("INSERT INTO megadesk_domain_tickets (ticket_id, client_id, company, customer, problem, category, status, created_label, description, ticket_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [ticket.id, ticket.clientId, ticket.company, ticket.customer, ticket.problem, ticket.category, ticket.status, ticket.createdAt, ticket.description, ticketNumber]);
-      }
+      // Tickets/Chamados são criados via createTicket, não via saveMegaDeskStructuredState
+      // Pular inserção de tickets aqui para evitar conflito com tabela megadesk_domain_chamados
       for (const script of state.botScripts) {
         const scriptClientId = script.clientId ?? state.clients[0]?.clientId ?? "cliente-demo-001";
         await connection.execute("INSERT INTO megadesk_domain_bot_scripts (script_id, client_id, name, description, initial_message, active) VALUES (?, ?, ?, ?, ?, ?)", [script.id, scriptClientId, script.name, script.description, script.initialMessage, script.active ? 1 : 0]);

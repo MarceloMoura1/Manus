@@ -686,6 +686,8 @@ export function TicketsPage() {
   const chamadosQuery = trpc.chamados.list.useQuery(
     {
       status: selectedFilter,
+      limit: 100, // Aumentar limite para mostrar mais chamados
+      offset: 0,
     },
     { enabled: !!user?.user?.id }
   );
