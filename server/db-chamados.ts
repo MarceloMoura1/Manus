@@ -824,3 +824,41 @@ export async function registerActivity(
     return { id: activityId };
   });
 }
+
+/**
+ * Contar total de chamados para um cliente com filtro de status
+ */
+export async function countChamados(
+  clientId: string,
+  status?: string
+): Promise<number> {
+  const db = getDb();
+  
+  try {
+    let query: any = db
+      .select({ count: sql<number>`count(*)` })
+      .from(megadeskDomainChamados)
+      .where(eq(megadeskDomainChamados.clientId, clientId));
+
+    if (status && status !== 'total') {
+      query = query.where(eq(megadeskDomainChamados.status, status as typeof VALID_STATUSES[number]));
+    } else if (status === 'total') {
+      // Excluir fechados
+      query = db
+        .select({ count: sql<number>`count(*)` })
+        .from(megadeskDomainChamados)
+        .where(
+          and(
+            eq(megadeskDomainChamados.clientId, clientId),
+            ne(megadeskDomainChamados.status, 'closed' as typeof VALID_STATUSES[number])
+          )
+        );
+    }
+
+    const result = await query;
+    return result[0]?.count || 0;
+  } catch (error) {
+    console.error(`[ERROR] Failed to count chamados for ${clientId}:`, error);
+    throw error;
+  }
+}

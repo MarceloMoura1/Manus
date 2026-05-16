@@ -16,6 +16,7 @@ import {
   createChamado,
   getChamadoWithActivities,
   listChamados,
+  countChamados,
   updateChamado,
   addActivityToChamado,
   editActivity,
@@ -90,14 +91,17 @@ export const chamadosRouter = router({
 
         console.log('[DEBUG] Listing chamados for clientId:', clientId, 'status:', input.status);
         
-        const chamados = await listChamados(clientId, input.status, input.limit, input.offset);
-        console.log('[DEBUG] Found chamados:', chamados.length);
+        const [chamados, total] = await Promise.all([
+          listChamados(clientId, input.status, input.limit, input.offset),
+          countChamados(clientId, input.status),
+        ]);
+        console.log('[DEBUG] Found chamados:', chamados.length, 'total:', total);
         
         return { 
           chamados, 
           limit: input.limit, 
           offset: input.offset,
-          total: chamados.length,
+          total: total,
         };
       } catch (error) {
         console.error('[ERROR] Failed to list chamados:', error);
