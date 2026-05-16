@@ -1108,7 +1108,7 @@ export function TicketsPage() {
                 <div>
                   <label className="text-sm font-semibold text-slate-700 block mb-2">Observações</label>
                   <textarea
-                    placeholder="Ex: Entre em contato com esse cliente para fechar o orçamento"
+                    placeholder="obs:"
                     value={forwardObservations}
                     onChange={e => setForwardObservations(e.target.value)}
                     className="w-full px-3 py-2 border-2 border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 transition-colors resize-none"
