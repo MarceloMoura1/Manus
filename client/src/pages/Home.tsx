@@ -799,10 +799,18 @@ export function TicketsPage() {
     }
 
     try {
+      // Encerrar o chamado
       await updateChamadoMutation.mutateAsync({
         chamadoId: selectedChamado.id,
         status: 'closed',
         observations: closeResolution.trim(),
+      });
+
+      // Criar atividade de encerramento no historico
+      await registerActivityMutation.mutateAsync({
+        chamadoId: selectedChamado.id,
+        description: `Encerramento: ${closeResolution.trim()}`,
+        actionType: 'close',
       });
 
       // Atualizar o chamado selecionado localmente
@@ -813,7 +821,13 @@ export function TicketsPage() {
       });
 
       // Recarregar a lista de chamados
-      await chamadosQuery.refetch();
+      const updatedChamado = await chamadosQuery.refetch();
+      if (updatedChamado.data?.chamados) {
+        const updated = updatedChamado.data.chamados.find((c: any) => c.id === selectedChamado.id);
+        if (updated) {
+          setSelectedChamado(updated);
+        }
+      }
       await utils.chamados.list.invalidate();
 
       // Limpar estados
