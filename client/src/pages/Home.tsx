@@ -916,12 +916,12 @@ export function TicketsPage() {
     closed: chamadosFiltrados.filter(c => c.status === 'closed').length,
   };
 
-  const statusCards: Array<{ id: 'total' | 'open' | 'in_progress' | 'waiting' | 'closed'; label: string; value: number; color: string; textColor: string }> = [
-    { id: 'total', label: 'Total', value: statusCounts.total, color: 'bg-slate-900', textColor: 'text-white' },
-    { id: 'open', label: 'Abertos', value: statusCounts.open, color: 'bg-blue-50', textColor: 'text-blue-600' },
-    { id: 'in_progress', label: 'Em Progresso', value: statusCounts.in_progress, color: 'bg-yellow-50', textColor: 'text-yellow-600' },
-    { id: 'waiting', label: 'Aguardando', value: statusCounts.waiting, color: 'bg-orange-50', textColor: 'text-orange-600' },
-    { id: 'closed', label: 'Fechados', value: statusCounts.closed, color: 'bg-green-50', textColor: 'text-green-600' },
+  const statusCards: Array<{ id: 'total' | 'open' | 'in_progress' | 'waiting' | 'closed'; label: string; value: number; gradient: string; bgGradient: string; icon: any; iconColor: string }> = [
+    { id: 'total', label: 'Total', value: statusCounts.total, gradient: 'from-slate-600 to-slate-900', bgGradient: 'from-slate-50 to-slate-100', icon: Ticket, iconColor: 'text-slate-700' },
+    { id: 'open', label: 'Abertos', value: statusCounts.open, gradient: 'from-blue-400 to-blue-600', bgGradient: 'from-blue-50 to-blue-100', icon: AlertCircle, iconColor: 'text-blue-600' },
+    { id: 'in_progress', label: 'Em Progresso', value: statusCounts.in_progress, gradient: 'from-amber-400 to-amber-600', bgGradient: 'from-amber-50 to-amber-100', icon: Clock, iconColor: 'text-amber-600' },
+    { id: 'waiting', label: 'Aguardando', value: statusCounts.waiting, gradient: 'from-orange-400 to-orange-600', bgGradient: 'from-orange-50 to-orange-100', icon: Hourglass, iconColor: 'text-orange-600' },
+    { id: 'closed', label: 'Fechados', value: statusCounts.closed, gradient: 'from-emerald-400 to-emerald-600', bgGradient: 'from-emerald-50 to-emerald-100', icon: CheckCircle2, iconColor: 'text-emerald-600' },
   ];
 
   const getStatusBadgeColor = (status: string) => {
@@ -995,22 +995,40 @@ export function TicketsPage() {
         </select>
       </div>
 
-      {/* Cards de Status */}
-      <div className="grid grid-cols-5 gap-3">
-        {statusCards.map(card => (
-          <button
-            key={card.id}
-            onClick={() => setSelectedFilter(card.id)}
-            className={`p-4 rounded-lg transition-all ${
-              selectedFilter === card.id
-                ? `${card.color} shadow-lg scale-105`
-                : `${card.color} opacity-70 hover:opacity-100`
-            }`}
-          >
-            <div className={`text-sm font-medium ${card.textColor}`}>{card.label}</div>
-            <div className={`text-2xl font-bold ${card.textColor}`}>{card.value}</div>
-          </button>
-        ))}
+      {/* Cards de Status - Estilizados */}
+      <div className="grid grid-cols-5 gap-4">
+        {statusCards.map((card: any, idx) => {
+          const Icon = card.icon;
+          const isSelected = selectedFilter === card.id;
+          return (
+            <button
+              key={card.id}
+              onClick={() => setSelectedFilter(card.id)}
+              className={`group relative overflow-hidden rounded-2xl bg-gradient-to-br ${card.bgGradient} p-6 transition-all duration-300 border-2 ${
+                isSelected
+                  ? `border-current shadow-xl scale-105`
+                  : `border-transparent hover:shadow-lg hover:scale-102 hover:-translate-y-1`
+              }`}
+            >
+              <div className={`absolute -top-8 -right-8 w-32 h-32 bg-gradient-to-br ${card.gradient} rounded-full blur-2xl opacity-10 group-hover:opacity-20 transition-all duration-300`} />
+              
+              <div className="relative z-10">
+                <div className="flex items-center justify-between mb-3">
+                  <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${card.gradient} flex items-center justify-center`}>
+                    <Icon className="w-5 h-5 text-white" />
+                  </div>
+                  <div className={`w-1.5 h-1.5 rounded-full bg-gradient-to-r ${card.gradient} ${isSelected ? 'animate-pulse' : ''}`} />
+                </div>
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">{card.label}</p>
+                <p className={`text-3xl font-black bg-gradient-to-r ${card.gradient} bg-clip-text text-transparent group-hover:scale-110 transition-transform duration-300 origin-left`}>
+                  {card.value}
+                </p>
+              </div>
+              
+              <div className={`absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r ${card.gradient} transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left`} />
+            </button>
+          );
+        })}
       </div>
 
       {/* Filtro de Pesquisa e Botao Novo Chamado */}
