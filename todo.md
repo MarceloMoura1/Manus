@@ -943,4 +943,10 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Diagnosticar fluxo de leitura do token (getGeminiToken / testIntegration)
 - [x] Corrigir bug onde token salvo retorna "Chave da API Gemini não configurada"
 - [x] Testar fluxo completo: salvar token → testar conexão → usar Assistente IA
+- [x] Salvar checkpoint
+
+## Fase 86: BUG - Erro de conexão com API Gemini no ambiente de deploy
+- [x] Substituir @google/generative-ai por fetch HTTP direto no testIntegration
+- [x] Substituir @google/generative-ai por fetch HTTP direto no gemini-client.ts
+- [x] Testar conexão e chat com token real
 - [ ] Salvar checkpoint

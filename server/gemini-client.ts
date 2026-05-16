@@ -1,12 +1,14 @@
 /**
  * Gemini IA Client — por cliente
- * Usa o token Gemini configurado no MegaAdmin para cada cliente.
+ * Usa fetch HTTP direto para a API Gemini (mais compatível com ambientes de deploy).
  * Mantém histórico de conversa no banco de dados.
  * Suporta function calling para consultar dados do ERP/conversas/chamados.
  */
-import { GoogleGenerativeAI, FunctionDeclaration, SchemaType } from "@google/generative-ai";
 import { getPool } from "./db";
 import { nanoid } from "nanoid";
+
+const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
+const GEMINI_MODEL = "gemini-1.5-flash";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -22,6 +24,63 @@ export interface ChatResult {
   tokensUsed: number;
   conversationId: string;
   functionCallsMade?: string[];
+}
+
+// ─── Helpers de chamada HTTP Gemini ──────────────────────────────────────────
+
+interface GeminiContent {
+  role: "user" | "model";
+  parts: Array<{ text?: string; functionCall?: any; functionResponse?: any }>;
+}
+
+interface GeminiRequest {
+  contents: GeminiContent[];
+  tools?: any[];
+  systemInstruction?: { parts: [{ text: string }] };
+  generationConfig?: { temperature?: number; maxOutputTokens?: number };
+}
+
+async function callGeminiAPI(apiKey: string, body: GeminiRequest): Promise<any> {
+  const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json() as any;
+  if (!response.ok) {
+    const errMsg = data?.error?.message ?? `HTTP ${response.status}`;
+    const errStatus = data?.error?.status ?? "";
+    throw new Error(`${errStatus}: ${errMsg}`);
+  }
+  return data;
+}
+
+/** Testa a conexão com a API Gemini usando fetch direto */
+export async function testGeminiConnection(apiKey: string): Promise<{ ok: boolean; message: string }> {
+  try {
+    const data = await callGeminiAPI(apiKey, {
+      contents: [{ role: "user", parts: [{ text: "Responda apenas: OK" }] }],
+      generationConfig: { maxOutputTokens: 10 },
+    });
+    const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    if (text.length > 0) {
+      return { ok: true, message: `Conexão com Gemini IA validada com sucesso. Modelo respondeu: "${text.slice(0, 50)}"` };
+    }
+    return { ok: false, message: "Gemini não retornou resposta." };
+  } catch (err: any) {
+    const errMsg: string = err?.message ?? "Erro desconhecido";
+    if (errMsg.includes("API_KEY_INVALID") || errMsg.includes("API key not valid")) {
+      return { ok: false, message: "Token inválido. Verifique a chave da API Gemini." };
+    } else if (errMsg.includes("PERMISSION_DENIED")) {
+      return { ok: false, message: "Permissão negada. Verifique se a chave tem acesso ao Gemini." };
+    } else if (errMsg.includes("QUOTA_EXCEEDED") || errMsg.includes("quota")) {
+      return { ok: false, message: "Cota da API Gemini excedida. Verifique seu plano." };
+    } else if (errMsg.includes("RESOURCE_EXHAUSTED")) {
+      return { ok: false, message: "Limite de requisições atingido. Tente novamente em alguns segundos." };
+    }
+    return { ok: false, message: `Erro ao conectar com Gemini: ${errMsg.slice(0, 120)}` };
+  }
 }
 
 // ─── Helpers de banco ─────────────────────────────────────────────────────────
@@ -107,7 +166,6 @@ async function executeClientFunction(
   const pool = getPool();
 
   if (functionName === "get_sales_summary") {
-    // Resumo de vendas do ERP
     const [rows] = await pool.execute(
       `SELECT COUNT(*) as total, SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.value')) AS DECIMAL(10,2))) as total_value
        FROM megadesk_domain_operational_records 
@@ -119,7 +177,6 @@ async function executeClientFunction(
   }
 
   if (functionName === "get_open_tickets") {
-    // Chamados abertos
     const [rows] = await pool.execute(
       `SELECT COUNT(*) as total, 
        SUM(CASE WHEN priority = 'high' OR priority = 'urgent' THEN 1 ELSE 0 END) as urgentes
@@ -132,7 +189,6 @@ async function executeClientFunction(
   }
 
   if (functionName === "get_conversations_summary") {
-    // Resumo de conversas
     const [rows] = await pool.execute(
       `SELECT COUNT(*) as total,
        SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as abertas,
@@ -146,7 +202,6 @@ async function executeClientFunction(
   }
 
   if (functionName === "get_erp_products") {
-    // Produtos do ERP
     const [rows] = await pool.execute(
       `SELECT JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.name')) as nome,
        JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.stock')) as estoque
@@ -160,46 +215,43 @@ async function executeClientFunction(
   return JSON.stringify({ erro: "Função não reconhecida" });
 }
 
-// ─── Declarações de funções para o Gemini ─────────────────────────────────────
+// ─── Declarações de funções para o Gemini (formato REST) ──────────────────────
 
-const CLIENT_FUNCTIONS: FunctionDeclaration[] = [
-  {
-    name: "get_sales_summary",
-    description: "Retorna o resumo de vendas do cliente para hoje, incluindo total de vendas e valor total.",
-    parameters: {
-      type: SchemaType.OBJECT,
-      properties: {},
-      required: [],
+const CLIENT_FUNCTIONS_TOOL = {
+  functionDeclarations: [
+    {
+      name: "get_sales_summary",
+      description: "Retorna o resumo de vendas do cliente para hoje, incluindo total de vendas e valor total.",
+      parameters: { type: "OBJECT", properties: {}, required: [] },
     },
-  },
-  {
-    name: "get_open_tickets",
-    description: "Retorna o número de chamados/tickets abertos e quantos são urgentes.",
-    parameters: {
-      type: SchemaType.OBJECT,
-      properties: {},
-      required: [],
+    {
+      name: "get_open_tickets",
+      description: "Retorna o número de chamados/tickets abertos e quantos são urgentes.",
+      parameters: { type: "OBJECT", properties: {}, required: [] },
     },
-  },
-  {
-    name: "get_conversations_summary",
-    description: "Retorna o resumo de conversas dos últimos 7 dias, incluindo abertas e fechadas.",
-    parameters: {
-      type: SchemaType.OBJECT,
-      properties: {},
-      required: [],
+    {
+      name: "get_conversations_summary",
+      description: "Retorna o resumo de conversas dos últimos 7 dias, incluindo abertas e fechadas.",
+      parameters: { type: "OBJECT", properties: {}, required: [] },
     },
-  },
-  {
-    name: "get_erp_products",
-    description: "Retorna a lista de produtos cadastrados no ERP do cliente com estoque.",
-    parameters: {
-      type: SchemaType.OBJECT,
-      properties: {},
-      required: [],
+    {
+      name: "get_erp_products",
+      description: "Retorna a lista de produtos cadastrados no ERP do cliente com estoque.",
+      parameters: { type: "OBJECT", properties: {}, required: [] },
     },
-  },
-];
+  ],
+};
+
+const SYSTEM_INSTRUCTION = `Você é o Assistente IA da plataforma MegaDesk, especializado em ajudar a equipe de atendimento.
+
+Você tem acesso a dados em tempo real do sistema através de funções especiais. Quando o usuário perguntar sobre:
+- Vendas, faturamento, produtos → use get_sales_summary ou get_erp_products
+- Chamados, tickets, suporte → use get_open_tickets
+- Conversas, atendimentos, WhatsApp → use get_conversations_summary
+
+Sempre responda em português brasileiro de forma clara, objetiva e profissional.
+Quando buscar dados, informe ao usuário que está consultando o sistema antes de responder.
+Se não tiver dados suficientes, seja honesto e sugira como o usuário pode obter a informação.`;
 
 // ─── Chat principal ────────────────────────────────────────────────────────────
 
@@ -215,76 +267,71 @@ export async function chatWithClientGemini(
     throw new Error("Token Gemini não configurado para este cliente. Solicite ao administrador que configure a API do Gemini.");
   }
 
-  // 2. Inicializa o cliente Gemini com o token do cliente
-  const genAI = new GoogleGenerativeAI(geminiKey);
-  const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
-    tools: [{ functionDeclarations: CLIENT_FUNCTIONS }],
-    systemInstruction: `Você é o Assistente IA da plataforma MegaDesk, especializado em ajudar a equipe de atendimento.
-
-Você tem acesso a dados em tempo real do sistema através de funções especiais. Quando o usuário perguntar sobre:
-- Vendas, faturamento, produtos → use get_sales_summary ou get_erp_products
-- Chamados, tickets, suporte → use get_open_tickets
-- Conversas, atendimentos, WhatsApp → use get_conversations_summary
-
-Sempre responda em português brasileiro de forma clara, objetiva e profissional.
-Quando buscar dados, informe ao usuário que está consultando o sistema antes de responder.
-Se não tiver dados suficientes, seja honesto e sugira como o usuário pode obter a informação.`,
-  });
-
-  // 3. Monta o histórico para o Gemini (sem a mensagem atual)
-  const geminiHistory = existingHistory.map((msg) => ({
-    role: msg.role === "user" ? "user" as const : "model" as const,
+  // 2. Monta o histórico no formato REST do Gemini
+  const contents: GeminiContent[] = existingHistory.map((msg) => ({
+    role: msg.role === "user" ? "user" : "model",
     parts: [{ text: msg.content }],
   }));
 
-  // 4. Inicia o chat com histórico
-  const chat = model.startChat({ history: geminiHistory });
+  // Adiciona a mensagem atual do usuário
+  contents.push({ role: "user", parts: [{ text: userMessage }] });
 
-  // 5. Envia a mensagem e processa function calls
-  let result = await chat.sendMessage(userMessage);
-  let response = result.response;
+  // 3. Primeira chamada ao Gemini
+  const requestBody: GeminiRequest = {
+    contents,
+    tools: [CLIENT_FUNCTIONS_TOOL],
+    systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+    generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+  };
+
+  let data = await callGeminiAPI(geminiKey, requestBody);
   const functionCallsMade: string[] = [];
-  let tokensUsed = response.usageMetadata?.totalTokenCount ?? 0;
+  let tokensUsed = data?.usageMetadata?.totalTokenCount ?? 0;
 
-  // 6. Processa function calls em loop (o Gemini pode chamar múltiplas funções)
+  // 4. Processa function calls em loop
   let iterations = 0;
-  while (response.functionCalls()?.length && iterations < 5) {
+  while (iterations < 5) {
+    const candidate = data?.candidates?.[0];
+    const parts = candidate?.content?.parts ?? [];
+    const functionCallPart = parts.find((p: any) => p.functionCall);
+    if (!functionCallPart) break;
+
     iterations++;
-    const functionCalls = response.functionCalls()!;
-    const functionResults = [];
+    const fc = functionCallPart.functionCall;
+    functionCallsMade.push(fc.name);
 
-    for (const fc of functionCalls) {
-      functionCallsMade.push(fc.name);
-      const funcResult = await executeClientFunction(fc.name, fc.args as Record<string, any>, clientId);
-      functionResults.push({
-        functionResponse: {
-          name: fc.name,
-          response: JSON.parse(funcResult),
-        },
-      });
-    }
+    // Executa a função localmente
+    const funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId);
 
-    // Envia os resultados das funções de volta ao Gemini
-    result = await chat.sendMessage(functionResults);
-    response = result.response;
-    tokensUsed += response.usageMetadata?.totalTokenCount ?? 0;
+    // Adiciona o resultado da função ao contexto e chama novamente
+    const modelTurn: GeminiContent = {
+      role: "model",
+      parts: [{ functionCall: fc }],
+    };
+    const functionResponseTurn: GeminiContent = {
+      role: "user",
+      parts: [{ functionResponse: { name: fc.name, response: JSON.parse(funcResult) } }],
+    };
+
+    requestBody.contents = [...requestBody.contents, modelTurn, functionResponseTurn];
+    data = await callGeminiAPI(geminiKey, requestBody);
+    tokensUsed += data?.usageMetadata?.totalTokenCount ?? 0;
   }
 
-  const finalResponse = response.text();
+  const finalResponse: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "Sem resposta do modelo.";
 
-  // 7. Salva no histórico
+  // 5. Salva no histórico
   const updatedHistory: IAMessage[] = [
     ...existingHistory,
     { role: "user", content: userMessage, timestamp: Date.now() },
     { role: "assistant", content: finalResponse, timestamp: Date.now() },
   ];
 
-  // Mantém apenas as últimas 50 mensagens para não sobrecarregar
+  // Mantém apenas as últimas 50 mensagens
   const trimmedHistory = updatedHistory.slice(-50);
   await saveConversationHistory(clientId, userId, trimmedHistory);
 
-  // 8. Loga a conversa
+  // 6. Loga a conversa
   const conversationId = await logIAConversation(
     clientId, userId, userMessage, finalResponse, tokensUsed
   );
