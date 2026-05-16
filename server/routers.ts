@@ -11,7 +11,6 @@ import { MEGAADMIN_COOKIE } from "./_core/context";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { createNewTenant, releaseTenantAccess, pauseTenantAccess, getTenantInfo, deleteTenant, listAllTenants } from "./_core/tenant-operations";
 import { chamadosRouter } from "./routers-chamados";
-import { geminiRouter } from "./routers-gemini";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -213,7 +212,6 @@ function sanitizeClient(client: MegaClient) {
 
 export const appRouter = router({
   chamados: chamadosRouter,
-  gemini: geminiRouter,
   auth: router({
     me: publicProcedure.query(({ ctx }) => ({ user: ctx.user })),
     logout: publicProcedure.mutation(({ ctx }) => {

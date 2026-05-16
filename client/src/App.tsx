@@ -4,7 +4,6 @@ import { httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
 import { Home } from "./pages/Home";
 import AdminPanel from "./pages/AdminPanel";
-import AssistentIA from "./pages/AssistentIA";
 import { AIAssistant } from "./components/AIAssistant";
 import { trpc } from "./lib/trpc";
 import { ThemeProvider } from "./contexts/ThemeContext";
