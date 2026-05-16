@@ -909,3 +909,9 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Corrigir para executar cada statement separadamente (array migrations[] com loop)
 - [x] Adicionar migração de password_hash como execute() separado
 - [x] 5 testes de validação de SQL statements passando
+
+## Fase 81: BUG - LONGTEXT com DEFAULT value inválido no MySQL
+- [x] Remover DEFAULT de todas as colunas LONGTEXT no CREATE TABLE (integrations_json)
+- [x] Remover DEFAULT das migrações ALTER TABLE com LONGTEXT
+- [x] Verificar que INSERTs sempre fornecem valor para integrations_json
+- [x] 6 testes de validação de schema SQL passando

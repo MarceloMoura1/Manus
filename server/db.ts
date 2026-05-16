@@ -168,7 +168,7 @@ async function ensureStructuredTables() {
     access_released BOOLEAN NOT NULL DEFAULT FALSE,
     api_token VARCHAR(255) NOT NULL,
     modules_json LONGTEXT NOT NULL,
-    integrations_json LONGTEXT NOT NULL DEFAULT '{}',
+    integrations_json LONGTEXT NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`);
@@ -179,7 +179,7 @@ async function ensureStructuredTables() {
     "ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS cnpj VARCHAR(20)",
     "ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS max_users INT NOT NULL DEFAULT 5",
     "ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS status_type ENUM('active','test') NOT NULL DEFAULT 'test'",
-    "ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS integrations_json LONGTEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS integrations_json LONGTEXT NOT NULL",
   ];
   for (const migration of migrations) {
     try {
