@@ -406,7 +406,7 @@ export const appRouter = router({
       clientId: z.string(),
       company: z.string().min(2).optional(),
       contact: z.string().min(2).optional(),
-      email: z.string().email().optional(),
+      email: z.string().email().or(z.literal("")).optional(),
       phone: z.string().min(8).optional(),
       cnpj: z.string().optional(),
       plan: z.string().min(2).optional(),
