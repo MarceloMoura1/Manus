@@ -561,48 +561,46 @@ function ConversationsPage() {
 
 
 
-      {/* Modal de Confirmação - Encerrar Conversa */}
+      {/* Modal de Confirmação - Encerrar Conversa - Simplificado */}
       {closeConfirmOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-2xl p-6 w-full max-w-sm mx-4">
-            <h3 className="text-lg font-bold text-slate-900 mb-4">Encerrar Conversa?</h3>
-            <p className="text-slate-600 mb-6">Tem certeza que deseja encerrar esta conversa? Esta ação pode ser desfeita.</p>
-            <div className="flex gap-3">
+        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+          <div className="bg-white rounded-lg shadow-lg p-4 w-80 pointer-events-auto">
+            <p className="text-slate-900 font-semibold mb-4 text-center">Encerrar conversa?</p>
+            <div className="flex gap-2">
               <button
                 onClick={() => setCloseConfirmOpen(false)}
-                className="flex-1 px-4 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-colors font-medium"
+                className="flex-1 px-3 py-2 bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-colors font-medium text-sm"
               >
-                Cancelar
+                Não
               </button>
               <button
                 onClick={handleCloseConversation}
-                className="flex-1 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-medium"
+                className="flex-1 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium text-sm"
               >
-                Encerrar
+                Sim
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal de Confirmação - Reabrir Conversa */}
+      {/* Modal de Confirmação - Reabrir Conversa - Simplificado */}
       {reopenConfirmOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-2xl p-6 w-full max-w-sm mx-4">
-            <h3 className="text-lg font-bold text-slate-900 mb-4">Reabrir Conversa?</h3>
-            <p className="text-slate-600 mb-6">Tem certeza que deseja reabrir esta conversa?</p>
-            <div className="flex gap-3">
+        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+          <div className="bg-white rounded-lg shadow-lg p-4 w-80 pointer-events-auto">
+            <p className="text-slate-900 font-semibold mb-4 text-center">Reabrir conversa?</p>
+            <div className="flex gap-2">
               <button
                 onClick={() => setReopenConfirmOpen(false)}
-                className="flex-1 px-4 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-colors font-medium"
+                className="flex-1 px-3 py-2 bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-colors font-medium text-sm"
               >
-                Cancelar
+                Não
               </button>
               <button
                 onClick={handleReopenConversation}
-                className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
+                className="flex-1 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium text-sm"
               >
-                Reabrir
+                Sim
               </button>
             </div>
           </div>
