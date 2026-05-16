@@ -158,15 +158,27 @@ async function ensureStructuredTables() {
     tenant_database_name VARCHAR(120) NOT NULL UNIQUE,
     company VARCHAR(255) NOT NULL,
     contact VARCHAR(180) NOT NULL,
+    email VARCHAR(255),
     phone VARCHAR(40) NOT NULL,
+    cnpj VARCHAR(20),
     plan VARCHAR(120) NOT NULL,
+    max_users INT NOT NULL DEFAULT 5,
     status ENUM('active','setup','paused') NOT NULL DEFAULT 'setup',
+    status_type ENUM('active','test') NOT NULL DEFAULT 'test',
     access_released BOOLEAN NOT NULL DEFAULT FALSE,
     api_token VARCHAR(255) NOT NULL,
     modules_json LONGTEXT NOT NULL,
+    integrations_json LONGTEXT NOT NULL DEFAULT '{}',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-  )`);
+  );
+  -- Adicionar colunas se não existirem (para migração)
+  ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS email VARCHAR(255);
+  ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS cnpj VARCHAR(20);
+  ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS max_users INT NOT NULL DEFAULT 5;
+  ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS status_type ENUM('active','test') NOT NULL DEFAULT 'test';
+  ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS integrations_json LONGTEXT NOT NULL DEFAULT '{}';
+  `);
   await pool.execute(`CREATE TABLE IF NOT EXISTS megadesk_domain_client_users (
     user_id VARCHAR(80) PRIMARY KEY,
     client_id VARCHAR(80) NOT NULL,
@@ -303,7 +315,7 @@ export async function loadMegaDeskStructuredState(defaultState: MegaDeskStructur
     }
 
     const loadedState = {
-      clients: (clientRows as any[]).map((row) => ({ id: row.internal_id, clientId: row.client_id, tenantDatabaseName: row.tenant_database_name, company: row.company, contact: row.contact, phone: row.phone, plan: row.plan, status: row.status, accessReleased: Boolean(row.access_released), apiToken: row.api_token, modules: JSON.parse(row.modules_json || "[]"), users: usersByClient.get(row.client_id) ?? [] })),
+      clients: (clientRows as any[]).map((row) => ({ id: row.internal_id, clientId: row.client_id, tenantDatabaseName: row.tenant_database_name, company: row.company, contact: row.contact, email: row.email || "", phone: row.phone, cnpj: row.cnpj || "", plan: row.plan, maxUsers: row.max_users || 5, status: row.status, statusType: row.status_type || "test", accessReleased: Boolean(row.access_released), apiToken: row.api_token, modules: JSON.parse(row.modules_json || "[]"), integrations: JSON.parse(row.integrations_json || "{}"), users: usersByClient.get(row.client_id) ?? [] })),
       conversations: (conversationRows as any[]).map((row) => ({ id: row.conversation_id, clientId: row.client_id, name: row.customer_name, phone: row.phone, company: row.company, status: row.status, lastMessage: row.last_message, time: row.time_label, messages: JSON.parse(row.messages_json || "[]") })),
       tickets: (ticketRows as any[]).map((row) => ({ id: row.ticket_id, clientId: row.client_id, company: row.company, customer: row.customer, problem: row.problem, category: row.category, status: row.status, createdAt: row.created_label, description: row.description })),
       botScripts: (scriptRows as any[]).map((row) => ({ id: row.script_id, clientId: row.client_id, name: row.name, description: row.description, initialMessage: row.initial_message, active: Boolean(row.active) })),
@@ -347,7 +359,7 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
       await connection.execute("DELETE FROM megadesk_domain_metrics");
 
       for (const client of state.clients) {
-        await connection.execute("INSERT INTO megadesk_domain_clients (client_id, internal_id, tenant_database_name, company, contact, phone, plan, status, access_released, api_token, modules_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE company=VALUES(company), contact=VALUES(contact), phone=VALUES(phone), plan=VALUES(plan), status=VALUES(status), access_released=VALUES(access_released), api_token=VALUES(api_token), modules_json=VALUES(modules_json)", [client.clientId, client.id, client.tenantDatabaseName, client.company, client.contact, client.phone, client.plan, client.status, client.accessReleased ? 1 : 0, client.apiToken, JSON.stringify(client.modules ?? [])]);
+        await connection.execute("INSERT INTO megadesk_domain_clients (client_id, internal_id, tenant_database_name, company, contact, email, phone, cnpj, plan, max_users, status, status_type, access_released, api_token, modules_json, integrations_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE company=VALUES(company), contact=VALUES(contact), email=VALUES(email), phone=VALUES(phone), cnpj=VALUES(cnpj), plan=VALUES(plan), max_users=VALUES(max_users), status=VALUES(status), status_type=VALUES(status_type), access_released=VALUES(access_released), api_token=VALUES(api_token), modules_json=VALUES(modules_json), integrations_json=VALUES(integrations_json)", [client.clientId, client.id, client.tenantDatabaseName, client.company, client.contact, client.email || "", client.phone, client.cnpj || "", client.plan, client.maxUsers || 5, client.status, client.statusType || "test", client.accessReleased ? 1 : 0, client.apiToken, JSON.stringify(client.modules ?? []), JSON.stringify(client.integrations ?? {})]);
         for (const user of client.users ?? []) {
           const passwordHash = (user as any).passwordHash ?? null;
           await connection.execute("INSERT INTO megadesk_domain_client_users (user_id, client_id, name, email, role, status, permissions_json, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), email=VALUES(email), role=VALUES(role), status=VALUES(status), permissions_json=VALUES(permissions_json), password_hash=VALUES(password_hash)", [user.id, client.clientId, user.name, user.email, user.role, user.status, JSON.stringify(user.permissions ?? []), passwordHash]);
