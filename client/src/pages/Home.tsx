@@ -283,6 +283,45 @@ function ConversationsPage() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
+  // Função para encerrar conversa
+  const handleCloseConversation = async () => {
+    if (!selectedConversation) return;
+    
+    try {
+      await closeConversationMutation.mutateAsync({ conversationId: selectedConversation });
+      
+      // Atualizar a conversa na lista
+      setConversations(prev => prev.map(conv => 
+        conv.id === selectedConversation ? { ...conv, status: 'closed' } : conv
+      ));
+      
+      setCloseConfirmOpen(false);
+      showToast('Conversa encerrada com sucesso!', 'success');
+    } catch (error) {
+      console.error('Erro ao encerrar conversa:', error);
+      showToast('Erro ao encerrar conversa', 'error');
+    }
+  };
+
+  // Função para reabrir conversa
+  const handleReopenConversation = async () => {
+    if (!selectedConversation) return;
+    
+    try {
+      // Aqui você pode implementar a lógica de reabertura se houver um endpoint
+      // Por enquanto, vamos apenas atualizar o status localmente
+      setConversations(prev => prev.map(conv => 
+        conv.id === selectedConversation ? { ...conv, status: 'open' } : conv
+      ));
+      
+      setReopenConfirmOpen(false);
+      showToast('Conversa reabierta com sucesso!', 'success');
+    } catch (error) {
+      console.error('Erro ao reabrir conversa:', error);
+      showToast('Erro ao reabrir conversa', 'error');
+    }
+  };
+
   // Capturar parâmetros da URL e localStorage ao carregar a página
   React.useEffect(() => {
     // Verificar localStorage para nova conversa criada
@@ -521,6 +560,54 @@ function ConversationsPage() {
       </div>
 
 
+
+      {/* Modal de Confirmação - Encerrar Conversa */}
+      {closeConfirmOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-2xl p-6 w-full max-w-sm mx-4">
+            <h3 className="text-lg font-bold text-slate-900 mb-4">Encerrar Conversa?</h3>
+            <p className="text-slate-600 mb-6">Tem certeza que deseja encerrar esta conversa? Esta ação pode ser desfeita.</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCloseConfirmOpen(false)}
+                className="flex-1 px-4 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-colors font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleCloseConversation}
+                className="flex-1 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-medium"
+              >
+                Encerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação - Reabrir Conversa */}
+      {reopenConfirmOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-2xl p-6 w-full max-w-sm mx-4">
+            <h3 className="text-lg font-bold text-slate-900 mb-4">Reabrir Conversa?</h3>
+            <p className="text-slate-600 mb-6">Tem certeza que deseja reabrir esta conversa?</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setReopenConfirmOpen(false)}
+                className="flex-1 px-4 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-colors font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleReopenConversation}
+                className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
+              >
+                Reabrir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast Notification */}
       {toastMessage && (
