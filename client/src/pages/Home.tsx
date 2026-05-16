@@ -552,6 +552,8 @@ export function TicketsPage() {
   const [showRegisterActivityModal, setShowRegisterActivityModal] = React.useState(false);
   const [activityDescription, setActivityDescription] = React.useState('');
   const [activityType, setActivityType] = React.useState<'register' | 'edit' | 'close' | 'forward' | 'note'>('note');
+  const [showCloseModal, setShowCloseModal] = React.useState(false);
+  const [closeResolution, setCloseResolution] = React.useState('');
   const [showEditCard, setShowEditCard] = React.useState(false);
   const [editForm, setEditForm] = React.useState<{
     clientName: string;
@@ -761,6 +763,67 @@ export function TicketsPage() {
     } catch (error) {
       console.error('Erro ao registrar atividade:', error);
       showToast('Erro ao registrar atividade', 'error');
+    }
+  };
+
+  const handleUpdateStatus = async (newStatus: string) => {
+    if (!selectedChamado) return;
+
+    try {
+      await updateChamadoMutation.mutateAsync({
+        chamadoId: selectedChamado.id,
+        status: newStatus,
+      });
+
+      // Atualizar o chamado selecionado localmente
+      setSelectedChamado({
+        ...selectedChamado,
+        status: newStatus,
+      });
+
+      // Recarregar a lista de chamados
+      await chamadosQuery.refetch();
+      await utils.chamados.list.invalidate();
+
+      showToast('Status atualizado com sucesso!', 'success');
+    } catch (error) {
+      console.error('Erro ao atualizar status:', error);
+      showToast('Erro ao atualizar status', 'error');
+    }
+  };
+
+  const handleCloseChamado = async () => {
+    if (!selectedChamado || !closeResolution.trim()) {
+      showToast('Preencha a resolucao do chamado', 'error');
+      return;
+    }
+
+    try {
+      await updateChamadoMutation.mutateAsync({
+        chamadoId: selectedChamado.id,
+        status: 'closed',
+        observations: closeResolution.trim(),
+      });
+
+      // Atualizar o chamado selecionado localmente
+      setSelectedChamado({
+        ...selectedChamado,
+        status: 'closed',
+        observations: closeResolution.trim(),
+      });
+
+      // Recarregar a lista de chamados
+      await chamadosQuery.refetch();
+      await utils.chamados.list.invalidate();
+
+      // Limpar estados
+      setShowCloseModal(false);
+      setCloseResolution('');
+
+      showToast('Chamado encerrado com sucesso!', 'success');
+    } catch (error) {
+      console.error('Erro ao encerrar chamado:', error);
+      showToast('Erro ao encerrar chamado', 'error');
     }
   };
 
@@ -1121,18 +1184,41 @@ export function TicketsPage() {
       {selectedChamado && (
         <div className="fixed top-0 right-0 bottom-0 left-20 lg:left-64 bg-white z-40 overflow-y-auto border border-slate-300" style={{height: '1016px', marginBottom: '5px', marginLeft: '-175px', marginRight: '0px', marginTop: '83px', paddingBottom: '16px', paddingLeft: '2px', width: 'calc(100% - 80px)'}}>
           {/* Header com Botao Voltar */}
-          <div className="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center gap-4">
-            <Button
-              onClick={() => setSelectedChamado(null)}
-              variant="outline"
-              className="flex items-center gap-2"
-            >
-              <X className="w-4 h-4" />
-              Voltar
-            </Button>
-            <h1 className="text-2xl font-bold text-slate-900">
-              #{String(selectedChamado.number).padStart(4, '0')} - {selectedChamado.title}
-            </h1>
+          <div className="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <Button
+                onClick={() => setSelectedChamado(null)}
+                variant="outline"
+                className="flex items-center gap-2"
+              >
+                <X className="w-4 h-4" />
+                Voltar
+              </Button>
+              <h1 className="text-2xl font-bold text-slate-900">
+                #{String(selectedChamado.number).padStart(4, '0')} - {selectedChamado.title}
+              </h1>
+            </div>
+            
+            {/* Status e Botao Encerrar */}
+            <div className="flex items-center gap-3">
+              <Select value={selectedChamado.status} onValueChange={(value) => handleUpdateStatus(value)}>
+                <SelectTrigger className="w-40 bg-slate-50 border-2 border-slate-200 focus:border-blue-500">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-white border-2 border-slate-200">
+                  <SelectItem value="open">Aberto</SelectItem>
+                  <SelectItem value="in_progress">Em Progresso</SelectItem>
+                  <SelectItem value="waiting">Aguardando</SelectItem>
+                  <SelectItem value="closed">Encerrado</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                onClick={() => setShowCloseModal(true)}
+                className="bg-red-500 hover:bg-red-600 text-white font-semibold"
+              >
+                Encerrar Chamado
+              </Button>
+            </div>
           </div>
 
           {/* Retangulo com Dados do Cliente */}
@@ -1299,6 +1385,53 @@ export function TicketsPage() {
                     </Button>
                     <Button
                       onClick={() => setShowRegisterActivityModal(false)}
+                      className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-900 font-semibold transition-colors"
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal de Encerramento */}
+          {showCloseModal && selectedChamado && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg shadow-2xl border border-slate-200 p-6 w-full max-w-2xl mx-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-slate-900">Encerrar Chamado</h3>
+                  <button
+                    onClick={() => setShowCloseModal(false)}
+                    className="text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Resolucao */}
+                  <div>
+                    <label className="text-sm font-semibold text-slate-700 block mb-2">Resolucao do Chamado</label>
+                    <textarea
+                      placeholder="Descreva como o chamado foi resolvido..."
+                      value={closeResolution}
+                      onChange={(e) => setCloseResolution(e.target.value)}
+                      className="w-full p-3 bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-blue-500 rounded-lg transition-colors resize-none h-32 text-sm"
+                    />
+                  </div>
+
+                  {/* Botoes */}
+                  <div className="flex gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
+                    <Button
+                      onClick={handleCloseChamado}
+                      disabled={updateChamadoMutation.isPending}
+                      className="flex-1 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold shadow-md hover:shadow-lg transition-all"
+                    >
+                      {updateChamadoMutation.isPending ? 'Encerrando...' : 'Encerrar'}
+                    </Button>
+                    <Button
+                      onClick={() => setShowCloseModal(false)}
                       className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-900 font-semibold transition-colors"
                     >
                       Cancelar
