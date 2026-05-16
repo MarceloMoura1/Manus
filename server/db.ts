@@ -369,7 +369,8 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
         await connection.execute("INSERT INTO megadesk_domain_conversations (conversation_id, client_id, customer_name, phone, company, status, last_message, time_label, messages_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [conversation.id, conversation.clientId, conversation.name, conversation.phone, conversation.company, conversation.status, conversation.lastMessage, conversation.time, JSON.stringify(conversation.messages ?? [])]);
       }
       for (const ticket of state.tickets) {
-        await connection.execute("INSERT INTO megadesk_domain_tickets (ticket_id, client_id, company, customer, problem, category, status, created_label, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [ticket.id, ticket.clientId, ticket.company, ticket.customer, ticket.problem, ticket.category, ticket.status, ticket.createdAt, ticket.description]);
+        const ticketNumber = Math.floor(Math.random() * 10000) + 1;
+        await connection.execute("INSERT INTO megadesk_domain_tickets (ticket_id, client_id, company, customer, problem, category, status, created_label, description, ticket_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [ticket.id, ticket.clientId, ticket.company, ticket.customer, ticket.problem, ticket.category, ticket.status, ticket.createdAt, ticket.description, ticketNumber]);
       }
       for (const script of state.botScripts) {
         const scriptClientId = script.clientId ?? state.clients[0]?.clientId ?? "cliente-demo-001";
