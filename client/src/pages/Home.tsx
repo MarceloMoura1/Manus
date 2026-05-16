@@ -906,7 +906,7 @@ export function TicketsPage() {
 
       {/* Tela Branca de Detalhes do Chamado */}
       {selectedChamado && (
-        <div className="fixed top-0 right-0 bottom-0 left-20 lg:left-64 bg-white z-40 overflow-y-auto" style={{height: '1016px', marginBottom: '5px', marginLeft: '-175px', marginRight: '14px', marginTop: '83px', paddingBottom: '16px', paddingLeft: '2px', width: '1599px'}}>
+        <div className="fixed top-0 right-0 bottom-0 left-20 lg:left-64 bg-white z-40 overflow-y-auto border border-slate-300" style={{height: '1016px', marginBottom: '5px', marginLeft: '-175px', marginRight: '14px', marginTop: '83px', paddingBottom: '16px', paddingLeft: '2px', width: '1599px'}}>
           {/* Header com Botao Voltar */}
           <div className="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center gap-4">
             <Button
