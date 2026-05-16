@@ -920,3 +920,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Localizar o card no código do MegaAdmin (AdminPanel.tsx linhas 952-953)
 - [x] Remover os cards "Conversas" e "Chamados" do grid de MetricCards
 - [x] Servidor compilando sem erros
+
+## Fase 83: Assistente IA - Chat Gemini no MegaDesk
+- [x] Verificar se campo de token Gemini no MegaAdmin está funcional (salvar/testar conexão)
+- [x] Criar tabelas de histórico de conversas IA no banco de dados (megadesk_ia_conversations, megadesk_ia_messages)
+- [x] Implementar procedure de chat IA com Gemini (token por cliente, histórico, function calling)
+- [x] Criar página Assistente IA no MegaDesk com chat completo
+- [x] Function calling: consultar vendas ERP, chamados, conversas quando solicitado
+- [x] 23 testes de Assistente IA passando (estrutura de mensagens, histórico, function calling, tokens por cliente)

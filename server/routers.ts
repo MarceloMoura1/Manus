@@ -1206,6 +1206,66 @@ export const appRouter = router({
           });
         }
       }),
+
+    // ── Chat IA por cliente (usa token Gemini do cliente, histórico no banco) ──
+    clientChat: publicProcedure
+      .input(z.object({
+        clientId: z.string().min(1),
+        userId: z.string().min(1),
+        message: z.string().min(1).max(4000),
+      }))
+      .mutation(async ({ input }) => {
+        const { chatWithClientGemini, loadConversationHistory } = await import("./gemini-client");
+        const history = await loadConversationHistory(input.clientId, input.userId);
+        try {
+          const result = await chatWithClientGemini(
+            input.clientId,
+            input.userId,
+            input.message,
+            history
+          );
+          return result;
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : "Erro desconhecido";
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: msg });
+        }
+      }),
+
+    // ── Carrega histórico de conversa do usuário ──
+    getHistory: publicProcedure
+      .input(z.object({
+        clientId: z.string().min(1),
+        userId: z.string().min(1),
+      }))
+      .query(async ({ input }) => {
+        const { loadConversationHistory } = await import("./gemini-client");
+        const history = await loadConversationHistory(input.clientId, input.userId);
+        return { ok: true, history };
+      }),
+
+    // ── Limpa histórico de conversa do usuário ──
+    clearHistory: publicProcedure
+      .input(z.object({
+        clientId: z.string().min(1),
+        userId: z.string().min(1),
+      }))
+      .mutation(async ({ input }) => {
+        const pool = getPool();
+        await pool.execute(
+          "DELETE FROM megadesk_domain_ia_conversation_history WHERE client_id = ? AND user_id = ?",
+          [input.clientId, input.userId]
+        );
+        return { ok: true };
+      }),
+
+    // ── Verifica se o cliente tem token Gemini configurado ──
+    checkGeminiConfig: publicProcedure
+      .input(z.object({ clientId: z.string().min(1) }))
+      .query(async ({ input }) => {
+        const { getClientGeminiToken } = await import("./gemini-client");
+        const token = await getClientGeminiToken(input.clientId);
+        return { configured: !!token && token.length > 10 };
+      }),
   }),
 });
 

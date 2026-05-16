@@ -2167,11 +2167,278 @@ function BotConfigPage() {
 }
 
 function AIAssistantPage() {
+  const MEGADESK_SESSION_KEY = "megadesk-session";
+  const session = React.useMemo(() => {
+    try {
+      const raw = localStorage.getItem(MEGADESK_SESSION_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  }, []);
+
+  const clientId = session?.clientId ?? "";
+  // Use email as userId for history (stable identifier)
+  const userId = session?.userEmail ?? "";
+
+  type ChatMessage = { role: "user" | "assistant"; content: string; timestamp: number; functionCalls?: string[] };
+
+  const [messages, setMessages] = React.useState<ChatMessage[]>([]);
+  const [input, setInput] = React.useState("");
+  const [sending, setSending] = React.useState(false);
+  const [geminiConfigured, setGeminiConfigured] = React.useState<boolean | null>(null);
+  const [historyLoaded, setHistoryLoaded] = React.useState(false);
+  const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  // Verificar se Gemini está configurado
+  const { data: geminiConfig } = trpc.assistant.checkGeminiConfig.useQuery(
+    { clientId },
+    { enabled: !!clientId, refetchOnWindowFocus: false }
+  );
+
+  React.useEffect(() => {
+    if (geminiConfig !== undefined) {
+      setGeminiConfigured(geminiConfig.configured);
+    }
+  }, [geminiConfig]);
+
+  // Carregar histórico do banco
+  const { data: historyData } = trpc.assistant.getHistory.useQuery(
+    { clientId, userId },
+    { enabled: !!clientId && !!userId && !historyLoaded, refetchOnWindowFocus: false }
+  );
+
+  React.useEffect(() => {
+    if (historyData && !historyLoaded) {
+      const loaded: ChatMessage[] = historyData.history.map((m: any) => ({
+        role: m.role,
+        content: m.content,
+        timestamp: m.timestamp ?? Date.now(),
+      }));
+      if (loaded.length > 0) {
+        setMessages(loaded);
+      }
+      setHistoryLoaded(true);
+    }
+  }, [historyData, historyLoaded]);
+
+  // Scroll para o final ao receber nova mensagem
+  React.useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const chatMutation = trpc.assistant.clientChat.useMutation();
+  const clearHistoryMutation = trpc.assistant.clearHistory.useMutation();
+
+  const handleSend = async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+
+    const userMsg: ChatMessage = { role: "user", content: text, timestamp: Date.now() };
+    setMessages(prev => [...prev, userMsg]);
+    setInput("");
+    setSending(true);
+
+    // Mensagem de "digitando"
+    const typingMsg: ChatMessage = { role: "assistant", content: "...", timestamp: Date.now() };
+    setMessages(prev => [...prev, typingMsg]);
+
+    try {
+      const result = await chatMutation.mutateAsync({ clientId, userId, message: text });
+      setMessages(prev => [
+        ...prev.slice(0, -1), // remove typing
+        {
+          role: "assistant",
+          content: result.response,
+          timestamp: Date.now(),
+          functionCalls: result.functionCallsMade,
+        },
+      ]);
+    } catch (err: any) {
+      setMessages(prev => [
+        ...prev.slice(0, -1), // remove typing
+        {
+          role: "assistant",
+          content: `❌ Erro: ${err.message ?? "Não foi possível obter resposta."}`,
+          timestamp: Date.now(),
+        },
+      ]);
+    } finally {
+      setSending(false);
+      textareaRef.current?.focus();
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleClearHistory = async () => {
+    if (!confirm("Limpar todo o histórico de conversa com o Assistente IA?")) return;
+    await clearHistoryMutation.mutateAsync({ clientId, userId });
+    setMessages([]);
+    setHistoryLoaded(false);
+  };
+
+  // Sugestões rápidas
+  const suggestions = [
+    "Quantas vendas tivemos hoje?",
+    "Quantos chamados estão abertos?",
+    "Resumo das conversas desta semana",
+    "Quais produtos temos em estoque?",
+  ];
+
+  // Sem token configurado
+  if (geminiConfigured === false) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full min-h-[400px] gap-6">
+        <div className="w-16 h-16 rounded-2xl bg-amber-100 flex items-center justify-center">
+          <Sparkles className="w-8 h-8 text-amber-500" />
+        </div>
+        <div className="text-center max-w-md">
+          <h2 className="text-xl font-bold text-slate-900 mb-2">Token Gemini não configurado</h2>
+          <p className="text-slate-500 text-sm">
+            O Assistente IA precisa de um token da API Gemini configurado pelo administrador.
+            Entre em contato com o suporte para ativar esta funcionalidade.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-4">Assistente IA</h2>
-        <p className="text-slate-600">Converse com o assistente inteligente.</p>
+    <div className="flex flex-col h-[calc(100vh-140px)] bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-900 to-slate-800">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-emerald-500/20 flex items-center justify-center">
+            <Sparkles className="w-5 h-5 text-emerald-400" />
+          </div>
+          <div>
+            <h2 className="text-base font-semibold text-white">Assistente IA</h2>
+            <p className="text-xs text-slate-400">Powered by Gemini • {session?.company}</p>
+          </div>
+        </div>
+        <button
+          onClick={handleClearHistory}
+          className="text-xs text-slate-400 hover:text-red-400 transition-colors px-3 py-1.5 rounded-lg hover:bg-red-900/20"
+          title="Limpar histórico"
+        >
+          Limpar histórico
+        </button>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 bg-slate-50">
+        {messages.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full gap-6 py-12">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-100 flex items-center justify-center">
+              <Sparkles className="w-7 h-7 text-emerald-500" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-lg font-semibold text-slate-800 mb-1">Como posso ajudar?</h3>
+              <p className="text-sm text-slate-500">Faça perguntas sobre vendas, chamados, conversas ou qualquer dado do sistema.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 w-full max-w-lg">
+              {suggestions.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => { setInput(s); textareaRef.current?.focus(); }}
+                  className="text-left px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 hover:border-emerald-400 hover:bg-emerald-50 transition-all duration-150 shadow-sm"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {messages.map((msg, i) => (
+          <div key={i} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+            {msg.role === "assistant" && (
+              <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 mt-1">
+                <Sparkles className="w-4 h-4 text-emerald-600" />
+              </div>
+            )}
+            <div className={`max-w-[75%] ${msg.role === "user" ? "order-first" : ""}`}>
+              <div
+                className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                  msg.role === "user"
+                    ? "bg-emerald-600 text-white rounded-tr-sm"
+                    : msg.content === "..."
+                    ? "bg-white border border-slate-200 text-slate-400 rounded-tl-sm"
+                    : "bg-white border border-slate-200 text-slate-800 rounded-tl-sm shadow-sm"
+                }`}
+              >
+                {msg.content === "..." ? (
+                  <span className="flex gap-1 items-center">
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                  </span>
+                ) : (
+                  <div className="whitespace-pre-wrap">{msg.content}</div>
+                )}
+              </div>
+              {msg.functionCalls && msg.functionCalls.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {msg.functionCalls.map((fc) => (
+                    <span key={fc} className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+                      🔍 {fc.replace(/_/g, " ")}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-slate-400 mt-1 px-1">
+                {new Date(msg.timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+              </p>
+            </div>
+            {msg.role === "user" && (
+              <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center flex-shrink-0 mt-1">
+                <span className="text-xs font-bold text-slate-600">{(session?.userName ?? "U").charAt(0).toUpperCase()}</span>
+              </div>
+            )}
+          </div>
+        ))}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <div className="px-6 py-4 border-t border-slate-100 bg-white">
+        <div className="flex gap-3 items-end">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Digite sua mensagem... (Enter para enviar, Shift+Enter para nova linha)"
+            rows={1}
+            className="flex-1 resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent transition-all bg-slate-50"
+            style={{ maxHeight: "120px", overflowY: "auto" }}
+            disabled={sending}
+          />
+          <button
+            onClick={handleSend}
+            disabled={!input.trim() || sending}
+            className="w-11 h-11 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:cursor-not-allowed text-white flex items-center justify-center transition-all duration-150 active:scale-95 flex-shrink-0"
+          >
+            {sending ? (
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 22 6.477 22 12h-4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+              </svg>
+            )}
+          </button>
+        </div>
+        <p className="text-xs text-slate-400 mt-2 text-center">
+          O assistente pode consultar dados do sistema em tempo real quando necessário.
+        </p>
       </div>
     </div>
   );
