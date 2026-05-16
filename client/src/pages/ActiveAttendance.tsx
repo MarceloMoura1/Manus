@@ -94,7 +94,9 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
 
     try {
       let conversationId = customerData.id || customerData.customerId;
+      let ticketCreated = false;
       
+      // Etapa 1: Criar chamado se solicitado
       if (openTicket === true) {
         if (!ticketTitle.trim()) {
           setError('Por favor, insira o título do chamado');
@@ -102,43 +104,62 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
           return;
         }
 
-        const ticketResult = await createTicketMutation.mutateAsync({
-          customerId: customerData.id || customerData.customerId,
-          phone: customerData.phone,
-          title: ticketTitle,
-          company: customerData.company,
-          customer: customerData.name,
-          observation: ticketObservation,
-        });
-        setSuccessMessage('Chamado criado com sucesso!');
+        try {
+          const ticketResult = await createTicketMutation.mutateAsync({
+            customerId: customerData.id || customerData.customerId,
+            phone: customerData.phone,
+            title: ticketTitle,
+            company: customerData.company,
+            customer: customerData.name,
+            observation: ticketObservation,
+          });
+          ticketCreated = true;
+          setSuccessMessage('Chamado criado com sucesso!');
+          console.log('Chamado criado:', ticketResult);
+        } catch (ticketError) {
+          console.error('Erro ao criar chamado:', ticketError);
+          setError('Erro ao criar chamado, mas continuando com a conversa...');
+          // Continuar mesmo se falhar
+        }
       }
       
-      // Criar conversa
-      const conversationResult = await createConversationMutation.mutateAsync({
-        customerId: customerData.id || customerData.customerId,
-        customerName: customerData.name,
-        phone: customerData.phone,
-        company: customerData.company,
-      });
-      conversationId = conversationResult.conversationId;
-      setSuccessMessage('Conversa iniciada com sucesso!');
+      // Etapa 2: Criar conversa
+      try {
+        const conversationResult = await createConversationMutation.mutateAsync({
+          customerId: customerData.id || customerData.customerId,
+          customerName: customerData.name,
+          phone: customerData.phone,
+          company: customerData.company,
+        });
+        conversationId = conversationResult.conversationId || conversationResult.id;
+        setSuccessMessage(ticketCreated ? 'Chamado e conversa criados com sucesso!' : 'Conversa iniciada com sucesso!');
+        console.log('Conversa criada:', conversationResult);
+      } catch (convError) {
+        console.error('Erro ao criar conversa:', convError);
+        setError('Erro ao criar conversa');
+        setIsSearching(false);
+        return;
+      }
       
-      // Redirecionar para conversas com ID da conversa
+      // Etapa 3: Redirecionar para conversas
       setTimeout(() => {
-        // Armazenar ID da conversa no localStorage para recuperar na página de Conversas
+        // Armazenar informações no localStorage
         localStorage.setItem('MEGADESK_NEW_CONVERSATION_ID', conversationId);
         localStorage.setItem('MEGADESK_NEW_CONVERSATION_PHONE', customerData.phone);
+        localStorage.setItem('MEGADESK_NEW_CONVERSATION_NAME', customerData.name);
         
         // Chamar callback para trocar a view ativa
         if (onNavigate) {
+          console.log('Navegando para conversas...');
           onNavigate('conversations');
         } else {
           // Fallback: redirecionar via hash
           window.location.hash = `#/conversas?clientId=${conversationId}&phone=${customerData.phone}`;
         }
-      }, 800);
+      }, 500);
       return;
     } catch (err) {
+      console.error('Erro geral:', err);
       setError(err instanceof Error ? err.message : 'Erro ao processar solicitação');
     } finally {
       setIsSearching(false);
