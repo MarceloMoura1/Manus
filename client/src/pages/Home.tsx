@@ -5,6 +5,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { validateNewChamado, ValidationError } from "@/lib/validations";
 import { ActiveAttendancePage } from "./ActiveAttendance";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -57,6 +58,23 @@ type MegaDeskSession = {
 };
 
 type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp" | "settings" | "bot-config" | "ai-assistant" | "notifications";
+
+type Ticket = {
+  id: string;
+  number: number;
+  title: string;
+  status: string;
+  priority: string;
+  customerName?: string;
+  company?: string;
+  assignedTo?: string;
+  activities: Array<{
+    id: string;
+    description: string;
+    attendant: string;
+    date: Date | string;
+  }>;
+};
 
 const cn = (...classes: any[]) => classes.filter(Boolean).join(" ");
 
@@ -505,27 +523,13 @@ type TicketActivity = {
   attendant: string;
 };
 
-type Ticket = {
-  id: string;
-  number: number;
-  customerName: string;
-  company: string;
-  title: string;
-  observations: string;
-  status: string;
-  priority?: string;
-  assignedTo?: string;
-  createdAt: Date;
-  activities: TicketActivity[];
-};
+// Tipo Ticket já definido acima
 
 export function TicketsPage() {
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState<'total' | 'open' | 'in_progress' | 'waiting' | 'closed'>('total');
-  // Modal de detalhes será implementado do zero
-  // Estados para modal de detalhes serão adicionados aqui
-  const [newAttendant, setNewAttendant] = React.useState('');
+
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [showNewChamadoModal, setShowNewChamadoModal] = React.useState(false);
   const [newChamadoForm, setNewChamadoForm] = React.useState<{
@@ -562,7 +566,7 @@ export function TicketsPage() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Funções para modal de detalhes serão implementadas aqui
+
 
   const handleCreateChamado = async () => {
     // Validar formulário
@@ -754,10 +758,7 @@ export function TicketsPage() {
               filteredChamados.map(chamado => (
                 <tr
                   key={chamado.id}
-                  onClick={() => {
-                    console.log('Clicou no chamado:', chamado);
-                    // Modal de detalhes será implementado aqui
-                  }}
+
                   className="border-b border-slate-200 hover:bg-blue-50 cursor-pointer transition-colors"
                 >
                   <td className="px-4 py-3 text-sm font-mono text-slate-600">#{String(chamado.number).padStart(4, '0')}</td>
@@ -782,7 +783,7 @@ export function TicketsPage() {
         </table>
       </div>
 
-      {/* Modal de Detalhes - Será implementado do zero */}
+
 
       {/* Modal de Novo Chamado */}
       <Dialog open={showNewChamadoModal} onOpenChange={setShowNewChamadoModal}>
