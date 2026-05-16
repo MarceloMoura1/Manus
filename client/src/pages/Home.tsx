@@ -51,12 +51,13 @@ const MEGADESK_ACTIVE_PAGE_KEY = "megadesk_active_page_v1";
 
 type MegaDeskSession = {
   clientId: string;
-  clientName: string;
+  company: string;
   permissions: string[];
-  userId: string;
   userName: string;
   userEmail: string;
-  userCompany: string;
+  userRole: 'admin' | 'manager' | 'agent' | 'viewer';
+  plan: string;
+  modules: string[];
 };
 
 type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp" | "settings" | "bot-config" | "ai-assistant" | "notifications";
@@ -102,15 +103,84 @@ function LoadingSpinner() {
   );
 }
 
-function AccessDeniedPage() {
+function LoginPage({ onLoginSuccess }: { onLoginSuccess: (session: MegaDeskSession) => void }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const loginMutation = trpc.megadesk.loginByEmail.useMutation();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    try {
+      const result = await loginMutation.mutateAsync({ email, password });
+      if (result.session) {
+        localStorage.setItem(MEGADESK_SESSION_KEY, JSON.stringify(result.session));
+        onLoginSuccess(result.session);
+      }
+    } catch (err: any) {
+      setError(err.message || "Erro ao fazer login. Verifique suas credenciais.");
+    }
+  };
+
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      <div className="text-center space-y-4">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-100">
-          <AlertCircle className="w-8 h-8 text-red-600" />
+    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 to-slate-950">
+      <div className="w-full max-w-md">
+        <div className="rounded-2xl border border-slate-700 bg-slate-900 p-8 shadow-2xl">
+          <div className="mb-8 text-center">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-blue-600 mb-4">
+              <Zap className="w-6 h-6 text-white" />
+            </div>
+            <h1 className="text-3xl font-bold text-white">MegaDesk</h1>
+            <p className="mt-2 text-sm text-slate-400">Plataforma de Atendimento</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">E-mail</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="seu@email.com"
+                required
+                className="w-full rounded-lg border border-slate-600 bg-slate-800 px-4 py-2 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Senha</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                className="w-full rounded-lg border border-slate-600 bg-slate-800 px-4 py-2 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+
+            {error && (
+              <div className="rounded-lg border border-red-600/50 bg-red-600/10 p-3 text-sm text-red-400">
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loginMutation.isPending}
+              className="w-full rounded-lg bg-blue-600 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            >
+              {loginMutation.isPending ? "Entrando..." : "Entrar"}
+            </button>
+          </form>
+
+          <div className="mt-6 border-t border-slate-700 pt-6">
+            <p className="text-center text-sm text-slate-400">
+              Nao tem acesso? Entre em contato com o administrador.
+            </p>
+          </div>
         </div>
-        <h2 className="text-2xl font-bold text-slate-900">Acesso Negado</h2>
-        <p className="text-slate-600">Usuário sem acesso ativo neste cliente.</p>
       </div>
     </div>
   );
@@ -2162,40 +2232,18 @@ function Shell() {
       try {
         const parsed = JSON.parse(storedSession);
         setSession(parsed);
+        setLoading(false);
       } catch (e) {
         console.error("Failed to parse session:", e);
-        // Criar sessão de teste automática
-        const testSession: MegaDeskSession = {
-          clientId: "test-client-001",
-          clientName: "Empresa Teste",
-          permissions: ["conversations", "tickets", "tracking", "erp", "bot-config", "ai-assistant"],
-          userId: "user-001",
-          userName: "Usuário Teste",
-          userEmail: "teste@megadesk.com",
-          userCompany: "MegaDesk",
-        };
-        localStorage.setItem(MEGADESK_SESSION_KEY, JSON.stringify(testSession));
-        setSession(testSession);
+        setLoading(false);
       }
     } else {
-      // Criar sessão de teste automática quando não houver sessão
-      const testSession: MegaDeskSession = {
-        clientId: "test-client-001",
-        clientName: "Empresa Teste",
-        permissions: ["conversations", "tickets", "tracking", "erp", "bot-config", "ai-assistant"],
-        userId: "user-001",
-        userName: "Usuário Teste",
-        userEmail: "teste@megadesk.com",
-        userCompany: "MegaDesk",
-      };
-      localStorage.setItem(MEGADESK_SESSION_KEY, JSON.stringify(testSession));
-      setSession(testSession);
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   if (loading) return <LoadingSpinner />;
-  if (!session) return <AccessDeniedPage />;
+  if (!session) return <LoginPage onLoginSuccess={(newSession) => setSession(newSession)} />;
 
   const navItems = [
     { id: "home" as RouteId, label: "Home", icon: HomeIcon },
@@ -2356,6 +2404,9 @@ function Shell() {
           <button
             onClick={() => {
               localStorage.removeItem(MEGADESK_SESSION_KEY);
+              localStorage.removeItem(MEGADESK_ACTIVE_PAGE_KEY);
+              localStorage.removeItem("megadesk-session-token");
+              localStorage.removeItem("manus-runtime-user-info");
               setSession(null);
             }}
             className={cn(
@@ -2377,7 +2428,7 @@ function Shell() {
         <header className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">{navItems.find(i => i.id === active)?.label || 'MegaDesk'}</h1>
-            <p className="text-sm text-slate-600">{session.clientName} • {session.userName}</p>
+            <p className="text-sm text-slate-600">{session.company} • {session.userName}</p>
           </div>
           <div className="flex items-center gap-4">
             <button className="p-2 hover:bg-slate-100 rounded-lg transition-colors" title="Abrir assistente IA">

@@ -253,3 +253,64 @@ export const adminCredentials = mysqlTable("megaadmin_credentials", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type AdminCredential = typeof adminCredentials.$inferSelect;
+
+// ===== GEMINI IA CONFIGURATION =====
+
+export const megadeskDomainGeminiConfig = mysqlTable("megadesk_domain_gemini_config", {
+  configId: varchar("config_id", { length: 80 }).primaryKey(),
+  clientId: varchar("client_id", { length: 80 }).notNull().unique(),
+  geminiTokenEncrypted: text("gemini_token_encrypted").notNull(),
+  quotaMode: mysqlEnum("quota_mode", ["free", "limited", "hybrid"]).notNull().default("free"),
+  quotaMensal: int("quota_mensal").notNull().default(5000),
+  quotaUsadaMes: int("quota_usada_mes").notNull().default(0),
+  dataResetQuota: timestamp("data_reset_quota").notNull(),
+  permissionsJson: text("permissions_json").notNull().default("[]"),
+  ativo: boolean("ativo").notNull().default(false),
+  testeConexao: boolean("teste_conexao").notNull().default(false),
+  ultimoTesteEm: timestamp("ultimo_teste_em"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+}, (table) => ({
+  clientIdx: index("idx_mdgc_client").on(table.clientId),
+  ativoIdx: index("idx_mdgc_ativo").on(table.ativo),
+}));
+
+export const megadeskDomainIAConversations = mysqlTable("megadesk_domain_ia_conversations", {
+  conversationId: varchar("conversation_id", { length: 80 }).primaryKey(),
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  userId: varchar("user_id", { length: 80 }).notNull(),
+  userMessage: text("user_message").notNull(),
+  iaResponse: text("ia_response").notNull(),
+  tokensUsed: int("tokens_used").notNull().default(0),
+  tipo: mysqlEnum("tipo", ["consulta", "relatorio", "acao", "analise"]).notNull().default("consulta"),
+  status: mysqlEnum("status", ["sucesso", "erro", "pendente"]).notNull().default("sucesso"),
+  errorMessage: text("error_message"),
+  metadataJson: text("metadata_json").notNull().default("{}"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  clientIdx: index("idx_mdic_client").on(table.clientId),
+  userIdx: index("idx_mdic_user").on(table.userId),
+  createdAtIdx: index("idx_mdic_created_at").on(table.createdAt),
+  tipoIdx: index("idx_mdic_tipo").on(table.tipo),
+}));
+
+export const megadeskDomainIAConversationHistory = mysqlTable("megadesk_domain_ia_conversation_history", {
+  historyId: varchar("history_id", { length: 80 }).primaryKey(),
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  userId: varchar("user_id", { length: 80 }).notNull(),
+  messagesJson: text("messages_json").notNull(),
+  contextJson: text("context_json").notNull().default("{}"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+}, (table) => ({
+  clientIdx: index("idx_mdich_client").on(table.clientId),
+  userIdx: index("idx_mdich_user").on(table.userId),
+  userClientUniqueIdx: uniqueIndex("idx_mdich_user_client_unique").on(table.userId, table.clientId),
+}));
+
+export type MegadeskDomainGeminiConfig = typeof megadeskDomainGeminiConfig.$inferSelect;
+export type InsertMegadeskDomainGeminiConfig = typeof megadeskDomainGeminiConfig.$inferInsert;
+export type MegadeskDomainIAConversation = typeof megadeskDomainIAConversations.$inferSelect;
+export type InsertMegadeskDomainIAConversation = typeof megadeskDomainIAConversations.$inferInsert;
+export type MegadeskDomainIAConversationHistory = typeof megadeskDomainIAConversationHistory.$inferSelect;
+export type InsertMegadeskDomainIAConversationHistory = typeof megadeskDomainIAConversationHistory.$inferInsert;
