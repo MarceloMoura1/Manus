@@ -856,3 +856,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Testar fluxo de login com credenciais inválidas (validado: exibe mensagem de erro)
 - [x] Testar fluxo de login com credenciais válidas (validado: carrega dashboard)
 - [x] FASE COMPLETA - Fluxo de autenticação 100% funcional!
+
+## Fase 74: Corrigir Persistência de Email e CNPJ no MegaAdmin
+- [x] Adicionar campos de edição para email e CNPJ no ClientDetail
+- [x] Implementar mutation para atualizar informações do cliente
+- [x] Testar persistência de email e CNPJ após edição
+- [x] Verificar se dados são salvos no banco de dados
+- [x] Criar testes Vitest para validar persistência (13 testes passando)
+- [x] Validar que dados não desaparecem após F5 (12 testes de integração passando)

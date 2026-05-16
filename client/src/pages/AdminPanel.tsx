@@ -544,6 +544,8 @@ function ClientDetail({ client, onClose, onRefresh }: { client: any; onClose: ()
   const [showAddUser, setShowAddUser] = useState(false);
   const [newUser, setNewUser] = useState({ name: "", email: "", role: "agent" as "admin" | "manager" | "agent" | "viewer" });
   const [editingModules, setEditingModules] = useState<string[]>(client.modules ?? []);
+  const [editingInfo, setEditingInfo] = useState({ email: client.email ?? "", cnpj: client.cnpj ?? "" });
+  const [showEditInfo, setShowEditInfo] = useState(false);
 
   const updateAccess = trpc.megaadmin.updateClientAccess.useMutation({
     onSuccess() { toast.success("Acesso atualizado."); onRefresh(); },
@@ -578,6 +580,11 @@ function ClientDetail({ client, onClose, onRefresh }: { client: any; onClose: ()
     onError(err) { toast.error(err.message); },
   });
 
+  const updateClientInfo = trpc.megaadmin.updateClientInfo.useMutation({
+    onSuccess() { toast.success("Informações do cliente atualizadas."); setShowEditInfo(false); onRefresh(); },
+    onError(err) { toast.error(err.message); },
+  });
+
   const isActive = client.status === "active" && client.accessReleased;
 
   return (
@@ -602,6 +609,55 @@ function ClientDetail({ client, onClose, onRefresh }: { client: any; onClose: ()
           <button onClick={onClose} className="rounded-2xl border border-white/10 px-4 py-2 text-sm text-slate-300">
             Fechar
           </button>
+        </div>
+
+        {/* Client Info Edit */}
+        <div className="mb-6 rounded-2xl border border-white/10 bg-white/[.03] p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-white">Informações do cliente</h4>
+            <button
+              onClick={() => setShowEditInfo(!showEditInfo)}
+              className="rounded-2xl bg-blue-400/10 px-3 py-1.5 text-xs text-blue-200 ring-1 ring-blue-400/30 hover:bg-blue-400/20"
+            >
+              {showEditInfo ? "Cancelar" : "Editar"}
+            </button>
+          </div>
+          {showEditInfo ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              <input
+                type="email"
+                value={editingInfo.email}
+                onChange={(e) => setEditingInfo({ ...editingInfo, email: e.target.value })}
+                placeholder="E-mail"
+                className="rounded-xl border border-white/10 bg-slate-800 px-3 py-2 text-sm text-white outline-none focus:border-blue-400"
+              />
+              <input
+                type="text"
+                value={editingInfo.cnpj}
+                onChange={(e) => setEditingInfo({ ...editingInfo, cnpj: e.target.value })}
+                placeholder="CNPJ (00.000.000/0001-00)"
+                className="rounded-xl border border-white/10 bg-slate-800 px-3 py-2 text-sm text-white outline-none focus:border-blue-400"
+              />
+              <button
+                onClick={() => updateClientInfo.mutate({ clientId: client.clientId, email: editingInfo.email, cnpj: editingInfo.cnpj })}
+                disabled={updateClientInfo.isPending}
+                className="rounded-xl bg-blue-400 px-3 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50 md:col-span-2"
+              >
+                Salvar
+              </button>
+            </div>
+          ) : (
+            <div className="grid gap-3 text-sm md:grid-cols-2">
+              <div>
+                <p className="text-xs text-slate-400">E-mail</p>
+                <p className="text-white">{client.email || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400">CNPJ</p>
+                <p className="text-white">{client.cnpj || "—"}</p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Access control */}
