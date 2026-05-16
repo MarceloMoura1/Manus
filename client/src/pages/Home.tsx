@@ -1171,6 +1171,14 @@ export function TicketsPage() {
             </div>
           </div>
 
+          {/* Mensagem Inicial do Chamado */}
+          {selectedChamado && selectedChamado.observations && (
+            <div className="mx-8 mt-6 p-4 bg-white rounded-lg border border-slate-200">
+              <h3 className="text-sm font-semibold text-slate-700 mb-2">Mensagem Inicial</h3>
+              <p className="text-sm text-slate-600 leading-relaxed">{selectedChamado.observations}</p>
+            </div>
+          )}
+
           {/* Seção de Colaboradores */}
           {selectedCollaborators && selectedCollaborators.length > 0 && (
             <div className="mx-8 mt-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
