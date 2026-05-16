@@ -903,3 +903,9 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Identificar por que a sessão não persiste após F5 (causa: sem rememberMe, usava sessionStorage que é apagado no reload)
 - [x] Implementar persistência de sessão correta (sempre salvar no localStorage, rememberMe controla apenas duração: 24h vs 30 dias)
 - [x] 12 testes de persistência de sessão passando
+
+## Fase 80: BUG - "Can not prepare multiple statements" ao excluir cliente
+- [x] Localizar o SQL com múltiplos statements na exclusão de clientes (causa: ensureStructuredTables() tinha CREATE TABLE + 5x ALTER TABLE em uma única execute())
+- [x] Corrigir para executar cada statement separadamente (array migrations[] com loop)
+- [x] Adicionar migração de password_hash como execute() separado
+- [x] 5 testes de validação de SQL statements passando

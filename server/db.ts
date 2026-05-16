@@ -171,14 +171,24 @@ async function ensureStructuredTables() {
     integrations_json LONGTEXT NOT NULL DEFAULT '{}',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-  );
-  -- Adicionar colunas se não existirem (para migração)
-  ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS email VARCHAR(255);
-  ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS cnpj VARCHAR(20);
-  ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS max_users INT NOT NULL DEFAULT 5;
-  ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS status_type ENUM('active','test') NOT NULL DEFAULT 'test';
-  ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS integrations_json LONGTEXT NOT NULL DEFAULT '{}';
-  `);
+  )`);
+  // Migrações de colunas: cada ALTER TABLE em sua própria chamada execute()
+  // (MySQL2 não permite múltiplos statements em uma única execute())
+  const migrations = [
+    "ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS email VARCHAR(255)",
+    "ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS cnpj VARCHAR(20)",
+    "ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS max_users INT NOT NULL DEFAULT 5",
+    "ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS status_type ENUM('active','test') NOT NULL DEFAULT 'test'",
+    "ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS integrations_json LONGTEXT NOT NULL DEFAULT '{}'",
+  ];
+  for (const migration of migrations) {
+    try {
+      await pool.execute(migration);
+    } catch (err: any) {
+      // Ignorar erros de coluna já existente
+      if (err?.code !== 'ER_DUP_FIELDNAME') throw err;
+    }
+  }
   await pool.execute(`CREATE TABLE IF NOT EXISTS megadesk_domain_client_users (
     user_id VARCHAR(80) PRIMARY KEY,
     client_id VARCHAR(80) NOT NULL,
@@ -187,10 +197,17 @@ async function ensureStructuredTables() {
     role ENUM('admin','manager','agent','viewer') NOT NULL DEFAULT 'viewer',
     status ENUM('active','blocked') NOT NULL DEFAULT 'blocked',
     permissions_json LONGTEXT NOT NULL,
+    password_hash VARCHAR(255),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_mdu_client (client_id)
   )`);
+  // Migração: adicionar password_hash se não existir (tabelas já criadas anteriormente)
+  try {
+    await pool.execute("ALTER TABLE megadesk_domain_client_users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)");
+  } catch (err: any) {
+    if (err?.code !== 'ER_DUP_FIELDNAME') throw err;
+  }
   await pool.execute(`CREATE TABLE IF NOT EXISTS megadesk_domain_conversations (
     conversation_id VARCHAR(80) PRIMARY KEY,
     client_id VARCHAR(80) NOT NULL,
