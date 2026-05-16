@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure } from "./_core/trpc";
-import { COOKIE_NAME } from "@shared/const";
+import { COOKIE_NAME, normalizeModuleNamesToBackend, normalizeModuleNamesToAdmin } from "@shared/const";
 import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool, createMegaDeskBackup, listMegaDeskBackups, getMegaDeskBackupInfo, applyMegaDeskBackup } from "./db";
 import bcrypt from "bcryptjs";
 import { adminCredentials, megadeskDomainClientUsers } from "../drizzle/schema";
@@ -185,39 +185,36 @@ function rolePermissions(role: MegaClient["users"][number]["role"]) {
 function resolveUserPermissions(user: MegaClient["users"][number], clientModules?: string[]) {
   const base = ["home", "settings", "notifications"];
   
-  // Determina as permissões base da role
-  let rolePerms = rolePermissions(user.role);
+  // CORREÇÃO: Se o usuário tem permissões customizadas, usar APENAS as customizadas
+  // Não misturar com permissões da role
+  let finalPerms: string[];
   
-  // Se o usuário tem permissões customizadas, usa essas em vez das da role
   if (user.permissions && user.permissions.length > 0) {
-    rolePerms = [...base, ...user.permissions];
+    // Permissões customizadas: normalizar para formato backend (hífen)
+    const normalizedCustomPerms = normalizeModuleNamesToBackend(user.permissions);
+    finalPerms = [...base, ...normalizedCustomPerms];
+  } else {
+    // Sem customizações: usar permissões da role
+    finalPerms = rolePermissions(user.role);
   }
   
-  // Se há módulos do cliente, filtra as permissões para apenas os módulos ativados
+  // CORREÇÃO: Filtrar por módulos do cliente (respeitar o que foi liberado)
   if (clientModules && clientModules.length > 0) {
-    // Mapeamento de módulos para permissões
-    const moduleToPermission: Record<string, string> = {
-      "active-attendance": "active-attendance",
-      "conversations": "conversations",
-      "tickets": "tickets",
-      "tracking": "tracking",
-      "erp": "erp",
-      "bot-config": "bot-config",
-      "ai-assistant": "ai-assistant",
-    };
+    // Normalizar módulos do cliente para formato backend (hífen)
+    const normalizedModules = normalizeModuleNamesToBackend(clientModules);
     
     // Filtra permissões para apenas as que correspondem a módulos ativados
-    const modulePems = rolePerms.filter(perm => {
+    const filteredPerms = finalPerms.filter(perm => {
       // Base permissions sempre incluídas
       if (base.includes(perm)) return true;
       // Permissões que correspondem a módulos ativados
-      return clientModules.some(mod => moduleToPermission[mod] === perm);
+      return normalizedModules.includes(perm);
     });
     
-    return Array.from(new Set(modulePems));
+    return Array.from(new Set(filteredPerms));
   }
   
-  return Array.from(new Set(rolePerms));
+  return Array.from(new Set(finalPerms));
 }
 
 function assertClientUserPermission(client: MegaClient, permission: string, userEmail?: string) {
@@ -643,11 +640,14 @@ export const appRouter = router({
       if (!user) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado neste cliente." });
       }
-      // Atualizar permissões do usuário
-      user.permissions = input.permissions;
+      // CORREÇÃO: Normalizar permissões recebidas do MegaAdmin (underscore → hífen)
+      const normalizedPermissions = normalizeModuleNamesToBackend(input.permissions);
+      user.permissions = normalizedPermissions;
       audit("MegaAdmin", `Permissões atualizadas para usuário ${user.email}`, client.clientId);
       await persistSyncState();
-      return { ok: true, user: { ...user, permissions: Array.from(new Set([...rolePermissions(user.role), ...user.permissions])) } };
+      // Retornar permissões resolvidas (sem misturar com role)
+      const resolvedPermissions = resolveUserPermissions(user, client.modules);
+      return { ok: true, user: { ...user, permissions: resolvedPermissions } };
     }),
     deleteClient: adminProcedure
       .input(z.object({ clientId: z.string() }))

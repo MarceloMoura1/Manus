@@ -25,6 +25,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Toaster } from "sonner";
 import { trpc } from "@/lib/trpc";
+import { MODULE_LABELS } from "@shared/const";
 import { AdminsSection } from "./AdminsSection";
 import { ClientEditPage } from "./ClientEditPage";
 
@@ -45,15 +46,7 @@ const ALL_MODULES = [
 
 type ModuleName = (typeof ALL_MODULES)[number];
 
-const MODULE_LABELS: Record<ModuleName, string> = {
-  atendimento_ativo: "Atendimento Ativo",
-  conversas: "Conversas",
-  chamados: "Chamados",
-  rastreio: "Rastreio",
-  erp: "ERP",
-  configurar_bot: "Configurar Bot",
-  assistente_ia: "Assistente IA",
-};
+// MODULE_LABELS importado de @shared/const
 
 type Section = "dashboard" | "clients" | "users" | "admins" | "backups";
 // ─── Helpers ────────────────────────────────────────────────────────────────

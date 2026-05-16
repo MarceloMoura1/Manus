@@ -872,3 +872,12 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Corrigir persistência de exclusão de clientes (adicionado DELETE FROM megadesk_domain_clients)
 - [x] Testar fluxo completo de exclusão e publicação
 - [x] Criar testes para validar que clientes deletados não reaparecem (10 testes passando)
+
+## Fase 76: DIAGNÓSTICO COMPLETO - Sistema de Permissões (MegaAdmin ↔ MegaDesk)
+- [x] Diagnosticar estrutura de permissões no banco de dados
+- [x] Verificar mapeamento de módulos/permissões entre MegaAdmin e MegaDesk
+- [x] Analisar fluxo de sincronização de permissões
+- [x] Identificar e documentar todos os bugs (5 bugs críticos encontrados em DIAGNOSTICO_PERMISSOES.md)
+- [x] Implementar correções de sincronização (normalização de nomes, resolução de permissões, filtro de módulos)
+- [x] Criar testes abrangentes de permissões (28 testes passando - normalizacão, bidirecional, sincronização)
+- [x] Validar fluxo completo (MegaAdmin → MegaDesk) - Testes de integração cobrindo todo o ciclo

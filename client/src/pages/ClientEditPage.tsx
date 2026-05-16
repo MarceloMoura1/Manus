@@ -24,6 +24,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
+import { MODULE_LABELS } from "@shared/const";
 
 function cn(...classes: Array<string | false | undefined | null>) {
   return classes.filter(Boolean).join(" ");
@@ -51,16 +52,6 @@ const ALL_MODULES = [
   "assistente_ia",
 ];
 
-const MODULE_LABELS: Record<string, string> = {
-  atendimento_ativo: "Atendimento Ativo",
-  conversas: "Conversas",
-  chamados: "Chamados",
-  rastreio: "Rastreio",
-  erp: "ERP",
-  configurar_bot: "Configurar Bot",
-  assistente_ia: "Assistente IA",
-};
-
 const ROLE_LABELS: Record<string, string> = {
   admin: "Administrador",
   manager: "Gerente",
@@ -68,16 +59,8 @@ const ROLE_LABELS: Record<string, string> = {
   viewer: "Visualizador",
 };
 
-// Permissões por página/módulo da MegaDesk
-const PERMISSION_LABELS: Record<string, string> = {
-  atendimento_ativo: "Atendimento Ativo",
-  conversas: "Conversas",
-  chamados: "Chamados",
-  rastreio: "Rastreio",
-  erp: "ERP",
-  configurar_bot: "Configurar Bot",
-  assistente_ia: "Assistente IA",
-};
+// Permissões por página/módulo da MegaDesk (usar MODULE_LABELS do shared/const.ts)
+const PERMISSION_LABELS = MODULE_LABELS;
 
 // Permissões padrão por função (espelha rolePermissions do backend)
 const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
@@ -550,7 +533,7 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
                       }}
                       className="rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500/50"
                     />
-                    <span className="text-sm text-slate-300">{MODULE_LABELS[mod] ?? mod}</span>
+                    <span className="text-sm text-slate-300">{(MODULE_LABELS as Record<string, string>)[mod] ?? mod}</span>
                   </label>
                 );
               })}
