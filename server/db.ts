@@ -378,6 +378,20 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
       await connection.execute("DELETE FROM megadesk_domain_operational_records");
       await connection.execute("DELETE FROM megadesk_domain_audit_logs");
       await connection.execute("DELETE FROM megadesk_domain_metrics");
+      // IMPORTANTE: Deletar clientes que foram removidos em memória (evita que reapareçam após reiniciar)
+      // Primeiro, obter lista de client_ids que ainda existem em memória
+      const clientIdsToKeep = state.clients.map((c) => c.clientId);
+      if (clientIdsToKeep.length > 0) {
+        // Deletar usuários de clientes que não existem mais
+        const placeholders = clientIdsToKeep.map(() => "?").join(",");
+        await connection.execute(`DELETE FROM megadesk_domain_client_users WHERE client_id NOT IN (${placeholders})`, clientIdsToKeep);
+        // Deletar clientes que não existem mais
+        await connection.execute(`DELETE FROM megadesk_domain_clients WHERE client_id NOT IN (${placeholders})`, clientIdsToKeep);
+      } else {
+        // Se não há clientes em memória, deletar todos
+        await connection.execute("DELETE FROM megadesk_domain_client_users");
+        await connection.execute("DELETE FROM megadesk_domain_clients");
+      }
 
       for (const client of state.clients) {
         await connection.execute("INSERT INTO megadesk_domain_clients (client_id, internal_id, tenant_database_name, company, contact, email, phone, cnpj, plan, max_users, status, status_type, access_released, api_token, modules_json, integrations_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE company=VALUES(company), contact=VALUES(contact), email=VALUES(email), phone=VALUES(phone), cnpj=VALUES(cnpj), plan=VALUES(plan), max_users=VALUES(max_users), status=VALUES(status), status_type=VALUES(status_type), access_released=VALUES(access_released), api_token=VALUES(api_token), modules_json=VALUES(modules_json), integrations_json=VALUES(integrations_json)", [client.clientId, client.id, client.tenantDatabaseName, client.company, client.contact, client.email || "", client.phone, client.cnpj || "", client.plan, client.maxUsers || 5, client.status, client.statusType || "test", client.accessReleased ? 1 : 0, client.apiToken, JSON.stringify(client.modules ?? []), JSON.stringify(client.integrations ?? {})]);

@@ -864,3 +864,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Verificar se dados são salvos no banco de dados
 - [x] Criar testes Vitest para validar persistência (13 testes passando)
 - [x] Validar que dados não desaparecem após F5 (12 testes de integração passando)
+
+## Fase 75: BUG CRÍTICO - Clientes Deletados Reaparecem Após Publicação
+- [x] Investigar como clientes deletados estão sendo recarregados do banco
+- [x] Verificar se deleteClient persiste corretamente no banco de dados
+- [x] Verificar se loadMegaDeskStructuredState está carregando clientes deletados
+- [x] Corrigir persistência de exclusão de clientes (adicionado DELETE FROM megadesk_domain_clients)
+- [x] Testar fluxo completo de exclusão e publicação
+- [x] Criar testes para validar que clientes deletados não reaparecem (10 testes passando)
