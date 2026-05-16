@@ -69,12 +69,15 @@ function loadSession(): MegaDeskSession | null {
   }
 }
 
-function saveSession(session: MegaDeskSession) {
+function saveSession(session: MegaDeskSession, rememberMe?: boolean) {
   // Adicionar timestamps de expiração se não existirem
   const now = Date.now();
+  // rememberMe controla apenas a duração: 30 dias vs 24 horas
+  // Sempre salvar no localStorage para persistir após F5
+  const duration = rememberMe ? SESSION_DURATION_LONG : SESSION_DURATION;
   const sessionWithTimestamps: MegaDeskSession = {
     ...session,
-    expiresAt: session.expiresAt || now + SESSION_DURATION,
+    expiresAt: session.expiresAt || now + duration,
     refreshedAt: session.refreshedAt || now,
   };
   localStorage.setItem(MEGADESK_SESSION_KEY, JSON.stringify(sessionWithTimestamps));
@@ -112,7 +115,8 @@ type MegaDeskSession = {
 };
 
 // Constantes para renovação de token
-const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 horas em ms
+const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 horas em ms (padrão sem "lembrar")
+const SESSION_DURATION_LONG = 30 * 24 * 60 * 60 * 1000; // 30 dias ("lembrar meu acesso")
 const REFRESH_THRESHOLD = 5 * 60 * 1000; // Renovar 5 minutos antes de expirar
 const REFRESH_INTERVAL = 10 * 60 * 1000; // Verificar renovação a cada 10 minutos
 
@@ -2462,12 +2466,10 @@ function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) =>
 
   const loginMutation = trpc.megadesk.loginByEmail.useMutation({
     onSuccess: (data) => {
-      if (rememberMe) {
-        saveSession(data.session);
-      } else {
-        sessionStorage.setItem(MEGADESK_SESSION_KEY, JSON.stringify(data.session));
-      }
-      onLogin(data.session);
+      // Sempre salvar no localStorage para persistir após F5
+      // rememberMe controla apenas a duração: 30 dias (true) vs 24 horas (false)
+      const savedSession = saveSession(data.session, rememberMe);
+      onLogin(savedSession);
     },
     onError: (err) => setError(err.message),
   });

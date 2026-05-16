@@ -897,3 +897,9 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] BUG #3 CORRIGIDO: overview e refreshSession passam client.modules para resolveUserPermissions() — filtro por módulos do cliente funciona
 - [x] BUG #4 CORRIGIDO: Todos os pontos de retorno de permissões no backend usam resolveUserPermissions(user, client.modules) consistentemente
 - [x] 21 testes criados cobrindo mapeamento bidirecional, resolução de permissões e fluxo completo MegaAdmin → MegaDesk
+
+## Fase 79: BUG - MegaDesk perde sessão ao dar F5
+- [x] Diagnosticar como a sessão é gerenciada no MegaDesk vs MegaAdmin
+- [x] Identificar por que a sessão não persiste após F5 (causa: sem rememberMe, usava sessionStorage que é apagado no reload)
+- [x] Implementar persistência de sessão correta (sempre salvar no localStorage, rememberMe controla apenas duração: 24h vs 30 dias)
+- [x] 12 testes de persistência de sessão passando
