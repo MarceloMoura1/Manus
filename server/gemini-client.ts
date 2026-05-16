@@ -60,14 +60,19 @@ async function callGeminiAPI(apiKey: string, body: GeminiRequest): Promise<any> 
 export async function testGeminiConnection(apiKey: string): Promise<{ ok: boolean; message: string }> {
   try {
     const data = await callGeminiAPI(apiKey, {
-      contents: [{ role: "user", parts: [{ text: "Responda apenas: OK" }] }],
-      generationConfig: { maxOutputTokens: 10 },
+      contents: [{ role: "user", parts: [{ text: "Responda apenas com a palavra: OK" }] }],
+      generationConfig: { maxOutputTokens: 100 },
     });
-    const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    if (text.length > 0) {
-      return { ok: true, message: `Conexão com Gemini IA validada com sucesso. Modelo respondeu: "${text.slice(0, 50)}"` };
+    // Aceita qualquer resposta válida — o modelo pode retornar texto vazio se usar tokens de pensamento
+    const candidates = data?.candidates ?? [];
+    const text: string = candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const finishReason: string = candidates?.[0]?.finishReason ?? "";
+    // Se chegou aqui sem erro, a chave é válida
+    if (candidates.length > 0 || data?.usageMetadata) {
+      const resposta = text.length > 0 ? `"${text.slice(0, 50)}"` : `(modelo: ${data?.modelVersion ?? GEMINI_MODEL}, tokens: ${data?.usageMetadata?.totalTokenCount ?? "?"})`;
+      return { ok: true, message: `Conexão com Gemini IA validada com sucesso. ${resposta}` };
     }
-    return { ok: false, message: "Gemini não retornou resposta." };
+    return { ok: false, message: "Gemini não retornou resposta válida." };
   } catch (err: any) {
     const errMsg: string = err?.message ?? "Erro desconhecido";
     if (errMsg.includes("API_KEY_INVALID") || errMsg.includes("API key not valid")) {

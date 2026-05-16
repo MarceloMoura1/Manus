@@ -957,4 +957,4 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Garantir que após salvar, "Testar conexão" usa o token recém-salvo
 - [x] tenantObservability sempre re-hidrata do banco (dados sempre frescos)
 - [x] Testar fluxo completo sem intervenção manual
-- [ ] Salvar checkpoint
+- [x] Salvar checkpoint
