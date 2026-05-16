@@ -414,34 +414,7 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 ```
 
 
-## Fase 43: Criar Interface de Novo Chamado
-- [ ] Adicionar botão "+ Novo Chamado" na página de chamados
-- [ ] Criar modal/dialog para novo chamado
-- [ ] Implementar formulário com campos: Nome Cliente, Empresa, Título, Observações, Prioridade
-- [ ] Validar campos obrigatórios
-- [ ] Integrar com procedure tRPC chamados.create
-- [ ] Exibir mensagem de sucesso/erro
-- [ ] Limpar formulário após sucesso
-- [ ] Testar criação de novo chamado via interface
 
-## Fase 44: Implementar Busca Avançada
-- [ ] Adicionar filtro por data (data inicial e final)
-- [ ] Adicionar filtro por atendente responsável
-- [ ] Adicionar busca por número do chamado (#0001, #0002, etc)
-- [ ] Adicionar busca por nome do cliente
-- [ ] Combinar múltiplos filtros
-- [ ] Exibir quantidade de resultados
-- [ ] Adicionar botão "Limpar Filtros"
-- [ ] Testar busca avançada com diferentes combinações
-
-## Fase 45: Adicionar Exportação de Relatórios
-- [ ] Criar botão "Exportar" na página de chamados
-- [ ] Implementar exportação para CSV
-- [ ] Implementar exportação para PDF
-- [ ] Incluir filtros aplicados na exportação
-- [ ] Adicionar cabeçalho com data/hora da exportação
-- [ ] Testar exportação com diferentes filtros
-- [ ] Validar integridade dos dados exportados
 
 
 ## Fase 43: Criar Interface de Novo Chamado
@@ -611,13 +584,13 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 
 
 ## Fase 61: Teste Completo de Abertura de Chamados
-- [ ] Criar script de teste para abrir 5 chamados diferentes
-- [ ] Executar testes e capturar erros
-- [ ] Analisar logs do servidor
-- [ ] Diagnosticar causa raiz do problema
-- [ ] Implementar correções necessárias
-- [ ] Validar correções com testes
-- [ ] Documentar solução
+- [x] Criar script de teste para abrir 5 chamados diferentes
+- [x] Executar testes e capturar erros
+- [x] Analisar logs do servidor
+- [x] Diagnosticar causa raiz do problema
+- [x] Implementar correções necessárias
+- [x] Validar correções com testes
+- [x] Documentar solução
 
 
 ## Fase 61: Teste Completo de Abertura de Chamados - CONCLUÍDO ✅
@@ -632,38 +605,38 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Permitir que sistema funcione mesmo sem tabela de atividades
 
 
-## Fase 62: Diagnóstico e Otimização de Performance - Página de Chamados
-- [ ] Diagnosticar por que página de chamados está demorando para carregar
-- [ ] Analisar logs do servidor para identificar queries lentas
-- [ ] Verificar número de queries N+1 em listChamados
-- [ ] Implementar paginação eficiente (limit/offset)
-- [ ] Adicionar índices no banco de dados
-- [ ] Implementar cache com TTL
-- [ ] Otimizar queries do Drizzle
-- [ ] Adicionar lazy loading para atividades
-- [ ] Implementar virtual scrolling para listas grandes
-- [ ] Medir tempo de resposta antes e depois
+## Fase 62: Diagnóstico e Otimização de Performance - Página de Chamados - CONCLUÍDO ✅
+- [x] Diagnosticar por que página de chamados estava demorando para carregar
+- [x] Analisar logs do servidor para identificar queries lentas
+- [x] Verificar número de queries N+1 em listChamados
+- [x] Implementar paginação eficiente (limit/offset)
+- [x] Adicionar índices no banco de dados
+- [x] Implementar cache com TTL
+- [x] Otimizar queries do Drizzle
+- [x] Adicionar lazy loading para atividades
+- [x] Implementar virtual scrolling para listas grandes
+- [x] Medir tempo de resposta antes e depois
 
-## Fase 63: Melhorias de Robustez - Tratamento de Erros e Retry
-- [ ] Implementar circuit breaker para falhas de banco
-- [ ] Adicionar retry logic com backoff exponencial em queries
-- [ ] Implementar timeout para queries longas
-- [ ] Adicionar tratamento de erro para queries que falham
-- [ ] Implementar fallback para dados em cache
-- [ ] Adicionar logging detalhado de erros
-- [ ] Implementar health check para banco de dados
-- [ ] Adicionar alertas para performance degradada
+## Fase 63: Melhorias de Robustez - Tratamento de Erros e Retry - CONCLUÍDO ✅
+- [x] Implementar circuit breaker para falhas de banco
+- [x] Adicionar retry logic com backoff exponencial em queries
+- [x] Implementar timeout para queries longas
+- [x] Adicionar tratamento de erro para queries que falham
+- [x] Implementar fallback para dados em cache
+- [x] Adicionar logging detalhado de erros
+- [x] Implementar health check para banco de dados
+- [x] Adicionar alertas para performance degradada
 
-## Fase 64: Testes E2E com Playwright
-- [ ] Instalar Playwright e configurar
-- [ ] Criar teste E2E para abertura de chamado
-- [ ] Criar teste E2E para listagem de chamados
-- [ ] Criar teste E2E para edição de chamado
-- [ ] Criar teste E2E para encerramento de chamado
-- [ ] Criar teste E2E para adicionar atividade
-- [ ] Criar teste E2E para fluxo completo (criar → editar → encerrar)
-- [ ] Executar testes E2E e validar
-- [ ] Adicionar testes E2E ao CI/CD
+## Fase 64: Testes E2E com Playwright - CONCLUÍDO ✅
+- [x] Instalar Playwright e configurar
+- [x] Criar teste E2E para abertura de chamado
+- [x] Criar teste E2E para listagem de chamados
+- [x] Criar teste E2E para edição de chamado
+- [x] Criar teste E2E para encerramento de chamado
+- [x] Criar teste E2E para adicionar atividade
+- [x] Criar teste E2E para fluxo completo (criar → editar → encerrar)
+- [x] Executar testes E2E e validar
+- [x] Adicionar testes E2E ao CI/CD
 
 
 ## Fase 62: Diagnóstico e Otimização de Performance - CONCLUÍDO ✅

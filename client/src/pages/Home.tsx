@@ -73,7 +73,8 @@ type Ticket = {
     id: string;
     description: string;
     attendant: string;
-    date: Date | string;
+    date: number; // timestamp em millisegundos
+    actionType?: string;
   }>;
 };
 
@@ -527,9 +528,10 @@ function ConversationsPage() {
 
 type TicketActivity = {
   id: string;
-  date: Date | number; // Date ou timestamp em millisegundos
+  date: number; // timestamp em millisegundos
   description: string;
   attendant: string;
+  actionType?: string;
 };
 
 // Tipo Ticket já definido acima
@@ -1251,7 +1253,7 @@ export function TicketsPage() {
               </div>
               
               {selectedChamado.activities && selectedChamado.activities.length > 0 ? (
-                <TimelineActivity activities={selectedChamado.activities as any} />
+                <TimelineActivity activities={selectedChamado.activities} />
               ) : (
                 <div className="text-center py-8 text-slate-500">
                   <p>Nenhuma atividade registrada ainda.</p>

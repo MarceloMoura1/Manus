@@ -10,8 +10,9 @@ interface TicketActivity {
   id: string;
   description: string;
   attendant: string;
-  date?: Date;
-  createdAt?: Date;
+  date?: number; // timestamp em millisegundos
+  createdAt?: number; // timestamp em millisegundos
+  actionType?: string;
 }
 
 interface Ticket {

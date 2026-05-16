@@ -3,7 +3,7 @@ import { CheckCircle, Edit, Users, Share2, MessageSquare, User } from 'lucide-re
 
 export interface ActivityItem {
   id: string;
-  date: Date | number | string; // Date, timestamp em millisegundos ou string ISO
+  date: number; // timestamp em millisegundos
   description: string;
   attendant: string;
   actionType?: 'register' | 'edit' | 'close' | 'forward' | 'note';
@@ -45,14 +45,10 @@ const getActionLabel = (actionType?: string) => {
   }
 };
 
-const formatDateTime = (date: Date | number) => {
+const formatDateTime = (date: number) => {
   let d: Date;
   
   if (typeof date === 'number') {
-    d = new Date(date);
-  } else if (date instanceof Date) {
-    d = date;
-  } else if (typeof date === 'string') {
     d = new Date(date);
   } else {
     d = new Date();

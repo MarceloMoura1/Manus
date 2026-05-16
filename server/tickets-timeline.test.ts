@@ -2,9 +2,10 @@ import { describe, it, expect, beforeEach } from 'vitest';
 
 type TicketActivity = {
   id: string;
-  date: Date;
+  date: number; // timestamp em millisegundos
   description: string;
   attendant: string;
+  actionType?: string;
 };
 
 type Ticket = {
@@ -40,9 +41,9 @@ describe('Tickets Timeline', () => {
         assignedTo: 'Bot IA',
         createdAt: new Date('2026-05-01'),
         activities: [
-          { id: 'a1', date: new Date('2026-05-01'), description: 'Cliente solicitou orçamento de 10 peças.', attendant: 'Bot IA' },
-          { id: 'a2', date: new Date('2026-05-05'), description: 'Cliente gostaria de ver sobre desconto', attendant: 'Atendente' },
-          { id: 'a3', date: new Date('2026-05-10'), description: 'Cliente gostaria de fechar orçamento.', attendant: 'Bot IA' },
+          { id: 'a1', date: new Date('2026-05-01').getTime(), description: 'Cliente solicitou orçamento de 10 peças.', attendant: 'Bot IA' },
+          { id: 'a2', date: new Date('2026-05-05').getTime(), description: 'Cliente gostaria de ver sobre desconto', attendant: 'Atendente' },
+          { id: 'a3', date: new Date('2026-05-10').getTime(), description: 'Cliente gostaria de fechar orçamento.', attendant: 'Bot IA' },
         ],
       },
     ];
@@ -85,11 +86,11 @@ describe('Tickets Timeline', () => {
   it('deve ordenar atividades cronologicamente', () => {
     const ticket = mockTickets[0];
     const sorted = [...ticket.activities].sort((a, b) =>
-      new Date(a.date).getTime() - new Date(b.date).getTime()
+      a.date - b.date
     );
 
-    expect(sorted[0].date.getTime()).toBeLessThanOrEqual(sorted[1].date.getTime());
-    expect(sorted[1].date.getTime()).toBeLessThanOrEqual(sorted[2].date.getTime());
+    expect(sorted[0].date).toBeLessThanOrEqual(sorted[1].date);
+    expect(sorted[1].date).toBeLessThanOrEqual(sorted[2].date);
   });
 
   it('deve mudar o status do chamado', () => {
@@ -127,7 +128,7 @@ describe('Tickets Timeline', () => {
 
   it('deve validar que cada atividade tem data válida', () => {
     const ticket = mockTickets[0];
-    const allValid = ticket.activities.every(a => a.date instanceof Date && !isNaN(a.date.getTime()));
+    const allValid = ticket.activities.every(a => typeof a.date === 'number' && !isNaN(a.date));
 
     expect(allValid).toBe(true);
   });

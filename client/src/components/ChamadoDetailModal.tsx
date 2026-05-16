@@ -8,7 +8,8 @@ interface Activity {
   id: string;
   description: string;
   attendant: string;
-  date: Date | string;
+  date: number; // timestamp em millisegundos
+  actionType?: string;
 }
 
 interface Chamado {
