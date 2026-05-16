@@ -833,3 +833,10 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Remover botão "+ Registrar Atividade" da seção "Histórico do Chamado"
 - [x] Manter botão na linha de ferramentas para evitar duplicação
 - [x] Testar que a timeline continua funcionando corretamente
+
+
+## Fase 73: Correção do Botão Registrar Atividade
+- [x] Diagnosticar por que botão não funcionava
+- [x] Adicionar onClick ao botão "Registro de atividade"
+- [x] Validar fluxo completo (modal → formulário → timeline)
+- [x] Testar integração com backend

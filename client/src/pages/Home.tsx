@@ -1189,7 +1189,7 @@ export function TicketsPage() {
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Editar chamado</div>
             </div>
             <div className="border-l border-slate-300 h-8"></div>
-            <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors">
+            <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors" onClick={() => setShowRegisterActivityModal(true)}>
               {/* Balão retangular com 2 linhas - Atividade */}
               <svg className="w-6 h-6 text-black hover:text-slate-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <rect x="3" y="5" width="14" height="10" rx="2" />
