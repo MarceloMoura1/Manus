@@ -635,6 +635,8 @@ export const appRouter = router({
       return { ok: true, clientId: client.clientId, integrationToken: client.apiToken, tokenHint: tokenHint(client.apiToken) };
     }),
     tenantObservability: adminProcedure.input(z.object({ clientId: z.string().min(3) })).query(async ({ input }) => {
+      // Sempre re-hidrata do banco para garantir dados frescos (integrações, token Gemini, etc.)
+      syncStateHydrated = false;
       await hydrateSyncState();
       const client = getClientOrThrow(input.clientId);
       return { client: sanitizeClient(client), observability: await readMegaDeskTenantObservability(client.clientId) };

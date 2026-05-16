@@ -950,3 +950,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Substituir @google/generative-ai por fetch HTTP direto no gemini-client.ts
 - [x] Testar conexão e chat com token real
 - [x] Salvar checkpoint
+
+## Fase 87: Garantir salvamento autônomo do token Gemini pelo formulário
+- [x] Auditar fluxo: digitar token → clicar Salvar → token persiste no banco
+- [x] Garantir que saveClientIntegrations atualiza banco E memória corretamente
+- [x] Garantir que após salvar, "Testar conexão" usa o token recém-salvo
+- [x] tenantObservability sempre re-hidrata do banco (dados sempre frescos)
+- [x] Testar fluxo completo sem intervenção manual
+- [ ] Salvar checkpoint
