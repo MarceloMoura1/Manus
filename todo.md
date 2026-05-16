@@ -854,3 +854,9 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Testar responsividade da timeline
 - [x] Validar que múltiplas atividades aparecem corretamente
 - [x] Testar tipos de ação diferentes
+
+## Fase 72: Ajuste de UI - Remover Botão Duplicado
+
+- [x] Remover botão "+ Registrar Atividade" da seção "Histórico do Chamado"
+- [x] Manter botão na linha de ferramentas para evitar duplicação
+- [x] Testar que a timeline continua funcionando corretamente

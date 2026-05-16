@@ -1248,12 +1248,6 @@ export function TicketsPage() {
             <div className="mx-8 mt-8 pb-8">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-lg font-semibold text-slate-900">Historico do Chamado</h3>
-                <Button
-                  onClick={() => setShowRegisterActivityModal(true)}
-                  className="bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-                >
-                  + Registrar Atividade
-                </Button>
               </div>
               
               {selectedChamado.activities && selectedChamado.activities.length > 0 ? (
