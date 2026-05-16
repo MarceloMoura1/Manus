@@ -923,24 +923,26 @@ export function TicketsPage() {
           </div>
 
           {/* Retangulo com Dados do Cliente */}
-          <div className="bg-slate-700 text-white p-6 mx-8 mt-6 rounded-lg" style={{height: '103px', marginBottom: '6px', marginLeft: '31px', paddingBottom: '0px', paddingLeft: '16px', paddingTop: '0px', width: '1778px'}}>
-            <h2 className="text-lg font-semibold mb-4">Dados do Cliente</h2>
-            <div className="grid grid-cols-2 gap-6">
-              <div>
-                <p className="text-sm text-slate-300">Nome</p>
-                <p className="text-base font-medium">{selectedChamado.clientName || 'N/A'}</p>
+          <div className="bg-slate-600 text-white p-4 mx-8 mt-6 rounded-lg flex items-center justify-between" style={{height: '103px', marginBottom: '6px', marginLeft: '31px', paddingBottom: '0px', paddingLeft: '16px', paddingTop: '0px', width: '1778px'}}>
+            <div className="flex items-center gap-8 w-full">
+              <div className="flex-1">
+                <p className="text-xs text-slate-300">Nome</p>
+                <p className="text-sm font-medium">{selectedChamado.clientName || 'N/A'}</p>
               </div>
-              <div>
-                <p className="text-sm text-slate-300">Telefone</p>
-                <p className="text-base font-medium">{selectedChamado.clientPhone || 'N/A'}</p>
+              <div className="border-l border-slate-500 h-12"></div>
+              <div className="flex-1">
+                <p className="text-xs text-slate-300">Telefone</p>
+                <p className="text-sm font-medium">{selectedChamado.clientPhone || 'N/A'}</p>
               </div>
-              <div>
-                <p className="text-sm text-slate-300">CNPJ</p>
-                <p className="text-base font-medium">{selectedChamado.clientCnpj || 'N/A'}</p>
+              <div className="border-l border-slate-500 h-12"></div>
+              <div className="flex-1">
+                <p className="text-xs text-slate-300">CNPJ</p>
+                <p className="text-sm font-medium">{selectedChamado.clientCnpj || 'N/A'}</p>
               </div>
-              <div>
-                <p className="text-sm text-slate-300">Email</p>
-                <p className="text-base font-medium">{selectedChamado.clientEmail || 'N/A'}</p>
+              <div className="border-l border-slate-500 h-12"></div>
+              <div className="flex-1">
+                <p className="text-xs text-slate-300">Email</p>
+                <p className="text-sm font-medium">{selectedChamado.clientEmail || 'N/A'}</p>
               </div>
             </div>
           </div>
