@@ -52,8 +52,19 @@ const MEGADESK_ACTIVE_PAGE_KEY = "megadesk_active_page_v1";
 function loadSession(): MegaDeskSession | null {
   try {
     const raw = localStorage.getItem(MEGADESK_SESSION_KEY) ?? sessionStorage.getItem(MEGADESK_SESSION_KEY);
-    return raw ? (JSON.parse(raw) as MegaDeskSession) : null;
+    if (!raw) return null;
+    
+    const session = JSON.parse(raw) as MegaDeskSession;
+    
+    // Se a sessão expirou, limpar e retornar null
+    if (isSessionExpired(session)) {
+      clearSession();
+      return null;
+    }
+    
+    return session;
   } catch {
+    clearSession();
     return null;
   }
 }
@@ -2696,8 +2707,58 @@ function useSessionRefresh(session: MegaDeskSession | null, setSession: (session
 
 export function Home() {
   const [session, setSession] = useState<MegaDeskSession | null>(() => loadSession());
+  const [isValidating, setIsValidating] = useState(true);
+  const refreshMutation = trpc.megadesk.refreshSession.useMutation();
+  
+  // Validar e renovar sessão ao carregar a página
+  React.useEffect(() => {
+    const validateAndRefreshSession = async () => {
+      try {
+        const loadedSession = loadSession();
+        
+        if (!loadedSession) {
+          setIsValidating(false);
+          return;
+        }
+        
+        // Se a sessão está próxima de expirar, renovar
+        if (shouldRefreshSession(loadedSession)) {
+          try {
+            const result = await refreshMutation.mutateAsync({ userEmail: loadedSession.userEmail });
+            if (result.ok) {
+              const updatedSession = saveSession(result.session);
+              setSession(updatedSession);
+            } else {
+              clearSession();
+              setSession(null);
+            }
+          } catch (error) {
+            console.error("Erro ao renovar sessão ao carregar:", error);
+            // Se falhar ao renovar, limpar sessão
+            clearSession();
+            setSession(null);
+          }
+        } else {
+          setSession(loadedSession);
+        }
+      } catch (error) {
+        console.error("Erro ao validar sessão:", error);
+        clearSession();
+        setSession(null);
+      } finally {
+        setIsValidating(false);
+      }
+    };
+    
+    validateAndRefreshSession();
+  }, []);
+  
   useSessionRefresh(session, setSession);
 
+  if (isValidating) {
+    return <LoadingSpinner />;
+  }
+  
   if (!session) {
     return <MegaDeskLoginGate onLogin={setSession} />;
   }
