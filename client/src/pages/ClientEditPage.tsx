@@ -14,6 +14,7 @@ import {
   Settings,
   Shield,
   Trash2,
+  TrendingUp,
   UserCog,
   UserPlus,
   Users,
@@ -571,6 +572,160 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
 }
 
 // ─── Aba: APIs / Integrações ──────────────────────────────────────────────────
+// ─── Painel de Uso de Tokens Gemini ─────────────────────────────────────────
+function GeminiTokenUsagePanel({ clientId }: { clientId: string }) {
+  const [period, setPeriod] = useState<"today" | "week" | "month" | "all">("month");
+  const { data, isLoading, refetch } = trpc.tokenUsage.getSummary.useQuery(
+    { clientId, period },
+    { refetchOnWindowFocus: false }
+  );
+  const { data: history, isLoading: histLoading } = trpc.tokenUsage.getHistory.useQuery(
+    { clientId, limit: 10, offset: 0 },
+    { refetchOnWindowFocus: false }
+  );
+
+  const periods = [
+    { key: "today" as const, label: "Hoje" },
+    { key: "week" as const, label: "7 dias" },
+    { key: "month" as const, label: "30 dias" },
+    { key: "all" as const, label: "Total" },
+  ];
+
+  const formatTokens = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+  const formatDate = (ts: number) => new Date(ts).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+
+  return (
+    <div className="rounded-2xl border border-purple-400/20 bg-purple-400/5 p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <TrendingUp className="h-5 w-5 text-purple-400" />
+          <h4 className="text-sm font-semibold text-white">Uso de Tokens Gemini</h4>
+          <span className="rounded-full bg-purple-400/10 border border-purple-400/20 px-2 py-0.5 text-xs text-purple-300">Controle financeiro</span>
+        </div>
+        <button onClick={() => refetch()} className="text-slate-400 hover:text-white transition">
+          <RefreshCw className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* Seletor de período */}
+      <div className="flex gap-2">
+        {periods.map((p) => (
+          <button
+            key={p.key}
+            onClick={() => setPeriod(p.key)}
+            className={cn(
+              "rounded-lg px-3 py-1 text-xs transition",
+              period === p.key
+                ? "bg-purple-500 text-white"
+                : "border border-white/10 text-slate-400 hover:text-white"
+            )}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-8 text-slate-400 text-sm">Carregando...</div>
+      ) : data ? (
+        <>
+          {/* Cards de métricas */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="rounded-xl border border-white/10 bg-white/[.02] p-3 text-center">
+              <div className="text-2xl font-bold text-purple-300">{formatTokens(data.totalTokens)}</div>
+              <div className="text-xs text-slate-400 mt-0.5">Tokens usados</div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/[.02] p-3 text-center">
+              <div className="text-2xl font-bold text-emerald-300">R$ {data.estimatedCostBRL.toFixed(2)}</div>
+              <div className="text-xs text-slate-400 mt-0.5">Custo estimado</div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/[.02] p-3 text-center">
+              <div className="text-2xl font-bold text-cyan-300">{data.totalCalls}</div>
+              <div className="text-xs text-slate-400 mt-0.5">Chamadas IA</div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/[.02] p-3 text-center">
+              <div className="text-2xl font-bold text-yellow-300">{data.uniqueUsers}</div>
+              <div className="text-xs text-slate-400 mt-0.5">Usuários ativos</div>
+            </div>
+          </div>
+
+          {/* Detalhes de tokens */}
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div className="rounded-xl border border-white/10 bg-white/[.02] p-3 space-y-1">
+              <div className="text-slate-400">Tokens de entrada (prompt)</div>
+              <div className="text-white font-medium">{formatTokens(data.promptTokens)}</div>
+              <div className="text-slate-500">$ {((data.promptTokens / 1_000_000) * 0.075).toFixed(4)} USD</div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/[.02] p-3 space-y-1">
+              <div className="text-slate-400">Tokens de saída (resposta)</div>
+              <div className="text-white font-medium">{formatTokens(data.completionTokens)}</div>
+              <div className="text-slate-500">$ {((data.completionTokens / 1_000_000) * 0.30).toFixed(4)} USD</div>
+            </div>
+          </div>
+
+          {/* Top usuários */}
+          {data.topUsers.length > 0 && (
+            <div>
+              <div className="text-xs text-slate-400 mb-2">Top usuários por consumo</div>
+              <div className="space-y-1.5">
+                {data.topUsers.slice(0, 5).map((u) => (
+                  <div key={u.email} className="flex items-center justify-between rounded-lg bg-white/[.02] px-3 py-2">
+                    <span className="text-xs text-slate-300 truncate max-w-[60%]">{u.email || "(sem email)"}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-purple-300">{formatTokens(u.tokens)} tokens</span>
+                      <span className="text-xs text-slate-500">{u.calls} chamadas</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Custo total em destaque */}
+          <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-4 flex items-center justify-between">
+            <div>
+              <div className="text-xs text-slate-400">Custo total estimado ({periods.find(p => p.key === period)?.label})</div>
+              <div className="text-lg font-bold text-emerald-300 mt-0.5">R$ {data.estimatedCostBRL.toFixed(2)}</div>
+              <div className="text-xs text-slate-500">${data.estimatedCostUSD.toFixed(4)} USD · Gemini 1.5 Flash</div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs text-slate-400">{data.totalConversations} conversas</div>
+              <div className="text-xs text-slate-400">{data.functionCalls} function calls</div>
+            </div>
+          </div>
+
+          {data.totalCalls === 0 && (
+            <div className="text-center py-4 text-slate-500 text-sm">Nenhum uso registrado no período selecionado.</div>
+          )}
+        </>
+      ) : null}
+
+      {/* Histórico recente */}
+      {history && history.items.length > 0 && (
+        <div>
+          <div className="text-xs text-slate-400 mb-2">Últimas chamadas</div>
+          <div className="space-y-1 max-h-48 overflow-y-auto">
+            {history.items.map((item) => (
+              <div key={item.id} className="flex items-center justify-between rounded-lg bg-white/[.02] px-3 py-2 text-xs">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-slate-400 shrink-0">{formatDate(item.createdAt)}</span>
+                  <span className="text-slate-300 truncate">{item.userEmail || "(sem email)"}</span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-purple-300">{formatTokens(item.totalTokens)} tk</span>
+                  {item.functionCallsCount > 0 && (
+                    <span className="text-yellow-400">{item.functionCallsCount} fn</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ApisTab({ client, onRefresh }: { client: any; onRefresh: () => void }) {
   const intg = client.integrations ?? {};
   const [form, setForm] = useState({
@@ -654,6 +809,9 @@ function ApisTab({ client, onRefresh }: { client: any; onRefresh: () => void }) 
           />
         </label>
       </div>
+
+      {/* Painel de uso de tokens */}
+      <GeminiTokenUsagePanel clientId={client.clientId} />
 
       {/* Rastreio */}
       <div className="rounded-2xl border border-white/10 bg-white/[.02] p-5 space-y-4">

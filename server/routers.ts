@@ -483,7 +483,31 @@ export const appRouter = router({
       let message = "";
       if (input.type === "gemini") {
         if (!intg.geminiKey) { message = "Chave da API Gemini não configurada."; }
-        else { success = intg.geminiKey.length > 10; message = success ? "Conexão com Gemini IA validada com sucesso." : "Chave inválida ou muito curta."; }
+        else if (intg.geminiKey.length <= 10) { message = "Chave inválida ou muito curta."; }
+        else {
+          // Faz chamada real à API Gemini para validar o token
+          try {
+            const { GoogleGenerativeAI } = await import("@google/generative-ai");
+            const genAI = new GoogleGenerativeAI(intg.geminiKey);
+            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            const result = await model.generateContent("Responda apenas: OK");
+            const text = result.response.text();
+            success = text.length > 0;
+            message = success ? `Conexão com Gemini IA validada com sucesso. Modelo respondeu: "${text.slice(0, 50)}"` : "Gemini não retornou resposta.";
+          } catch (err: any) {
+            success = false;
+            const errMsg = err?.message ?? "Erro desconhecido";
+            if (errMsg.includes("API_KEY_INVALID") || errMsg.includes("API key not valid")) {
+              message = "Token inválido. Verifique a chave da API Gemini.";
+            } else if (errMsg.includes("PERMISSION_DENIED")) {
+              message = "Permissão negada. Verifique se a chave tem acesso ao Gemini.";
+            } else if (errMsg.includes("QUOTA_EXCEEDED") || errMsg.includes("quota")) {
+              message = "Cota da API Gemini excedida. Verifique seu plano.";
+            } else {
+              message = `Erro ao conectar com Gemini: ${errMsg.slice(0, 100)}`;
+            }
+          }
+        }
       } else if (input.type === "tracking") {
         if (!intg.trackingToken) { message = "Token de rastreio não configurado."; }
         else { success = intg.trackingToken.length > 5; message = success ? "Token de rastreio validado com sucesso." : "Token inválido."; }
@@ -1258,7 +1282,7 @@ export const appRouter = router({
         return { ok: true };
       }),
 
-    // ── Verifica se o cliente tem token Gemini configurado ──
+        // ── Verifica se o cliente tem token Gemini configurado ──
     checkGeminiConfig: publicProcedure
       .input(z.object({ clientId: z.string().min(1) }))
       .query(async ({ input }) => {
@@ -1267,6 +1291,164 @@ export const appRouter = router({
         return { configured: !!token && token.length > 10 };
       }),
   }),
-});
 
+  // ════════════════════════════════════════════════════════════════════════════════
+  // ROUTER: tokenUsage — Rastreio de uso de tokens Gemini por cliente
+  // ════════════════════════════════════════════════════════════════════════════════
+  tokenUsage: router({
+    // Registra uso de tokens após uma conversa com IA
+    record: publicProcedure
+      .input(z.object({
+        clientId: z.string().min(1),
+        userEmail: z.string().default(""),
+        conversationId: z.string().default(""),
+        promptTokens: z.number().int().min(0).default(0),
+        completionTokens: z.number().int().min(0).default(0),
+        totalTokens: z.number().int().min(0).default(0),
+        model: z.string().default("gemini-1.5-flash"),
+        functionCallsCount: z.number().int().min(0).default(0),
+      }))
+      .mutation(async ({ input }) => {
+        const pool = getPool();
+        const id = `tu-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        await pool.execute(
+          `INSERT INTO megadesk_ia_token_usage
+           (id, client_id, user_email, conversation_id, prompt_tokens, completion_tokens, total_tokens, model, function_calls_count, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [id, input.clientId, input.userEmail, input.conversationId,
+           input.promptTokens, input.completionTokens, input.totalTokens,
+           input.model, input.functionCallsCount, Date.now()]
+        );
+        return { ok: true, id };
+      }),
+
+    // Retorna resumo de uso de tokens por cliente (para MegaAdmin)
+    getSummary: adminProcedure
+      .input(z.object({
+        clientId: z.string().min(1),
+        period: z.enum(["today", "week", "month", "all"]).default("month"),
+      }))
+      .query(async ({ input }) => {
+        const pool = getPool();
+        const now = Date.now();
+        const periodMs: Record<string, number> = {
+          today: 24 * 60 * 60 * 1000,
+          week: 7 * 24 * 60 * 60 * 1000,
+          month: 30 * 24 * 60 * 60 * 1000,
+          all: now, // desde o início
+        };
+        const since = input.period === "all" ? 0 : now - periodMs[input.period];
+
+        // Totais do período
+        const [totals] = await pool.execute(
+          `SELECT
+             COUNT(*) as total_calls,
+             COALESCE(SUM(total_tokens), 0) as total_tokens,
+             COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+             COALESCE(SUM(completion_tokens), 0) as completion_tokens,
+             COALESCE(SUM(function_calls_count), 0) as function_calls,
+             COUNT(DISTINCT user_email) as unique_users,
+             COUNT(DISTINCT conversation_id) as total_conversations
+           FROM megadesk_ia_token_usage
+           WHERE client_id = ? AND created_at >= ?`,
+          [input.clientId, since]
+        ) as any;
+
+        // Uso por dia (últimos 30 dias)
+        const [dailyUsage] = await pool.execute(
+          `SELECT
+             DATE(FROM_UNIXTIME(created_at / 1000)) as day,
+             SUM(total_tokens) as tokens,
+             COUNT(*) as calls
+           FROM megadesk_ia_token_usage
+           WHERE client_id = ? AND created_at >= ?
+           GROUP BY DATE(FROM_UNIXTIME(created_at / 1000))
+           ORDER BY day DESC
+           LIMIT 30`,
+          [input.clientId, now - 30 * 24 * 60 * 60 * 1000]
+        ) as any;
+
+        // Top usuários por consumo
+        const [topUsers] = await pool.execute(
+          `SELECT
+             user_email,
+             SUM(total_tokens) as total_tokens,
+             COUNT(*) as calls
+           FROM megadesk_ia_token_usage
+           WHERE client_id = ? AND created_at >= ?
+           GROUP BY user_email
+           ORDER BY total_tokens DESC
+           LIMIT 10`,
+          [input.clientId, since]
+        ) as any;
+
+        const summary = (totals as any[])[0] ?? {};
+        // Custo estimado: Gemini 1.5 Flash = ~$0.075 por 1M tokens de entrada, $0.30 por 1M de saída
+        const promptCost = (Number(summary.prompt_tokens ?? 0) / 1_000_000) * 0.075;
+        const completionCost = (Number(summary.completion_tokens ?? 0) / 1_000_000) * 0.30;
+        const estimatedCostUSD = promptCost + completionCost;
+
+        return {
+          period: input.period,
+          totalCalls: Number(summary.total_calls ?? 0),
+          totalTokens: Number(summary.total_tokens ?? 0),
+          promptTokens: Number(summary.prompt_tokens ?? 0),
+          completionTokens: Number(summary.completion_tokens ?? 0),
+          functionCalls: Number(summary.function_calls ?? 0),
+          uniqueUsers: Number(summary.unique_users ?? 0),
+          totalConversations: Number(summary.total_conversations ?? 0),
+          estimatedCostUSD: Math.round(estimatedCostUSD * 10000) / 10000,
+          estimatedCostBRL: Math.round(estimatedCostUSD * 5.5 * 100) / 100, // cotacao aproximada
+          dailyUsage: (dailyUsage as any[]).map((d) => ({
+            day: d.day,
+            tokens: Number(d.tokens),
+            calls: Number(d.calls),
+          })),
+          topUsers: (topUsers as any[]).map((u) => ({
+            email: u.user_email,
+            tokens: Number(u.total_tokens),
+            calls: Number(u.calls),
+          })),
+        };
+      }),
+
+    // Histórico detalhado de uso (para MegaAdmin)
+    getHistory: adminProcedure
+      .input(z.object({
+        clientId: z.string().min(1),
+        limit: z.number().int().min(1).max(100).default(50),
+        offset: z.number().int().min(0).default(0),
+      }))
+      .query(async ({ input }) => {
+        const pool = getPool();
+        const [rows] = await pool.execute(
+          `SELECT id, user_email, conversation_id, prompt_tokens, completion_tokens,
+                  total_tokens, model, function_calls_count, created_at
+           FROM megadesk_ia_token_usage
+           WHERE client_id = ?
+           ORDER BY created_at DESC
+           LIMIT ? OFFSET ?`,
+          [input.clientId, input.limit, input.offset]
+        ) as any;
+        const [countRows] = await pool.execute(
+          "SELECT COUNT(*) as total FROM megadesk_ia_token_usage WHERE client_id = ?",
+          [input.clientId]
+        ) as any;
+        return {
+          items: (rows as any[]).map((r) => ({
+            id: r.id,
+            userEmail: r.user_email,
+            conversationId: r.conversation_id,
+            promptTokens: Number(r.prompt_tokens),
+            completionTokens: Number(r.completion_tokens),
+            totalTokens: Number(r.total_tokens),
+            model: r.model,
+            functionCallsCount: Number(r.function_calls_count),
+            createdAt: Number(r.created_at),
+          })),
+          total: Number((countRows as any[])[0]?.total ?? 0),
+        };
+      }),
+  }),
+});
 export type AppRouter = typeof appRouter;

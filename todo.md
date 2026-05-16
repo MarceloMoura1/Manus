@@ -928,3 +928,12 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Criar página Assistente IA no MegaDesk com chat completo
 - [x] Function calling: consultar vendas ERP, chamados, conversas quando solicitado
 - [x] 23 testes de Assistente IA passando (estrutura de mensagens, histórico, function calling, tokens por cliente)
+
+## Fase 84: Melhorias de Token Gemini e Controle Financeiro no MegaAdmin
+- [x] Melhorar botão "Testar conexão" com chamada real à API Gemini
+- [x] Criar tabela de rastreio de uso de tokens no banco (megadesk_ia_token_usage)
+- [x] Criar procedure para registrar uso de tokens a cada chat
+- [x] Criar procedure para consultar uso de tokens por cliente/período
+- [x] Implementar painel de uso de tokens na aba do cliente no MegaAdmin
+- [x] Exibir: tokens consumidos (dia/mês), custo estimado, histórico de conversas
+- [x] Criar testes e salvar checkpoint
