@@ -116,6 +116,15 @@ export async function createTicket(input: {
   category: string;
   description: string;
 }) {
+  const now = new Date();
+  const day = String(now.getDate()).padStart(2, '0');
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const year = now.getFullYear();
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  const createdLabel = `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+  
   await getDb().insert(megadeskDomainTickets).values({
     ticketId: input.ticketId,
     clientId: input.clientId,
@@ -124,7 +133,7 @@ export async function createTicket(input: {
     problem: input.problem,
     category: input.category,
     status: "open",
-    createdLabel: new Date().toLocaleString("pt-BR"),
+    createdLabel: createdLabel,
     description: input.description,
   });
   return input;

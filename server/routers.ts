@@ -826,7 +826,10 @@ export const appRouter = router({
           return { ok: true, ticketId, title: input.title };
         } catch (error) {
           console.error("Erro ao criar chamado:", error);
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao criar chamado" });
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error("Detalhes do erro:", errorMessage);
+          console.error("Stack:", error instanceof Error ? error.stack : "N/A");
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Erro ao criar chamado: ${errorMessage}` });
         }
       }),
     createConversation: publicProcedure
