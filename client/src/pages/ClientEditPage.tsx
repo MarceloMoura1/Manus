@@ -773,7 +773,12 @@ function ApisTab({ client, onRefresh }: { client: any; onRefresh: () => void }) 
     const result = testResults[type];
     return (
       <button
-        onClick={() => test.mutate({ clientId: client.clientId, type })}
+        onClick={() => test.mutate({
+          clientId: client.clientId,
+          type,
+          // Passa o valor atual do formulário para o Gemini, sem precisar salvar antes
+          ...(type === "gemini" && form.geminiKey ? { geminiKeyOverride: form.geminiKey } : {}),
+        })}
         disabled={test.isPending}
         className={cn(
           "flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs transition",

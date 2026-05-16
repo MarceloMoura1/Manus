@@ -937,3 +937,10 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Implementar painel de uso de tokens na aba do cliente no MegaAdmin
 - [x] Exibir: tokens consumidos (dia/mês), custo estimado, histórico de conversas
 - [x] Criar testes e salvar checkpoint
+
+## Fase 85: BUG - Token Gemini não reconhecido após salvar no MegaAdmin
+- [x] Diagnosticar fluxo de salvamento do token (saveIntegration procedure)
+- [x] Diagnosticar fluxo de leitura do token (getGeminiToken / testIntegration)
+- [x] Corrigir bug onde token salvo retorna "Chave da API Gemini não configurada"
+- [x] Testar fluxo completo: salvar token → testar conexão → usar Assistente IA
+- [ ] Salvar checkpoint

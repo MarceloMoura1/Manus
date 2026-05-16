@@ -475,6 +475,8 @@ export const appRouter = router({
     testIntegration: adminProcedure.input(z.object({
       clientId: z.string(),
       type: z.enum(["gemini", "tracking", "n8n"]),
+      // Permite testar com o valor atual do formulário sem precisar salvar antes
+      geminiKeyOverride: z.string().optional(),
     })).mutation(async ({ input }) => {
       await hydrateSyncState();
       const client = getClientOrThrow(input.clientId);
@@ -482,18 +484,25 @@ export const appRouter = router({
       let success = false;
       let message = "";
       if (input.type === "gemini") {
-        if (!intg.geminiKey) { message = "Chave da API Gemini não configurada."; }
-        else if (intg.geminiKey.length <= 10) { message = "Chave inválida ou muito curta."; }
+        // Usa o valor do formulário se fornecido, senão usa o salvo no banco
+        const geminiKey = input.geminiKeyOverride?.trim() || intg.geminiKey;
+        if (!geminiKey) { message = "Chave da API Gemini não configurada."; }
+        else if (geminiKey.length <= 10) { message = "Chave inválida ou muito curta."; }
         else {
           // Faz chamada real à API Gemini para validar o token
           try {
             const { GoogleGenerativeAI } = await import("@google/generative-ai");
-            const genAI = new GoogleGenerativeAI(intg.geminiKey);
+            const genAI = new GoogleGenerativeAI(geminiKey);
             const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
             const result = await model.generateContent("Responda apenas: OK");
             const text = result.response.text();
             success = text.length > 0;
             message = success ? `Conexão com Gemini IA validada com sucesso. Modelo respondeu: "${text.slice(0, 50)}"` : "Gemini não retornou resposta.";
+            // Se o teste passou e o token era do formulário, salva automaticamente
+            if (success && input.geminiKeyOverride?.trim()) {
+              client.integrations = { ...client.integrations, geminiKey: input.geminiKeyOverride.trim() };
+              await persistSyncState();
+            }
           } catch (err: any) {
             success = false;
             const errMsg = err?.message ?? "Erro desconhecido";
