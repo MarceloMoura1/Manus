@@ -707,7 +707,7 @@ export const appRouter = router({
       const client = getReleasedClientOrThrow(input.clientId);
       // Busca o usuário ativo — sem exigir nenhuma permissão específica, apenas que esteja ativo
       const activeUsers = client.users
-        .map((user) => ({ ...user, permissions: resolveUserPermissions(user) }))
+        .map((user) => ({ ...user, permissions: resolveUserPermissions(user, client.modules) }))
         .filter((user) => user.status === "active");
       const activeUser = activeUsers.find((u) => u.email.toLowerCase() === input.userEmail.toLowerCase());
       if (!activeUser) {
@@ -741,7 +741,7 @@ export const appRouter = router({
       }
       // Verifica apenas que o usuário existe e está ativo — sem exigir permissão específica
       const activeUsers = client.users
-        .map((u) => ({ ...u, permissions: Array.from(new Set([...rolePermissions(u.role), ...(u.permissions ?? [])])) }))
+        .map((u) => ({ ...u, permissions: resolveUserPermissions(u, client.modules) }))
         .filter((u) => u.status === "active");
       const user = activeUsers.find((u) => u.email.toLowerCase() === input.userEmail.toLowerCase());
       if (!user) {
@@ -794,7 +794,7 @@ export const appRouter = router({
       const client = getReleasedClientOrThrow(input.clientId);
       // Verifica apenas que o usuário existe e está ativo
       const activeUsers = client.users
-        .map((u) => ({ ...u, permissions: Array.from(new Set([...rolePermissions(u.role), ...(u.permissions ?? [])])) }))
+        .map((u) => ({ ...u, permissions: resolveUserPermissions(u, client.modules) }))
         .filter((u) => u.status === "active");
       const user = activeUsers.find((u) => u.email.toLowerCase() === input.userEmail.toLowerCase());
       if (!user) throw new TRPCError({ code: "FORBIDDEN", message: "Usuário sem acesso ativo neste cliente." });
@@ -1155,8 +1155,8 @@ export const appRouter = router({
             });
           }
 
-          // Renova a sessão com permissões atualizadas
-          const permissions = resolveUserPermissions(user);
+          // Renova a sessão com permissões atualizadas (respeitando módulos do cliente)
+          const permissions = resolveUserPermissions(user, client.modules);
           audit("MegaDesk", `Sessão renovada: ${email}`, client.clientId);
           await persistSyncState();
 

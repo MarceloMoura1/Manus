@@ -889,3 +889,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Verificar se loadMegaDeskStructuredState está carregando clientes deletados
 - [x] Implementar correção definitiva: deleteClientFromDb() chamado ANTES de splice() em memória
 - [x] Criar testes e validar (11 testes de exclusão permanente passando)
+
+## Fase 78: CORREÇÃO DEFINITIVA - Sistema de Permissões MegaAdmin ↔ MegaDesk
+- [x] Diagnóstico completo: leitura de todos os arquivos envolvidos (ClientEditPage, routers.ts, Home.tsx, shared/const.ts)
+- [x] BUG #1 CORRIGIDO: Checkboxes no MegaAdmin normalizam permissões do backend (hífen → underscore) antes de comparar com ALL_MODULES
+- [x] BUG #2 CORRIGIDO: validateToken e tenantObservability usam resolveUserPermissions() em vez de misturar rolePermissions com customizadas
+- [x] BUG #3 CORRIGIDO: overview e refreshSession passam client.modules para resolveUserPermissions() — filtro por módulos do cliente funciona
+- [x] BUG #4 CORRIGIDO: Todos os pontos de retorno de permissões no backend usam resolveUserPermissions(user, client.modules) consistentemente
+- [x] 21 testes criados cobrindo mapeamento bidirecional, resolução de permissões e fluxo completo MegaAdmin → MegaDesk

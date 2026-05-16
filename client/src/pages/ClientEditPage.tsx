@@ -24,7 +24,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
-import { MODULE_LABELS } from "@shared/const";
+import { MODULE_LABELS, normalizeModuleNamesToAdmin } from "@shared/const";
 
 function cn(...classes: Array<string | false | undefined | null>) {
   return classes.filter(Boolean).join(" ");
@@ -518,7 +518,9 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               {ALL_MODULES.map((mod) => {
                 const user = users.find((u: any) => u.id === expandedUser);
-                const currentPermissions = editingPermissions[expandedUser] ?? user?.permissions ?? [];
+                // Normalizar permissões do backend (hífen) para underscore antes de comparar com ALL_MODULES
+                const rawPermissions = editingPermissions[expandedUser] ?? user?.permissions ?? [];
+                const currentPermissions = normalizeModuleNamesToAdmin(rawPermissions);
                 const hasPermission = currentPermissions.includes(mod);
                 return (
                   <label key={mod} className="flex items-center gap-3 p-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 cursor-pointer transition border border-slate-700 hover:border-blue-500">
@@ -528,7 +530,7 @@ function PermissoesTab({ client, onRefresh }: { client: any; onRefresh: () => vo
                       onChange={(e) => {
                         const newPermissions = e.target.checked
                           ? [...currentPermissions, mod]
-                          : currentPermissions.filter((p) => p !== mod);
+                          : currentPermissions.filter((p: string) => p !== mod);
                         setEditingPermissions((prev) => ({ ...prev, [expandedUser]: newPermissions }));
                       }}
                       className="rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500/50"
