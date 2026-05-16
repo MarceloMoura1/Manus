@@ -484,8 +484,18 @@ export const appRouter = router({
       let success = false;
       let message = "";
       if (input.type === "gemini") {
-        // Usa o valor do formulário se fornecido, senão usa o salvo no banco
-        const geminiKey = input.geminiKeyOverride?.trim() || intg.geminiKey;
+        // Prioridade: override do formulário > banco direto > memória em cache
+        let geminiKey = input.geminiKeyOverride?.trim() || intg.geminiKey;
+        // Se não há override e a memória está vazia, busca diretamente do banco
+        if (!geminiKey) {
+          const { getClientGeminiToken } = await import("./gemini-client");
+          const dbKey = await getClientGeminiToken(input.clientId);
+          if (dbKey) {
+            geminiKey = dbKey;
+            // Atualiza a memória em cache para evitar nova consulta
+            client.integrations = { ...client.integrations, geminiKey: dbKey };
+          }
+        }
         if (!geminiKey) { message = "Chave da API Gemini não configurada."; }
         else if (geminiKey.length <= 10) { message = "Chave inválida ou muito curta."; }
         else {

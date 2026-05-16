@@ -949,4 +949,4 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Substituir @google/generative-ai por fetch HTTP direto no testIntegration
 - [x] Substituir @google/generative-ai por fetch HTTP direto no gemini-client.ts
 - [x] Testar conexão e chat com token real
-- [ ] Salvar checkpoint
+- [x] Salvar checkpoint
