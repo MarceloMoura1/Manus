@@ -1310,7 +1310,7 @@ export function TicketsPage() {
 
           {/* Card Suspenso de Editar Chamado */}
           {showEditCard && selectedChamado && (
-            <div className="absolute top-[280px] left-1/2 transform -translate-x-1/2 z-50 bg-white rounded-lg shadow-2xl border border-slate-200 p-6 w-96 max-h-[500px] overflow-y-auto">
+            <div className="absolute top-[280px] left-1/2 transform -translate-x-1/2 z-50 bg-white rounded-lg shadow-2xl border border-slate-200 p-8 w-[600px] max-h-[700px] overflow-y-auto">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-bold text-slate-900">Editar Chamado</h3>
                 <button
