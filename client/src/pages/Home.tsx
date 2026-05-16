@@ -529,6 +529,7 @@ export function TicketsPage() {
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState<'total' | 'open' | 'in_progress' | 'waiting' | 'closed'>('total');
+  const [selectedChamado, setSelectedChamado] = React.useState<any | null>(null);
 
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [showNewChamadoModal, setShowNewChamadoModal] = React.useState(false);
@@ -758,7 +759,7 @@ export function TicketsPage() {
               filteredChamados.map(chamado => (
                 <tr
                   key={chamado.id}
-
+                  onClick={() => setSelectedChamado(chamado)}
                   className="border-b border-slate-200 hover:bg-blue-50 cursor-pointer transition-colors"
                 >
                   <td className="px-4 py-3 text-sm font-mono text-slate-600">#{String(chamado.number).padStart(4, '0')}</td>
@@ -895,11 +896,36 @@ export function TicketsPage() {
       {/* Toast */}
       {toastMessage && (
         <div
-          className={`fixed bottom-4 right-4 px-4 py-3 rounded-lg text-white ${
+          className={`fixed bottom-4 right-4 px-6 py-3 rounded-lg text-white font-medium shadow-lg z-50 ${
             toastMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'
           }`}
         >
           {toastMessage.message}
+        </div>
+      )}
+
+      {/* Tela Branca de Detalhes do Chamado */}
+      {selectedChamado && (
+        <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
+          {/* Header com Botao Voltar */}
+          <div className="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center gap-4">
+            <Button
+              onClick={() => setSelectedChamado(null)}
+              variant="outline"
+              className="flex items-center gap-2"
+            >
+              <X className="w-4 h-4" />
+              Voltar
+            </Button>
+            <h1 className="text-2xl font-bold text-slate-900">
+              #{String(selectedChamado.number).padStart(4, '0')} - {selectedChamado.title}
+            </h1>
+          </div>
+
+          {/* Conteudo da Tela Branca */}
+          <div className="p-8 max-w-6xl mx-auto">
+            <p className="text-slate-600">Detalhes do chamado serao exibidos aqui...</p>
+          </div>
         </div>
       )}
     </div>
