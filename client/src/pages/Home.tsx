@@ -22,6 +22,7 @@ import {
   Eye,
   EyeOff,
   Home as HomeIcon,
+  Hourglass,
   Lock,
   Mail,
   MapPin,
