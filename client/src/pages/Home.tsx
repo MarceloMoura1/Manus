@@ -598,10 +598,13 @@ export function TicketsPage() {
     }
 
     try {
+      // Obter o nome do atendente
+      const attendantName = clientUsers.find(u => u.userId === forwardAttendant)?.name || forwardAttendant;
+      
       // Atualizar o chamado com o novo atendente
       await updateChamadoMutation.mutateAsync({
         chamadoId: selectedChamado.id,
-        assignedTo: forwardAttendant,
+        assignedTo: attendantName,
       });
 
       // Adicionar atividade se houver observações
@@ -616,7 +619,7 @@ export function TicketsPage() {
       // Atualizar o chamado selecionado
       setSelectedChamado({
         ...selectedChamado,
-        assignedTo: forwardAttendant,
+        assignedTo: attendantName,
       });
 
       // Invalidar cache e refetch
