@@ -881,3 +881,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Implementar correções de sincronização (normalização de nomes, resolução de permissões, filtro de módulos)
 - [x] Criar testes abrangentes de permissões (28 testes passando - normalizacão, bidirecional, sincronização)
 - [x] Validar fluxo completo (MegaAdmin → MegaDesk) - Testes de integração cobrindo todo o ciclo
+
+## Fase 77: BUG CRÍTICO - Clientes Deletados Reaparecem Após Publicação (Reincidência)
+- [x] Diagnosticar fluxo completo de exclusão e carregamento de clientes
+- [x] Verificar se deleteClient está persistindo no banco corretamente
+- [x] Verificar se saveMegaDeskStructuredState está deletando do banco
+- [x] Verificar se loadMegaDeskStructuredState está carregando clientes deletados
+- [x] Implementar correção definitiva: deleteClientFromDb() chamado ANTES de splice() em memória
+- [x] Criar testes e validar (11 testes de exclusão permanente passando)

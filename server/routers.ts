@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure } from "./_core/trpc";
 import { COOKIE_NAME, normalizeModuleNamesToBackend, normalizeModuleNamesToAdmin } from "@shared/const";
-import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool, createMegaDeskBackup, listMegaDeskBackups, getMegaDeskBackupInfo, applyMegaDeskBackup } from "./db";
+import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool, createMegaDeskBackup, listMegaDeskBackups, getMegaDeskBackupInfo, applyMegaDeskBackup, deleteClientFromDb } from "./db";
 import bcrypt from "bcryptjs";
 import { adminCredentials, megadeskDomainClientUsers } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
@@ -666,9 +666,13 @@ export const appRouter = router({
             message: `Não é possível excluir cliente com ${activeUsers.length} usuário(s) ativo(s). Desative todos os usuários primeiro.`,
           });
         }
-        // Remover cliente da lista
+        // PASSO 1: Deletar diretamente do banco ANTES de remover da memória
+        // Isso garante que mesmo se persistSyncState() falhar, o cliente não reaparecerá
+        await deleteClientFromDb(input.clientId);
+        // PASSO 2: Remover da memória
         clients.splice(clientIndex, 1);
         audit("MegaAdmin", `Cliente ${client.company} (${input.clientId}) excluído`, undefined);
+        // PASSO 3: Sincronizar estado completo (conversas, tickets, etc.)
         await persistSyncState();
         return { ok: true, message: `Cliente ${client.company} foi excluído com sucesso.` };
       }),

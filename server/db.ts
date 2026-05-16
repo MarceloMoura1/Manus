@@ -696,3 +696,41 @@ export async function getMegaDeskBackupInfo(backupId: string) {
     return null;
   }
 }
+
+/**
+ * Deletar cliente diretamente do banco de dados de forma garantida.
+ * Esta função deve ser chamada ANTES de remover o cliente da memória,
+ * garantindo que mesmo que persistSyncState() falhe, o cliente já foi
+ * removido do banco e não reaparecerá após reinicialização do servidor.
+ */
+export async function deleteClientFromDb(clientId: string): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+  try {
+    await ensureStructuredTables();
+    const pool = getPool();
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      // Deletar usuários do cliente primeiro (FK constraint)
+      await connection.execute(
+        "DELETE FROM megadesk_domain_client_users WHERE client_id = ?",
+        [clientId]
+      );
+      // Deletar o cliente
+      await connection.execute(
+        "DELETE FROM megadesk_domain_clients WHERE client_id = ?",
+        [clientId]
+      );
+      await connection.commit();
+      console.log(`[MegaDesk] Cliente ${clientId} deletado do banco com sucesso.`);
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error(`[MegaDesk] Erro ao deletar cliente ${clientId} do banco:`, error);
+    throw error; // Propagar erro para que a procedure possa tratar
+  }
+}
