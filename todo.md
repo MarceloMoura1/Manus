@@ -1029,4 +1029,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Aplicar layout fixo com `fixed inset-0` e `flex items-center justify-center`
 - [x] Manter overflow-y-auto apenas no container interno para permitir scroll se necessário
 - [x] Testar e validar no navegador
-- [ ] Salvar checkpoint
+- [x] Salvar checkpoint
+
+## Fase 97: Aumentar Tamanho e Largura do Card de Atendimento Ativo
+- [x] Aumentar largura máxima de max-w-2xl para max-w-5xl
+- [x] Aumentar padding dos cards de p-8 para p-12
+- [x] Aplicar em todos os cards principais (busca, dados do cliente, opção de chamado)
+- [x] Testar e validar no navegador
+- [x] Salvar checkpoint
