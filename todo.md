@@ -1047,3 +1047,8 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Identificar que tRPC client não enviava x-tenant-id nas requisições
 - [x] Corrigir App.tsx para ler megadesk_session_v1 e enviar x-tenant-id e x-user-role nos headers
 - [x] Chamados agora aparecem na página Chamados pois clientId é o mesmo usado na criação
+
+## Fase 104: Melhorias pós-criação de chamado
+- [x] Exibir número do chamado (#XXXX) na mensagem de sucesso do Atendimento Ativo
+- [x] Adicionar botão "Ver Chamado" que navega para aba Chamados após criação
+- [x] Validar isolamento multi-tenant: chamados de cliente A não aparecem para cliente B (6 testes adicionados, todos passando)

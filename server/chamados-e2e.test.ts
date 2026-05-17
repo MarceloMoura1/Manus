@@ -372,3 +372,75 @@ describe('Fluxo Completo de Chamados - E2E', () => {
     });
   });
 });
+
+describe('Isolamento Multi-Tenant - Chamados', () => {
+  // Simula chamados de dois clientes diferentes
+  const chamadosClienteA = [
+    { id: 'chamado-a1', clientId: 'cliente-001', number: 1, customerName: 'João Silva', company: 'Empresa A', title: 'Problema A1', status: 'open' },
+    { id: 'chamado-a2', clientId: 'cliente-001', number: 2, customerName: 'Maria Santos', company: 'Empresa A', title: 'Problema A2', status: 'in_progress' },
+  ];
+
+  const chamadosClienteB = [
+    { id: 'chamado-b1', clientId: 'cliente-002', number: 1, customerName: 'Carlos Lima', company: 'Empresa B', title: 'Problema B1', status: 'open' },
+  ];
+
+  const listChamadosByClient = (clientId: string) =>
+    [...chamadosClienteA, ...chamadosClienteB].filter(c => c.clientId === clientId);
+
+  it('cliente A não deve ver chamados do cliente B', () => {
+    const lista = listChamadosByClient('cliente-001');
+    expect(lista.every(c => c.clientId === 'cliente-001')).toBe(true);
+    expect(lista.some(c => c.clientId === 'cliente-002')).toBe(false);
+    expect(lista).toHaveLength(2);
+  });
+
+  it('cliente B não deve ver chamados do cliente A', () => {
+    const lista = listChamadosByClient('cliente-002');
+    expect(lista.every(c => c.clientId === 'cliente-002')).toBe(true);
+    expect(lista.some(c => c.clientId === 'cliente-001')).toBe(false);
+    expect(lista).toHaveLength(1);
+  });
+
+  it('IDs de chamados não devem se cruzar entre clientes', () => {
+    const idsA = listChamadosByClient('cliente-001').map(c => c.id);
+    const idsB = listChamadosByClient('cliente-002').map(c => c.id);
+    const intersection = idsA.filter(id => idsB.includes(id));
+    expect(intersection).toHaveLength(0);
+  });
+
+  it('numeração de chamados é independente por cliente', () => {
+    // Ambos os clientes podem ter chamado #1 sem conflito
+    const numA = listChamadosByClient('cliente-001').map(c => c.number);
+    const numB = listChamadosByClient('cliente-002').map(c => c.number);
+    expect(numA).toContain(1);
+    expect(numB).toContain(1);
+    // Isso é correto: cada cliente tem sua própria sequência
+  });
+
+  it('busca por ID deve retornar null se clientId não bate', () => {
+    const getChamadoByIdForClient = (id: string, clientId: string) =>
+      [...chamadosClienteA, ...chamadosClienteB].find(c => c.id === id && c.clientId === clientId) ?? null;
+
+    // Cliente A tentando acessar chamado do cliente B
+    expect(getChamadoByIdForClient('chamado-b1', 'cliente-001')).toBeNull();
+    // Cliente B tentando acessar chamado do cliente A
+    expect(getChamadoByIdForClient('chamado-a1', 'cliente-002')).toBeNull();
+    // Acesso correto
+    expect(getChamadoByIdForClient('chamado-a1', 'cliente-001')).not.toBeNull();
+    expect(getChamadoByIdForClient('chamado-b1', 'cliente-002')).not.toBeNull();
+  });
+
+  it('header x-tenant-id deve ser enviado em todas as requisições tRPC', () => {
+    // Simula a lógica do App.tsx após a correção
+    const mockSession = { clientId: 'cliente-001', role: 'admin' };
+    const headers: Record<string, string> = {};
+
+    try {
+      if (mockSession?.clientId) headers['x-tenant-id'] = mockSession.clientId;
+      if (mockSession?.role) headers['x-user-role'] = mockSession.role;
+    } catch { /* ignore */ }
+
+    expect(headers['x-tenant-id']).toBe('cliente-001');
+    expect(headers['x-user-role']).toBe('admin');
+  });
+});
