@@ -925,37 +925,24 @@ export const appRouter = router({
       .input(z.object({ customerId: z.string(), phone: z.string(), title: z.string().min(1), observation: z.string().optional(), company: z.string(), customer: z.string(), clientId: z.string().min(1) }))
       .mutation(async ({ input }) => {
         try {
-          const { createTicket: createTicketDb } = await import("./db");
+          const { createChamado } = await import("./db-chamados");
           await hydrateSyncState();
           const client = getReleasedClientOrThrow(input.clientId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
           
-          const ticketId = `ticket-${Date.now()}`;
-          await createTicketDb({
-            ticketId,
-            clientId: client.clientId,
-            company: input.company,
-            customer: input.customer,
-            problem: input.title,
-            category: "suporte",
-            description: input.observation || "Sem observações",
-          });
+          // Usar createChamado do db-chamados.ts que persiste corretamente no banco
+          const chamado = await createChamado(
+            client.clientId,
+            input.customerId || `cust-${Date.now()}`,
+            input.customer,
+            input.company,
+            input.title,
+            input.observation || "",
+            "media"
+          );
           
-          const newTicket: TicketRecord = {
-            id: ticketId,
-            clientId: client.clientId,
-            company: input.company,
-            customer: input.customer,
-            problem: input.title,
-            category: "suporte",
-            status: "open",
-            createdAt: new Date().toLocaleString('pt-BR'),
-            description: input.observation || "Sem observações",
-          };
-          tickets.push(newTicket);
-          audit("MegaDesk", `Chamado criado: ${input.title}`, client.clientId);
-          await persistSyncState();
-          return { ok: true, ticketId, title: input.title };
+          audit("MegaDesk", `Chamado criado via Atendimento Ativo: ${input.title}`, client.clientId);
+          return { ok: true, ticketId: chamado.id, title: input.title, chamadoNumber: chamado.number };
         } catch (error) {
           console.error("Erro ao criar chamado:", error);
           const errorMessage = error instanceof Error ? error.message : String(error);

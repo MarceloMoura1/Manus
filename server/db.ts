@@ -428,7 +428,7 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
         }
       }
       for (const conversation of state.conversations) {
-        await connection.execute("INSERT INTO megadesk_domain_conversations (conversation_id, client_id, customer_name, phone, company, status, last_message, time_label, messages_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [conversation.id, conversation.clientId, conversation.name, conversation.phone, conversation.company, conversation.status, conversation.lastMessage, conversation.time, JSON.stringify(conversation.messages ?? [])]);
+        await connection.execute("INSERT INTO megadesk_domain_conversations (conversation_id, client_id, customer_name, phone, company, status, last_message, time_label, messages_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE customer_name=VALUES(customer_name), phone=VALUES(phone), company=VALUES(company), status=VALUES(status), last_message=VALUES(last_message), time_label=VALUES(time_label), messages_json=VALUES(messages_json)", [conversation.id, conversation.clientId, conversation.name, conversation.phone, conversation.company, conversation.status, conversation.lastMessage, conversation.time, JSON.stringify(conversation.messages ?? [])]);
       }
       // Tickets/Chamados são criados via createTicket, não via saveMegaDeskStructuredState
       // Pular inserção de tickets aqui para evitar conflito com tabela megadesk_domain_chamados

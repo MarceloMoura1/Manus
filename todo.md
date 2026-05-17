@@ -1037,3 +1037,8 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Aplicar em todos os cards principais (busca, dados do cliente, opção de chamado)
 - [x] Testar e validar no navegador
 - [x] Salvar checkpoint
+
+## Fase 102: Correção de Bugs no Atendimento Ativo
+- [x] Corrigir duplicação de conversas ao abrir atendimento ativo (INSERT ON DUPLICATE KEY UPDATE no db.ts)
+- [x] Corrigir bug: chamado não é criado quando usuário clica "Sim" para abrir chamado (usar createChamado do db-chamados.ts)
+- [x] Validar fluxo completo: busca cliente → opção chamado → cria chamado na página Chamados
