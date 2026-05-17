@@ -226,11 +226,11 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
         {/* LAYOUT FIXO - Sempre visível */}
         <div className="space-y-6">
           {/* Etapa 1: Buscar Cliente - SEMPRE VISÍVEL */}
-          <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300">
+          <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-2xl shadow-2xl p-12 border-2 border-blue-500/50 hover:shadow-2xl hover:border-blue-400 transition-all duration-300">
             <div className="space-y-4">
               <div>
-                <label className="block text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
-                  <Phone className="w-5 h-5 text-blue-600" />
+                <label className="block text-base font-bold text-white mb-4 flex items-center gap-2">
+                  <Phone className="w-5 h-5 text-blue-400" />
                   Número do Cliente
                 </label>
                 <div className="flex gap-3">
@@ -241,7 +241,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                     onChange={(e) => setPhoneNumber(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleSearchCustomer()}
                     disabled={!!customerData}
-                    className="flex-1 px-5 py-4 rounded-xl border-2 border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 disabled:bg-slate-100 disabled:text-slate-500 text-base"
+                    className="flex-1 px-5 py-4 rounded-xl border-2 border-blue-500/50 bg-slate-800/50 text-white focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-200 placeholder-slate-400 disabled:bg-slate-700 disabled:text-slate-400 text-base"
                   />
                   <button
                     onClick={handleSearchCustomer}
@@ -347,16 +347,16 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
               </div>
 
               {/* Ticket Option Card */}
-              <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400">
-                <h3 className="text-2xl font-bold text-slate-900 mb-8">Deseja abrir um chamado?</h3>
+              <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-2xl shadow-2xl p-12 border-2 border-purple-500/50 hover:border-purple-400 transition-all duration-300">
+                <h3 className="text-2xl font-bold text-white mb-8">Deseja abrir um chamado?</h3>
                 <div className="flex gap-4 mb-8">
                   <button
                     onClick={() => setOpenTicket(false)}
                     className={cn(
                       'flex-1 px-6 py-4 rounded-xl font-bold transition-all duration-200 transform hover:scale-105 text-base',
                       openTicket === false
-                        ? 'bg-gradient-to-r from-slate-700 to-slate-800 text-white shadow-lg'
-                        : 'bg-slate-100 border-2 border-slate-300 text-slate-700 hover:border-slate-400'
+                        ? 'bg-gradient-to-r from-red-600 to-red-700 text-white shadow-lg'
+                        : 'bg-slate-700/50 border-2 border-slate-600 text-slate-200 hover:border-slate-500'
                     )}
                   >
                     Não
@@ -366,8 +366,8 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                     className={cn(
                       'flex-1 px-6 py-4 rounded-xl font-bold transition-all duration-200 transform hover:scale-105 text-base',
                       openTicket === true
-                        ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg'
-                        : 'bg-slate-100 border-2 border-slate-300 text-slate-700 hover:border-slate-400'
+                        ? 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-lg'
+                        : 'bg-slate-700/50 border-2 border-slate-600 text-slate-200 hover:border-slate-500'
                     )}
                   >
                     Sim
@@ -398,14 +398,14 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
               <div className="flex gap-4 pt-4">
                 <button
                   onClick={handleReset}
-                  className="flex-1 px-8 py-4 bg-slate-100 text-slate-900 rounded-xl hover:bg-slate-200 transition-all duration-200 font-bold border-2 border-slate-300 hover:shadow-md text-base"
+                  className="flex-1 px-8 py-4 bg-slate-700/50 text-slate-200 rounded-xl hover:bg-slate-600/50 transition-all duration-200 font-bold border-2 border-slate-600 hover:shadow-md text-base"
                 >
                   Voltar
                 </button>
                 <button
                   onClick={handleStartConversation}
                   disabled={isSearching}
-                  className="flex-1 px-8 py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-xl hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-bold flex items-center justify-center gap-2 text-base"
+                  className="flex-1 px-8 py-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-xl hover:shadow-xl hover:from-cyan-600 hover:to-blue-700 disabled:from-slate-600 disabled:to-slate-700 transition-all duration-200 font-bold flex items-center justify-center gap-2 text-base"
                 >
                   {isSearching ? (
                     <>
