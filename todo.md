@@ -1055,3 +1055,9 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 
 ## Fase 105: Remover contador total de conversas
 - [x] Remover exibição do total de conversas (abertas + fechadas) na aba Conversas
+
+## Fase 106: Edição de Nome e Empresa do Contato
+- [x] Localizar a engrenagem de edição na aba Conversas
+- [x] Criar modal de edição com campos para nome e empresa
+- [x] Implementar função de atualização (atualiza mockConversations em tempo real)
+- [x] Validar e testar a edição

@@ -672,6 +672,62 @@ function ConversationsPage() {
         </div>
       )}
 
+      {/* Modal de Edição de Cliente */}
+      {editModalOpen && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+          <div className="bg-white rounded-lg shadow-lg p-6 w-96 pointer-events-auto">
+            <h3 className="text-lg font-bold text-slate-900 mb-4">Editar Cliente</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Nome</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Nome do cliente"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Empresa</label>
+                <input
+                  type="text"
+                  value={editCompany}
+                  onChange={(e) => setEditCompany(e.target.value)}
+                  className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Nome da empresa"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-6">
+              <button
+                onClick={() => setEditModalOpen(false)}
+                className="flex-1 px-4 py-2 bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-colors font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  if (selectedConversation && mockConversations) {
+                    const conv = mockConversations.find(c => c.id === selectedConversation);
+                    if (conv) {
+                      conv.name = editName;
+                      conv.company = editCompany;
+                      setToastMessage({ message: 'Cliente atualizado com sucesso!', type: 'success' });
+                      setTimeout(() => setToastMessage(null), 3000);
+                    }
+                  }
+                  setEditModalOpen(false);
+                }}
+                className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
+              >
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Toast Notification */}
       {toastMessage && (
         <div className={cn(
