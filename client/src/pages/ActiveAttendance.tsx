@@ -224,7 +224,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
         {/* LAYOUT FIXO - Sempre visível */}
         <div className="space-y-6">
           {/* Etapa 1: Buscar Cliente - SEMPRE VISÍVEL */}
-          <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300">
+          <div className="bg-white rounded-2xl shadow-lg p-12 border border-slate-100 hover:shadow-xl transition-shadow duration-300">
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
@@ -310,7 +310,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
           {customerData && (
             <>
               {/* Customer Info Card */}
-              <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-lg p-12 text-white border-2 border-slate-400">
+              <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-lg p-12 text-white">
                 <h3 className="text-lg font-semibold mb-6 flex items-center gap-2">
                   <User className="w-5 h-5" />
                   Dados do Cliente
@@ -345,7 +345,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
               </div>
 
               {/* Ticket Option Card */}
-              <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400">
+              <div className="bg-white rounded-2xl shadow-lg p-12 border border-slate-100">
                 <h3 className="text-lg font-semibold text-slate-900 mb-6">Deseja abrir um chamado?</h3>
                 <div className="flex gap-3 mb-6">
                   <button
