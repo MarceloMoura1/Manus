@@ -7,7 +7,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { MessageCircle, X, Clock, User, Search } from "lucide-react";
-import { useAuth } from "@/src/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 
 interface ConversationCard {
@@ -24,7 +23,6 @@ interface ConversationCard {
 }
 
 export function ConversasPage() {
-  const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterUser, setFilterUser] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<ConversationCard | null>(null);
@@ -32,13 +30,25 @@ export function ConversasPage() {
   const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [assignToUser, setAssignToUser] = useState<string | null>(null);
 
+  // Get clientId from session
+  const getClientId = () => {
+    try {
+      const session = JSON.parse(localStorage.getItem("megadesk_session_v1") || "{}");
+      return session.clientId || "";
+    } catch {
+      return "";
+    }
+  };
+
+  const clientId = getClientId();
+
   // Queries
   const { data: conversations = [], isLoading: conversationsLoading } = trpc.conversations.list.useQuery({
-    clientId: user?.clientId || "",
+    clientId,
   });
 
   const { data: users = [] } = trpc.users.list.useQuery({
-    clientId: user?.clientId || "",
+    clientId,
   });
 
   // Mutations
@@ -91,7 +101,7 @@ export function ConversasPage() {
     try {
       await closeConversationMutation.mutateAsync({
         conversationId: selectedConversation.id,
-        clientId: user?.clientId || "",
+        clientId,
       });
       setShowCloseDialog(false);
       setSelectedConversation(null);
@@ -107,7 +117,7 @@ export function ConversasPage() {
       await assignConversationMutation.mutateAsync({
         conversationId: selectedConversation.id,
         userId: assignToUser,
-        clientId: user?.clientId || "",
+        clientId,
       });
       setShowAssignDialog(false);
       setSelectedConversation(null);
