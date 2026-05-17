@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { MessageCircle, X, Clock, User, Search } from "lucide-react";
+import { MessageCircle, X, Clock, User, Search, Eye } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 
 interface ConversationCard {
@@ -25,22 +25,23 @@ interface ConversationCard {
 export function ConversasPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterUser, setFilterUser] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"all" | "mine" | "specific">("all");
   const [selectedConversation, setSelectedConversation] = useState<ConversationCard | null>(null);
   const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [assignToUser, setAssignToUser] = useState<string | null>(null);
 
-  // Get clientId from session
-  const getClientId = () => {
+  // Get clientId and userId from session
+  const getSessionData = () => {
     try {
       const session = JSON.parse(localStorage.getItem("megadesk_session_v1") || "{}");
-      return session.clientId || "";
+      return { clientId: session.clientId || "", userId: session.userId || "" };
     } catch {
-      return "";
+      return { clientId: "", userId: "" };
     }
   };
 
-  const clientId = getClientId();
+  const { clientId, userId } = getSessionData();
 
   // Queries
   const { data: conversations = [], isLoading: conversationsLoading } = trpc.conversations.list.useQuery({
@@ -55,9 +56,22 @@ export function ConversasPage() {
   const closeConversationMutation = trpc.conversations.close.useMutation();
   const assignConversationMutation = trpc.conversations.assign.useMutation();
 
+  // Aplicar filtro de visualização
+  const conversationsFiltered = useMemo(() => {
+    let filtered = conversations as ConversationCard[];
+
+    if (viewMode === "mine") {
+      filtered = filtered.filter((c) => c.assignedUserId === userId);
+    } else if (viewMode === "specific" && filterUser) {
+      filtered = filtered.filter((c) => c.assignedUserId === filterUser);
+    }
+
+    return filtered;
+  }, [conversations, viewMode, filterUser, userId]);
+
   // Filtrar e organizar conversas
   const filteredConversations = useMemo(() => {
-    let filtered = conversations as ConversationCard[];
+    let filtered = conversationsFiltered;
 
     // Filtrar por termo de busca
     if (searchTerm) {
@@ -69,15 +83,8 @@ export function ConversasPage() {
       );
     }
 
-    // Filtrar por usuário
-    if (filterUser === "unassigned") {
-      filtered = filtered.filter((c) => !c.assignedUserId);
-    } else if (filterUser && filterUser !== "all") {
-      filtered = filtered.filter((c) => c.assignedUserId === filterUser);
-    }
-
     return filtered;
-  }, [conversations, searchTerm, filterUser]);
+  }, [conversationsFiltered, searchTerm]);
 
   // Agrupar por usuário
   const conversationsByUser = useMemo(() => {
@@ -153,6 +160,61 @@ export function ConversasPage() {
 
         {/* Filtros */}
         <div className="flex gap-4 flex-wrap">
+          {/* Filtro de visualização */}
+          <div className="flex gap-2">
+            <Button
+              variant={viewMode === "all" ? "default" : "outline"}
+              onClick={() => {
+                setViewMode("all");
+                setFilterUser(null);
+              }}
+              className="flex items-center gap-2"
+            >
+              <Eye className="w-4 h-4" />
+              Todas as conversas
+            </Button>
+
+            <Button
+              variant={viewMode === "mine" ? "default" : "outline"}
+              onClick={() => {
+                setViewMode("mine");
+                setFilterUser(null);
+              }}
+              className="flex items-center gap-2"
+            >
+              <User className="w-4 h-4" />
+              Minhas conversas
+            </Button>
+
+            {viewMode === "specific" && (
+              <Select value={filterUser || ""} onValueChange={(v) => setFilterUser(v || null)}>
+                <SelectTrigger className="w-64">
+                  <SelectValue placeholder="Selecionar usuário" />
+                </SelectTrigger>
+                <SelectContent>
+                  {users.map((u: any) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            {viewMode !== "specific" && (
+              <Button
+                variant="outline"
+                onClick={() => setViewMode("specific")}
+                className="flex items-center gap-2"
+              >
+                Usuário específico
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Barra de busca */}
+        <div className="flex gap-4">
           <div className="flex-1 min-w-64">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -164,21 +226,6 @@ export function ConversasPage() {
               />
             </div>
           </div>
-
-          <Select value={filterUser || "all"} onValueChange={(v) => setFilterUser(v === "all" ? null : v)}>
-            <SelectTrigger className="w-64">
-              <SelectValue placeholder="Filtrar por atendente" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas as conversas</SelectItem>
-              <SelectItem value="unassigned">Não atribuídas</SelectItem>
-              {users.map((u: any) => (
-                <SelectItem key={u.id} value={u.id}>
-                  {u.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
       </div>
 

@@ -1181,3 +1181,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Implementar filtro de usuário/atendente na página de Conversas
 - [x] Implementar procedures tRPC para listar, fechar e atribuir conversas
 - [x] Integrar ConversasPage ao menu de navegação do MegaDesk
+
+## Fase 119: Filtro de Visualização de Conversas (Todas/Específico/Minhas)
+- [x] Adicionar dropdown/select para filtro de visualização na página de Conversas
+- [x] Opção "Todas as conversas" - exibir todas as conversas do cliente
+- [x] Opção "Minhas conversas" - exibir apenas conversas atribuídas ao usuário logado
+- [x] Opção "Usuário específico" - permitir selecionar um usuário e ver suas conversas
+- [x] Integrar filtro com a lógica de busca e status existente
+- [x] Testar alternância entre filtros
