@@ -1525,6 +1525,56 @@ export const appRouter = router({
         };
       }),
   }),
+  conversations: router({
+    list: publicProcedure
+      .input(z.object({ clientId: z.string() }))
+      .query(({ input }) => {
+        const clientConversations = conversations
+          .filter((c) => c.clientId === input.clientId)
+          .map((c) => ({
+            id: c.id,
+            customerName: c.name,
+            customerPhone: c.phone,
+            companyName: c.company,
+            lastMessage: c.lastMessage,
+            lastMessageAt: new Date(),
+            unreadCount: 0,
+            status: (c.status === "closed" ? "closed" : c.status === "bot" ? "pending" : "open") as "open" | "pending" | "closed",
+            assignedUserId: null,
+            assignedUserName: undefined,
+          }));
+        return clientConversations;
+      }),
+    close: publicProcedure
+      .input(z.object({ conversationId: z.string(), clientId: z.string() }))
+      .mutation(({ input }) => {
+        const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === input.clientId);
+        if (!conv) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa nao encontrada" });
+        conv.status = "closed";
+        return { ok: true };
+      }),
+    assign: publicProcedure
+      .input(z.object({ conversationId: z.string(), userId: z.string(), clientId: z.string() }))
+      .mutation(({ input }) => {
+        const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === input.clientId);
+        if (!conv) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa nao encontrada" });
+        return { ok: true };
+      }),
+  }),
+  users: router({
+    list: publicProcedure
+      .input(z.object({ clientId: z.string() }))
+      .query(({ input }) => {
+        const client = clients.find((c) => c.clientId === input.clientId);
+        if (!client) return [];
+        return client.users.map((u) => ({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          role: u.role,
+        }));
+      }),
+  }),
   whatsapp: whatsappRouter,
 });
 export type AppRouter = typeof appRouter;

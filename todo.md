@@ -1175,3 +1175,9 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Integrar ao menu de navegação do MegaDesk (aba WhatsApp no grupo de configurações)
 - [x] Exibir URL do webhook Meta com botão de copiar
 - [x] Suporte a webhookVerifyToken no formulário
+
+## Fase 118: Organização de Conversas por Usuário
+- [x] Criar página ConversasPage.tsx com lista de conversas por usuário
+- [x] Implementar filtro de usuário/atendente na página de Conversas
+- [x] Implementar procedures tRPC para listar, fechar e atribuir conversas
+- [x] Integrar ConversasPage ao menu de navegação do MegaDesk

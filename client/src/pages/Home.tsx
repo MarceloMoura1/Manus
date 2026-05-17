@@ -6,6 +6,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { validateNewChamado, ValidationError } from "@/lib/validations";
 import { ActiveAttendancePage } from "./ActiveAttendance";
 import { ClientesPage } from "./ClientesPage";
+import { ConversasPage } from "./ConversasPage";
 import { WhatsAppConfigPage } from "./WhatsAppConfigPage";
 import { TimelineActivity } from "@/components/TimelineActivity";
 
@@ -2805,6 +2806,7 @@ function Shell() {
             // Navegar para Conversas com novo chat aberto
             setActive('conversations');
           }} />}
+          {active === "conversations" && <ConversasPage />}
         </main>
       </div>
 
