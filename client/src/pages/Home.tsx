@@ -2167,12 +2167,27 @@ function BotConfigPage() {
 }
 
 function AIAssistantPage() {
-  const MEGADESK_SESSION_KEY = "megadesk-session";
-  const session = React.useMemo(() => {
+  // IMPORTANTE: usar a mesma chave que o login salva a sessão
+  const SESSION_KEY = "megadesk_session_v1";
+
+  // Ler sessão de forma reativa — atualiza se o localStorage mudar
+  const [session, setSession] = React.useState<any>(() => {
     try {
-      const raw = localStorage.getItem(MEGADESK_SESSION_KEY);
+      const raw = localStorage.getItem(SESSION_KEY) ?? sessionStorage.getItem(SESSION_KEY);
       return raw ? JSON.parse(raw) : null;
     } catch { return null; }
+  });
+
+  // Ouvir mudanças no localStorage (ex: login em outra aba)
+  React.useEffect(() => {
+    const handler = () => {
+      try {
+        const raw = localStorage.getItem(SESSION_KEY) ?? sessionStorage.getItem(SESSION_KEY);
+        setSession(raw ? JSON.parse(raw) : null);
+      } catch { setSession(null); }
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
   }, []);
 
   const clientId = session?.clientId ?? "";

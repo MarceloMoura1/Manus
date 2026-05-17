@@ -982,4 +982,10 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Adicionar Camada 2: COALESCE(VALUES(password_hash), password_hash) no SQL
 - [x] Adicionar Camada 3: verificação de integridade pós-save com auto-correção
 - [x] Adicionar 11 testes automatizados do ciclo de vida do passwordHash
+- [x] Salvar checkpoint
+
+## Fase 91: BUG - Assistente IA retorna erro de clientId/userId vazios
+- [x] Diagnosticar onde clientId e userId são passados para o Assistente IA
+- [x] Corrigir chave de sessão errada ("megadesk-session" → "megadesk_session_v1")
+- [x] Tornar leitura de sessão reativa com useState + listener de storage
 - [ ] Salvar checkpoint
