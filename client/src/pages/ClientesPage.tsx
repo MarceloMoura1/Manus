@@ -597,6 +597,47 @@ function ClientDetailPanel({
               </div>
             </div>
 
+            {/* Contatos Adicionais */}
+            {client.contactsJson && (() => {
+              try {
+                const contacts = JSON.parse(client.contactsJson);
+                if (contacts.length > 0) {
+                  return (
+                    <div>
+                      <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Contatos Adicionais</h4>
+                      <div className="space-y-2">
+                        {contacts.map((contact: any, idx: number) => (
+                          <div key={idx} className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                            <div className="space-y-1.5">
+                              {contact.description && (
+                                <p className="text-xs font-medium text-slate-600">{contact.description}</p>
+                              )}
+                              {contact.phone && (
+                                <div className="flex items-center gap-2 text-sm text-slate-700">
+                                  <Phone className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                                  <span>{contact.phone}</span>
+                                </div>
+                              )}
+                              {contact.whatsapp && (
+                                <div className="flex items-center gap-2 text-sm text-slate-700">
+                                  <Smartphone className="w-4 h-4 text-green-500 flex-shrink-0" />
+                                  <span>{contact.whatsapp}</span>
+                                  <span className="text-xs text-green-600 font-medium">WhatsApp</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
+              } catch (e) {
+                // Se nao conseguir fazer parse, ignora
+              }
+              return null;
+            })()}
+
             {/* Endereço */}
             {(client.address || client.city) && (
               <div>

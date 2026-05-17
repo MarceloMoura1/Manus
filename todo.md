@@ -1113,3 +1113,6 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Atualizar procedure `crm.create` para salvar múltiplos contatos
 - [x] Atualizar procedure `crm.update` para atualizar múltiplos contatos
 - [x] Exibir todos os contatos no painel de detalhes do cliente
+
+## Fase 113: Exibição de contatos adicionais na aba Geral
+- [x] Exibir todos os contatos adicionais na aba "Geral" do painel de detalhes do cliente
