@@ -868,16 +868,49 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         try {
           const { searchCustomerByPhone } = await import("./db");
+          const { getPool } = await import("./db");
+
+          // 1º: Buscar na tabela de contatos de conversas (megadesk_domain_customers)
           const customer = await searchCustomerByPhone(input.phone, input.clientId);
           if (customer) {
             return {
               found: true,
+              source: "contacts" as const,
               id: customer.customerId,
               name: customer.name,
               company: customer.company,
               phone: customer.phone,
             };
           }
+
+          // 2º: Buscar na tabela de Clientes CRM (megadesk_crm_clients)
+          // Normaliza o telefone removendo caracteres não numéricos para comparação
+          const phoneDigits = input.phone.replace(/\D/g, "");
+          const pool = getPool();
+          const [crmRows] = await pool.execute(
+            `SELECT crm_client_id, company_name, responsible_name, phone, whatsapp
+             FROM megadesk_crm_clients
+             WHERE client_id = ?
+               AND (
+                 REPLACE(REPLACE(REPLACE(phone, '-', ''), ' ', ''), '()', '') LIKE ?
+                 OR REPLACE(REPLACE(REPLACE(whatsapp, '-', ''), ' ', ''), '()', '') LIKE ?
+               )
+             LIMIT 1`,
+            [input.clientId, `%${phoneDigits}%`, `%${phoneDigits}%`]
+          ) as any[];
+
+          if (crmRows && (crmRows as any[]).length > 0) {
+            const crm = (crmRows as any[])[0];
+            return {
+              found: true,
+              source: "crm" as const,
+              id: crm.crm_client_id,
+              name: crm.responsible_name || crm.company_name,
+              company: crm.company_name,
+              phone: input.phone,
+            };
+          }
+
           return { found: false };
         } catch (error) {
           console.error("Erro ao buscar cliente:", error);

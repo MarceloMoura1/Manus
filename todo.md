@@ -1080,3 +1080,10 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Vincular conversas ao cliente pelo telefone/empresa na aba "Conversas" do painel (procedure crm.getConversas)
 - [x] Importação em massa via CSV (botão + parser + validação + inserção em lote - máx 500 registros)
 - [x] Registrar histórico de edições na Timeline Operacional (editedBy capturado da sessão megadesk_session_v1)
+
+## Fase 109: Integração Atendimento Ativo com CRM
+- [x] Atualizar procedure searchCustomer para buscar também na tabela megadesk_crm_clients
+- [x] Retornar nome e empresa do CRM quando número for encontrado
+- [x] Atualizar frontend do Atendimento Ativo para preencher campos automaticamente com dados do CRM
+- [x] Badge de origem exibido no card: '📋 CRM' ou '💬 Contato'
+- [x] Testar fluxo: digitar telefone cadastrado no CRM → nome e empresa preenchidos automaticamente
