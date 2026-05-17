@@ -1115,4 +1115,4 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Exibir todos os contatos no painel de detalhes do cliente
 
 ## Fase 113: Exibição de contatos adicionais na aba Geral
-- [x] Exibir todos os contatos adicionais na aba "Geral" do painel de detalhes do cliente
+- [x] Exibir todos os contatos adicionais na aba "Geral" do painel de detalhes do cliente (reorganizado para aparecer junto com contatos principais)
