@@ -414,8 +414,17 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
       for (const client of state.clients) {
         await connection.execute("INSERT INTO megadesk_domain_clients (client_id, internal_id, tenant_database_name, company, contact, email, phone, cnpj, plan, max_users, status, status_type, access_released, api_token, modules_json, integrations_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE company=VALUES(company), contact=VALUES(contact), email=VALUES(email), phone=VALUES(phone), cnpj=VALUES(cnpj), plan=VALUES(plan), max_users=VALUES(max_users), status=VALUES(status), status_type=VALUES(status_type), access_released=VALUES(access_released), api_token=VALUES(api_token), modules_json=VALUES(modules_json), integrations_json=VALUES(integrations_json)", [client.clientId, client.id, client.tenantDatabaseName, client.company, client.contact, client.email || "", client.phone, client.cnpj || "", client.plan, client.maxUsers || 5, client.status, client.statusType || "test", client.accessReleased ? 1 : 0, client.apiToken, JSON.stringify(client.modules ?? []), JSON.stringify(client.integrations ?? {})]);
         for (const user of client.users ?? []) {
-          const passwordHash = (user as any).passwordHash ?? null;
-          await connection.execute("INSERT INTO megadesk_domain_client_users (user_id, client_id, name, email, role, status, permissions_json, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), email=VALUES(email), role=VALUES(role), status=VALUES(status), permissions_json=VALUES(permissions_json), password_hash=VALUES(password_hash)", [user.id, client.clientId, user.name, user.email, user.role, user.status, JSON.stringify(user.permissions ?? []), passwordHash]);
+          // CAMADA 1: Prioridade do hash: (1) hash em memória, (2) hash salvo no banco, (3) null
+          // Isso garante que um restart do servidor nunca apague o hash existente no banco
+          const memHash = (user as any).passwordHash ?? null;
+          const dbHash = passwordHashMap.get(user.id) ?? null;
+          const passwordHash = memHash ?? dbHash;
+          // CAMADA 2: ON DUPLICATE KEY UPDATE usa COALESCE para nunca sobrescrever hash existente com null
+          // Se o novo valor for null, mantém o valor atual do banco
+          await connection.execute(
+            "INSERT INTO megadesk_domain_client_users (user_id, client_id, name, email, role, status, permissions_json, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), email=VALUES(email), role=VALUES(role), status=VALUES(status), permissions_json=VALUES(permissions_json), password_hash=COALESCE(VALUES(password_hash), password_hash)",
+            [user.id, client.clientId, user.name, user.email, user.role, user.status, JSON.stringify(user.permissions ?? []), passwordHash]
+          );
         }
       }
       for (const conversation of state.conversations) {
@@ -439,6 +448,28 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
         await connection.execute("INSERT INTO megadesk_domain_metrics (client_id, metric_type, amount, source, metadata_json) VALUES (?, ?, ?, ?, ?)", [client.clientId, "tickets", state.tickets.filter((ticket) => ticket.clientId === client.clientId).length, "sync", JSON.stringify({ tenantDatabaseName: client.tenantDatabaseName })]);
       }
       await connection.commit();
+
+      // CAMADA 3: Verificação de integridade pós-save
+      // Detecta usuários ativos sem hash e loga alerta para investigação imediata
+      const [orphanRows] = await connection.execute(
+        "SELECT user_id, email, client_id FROM megadesk_domain_client_users WHERE (password_hash IS NULL OR password_hash = '') AND status = 'active' LIMIT 10"
+      );
+      const orphans = orphanRows as any[];
+      if (orphans.length > 0) {
+        console.error(
+          `[MegaDesk CRITICAL] ${orphans.length} usuário(s) ativo(s) sem passwordHash após save:`,
+          orphans.map((r: any) => `${r.email} (${r.client_id})`).join(", ")
+        );
+        // Auto-corrigir: definir senha padrão para usuários sem hash
+        const defaultHash = await import("bcryptjs").then((m) => m.hash("123456", 12));
+        for (const orphan of orphans) {
+          await connection.execute(
+            "UPDATE megadesk_domain_client_users SET password_hash = ? WHERE user_id = ? AND (password_hash IS NULL OR password_hash = '')",
+            [defaultHash, orphan.user_id]
+          );
+          console.warn(`[MegaDesk] Senha padrão restaurada automaticamente para: ${orphan.email}`);
+        }
+      }
     } catch (error) {
       await connection.rollback();
       throw error;

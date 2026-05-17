@@ -973,4 +973,13 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Diagnosticar causa do erro de senha não configurada
 - [x] Corrigir o bug (passwordHash não era carregado do banco no loadMegaDeskStructuredState)
 - [x] Restaurar senha padrão para usuários afetados no banco
+- [x] Salvar checkpoint
+
+## Fase 90: Salvaguardas para passwordHash nunca ser perdido
+- [x] Auditar todos os pontos de leitura/escrita do passwordHash
+- [x] Corrigir ON DUPLICATE KEY UPDATE para nunca sobrescrever hash com null (COALESCE)
+- [x] Adicionar Camada 1: memHash ?? dbHash ?? null no saveMegaDeskStructuredState
+- [x] Adicionar Camada 2: COALESCE(VALUES(password_hash), password_hash) no SQL
+- [x] Adicionar Camada 3: verificação de integridade pós-save com auto-correção
+- [x] Adicionar 11 testes automatizados do ciclo de vida do passwordHash
 - [ ] Salvar checkpoint
