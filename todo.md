@@ -1105,3 +1105,4 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 ## Bugs Corrigidos
 
 - [x] Botão "Fechar" do painel de detalhes do cliente não estava funcionando (faltava type="button")
+- [x] Remover filtros de status (todos, lead, ativo, inativo, cancelado, inadimplente) da aba de clientes

@@ -750,7 +750,6 @@ export function ClientesPage({ initialSelectedId }: { initialSelectedId?: string
   const clientId: string = session.clientId ?? "";
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("todos");
   const [selectedClientId, setSelectedClientId] = useState<string | null>(initialSelectedId ?? null);
   const [showModal, setShowModal] = useState(false);
   const [editClient, setEditClient] = useState<CrmClient | null>(null);
@@ -818,10 +817,10 @@ export function ClientesPage({ initialSelectedId }: { initialSelectedId?: string
 
   const clients: CrmClient[] = (data?.clients ?? []) as CrmClient[];
 
+  // Sem filtro de status, mostrar todos os clientes
   const filteredClients = useMemo(() => {
-    if (statusFilter === "todos") return clients;
-    return clients.filter(c => c.status === statusFilter);
-  }, [clients, statusFilter]);
+    return clients;
+  }, [clients]);
 
   const selectedClient = filteredClients.find(c => c.crmClientId === selectedClientId) ?? null;
 
@@ -831,7 +830,6 @@ export function ClientesPage({ initialSelectedId }: { initialSelectedId?: string
     if (initialSelectedId && clients.length > 0 && !selectedClient) {
       const found = clients.find(c => c.crmClientId === initialSelectedId);
       if (found) {
-        setStatusFilter("todos");
         setSelectedClientId(initialSelectedId);
       }
     }
@@ -896,23 +894,7 @@ export function ClientesPage({ initialSelectedId }: { initialSelectedId?: string
             />
           </div>
 
-          {/* Filtros de status */}
-          <div className="flex gap-1 overflow-x-auto pb-1">
-            {["todos", "lead", "ativo", "inativo", "cancelado", "inadimplente"].map(s => (
-              <button
-                key={s}
-                onClick={() => setStatusFilter(s)}
-                className={cn(
-                  "px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors",
-                  statusFilter === s
-                    ? "bg-blue-600 text-white"
-                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                )}
-              >
-                {s === "todos" ? "Todos" : STATUS_CONFIG[s]?.label ?? s}
-              </button>
-            ))}
-          </div>
+
         </div>
 
         {/* Lista */}
@@ -968,7 +950,6 @@ export function ClientesPage({ initialSelectedId }: { initialSelectedId?: string
           <div className="p-3 border-t border-slate-100 bg-slate-50">
             <p className="text-xs text-slate-400 text-center">
               {filteredClients.length} cliente{filteredClients.length !== 1 ? "s" : ""}
-              {statusFilter !== "todos" ? ` com status "${STATUS_CONFIG[statusFilter]?.label}"` : ""}
             </p>
           </div>
         )}
