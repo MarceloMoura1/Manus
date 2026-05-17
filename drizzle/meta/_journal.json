@@ -1,5 +1,83 @@
 {
   "version": "7",
   "dialect": "mysql",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1778846962025,
+      "tag": "0000_youthful_tana_nile",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1778855650681,
+      "tag": "0001_sad_whiplash",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1778855695374,
+      "tag": "0002_chilly_lethal_legion",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1778855776293,
+      "tag": "0003_burly_sersi",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1778856317124,
+      "tag": "0004_cold_wild_child",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1778932439766,
+      "tag": "0005_wonderful_blade",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1778936302408,
+      "tag": "0006_sloppy_trish_tilby",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1778943312730,
+      "tag": "0007_certain_runaways",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1778948671550,
+      "tag": "0008_elite_donald_blake",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1779031362930,
+      "tag": "0009_jazzy_whirlwind",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1779032609006,
+      "tag": "0010_graceful_peter_parker",
+      "breakpoints": true
+    }
+  ]
 }

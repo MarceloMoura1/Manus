@@ -1,0 +1,1 @@
+ALTER TABLE `megadesk_crm_clients` ADD `contacts_json` text DEFAULT ('') NOT NULL;
