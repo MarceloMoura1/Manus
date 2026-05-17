@@ -72,6 +72,7 @@ export interface CreateWaAccountInput {
   phoneNumberId: string;
   businessAccountId: string;
   accessToken: string;
+  webhookVerifyToken?: string;
 }
 
 export interface SendTextMessageInput {

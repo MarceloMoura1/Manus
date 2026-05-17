@@ -6,6 +6,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { validateNewChamado, ValidationError } from "@/lib/validations";
 import { ActiveAttendancePage } from "./ActiveAttendance";
 import { ClientesPage } from "./ClientesPage";
+import { WhatsAppConfigPage } from "./WhatsAppConfigPage";
 import { TimelineActivity } from "@/components/TimelineActivity";
 
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ import {
   X,
   Edit2,
   Building2,
+  Smartphone,
 } from "lucide-react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
@@ -122,7 +124,7 @@ const SESSION_DURATION_LONG = 30 * 24 * 60 * 60 * 1000; // 30 dias ("lembrar meu
 const REFRESH_THRESHOLD = 5 * 60 * 1000; // Renovar 5 minutos antes de expirar
 const REFRESH_INTERVAL = 10 * 60 * 1000; // Verificar renovação a cada 10 minutos
 
-type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "clients";
+type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "clients" | "whatsapp-config";
 
 type Ticket = {
   id: string;
@@ -2585,6 +2587,7 @@ function Shell() {
     { id: "tracking" as RouteId, label: "Rastreamento", icon: MapPin },
     { id: "erp" as RouteId, label: "ERP", icon: PackageSearch },
     { id: "clients" as RouteId, label: "Clientes", icon: Building2 },
+    { id: "whatsapp-config" as RouteId, label: "WhatsApp", icon: Smartphone },
     { id: "settings" as RouteId, label: "Configurações", icon: Cog },
     { id: "bot-config" as RouteId, label: "Configurar Bot", icon: Bot },
     { id: "ai-assistant" as RouteId, label: "Assistente IA", icon: Sparkles },
@@ -2604,7 +2607,7 @@ function Shell() {
 
   // Separar itens em seções
   const mainNavItems = filteredNavItems.filter(item => !["settings", "bot-config", "ai-assistant", "help", "notifications"].includes(item.id));
-  const settingsNavItems = filteredNavItems.filter(item => ["settings", "bot-config", "ai-assistant", "help", "notifications"].includes(item.id));
+  const settingsNavItems = filteredNavItems.filter(item => ["settings", "bot-config", "ai-assistant", "help", "notifications", "whatsapp-config"].includes(item.id));
 
   return (
     <div className={`flex h-screen bg-slate-50 ${theme === 'dark' ? 'dark bg-slate-950' : ''}`}>
@@ -2784,6 +2787,7 @@ function Shell() {
           {active === "erp" && <ERPPage />}
           {active === "settings" && <SettingsPage />}
           {active === "bot-config" && <BotConfigPage />}
+          {active === "whatsapp-config" && <WhatsAppConfigPage />}
           {active === "ai-assistant" && <AIAssistantPage />}
           {active === "notifications" && <NotificationsPage />}
           {active === "active-attendance" && <ActiveAttendancePage onNavigate={(nav) => {

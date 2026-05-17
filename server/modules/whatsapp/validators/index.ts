@@ -12,6 +12,7 @@ export const createWaAccountSchema = z.object({
   phoneNumberId: z.string().min(1),
   businessAccountId: z.string().min(1),
   accessToken: z.string().min(1),
+  webhookVerifyToken: z.string().optional(),
 });
 
 export const updateWaAccountSchema = z.object({

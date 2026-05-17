@@ -1165,3 +1165,13 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Criar server/modules/whatsapp/whatsapp.router.ts com procedures
 - [x] Integrar whatsappRouter ao routers.ts principal
 - [x] Testes unitários: 24 testes passando (validators + isolamento multiempresa)
+
+## Fase 117: Tela de Configuração WhatsApp por Cliente
+- [x] Criar página WhatsAppConfigPage com lista de contas conectadas
+- [x] Formulário para adicionar conta (Phone Number ID, Business Account ID, Access Token, nome)
+- [x] Botão de ativar/desativar conta
+- [x] Botão de remover conta com confirmação
+- [x] Exibir status da conta (ativo, inativo, erro)
+- [x] Integrar ao menu de navegação do MegaDesk (aba WhatsApp no grupo de configurações)
+- [x] Exibir URL do webhook Meta com botão de copiar
+- [x] Suporte a webhookVerifyToken no formulário
