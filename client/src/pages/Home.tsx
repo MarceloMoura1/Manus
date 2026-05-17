@@ -454,7 +454,7 @@ function ConversationsPage() {
             <MessageCircle className="w-5 h-5 text-slate-600" />
             <h2 className="text-xl font-bold text-slate-900">Conversas</h2>
           </div>
-          <p className="text-slate-500 text-sm ml-7">{mockConversations?.length || 0} conversas</p>
+
         </div>
 
         {/* Search Bar */}

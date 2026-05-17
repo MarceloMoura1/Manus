@@ -1052,3 +1052,6 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Exibir número do chamado (#XXXX) na mensagem de sucesso do Atendimento Ativo
 - [x] Adicionar botão "Ver Chamado" que navega para aba Chamados após criação
 - [x] Validar isolamento multi-tenant: chamados de cliente A não aparecem para cliente B (6 testes adicionados, todos passando)
+
+## Fase 105: Remover contador total de conversas
+- [x] Remover exibição do total de conversas (abertas + fechadas) na aba Conversas
