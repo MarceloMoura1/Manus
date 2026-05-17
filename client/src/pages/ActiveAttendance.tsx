@@ -151,6 +151,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
           company: customerData.company,
           clientId,
           fromCrm: customerData.source === 'crm',
+          crmClientId: customerData.crmClientId ?? undefined,
         });
         conversationId = conversationResult.conversationId || (conversationResult as any).id;
         if (ticketCreated && createdChamadoNumber) {
@@ -403,7 +404,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                 {customerData.source === 'crm' && customerData.crmClientId && onNavigate && (
                   <div className="mt-4 flex justify-end">
                     <button
-                      onClick={() => onNavigate('clients')}
+                      onClick={() => onNavigate({ route: 'clients', crmClientId: customerData.crmClientId })}
                       className="flex items-center gap-2 bg-white/20 hover:bg-white/30 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200 border border-white/30"
                     >
                       <ArrowRight className="w-4 h-4" />

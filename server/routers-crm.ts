@@ -163,30 +163,51 @@ export const crmRouter = router({
       const crmClient = await getCrmClientById(input.crmClientId, input.clientId);
       if (!crmClient) return { conversas: [] };
 
+      // Busca 1: por crm_client_id direto (vínculo criado ao abrir conversa via Atendimento Ativo)
+      const [directRows] = await pool.execute(
+        `SELECT conversation_id, customer_name, phone, company, status, last_message, time_label, created_at
+         FROM megadesk_domain_conversations
+         WHERE client_id = ? AND crm_client_id = ?
+         ORDER BY created_at DESC LIMIT 50`,
+        [input.clientId, input.crmClientId]
+      ) as any[];
+
+      // Busca 2: por nome/empresa/telefone (fallback para conversas sem vínculo direto)
       const searchTerms: string[] = [];
       if (crmClient.phone) searchTerms.push(crmClient.phone.replace(/\D/g, ""));
       if (crmClient.whatsapp) searchTerms.push(crmClient.whatsapp.replace(/\D/g, ""));
       if (crmClient.companyName) searchTerms.push(crmClient.companyName);
       if (crmClient.responsibleName) searchTerms.push(crmClient.responsibleName);
 
-      if (searchTerms.length === 0) return { conversas: [] };
+      let indirectRows: any[] = [];
+      if (searchTerms.length > 0) {
+        const placeholders = searchTerms.map(() => "REPLACE(REPLACE(phone, '-', ''), ' ', '') LIKE ? OR company LIKE ? OR customer_name LIKE ?").join(" OR ");
+        const values: string[] = [];
+        searchTerms.forEach(term => {
+          values.push(`%${term}%`, `%${term}%`, `%${term}%`);
+        });
+        const [rows] = await pool.execute(
+          `SELECT conversation_id, customer_name, phone, company, status, last_message, time_label, created_at
+           FROM megadesk_domain_conversations
+           WHERE client_id = ? AND (crm_client_id IS NULL OR crm_client_id = '') AND (${placeholders})
+           ORDER BY created_at DESC LIMIT 50`,
+          [input.clientId, ...values]
+        ) as any[];
+        indirectRows = rows as any[];
+      }
 
-      const placeholders = searchTerms.map(() => "REPLACE(REPLACE(phone, '-', ''), ' ', '') LIKE ? OR company LIKE ? OR customer_name LIKE ?").join(" OR ");
-      const values: string[] = [];
-      searchTerms.forEach(term => {
-        values.push(`%${term}%`, `%${term}%`, `%${term}%`);
+      // Combinar e deduplicar por conversation_id
+      const allRows = [...(directRows as any[]), ...indirectRows];
+      const seen = new Set<string>();
+      const uniqueRows = allRows.filter(r => {
+        if (seen.has(r.conversation_id)) return false;
+        seen.add(r.conversation_id);
+        return true;
       });
-
-      const [rows] = await pool.execute(
-        `SELECT conversation_id, customer_name, phone, company, status, last_message, time_label, created_at
-         FROM megadesk_domain_conversations
-         WHERE client_id = ? AND (${placeholders})
-         ORDER BY created_at DESC LIMIT 50`,
-        [input.clientId, ...values]
-      ) as any[];
+      uniqueRows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       return {
-        conversas: (rows as any[]).map(r => ({
+        conversas: uniqueRows.slice(0, 50).map(r => ({
           id: r.conversation_id,
           customerName: r.customer_name,
           phone: r.phone,

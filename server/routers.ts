@@ -990,7 +990,7 @@ export const appRouter = router({
         }
       }),
     createConversation: publicProcedure
-      .input(z.object({ customerId: z.string(), customerName: z.string(), phone: z.string(), company: z.string(), clientId: z.string().min(1), fromCrm: z.boolean().optional() }))
+      .input(z.object({ customerId: z.string(), customerName: z.string(), phone: z.string(), company: z.string(), clientId: z.string().min(1), fromCrm: z.boolean().optional(), crmClientId: z.string().optional() }))
       .mutation(async ({ input }) => {
         try {
           const { createConversation: createConversationDb, createCustomer: createCustomerDb, searchCustomerByPhone } = await import("./db");
@@ -1017,6 +1017,7 @@ export const appRouter = router({
           await createConversationDb({
             conversationId,
             clientId: client.clientId,
+            crmClientId: input.crmClientId ?? undefined,
             customerName: input.customerName,
             phone: input.phone,
             company: input.company,

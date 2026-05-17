@@ -2549,6 +2549,7 @@ function Shell() {
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [indicadores, setIndicadores] = useState<any>(null);
+  const [activeCrmClientId, setActiveCrmClientId] = useState<string | null>(null);
 
   const loginMutation = trpc.megadesk.loginByEmail.useMutation();
 
@@ -2785,8 +2786,18 @@ function Shell() {
           {active === "bot-config" && <BotConfigPage />}
           {active === "ai-assistant" && <AIAssistantPage />}
           {active === "notifications" && <NotificationsPage />}
-          {active === "active-attendance" && <ActiveAttendancePage onNavigate={(route) => setActive(route as RouteId)} />}
-          {active === "clients" && <ClientesPage />}
+          {active === "active-attendance" && <ActiveAttendancePage onNavigate={(nav) => {
+            if (typeof nav === 'string') {
+              setActive(nav as RouteId);
+            } else if (nav && typeof nav === 'object') {
+              const { route, crmClientId } = nav as { route: string; crmClientId?: string };
+              if (crmClientId) {
+                setActiveCrmClientId(crmClientId);
+              }
+              setActive(route as RouteId);
+            }
+          }} />}
+          {active === "clients" && <ClientesPage initialSelectedId={activeCrmClientId ?? undefined} />}
         </main>
       </div>
 

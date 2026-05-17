@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback } from "react";
+import React, { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import {
@@ -741,7 +741,7 @@ function ClientDetailPanel({
 }
 
 // ─── Página Principal ──────────────────────────────────────────────────────────
-export function ClientesPage() {
+export function ClientesPage({ initialSelectedId }: { initialSelectedId?: string } = {}) {
   const session = useMemo(() => {
     try {
       return JSON.parse(localStorage.getItem("megadesk_session_v1") ?? "{}");
@@ -751,7 +751,7 @@ export function ClientesPage() {
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("todos");
-  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(initialSelectedId ?? null);
   const [showModal, setShowModal] = useState(false);
   const [editClient, setEditClient] = useState<CrmClient | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -824,6 +824,18 @@ export function ClientesPage() {
   }, [clients, statusFilter]);
 
   const selectedClient = filteredClients.find(c => c.crmClientId === selectedClientId) ?? null;
+
+  // Quando initialSelectedId é passado e os dados carregam, garantir que o cliente seja encontrado
+  // mesmo que esteja fora do filtro atual (resetar filtro se necessário)
+  useEffect(() => {
+    if (initialSelectedId && clients.length > 0 && !selectedClient) {
+      const found = clients.find(c => c.crmClientId === initialSelectedId);
+      if (found) {
+        setStatusFilter("todos");
+        setSelectedClientId(initialSelectedId);
+      }
+    }
+  }, [initialSelectedId, clients, selectedClient]);
 
   if (!clientId) {
     return (

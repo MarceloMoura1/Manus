@@ -1093,3 +1093,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Retornar email e whatsapp do CRM na procedure searchCustomer
 - [x] Exibir e-mail e WhatsApp do CRM no card do Atendimento Ativo
 - [x] Adicionar botão "Ver no CRM" no card para navegar ao perfil completo
+
+## Fase 111: Navegação direta ao cliente CRM + Vínculo de conversa ao CRM
+- [x] Adicionar coluna `crm_client_id` na tabela `megadesk_domain_conversations`
+- [x] Atualizar procedure `createConversation` para salvar `crmClientId` quando `fromCrm=true`
+- [x] Atualizar procedure `crm.getConversas` para buscar também por `crm_client_id` (além de nome/empresa/telefone)
+- [x] Atualizar `ClientesPage` para aceitar parâmetro `selectedClientId` e abrir o cliente automaticamente
+- [x] Atualizar botão "Ver no CRM" no `ActiveAttendance` para passar `crmClientId` na navegação
+- [x] Atualizar `Home.tsx` para ler parâmetro de rota e repassar para `ClientesPage`

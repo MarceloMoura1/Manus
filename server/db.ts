@@ -125,6 +125,7 @@ export async function createTicket(input: {
 export async function createConversation(input: {
   conversationId: string;
   clientId: string;
+  crmClientId?: string;
   customerName: string;
   phone: string;
   company: string;
@@ -135,6 +136,7 @@ export async function createConversation(input: {
   await getDb().insert(megadeskDomainConversations).values({
     conversationId: input.conversationId,
     clientId: input.clientId,
+    crmClientId: input.crmClientId ?? null,
     customerName: input.customerName,
     phone: input.phone,
     company: input.company,

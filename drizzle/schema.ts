@@ -95,6 +95,7 @@ export const megadeskDomainCustomers = mysqlTable("megadesk_domain_customers", {
 export const megadeskDomainConversations = mysqlTable("megadesk_domain_conversations", {
   conversationId: varchar("conversation_id", { length: 80 }).primaryKey(),
   clientId: varchar("client_id", { length: 80 }).notNull(),
+  crmClientId: varchar("crm_client_id", { length: 36 }),
   customerName: varchar("customer_name", { length: 180 }).notNull(),
   phone: varchar("phone", { length: 40 }).notNull(),
   company: varchar("company", { length: 255 }).notNull(),
