@@ -1037,3 +1037,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Aplicar em todos os cards principais (busca, dados do cliente, opção de chamado)
 - [x] Testar e validar no navegador
 - [x] Salvar checkpoint
+
+## Fase 98: Adicionar Borda Cinza Escura aos Cards de Atendimento Ativo
+- [x] Alterar borda do card de busca de cliente de border-slate-100 para border-slate-400
+- [x] Alterar borda do card de dados do cliente para border-slate-400
+- [x] Alterar borda do card de opção de chamado para border-slate-400
+- [x] Aumentar espessura da borda de border para border-2
+- [x] Testar e validar no navegador
+- [x] Salvar checkpoint
