@@ -544,6 +544,7 @@ export async function updateConversationStatus(conversationId: string, status: "
 
 export async function updateCustomer(input: {
   customerId: string;
+  clientId: string;
   name?: string;
   company?: string;
 }) {
@@ -554,7 +555,10 @@ export async function updateCustomer(input: {
   
   await getDb().update(megadeskDomainCustomers)
     .set(updates)
-    .where(eq(megadeskDomainCustomers.customerId, input.customerId));
+    .where(and(
+      eq(megadeskDomainCustomers.customerId, input.customerId),
+      eq(megadeskDomainCustomers.clientId, input.clientId)
+    ));
 }
 
 

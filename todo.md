@@ -1010,4 +1010,15 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Corrigir ActiveAttendance para passar clientId em todas as chamadas
 - [x] Limpar todos os dados cruzados do banco (banco zerado a pedido do usuário)
 - [x] Novos clientes começam com banco limpo automaticamente
-- [ ] Salvar checkpoint
+- [x] Salvar checkpoint
+
+## Fase 95: Validação do Fluxo de Isolamento por Cliente
+- [x] Auditar fluxo de login: email → clientId correto na sessão
+- [x] Auditar todas as procedures do MegaDesk que acessam dados
+- [x] Verificar se chamados filtram por clientId
+- [x] Verificar se conversas filtram por clientId
+- [x] Verificar se contatos filtram por clientId
+- [x] Verificar se ERP/rastreio filtram por clientId
+- [x] Verificar se o Assistente IA usa o clientId correto
+- [x] Corrigir pontos fracos encontrados (botScripts fallback, closeConversation sem verify, updateCustomer sem clientId)
+- [x] Salvar checkpoint

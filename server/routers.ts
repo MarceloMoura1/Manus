@@ -774,7 +774,7 @@ export const appRouter = router({
         indicadores: { conversasAbertas: visibleConversations.filter((conversation) => conversation.status === "open").length, chamadosAbertos: visibleTickets.filter((ticket) => ticket.status !== "closed").length, tempoMedio: "4m 12s", resolucaoBot: "62%" },
         tickets: visibleTickets,
         conversas: visibleConversations,
-        botScripts: botScripts.filter((script) => !script.clientId || script.clientId === client.clientId),
+        botScripts: botScripts.filter((script) => script.clientId === client.clientId),
         modulos: client.modules,
         activeUser: { email: activeUser.email, role: activeUser.role, permissions: activeUser.permissions },
       };
@@ -1037,12 +1037,13 @@ export const appRouter = router({
           const client = getReleasedClientOrThrow(input.clientId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
           
-          await updateConversationStatus(input.conversationId, "closed");
-          
+          // Verifica que a conversa pertence ao cliente antes de encerrar
           const conv = conversations.find(c => c.id === input.conversationId);
-          if (conv) {
-            conv.status = "closed";
-          }
+          if (!conv) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
+          if (conv.clientId !== client.clientId) throw new TRPCError({ code: "FORBIDDEN", message: "Acesso negado: conversa não pertence a este cliente." });
+          
+          await updateConversationStatus(input.conversationId, "closed");
+          conv.status = "closed";
           
           audit("MegaDesk", `Conversa encerrada: ${input.conversationId}`, client.clientId);
           await persistSyncState();
@@ -1067,6 +1068,7 @@ export const appRouter = router({
           
           await updateCustomer({
             customerId: input.customerId,
+            clientId: client.clientId,
             name: input.name,
             company: input.company,
           });
