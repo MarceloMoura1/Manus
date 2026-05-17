@@ -19,6 +19,7 @@ type OperationalRecordType = "conversation" | "ticket" | "tracking" | "erp";
 
 type ClientIntegrations = {
   geminiKey?: string;
+  geminiQuotaMensal?: number; // 0 = ilimitado
   trackingToken?: string;
   trackingUser?: string;
   trackingPassword?: string;
@@ -355,10 +356,21 @@ export const appRouter = router({
       }),
     summary: adminProcedure.query(async () => {
       await hydrateSyncState();
+      // Calcula status IA de cada cliente de forma eficiente
+      const { getClientIAStatus } = await import("./gemini-client");
+      const iaStatusMap: Record<string, "ativa" | "inativa" | "quota_atingida"> = {};
+      await Promise.all(clients.map(async (client) => {
+        try {
+          const s = await getClientIAStatus(client.clientId);
+          iaStatusMap[client.clientId] = s.status;
+        } catch {
+          iaStatusMap[client.clientId] = "inativa";
+        }
+      }));
       return {
       platform: "MegaAdmin",
       description: "Painel interno para administrar clientes, liberar acesso, módulos e tokens consumidos pela MegaDesk.",
-      clients: clients.map((client) => sanitizeClient(client)),
+      clients: clients.map((client) => ({ ...sanitizeClient(client), iaStatus: iaStatusMap[client.clientId] ?? "inativa" })),
       totals: {
         clients: clients.length,
         released: clients.filter((client) => client.accessReleased).length,
@@ -456,6 +468,7 @@ export const appRouter = router({
       clientId: z.string(),
       integrations: z.object({
         geminiKey: z.string().optional(),
+        geminiQuotaMensal: z.number().int().min(0).optional(), // 0 = ilimitado
         trackingToken: z.string().optional(),
         trackingUser: z.string().optional(),
         trackingPassword: z.string().optional(),
@@ -639,7 +652,9 @@ export const appRouter = router({
       syncStateHydrated = false;
       await hydrateSyncState();
       const client = getClientOrThrow(input.clientId);
-      return { client: sanitizeClient(client), observability: await readMegaDeskTenantObservability(client.clientId) };
+      const { getClientIAStatus } = await import("./gemini-client");
+      const iaStatus = await getClientIAStatus(client.clientId);
+      return { client: sanitizeClient(client), observability: await readMegaDeskTenantObservability(client.clientId), iaStatus };
     }),
     pushOperationalRecord: adminProcedure.input(z.object({ clientId: z.string(), type: z.enum(["conversation", "ticket", "tracking", "erp"]), ownerPhone: z.string().min(8), title: z.string().min(2), status: z.string().min(2), payload: z.record(z.string(), z.unknown()).default({}) })).mutation(async ({ input }) => {
       await hydrateSyncState();

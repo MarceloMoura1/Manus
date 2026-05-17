@@ -958,3 +958,13 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] tenantObservability sempre re-hidrata do banco (dados sempre frescos)
 - [x] Testar fluxo completo sem intervenção manual
 - [x] Salvar checkpoint
+
+## Fase 88: Quota Mensal de Tokens e Badge IA Ativa/Inativa
+- [x] Adicionar campo geminiQuotaMensal (número, 0 = ilimitado) nas integrations do cliente
+- [x] Atualizar saveClientIntegrations para aceitar e salvar geminiQuotaMensal
+- [x] Criar procedure getClientIAStatus para retornar status da IA (ativa/inativa/quota_atingida)
+- [x] Bloquear chatWithClientGemini quando quota mensal for atingida
+- [x] Adicionar campo "Quota mensal (tokens)" na aba APIs do MegaAdmin
+- [x] Exibir barra de progresso de uso vs quota na aba APIs
+- [x] Adicionar badge "IA Ativa" / "IA Inativa" / "Quota Atingida" na listagem de clientes
+- [ ] Testes e checkpoint

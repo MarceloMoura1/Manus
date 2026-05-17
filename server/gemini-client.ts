@@ -90,6 +90,62 @@ export async function testGeminiConnection(apiKey: string): Promise<{ ok: boolea
 
 // ─── Helpers de banco ─────────────────────────────────────────────────────────
 
+/** Busca o token Gemini e a quota mensal do cliente */
+export async function getClientGeminiConfig(clientId: string): Promise<{ geminiKey: string | null; geminiQuotaMensal: number }> {
+  const pool = getPool();
+  const [rows] = await pool.execute(
+    "SELECT integrations_json FROM megadesk_domain_clients WHERE client_id = ? LIMIT 1",
+    [clientId]
+  ) as any[];
+  if (!rows || rows.length === 0) return { geminiKey: null, geminiQuotaMensal: 0 };
+  try {
+    const integrations = JSON.parse(rows[0].integrations_json ?? "{}");
+    return {
+      geminiKey: integrations.geminiKey ?? null,
+      geminiQuotaMensal: Number(integrations.geminiQuotaMensal ?? 0),
+    };
+  } catch {
+    return { geminiKey: null, geminiQuotaMensal: 0 };
+  }
+}
+
+/** Busca o total de tokens usados no mês atual pelo cliente */
+export async function getClientTokensUsedThisMonth(clientId: string): Promise<number> {
+  const pool = getPool();
+  try {
+    const [rows] = await pool.execute(
+      `SELECT COALESCE(SUM(tokens_used), 0) as total
+       FROM megadesk_domain_ia_conversations
+       WHERE client_id = ? AND MONTH(created_at) = MONTH(CURDATE()) AND YEAR(created_at) = YEAR(CURDATE())`,
+      [clientId]
+    ) as any[];
+    return Number((rows as any[])[0]?.total ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** Retorna o status da IA do cliente: ativa, inativa, quota_atingida */
+export async function getClientIAStatus(clientId: string): Promise<{
+  status: "ativa" | "inativa" | "quota_atingida";
+  geminiKey: string | null;
+  geminiQuotaMensal: number;
+  tokensUsadosMes: number;
+  percentualUso: number;
+}> {
+  const config = await getClientGeminiConfig(clientId);
+  if (!config.geminiKey) {
+    return { status: "inativa", geminiKey: null, geminiQuotaMensal: 0, tokensUsadosMes: 0, percentualUso: 0 };
+  }
+  const tokensUsadosMes = await getClientTokensUsedThisMonth(clientId);
+  const quota = config.geminiQuotaMensal;
+  const percentualUso = quota > 0 ? Math.round((tokensUsadosMes / quota) * 100) : 0;
+  if (quota > 0 && tokensUsadosMes >= quota) {
+    return { status: "quota_atingida", geminiKey: config.geminiKey, geminiQuotaMensal: quota, tokensUsadosMes, percentualUso };
+  }
+  return { status: "ativa", geminiKey: config.geminiKey, geminiQuotaMensal: quota, tokensUsadosMes, percentualUso };
+}
+
 /** Busca o token Gemini do cliente diretamente na tabela megadesk_domain_clients */
 export async function getClientGeminiToken(clientId: string): Promise<string | null> {
   const pool = getPool();
@@ -266,11 +322,15 @@ export async function chatWithClientGemini(
   userMessage: string,
   existingHistory: IAMessage[]
 ): Promise<ChatResult> {
-  // 1. Busca o token do cliente
-  const geminiKey = await getClientGeminiToken(clientId);
-  if (!geminiKey) {
+  // 1. Busca o token e verifica quota do cliente
+  const iaStatus = await getClientIAStatus(clientId);
+  if (iaStatus.status === "inativa") {
     throw new Error("Token Gemini não configurado para este cliente. Solicite ao administrador que configure a API do Gemini.");
   }
+  if (iaStatus.status === "quota_atingida") {
+    throw new Error(`Quota mensal de tokens atingida (${iaStatus.tokensUsadosMes.toLocaleString("pt-BR")} / ${iaStatus.geminiQuotaMensal.toLocaleString("pt-BR")} tokens). O Assistente IA será liberado no próximo mês ou após o administrador ajustar o limite.`);
+  }
+  const geminiKey = iaStatus.geminiKey!;
 
   // 2. Monta o histórico no formato REST do Gemini
   const contents: GeminiContent[] = existingHistory.map((msg) => ({

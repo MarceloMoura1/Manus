@@ -728,8 +728,10 @@ function GeminiTokenUsagePanel({ clientId }: { clientId: string }) {
 
 function ApisTab({ client, onRefresh }: { client: any; onRefresh: () => void }) {
   const intg = client.integrations ?? {};
+  const iaStatus = client.iaStatus ?? null; // vem do tenantObservability
   const [form, setForm] = useState({
     geminiKey: intg.geminiKey ?? "",
+    geminiQuotaMensal: String(intg.geminiQuotaMensal ?? 0),
     trackingToken: intg.trackingToken ?? "",
     trackingUser: intg.trackingUser ?? "",
     trackingPassword: intg.trackingPassword ?? "",
@@ -741,6 +743,14 @@ function ApisTab({ client, onRefresh }: { client: any; onRefresh: () => void }) 
   const [dirty, setDirty] = useState(false);
   const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string } | null>>({});
   const [showPwd, setShowPwd] = useState(false);
+
+  function setNumericField(key: keyof typeof form, value: string) {
+    // Aceita apenas números inteiros positivos
+    if (value === "" || /^\d+$/.test(value)) {
+      setForm((prev) => ({ ...prev, [key]: value }));
+      setDirty(true);
+    }
+  }
 
   function setField(key: keyof typeof form, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -813,6 +823,49 @@ function ApisTab({ client, onRefresh }: { client: any; onRefresh: () => void }) 
             className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-sm text-white outline-none focus:border-purple-400"
           />
         </label>
+        <label className="block text-xs text-slate-400">
+          Quota mensal de tokens
+          <span className="ml-1 text-slate-500">(0 = ilimitado)</span>
+          <input
+            value={form.geminiQuotaMensal}
+            onChange={(e) => setNumericField("geminiQuotaMensal", e.target.value)}
+            placeholder="Ex: 100000"
+            className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-sm text-white outline-none focus:border-purple-400"
+          />
+        </label>
+        {/* Barra de progresso de uso vs quota */}
+        {iaStatus && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-400">Uso este mês</span>
+              <span className={cn(
+                "font-medium",
+                iaStatus.status === "quota_atingida" ? "text-red-400" :
+                iaStatus.percentualUso >= 80 ? "text-amber-400" : "text-emerald-400"
+              )}>
+                {(iaStatus.tokensUsadosMes ?? 0).toLocaleString("pt-BR")} tokens
+                {iaStatus.geminiQuotaMensal > 0 && ` / ${iaStatus.geminiQuotaMensal.toLocaleString("pt-BR")}`}
+              </span>
+            </div>
+            {iaStatus.geminiQuotaMensal > 0 && (
+              <div className="h-2 w-full rounded-full bg-white/10 overflow-hidden">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-all",
+                    iaStatus.status === "quota_atingida" ? "bg-red-400" :
+                    iaStatus.percentualUso >= 80 ? "bg-amber-400" : "bg-emerald-400"
+                  )}
+                  style={{ width: `${Math.min(iaStatus.percentualUso ?? 0, 100)}%` }}
+                />
+              </div>
+            )}
+            {iaStatus.status === "quota_atingida" && (
+              <p className="text-xs text-red-400 flex items-center gap-1">
+                <Lock className="h-3 w-3" /> Assistente IA bloqueado — quota mensal atingida
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Painel de uso de tokens */}
@@ -928,6 +981,7 @@ function ApisTab({ client, onRefresh }: { client: any; onRefresh: () => void }) 
           onClick={() => {
             setForm({
               geminiKey: intg.geminiKey ?? "",
+              geminiQuotaMensal: String(intg.geminiQuotaMensal ?? 0),
               trackingToken: intg.trackingToken ?? "",
               trackingUser: intg.trackingUser ?? "",
               trackingPassword: intg.trackingPassword ?? "",
@@ -944,7 +998,7 @@ function ApisTab({ client, onRefresh }: { client: any; onRefresh: () => void }) 
           Sair sem salvar
         </button>
         <button
-          onClick={() => save.mutate({ clientId: client.clientId, integrations: form })}
+          onClick={() => save.mutate({ clientId: client.clientId, integrations: { ...form, geminiQuotaMensal: parseInt(form.geminiQuotaMensal || "0", 10) } })}
           disabled={!dirty || save.isPending}
           className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-400 px-5 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-50"
         >

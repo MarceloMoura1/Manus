@@ -1034,6 +1034,7 @@ export default function AdminPanel() {
                           <th className="px-4 py-3 text-center text-xs text-slate-400 font-medium">Cadastrados</th>
                           <th className="px-4 py-3 text-center text-xs text-slate-400 font-medium">Ativos</th>
                           <th className="px-4 py-3 text-center text-xs text-slate-400 font-medium">Status</th>
+                          <th className="px-4 py-3 text-center text-xs text-slate-400 font-medium">IA Gemini</th>
                           <th className="px-4 py-3 text-right text-xs text-slate-400 font-medium">Ação</th>
                         </tr>
                       </thead>
@@ -1067,6 +1068,24 @@ export default function AdminPanel() {
                                 <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-medium", client.statusType === "active" ? "bg-emerald-400/10 text-emerald-300 border border-emerald-400/20" : "bg-yellow-400/10 text-yellow-300 border border-yellow-400/20")}>
                                   {client.statusType === "active" ? "Ativo" : "Teste"}
                                 </span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {client.iaStatus === "ativa" ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-purple-400/30 bg-purple-400/10 px-2.5 py-0.5 text-xs font-medium text-purple-300">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-purple-400" />
+                                    IA Ativa
+                                  </span>
+                                ) : client.iaStatus === "quota_atingida" ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-red-400/30 bg-red-400/10 px-2.5 py-0.5 text-xs font-medium text-red-300">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+                                    Quota Atingida
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-slate-600/40 bg-slate-800/40 px-2.5 py-0.5 text-xs font-medium text-slate-500">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-slate-600" />
+                                    IA Inativa
+                                  </span>
+                                )}
                               </td>
                               <td className="px-4 py-3 text-right">
                                 <div className="flex items-center justify-end gap-2">
