@@ -967,4 +967,10 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Adicionar campo "Quota mensal (tokens)" na aba APIs do MegaAdmin
 - [x] Exibir barra de progresso de uso vs quota na aba APIs
 - [x] Adicionar badge "IA Ativa" / "IA Inativa" / "Quota Atingida" na listagem de clientes
-- [ ] Testes e checkpoint
+- [x] Testes e checkpoint
+
+## Fase 89: BUG - Senha de acesso não configurada para todos os usuários MegaDesk
+- [x] Diagnosticar causa do erro de senha não configurada
+- [x] Corrigir o bug (passwordHash não era carregado do banco no loadMegaDeskStructuredState)
+- [x] Restaurar senha padrão para usuários afetados no banco
+- [ ] Salvar checkpoint

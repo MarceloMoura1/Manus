@@ -348,7 +348,8 @@ export async function loadMegaDeskStructuredState(defaultState: MegaDeskStructur
     const usersByClient = new Map<string, any[]>();
     for (const row of userRows as any[]) {
       const list = usersByClient.get(row.client_id) ?? [];
-      list.push({ id: row.user_id, name: row.name, email: row.email, role: row.role, status: row.status, permissions: JSON.parse(row.permissions_json || "[]") });
+      // IMPORTANTE: incluir passwordHash para que persistSyncState não sobrescreva com null
+      list.push({ id: row.user_id, name: row.name, email: row.email, role: row.role, status: row.status, permissions: JSON.parse(row.permissions_json || "[]"), passwordHash: row.password_hash ?? null });
       usersByClient.set(row.client_id, list);
     }
 
