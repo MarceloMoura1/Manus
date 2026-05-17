@@ -60,6 +60,12 @@ type Conversation = {
   lastMessage: string;
   time: string;
   messages: Array<{ from: "customer" | "agent" | "bot"; text: string; time: string }>;
+  assignedUserId?: string | null;
+  assignedUserName?: string;
+  iaActive?: boolean;
+  unreadCount?: number;
+  lastMessageFrom?: "customer" | "agent" | "bot";
+  createdAt?: string;
 };
 
 type TicketRecord = {
@@ -676,7 +682,13 @@ export const appRouter = router({
       const record: OperationalRecord = { id: `op-${Date.now()}`, clientId: client.clientId, tenantDatabaseName: client.tenantDatabaseName, type: input.type, ownerPhone: input.ownerPhone, title: input.title, status: input.status, payload: input.payload, createdAt: new Date().toISOString() };
       operationalRecords.unshift(record);
       if (input.type === "conversation") {
-        conversations.unshift({ id: `conv-${Date.now()}`, clientId: client.clientId, name: client.contact, phone: input.ownerPhone, company: client.company, status: "open", lastMessage: input.title, time: nowLabel(), messages: [{ from: "customer", text: input.title, time: nowLabel() }] });
+        const newConv = { id: `conv-${Date.now()}`, clientId: client.clientId, name: client.contact, phone: input.ownerPhone, company: client.company, status: "open" as ConversationStatus, lastMessage: input.title, time: nowLabel(), messages: [{ from: "customer" as const, text: input.title, time: nowLabel() }], createdAt: new Date().toISOString(), lastMessageFrom: "customer" as const, unreadCount: 1 };
+        conversations.unshift(newConv);
+        try {
+          const { getSocketIO } = await import("./modules/whatsapp/socket/whatsapp.socket");
+          const io = getSocketIO();
+          if (io) io.to(`client:${client.clientId}`).emit("conversation:new", { conversation: newConv });
+        } catch {}
       }
       if (input.type === "ticket") {
         tickets.unshift({ id: `MD-${String(tickets.length + 1).padStart(4, "0")}`, clientId: client.clientId, company: client.company, customer: client.contact, problem: input.title, category: "🛠️ Suporte", status: "open", createdAt: nowLabel(), description: String(input.payload.description ?? input.title) });
@@ -1527,23 +1539,34 @@ export const appRouter = router({
   }),
   conversations: router({
     list: publicProcedure
-      .input(z.object({ clientId: z.string() }))
+      .input(z.object({
+        clientId: z.string(),
+        viewMode: z.enum(["all", "mine", "specific"]).optional(),
+        assignedUserId: z.string().nullable().optional(),
+      }))
       .query(({ input }) => {
-        const clientConversations = conversations
-          .filter((c) => c.clientId === input.clientId)
-          .map((c) => ({
-            id: c.id,
-            customerName: c.name,
-            customerPhone: c.phone,
-            companyName: c.company,
-            lastMessage: c.lastMessage,
-            lastMessageAt: new Date(),
-            unreadCount: 0,
-            status: (c.status === "closed" ? "closed" : c.status === "bot" ? "pending" : "open") as "open" | "pending" | "closed",
-            assignedUserId: null,
-            assignedUserName: undefined,
-          }));
-        return clientConversations;
+        let clientConversations = conversations.filter((c) => c.clientId === input.clientId);
+        // Filtrar por modo de visualização
+        if (input.viewMode === "mine" && input.assignedUserId) {
+          clientConversations = clientConversations.filter((c) => c.assignedUserId === input.assignedUserId);
+        } else if (input.viewMode === "specific" && input.assignedUserId) {
+          clientConversations = clientConversations.filter((c) => c.assignedUserId === input.assignedUserId);
+        }
+        return clientConversations.map((c) => ({
+          id: c.id,
+          customerName: c.name,
+          customerPhone: c.phone,
+          companyName: c.company,
+          lastMessage: c.lastMessage,
+          lastMessageAt: c.createdAt ? new Date(c.createdAt) : new Date(),
+          unreadCount: c.unreadCount ?? 0,
+          status: (c.status === "closed" ? "closed" : c.status === "bot" ? "pending" : "open") as "open" | "pending" | "closed",
+          assignedUserId: c.assignedUserId ?? null,
+          assignedUserName: c.assignedUserName,
+          iaActive: c.iaActive ?? false,
+          lastMessageFrom: c.lastMessageFrom,
+          createdAt: c.createdAt,
+        }));
       }),
     close: publicProcedure
       .input(z.object({ conversationId: z.string(), clientId: z.string() }))
@@ -1551,13 +1574,46 @@ export const appRouter = router({
         const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === input.clientId);
         if (!conv) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa nao encontrada" });
         conv.status = "closed";
+        persistSyncState().catch(console.error);
+        // Emitir evento Socket.IO
+        try {
+          const { getSocketIO } = require("../modules/whatsapp/socket/whatsapp.socket");
+          const io = getSocketIO();
+          if (io) io.to(`client:${input.clientId}`).emit("conversation:closed", { conversationId: input.conversationId, clientId: input.clientId });
+        } catch {}
         return { ok: true };
       }),
     assign: publicProcedure
-      .input(z.object({ conversationId: z.string(), userId: z.string(), clientId: z.string() }))
+      .input(z.object({ conversationId: z.string(), userId: z.string(), userName: z.string().optional(), clientId: z.string() }))
       .mutation(({ input }) => {
         const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === input.clientId);
         if (!conv) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa nao encontrada" });
+        // Buscar nome do usuário se não foi passado
+        const client = clients.find((c) => c.clientId === input.clientId);
+        const user = client?.users.find((u) => u.id === input.userId);
+        conv.assignedUserId = input.userId;
+        conv.assignedUserName = input.userName ?? user?.name;
+        persistSyncState().catch(console.error);
+        // Emitir evento Socket.IO
+        try {
+          const { getSocketIO } = require("../modules/whatsapp/socket/whatsapp.socket");
+          const io = getSocketIO();
+          if (io) io.to(`client:${input.clientId}`).emit("conversation:assigned", { conversationId: input.conversationId, assignedUserId: conv.assignedUserId, assignedUserName: conv.assignedUserName, clientId: input.clientId });
+        } catch {}
+        return { ok: true };
+      }),
+    reopen: publicProcedure
+      .input(z.object({ conversationId: z.string(), clientId: z.string() }))
+      .mutation(({ input }) => {
+        const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === input.clientId);
+        if (!conv) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa nao encontrada" });
+        conv.status = "open";
+        persistSyncState().catch(console.error);
+        try {
+          const { getSocketIO } = require("../modules/whatsapp/socket/whatsapp.socket");
+          const io = getSocketIO();
+          if (io) io.to(`client:${input.clientId}`).emit("conversation:reopened", { conversationId: input.conversationId, clientId: input.clientId });
+        } catch {}
         return { ok: true };
       }),
   }),

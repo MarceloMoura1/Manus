@@ -1,8 +1,12 @@
-import { useState, useMemo } from "react";
-import { Button } from "@/components/ui/button";
+/**
+ * ConversasPage — Página de Conversas do MegaDesk
+ * Filtros: Todas / Minhas / Usuário Específico
+ * Abas: Abertas / Pendentes / Encerradas
+ * Atualizações em tempo real via Socket.IO
+ */
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { Input } from "@/components/ui/input";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -11,526 +15,793 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Spinner } from "@/components/ui/spinner";
-import {
   MessageCircle,
-  X,
-  Clock,
-  User,
   Search,
-  Eye,
-  Send,
-  Phone,
+  User,
   Building2,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
+  Bot,
+  UserCheck,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { useConversasSocket } from "@/hooks/useConversasSocket";
+import type { ConversaSocketItem } from "@/hooks/useConversasSocket";
 
-interface ConversationCard {
+// ─── Constantes ───────────────────────────────────────────────────────────────
+const MEGADESK_SESSION_KEY = "megadesk_session_v1";
+
+type ViewMode = "all" | "mine" | "specific";
+type StatusTab = "open" | "pending" | "closed";
+
+type ConversationItem = {
   id: string;
   customerName: string;
   customerPhone: string;
-  companyName?: string;
+  companyName: string;
   lastMessage: string;
   lastMessageAt: Date;
   unreadCount: number;
   status: "open" | "pending" | "closed";
   assignedUserId: string | null;
   assignedUserName?: string;
+  iaActive: boolean;
+  lastMessageFrom?: "customer" | "agent" | "bot";
+  createdAt?: string;
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatDate(date: Date | string | undefined): string {
+  if (!date) return "";
+  const d = typeof date === "string" ? new Date(date) : date;
+  if (isNaN(d.getTime())) return "";
+  const now = new Date();
+  const isToday =
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear();
+  if (isToday) {
+    return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  }
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
-export function ConversasPage() {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [viewMode, setViewMode] = useState<"all" | "mine" | "specific">("all");
-  const [filterUser, setFilterUser] = useState<string | null>(null);
-  const [selectedConversation, setSelectedConversation] =
-    useState<ConversationCard | null>(null);
-  const [showCloseDialog, setShowCloseDialog] = useState(false);
-  const [showAssignDialog, setShowAssignDialog] = useState(false);
-  const [assignToUser, setAssignToUser] = useState<string | null>(null);
-
-  // Get clientId and userId from session
-  const getSessionData = () => {
-    try {
-      const session = JSON.parse(
-        localStorage.getItem("megadesk_session_v1") || "{}"
-      );
-      return { clientId: session.clientId || "", userId: session.userId || "" };
-    } catch {
-      return { clientId: "", userId: "" };
-    }
-  };
-
-  const { clientId, userId } = getSessionData();
-
-  // Queries
-  const { data: conversations = [], isLoading: conversationsLoading } =
-    trpc.conversations.list.useQuery({
-      clientId,
-    });
-
-  const { data: users = [] } = trpc.users.list.useQuery({
-    clientId,
-  });
-
-  // Mutations
-  const closeConversationMutation = trpc.conversations.close.useMutation();
-  const assignConversationMutation = trpc.conversations.assign.useMutation();
-
-  // Aplicar filtro de visualização
-  const conversationsFiltered = useMemo(() => {
-    let filtered = conversations as ConversationCard[];
-
-    if (viewMode === "mine") {
-      filtered = filtered.filter((c) => c.assignedUserId === userId);
-    } else if (viewMode === "specific" && filterUser) {
-      filtered = filtered.filter((c) => c.assignedUserId === filterUser);
-    }
-
-    return filtered;
-  }, [conversations, viewMode, filterUser, userId]);
-
-  // Filtrar por termo de busca
-  const filteredConversations = useMemo(() => {
-    let filtered = conversationsFiltered;
-
-    if (searchTerm) {
-      filtered = filtered.filter(
-        (c) =>
-          c.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          c.customerPhone.includes(searchTerm) ||
-          c.companyName?.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    return filtered;
-  }, [conversationsFiltered, searchTerm]);
-
-  // Agrupar conversas por status
-  const conversationsByStatus = useMemo(() => {
-    return {
-      open: filteredConversations.filter((c) => c.status === "open"),
-      pending: filteredConversations.filter((c) => c.status === "pending"),
-      closed: filteredConversations.filter((c) => c.status === "closed"),
+function getSession() {
+  try {
+    const raw =
+      localStorage.getItem(MEGADESK_SESSION_KEY) ??
+      sessionStorage.getItem(MEGADESK_SESSION_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as {
+      clientId: string;
+      userEmail: string;
+      userName: string;
+      userRole: string;
     };
-  }, [filteredConversations]);
+  } catch {
+    return null;
+  }
+}
 
-  const handleCloseConversation = async () => {
-    if (!selectedConversation) return;
-
-    try {
-      await closeConversationMutation.mutateAsync({
-        clientId,
-        conversationId: selectedConversation.id,
-      });
-      setShowCloseDialog(false);
-      setSelectedConversation(null);
-    } catch (error) {
-      console.error("Erro ao encerrar conversa:", error);
-    }
-  };
-
-  const handleAssignConversation = async () => {
-    if (!selectedConversation || !assignToUser) return;
-
-    try {
-      await assignConversationMutation.mutateAsync({
-        clientId,
-        conversationId: selectedConversation.id,
-        userId: assignToUser,
-      });
-      setShowAssignDialog(false);
-      setSelectedConversation(null);
-    } catch (error) {
-      console.error("Erro ao atribuir conversa:", error);
-    }
-  };
-
-  const formatDate = (date: Date) => {
-    const d = new Date(date);
-    return d.toLocaleDateString("pt-BR", { month: "2-digit", day: "2-digit" });
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "open":
-        return "bg-green-100 text-green-800";
-      case "pending":
-        return "bg-yellow-100 text-yellow-800";
-      case "closed":
-        return "bg-gray-100 text-gray-800";
-      default:
-        return "bg-gray-100 text-gray-800";
-    }
-  };
-
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case "open":
-        return "Aberta";
-      case "pending":
-        return "Pendente";
-      case "closed":
-        return "Encerrada";
-      default:
-        return status;
-    }
-  };
-
-  const ConversationCard = ({ conv }: { conv: ConversationCard }) => (
-    <Card
-      className="p-4 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-l-blue-500"
-      onClick={() => setSelectedConversation(conv)}
-    >
+// ─── Componente de Skeleton ───────────────────────────────────────────────────
+function ConversationSkeleton() {
+  return (
+    <div className="bg-white rounded-xl border border-slate-100 p-4 space-y-3">
       <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-2">
-            <h3 className="font-semibold text-gray-900">{conv.customerName}</h3>
-            {conv.unreadCount > 0 && (
-              <Badge variant="destructive" className="text-xs">
-                {conv.unreadCount}
-              </Badge>
-            )}
-          </div>
-
-          <div className="space-y-1 text-sm text-gray-600">
-            <div className="flex items-center gap-2">
-              <Phone size={14} />
-              <span>{conv.customerPhone}</span>
-            </div>
-            {conv.companyName && (
-              <div className="flex items-center gap-2">
-                <Building2 size={14} />
-                <span>{conv.companyName}</span>
-              </div>
-            )}
-          </div>
-
-          <p className="text-sm text-gray-700 mt-2 line-clamp-2">
-            {conv.lastMessage}
-          </p>
+        <div className="space-y-1.5 flex-1">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-3 w-24" />
         </div>
-
-        <div className="flex flex-col items-end gap-2">
-          <Badge className={getStatusColor(conv.status)}>
-            {getStatusLabel(conv.status)}
-          </Badge>
-          <div className="flex items-center gap-1 text-xs text-gray-500">
-            <Clock size={12} />
-            {formatDate(conv.lastMessageAt)}
-          </div>
-        </div>
+        <Skeleton className="h-6 w-16 rounded-full" />
       </div>
-
-      {conv.assignedUserName && (
-        <div className="mt-3 pt-3 border-t border-gray-200 flex items-center gap-2 text-xs text-gray-600">
-          <User size={12} />
-          <span>{conv.assignedUserName}</span>
-        </div>
-      )}
-    </Card>
+      <Skeleton className="h-3 w-full" />
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-7 w-24 rounded-lg" />
+      </div>
+    </div>
   );
+}
 
-  const ConversationList = ({
-    conversations,
-  }: {
-    conversations: ConversationCard[];
-  }) => {
-    if (conversationsLoading) {
-      return (
-        <div className="flex items-center justify-center py-12">
-          <Spinner />
-        </div>
-      );
-    }
+// ─── Card de Conversa ─────────────────────────────────────────────────────────
+type ConversationCardProps = {
+  conv: ConversationItem;
+  onClose: (id: string) => void;
+  onReopen: (id: string) => void;
+  onAssign: (id: string) => void;
+  confirmingClose: string | null;
+  setConfirmingClose: (id: string | null) => void;
+  confirmingReopen: string | null;
+  setConfirmingReopen: (id: string | null) => void;
+};
 
-    if (conversations.length === 0) {
-      return (
-        <div className="flex flex-col items-center justify-center py-12 text-gray-500">
-          <MessageCircle size={48} className="mb-4 opacity-50" />
-          <p className="text-lg font-medium">Nenhuma conversa encontrada</p>
-          <p className="text-sm">Tente ajustar os filtros de busca</p>
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-3">
-        {conversations.map((conv) => (
-          <ConversationCard key={conv.id} conv={conv} />
-        ))}
-      </div>
-    );
-  };
+function ConversationCard({
+  conv,
+  onClose,
+  onReopen,
+  onAssign,
+  confirmingClose,
+  setConfirmingClose,
+  confirmingReopen,
+  setConfirmingReopen,
+}: ConversationCardProps) {
+  const isUnread = conv.unreadCount > 0 && conv.lastMessageFrom === "customer";
+  const isClosed = conv.status === "closed";
 
   return (
-    <div className="h-full flex flex-col bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 p-6">
-        <div className="max-w-7xl mx-auto">
-          <h1 className="text-3xl font-bold text-gray-900 mb-6">Conversas</h1>
-
-          {/* Filtros */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Busca */}
-            <div className="relative">
-              <Search
-                size={18}
-                className="absolute left-3 top-3 text-gray-400"
-              />
-              <Input
-                placeholder="Buscar por nome, telefone ou empresa..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
+    <div
+      className={[
+        "bg-white rounded-xl border transition-all duration-200",
+        "hover:shadow-md hover:-translate-y-0.5",
+        isUnread ? "border-blue-200 shadow-sm shadow-blue-50" : "border-slate-100",
+      ].join(" ")}
+      style={{ animation: "fadeSlideIn 0.2s ease-out" }}
+    >
+      <div className="p-4">
+        {/* Header do card */}
+        <div className="flex items-start justify-between gap-3 mb-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span
+                className={[
+                  "text-sm truncate",
+                  isUnread ? "font-bold text-slate-900" : "font-semibold text-slate-800",
+                ].join(" ")}
+              >
+                {conv.customerName || "Sem nome"}
+              </span>
+              {conv.unreadCount > 0 && (
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-500 text-white text-xs font-bold flex-shrink-0">
+                  {conv.unreadCount > 9 ? "9+" : conv.unreadCount}
+                </span>
+              )}
             </div>
+            {conv.companyName && (
+              <div className="flex items-center gap-1 mt-0.5">
+                <Building2 className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                <span className="text-xs text-slate-500 truncate">{conv.companyName}</span>
+              </div>
+            )}
+          </div>
+          <span className="text-xs text-slate-400 flex-shrink-0">
+            {formatDate(conv.lastMessageAt)}
+          </span>
+        </div>
 
-            {/* Modo de visualização */}
-            <Select value={viewMode} onValueChange={(v: any) => setViewMode(v)}>
-              <SelectTrigger>
-                <Eye size={16} className="mr-2" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas as conversas</SelectItem>
-                <SelectItem value="mine">Minhas conversas</SelectItem>
-                <SelectItem value="specific">Usuário específico</SelectItem>
-              </SelectContent>
-            </Select>
+        {/* Última mensagem */}
+        <p
+          className={[
+            "text-xs mb-3 line-clamp-2",
+            isClosed
+              ? "text-slate-400 italic"
+              : isUnread
+              ? "text-slate-800 font-semibold"
+              : "text-slate-500",
+          ].join(" ")}
+        >
+          {isClosed ? "Conversa encerrada" : conv.lastMessage || "Sem mensagens"}
+        </p>
 
-            {/* Filtro de usuário (apenas se "specific" estiver selecionado) */}
-            {viewMode === "specific" && (
-              <Select value={filterUser || ""} onValueChange={setFilterUser}>
-                <SelectTrigger>
-                  <User size={16} className="mr-2" />
-                  <SelectValue placeholder="Selecionar usuário" />
-                </SelectTrigger>
-                <SelectContent>
-                  {users.map((user: any) => (
-                    <SelectItem key={user.id} value={user.id}>
-                      {user.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        {/* Footer do card */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            {conv.assignedUserName ? (
+              <div className="flex items-center gap-1">
+                <UserCheck className="w-3 h-3 text-green-500 flex-shrink-0" />
+                <span className="text-xs text-slate-500 truncate max-w-[120px]">
+                  {conv.assignedUserName}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1">
+                <User className="w-3 h-3 text-slate-300 flex-shrink-0" />
+                <span className="text-xs text-slate-400">Não atribuído</span>
+              </div>
+            )}
+            {conv.iaActive && (
+              <div className="flex items-center gap-1">
+                <Bot className="w-3 h-3 text-purple-500" />
+                <span className="text-xs text-purple-500">IA</span>
+              </div>
+            )}
+          </div>
+
+          {/* Ações */}
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {!isClosed && (
+              <button
+                type="button"
+                onClick={() => onAssign(conv.id)}
+                className="text-xs text-slate-500 hover:text-blue-600 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors"
+              >
+                Atribuir
+              </button>
+            )}
+
+            {/* Encerrar / Abrir com confirmação inline */}
+            {!isClosed ? (
+              confirmingClose === conv.id ? (
+                <div className="flex items-center gap-1 bg-red-50 border border-red-200 rounded-lg px-2 py-1">
+                  <span className="text-xs text-red-600 font-medium">Encerrar?</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose(conv.id);
+                      setConfirmingClose(null);
+                    }}
+                    className="text-xs font-bold text-red-600 hover:text-red-700 px-1 transition-colors"
+                  >
+                    Sim
+                  </button>
+                  <span className="text-red-300 text-xs">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingClose(null)}
+                    className="text-xs text-slate-500 hover:text-slate-700 px-1 transition-colors"
+                  >
+                    Não
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmingClose(conv.id)}
+                  className="text-xs text-red-500 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors border border-transparent hover:border-red-200"
+                >
+                  Encerrar
+                </button>
+              )
+            ) : confirmingReopen === conv.id ? (
+              <div className="flex items-center gap-1 bg-green-50 border border-green-200 rounded-lg px-2 py-1">
+                <span className="text-xs text-green-600 font-medium">Abrir?</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onReopen(conv.id);
+                    setConfirmingReopen(null);
+                  }}
+                  className="text-xs font-bold text-green-600 hover:text-green-700 px-1 transition-colors"
+                >
+                  Sim
+                </button>
+                <span className="text-green-300 text-xs">|</span>
+                <button
+                  type="button"
+                  onClick={() => setConfirmingReopen(null)}
+                  className="text-xs text-slate-500 hover:text-slate-700 px-1 transition-colors"
+                >
+                  Não
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmingReopen(conv.id)}
+                className="text-xs text-green-600 hover:text-green-700 px-2 py-1 rounded-lg hover:bg-green-50 transition-colors border border-transparent hover:border-green-200"
+              >
+                Abrir conversa
+              </button>
             )}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
 
-      {/* Conteúdo */}
-      <div className="flex-1 overflow-auto">
-        <div className="max-w-7xl mx-auto p-6">
-          <Tabs defaultValue="open" className="w-full">
-            <TabsList className="grid w-full grid-cols-3 mb-6">
-              <TabsTrigger value="open" className="flex items-center gap-2">
-                <MessageCircle size={16} />
-                <span>Abertas</span>
-                {conversationsByStatus.open.length > 0 && (
-                  <Badge variant="secondary">
-                    {conversationsByStatus.open.length}
-                  </Badge>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="pending" className="flex items-center gap-2">
-                <Clock size={16} />
-                <span>Pendentes</span>
-                {conversationsByStatus.pending.length > 0 && (
-                  <Badge variant="secondary">
-                    {conversationsByStatus.pending.length}
-                  </Badge>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="closed" className="flex items-center gap-2">
-                <X size={16} />
-                <span>Encerradas</span>
-                {conversationsByStatus.closed.length > 0 && (
-                  <Badge variant="secondary">
-                    {conversationsByStatus.closed.length}
-                  </Badge>
-                )}
-              </TabsTrigger>
-            </TabsList>
+// ─── Modal de Atribuição ──────────────────────────────────────────────────────
+type AssignModalProps = {
+  conversationId: string | null;
+  users: Array<{ id: string; name: string; email: string; role: string }>;
+  onAssign: (userId: string, userName: string) => void;
+  onClose: () => void;
+};
 
-            <TabsContent value="open">
-              <ConversationList conversations={conversationsByStatus.open} />
-            </TabsContent>
-            <TabsContent value="pending">
-              <ConversationList conversations={conversationsByStatus.pending} />
-            </TabsContent>
-            <TabsContent value="closed">
-              <ConversationList conversations={conversationsByStatus.closed} />
-            </TabsContent>
-          </Tabs>
+function AssignModal({ conversationId, users, onAssign, onClose }: AssignModalProps) {
+  if (!conversationId) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
+      <div
+        className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm p-5"
+        style={{ animation: "scaleIn 0.15s cubic-bezier(0.23, 1, 0.32, 1)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-base font-semibold text-slate-800 mb-4">Atribuir conversa</h3>
+        <div className="space-y-2 max-h-64 overflow-y-auto">
+          {users.length === 0 ? (
+            <p className="text-sm text-slate-500 text-center py-4">Nenhum usuário disponível</p>
+          ) : (
+            users.map((u) => (
+              <button
+                key={u.id}
+                type="button"
+                onClick={() => onAssign(u.id, u.name)}
+                className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-colors text-left"
+              >
+                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                  <span className="text-blue-600 font-semibold text-sm">
+                    {u.name.charAt(0).toUpperCase()}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-slate-800">{u.name}</p>
+                  <p className="text-xs text-slate-400">{u.email}</p>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-4 w-full py-2 text-sm text-slate-500 hover:text-slate-700 transition-colors"
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Componente Principal ─────────────────────────────────────────────────────
+export function ConversasPage() {
+  const session = useMemo(() => getSession(), []);
+  const clientId = session?.clientId ?? null;
+  const userEmail = session?.userEmail ?? null;
+
+  // Estados de filtro
+  const [viewMode, setViewMode] = useState<ViewMode>("all");
+  const [specificUserId, setSpecificUserId] = useState<string | null>(null);
+  const [statusTab, setStatusTab] = useState<StatusTab>("open");
+  const [searchTerm, setSearchTerm] = useState("");
+
+  // Estados de ação
+  const [confirmingClose, setConfirmingClose] = useState<string | null>(null);
+  const [confirmingReopen, setConfirmingReopen] = useState<string | null>(null);
+  const [assigningConvId, setAssigningConvId] = useState<string | null>(null);
+
+  // Estado local das conversas (para atualizações em tempo real)
+  const [localConversations, setLocalConversations] = useState<ConversationItem[]>([]);
+  const [hasLoaded, setHasLoaded] = useState(false);
+
+  // ─── Busca de usuários ──────────────────────────────────────────────────────
+  const { data: usersData } = trpc.users.list.useQuery(
+    { clientId: clientId ?? "" },
+    { enabled: !!clientId, staleTime: 60_000 }
+  );
+
+  // Encontrar o userId do usuário logado pelo email
+  const currentUserId = useMemo(() => {
+    if (!userEmail || !usersData) return null;
+    return usersData.find((u) => u.email === userEmail)?.id ?? null;
+  }, [userEmail, usersData]);
+
+  // Calcular o assignedUserId para o filtro
+  const filterAssignedUserId = useMemo(() => {
+    if (viewMode === "mine") return currentUserId;
+    if (viewMode === "specific") return specificUserId;
+    return null;
+  }, [viewMode, currentUserId, specificUserId]);
+
+  // ─── Query de conversas ─────────────────────────────────────────────────────
+  const { data: conversationsData, isLoading, refetch } = trpc.conversations.list.useQuery(
+    {
+      clientId: clientId ?? "",
+      viewMode,
+      assignedUserId: filterAssignedUserId,
+    },
+    {
+      enabled: !!clientId,
+      staleTime: 10_000,
+      refetchOnWindowFocus: false,
+    }
+  );
+
+  // Sincronizar dados do servidor com estado local
+  useEffect(() => {
+    if (conversationsData) {
+      setLocalConversations(
+        conversationsData.map((c) => ({
+          ...c,
+          lastMessageAt:
+            c.lastMessageAt instanceof Date ? c.lastMessageAt : new Date(c.lastMessageAt),
+        }))
+      );
+      setHasLoaded(true);
+    }
+  }, [conversationsData]);
+
+  // ─── Mutations ──────────────────────────────────────────────────────────────
+  const closeMutation = trpc.conversations.close.useMutation({
+    onSuccess: (_, vars) => {
+      setLocalConversations((prev) =>
+        prev.map((c) =>
+          c.id === vars.conversationId ? { ...c, status: "closed" as const } : c
+        )
+      );
+    },
+  });
+
+  const reopenMutation = trpc.conversations.reopen.useMutation({
+    onSuccess: (_, vars) => {
+      setLocalConversations((prev) =>
+        prev.map((c) =>
+          c.id === vars.conversationId ? { ...c, status: "open" as const } : c
+        )
+      );
+    },
+  });
+
+  const assignMutation = trpc.conversations.assign.useMutation({
+    onSuccess: (_, vars) => {
+      const user = usersData?.find((u) => u.id === vars.userId);
+      setLocalConversations((prev) =>
+        prev.map((c) =>
+          c.id === vars.conversationId
+            ? {
+                ...c,
+                assignedUserId: vars.userId,
+                assignedUserName: vars.userName ?? user?.name,
+              }
+            : c
+        )
+      );
+      setAssigningConvId(null);
+    },
+  });
+
+  // ─── Socket.IO — atualizações em tempo real ─────────────────────────────────
+  const handleConversationNew = useCallback((conv: ConversaSocketItem) => {
+    setLocalConversations((prev) => {
+      if (prev.some((c) => c.id === conv.id)) return prev;
+      return [conv, ...prev];
+    });
+  }, []);
+
+  const handleConversationClosed = useCallback((conversationId: string) => {
+    setLocalConversations((prev) =>
+      prev.map((c) =>
+        c.id === conversationId ? { ...c, status: "closed" as const } : c
+      )
+    );
+  }, []);
+
+  const handleConversationReopened = useCallback((conversationId: string) => {
+    setLocalConversations((prev) =>
+      prev.map((c) =>
+        c.id === conversationId ? { ...c, status: "open" as const } : c
+      )
+    );
+  }, []);
+
+  const handleConversationAssigned = useCallback(
+    (data: { conversationId: string; assignedUserId: string; assignedUserName?: string }) => {
+      setLocalConversations((prev) =>
+        prev.map((c) =>
+          c.id === data.conversationId
+            ? {
+                ...c,
+                assignedUserId: data.assignedUserId,
+                assignedUserName: data.assignedUserName,
+              }
+            : c
+        )
+      );
+    },
+    []
+  );
+
+  useConversasSocket({
+    clientId,
+    onConversationNew: handleConversationNew,
+    onConversationClosed: handleConversationClosed,
+    onConversationReopened: handleConversationReopened,
+    onConversationAssigned: handleConversationAssigned,
+  });
+
+  // ─── Filtragem local ────────────────────────────────────────────────────────
+  const filteredConversations = useMemo(() => {
+    let list = localConversations;
+
+    // Filtro de status (aba)
+    list = list.filter((c) => c.status === statusTab);
+
+    // Busca por texto
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      list = list.filter(
+        (c) =>
+          c.customerName?.toLowerCase().includes(term) ||
+          c.companyName?.toLowerCase().includes(term) ||
+          c.customerPhone?.includes(term) ||
+          c.lastMessage?.toLowerCase().includes(term)
+      );
+    }
+
+    // Ordenar: não lidas primeiro, depois por data
+    list = [...list].sort((a, b) => {
+      const aUnread = a.unreadCount > 0 && a.lastMessageFrom === "customer" ? 1 : 0;
+      const bUnread = b.unreadCount > 0 && b.lastMessageFrom === "customer" ? 1 : 0;
+      if (aUnread !== bUnread) return bUnread - aUnread;
+      return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime();
+    });
+
+    return list;
+  }, [localConversations, statusTab, searchTerm]);
+
+  // Contadores por aba
+  const counts = useMemo(
+    () => ({
+      open: localConversations.filter((c) => c.status === "open").length,
+      pending: localConversations.filter((c) => c.status === "pending").length,
+      closed: localConversations.filter((c) => c.status === "closed").length,
+    }),
+    [localConversations]
+  );
+
+  // ─── Handlers ───────────────────────────────────────────────────────────────
+  const handleClose = useCallback(
+    (conversationId: string) => {
+      if (!clientId) return;
+      closeMutation.mutate({ conversationId, clientId });
+    },
+    [clientId, closeMutation]
+  );
+
+  const handleReopen = useCallback(
+    (conversationId: string) => {
+      if (!clientId) return;
+      reopenMutation.mutate({ conversationId, clientId });
+    },
+    [clientId, reopenMutation]
+  );
+
+  const handleAssignConfirm = useCallback(
+    (userId: string, userName: string) => {
+      if (!clientId || !assigningConvId) return;
+      assignMutation.mutate({ conversationId: assigningConvId, userId, userName, clientId });
+    },
+    [clientId, assigningConvId, assignMutation]
+  );
+
+  // ─── Render ──────────────────────────────────────────────────────────────────
+  if (!clientId) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <p className="text-slate-500 text-sm">Sessão não encontrada. Faça login novamente.</p>
+      </div>
+    );
+  }
+
+  const tabConfig: Array<{ id: StatusTab; label: string; icon: React.ReactNode }> = [
+    { id: "open", label: "Abertas", icon: <MessageCircle className="w-3.5 h-3.5" /> },
+    { id: "pending", label: "Pendentes", icon: <Clock className="w-3.5 h-3.5" /> },
+    { id: "closed", label: "Encerradas", icon: <CheckCircle2 className="w-3.5 h-3.5" /> },
+  ];
+
+  return (
+    <>
+      <style>{`
+        @keyframes fadeSlideIn {
+          from { opacity: 0; transform: translateY(6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes scaleIn {
+          from { opacity: 0; transform: scale(0.95); }
+          to { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
+
+      <div className="h-full flex flex-col bg-slate-50">
+        {/* ─── Header ─────────────────────────────────────────────────────── */}
+        <div className="bg-white border-b border-slate-200 px-6 py-4 flex-shrink-0">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">Conversas</h1>
+              <p className="text-sm text-slate-500 mt-0.5">
+                {isLoading
+                  ? "Carregando..."
+                  : `${localConversations.length} conversa${localConversations.length !== 1 ? "s" : ""}`}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => refetch()}
+              className="p-2 rounded-lg hover:bg-slate-100 transition-colors text-slate-500 hover:text-slate-700"
+              title="Atualizar"
+            >
+              <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
+
+          {/* Filtros de visualização */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center bg-slate-100 rounded-xl p-1 gap-1">
+              {(
+                [
+                  { id: "all" as ViewMode, label: "Todas" },
+                  { id: "mine" as ViewMode, label: "Minhas" },
+                  { id: "specific" as ViewMode, label: "Específico" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    setViewMode(opt.id);
+                    if (opt.id !== "specific") setSpecificUserId(null);
+                  }}
+                  className={[
+                    "px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150",
+                    viewMode === opt.id
+                      ? "bg-white text-slate-800 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700",
+                  ].join(" ")}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Dropdown para usuário específico */}
+            {viewMode === "specific" && (
+              <div style={{ animation: "scaleIn 0.15s cubic-bezier(0.23, 1, 0.32, 1)" }}>
+                <Select
+                  value={specificUserId ?? ""}
+                  onValueChange={(v) => setSpecificUserId(v || null)}
+                >
+                  <SelectTrigger className="w-48 h-9 text-sm bg-white border-slate-200">
+                    <SelectValue placeholder="Selecionar usuário..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {!usersData || usersData.length === 0 ? (
+                      <SelectItem value="_none" disabled>
+                        Nenhum usuário
+                      </SelectItem>
+                    ) : (
+                      usersData.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ─── Abas de Status ─────────────────────────────────────────────── */}
+        <div className="bg-white border-b border-slate-200 px-6 flex-shrink-0">
+          <div className="flex gap-0">
+            {tabConfig.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setStatusTab(tab.id)}
+                className={[
+                  "flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-all duration-150",
+                  statusTab === tab.id
+                    ? "border-blue-500 text-blue-600"
+                    : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300",
+                ].join(" ")}
+              >
+                {tab.icon}
+                {tab.label}
+                <span
+                  className={[
+                    "ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full text-xs font-bold px-1",
+                    statusTab === tab.id
+                      ? "bg-blue-100 text-blue-600"
+                      : "bg-slate-100 text-slate-500",
+                  ].join(" ")}
+                >
+                  {counts[tab.id]}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* ─── Busca ──────────────────────────────────────────────────────── */}
+        <div className="px-6 py-3 bg-white border-b border-slate-100 flex-shrink-0">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Input
+              placeholder="Buscar por nome, empresa, telefone ou mensagem..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-9 h-9 text-sm bg-slate-50 border-slate-200 focus:bg-white transition-colors"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <XCircle className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ─── Lista de Conversas ──────────────────────────────────────────── */}
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          {isLoading && !hasLoaded ? (
+            <div className="space-y-3">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <ConversationSkeleton key={i} />
+              ))}
+            </div>
+          ) : filteredConversations.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-4">
+                <MessageCircle className="w-8 h-8 text-slate-300" />
+              </div>
+              <p className="text-slate-500 font-medium">
+                {searchTerm
+                  ? "Nenhuma conversa encontrada para esta busca"
+                  : statusTab === "open"
+                  ? "Nenhuma conversa aberta"
+                  : statusTab === "pending"
+                  ? "Nenhuma conversa pendente"
+                  : "Nenhuma conversa encerrada"}
+              </p>
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm("")}
+                  className="mt-2 text-sm text-blue-500 hover:text-blue-600 transition-colors"
+                >
+                  Limpar busca
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {filteredConversations.map((conv, index) => (
+                <div
+                  key={conv.id}
+                  style={{ animationDelay: `${Math.min(index * 30, 150)}ms` }}
+                >
+                  <ConversationCard
+                    conv={conv}
+                    onClose={handleClose}
+                    onReopen={handleReopen}
+                    onAssign={(id) => setAssigningConvId(id)}
+                    confirmingClose={confirmingClose}
+                    setConfirmingClose={setConfirmingClose}
+                    confirmingReopen={confirmingReopen}
+                    setConfirmingReopen={setConfirmingReopen}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Modal de Detalhes */}
-      {selectedConversation && (
-        <div className="fixed inset-0 bg-black/50 flex items-end z-50">
-          <div className="bg-white w-full md:w-96 h-full md:h-auto md:rounded-lg md:shadow-lg flex flex-col">
-            {/* Header da Modal */}
-            <div className="border-b border-gray-200 p-4 flex items-start justify-between">
-              <div className="flex-1">
-                <h2 className="text-xl font-bold text-gray-900">
-                  {selectedConversation.customerName}
-                </h2>
-                <p className="text-sm text-gray-600 mt-1">
-                  {selectedConversation.customerPhone}
-                </p>
-                {selectedConversation.companyName && (
-                  <p className="text-sm text-gray-600">
-                    {selectedConversation.companyName}
-                  </p>
-                )}
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSelectedConversation(null)}
-              >
-                <X size={20} />
-              </Button>
-            </div>
-
-            {/* Conteúdo da Modal */}
-            <div className="flex-1 overflow-auto p-4 space-y-4">
-              {/* Status */}
-              <div>
-                <label className="text-sm font-medium text-gray-700">
-                  Status
-                </label>
-                <Badge className={`mt-2 ${getStatusColor(selectedConversation.status)}`}>
-                  {getStatusLabel(selectedConversation.status)}
-                </Badge>
-              </div>
-
-              {/* Mensagem */}
-              <div>
-                <label className="text-sm font-medium text-gray-700">
-                  Última mensagem
-                </label>
-                <p className="text-sm text-gray-600 mt-2">
-                  {selectedConversation.lastMessage}
-                </p>
-              </div>
-
-              {/* Atribuição */}
-              <div>
-                <label className="text-sm font-medium text-gray-700">
-                  Atribuído a
-                </label>
-                <p className="text-sm text-gray-600 mt-2">
-                  {selectedConversation.assignedUserName || "Não atribuído"}
-                </p>
-              </div>
-            </div>
-
-            {/* Ações */}
-            <div className="border-t border-gray-200 p-4 space-y-2">
-              <Button
-                className="w-full"
-                variant="outline"
-                onClick={() => setShowAssignDialog(true)}
-              >
-                <User size={16} className="mr-2" />
-                Reatribuir
-              </Button>
-              <Button
-                className="w-full"
-                variant={
-                  selectedConversation.status === "closed"
-                    ? "default"
-                    : "destructive"
-                }
-                onClick={() => setShowCloseDialog(true)}
-              >
-                {selectedConversation.status === "closed"
-                  ? "Reabrir conversa"
-                  : "Encerrar conversa"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Dialog de Encerramento */}
-      <AlertDialog open={showCloseDialog} onOpenChange={setShowCloseDialog}>
-        <AlertDialogContent>
-          <AlertDialogTitle>
-            {selectedConversation?.status === "closed"
-              ? "Reabrir conversa?"
-              : "Encerrar conversa?"}
-          </AlertDialogTitle>
-          <AlertDialogDescription>
-            {selectedConversation?.status === "closed"
-              ? "Esta ação reabrirá a conversa com o cliente."
-              : "Esta ação encerrará a conversa com o cliente. Você poderá reabri-la depois se necessário."}
-          </AlertDialogDescription>
-          <div className="flex gap-2 justify-end">
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleCloseConversation}
-              className={
-                selectedConversation?.status === "closed"
-                  ? ""
-                  : "bg-red-600 hover:bg-red-700"
-              }
-            >
-              {closeConversationMutation.isPending ? (
-                <Spinner className="mr-2" />
-              ) : null}
-              {selectedConversation?.status === "closed"
-                ? "Reabrir"
-                : "Encerrar"}
-            </AlertDialogAction>
-          </div>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Dialog de Reatribuição */}
-      <AlertDialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
-        <AlertDialogContent>
-          <AlertDialogTitle>Reatribuir conversa</AlertDialogTitle>
-          <AlertDialogDescription>
-            Selecione um usuário para atribuir esta conversa.
-          </AlertDialogDescription>
-          <Select value={assignToUser || ""} onValueChange={setAssignToUser}>
-            <SelectTrigger>
-              <SelectValue placeholder="Selecionar usuário" />
-            </SelectTrigger>
-            <SelectContent>
-              {users.map((user: any) => (
-                <SelectItem key={user.id} value={user.id}>
-                  {user.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <div className="flex gap-2 justify-end">
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleAssignConversation}>
-              {assignConversationMutation.isPending ? (
-                <Spinner className="mr-2" />
-              ) : null}
-              Atribuir
-            </AlertDialogAction>
-          </div>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+      {/* ─── Modal de Atribuição ─────────────────────────────────────────── */}
+      <AssignModal
+        conversationId={assigningConvId}
+        users={
+          usersData?.map((u) => ({
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            role: u.role,
+          })) ?? []
+        }
+        onAssign={handleAssignConfirm}
+        onClose={() => setAssigningConvId(null)}
+      />
+    </>
   );
 }

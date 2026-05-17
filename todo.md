@@ -1189,3 +1189,19 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Opção "Usuário específico" - permitir selecionar um usuário e ver suas conversas
 - [x] Integrar filtro com a lógica de busca e status existente
 - [x] Testar alternância entre filtros
+
+## Fase 120: Sistema completo de filtros e tempo real na página Conversas
+- [x] Atualizar procedures tRPC de conversas para suportar filtros por assignedUserId
+- [x] Garantir campos ia_active, unread_count, lastMessageFrom, createdAt nas conversas
+- [x] Criar hook useConversasSocket para atualizações em tempo real via Socket.IO
+- [x] Emitir eventos Socket.IO ao criar/atualizar/encerrar/atribuir conversas no backend
+- [x] Reescrever ConversasPage com filtros funcionais (Todas/Minhas/Específico)
+- [x] Dropdown "Filtrar por Atendente" listando usuários da empresa
+- [x] Loading states (skeleton cards) e animações suaves nos filtros
+- [x] Atualização dinâmica sem recarregar a página (Socket.IO + estado local)
+- [x] Isolamento total por clientId (multiempresa)
+- [x] Cards: nome + empresa, última mensagem em negrito se não lida, data no formato 15/05
+- [x] Aba Encerradas: texto "Conversa encerrada", botão "Abrir conversa"
+- [x] Encerrar/Abrir conversa: confirmação Sim/Não inline sem modal overlay
+- [x] Procedure conversations.reopen para reabrir conversas
+- [x] Procedure conversations.assign salva assignedUserId e assignedUserName
