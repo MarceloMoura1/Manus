@@ -1000,4 +1000,14 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 ## Fase 93: BUG - Botão de editar usuário não está funcionando no MegaAdmin
 - [x] Diagnosticar por que o botão de editar não abre o modal (estava em ClientDetail, não em ClientEditPage)
 - [x] Corrigir o fluxo de clique do botão de editar (movido para ClientEditPage)
-- [ ] Testar e salvar checkpoint
+- [x] Testar e salvar checkpoint
+
+## Fase 94: CRÍTICO - Isolamento de dados entre clientes no MegaDesk
+- [x] Diagnosticar todas as tabelas que podem vazar dados entre clientes
+- [x] Corrigir searchCustomer, createCustomer, createTicket, createConversation, getConversations, closeConversation
+- [x] Corrigir searchCustomerByPhone no db.ts para filtrar por clientId
+- [x] Corrigir ConversationsPage para passar clientId em todas as chamadas
+- [x] Corrigir ActiveAttendance para passar clientId em todas as chamadas
+- [x] Limpar todos os dados cruzados do banco (banco zerado a pedido do usuário)
+- [x] Novos clientes começam com banco limpo automaticamente
+- [ ] Salvar checkpoint

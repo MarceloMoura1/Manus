@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Phone, User, Building2, CheckCircle, AlertCircle, Loader2, ArrowRight, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
+
+const MEGADESK_SESSION_KEY = "megadesk_session_v1";
 
 export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any) => void }) {
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -16,6 +18,12 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
   const [searchAttempted, setSearchAttempted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Obter clientId da sessão do usuário logado
+  const session = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem(MEGADESK_SESSION_KEY) || 'null'); } catch { return null; }
+  }, []);
+  const clientId: string = session?.clientId ?? '';
 
   // tRPC mutations
   const searchCustomerMutation = trpc.megadesk.searchCustomer.useMutation();
@@ -35,7 +43,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
     setSearchAttempted(true);
 
     try {
-      const result = await searchCustomerMutation.mutateAsync({ phone: phoneNumber });
+      const result = await searchCustomerMutation.mutateAsync({ phone: phoneNumber, clientId });
       if (result.found) {
         setCustomerData({
           customerId: result.id,
@@ -72,6 +80,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
         phone: phoneNumber,
         name: newCustomerName,
         company: newCustomerCompany,
+        clientId,
       });
       setCustomerData(result);
       setShowNewCustomerForm(false);
@@ -112,6 +121,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
             company: customerData.company,
             customer: customerData.name,
             observation: ticketObservation,
+            clientId,
           });
           ticketCreated = true;
           setSuccessMessage('Chamado criado com sucesso!');
@@ -130,6 +140,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
           customerName: customerData.name,
           phone: customerData.phone,
           company: customerData.company,
+          clientId,
         });
         conversationId = conversationResult.conversationId || (conversationResult as any).id;
         setSuccessMessage(ticketCreated ? 'Chamado e conversa criados com sucesso!' : 'Conversa iniciada com sucesso!');

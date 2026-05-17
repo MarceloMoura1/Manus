@@ -314,6 +314,12 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
 }
 
 function ConversationsPage() {
+  // Obter clientId da sessão do usuário logado
+  const sessionData = React.useMemo(() => {
+    try { return JSON.parse(localStorage.getItem(MEGADESK_SESSION_KEY) || 'null'); } catch { return null; }
+  }, []);
+  const clientId: string = sessionData?.clientId ?? '';
+
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState<'open' | 'bot' | 'closed'>('open');
   const [selectedConversation, setSelectedConversation] = React.useState<string | null>(null);
@@ -348,7 +354,7 @@ function ConversationsPage() {
     
     // Envia a requisicao para o backend em background
     try {
-      await closeConversationMutation.mutateAsync({ conversationId: selectedConversation });
+      await closeConversationMutation.mutateAsync({ conversationId: selectedConversation, clientId });
     } catch (error) {
       console.error('Erro ao encerrar conversa:', error);
       // Reverter a mudanca se falhar
@@ -414,7 +420,10 @@ function ConversationsPage() {
   }, []);
 
   // Carregar conversas via tRPC
-  const { data: conversationsData } = trpc.megadesk.getConversations.useQuery();
+  const { data: conversationsData } = trpc.megadesk.getConversations.useQuery(
+    { clientId },
+    { enabled: !!clientId }
+  );
   
   React.useEffect(() => {
     if (conversationsData && conversationsData.length > 0) {

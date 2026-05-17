@@ -862,11 +862,11 @@ export const appRouter = router({
      * Retorna dados da sessão que são armazenados no localStorage do browser.
      */
     searchCustomer: publicProcedure
-      .input(z.object({ phone: z.string().min(1) }))
+      .input(z.object({ phone: z.string().min(1), clientId: z.string().min(1) }))
       .mutation(async ({ input }) => {
         try {
           const { searchCustomerByPhone } = await import("./db");
-          const customer = await searchCustomerByPhone(input.phone);
+          const customer = await searchCustomerByPhone(input.phone, input.clientId);
           if (customer) {
             return {
               found: true,
@@ -883,12 +883,12 @@ export const appRouter = router({
         }
       }),
     createCustomer: publicProcedure
-      .input(z.object({ phone: z.string().min(1), name: z.string().min(1), company: z.string().min(1) }))
+      .input(z.object({ phone: z.string().min(1), name: z.string().min(1), company: z.string().min(1), clientId: z.string().min(1) }))
       .mutation(async ({ input }) => {
         try {
           const { createCustomer: createCustomerDb } = await import("./db");
           await hydrateSyncState();
-          const client = clients[0];
+          const client = getReleasedClientOrThrow(input.clientId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
           
           const customerId = `cust-${Date.now()}`;
@@ -922,12 +922,12 @@ export const appRouter = router({
         }
       }),
     createTicket: publicProcedure
-      .input(z.object({ customerId: z.string(), phone: z.string(), title: z.string().min(1), observation: z.string().optional(), company: z.string(), customer: z.string() }))
+      .input(z.object({ customerId: z.string(), phone: z.string(), title: z.string().min(1), observation: z.string().optional(), company: z.string(), customer: z.string(), clientId: z.string().min(1) }))
       .mutation(async ({ input }) => {
         try {
           const { createTicket: createTicketDb } = await import("./db");
           await hydrateSyncState();
-          const client = clients[0];
+          const client = getReleasedClientOrThrow(input.clientId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
           
           const ticketId = `ticket-${Date.now()}`;
@@ -965,12 +965,12 @@ export const appRouter = router({
         }
       }),
     createConversation: publicProcedure
-      .input(z.object({ customerId: z.string(), customerName: z.string(), phone: z.string(), company: z.string() }))
+      .input(z.object({ customerId: z.string(), customerName: z.string(), phone: z.string(), company: z.string(), clientId: z.string().min(1) }))
       .mutation(async ({ input }) => {
         try {
           const { createConversation: createConversationDb } = await import("./db");
           await hydrateSyncState();
-          const client = clients[0];
+          const client = getReleasedClientOrThrow(input.clientId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
           
           const conversationId = `conv-${Date.now()}`;
@@ -1005,10 +1005,11 @@ export const appRouter = router({
         }
       }),
     getConversations: publicProcedure
-      .query(async () => {
+      .input(z.object({ clientId: z.string().min(1) }))
+      .query(async ({ input }) => {
         try {
           await hydrateSyncState();
-          const client = clients[0];
+          const client = getReleasedClientOrThrow(input.clientId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
           
           // Retornar conversas do cliente
@@ -1028,12 +1029,12 @@ export const appRouter = router({
         }
       }),
     closeConversation: publicProcedure
-      .input(z.object({ conversationId: z.string() }))
+      .input(z.object({ conversationId: z.string(), clientId: z.string().min(1) }))
       .mutation(async ({ input }) => {
         try {
           const { updateConversationStatus } = await import("./db");
           await hydrateSyncState();
-          const client = clients[0];
+          const client = getReleasedClientOrThrow(input.clientId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
           
           await updateConversationStatus(input.conversationId, "closed");
@@ -1052,12 +1053,12 @@ export const appRouter = router({
         }
       }),
     updateCustomerInfo: publicProcedure
-      .input(z.object({ customerId: z.string(), name: z.string().optional(), company: z.string().optional() }))
+      .input(z.object({ customerId: z.string(), name: z.string().optional(), company: z.string().optional(), clientId: z.string().min(1) }))
       .mutation(async ({ input }) => {
         try {
           const { updateCustomer } = await import("./db");
           await hydrateSyncState();
-          const client = clients[0];
+          const client = getReleasedClientOrThrow(input.clientId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
           
           if (!input.name && !input.company) {

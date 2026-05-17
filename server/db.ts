@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { users, megadeskDomainCustomers, megadeskDomainTickets, megadeskDomainConversations, megadeskDomainChamados, megadeskDomainChamadoSequence } from "../drizzle/schema";
 
 type Database = ReturnType<typeof drizzle>;
@@ -78,11 +78,11 @@ export async function getConversationsByClientId(clientId: string) {
   return rows;
 }
 
-export async function searchCustomerByPhone(phone: string) {
+export async function searchCustomerByPhone(phone: string, clientId: string) {
   const rows = await getDb()
     .select()
     .from(megadeskDomainCustomers)
-    .where(eq(megadeskDomainCustomers.phone, phone))
+    .where(and(eq(megadeskDomainCustomers.phone, phone), eq(megadeskDomainCustomers.clientId, clientId)))
     .limit(1);
   return rows[0] ?? null;
 }
