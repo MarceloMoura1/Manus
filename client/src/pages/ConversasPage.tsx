@@ -667,9 +667,6 @@ export function ConversasPage() {
                   <SelectValue placeholder="Filtrar por Atendente..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">
-                    Todos os atendentes
-                  </SelectItem>
                   {!usersData || usersData.length === 0 ? (
                     <SelectItem value="_none" disabled>
                       Nenhum usuário
