@@ -63,6 +63,7 @@ type CrmClient = {
   internalResponsible: string;
   tags: string;
   observations: string;
+  contactsJson: string;
   lastInteractionAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
