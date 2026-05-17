@@ -1101,3 +1101,7 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Atualizar `ClientesPage` para aceitar parâmetro `selectedClientId` e abrir o cliente automaticamente
 - [x] Atualizar botão "Ver no CRM" no `ActiveAttendance` para passar `crmClientId` na navegação
 - [x] Atualizar `Home.tsx` para ler parâmetro de rota e repassar para `ClientesPage`
+
+## Bugs Corrigidos
+
+- [x] Botão "Fechar" do painel de detalhes do cliente não estava funcionando (faltava type="button")

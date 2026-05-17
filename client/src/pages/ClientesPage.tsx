@@ -421,13 +421,13 @@ function ClientDetailPanel({
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <button onClick={onEdit} className="p-2 hover:bg-slate-100 rounded-lg transition-colors" title="Editar">
+            <button type="button" onClick={onEdit} className="p-2 hover:bg-slate-100 rounded-lg transition-colors" title="Editar">
               <Edit3 className="w-4 h-4 text-slate-500" />
             </button>
-            <button onClick={onDelete} className="p-2 hover:bg-red-50 rounded-lg transition-colors" title="Excluir">
+            <button type="button" onClick={onDelete} className="p-2 hover:bg-red-50 rounded-lg transition-colors" title="Excluir">
               <Trash2 className="w-4 h-4 text-red-400" />
             </button>
-            <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg transition-colors" title="Fechar">
+            <button type="button" onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg transition-colors" title="Fechar">
               <X className="w-4 h-4 text-slate-500" />
             </button>
           </div>
