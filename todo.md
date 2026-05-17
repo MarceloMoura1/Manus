@@ -1087,3 +1087,9 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Atualizar frontend do Atendimento Ativo para preencher campos automaticamente com dados do CRM
 - [x] Badge de origem exibido no card: '📋 CRM' ou '💬 Contato'
 - [x] Testar fluxo: digitar telefone cadastrado no CRM → nome e empresa preenchidos automaticamente
+
+## Fase 110: Melhorias Atendimento Ativo + CRM
+- [x] Salvar contato em megadesk_domain_customers ao criar conversa para cliente do CRM
+- [x] Retornar email e whatsapp do CRM na procedure searchCustomer
+- [x] Exibir e-mail e WhatsApp do CRM no card do Atendimento Ativo
+- [x] Adicionar botão "Ver no CRM" no card para navegar ao perfil completo

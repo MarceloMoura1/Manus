@@ -55,6 +55,9 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
           phone: result.phone,
           exists: true,
           source: (result as any).source ?? 'contacts',
+          email: (result as any).email ?? '',
+          whatsapp: (result as any).whatsapp ?? '',
+          crmClientId: (result as any).crmClientId ?? null,
         });
         setShowNewCustomerForm(false);
       } else {
@@ -147,6 +150,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
           phone: customerData.phone,
           company: customerData.company,
           clientId,
+          fromCrm: customerData.source === 'crm',
         });
         conversationId = conversationResult.conversationId || (conversationResult as any).id;
         if (ticketCreated && createdChamadoNumber) {
@@ -383,7 +387,30 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                       {customerData.exists ? 'Existente' : 'Novo'}
                     </p>
                   </div>
+                  {customerData.source === 'crm' && customerData.email && (
+                    <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
+                      <p className="text-sm text-blue-100 mb-1">E-mail</p>
+                      <p className="text-base font-semibold truncate">{customerData.email}</p>
+                    </div>
+                  )}
+                  {customerData.source === 'crm' && customerData.whatsapp && (
+                    <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
+                      <p className="text-sm text-blue-100 mb-1">WhatsApp</p>
+                      <p className="text-base font-semibold">{customerData.whatsapp}</p>
+                    </div>
+                  )}
                 </div>
+                {customerData.source === 'crm' && customerData.crmClientId && onNavigate && (
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      onClick={() => onNavigate('clients')}
+                      className="flex items-center gap-2 bg-white/20 hover:bg-white/30 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200 border border-white/30"
+                    >
+                      <ArrowRight className="w-4 h-4" />
+                      Ver no CRM
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Ticket Option Card */}

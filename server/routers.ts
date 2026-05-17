@@ -888,7 +888,7 @@ export const appRouter = router({
           const phoneDigits = input.phone.replace(/\D/g, "");
           const pool = getPool();
           const [crmRows] = await pool.execute(
-            `SELECT crm_client_id, company_name, responsible_name, phone, whatsapp
+            `SELECT crm_client_id, company_name, responsible_name, phone, whatsapp, email
              FROM megadesk_crm_clients
              WHERE client_id = ?
                AND (
@@ -907,7 +907,10 @@ export const appRouter = router({
               id: crm.crm_client_id,
               name: crm.responsible_name || crm.company_name,
               company: crm.company_name,
-              phone: input.phone,
+              phone: crm.phone || input.phone,
+              whatsapp: crm.whatsapp || "",
+              email: crm.email || "",
+              crmClientId: crm.crm_client_id,
             };
           }
 
@@ -987,13 +990,28 @@ export const appRouter = router({
         }
       }),
     createConversation: publicProcedure
-      .input(z.object({ customerId: z.string(), customerName: z.string(), phone: z.string(), company: z.string(), clientId: z.string().min(1) }))
+      .input(z.object({ customerId: z.string(), customerName: z.string(), phone: z.string(), company: z.string(), clientId: z.string().min(1), fromCrm: z.boolean().optional() }))
       .mutation(async ({ input }) => {
         try {
-          const { createConversation: createConversationDb } = await import("./db");
+          const { createConversation: createConversationDb, createCustomer: createCustomerDb, searchCustomerByPhone } = await import("./db");
           await hydrateSyncState();
           const client = getReleasedClientOrThrow(input.clientId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
+
+          // Se veio do CRM, garantir que o contato existe em megadesk_domain_customers
+          if (input.fromCrm) {
+            const existing = await searchCustomerByPhone(input.phone, client.clientId);
+            if (!existing) {
+              const customerId = input.customerId || `cust-${Date.now()}`;
+              await createCustomerDb({
+                customerId,
+                clientId: client.clientId,
+                name: input.customerName,
+                phone: input.phone,
+                company: input.company,
+              });
+            }
+          }
           
           const conversationId = `conv-${Date.now()}`;
           await createConversationDb({
