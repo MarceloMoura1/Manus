@@ -171,3 +171,47 @@ export async function deleteCrmClient(crmClientId: string, clientId: string) {
       )
     );
 }
+
+/**
+ * Adiciona uma entrada na timeline operacional de um cliente CRM.
+ * REGRA 1: Filtra por clientId.
+ */
+export async function addCrmTimeline(
+  crmClientId: string,
+  clientId: string,
+  entry: {
+    type: string;
+    description: string;
+    author?: string;
+  }
+) {
+  const pool = getPool();
+  const id = randomUUID();
+  await pool.execute(
+    `INSERT INTO megadesk_crm_timeline (timeline_id, crm_client_id, client_id, entry_type, description, author, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+    [id, crmClientId, clientId, entry.type, entry.description, entry.author ?? "Sistema"]
+  );
+}
+
+/**
+ * Lista a timeline operacional de um cliente CRM.
+ * REGRA 1: Filtra por clientId.
+ */
+export async function listCrmTimeline(crmClientId: string, clientId: string) {
+  const pool = getPool();
+  const [rows] = await pool.execute(
+    `SELECT timeline_id, entry_type, description, author, created_at
+     FROM megadesk_crm_timeline
+     WHERE crm_client_id = ? AND client_id = ?
+     ORDER BY created_at DESC LIMIT 100`,
+    [crmClientId, clientId]
+  ) as any[];
+  return (rows as any[]).map(r => ({
+    id: r.timeline_id,
+    type: r.entry_type,
+    description: r.description,
+    author: r.author,
+    createdAt: r.created_at,
+  }));
+}

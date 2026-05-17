@@ -2583,10 +2583,10 @@ function Shell() {
     { id: "tickets" as RouteId, label: "Chamados", icon: ClipboardList },
     { id: "tracking" as RouteId, label: "Rastreamento", icon: MapPin },
     { id: "erp" as RouteId, label: "ERP", icon: PackageSearch },
+    { id: "clients" as RouteId, label: "Clientes", icon: Building2 },
     { id: "settings" as RouteId, label: "Configurações", icon: Cog },
     { id: "bot-config" as RouteId, label: "Configurar Bot", icon: Bot },
     { id: "ai-assistant" as RouteId, label: "Assistente IA", icon: Sparkles },
-    { id: "clients" as RouteId, label: "Clientes", icon: Building2 },
     { id: "help" as RouteId, label: "Ajuda", icon: AlertCircle },
     { id: "notifications" as RouteId, label: "Notificações", icon: Bell },
   ];
@@ -2602,8 +2602,8 @@ function Shell() {
   });
 
   // Separar itens em seções
-  const mainNavItems = filteredNavItems.filter(item => !["settings", "bot-config", "ai-assistant", "help", "notifications", "clients"].includes(item.id));
-  const settingsNavItems = filteredNavItems.filter(item => ["settings", "bot-config", "ai-assistant", "help", "notifications", "clients"].includes(item.id));
+  const mainNavItems = filteredNavItems.filter(item => !["settings", "bot-config", "ai-assistant", "help", "notifications"].includes(item.id));
+  const settingsNavItems = filteredNavItems.filter(item => ["settings", "bot-config", "ai-assistant", "help", "notifications"].includes(item.id));
 
   return (
     <div className={`flex h-screen bg-slate-50 ${theme === 'dark' ? 'dark bg-slate-950' : ''}`}>

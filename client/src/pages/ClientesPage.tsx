@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import {
@@ -32,6 +32,12 @@ import {
   AlertCircle,
   MinusCircle,
   TrendingDown,
+  UploadCloud,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
+  MessageSquare,
+  PlusCircle,
 } from "lucide-react";
 
 function cn(...classes: Array<string | false | undefined | null>) {
@@ -62,7 +68,7 @@ type CrmClient = {
   updatedAt: Date;
 };
 
-type ClientTab = "geral" | "chamados" | "conversas" | "financeiro" | "rastreamento" | "arquivos";
+type ClientTab = "geral" | "chamados" | "conversas" | "timeline" | "financeiro" | "rastreamento" | "arquivos";
 
 // ─── Status config ─────────────────────────────────────────────────────────────
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
@@ -152,6 +158,10 @@ function ClientFormModal({
     onError(err) { toast.error(err.message); },
   });
 
+  const sessionUser = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem("megadesk_session_v1") ?? "{}"); } catch { return {}; }
+  }, []);
+
   const updateMutation = trpc.crm.update.useMutation({
     onSuccess() { toast.success("Cliente atualizado com sucesso!"); onSaved(); onClose(); },
     onError(err) { toast.error(err.message); },
@@ -165,7 +175,7 @@ function ClientFormModal({
     e.preventDefault();
     if (!form.companyName.trim()) { toast.error("Nome da empresa é obrigatório."); return; }
     if (editData) {
-      updateMutation.mutate({ clientId, crmClientId: editData.crmClientId, data: form });
+      updateMutation.mutate({ clientId, crmClientId: editData.crmClientId, data: form, editedBy: sessionUser.userName ?? sessionUser.email ?? "Usuário" });
     } else {
       createMutation.mutate({ clientId, data: form });
     }
@@ -360,15 +370,35 @@ function ClientDetailPanel({
   onClose: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<ClientTab>("geral");
+  const [newTimelineNote, setNewTimelineNote] = useState("");
 
   const tabs: { id: ClientTab; label: string; icon: React.ReactNode }[] = [
     { id: "geral",        label: "Geral",        icon: <User className="w-4 h-4" /> },
     { id: "chamados",     label: "Chamados",     icon: <Ticket className="w-4 h-4" /> },
     { id: "conversas",    label: "Conversas",    icon: <MessageCircle className="w-4 h-4" /> },
+    { id: "timeline",    label: "Timeline",     icon: <Clock className="w-4 h-4" /> },
     { id: "financeiro",   label: "Financeiro",   icon: <DollarSign className="w-4 h-4" /> },
     { id: "rastreamento", label: "Rastreamento", icon: <Package className="w-4 h-4" /> },
     { id: "arquivos",     label: "Arquivos",     icon: <Paperclip className="w-4 h-4" /> },
   ];
+
+  // Queries das abas
+  const chamadosQuery = trpc.crm.getChamados.useQuery(
+    { clientId, crmClientId: client.crmClientId },
+    { enabled: activeTab === "chamados", refetchOnWindowFocus: false }
+  );
+  const conversasQuery = trpc.crm.getConversas.useQuery(
+    { clientId, crmClientId: client.crmClientId },
+    { enabled: activeTab === "conversas", refetchOnWindowFocus: false }
+  );
+  const timelineQuery = trpc.crm.getTimeline.useQuery(
+    { clientId, crmClientId: client.crmClientId },
+    { enabled: activeTab === "timeline", refetchOnWindowFocus: false }
+  );
+  const addTimelineMutation = trpc.crm.addTimelineEntry.useMutation({
+    onSuccess() { timelineQuery.refetch(); setNewTimelineNote(""); toast.success("Nota adicionada!"); },
+    onError(err) { toast.error(err.message); },
+  });
 
   const tags = client.tags ? client.tags.split(",").map(t => t.trim()).filter(Boolean) : [];
 
@@ -527,18 +557,158 @@ function ClientDetailPanel({
         )}
 
         {activeTab === "chamados" && (
-          <div className="flex flex-col items-center justify-center h-48 text-center">
-            <Ticket className="w-12 h-12 text-slate-200 mb-3" />
-            <p className="text-slate-500 font-medium text-sm">Chamados do cliente</p>
-            <p className="text-slate-400 text-xs mt-1">Os chamados vinculados a este cliente aparecerão aqui.</p>
+          <div className="space-y-3">
+            {chamadosQuery.isLoading ? (
+              <div className="flex items-center justify-center h-32">
+                <RefreshCw className="w-5 h-5 text-blue-400 animate-spin" />
+              </div>
+            ) : (chamadosQuery.data?.chamados ?? []).length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 text-center">
+                <Ticket className="w-12 h-12 text-slate-200 mb-3" />
+                <p className="text-slate-500 font-medium text-sm">Nenhum chamado vinculado</p>
+                <p className="text-slate-400 text-xs mt-1">Chamados com o nome ou empresa deste cliente aparecerão aqui.</p>
+              </div>
+            ) : (
+              (chamadosQuery.data?.chamados ?? []).map(c => (
+                <div key={c.id} className="border border-slate-200 rounded-xl p-3 hover:bg-slate-50 transition-colors">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-slate-900 text-sm truncate">#{c.number} — {c.title}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{c.customerName} · {c.company}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className={cn(
+                        "px-2 py-0.5 rounded-full text-xs font-medium",
+                        c.status === "open" ? "bg-blue-100 text-blue-700" :
+                        c.status === "in_progress" ? "bg-yellow-100 text-yellow-700" :
+                        c.status === "waiting" ? "bg-orange-100 text-orange-700" :
+                        "bg-slate-100 text-slate-600"
+                      )}>
+                        {c.status === "open" ? "Aberto" : c.status === "in_progress" ? "Em andamento" : c.status === "waiting" ? "Aguardando" : "Fechado"}
+                      </span>
+                      <span className={cn(
+                        "px-2 py-0.5 rounded-full text-xs font-medium",
+                        c.priority === "critica" ? "bg-red-100 text-red-700" :
+                        c.priority === "alta" ? "bg-orange-100 text-orange-700" :
+                        c.priority === "media" ? "bg-yellow-100 text-yellow-700" :
+                        "bg-slate-100 text-slate-600"
+                      )}>
+                        {c.priority}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">{new Date(c.createdAt).toLocaleDateString("pt-BR")}</p>
+                </div>
+              ))
+            )}
           </div>
         )}
 
         {activeTab === "conversas" && (
-          <div className="flex flex-col items-center justify-center h-48 text-center">
-            <MessageCircle className="w-12 h-12 text-slate-200 mb-3" />
-            <p className="text-slate-500 font-medium text-sm">Conversas WhatsApp</p>
-            <p className="text-slate-400 text-xs mt-1">O histórico de conversas deste cliente aparecerá aqui.</p>
+          <div className="space-y-3">
+            {conversasQuery.isLoading ? (
+              <div className="flex items-center justify-center h-32">
+                <RefreshCw className="w-5 h-5 text-blue-400 animate-spin" />
+              </div>
+            ) : (conversasQuery.data?.conversas ?? []).length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 text-center">
+                <MessageCircle className="w-12 h-12 text-slate-200 mb-3" />
+                <p className="text-slate-500 font-medium text-sm">Nenhuma conversa vinculada</p>
+                <p className="text-slate-400 text-xs mt-1">Conversas com o telefone ou empresa deste cliente aparecerão aqui.</p>
+              </div>
+            ) : (
+              (conversasQuery.data?.conversas ?? []).map(c => (
+                <div key={c.id} className="border border-slate-200 rounded-xl p-3 hover:bg-slate-50 transition-colors">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-slate-900 text-sm truncate">{c.customerName}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{c.phone} · {c.company}</p>
+                      {c.lastMessage && <p className="text-xs text-slate-400 mt-1 truncate">{c.lastMessage}</p>}
+                    </div>
+                    <span className={cn(
+                      "px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0",
+                      c.status === "open" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600"
+                    )}>
+                      {c.status === "open" ? "Aberta" : "Fechada"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">{c.timeLabel ?? new Date(c.createdAt).toLocaleDateString("pt-BR")}</p>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {activeTab === "timeline" && (
+          <div className="space-y-4">
+            {/* Adicionar nota */}
+            <div className="border border-slate-200 rounded-xl p-3 bg-slate-50">
+              <p className="text-xs font-semibold text-slate-500 mb-2">Adicionar nota ou registro</p>
+              <textarea
+                value={newTimelineNote}
+                onChange={e => setNewTimelineNote(e.target.value)}
+                placeholder="Descreva uma interação, ligação, reunião..."
+                className="w-full text-sm border border-slate-200 rounded-lg p-2 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                rows={2}
+              />
+              <button
+                onClick={() => {
+                  if (!newTimelineNote.trim()) return;
+                  const session = JSON.parse(localStorage.getItem("megadesk_session_v1") ?? "{}");
+                  addTimelineMutation.mutate({
+                    clientId,
+                    crmClientId: client.crmClientId,
+                    description: newTimelineNote.trim(),
+                    author: session.userName ?? "Usuário",
+                    type: "note",
+                  });
+                }}
+                disabled={addTimelineMutation.isPending || !newTimelineNote.trim()}
+                className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs font-medium disabled:opacity-60"
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+                {addTimelineMutation.isPending ? "Salvando..." : "Adicionar"}
+              </button>
+            </div>
+
+            {/* Entradas da timeline */}
+            {timelineQuery.isLoading ? (
+              <div className="flex items-center justify-center h-32">
+                <RefreshCw className="w-5 h-5 text-blue-400 animate-spin" />
+              </div>
+            ) : (timelineQuery.data?.entries ?? []).length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-32 text-center">
+                <Clock className="w-10 h-10 text-slate-200 mb-2" />
+                <p className="text-slate-400 text-sm">Nenhum registro ainda</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {(timelineQuery.data?.entries ?? []).map((entry: any) => (
+                  <div key={entry.id} className="flex gap-3">
+                    <div className="flex flex-col items-center">
+                      <div className={cn(
+                        "w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0",
+                        entry.type === "edit" ? "bg-blue-100" :
+                        entry.type === "note" ? "bg-amber-100" :
+                        entry.type === "status_change" ? "bg-green-100" : "bg-slate-100"
+                      )}>
+                        {entry.type === "edit" ? <Edit3 className="w-3.5 h-3.5 text-blue-600" /> :
+                         entry.type === "note" ? <MessageSquare className="w-3.5 h-3.5 text-amber-600" /> :
+                         entry.type === "status_change" ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> :
+                         <Clock className="w-3.5 h-3.5 text-slate-500" />}
+                      </div>
+                      <div className="w-px flex-1 bg-slate-200 mt-1" />
+                    </div>
+                    <div className="flex-1 pb-3">
+                      <p className="text-sm text-slate-800">{entry.description}</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {entry.author} · {new Date(entry.createdAt).toLocaleString("pt-BR")}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -585,6 +755,56 @@ export function ClientesPage() {
   const [showModal, setShowModal] = useState(false);
   const [editClient, setEditClient] = useState<CrmClient | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [csvImporting, setCsvImporting] = useState(false);
+  const [csvResult, setCsvResult] = useState<{ imported: number; errors: number; errorMessages: string[] } | null>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
+  const importCsvMutation = trpc.crm.importCsv.useMutation({
+    onSuccess(result) {
+      setCsvResult(result);
+      setCsvImporting(false);
+      refetch();
+      toast.success(`Importação concluída: ${result.imported} clientes importados${result.errors > 0 ? `, ${result.errors} erros` : "."}`);
+    },
+    onError(err) { setCsvImporting(false); toast.error(err.message); },
+  });
+
+  const handleCsvFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvImporting(true);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      if (lines.length < 2) { toast.error("CSV vazio ou sem dados."); setCsvImporting(false); return; }
+      const headers = lines[0].split(";").map(h => h.trim().toLowerCase());
+      const rows = lines.slice(1).map(line => {
+        const cols = line.split(";");
+        const obj: Record<string, string> = {};
+        headers.forEach((h, i) => { obj[h] = (cols[i] ?? "").trim(); });
+        return obj;
+      }).filter(r => r["empresa"] || r["companyname"] || r["nome_empresa"]);
+      if (rows.length === 0) { toast.error("Nenhum dado válido encontrado. Verifique o CSV."); setCsvImporting(false); return; }
+      const mapped = rows.map(r => ({
+        companyName: r["empresa"] || r["companyname"] || r["nome_empresa"] || "",
+        responsibleName: r["responsavel"] || r["responsiblename"] || r["contato"] || "",
+        cpfCnpj: r["cnpj"] || r["cpf"] || r["cpfcnpj"] || "",
+        phone: r["telefone"] || r["phone"] || "",
+        whatsapp: r["whatsapp"] || "",
+        email: r["email"] || "",
+        address: r["endereco"] || r["address"] || "",
+        city: r["cidade"] || r["city"] || "",
+        state: (r["estado"] || r["state"] || "").slice(0, 2),
+        cep: r["cep"] || "",
+        status: r["status"] || "lead",
+        origin: r["origem"] || r["origin"] || "outro",
+        observations: r["observacoes"] || r["observations"] || "",
+      }));
+      importCsvMutation.mutate({ clientId, rows: mapped });
+    };
+    reader.readAsText(file, "UTF-8");
+    e.target.value = "";
+  }, [clientId, importCsvMutation]);
 
   const { data, isLoading, refetch } = trpc.crm.list.useQuery(
     { clientId, search: search.trim() || undefined },
@@ -624,13 +844,32 @@ export function ClientesPage() {
         <div className="p-4 border-b border-slate-200">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-base font-bold text-slate-900">Clientes</h2>
-            <button
-              onClick={() => { setEditClient(null); setShowModal(true); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-            >
-              <Plus className="w-4 h-4" />
-              Novo Cliente
-            </button>
+            <div className="flex items-center gap-1.5">
+              {/* Botão de importar CSV */}
+              <input
+                ref={csvInputRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={handleCsvFile}
+              />
+              <button
+                onClick={() => csvInputRef.current?.click()}
+                disabled={csvImporting}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors text-sm font-medium disabled:opacity-60"
+                title="Importar clientes via CSV"
+              >
+                {csvImporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
+                {csvImporting ? "Importando..." : "CSV"}
+              </button>
+              <button
+                onClick={() => { setEditClient(null); setShowModal(true); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+              >
+                <Plus className="w-4 h-4" />
+                Novo
+              </button>
+            </div>
           </div>
 
           {/* Busca */}

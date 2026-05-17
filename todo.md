@@ -1073,3 +1073,10 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Adicionar permissão 'clientes' no MegaAdmin (ALL_MODULES + ROLE_DEFAULT_PERMISSIONS)
 - [x] Registrar rota 'clients' e item de navegação no sidebar do MegaDesk
 - [x] Garantir isolamento por clientId (REGRA 1) em todas as procedures CRM
+
+## Fase 108: Melhorias na Página de Clientes
+- [x] Reposicionar "Clientes" abaixo do "ERP" no sidebar do MegaDesk
+- [x] Vincular chamados ao cliente pelo nome/empresa na aba "Chamados" do painel (procedure crm.getChamados)
+- [x] Vincular conversas ao cliente pelo telefone/empresa na aba "Conversas" do painel (procedure crm.getConversas)
+- [x] Importação em massa via CSV (botão + parser + validação + inserção em lote - máx 500 registros)
+- [x] Registrar histórico de edições na Timeline Operacional (editedBy capturado da sessão megadesk_session_v1)
