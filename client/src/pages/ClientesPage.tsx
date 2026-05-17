@@ -456,12 +456,14 @@ function ClientDetailPanel({
   onEdit,
   onDelete,
   onClose,
+  onSendMessage,
 }: {
   client: CrmClient;
   clientId: string;
   onEdit: () => void;
   onDelete: () => void;
   onClose: () => void;
+  onSendMessage?: (phone: string) => void;
 }) {
   const [activeTab, setActiveTab] = useState<ClientTab>("geral");
   const [newTimelineNote, setNewTimelineNote] = useState("");
@@ -570,16 +572,32 @@ function ClientDetailPanel({
               <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Contato</h4>
               <div className="space-y-2">
                 {client.phone && (
-                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                  <div className="flex items-center gap-2 text-sm text-slate-700 group">
                     <Phone className="w-4 h-4 text-slate-400 flex-shrink-0" />
                     <span>{client.phone}</span>
+                    <button
+                      type="button"
+                      onClick={() => onSendMessage?.(client.phone)}
+                      className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-slate-100 rounded"
+                      title="Enviar mensagem"
+                    >
+                      <MessageSquare className="w-4 h-4 text-blue-500" />
+                    </button>
                   </div>
                 )}
                 {client.whatsapp && (
-                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                  <div className="flex items-center gap-2 text-sm text-slate-700 group">
                     <Smartphone className="w-4 h-4 text-green-500 flex-shrink-0" />
                     <span>{client.whatsapp}</span>
                     <span className="text-xs text-green-600 font-medium">WhatsApp</span>
+                    <button
+                      type="button"
+                      onClick={() => onSendMessage?.(client.whatsapp)}
+                      className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-slate-100 rounded"
+                      title="Enviar mensagem"
+                    >
+                      <MessageSquare className="w-4 h-4 text-blue-500" />
+                    </button>
                   </div>
                 )}
                 {client.email && (
@@ -608,16 +626,32 @@ function ClientDetailPanel({
                                 <p className="text-xs font-medium text-slate-600 mb-1">{contact.description}</p>
                               )}
                               {contact.phone && (
-                                <div className="flex items-center gap-2 text-sm text-slate-700">
+                                <div className="flex items-center gap-2 text-sm text-slate-700 group">
                                   <Phone className="w-4 h-4 text-slate-400 flex-shrink-0" />
                                   <span>{contact.phone}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => onSendMessage?.(contact.phone)}
+                                    className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-slate-100 rounded"
+                                    title="Enviar mensagem"
+                                  >
+                                    <MessageSquare className="w-4 h-4 text-blue-500" />
+                                  </button>
                                 </div>
                               )}
                               {contact.whatsapp && (
-                                <div className="flex items-center gap-2 text-sm text-slate-700">
+                                <div className="flex items-center gap-2 text-sm text-slate-700 group">
                                   <Smartphone className="w-4 h-4 text-green-500 flex-shrink-0" />
                                   <span>{contact.whatsapp}</span>
                                   <span className="text-xs text-green-600 font-medium">WhatsApp</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => onSendMessage?.(contact.whatsapp)}
+                                    className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-slate-100 rounded"
+                                    title="Enviar mensagem"
+                                  >
+                                    <MessageSquare className="w-4 h-4 text-blue-500" />
+                                  </button>
                                 </div>
                               )}
                             </div>
@@ -872,13 +906,19 @@ function ClientDetailPanel({
 }
 
 // ─── Página Principal ──────────────────────────────────────────────────────────
-export function ClientesPage({ initialSelectedId }: { initialSelectedId?: string } = {}) {
+export function ClientesPage({ initialSelectedId, onNavigate }: { initialSelectedId?: string; onNavigate?: (phone: string) => void } = {}) {
   const session = useMemo(() => {
     try {
       return JSON.parse(localStorage.getItem("megadesk_session_v1") ?? "{}");
     } catch { return {}; }
   }, []);
   const clientId: string = session.clientId ?? "";
+
+  const handleSendMessage = useCallback((phone: string) => {
+    if (onNavigate) {
+      onNavigate(phone);
+    }
+  }, [onNavigate]);
 
   const [search, setSearch] = useState("");
   const [selectedClientId, setSelectedClientId] = useState<string | null>(initialSelectedId ?? null);
@@ -1095,6 +1135,7 @@ export function ClientesPage({ initialSelectedId }: { initialSelectedId?: string
             onEdit={() => { setEditClient(selectedClient); setShowModal(true); }}
             onDelete={() => setDeleteConfirm(selectedClient.crmClientId)}
             onClose={() => setSelectedClientId(null)}
+            onSendMessage={handleSendMessage}
           />
         </div>
       ) : (

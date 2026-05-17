@@ -1120,3 +1120,8 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 ## Fase 114: Busca de empresa por números adicionais no Atendimento Ativo
 - [x] Atualizar procedure searchCustomer para buscar também por números adicionais (contacts_json)
 - [x] Testar se números adicionais retornam dados da empresa corretamente
+
+## Fase 115: Ícone de enviar mensagem no cadastro do cliente
+- [x] Adicionar ícone discreto de "Enviar mensagem" ao lado dos números na aba "Geral"
+- [x] Implementar navegação para Conversas ao clicar no ícone
+- [x] Abrir nova conversa com o número selecionado

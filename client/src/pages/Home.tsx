@@ -2797,7 +2797,10 @@ function Shell() {
               setActive(route as RouteId);
             }
           }} />}
-          {active === "clients" && <ClientesPage initialSelectedId={activeCrmClientId ?? undefined} />}
+          {active === "clients" && <ClientesPage initialSelectedId={activeCrmClientId ?? undefined} onNavigate={(phone) => {
+            // Navegar para Conversas com novo chat aberto
+            setActive('conversations');
+          }} />}
         </main>
       </div>
 
