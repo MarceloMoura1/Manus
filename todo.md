@@ -1022,3 +1022,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Verificar se o Assistente IA usa o clientId correto
 - [x] Corrigir pontos fracos encontrados (botScripts fallback, closeConversation sem verify, updateCustomer sem clientId)
 - [x] Salvar checkpoint
+
+## Fase 96: Edições de Layout do Atendimento Ativo
+- [x] Remover barra de scroll da página de Atendimento Ativo
+- [x] Centralizar o card de "Atendimento Ativo" no meio da página
+- [x] Aplicar layout fixo com `fixed inset-0` e `flex items-center justify-center`
+- [x] Manter overflow-y-auto apenas no container interno para permitir scroll se necessário
+- [x] Testar e validar no navegador
+- [ ] Salvar checkpoint
