@@ -192,31 +192,10 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
   };
 
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-slate-50 via-blue-50 to-slate-50 overflow-hidden flex flex-col">
-      {/* Top Header */}
-      <div className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="flex flex-col">
-            <p className="text-xs text-slate-500 font-medium">Empresa</p>
-            <p className="text-lg font-bold text-slate-900">{session?.company || 'Empresa'}</p>
-          </div>
-          <div className="w-px h-10 bg-slate-200"></div>
-          <div className="flex flex-col">
-            <p className="text-xs text-slate-500 font-medium">Usuário</p>
-            <p className="text-lg font-bold text-slate-900">{session?.userName || 'Usuário'}</p>
-          </div>
-        </div>
-        <div className="text-right">
-          <p className="text-xs text-slate-500 font-medium">Página Atual</p>
-          <p className="text-lg font-bold text-blue-600">Atendimento Ativo</p>
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-5xl mx-auto w-full px-4 md:px-8 py-8">
-          {/* Header */}
-          <div className="mb-8">
+    <div className="fixed inset-0 bg-gradient-to-br from-slate-50 via-blue-50 to-slate-50 overflow-hidden flex items-center justify-center">
+      <div className="max-w-5xl mx-auto w-full px-4 md:px-8 max-h-screen overflow-y-auto">
+        {/* Header */}
+        <div className="mb-8">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
               <Phone className="w-6 h-6 text-white" />
@@ -441,7 +420,6 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
               </div>
             </>
           )}
-        </div>
         </div>
       </div>
     </div>
