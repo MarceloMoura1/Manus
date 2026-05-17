@@ -995,4 +995,9 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Limpar email e senha de Correios na seção de APIs do cliente
 - [x] Filtro de pesquisa para procurar cliente na página Clientes
 - [x] Filtro de pesquisa para procurar usuário
+- [x] Testar e salvar checkpoint
+
+## Fase 93: BUG - Botão de editar usuário não está funcionando no MegaAdmin
+- [x] Diagnosticar por que o botão de editar não abre o modal (estava em ClientDetail, não em ClientEditPage)
+- [x] Corrigir o fluxo de clique do botão de editar (movido para ClientEditPage)
 - [ ] Testar e salvar checkpoint

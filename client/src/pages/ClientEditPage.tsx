@@ -4,6 +4,7 @@ import {
   Building2,
   Check,
   ChevronRight,
+  Edit3,
   Eye,
   EyeOff,
   KeyRound,
@@ -224,6 +225,9 @@ function UsuariosTab({ client, onRefresh }: { client: any; onRefresh: () => void
   const [resetTarget, setResetTarget] = useState<{ id: string; name: string } | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
+  const [showEditUserModal, setShowEditUserModal] = useState(false);
+  const [editingUser, setEditingUser] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [editUserForm, setEditUserForm] = useState({ name: "", email: "" });
   // Estado local otimista para cargo e status (evita reverter enquanto o refetch carrega)
   const [localRoles, setLocalRoles] = useState<Record<string, string>>({});
   const [localStatus, setLocalStatus] = useState<Record<string, string>>({});
@@ -260,6 +264,15 @@ function UsuariosTab({ client, onRefresh }: { client: any; onRefresh: () => void
       toast.success(data.message);
       setResetTarget(null);
       setNewPassword("");
+    },
+    onError(err) { toast.error(err.message); },
+  });
+  const updateUserInfo = trpc.megaadmin.updateUserInfo.useMutation({
+    onSuccess() {
+      toast.success("Usuário atualizado com sucesso.");
+      setShowEditUserModal(false);
+      setEditingUser(null);
+      onRefresh();
     },
     onError(err) { toast.error(err.message); },
   });
@@ -391,6 +404,16 @@ function UsuariosTab({ client, onRefresh }: { client: any; onRefresh: () => void
                     <option value="viewer">Visualizador</option>
                   </select>
                   <button
+                    onClick={() => {
+                      setEditingUser({ id: user.id, name: user.name, email: user.email });
+                      setShowEditUserModal(true);
+                    }}
+                    className="flex items-center gap-1.5 rounded-xl border border-white/10 px-3 py-1.5 text-xs text-slate-300 hover:border-blue-400/40"
+                  >
+                    <Edit3 className="h-3 w-3" />
+                    Editar
+                  </button>
+                  <button
                     onClick={() => setResetTarget({ id: user.id, name: user.name })}
                     className="flex items-center gap-1.5 rounded-xl border border-white/10 px-3 py-1.5 text-xs text-slate-300 hover:border-cyan-400/40"
                   >
@@ -437,6 +460,62 @@ function UsuariosTab({ client, onRefresh }: { client: any; onRefresh: () => void
                 className="rounded-2xl bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50"
               >
                 {resetPwd.isPending ? "Salvando..." : "Confirmar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de editar usuário */}
+      {showEditUserModal && editingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl">
+            <h3 className="mb-4 text-lg font-bold text-white">Editar Usuário</h3>
+            <div className="space-y-4">
+              <label className="block text-xs text-slate-400">
+                Nome
+                <input
+                  type="text"
+                  value={editUserForm.name}
+                  onChange={(e) => setEditUserForm({ ...editUserForm, name: e.target.value })}
+                  placeholder="Nome do usuário"
+                  className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-sm text-white outline-none focus:border-cyan-400"
+                />
+              </label>
+              <label className="block text-xs text-slate-400">
+                Email
+                <input
+                  type="email"
+                  value={editUserForm.email}
+                  onChange={(e) => setEditUserForm({ ...editUserForm, email: e.target.value })}
+                  placeholder="Email do usuário"
+                  className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-sm text-white outline-none focus:border-cyan-400"
+                />
+              </label>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => {
+                  setShowEditUserModal(false);
+                  setEditingUser(null);
+                }}
+                className="flex-1 rounded-xl border border-white/10 px-4 py-2.5 text-sm text-slate-300 hover:border-slate-400"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  updateUserInfo.mutate({
+                    clientId: client.clientId,
+                    userId: editingUser.id,
+                    name: editUserForm.name,
+                    email: editUserForm.email,
+                  });
+                }}
+                disabled={updateUserInfo.isPending}
+                className="flex-1 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
+              >
+                {updateUserInfo.isPending ? "Salvando..." : "Salvar"}
               </button>
             </div>
           </div>
