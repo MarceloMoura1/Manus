@@ -1,1 +1,0 @@
-ALTER TABLE `megadesk_clients` ADD `maxUsers` int DEFAULT 10 NOT NULL;

@@ -9,47 +9,6 @@ function getQueryParam(req: Request, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-/**
- * Extrai o returnPath do state OAuth.
- * Suporta três formatos de state:
- *   1. JSON base64: btoa(JSON.stringify({ origin, returnPath })) — gerado pelo AdminPanel
- *   2. URL completa base64: btoa("https://origin/path") — formato legado
- *   3. Path relativo direto: "/admin"
- */
-function extractReturnPath(state: string): string {
-  try {
-    const decoded = Buffer.from(state, "base64").toString("utf-8");
-
-    // Formato 1: JSON com { origin, returnPath }
-    try {
-      const parsed = JSON.parse(decoded);
-      if (parsed && typeof parsed.returnPath === "string" && parsed.returnPath.startsWith("/")) {
-        return parsed.returnPath;
-      }
-    } catch {
-      // não é JSON, tenta como URL
-    }
-
-    // Formato 2: URL completa
-    try {
-      const url = new URL(decoded);
-      if (url.pathname !== "/api/oauth/callback") {
-        return url.pathname + url.search + url.hash;
-      }
-    } catch {
-      // não é URL válida
-    }
-
-    // Formato 3: path relativo direto
-    if (decoded.startsWith("/")) return decoded;
-
-    return "/";
-  } catch {
-    if (typeof state === "string" && state.startsWith("/")) return state;
-    return "/";
-  }
-}
-
 export function registerOAuthRoutes(app: Express) {
   app.get("/api/oauth/callback", async (req: Request, res: Response) => {
     const code = getQueryParam(req, "code");
@@ -85,10 +44,7 @@ export function registerOAuthRoutes(app: Express) {
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
 
-      // Preservar returnPath: se o state contiver um path diferente de /,
-      // redirecionar de volta para lá (ex: /admin após login no MegaAdmin).
-      const returnPath = extractReturnPath(state);
-      res.redirect(302, returnPath);
+      res.redirect(302, "/");
     } catch (error) {
       console.error("[OAuth] Callback failed", error);
       res.status(500).json({ error: "OAuth callback failed" });

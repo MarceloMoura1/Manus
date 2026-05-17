@@ -4,7 +4,7 @@ type Theme = "light" | "dark";
 
 interface ThemeContextType {
   theme: Theme;
-  toggleTheme: () => void;
+  toggleTheme?: () => void;
   switchable: boolean;
 }
 
@@ -13,44 +13,43 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 interface ThemeProviderProps {
   children: React.ReactNode;
   defaultTheme?: Theme;
+  switchable?: boolean;
 }
 
 export function ThemeProvider({
   children,
   defaultTheme = "light",
+  switchable = false,
 }: ThemeProviderProps) {
   const [theme, setTheme] = useState<Theme>(() => {
-    try {
-      const stored = localStorage.getItem("megadesk_theme");
+    if (switchable) {
+      const stored = localStorage.getItem("theme");
       return (stored as Theme) || defaultTheme;
-    } catch {
-      return defaultTheme;
     }
+    return defaultTheme;
   });
 
   useEffect(() => {
     const root = document.documentElement;
     if (theme === "dark") {
       root.classList.add("dark");
-      root.style.colorScheme = "dark";
     } else {
       root.classList.remove("dark");
-      root.style.colorScheme = "light";
     }
 
-    try {
-      localStorage.setItem("megadesk_theme", theme);
-    } catch {
-      // localStorage pode não estar disponível
+    if (switchable) {
+      localStorage.setItem("theme", theme);
     }
-  }, [theme]);
+  }, [theme, switchable]);
 
-  const toggleTheme = () => {
-    setTheme(prev => (prev === "light" ? "dark" : "light"));
-  };
+  const toggleTheme = switchable
+    ? () => {
+        setTheme(prev => (prev === "light" ? "dark" : "light"));
+      }
+    : undefined;
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, switchable: true }}>
+    <ThemeContext.Provider value={{ theme, toggleTheme, switchable }}>
       {children}
     </ThemeContext.Provider>
   );

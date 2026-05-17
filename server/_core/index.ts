@@ -6,11 +6,8 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
-import { registerMetricWebhook } from "../metricWebhook";
-import { registerIntegrationApi } from "../integrationApi";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
-import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -39,52 +36,6 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
   registerOAuthRoutes(app);
-  registerMetricWebhook(app);
-  registerIntegrationApi(app);
-
-  // WhatsApp Webhook endpoints (Meta)
-  app.get("/api/webhooks/meta", handleWebhookVerify);
-  app.post("/api/webhooks/meta", handleWebhookEvent);
-
-  // Inicializar Socket.IO para WhatsApp
-  initWhatsAppSocket(server);
-  // Backup scheduled handler
-  app.post("/api/scheduled/backup", async (req, res) => {
-    try {
-      const sdk = await import("./sdk").then(m => m.sdk);
-      const user = await sdk.authenticateRequest(req);
-      if (!user.isCron || !user.taskUid) {
-        return res.status(403).json({ error: "cron-only" });
-      }
-      
-      const { loadMegaDeskStructuredState, createMegaDeskBackup, cleanupOldBackups } = await import("../db");
-      const defaultState = { clients: [], conversations: [], tickets: [], botScripts: [], operationalRecords: [], auditLogs: [] };
-      const state = await loadMegaDeskStructuredState(defaultState);
-      
-      if (!state) {
-        return res.status(500).json({ error: "Falha ao carregar estado", taskUid: user.taskUid });
-      }
-      
-      // Criar backup
-      const backupId = await createMegaDeskBackup(state);
-      if (!backupId) {
-        return res.status(500).json({ error: "Falha ao criar backup", taskUid: user.taskUid });
-      }
-      
-      // Limpar backups antigos (30 dias)
-      await cleanupOldBackups(30);
-      
-      res.json({ ok: true, backupId, message: "Backup automático criado com sucesso" });
-    } catch (error: any) {
-      console.error("[Backup Handler] Erro:", error);
-      res.status(500).json({ 
-        error: error?.message || "Erro desconhecido",
-        stack: error?.stack,
-        timestamp: new Date().toISOString()
-      });
-    }
-  });
-
   // tRPC API
   app.use(
     "/api/trpc",
