@@ -1116,3 +1116,7 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 
 ## Fase 113: Exibição de contatos adicionais na aba Geral
 - [x] Exibir todos os contatos adicionais na aba "Geral" do painel de detalhes do cliente (reorganizado para aparecer junto com contatos principais)
+
+## Fase 114: Busca de empresa por números adicionais no Atendimento Ativo
+- [x] Atualizar procedure searchCustomer para buscar também por números adicionais (contacts_json)
+- [x] Testar se números adicionais retornam dados da empresa corretamente

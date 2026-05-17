@@ -888,15 +888,16 @@ export const appRouter = router({
           const phoneDigits = input.phone.replace(/\D/g, "");
           const pool = getPool();
           const [crmRows] = await pool.execute(
-            `SELECT crm_client_id, company_name, responsible_name, phone, whatsapp, email
+            `SELECT crm_client_id, company_name, responsible_name, phone, whatsapp, email, contacts_json
              FROM megadesk_crm_clients
              WHERE client_id = ?
                AND (
                  REPLACE(REPLACE(REPLACE(phone, '-', ''), ' ', ''), '()', '') LIKE ?
                  OR REPLACE(REPLACE(REPLACE(whatsapp, '-', ''), ' ', ''), '()', '') LIKE ?
+                 OR contacts_json LIKE ?
                )
              LIMIT 1`,
-            [input.clientId, `%${phoneDigits}%`, `%${phoneDigits}%`]
+            [input.clientId, `%${phoneDigits}%`, `%${phoneDigits}%`, `%${phoneDigits}%`]
           ) as any[];
 
           if (crmRows && (crmRows as any[]).length > 0) {
