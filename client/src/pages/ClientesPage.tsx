@@ -116,12 +116,14 @@ type FormData = {
   internalResponsible: string;
   tags: string;
   observations: string;
+  contacts: Array<{ phone: string; whatsapp: string; description?: string }>;
 };
 
 const EMPTY_FORM: FormData = {
   companyName: "", responsibleName: "", cpfCnpj: "", phone: "", whatsapp: "",
   email: "", address: "", city: "", state: "", cep: "",
   status: "lead", origin: "outro", internalResponsible: "", tags: "", observations: "",
+  contacts: [],
 };
 
 function ClientFormModal({
@@ -151,7 +153,29 @@ function ClientFormModal({
     internalResponsible: editData.internalResponsible,
     tags: editData.tags,
     observations: editData.observations,
+    contacts: editData.contactsJson ? JSON.parse(editData.contactsJson) : [],
   } : EMPTY_FORM);
+
+  const addContact = () => {
+    setForm(prev => ({
+      ...prev,
+      contacts: [...prev.contacts, { phone: "", whatsapp: "", description: "" }]
+    }));
+  };
+
+  const removeContact = (index: number) => {
+    setForm(prev => ({
+      ...prev,
+      contacts: prev.contacts.filter((_, i) => i !== index)
+    }));
+  };
+
+  const updateContact = (index: number, field: string, value: string) => {
+    setForm(prev => ({
+      ...prev,
+      contacts: prev.contacts.map((c, i) => i === index ? { ...c, [field]: value } : c)
+    }));
+  };
 
   const createMutation = trpc.crm.create.useMutation({
     onSuccess() { toast.success("Cliente cadastrado com sucesso!"); onSaved(); onClose(); },
@@ -318,6 +342,75 @@ function ClientFormModal({
                   placeholder="vip, prioritário, parceiro (separados por vírgula)" />
               </div>
             </div>
+          </section>
+
+          {/* Contatos Adicionais */}
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                <Phone className="w-4 h-4 text-slate-400" /> Contatos Adicionais
+              </h3>
+              <button
+                type="button"
+                onClick={addContact}
+                className="px-3 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors text-sm font-medium flex items-center gap-1"
+              >
+                <Plus className="w-4 h-4" /> Adicionar
+              </button>
+            </div>
+            {form.contacts.length > 0 ? (
+              <div className="space-y-4">
+                {form.contacts.map((contact, idx) => (
+                  <div key={idx} className="p-4 border border-slate-200 rounded-lg bg-slate-50">
+                    <div className="flex items-start justify-between mb-3">
+                      <span className="text-sm font-medium text-slate-600">Contato {idx + 1}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeContact(idx)}
+                        className="p-1 text-red-400 hover:bg-red-50 rounded transition-colors"
+                        title="Remover contato"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Telefone</label>
+                        <input
+                          type="text"
+                          value={contact.phone}
+                          onChange={e => updateContact(idx, "phone", e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                          placeholder="(11) 9999-9999"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">WhatsApp</label>
+                        <input
+                          type="text"
+                          value={contact.whatsapp}
+                          onChange={e => updateContact(idx, "whatsapp", e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                          placeholder="(11) 9999-9999"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Descrição (opcional)</label>
+                        <input
+                          type="text"
+                          value={contact.description || ""}
+                          onChange={e => updateContact(idx, "description", e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                          placeholder="Ex: Gerente, Recepção, etc."
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500 text-center py-4">Nenhum contato adicional. Clique em "+ Adicionar" para adicionar um novo contato.</p>
+            )}
           </section>
 
           {/* Observações */}

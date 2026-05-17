@@ -30,6 +30,7 @@ export type CrmClientInput = {
   internalResponsible?: string;
   tags?: string;
   observations?: string;
+  contacts?: Array<{ phone: string; whatsapp: string; description?: string }>;
 };
 
 /**
@@ -107,6 +108,7 @@ export async function createCrmClient(clientId: string, input: CrmClientInput) {
     internalResponsible: input.internalResponsible ?? "",
     tags: input.tags ?? "",
     observations: input.observations ?? "",
+    contactsJson: input.contacts ? JSON.stringify(input.contacts) : "",
   });
   return { crmClientId };
 }
@@ -140,6 +142,7 @@ export async function updateCrmClient(
   if (input.internalResponsible !== undefined) updateData.internalResponsible = input.internalResponsible;
   if (input.tags !== undefined) updateData.tags = input.tags;
   if (input.observations !== undefined) updateData.observations = input.observations;
+  if (input.contacts !== undefined) updateData.contactsJson = JSON.stringify(input.contacts);
 
   if (Object.keys(updateData).length === 0) return;
 

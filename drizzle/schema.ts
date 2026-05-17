@@ -232,6 +232,7 @@ export const megadeskCrmClients = mysqlTable("megadesk_crm_clients", {
   phone: varchar("phone", { length: 40 }).notNull().default(""),
   whatsapp: varchar("whatsapp", { length: 40 }).notNull().default(""),
   email: varchar("email", { length: 255 }).notNull().default(""),
+  contactsJson: text("contacts_json").notNull().default(""), // JSON array de contatos adicionais
   address: varchar("address", { length: 255 }).notNull().default(""),
   city: varchar("city", { length: 120 }).notNull().default(""),
   state: varchar("state", { length: 2 }).notNull().default(""),

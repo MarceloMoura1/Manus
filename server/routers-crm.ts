@@ -34,6 +34,11 @@ const crmClientInputSchema = z.object({
   internalResponsible: z.string().optional().default(""),
   tags: z.string().optional().default(""),
   observations: z.string().optional().default(""),
+  contacts: z.array(z.object({
+    phone: z.string(),
+    whatsapp: z.string(),
+    description: z.string().optional(),
+  })).optional().default([]),
 });
 
 export const crmRouter = router({

@@ -1106,3 +1106,10 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 
 - [x] Botão "Fechar" do painel de detalhes do cliente não estava funcionando (faltava type="button")
 - [x] Remover filtros de status (todos, lead, ativo, inativo, cancelado, inadimplente) da aba de clientes
+
+## Fase 112: Múltiplos contatos por cliente
+- [x] Adicionar coluna `contacts_json` na tabela `megadesk_crm_clients` para armazenar múltiplos contatos
+- [x] Implementar UI de adição/remoção de contatos no formulário de cadastro (botão "+ Adicionar contato")
+- [x] Atualizar procedure `crm.create` para salvar múltiplos contatos
+- [x] Atualizar procedure `crm.update` para atualizar múltiplos contatos
+- [x] Exibir todos os contatos no painel de detalhes do cliente
