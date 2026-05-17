@@ -1061,3 +1061,15 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Criar modal de edição com campos para nome e empresa
 - [x] Implementar função de atualização (atualiza mockConversations em tempo real)
 - [x] Validar e testar a edição
+
+## Fase 107: Página de Clientes (CRM)
+- [x] Criar tabela `megadesk_crm_clients` no banco de dados com todos os campos
+- [x] Criar helpers no db-crm.ts para CRUD de clientes CRM
+- [x] Criar procedures tRPC: crm.list, crm.create, crm.update, crm.delete, crm.getById (routers-crm.ts)
+- [x] Criar ClientesPage com lista à esquerda (busca, filtros, status) e painel à direita com abas
+- [x] Implementar modal de cadastro com campos: empresa, responsável, CPF/CNPJ, telefone, WhatsApp, e-mail, endereço, cidade, estado, CEP, status, origem, observações
+- [x] Implementar abas do painel: Geral, Chamados, Conversas, Financeiro, Rastreamento, Arquivos
+- [x] Implementar Timeline Operacional
+- [x] Adicionar permissão 'clientes' no MegaAdmin (ALL_MODULES + ROLE_DEFAULT_PERMISSIONS)
+- [x] Registrar rota 'clients' e item de navegação no sidebar do MegaDesk
+- [x] Garantir isolamento por clientId (REGRA 1) em todas as procedures CRM

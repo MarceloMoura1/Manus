@@ -52,6 +52,7 @@ const ALL_MODULES = [
   "erp",
   "configurar_bot",
   "assistente_ia",
+  "clientes",
 ];
 
 const ROLE_LABELS: Record<string, string> = {
@@ -66,8 +67,8 @@ const PERMISSION_LABELS = MODULE_LABELS;
 
 // Permissões padrão por função (espelha rolePermissions do backend)
 const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
-  admin:   ["atendimento_ativo", "conversas", "chamados", "rastreio", "erp", "configurar_bot", "assistente_ia"],
-  manager: ["atendimento_ativo", "conversas", "chamados", "rastreio", "erp", "configurar_bot", "assistente_ia"],
+  admin:   ["atendimento_ativo", "conversas", "chamados", "rastreio", "erp", "configurar_bot", "assistente_ia", "clientes"],
+  manager: ["atendimento_ativo", "conversas", "chamados", "rastreio", "erp", "configurar_bot", "assistente_ia", "clientes"],
   agent:   ["atendimento_ativo", "conversas", "chamados"],
   viewer:  ["chamados"],
 };

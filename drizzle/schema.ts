@@ -221,6 +221,36 @@ export const megadeskDomainChamadoCollaborators = mysqlTable("megadesk_domain_ch
   chamadoUserUniqueIdx: uniqueIndex("idx_mdcc_chamado_user_unique").on(table.chamadoId, table.userId),
 }));
 
+export const megadeskCrmClients = mysqlTable("megadesk_crm_clients", {
+  crmClientId: varchar("crm_client_id", { length: 80 }).primaryKey(),
+  clientId: varchar("client_id", { length: 80 }).notNull(), // tenant isolamento
+  // Dados Básicos
+  companyName: varchar("company_name", { length: 255 }).notNull(),
+  responsibleName: varchar("responsible_name", { length: 180 }).notNull().default(""),
+  cpfCnpj: varchar("cpf_cnpj", { length: 20 }).notNull().default(""),
+  phone: varchar("phone", { length: 40 }).notNull().default(""),
+  whatsapp: varchar("whatsapp", { length: 40 }).notNull().default(""),
+  email: varchar("email", { length: 255 }).notNull().default(""),
+  address: varchar("address", { length: 255 }).notNull().default(""),
+  city: varchar("city", { length: 120 }).notNull().default(""),
+  state: varchar("state", { length: 2 }).notNull().default(""),
+  cep: varchar("cep", { length: 10 }).notNull().default(""),
+  // Informações Comerciais
+  status: mysqlEnum("status", ["lead", "ativo", "inativo", "cancelado", "inadimplente"]).notNull().default("lead"),
+  origin: mysqlEnum("origin", ["whatsapp", "instagram", "facebook", "site", "indicacao", "outro"]).notNull().default("outro"),
+  internalResponsible: varchar("internal_responsible", { length: 180 }).notNull().default(""),
+  tags: text("tags").notNull().default(""), // JSON array de tags
+  observations: text("observations").notNull().default(""),
+  lastInteractionAt: timestamp("last_interaction_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+}, (table) => ({
+  clientIdx: index("idx_mcc_client").on(table.clientId),
+  statusIdx: index("idx_mcc_status").on(table.status),
+  companyIdx: index("idx_mcc_company").on(table.companyName),
+  phoneIdx: index("idx_mcc_phone").on(table.phone),
+}));
+
 export const megadeskDomainAuditLogs = mysqlTable("megadesk_domain_audit_logs", {
   auditId: varchar("audit_id", { length: 100 }).primaryKey(),
   platform: mysqlEnum("platform", ["MegaAdmin", "MegaDesk"]).notNull(),

@@ -16,6 +16,7 @@ export const MODULE_NAME_MAP = {
   "erp": "erp",
   "configurar_bot": "bot-config",
   "assistente_ia": "ai-assistant",
+  "clientes": "clients",
 } as const;
 
 // Mapeamento reverso: Backend/MegaDesk → MegaAdmin
@@ -32,6 +33,7 @@ export const MODULE_LABELS = {
   "erp": "ERP",
   "configurar_bot": "Configurar Bot",
   "assistente_ia": "Assistente IA",
+  "clientes": "Clientes",
   // Também suportar nomes em hífen (para backend)
   "active-attendance": "Atendimento Ativo",
   "conversations": "Conversas",
@@ -39,6 +41,7 @@ export const MODULE_LABELS = {
   "tracking": "Rastreio",
   "bot-config": "Configurar Bot",
   "ai-assistant": "Assistente IA",
+  "clients": "Clientes",
 } as const;
 
 // Função para normalizar nome de módulo para formato hífen (backend/MegaDesk)
