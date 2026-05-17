@@ -893,25 +893,20 @@ function ApisTab({ client, onRefresh }: { client: any; onRefresh: () => void }) 
           <label className="block text-xs text-slate-400">
             Usuário (Correios)
             <input
-              value={form.trackingUser}
-              onChange={(e) => setField("trackingUser", e.target.value)}
-              placeholder="Usuário dos Correios"
-              className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-sm text-white outline-none focus:border-cyan-400"
+              disabled
+              placeholder="Campo removido por segurança"
+              className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-800 px-4 py-2.5 text-sm text-slate-500 outline-none cursor-not-allowed"
             />
           </label>
           <label className="block text-xs text-slate-400">
             Senha (Correios)
             <div className="relative mt-1.5">
               <input
-                type={showPwd ? "text" : "password"}
-                value={form.trackingPassword}
-                onChange={(e) => setField("trackingPassword", e.target.value)}
-                placeholder="Senha dos Correios"
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 pr-10 text-sm text-white outline-none focus:border-cyan-400"
+                disabled
+                type="password"
+                placeholder="Campo removido por segurança"
+                className="w-full rounded-xl border border-white/10 bg-slate-800 px-4 py-2.5 pr-10 text-sm text-slate-500 outline-none cursor-not-allowed"
               />
-              <button onClick={() => setShowPwd(!showPwd)} className="absolute right-3 top-2.5 text-slate-400">
-                {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
             </div>
           </label>
           <label className="block text-xs text-slate-400">

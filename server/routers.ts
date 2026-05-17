@@ -619,6 +619,17 @@ export const appRouter = router({
       await persistSyncState();
       return { ok: true, user };
     }),
+    updateUserInfo: adminProcedure.input(z.object({ clientId: z.string(), userId: z.string(), name: z.string().min(1), email: z.string().email() })).mutation(async ({ input }) => {
+      await hydrateSyncState();
+      const client = getClientOrThrow(input.clientId);
+      const user = client.users.find((item) => item.id === input.userId);
+      if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado para este cliente." });
+      user.name = input.name;
+      user.email = input.email;
+      audit("MegaAdmin", `Informações do usuário atualizadas: ${input.email}`, client.clientId);
+      await persistSyncState();
+      return { ok: true, user };
+    }),
     removeClientUser: adminProcedure.input(z.object({ clientId: z.string(), userId: z.string() })).mutation(async ({ input }) => {
       await hydrateSyncState();
       const client = getClientOrThrow(input.clientId);

@@ -988,4 +988,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Diagnosticar onde clientId e userId são passados para o Assistente IA
 - [x] Corrigir chave de sessão errada ("megadesk-session" → "megadesk_session_v1")
 - [x] Tornar leitura de sessão reativa com useState + listener de storage
-- [ ] Salvar checkpoint
+- [x] Salvar checkpoint
+
+## Fase 92: Fila de Edições do MegaAdmin
+- [x] Botão de editar usuário (nome e email) no MegaAdmin
+- [x] Limpar email e senha de Correios na seção de APIs do cliente
+- [x] Filtro de pesquisa para procurar cliente na página Clientes
+- [x] Filtro de pesquisa para procurar usuário
+- [ ] Testar e salvar checkpoint

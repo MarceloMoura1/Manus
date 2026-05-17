@@ -539,6 +539,15 @@ function ClientDetail({ client, onClose, onRefresh }: { client: any; onClose: ()
   const [editingModules, setEditingModules] = useState<string[]>(client.modules ?? []);
   const [editingInfo, setEditingInfo] = useState({ email: client.email ?? "", cnpj: client.cnpj ?? "" });
   const [showEditInfo, setShowEditInfo] = useState(false);
+  const [showEditUserModal, setShowEditUserModal] = useState(false);
+  const [editingUser, setEditingUser] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [editUserForm, setEditUserForm] = useState({ name: "", email: "" });
+
+  useEffect(() => {
+    if (editingUser) {
+      setEditUserForm({ name: editingUser.name, email: editingUser.email });
+    }
+  }, [editingUser]);
 
   const updateAccess = trpc.megaadmin.updateClientAccess.useMutation({
     onSuccess() { toast.success("Acesso atualizado."); onRefresh(); },
@@ -557,6 +566,16 @@ function ClientDetail({ client, onClose, onRefresh }: { client: any; onClose: ()
 
   const removeUser = trpc.megaadmin.removeClientUser.useMutation({
     onSuccess() { toast.success("Usuário removido."); onRefresh(); },
+    onError(err) { toast.error(err.message); },
+  });
+
+  const updateUserInfo = trpc.megaadmin.updateUserInfo.useMutation({
+    onSuccess() {
+      toast.success("Usuário atualizado com sucesso.");
+      setShowEditUserModal(false);
+      setEditingUser(null);
+      onRefresh();
+    },
     onError(err) { toast.error(err.message); },
   });
 
@@ -762,6 +781,16 @@ function ClientDetail({ client, onClose, onRefresh }: { client: any; onClose: ()
                   </div>
                   <div className="flex gap-2">
                     <button
+                      onClick={() => {
+                        setEditingUser({ id: user.id, name: user.name, email: user.email });
+                        setShowEditUserModal(true);
+                      }}
+                      className="rounded-xl border border-white/10 px-3 py-1.5 text-xs text-slate-300 hover:border-blue-400/40"
+                    >
+                      <UserCog className="mr-1 inline h-3.5 w-3.5" />
+                      Editar
+                    </button>
+                    <button
                       onClick={() => updateUser.mutate({ clientId: client.clientId, userId: user.id, status: user.status === "active" ? "blocked" : "active" })}
                       className="rounded-xl border border-white/10 px-3 py-1.5 text-xs text-slate-300 hover:border-cyan-400/40"
                     >
@@ -779,9 +808,65 @@ function ClientDetail({ client, onClose, onRefresh }: { client: any; onClose: ()
                 </div>
               ))
             )}
-          </div>
+           </div>
         </div>
       </div>
+
+      {/* Modal de editar usuário */}
+      {showEditUserModal && editingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl">
+            <h3 className="mb-4 text-lg font-bold text-white">Editar Usuário</h3>
+            <div className="space-y-4">
+              <label className="block text-xs text-slate-400">
+                Nome
+                <input
+                  type="text"
+                  value={editUserForm.name}
+                  onChange={(e) => setEditUserForm({ ...editUserForm, name: e.target.value })}
+                  placeholder="Nome do usuário"
+                  className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-sm text-white outline-none focus:border-cyan-400"
+                />
+              </label>
+              <label className="block text-xs text-slate-400">
+                Email
+                <input
+                  type="email"
+                  value={editUserForm.email}
+                  onChange={(e) => setEditUserForm({ ...editUserForm, email: e.target.value })}
+                  placeholder="Email do usuário"
+                  className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-sm text-white outline-none focus:border-cyan-400"
+                />
+              </label>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => {
+                  setShowEditUserModal(false);
+                  setEditingUser(null);
+                }}
+                className="flex-1 rounded-xl border border-white/10 px-4 py-2.5 text-sm text-slate-300 hover:border-slate-400"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  updateUserInfo.mutate({
+                    clientId: client.clientId,
+                    userId: editingUser.id,
+                    name: editUserForm.name,
+                    email: editUserForm.email,
+                  });
+                }}
+                disabled={updateUserInfo.isPending}
+                className="flex-1 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
+              >
+                {updateUserInfo.isPending ? "Salvando..." : "Salvar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -858,6 +943,17 @@ export default function AdminPanel() {
   const [active, setActive] = useState<Section>("dashboard");
   const [showWizard, setShowWizard] = useState(false);
   const [selectedClient, setSelectedClient] = useState<any | null>(null);
+  const [showEditUserModal, setShowEditUserModal] = useState(false);
+  const [editingUser, setEditingUser] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [editUserForm, setEditUserForm] = useState({ name: "", email: "" });
+  const [searchClients, setSearchClients] = useState("");
+  const [searchUsers, setSearchUsers] = useState("");
+
+  useEffect(() => {
+    if (editingUser) {
+      setEditUserForm({ name: editingUser.name, email: editingUser.email });
+    }
+  }, [editingUser]);
 
   const summaryQuery = trpc.megaadmin.summary.useQuery(undefined, {
     enabled: authQuery.data?.user?.role === "admin",
@@ -1022,9 +1118,16 @@ export default function AdminPanel() {
                   <h3 className="text-xl font-semibold text-white">Gerenciamento de clientes</h3>
                   <span className="text-xs text-slate-400">{clients.length} cliente(s)</span>
                 </div>
-                <p className="text-sm text-slate-400 mb-6">Clique em um cliente para editar dados, usuários, permissões e integrações.</p>
+                <p className="text-sm text-slate-400 mb-4">Clique em um cliente para editar dados, usuários, permissões e integrações.</p>
+                <input
+                  type="text"
+                  placeholder="Pesquisar cliente por nome..."
+                  value={searchClients}
+                  onChange={(e) => setSearchClients(e.target.value)}
+                  className="mb-6 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-sm text-white outline-none focus:border-cyan-400"
+                />
                 {/* Tabela de controle de usuários */}
-                {clients.length > 0 && (
+                {clients.filter((c: any) => c.company.toLowerCase().includes(searchClients.toLowerCase())).length > 0 && (
                   <div className="mb-6 overflow-x-auto rounded-2xl border border-white/10">
                     <table className="w-full text-sm">
                       <thead>
@@ -1039,7 +1142,7 @@ export default function AdminPanel() {
                         </tr>
                       </thead>
                       <tbody>
-                        {clients.map((client: any) => {
+                        {clients.filter((c: any) => c.company.toLowerCase().includes(searchClients.toLowerCase())).map((client: any) => {
                           const totalUsers = client.users?.length ?? 0;
                           const activeUsers = (client.users ?? []).filter((u: any) => u.status === "active").length;
                           const maxUsers = client.maxUsers ?? 5;
@@ -1130,12 +1233,19 @@ export default function AdminPanel() {
               <section className="rounded-[2rem] border border-white/10 bg-slate-950/70 p-6">
                 <h3 className="text-xl font-semibold text-white">Todos os usuários</h3>
                 <p className="mt-2 text-sm text-slate-400">Usuários vinculados a cada cliente. Clique no cliente para editar.</p>
-                <div className="mt-6 space-y-3">
+                <input
+                  type="text"
+                  placeholder="Pesquisar usuário por nome ou email..."
+                  value={searchUsers}
+                  onChange={(e) => setSearchUsers(e.target.value)}
+                  className="mt-4 mb-6 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-sm text-white outline-none focus:border-cyan-400"
+                />
+                <div className="space-y-3">
                   {clients.length === 0 ? (
                     <EmptyState text="Nenhum cliente cadastrado ainda." />
                   ) : (
                     clients.flatMap((client: any) =>
-                      (client.users ?? []).map((user: any) => (
+                      (client.users ?? []).filter((user: any) => user.name.toLowerCase().includes(searchUsers.toLowerCase()) || user.email.toLowerCase().includes(searchUsers.toLowerCase())).map((user: any) => (
                         <div
                           key={user.id}
                           className="flex flex-col gap-3 rounded-3xl border border-white/10 bg-white/[.03] p-5 lg:flex-row lg:items-center lg:justify-between"
@@ -1180,6 +1290,8 @@ export default function AdminPanel() {
         {showWizard && (
           <ClientWizard onClose={() => setShowWizard(false)} onCreated={() => { summaryQuery.refetch(); setActive("clients"); setShowWizard(false); }} />
         )}
+
+
 
       </div>
     </DarkModeWrapper>
