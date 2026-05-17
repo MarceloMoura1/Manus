@@ -24,7 +24,18 @@ export default function App() {
           headers() {
             // Forward local session token for megaadmin procedures if present
             const token = localStorage.getItem("megadesk-session-token");
-            return token ? { Authorization: `Bearer ${token}` } : {};
+            const headers: Record<string, string> = {};
+            if (token) headers["Authorization"] = `Bearer ${token}`;
+            // Forward MegaDesk tenant info for multi-tenant isolation
+            try {
+              const megadeskSession = localStorage.getItem("megadesk_session_v1");
+              if (megadeskSession) {
+                const parsed = JSON.parse(megadeskSession);
+                if (parsed?.clientId) headers["x-tenant-id"] = parsed.clientId;
+                if (parsed?.role) headers["x-user-role"] = parsed.role;
+              }
+            } catch { /* ignore */ }
+            return headers;
           },
         }),
       ],

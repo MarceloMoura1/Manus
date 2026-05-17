@@ -1042,3 +1042,8 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Corrigir duplicação de conversas ao abrir atendimento ativo (INSERT ON DUPLICATE KEY UPDATE no db.ts)
 - [x] Corrigir bug: chamado não é criado quando usuário clica "Sim" para abrir chamado (usar createChamado do db-chamados.ts)
 - [x] Validar fluxo completo: busca cliente → opção chamado → cria chamado na página Chamados
+
+## Fase 103: Correção do Header x-tenant-id
+- [x] Identificar que tRPC client não enviava x-tenant-id nas requisições
+- [x] Corrigir App.tsx para ler megadesk_session_v1 e enviar x-tenant-id e x-user-role nos headers
+- [x] Chamados agora aparecem na página Chamados pois clientId é o mesmo usado na criação
