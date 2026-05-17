@@ -12,6 +12,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { createNewTenant, releaseTenantAccess, pauseTenantAccess, getTenantInfo, deleteTenant, listAllTenants } from "./_core/tenant-operations";
 import { chamadosRouter } from "./routers-chamados";
 import { crmRouter } from "./routers-crm";
+import { whatsappRouter } from "./modules/whatsapp/whatsapp.router";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -1524,5 +1525,6 @@ export const appRouter = router({
         };
       }),
   }),
+  whatsapp: whatsappRouter,
 });
 export type AppRouter = typeof appRouter;

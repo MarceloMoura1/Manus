@@ -1125,3 +1125,43 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Adicionar ícone discreto de "Enviar mensagem" ao lado dos números na aba "Geral"
 - [x] Implementar navegação para Conversas ao clicar no ícone
 - [x] Abrir nova conversa com o número selecionado
+
+## Fase 116: Módulo WhatsApp Modular - server/modules/whatsapp
+
+### Schema e Banco
+- [x] Criar tabelas Drizzle: wa_accounts, wa_conversations, wa_messages
+- [x] Aplicar migrations via webdev_execute_sql
+
+### Estrutura do Módulo
+- [x] Criar server/modules/whatsapp/types/index.ts
+- [x] Criar server/modules/whatsapp/validators/index.ts
+- [x] Criar server/modules/whatsapp/repositories/whatsapp.repo.ts
+- [x] Criar server/modules/whatsapp/repositories/conversation.repo.ts
+- [x] Criar server/modules/whatsapp/repositories/message.repo.ts
+
+### Meta API
+- [x] Criar server/modules/whatsapp/meta/graph-api.ts (envio mensagens)
+- [x] Criar server/modules/whatsapp/meta/oauth.ts (fluxo OAuth Meta)
+- [x] Criar server/modules/whatsapp/meta/webhook-validator.ts
+
+### Webhooks
+- [x] Criar server/modules/whatsapp/webhooks/webhook.handler.ts
+- [x] Criar server/modules/whatsapp/webhooks/message.processor.ts
+- [x] Registrar endpoint /api/webhooks/meta no servidor
+
+### Services
+- [x] Criar server/modules/whatsapp/services/conversation.service.ts
+- [x] Criar server/modules/whatsapp/services/message.service.ts
+- [x] Criar server/modules/whatsapp/services/whatsapp-account.service.ts
+
+### Queues
+- [x] Criar server/modules/whatsapp/queues/message.queue.ts (fila em memória, Redis-ready)
+
+### Socket.IO
+- [x] Criar server/modules/whatsapp/socket/whatsapp.socket.ts
+- [x] Integrar Socket.IO ao servidor Express existente
+
+### tRPC Procedures
+- [x] Criar server/modules/whatsapp/whatsapp.router.ts com procedures
+- [x] Integrar whatsappRouter ao routers.ts principal
+- [x] Testes unitários: 24 testes passando (validators + isolamento multiempresa)

@@ -346,3 +346,85 @@ export type MegadeskDomainIAConversation = typeof megadeskDomainIAConversations.
 export type InsertMegadeskDomainIAConversation = typeof megadeskDomainIAConversations.$inferInsert;
 export type MegadeskDomainIAConversationHistory = typeof megadeskDomainIAConversationHistory.$inferSelect;
 export type InsertMegadeskDomainIAConversationHistory = typeof megadeskDomainIAConversationHistory.$inferInsert;
+
+// ─── WhatsApp Module Tables ────────────────────────────────────────────────────
+
+/**
+ * whatsapp_accounts — uma conta WhatsApp Business por número conectado.
+ * Cada conta pertence a um clientId (tenant). Múltiplas contas por tenant são suportadas.
+ */
+export const waAccounts = mysqlTable("wa_accounts", {
+  id: varchar("id", { length: 80 }).primaryKey(), // UUID gerado no app
+  clientId: varchar("client_id", { length: 80 }).notNull(), // tenant isolamento
+  displayName: varchar("display_name", { length: 180 }).notNull().default(""),
+  phoneNumberId: varchar("phone_number_id", { length: 80 }).notNull(),
+  businessAccountId: varchar("business_account_id", { length: 80 }).notNull(),
+  accessToken: text("access_token").notNull(), // token Meta (criptografado)
+  webhookVerifyToken: varchar("webhook_verify_token", { length: 120 }).notNull(),
+  status: mysqlEnum("status", ["active", "inactive", "error"]).notNull().default("inactive"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+}, (t) => ({
+  clientIdx: index("idx_wa_accounts_client").on(t.clientId),
+  phoneIdx: index("idx_wa_accounts_phone").on(t.phoneNumberId),
+}));
+
+/**
+ * wa_conversations — uma conversa por contato externo.
+ * Vinculada ao account e ao tenant.
+ */
+export const waConversations = mysqlTable("wa_conversations", {
+  id: varchar("id", { length: 80 }).primaryKey(),
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  accountId: varchar("account_id", { length: 80 }).notNull(), // FK wa_accounts.id
+  customerName: varchar("customer_name", { length: 180 }).notNull().default(""),
+  customerPhone: varchar("customer_phone", { length: 40 }).notNull(),
+  lastMessage: text("last_message").notNull().default(""),
+  lastMessageAt: timestamp("last_message_at").notNull().defaultNow(),
+  unreadCount: int("unread_count").notNull().default(0),
+  status: mysqlEnum("status", ["open", "pending", "closed"]).notNull().default("open"),
+  assignedUserId: varchar("assigned_user_id", { length: 80 }), // atendente responsável
+  crmClientId: varchar("crm_client_id", { length: 80 }), // vínculo CRM
+  metadataJson: text("metadata_json").notNull().default("{}"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+}, (t) => ({
+  clientIdx: index("idx_wa_conv_client").on(t.clientId),
+  accountIdx: index("idx_wa_conv_account").on(t.accountId),
+  phoneIdx: index("idx_wa_conv_phone").on(t.customerPhone),
+  statusIdx: index("idx_wa_conv_status").on(t.status),
+  lastMsgIdx: index("idx_wa_conv_last_msg").on(t.lastMessageAt),
+}));
+
+/**
+ * wa_messages — cada mensagem de uma conversa.
+ */
+export const waMessages = mysqlTable("wa_messages", {
+  id: varchar("id", { length: 80 }).primaryKey(),
+  conversationId: varchar("conversation_id", { length: 80 }).notNull(),
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  waMessageId: varchar("wa_message_id", { length: 120 }), // ID retornado pela Meta API
+  senderType: mysqlEnum("sender_type", ["customer", "agent", "bot"]).notNull(),
+  messageType: mysqlEnum("message_type", ["text", "image", "audio", "video", "document", "template", "sticker", "location", "reaction"]).notNull().default("text"),
+  content: text("content").notNull().default(""),
+  mediaUrl: text("media_url"),
+  mediaId: varchar("media_id", { length: 120 }), // ID de mídia na Meta
+  caption: text("caption"),
+  status: mysqlEnum("status", ["pending", "sent", "delivered", "read", "failed"]).notNull().default("pending"),
+  errorMessage: text("error_message"),
+  metadataJson: text("metadata_json").notNull().default("{}"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  convIdx: index("idx_wa_msg_conv").on(t.conversationId),
+  clientIdx: index("idx_wa_msg_client").on(t.clientId),
+  waIdIdx: index("idx_wa_msg_wa_id").on(t.waMessageId),
+  createdAtIdx: index("idx_wa_msg_created").on(t.createdAt),
+}));
+
+// ─── WhatsApp Module Types ─────────────────────────────────────────────────────
+export type WaAccount = typeof waAccounts.$inferSelect;
+export type InsertWaAccount = typeof waAccounts.$inferInsert;
+export type WaConversation = typeof waConversations.$inferSelect;
+export type InsertWaConversation = typeof waConversations.$inferInsert;
+export type WaMessage = typeof waMessages.$inferSelect;
+export type InsertWaMessage = typeof waMessages.$inferInsert;

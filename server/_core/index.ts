@@ -10,6 +10,7 @@ import { registerMetricWebhook } from "../metricWebhook";
 import { registerIntegrationApi } from "../integrationApi";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -40,6 +41,13 @@ async function startServer() {
   registerOAuthRoutes(app);
   registerMetricWebhook(app);
   registerIntegrationApi(app);
+
+  // WhatsApp Webhook endpoints (Meta)
+  app.get("/api/webhooks/meta", handleWebhookVerify);
+  app.post("/api/webhooks/meta", handleWebhookEvent);
+
+  // Inicializar Socket.IO para WhatsApp
+  initWhatsAppSocket(server);
   // Backup scheduled handler
   app.post("/api/scheduled/backup", async (req, res) => {
     try {
