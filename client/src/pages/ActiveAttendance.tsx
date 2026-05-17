@@ -195,29 +195,31 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
     <div className="fixed inset-0 bg-gradient-to-br from-slate-50 via-blue-50 to-slate-50 overflow-hidden flex items-center justify-center">
       <div className="max-w-5xl mx-auto w-full px-4 md:px-8 max-h-screen overflow-y-auto">
         {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
-              <Phone className="w-6 h-6 text-white" />
+        <div className="mb-12">
+          <div className="flex items-center gap-4 mb-3">
+            <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center shadow-xl">
+              <Phone className="w-7 h-7 text-white" />
             </div>
-            <h1 className="text-3xl font-bold text-slate-900">Atendimento Ativo</h1>
+            <div>
+              <h1 className="text-4xl font-bold text-slate-900">Atendimento Ativo</h1>
+              <p className="text-slate-500 text-sm font-medium mt-1">Gerenciamento inteligente de atendimentos</p>
+            </div>
           </div>
-          <p className="text-slate-600 ml-15">Inicie um atendimento com um cliente</p>
         </div>
 
         {/* Success Message */}
         {successMessage && (
-          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl flex items-center gap-3">
-            <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-            <p className="text-sm text-green-700 font-medium">{successMessage}</p>
+          <div className="mb-8 p-5 bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 rounded-2xl flex items-center gap-4 shadow-md">
+            <CheckCircle className="w-6 h-6 text-green-600 flex-shrink-0" />
+            <p className="text-sm text-green-800 font-semibold">{successMessage}</p>
           </div>
         )}
 
         {/* Error Message */}
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3">
-            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
-            <p className="text-sm text-red-700 font-medium">{error}</p>
+          <div className="mb-8 p-5 bg-gradient-to-r from-red-50 to-rose-50 border-2 border-red-300 rounded-2xl flex items-center gap-4 shadow-md">
+            <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0" />
+            <p className="text-sm text-red-800 font-semibold">{error}</p>
           </div>
         )}
 
@@ -227,8 +229,8 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
           <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300">
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
-                  <Phone className="w-4 h-4 text-blue-600" />
+                <label className="block text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
+                  <Phone className="w-5 h-5 text-blue-600" />
                   Número do Cliente
                 </label>
                 <div className="flex gap-3">
@@ -239,12 +241,12 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                     onChange={(e) => setPhoneNumber(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleSearchCustomer()}
                     disabled={!!customerData}
-                    className="flex-1 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 disabled:bg-slate-100 disabled:text-slate-500"
+                    className="flex-1 px-5 py-4 rounded-xl border-2 border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 disabled:bg-slate-100 disabled:text-slate-500 text-base"
                   />
                   <button
                     onClick={handleSearchCustomer}
                     disabled={isSearching || !!customerData}
-                    className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center gap-2 group"
+                    className="px-8 py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-xl hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center gap-2 group"
                   >
                     {isSearching ? (
                       <>
@@ -311,33 +313,33 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
             <>
               {/* Customer Info Card */}
               <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-lg p-12 text-white border-2 border-slate-400">
-                <h3 className="text-lg font-semibold mb-6 flex items-center gap-2">
-                  <User className="w-5 h-5" />
+                <h3 className="text-2xl font-bold mb-8 flex items-center gap-3">
+                  <User className="w-6 h-6" />
                   Dados do Cliente
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
-                    <p className="text-sm text-blue-100 mb-1">Nome</p>
-                    <p className="text-xl font-bold">{customerData.name}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="bg-white/15 rounded-2xl p-6 backdrop-blur-md border-2 border-white/30">
+                    <p className="text-xs text-blue-100 mb-3 font-semibold uppercase tracking-wide">Nome</p>
+                    <p className="text-2xl font-bold">{customerData.name}</p>
                   </div>
-                  <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
-                    <p className="text-sm text-blue-100 mb-1">Empresa</p>
-                    <p className="text-xl font-bold flex items-center gap-2">
-                      <Building2 className="w-5 h-5" />
+                  <div className="bg-white/15 rounded-2xl p-6 backdrop-blur-md border-2 border-white/30">
+                    <p className="text-xs text-blue-100 mb-3 font-semibold uppercase tracking-wide">Empresa</p>
+                    <p className="text-2xl font-bold flex items-center gap-2">
+                      <Building2 className="w-6 h-6" />
                       {customerData.company}
                     </p>
                   </div>
-                  <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
-                    <p className="text-sm text-blue-100 mb-1">Telefone</p>
-                    <p className="text-xl font-bold flex items-center gap-2">
-                      <Phone className="w-5 h-5" />
+                  <div className="bg-white/15 rounded-2xl p-6 backdrop-blur-md border-2 border-white/30">
+                    <p className="text-xs text-blue-100 mb-3 font-semibold uppercase tracking-wide">Telefone</p>
+                    <p className="text-2xl font-bold flex items-center gap-2">
+                      <Phone className="w-6 h-6" />
                       {customerData.phone}
                     </p>
                   </div>
-                  <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
-                    <p className="text-sm text-blue-100 mb-1">Status</p>
-                    <p className="text-xl font-bold flex items-center gap-2">
-                      <CheckCircle className="w-5 h-5" />
+                  <div className="bg-white/15 rounded-2xl p-6 backdrop-blur-md border-2 border-white/30">
+                    <p className="text-xs text-blue-100 mb-3 font-semibold uppercase tracking-wide">Status</p>
+                    <p className="text-2xl font-bold flex items-center gap-2">
+                      <CheckCircle className="w-6 h-6" />
                       {customerData.exists ? 'Existente' : 'Novo'}
                     </p>
                   </div>
@@ -346,15 +348,15 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
 
               {/* Ticket Option Card */}
               <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400">
-                <h3 className="text-lg font-semibold text-slate-900 mb-6">Deseja abrir um chamado?</h3>
-                <div className="flex gap-3 mb-6">
+                <h3 className="text-2xl font-bold text-slate-900 mb-8">Deseja abrir um chamado?</h3>
+                <div className="flex gap-4 mb-8">
                   <button
                     onClick={() => setOpenTicket(false)}
                     className={cn(
-                      'flex-1 px-4 py-3 rounded-xl font-semibold transition-all duration-200 transform hover:scale-105',
+                      'flex-1 px-6 py-4 rounded-xl font-bold transition-all duration-200 transform hover:scale-105 text-base',
                       openTicket === false
                         ? 'bg-gradient-to-r from-slate-700 to-slate-800 text-white shadow-lg'
-                        : 'bg-slate-100 border-2 border-slate-200 text-slate-700 hover:border-slate-300'
+                        : 'bg-slate-100 border-2 border-slate-300 text-slate-700 hover:border-slate-400'
                     )}
                   >
                     Não
@@ -362,10 +364,10 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                   <button
                     onClick={() => setOpenTicket(true)}
                     className={cn(
-                      'flex-1 px-4 py-3 rounded-xl font-semibold transition-all duration-200 transform hover:scale-105',
+                      'flex-1 px-6 py-4 rounded-xl font-bold transition-all duration-200 transform hover:scale-105 text-base',
                       openTicket === true
                         ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg'
-                        : 'bg-slate-100 border-2 border-slate-200 text-slate-700 hover:border-slate-300'
+                        : 'bg-slate-100 border-2 border-slate-300 text-slate-700 hover:border-slate-400'
                     )}
                   >
                     Sim
@@ -393,17 +395,17 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-3">
+              <div className="flex gap-4 pt-4">
                 <button
                   onClick={handleReset}
-                  className="flex-1 px-6 py-3 bg-slate-100 text-slate-900 rounded-xl hover:bg-slate-200 transition-all duration-200 font-semibold border border-slate-200 hover:shadow-md"
+                  className="flex-1 px-8 py-4 bg-slate-100 text-slate-900 rounded-xl hover:bg-slate-200 transition-all duration-200 font-bold border-2 border-slate-300 hover:shadow-md text-base"
                 >
                   Voltar
                 </button>
                 <button
                   onClick={handleStartConversation}
                   disabled={isSearching}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2"
+                  className="flex-1 px-8 py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-xl hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-bold flex items-center justify-center gap-2 text-base"
                 >
                   {isSearching ? (
                     <>

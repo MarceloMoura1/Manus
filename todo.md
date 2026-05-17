@@ -1045,3 +1045,15 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Aumentar espessura da borda de border para border-2
 - [x] Testar e validar no navegador
 - [x] Salvar checkpoint
+
+## Fase 99: Melhorias de Layout e Design do Atendimento Ativo
+- [x] Melhorar tipografia do header (aumentar tamanho e adicionar subtítulo)
+- [x] Aumentar ícone do header (w-14 h-14 e w-7 h-7)
+- [x] Melhorar mensagens de sucesso e erro com gradientes e bordas
+- [x] Aumentar labels e inputs com melhor espaçamento
+- [x] Melhorar cards de dados do cliente com melhor tipografia e espaçamento
+- [x] Aumentar títulos de seções (text-2xl font-bold)
+- [x] Melhorar botões de opção com melhor padding e espaçamento
+- [x] Melhorar botões de ação com melhor styling
+- [x] Testar e validar no navegador
+- [x] Salvar checkpoint
