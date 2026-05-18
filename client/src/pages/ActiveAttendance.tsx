@@ -230,9 +230,18 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                   <div className="flex gap-3 w-full">
                     <input
                       type="text"
-                      placeholder="Digite o número..."
+                      placeholder="Digite o número (XX XXXXX-XXXX)..."
                       value={phoneNumber}
-                      onChange={(e) => setPhoneNumber(e.target.value)}
+                      onChange={(e) => {
+                        let value = e.target.value.replace(/\D/g, '');
+                        if (value.length > 11) value = value.slice(0, 11);
+                        if (value.length > 6) {
+                          value = value.slice(0, 2) + ' ' + value.slice(2, 7) + '-' + value.slice(7);
+                        } else if (value.length > 2) {
+                          value = value.slice(0, 2) + ' ' + value.slice(2);
+                        }
+                        setPhoneNumber(value);
+                      }}
                       onKeyPress={(e) => e.key === 'Enter' && handleSearchCustomer()}
                       disabled={!!customerData}
                       className="flex-1 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 disabled:bg-slate-100 disabled:text-slate-500"
@@ -329,9 +338,9 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
 
             {/* Card "Criar Chamado" (aparece embaixo quando SIM é clicado) */}
             {customerData && openTicket === true && (
-              <div className="bg-white rounded-xl shadow-md p-6 border border-slate-300 animate-fadeSlideIn">
-                <h3 className="text-base font-semibold text-slate-900 mb-4">Criar Chamado</h3>
-                <div className="space-y-3">
+              <div className="bg-white rounded-xl shadow-md p-8 border border-slate-300 animate-fadeSlideIn">
+                <h3 className="text-lg font-semibold text-slate-900 mb-5">Criar Chamado</h3>
+                <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-semibold text-slate-900 mb-2">Título *</label>
                     <input
@@ -352,21 +361,21 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 resize-none text-sm"
                     />
                   </div>
-                  <div className="flex gap-2 pt-2">
+                  <div className="flex gap-3 pt-4 border-t border-slate-200">
                     <button
                       onClick={() => {
                         setOpenTicket(false);
                         setTicketTitle('');
                         setTicketObservation('');
                       }}
-                      className="flex-1 px-3 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-all duration-200 font-semibold text-sm"
+                      className="flex-1 px-4 py-3 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-all duration-200 font-semibold text-sm hover:shadow-md"
                     >
                       Voltar
                     </button>
                     <button
                       onClick={handleCreateTicket}
                       disabled={isSearching || !ticketTitle.trim()}
-                      className="flex-1 px-3 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:bg-slate-400 disabled:cursor-not-allowed transition-all duration-200 font-semibold flex items-center justify-center gap-2 text-sm"
+                      className="flex-1 px-4 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:bg-slate-400 disabled:cursor-not-allowed transition-all duration-200 font-semibold flex items-center justify-center gap-2 text-sm hover:shadow-md"
                     >
                       {isSearching ? (
                         <>
@@ -376,7 +385,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                       ) : (
                         <>
                           <Plus className="w-4 h-4" />
-                          Criar
+                          Criar Chamado
                         </>
                       )}
                     </button>
