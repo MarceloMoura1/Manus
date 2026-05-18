@@ -326,6 +326,52 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                 </div>
               </div>
             )}
+
+            {/* Card "Criar Chamado" (aparece embaixo quando SIM é clicado) */}
+            {customerData && openTicket === true && (
+              <div className="bg-white rounded-xl shadow-md p-6 border border-slate-300 animate-fadeSlideIn">
+                <h3 className="text-base font-semibold text-slate-900 mb-4">Criar Chamado</h3>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-900 mb-2">Título</label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Problema com faturamento"
+                      value={ticketTitle}
+                      onChange={(e) => setTicketTitle(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-900 mb-2">Descrição (opcional)</label>
+                    <textarea
+                      placeholder="Descreva o problema..."
+                      value={ticketObservation}
+                      onChange={(e) => setTicketObservation(e.target.value)}
+                      rows={2}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 resize-none text-sm"
+                    />
+                  </div>
+                  <button
+                    onClick={handleCreateTicket}
+                    disabled={isSearching}
+                    className="w-full px-3 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:bg-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2 text-sm"
+                  >
+                    {isSearching ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Criando...
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-4 h-4" />
+                        Criar Chamado
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* CENTRO: Dados do Cliente (aparecem quando cliente encontrado) */}
@@ -402,64 +448,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
             </div>
           )}
 
-          {/* DIREITA: Formulário de Chamado (aparece quando SIM é clicado) */}
-          {customerData && openTicket === true && (
-            <div className="w-96 animate-fadeSlideIn">
-              <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold text-slate-900">Criar Chamado</h3>
-                  <button
-                    onClick={() => setOpenTicket(false)}
-                    className="p-2 hover:bg-slate-100 rounded-lg transition-all duration-200"
-                  >
-                    <X className="w-5 h-5 text-slate-600" />
-                  </button>
-                </div>
 
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-900 mb-2">Título do Chamado</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: Problema com faturamento"
-                      value={ticketTitle}
-                      onChange={(e) => setTicketTitle(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-900 mb-2">Descrição (opcional)</label>
-                    <textarea
-                      placeholder="Descreva o problema em detalhes..."
-                      value={ticketObservation}
-                      onChange={(e) => setTicketObservation(e.target.value)}
-                      rows={4}
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 resize-none"
-                    />
-                  </div>
-
-                  <button
-                    onClick={handleCreateTicket}
-                    disabled={isSearching}
-                    className="w-full px-4 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg hover:from-green-600 hover:to-green-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2 mt-4"
-                  >
-                    {isSearching ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Criando...
-                      </>
-                    ) : (
-                      <>
-                        <Plus className="w-4 h-4" />
-                        Criar Chamado
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
