@@ -4,6 +4,7 @@ import { httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
 import { Home } from "./pages/Home";
 import AdminPanel from "./pages/AdminPanel";
+import { SettingsPage } from "./pages/SettingsPage";
 import { AIAssistant } from "./components/AIAssistant";
 import { trpc } from "./lib/trpc";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -11,6 +12,11 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 function isAdminRoute() {
   const pathname = window.location.pathname.toLowerCase();
   return pathname === "/admin" || pathname.startsWith("/admin/");
+}
+
+function isSettingsRoute() {
+  const pathname = window.location.pathname.toLowerCase();
+  return pathname === "/settings" || pathname.startsWith("/settings/");
 }
 
 export default function App() {
@@ -43,13 +49,13 @@ export default function App() {
   );
 
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
-  const platform = isAdminRoute() ? "megaadmin" : "megadesk";
+  const platform = isAdminRoute() ? "megaadmin" : isSettingsRoute() ? "megadesk" : "megadesk";
 
   return (
     <ThemeProvider>
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
-          {isAdminRoute() ? <AdminPanel /> : <Home />}
+          {isAdminRoute() ? <AdminPanel /> : isSettingsRoute() ? <SettingsPage /> : <Home />}
 
           <AIAssistant
             isOpen={isAssistantOpen}

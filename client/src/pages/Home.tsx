@@ -8,6 +8,7 @@ import { ActiveAttendancePage } from "./ActiveAttendance";
 import { ClientesPage } from "./ClientesPage";
 import { ConversasPage } from "./ConversasPage";
 import { WhatsAppConfigPage } from "./WhatsAppConfigPage";
+import { SettingsPage as SettingsPageComponent } from "./SettingsPage";
 import { TimelineActivity } from "@/components/TimelineActivity";
 
 import { Button } from "@/components/ui/button";
@@ -2305,7 +2306,7 @@ function ERPPage() {
   );
 }
 
-function SettingsPage() {
+function SettingsPagePlaceholder() {
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
@@ -2877,7 +2878,7 @@ function Shell() {
           {active === "tickets" && <TicketsPage />}
           {active === "tracking" && <TrackingPage />}
           {active === "erp" && <ERPPage />}
-          {active === "settings" && <SettingsPage />}
+          {active === "settings" && <SettingsPageComponent />}
           {active === "bot-config" && <BotConfigPage />}
           {active === "whatsapp-config" && <WhatsAppConfigPage />}
           {active === "ai-assistant" && <AIAssistantPage />}

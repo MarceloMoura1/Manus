@@ -1255,3 +1255,12 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Implementar dossiê do cliente funcional com fetch direto e x-tenant-id
 - [x] Adicionar 'attachment' ao enum actionType no banco de dados
 - [x] Corrigir TypeScript: customerId faltando no return do createChamado e getCustomerChamadoHistory
+
+## Fase 126: Página de Configurações do MegaDesk (em progresso)
+- [ ] Criar schema para user_settings (notificações, atalhos de mensagens)
+- [ ] Criar procedures tRPC para CRUD de configurações
+- [ ] Implementar aba Conta (alterar nome e senha com auditoria)
+- [ ] Implementar aba Notificações (7 tipos + volume + silenciar)
+- [ ] Implementar aba Atendimento (resposta automática e atalhos com /)
+- [ ] Integrar página no App.tsx e adicionar ao sidebar
+- [ ] Testar todas as abas e persistência de dados

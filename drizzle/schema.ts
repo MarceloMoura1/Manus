@@ -440,6 +440,62 @@ export const waMessages = mysqlTable("wa_messages", {
   createdAtIdx: index("idx_wa_msg_created").on(t.createdAt),
 }));
 
+// ─── User Settings Tables ────────────────────────────────────────────────────
+/**
+ * megadesk_user_settings — configurações de notificações e atendimento por usuário
+ * Cada usuário tem suas próprias configurações, não compartilhadas com outros
+ */
+export const megadeskUserSettings = mysqlTable("megadesk_user_settings", {
+  id: varchar("id", { length: 80 }).primaryKey(), // UUID
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  userId: varchar("user_id", { length: 80 }).notNull(),
+  // Notificações
+  notificationsEnabled: boolean("notifications_enabled").notNull().default(true),
+  soundEnabled: boolean("sound_enabled").notNull().default(true),
+  soundVolume: int("sound_volume").notNull().default(70), // 0-100
+  muteUntil: timestamp("mute_until"), // null = não silenciado
+  desktopNotificationsEnabled: boolean("desktop_notifications_enabled").notNull().default(true),
+  whatsappNotificationsEnabled: boolean("whatsapp_notifications_enabled").notNull().default(true),
+  ticketsNotificationsEnabled: boolean("tickets_notifications_enabled").notNull().default(true),
+  iaNotificationsEnabled: boolean("ia_notifications_enabled").notNull().default(true),
+  erpNotificationsEnabled: boolean("erp_notifications_enabled").notNull().default(true),
+  trackingNotificationsEnabled: boolean("tracking_notifications_enabled").notNull().default(true),
+  showMessagePreview: boolean("show_message_preview").notNull().default(true),
+  // Atendimento
+  autoResponseEnabled: boolean("auto_response_enabled").notNull().default(false),
+  autoResponseMessage: text("auto_response_message"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+}, (t) => ({
+  clientIdx: index("idx_mus_client").on(t.clientId),
+  userIdx: index("idx_mus_user").on(t.userId),
+  clientUserIdx: uniqueIndex("idx_mus_client_user").on(t.clientId, t.userId),
+}));
+
+/**
+ * megadesk_user_shortcuts — atalhos de mensagens personalizados por usuário
+ * Cada usuário pode criar seus próprios atalhos com /comando
+ */
+export const megadeskUserShortcuts = mysqlTable("megadesk_user_shortcuts", {
+  id: varchar("id", { length: 80 }).primaryKey(), // UUID
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  userId: varchar("user_id", { length: 80 }).notNull(),
+  shortcutKey: varchar("shortcut_key", { length: 50 }).notNull(), // ex: "ola", "obrigado"
+  shortcutMessage: text("shortcut_message").notNull(), // mensagem completa
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+}, (t) => ({
+  clientIdx: index("idx_mus_client").on(t.clientId),
+  userIdx: index("idx_mus_user").on(t.userId),
+  clientUserKeyIdx: uniqueIndex("idx_mus_client_user_key").on(t.clientId, t.userId, t.shortcutKey),
+}));
+
+// ─── User Settings Types ──────────────────────────────────────────────────────
+export type MegadeskUserSettings = typeof megadeskUserSettings.$inferSelect;
+export type InsertMegadeskUserSettings = typeof megadeskUserSettings.$inferInsert;
+export type MegadeskUserShortcut = typeof megadeskUserShortcuts.$inferSelect;
+export type InsertMegadeskUserShortcut = typeof megadeskUserShortcuts.$inferInsert;
+
 // ─── WhatsApp Module Types ─────────────────────────────────────────────────────
 export type WaAccount = typeof waAccounts.$inferSelect;
 export type InsertWaAccount = typeof waAccounts.$inferInsert;
