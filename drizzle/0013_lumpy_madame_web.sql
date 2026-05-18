@@ -1,0 +1,1 @@
+ALTER TABLE `megadesk_domain_chamado_activities` MODIFY COLUMN `action_type` enum('register','edit','close','forward','note','attachment') NOT NULL DEFAULT 'note';

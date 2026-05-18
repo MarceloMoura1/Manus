@@ -624,14 +624,14 @@ export const chamadosRouter = router({
       }
     }),
 
-  uploadAttachment: megadeskProcedure
+    uploadAttachment: megadeskProcedure
     .input(
       z.object({
         chamadoId: ChamadoIdSchema,
         fileName: z.string().min(1),
-        fileUrl: z.string(),
-        fileSize: z.number().optional(),
-        mimeType: z.string().optional(),
+        fileType: z.string().default('application/octet-stream'),
+        fileBase64: z.string().min(1),
+        attendant: z.string().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -644,29 +644,32 @@ export const chamadosRouter = router({
           });
         }
         checkRateLimit(clientId);
-        
-        const uploadedBy = "Atendente";
+        const uploadedBy = input.attendant || "Atendente";
+        // Converter base64 para Buffer e fazer upload para storage
+        const fileBuffer = Buffer.from(input.fileBase64, 'base64');
+        const storageKey = `chamados/${clientId}/${input.chamadoId}/${Date.now()}-${input.fileName}`;
+        const { storagePut } = await import('../server/storage');
+        const { url: fileUrl } = await storagePut(storageKey, fileBuffer, input.fileType);
         const result = await addAttachment(
           input.chamadoId,
           clientId,
           input.fileName,
-          input.fileUrl,
+          fileUrl,
           uploadedBy,
-          input.fileSize,
-          input.mimeType
+          fileBuffer.length,
+          input.fileType
         );
-        
         await addActivityToChamado(
           input.chamadoId,
           clientId,
-          `Atendente adicionou anexo: ${input.fileName}`,
+          `${uploadedBy} adicionou anexo: ${input.fileName}`,
           uploadedBy
         );
-        
         const chamado = await getChamadoWithActivities(input.chamadoId, clientId);
         return {
           success: true,
           attachmentId: result.attachmentId,
+          fileUrl,
           chamado,
         };
       } catch (error) {

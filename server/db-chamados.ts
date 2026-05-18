@@ -23,6 +23,7 @@ import { v4 as uuidv4 } from 'uuid';
 export type ChamadoWithActivities = {
   id: string;
   number: number;
+  customerId: string;
   customerName: string;
   customerPhone?: string | null;
   customerEmail?: string | null;
@@ -224,10 +225,14 @@ export async function createChamado(
     console.log(`[SUCCESS] Chamado #${chamadoNumber} criado com sucesso (ID: ${chamadoId})`);
 
     const now = new Date();
-    return {
+        return {
       id: chamadoId,
       number: chamadoNumber,
+      customerId: customerId || `cust-${Date.now()}`,
       customerName: sanitizedCustomerName,
+      customerPhone: customerPhone || null,
+      customerEmail: customerEmail || null,
+      customerCNPJ: customerCNPJ || null,
       company: sanitizedCompany,
       title: sanitizedTitle,
       observations: sanitizedObservations,
@@ -239,7 +244,6 @@ export async function createChamado(
     };
   });
 }
-
 /**
  * Obter chamado com atividades (otimizado com JOIN)
  */
@@ -292,12 +296,15 @@ export async function getChamadoWithActivities(
       }
     }
 
-    const c = chamado[0];
-
+        const c = chamado[0];
     return {
       id: c.chamadoId,
       number: c.chamadoNumber,
+      customerId: c.customerId,
       customerName: c.customerName,
+      customerPhone: c.customerPhone,
+      customerEmail: c.customerEmail,
+      customerCNPJ: c.customerCNPJ,
       company: c.company,
       title: c.title,
       observations: c.observations,
@@ -416,7 +423,11 @@ export async function listChamados(
     const result: ChamadoWithActivities[] = chamados.map((c: any) => ({
       id: c.chamadoId,
       number: c.chamadoNumber,
+      customerId: c.customerId,
       customerName: c.customerName,
+      customerPhone: c.customerPhone,
+      customerEmail: c.customerEmail,
+      customerCNPJ: c.customerCNPJ,
       company: c.company,
       title: c.title,
       observations: c.observations,
@@ -467,14 +478,14 @@ export async function listChamados(
           timestamp = Date.now();
         }
         return {
-          id: a.activityId,
+                    id: a.activityId,
           date: timestamp,
           description: a.description,
           attendant: a.attendant,
+          actionType: a.actionType || 'note',
         };
       }),
     }));
-
     return result;
   });
 }
@@ -1015,6 +1026,7 @@ export async function getCustomerChamadoHistory(
   return chamados.map((chamado) => ({
     id: chamado.chamadoId,
     number: chamado.chamadoNumber,
+    customerId: chamado.customerId,
     customerName: chamado.customerName,
     customerPhone: chamado.customerPhone,
     customerEmail: chamado.customerEmail,

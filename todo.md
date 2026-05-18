@@ -1239,3 +1239,19 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Implementar funcionalidade de anexos com balão "atendente adicionou anexo"
 - [x] Adicionar ícone "Editar chamado" no balão
 - [x] Implementar funcionalidade "Dossiê do cliente" com histórico completo
+
+## Fase 125: Correções reais dos 5 problemas do sistema de chamados
+- [ ] Corrigir data inválida no balão de atividade (campo date/createdAt não está sendo passado corretamente)
+- [ ] Implementar clips de anexo funcional (upload real de arquivo para storage + exibição no balão)
+- [ ] Implementar editar balão funcional (procedure editActivity conectada ao frontend)
+- [ ] Corrigir dados do cliente na barra cinza (customerPhone, customerEmail, customerCNPJ não sendo retornados)
+- [ ] Implementar dossiê do cliente funcional (customerId precisa ser passado corretamente)
+
+## Fase 125: Correções reais dos 5 problemas do sistema de chamados (concluída)
+- [x] Corrigir data inválida no balão (new Date(timestamp).toLocaleString com opções pt-BR)
+- [x] Corrigir dados do cliente na barra cinza (customerId, customerPhone, customerEmail, customerCNPJ)
+- [x] Implementar upload de anexo funcional com base64 e storage
+- [x] Implementar editar balão funcional com modal inline e botão de editar
+- [x] Implementar dossiê do cliente funcional com fetch direto e x-tenant-id
+- [x] Adicionar 'attachment' ao enum actionType no banco de dados
+- [x] Corrigir TypeScript: customerId faltando no return do createChamado e getCustomerChamadoHistory

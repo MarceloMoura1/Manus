@@ -27,7 +27,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 type Chamado = {
   id: string;
   number: number;
+  customerId: string;
   customerName: string;
+  customerPhone?: string | null;
+  customerEmail?: string | null;
+  customerCNPJ?: string | null;
   company: string;
   title: string;
   observations: string;
@@ -40,6 +44,7 @@ type Chamado = {
     date: number; // timestamp em millisegundos
     description: string;
     attendant: string;
+    actionType?: string;
   }>;
 };
 
@@ -128,10 +133,17 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
     console.log('[DEBUG] User:', user, 'Query enabled:', !!user?.user?.id);
   }, [user]);
 
+  const [attachmentFile, setAttachmentFile] = React.useState<File | null>(null);
+  const [isUploadingAttachment, setIsUploadingAttachment] = React.useState(false);
+  const [showCustomerHistoryModal, setShowCustomerHistoryModal] = React.useState(false);
+  const [customerHistory, setCustomerHistory] = React.useState<any[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = React.useState(false);
+
   const updateChamadoMutation = trpc.chamados.update.useMutation();
   const addActivityMutation = trpc.chamados.addActivity.useMutation();
   const editActivityMutation = trpc.chamados.editActivity.useMutation();
   const createChamadoMutation = trpc.chamados.create.useMutation();
+  const uploadAttachmentMutation = trpc.chamados.uploadAttachment.useMutation();
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToastMessage({ message, type });
@@ -200,6 +212,61 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
     }
   };
 
+
+  // Upload de anexo
+  const handleUploadAttachment = async () => {
+    if (!attachmentFile || !selectedChamado) return;
+    setIsUploadingAttachment(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64 = (e.target?.result as string).split(',')[1];
+        const result = await uploadAttachmentMutation.mutateAsync({
+          chamadoId: selectedChamado.id,
+          fileName: attachmentFile.name,
+          fileType: attachmentFile.type,
+          fileBase64: base64,
+          attendant: user?.user?.name || 'Atendente',
+        });
+        if (result.chamado) {
+          setSelectedChamado(result.chamado);
+          setAttachmentFile(null);
+          showToast('Anexo enviado com sucesso', 'success');
+        }
+        setIsUploadingAttachment(false);
+      };
+      reader.readAsDataURL(attachmentFile);
+    } catch (error) {
+      showToast('Erro ao enviar anexo', 'error');
+      setIsUploadingAttachment(false);
+    }
+  };
+
+  // Dossiê do cliente
+  const handleOpenCustomerHistory = async () => {
+    if (!selectedChamado?.customerId) {
+      showToast('Cliente sem ID para buscar histórico', 'error');
+      return;
+    }
+    setIsLoadingHistory(true);
+    setShowCustomerHistoryModal(true);
+    try {
+      const session = JSON.parse(localStorage.getItem('megadesk_session_v1') || '{}');
+      const clientId = session?.clientId || '';
+      const result = await fetch('/api/trpc/chamados.getCustomerHistory?input=' + encodeURIComponent(JSON.stringify({ json: { customerId: selectedChamado.customerId } })), {
+        headers: {
+          'x-tenant-id': clientId,
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await result.json();
+      setCustomerHistory(data?.result?.data?.json || []);
+    } catch (error) {
+      showToast('Erro ao buscar histórico do cliente', 'error');
+      setCustomerHistory([]);
+    }
+    setIsLoadingHistory(false);
+  };
 
   // Abrir conversa com cliente
   const handleOpenConversation = async (chamado: Chamado) => {
@@ -703,8 +770,8 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
       </div>
 
       {/* Modal de Detalhes */}
-      <Dialog open={showDetailModal} onOpenChange={setShowDetailModal}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <Dialog open={showDetailModal} onOpenChange={(open) => { setShowDetailModal(open); if (!open) { setEditingActivityId(null); setAttachmentFile(null); } }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               #{String(selectedChamado?.number).padStart(4, '0')} - {selectedChamado?.title}
@@ -712,7 +779,28 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
           </DialogHeader>
 
           {selectedChamado && (
-            <div className="space-y-6">
+            <div className="space-y-5">
+
+              {/* Barra cinza - Dados do Cliente */}
+              <div className="bg-slate-700 rounded-lg p-4 grid grid-cols-4 gap-4">
+                <div>
+                  <p className="text-xs text-slate-300 mb-1">Nome</p>
+                  <p className="text-sm font-semibold text-white">{selectedChamado.customerName || 'N/A'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-300 mb-1">Telefone</p>
+                  <p className="text-sm font-semibold text-white">{selectedChamado.customerPhone || 'N/A'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-300 mb-1">CNPJ</p>
+                  <p className="text-sm font-semibold text-white">{selectedChamado.customerCNPJ || 'N/A'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-300 mb-1">Email</p>
+                  <p className="text-sm font-semibold text-white">{selectedChamado.customerEmail || 'N/A'}</p>
+                </div>
+              </div>
+
               {/* Controles */}
               <div className="grid grid-cols-3 gap-4">
                 <div>
@@ -752,27 +840,38 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
                 </div>
               </div>
 
+              {/* Botão Dossiê do Cliente */}
+              <div className="flex justify-end">
+                <button
+                  onClick={handleOpenCustomerHistory}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-100 transition"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  Dossiê do Cliente
+                </button>
+              </div>
+
               {/* Timeline */}
               <div>
-                <h3 className="font-semibold text-slate-900 mb-4">Timeline de Atividades</h3>
-                <div className="space-y-4 max-h-96 overflow-y-auto">
+                <h3 className="font-semibold text-slate-900 mb-3">Timeline de Atividades</h3>
+                <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                   {selectedChamado.activities.length === 0 ? (
                     <p className="text-sm text-slate-500 text-center py-4">Nenhuma atividade registrada</p>
                   ) : (
                     selectedChamado.activities.map((activity, idx) => (
-                      <div key={activity.id} className="flex gap-4">
+                      <div key={activity.id} className="flex gap-3">
                         <div className="flex flex-col items-center">
-                          <div className="w-3 h-3 rounded-full bg-blue-600 mt-2" />
+                          <div className="w-3 h-3 rounded-full bg-blue-600 mt-2 flex-shrink-0" />
                           {idx < selectedChamado.activities.length - 1 && (
-                            <div className="w-0.5 h-12 bg-slate-200 my-1" />
+                            <div className="w-0.5 flex-1 bg-slate-200 my-1" />
                           )}
                         </div>
-                        <div className="flex-1 pb-4">
-                          <div className="flex items-start justify-between">
+                        <div className="flex-1 pb-3 bg-blue-50 rounded-lg p-3 border border-blue-100">
+                          <div className="flex items-start justify-between mb-1">
                             <div>
-                              <p className="text-sm font-medium text-slate-900">{activity.attendant}</p>
+                              <p className="text-sm font-semibold text-slate-900">{activity.attendant}</p>
                               <p className="text-xs text-slate-500">
-                                {activity.date.toLocaleString('pt-BR')}
+                                {new Date(activity.date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                               </p>
                             </div>
                             {editingActivityId !== activity.id && (
@@ -781,9 +880,10 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
                                   setEditingActivityId(activity.id);
                                   setEditingActivityText(activity.description);
                                 }}
-                                className="p-1 hover:bg-slate-100 rounded"
+                                className="p-1 hover:bg-blue-200 rounded transition"
+                                title="Editar atividade"
                               >
-                                <Edit2 className="w-4 h-4 text-slate-400" />
+                                <Edit2 className="w-3.5 h-3.5 text-blue-600" />
                               </button>
                             )}
                           </div>
@@ -794,26 +894,25 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
                                 value={editingActivityText}
                                 onChange={e => setEditingActivityText(e.target.value)}
                                 className="text-sm"
+                                autoFocus
                               />
                               <div className="flex gap-2">
-                                <Button
-                                  size="sm"
-                                  onClick={handleEditActivity}
-                                  disabled={editActivityMutation.isPending}
-                                >
+                                <Button size="sm" onClick={handleEditActivity} disabled={editActivityMutation.isPending}>
                                   Salvar
                                 </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => setEditingActivityId(null)}
-                                >
+                                <Button size="sm" variant="outline" onClick={() => setEditingActivityId(null)}>
                                   Cancelar
                                 </Button>
                               </div>
                             </div>
                           ) : (
-                            <p className="text-sm text-slate-700 mt-2">{activity.description}</p>
+                            activity.actionType === 'attachment' ? (
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-slate-700 text-sm">📎 {activity.description}</span>
+                              </div>
+                            ) : (
+                              <p className="text-sm text-slate-700 mt-1">{activity.description}</p>
+                            )
                           )}
                         </div>
                       </div>
@@ -822,27 +921,103 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
                 </div>
               </div>
 
-              {/* Registrar Atividade */}
-              <div className="border-t border-slate-200 pt-4">
-                <label className="text-sm font-medium text-slate-700 block mb-2">Registrar Atividade</label>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Descreva a atividade..."
-                    value={newActivityText}
-                    onChange={e => setNewActivityText(e.target.value)}
-                    className="text-sm"
-                  />
-                  <Button
-                    onClick={handleAddActivity}
-                    disabled={addActivityMutation.isPending || !newActivityText.trim()}
-                    size="sm"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </Button>
+              {/* Registrar Atividade + Anexo */}
+              <div className="border-t border-slate-200 pt-4 space-y-3">
+                <div>
+                  <label className="text-sm font-medium text-slate-700 block mb-2">Registrar Atividade</label>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Descreva a atividade..."
+                      value={newActivityText}
+                      onChange={e => setNewActivityText(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleAddActivity()}
+                      className="text-sm"
+                    />
+                    <Button
+                      onClick={handleAddActivity}
+                      disabled={addActivityMutation.isPending || !newActivityText.trim()}
+                      size="sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Upload de Anexo */}
+                <div>
+                  <label className="text-sm font-medium text-slate-700 block mb-2">📎 Adicionar Anexo</label>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="file"
+                      id="attachment-upload"
+                      className="hidden"
+                      onChange={e => setAttachmentFile(e.target.files?.[0] || null)}
+                    />
+                    <label
+                      htmlFor="attachment-upload"
+                      className="cursor-pointer px-3 py-2 border border-slate-300 rounded-md text-sm text-slate-600 hover:bg-slate-50 transition"
+                    >
+                      {attachmentFile ? attachmentFile.name : 'Escolher arquivo...'}
+                    </label>
+                    {attachmentFile && (
+                      <Button
+                        size="sm"
+                        onClick={handleUploadAttachment}
+                        disabled={isUploadingAttachment}
+                        className="bg-blue-600 hover:bg-blue-700"
+                      >
+                        {isUploadingAttachment ? 'Enviando...' : 'Enviar'}
+                      </Button>
+                    )}
+                    {attachmentFile && (
+                      <button
+                        onClick={() => setAttachmentFile(null)}
+                        className="text-slate-400 hover:text-slate-600"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Dossiê do Cliente */}
+      <Dialog open={showCustomerHistoryModal} onOpenChange={setShowCustomerHistoryModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>📋 Dossiê do Cliente — {selectedChamado?.customerName}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {isLoadingHistory ? (
+              <p className="text-center text-slate-500 py-8">Carregando histórico...</p>
+            ) : customerHistory.length === 0 ? (
+              <p className="text-center text-slate-500 py-8">Nenhum chamado encontrado para este cliente.</p>
+            ) : (
+              customerHistory.map((c: any) => (
+                <div key={c.id} className="border border-slate-200 rounded-lg p-4 hover:bg-slate-50 transition">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-semibold text-slate-900">#{String(c.number).padStart(4, '0')} — {c.title}</p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Aberto em: {new Date(c.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusBadgeColor(c.status)}`}>
+                      {getStatusLabel(c.status)}
+                    </span>
+                  </div>
+                  {c.observations && (
+                    <p className="text-sm text-slate-600 mt-2">{c.observations}</p>
+                  )}
+                  <p className="text-xs text-slate-400 mt-2">Atendente: {c.assignedTo || 'Não atribuído'} | Prioridade: {c.priority || 'N/A'}</p>
+                </div>
+              ))
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 
