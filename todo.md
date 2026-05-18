@@ -1233,9 +1233,9 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 ## Fase 124: Implementação das edições simples (em progresso)
 - [x] Adicionar campos customerPhone, customerEmail, customerCNPJ à tabela de chamados
 - [x] Atualizar função createChamado para aceitar esses parâmetros
-- [ ] Atualizar procedure de criar chamado para puxar dados do cliente
+- [x] Atualizar procedure de criar chamado para puxar dados do cliente
+- [x] Puxar dados do cliente (Nome, Telefone, CNPJ, Email) no detalhe do chamado
 - [ ] Corrigir exibição de data/hora no card do chamado
 - [ ] Implementar funcionalidade de anexos com balão "atendente adicionou anexo"
 - [ ] Adicionar ícone "Editar chamado" no balão
-- [ ] Puxar dados do cliente (Nome, Telefone, CNPJ, Email) no detalhe do chamado
 - [ ] Implementar funcionalidade "Dossiê do cliente" com histórico completo

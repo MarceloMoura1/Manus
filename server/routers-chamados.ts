@@ -26,6 +26,8 @@ import {
   removeCollaborator,
   updateCollaborators,
   registerActivity,
+  addAttachment,
+  getAttachments,
   type ChamadoWithActivities,
 } from "./db-chamados";
 
@@ -617,6 +619,88 @@ export const chamadosRouter = router({
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: `Erro ao obter contadores: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
+        });
+      }
+    }),
+
+  uploadAttachment: megadeskProcedure
+    .input(
+      z.object({
+        chamadoId: ChamadoIdSchema,
+        fileName: z.string().min(1),
+        fileUrl: z.string(),
+        fileSize: z.number().optional(),
+        mimeType: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      try {
+        const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
+        if (!clientId || clientId.trim() === '') {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Identificacao de cliente invalida",
+          });
+        }
+        checkRateLimit(clientId);
+        
+        const uploadedBy = "Atendente";
+        const result = await addAttachment(
+          input.chamadoId,
+          clientId,
+          input.fileName,
+          input.fileUrl,
+          uploadedBy,
+          input.fileSize,
+          input.mimeType
+        );
+        
+        await addActivityToChamado(
+          input.chamadoId,
+          clientId,
+          `Atendente adicionou anexo: ${input.fileName}`,
+          uploadedBy
+        );
+        
+        const chamado = await getChamadoWithActivities(input.chamadoId, clientId);
+        return {
+          success: true,
+          attachmentId: result.attachmentId,
+          chamado,
+        };
+      } catch (error) {
+        console.error('[ERROR] Failed to upload attachment:', error);
+        if (error instanceof TRPCError) throw error;
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Erro ao fazer upload do anexo: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
+        });
+      }
+    }),
+
+  getAttachments: megadeskProcedure
+    .input(
+      z.object({
+        chamadoId: ChamadoIdSchema,
+      })
+    )
+    .query(async ({ input, ctx }) => {
+      try {
+        const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
+        if (!clientId || clientId.trim() === '') {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Identificacao de cliente invalida",
+          });
+        }
+        const attachments = await getAttachments(input.chamadoId, clientId);
+        return attachments;
+      } catch (error) {
+        console.error('[ERROR] Failed to get attachments:', error);
+        if (error instanceof TRPCError) throw error;
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Erro ao obter anexos: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
         });
       }
     }),

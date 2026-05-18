@@ -637,7 +637,13 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
                 >
                   <td className="px-4 py-3 text-sm font-mono text-slate-600">#{String(chamado.number).padStart(4, '0')}</td>
                   <td className="px-4 py-3 text-sm text-slate-600">
-                    {new Date(chamado.createdAt).toLocaleDateString('pt-BR')}
+                    {new Date(chamado.createdAt).toLocaleString('pt-BR', { 
+                      year: 'numeric', 
+                      month: '2-digit', 
+                      day: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
                   </td>
                   <td className="px-4 py-3 text-sm">
                     <div className="font-medium text-slate-900">{chamado.customerName}</div>

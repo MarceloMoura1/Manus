@@ -211,6 +211,22 @@ export const megadeskDomainChamadoActivities = mysqlTable("megadesk_domain_chama
   createdAtIdx: index("idx_mdca_created_at").on(table.createdAt),
 }));
 
+export const megadeskDomainChamadoAttachments = mysqlTable("megadesk_domain_chamado_attachments", {
+  attachmentId: varchar("attachment_id", { length: 80 }).primaryKey(),
+  chamadoId: varchar("chamado_id", { length: 80 }).notNull(),
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  fileName: varchar("file_name", { length: 255 }).notNull(),
+  fileUrl: text("file_url").notNull(),
+  fileSize: int("file_size"),
+  mimeType: varchar("mime_type", { length: 100 }),
+  uploadedBy: varchar("uploaded_by", { length: 180 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  chamadoIdx: index("idx_mdca_chamado").on(table.chamadoId),
+  clientIdx: index("idx_mdca_client").on(table.clientId),
+  createdAtIdx: index("idx_mdca_created_at").on(table.createdAt),
+}));
+
 export const megadeskDomainChamadoCollaborators = mysqlTable("megadesk_domain_chamado_collaborators", {
   collaboratorId: varchar("collaborator_id", { length: 80 }).primaryKey(),
   chamadoId: varchar("chamado_id", { length: 80 }).notNull(),

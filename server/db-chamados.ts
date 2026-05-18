@@ -15,6 +15,7 @@ import {
   megadeskDomainChamados,
   megadeskDomainChamadoActivities,
   megadeskDomainChamadoSequence,
+  megadeskDomainChamadoAttachments,
 } from '../drizzle/schema';
 import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
@@ -919,4 +920,52 @@ export async function getStatusCounts(clientId: string): Promise<{
     console.error(`[ERROR] Failed to get status counts for ${clientId}:`, error);
     throw error;
   }
+}
+
+
+/**
+ * Adicionar anexo a um chamado
+ */
+export async function addAttachment(
+  chamadoId: string,
+  clientId: string,
+  fileName: string,
+  fileUrl: string,
+  uploadedBy: string,
+  fileSize?: number,
+  mimeType?: string
+): Promise<{ attachmentId: string }> {
+  const attachmentId = uuidv4();
+  
+  await db.insert(megadeskDomainChamadoAttachments).values({
+    attachmentId,
+    chamadoId,
+    clientId,
+    fileName,
+    fileUrl,
+    fileSize,
+    mimeType,
+    uploadedBy,
+    createdAt: new Date(),
+  });
+  
+  return { attachmentId };
+}
+
+/**
+ * Obter anexos de um chamado
+ */
+export async function getAttachments(chamadoId: string, clientId: string) {
+  const attachments = await db
+    .select()
+    .from(megadeskDomainChamadoAttachments)
+    .where(
+      and(
+        eq(megadeskDomainChamadoAttachments.chamadoId, chamadoId),
+        eq(megadeskDomainChamadoAttachments.clientId, clientId)
+      )
+    )
+    .orderBy(desc(megadeskDomainChamadoAttachments.createdAt));
+  
+  return attachments;
 }
