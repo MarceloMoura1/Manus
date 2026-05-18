@@ -143,13 +143,13 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
       const result = await createTicketMutation.mutateAsync({
         customerId: customerData.customerId,
         title: ticketTitle,
-        description: ticketObservation,
+        observation: ticketObservation,
         clientId,
       });
 
-      setCreatedChamadoNumber(result.number);
+      setCreatedChamadoNumber(result.chamadoNumber);
       setCreatedChamadoId(result.id);
-      setSuccessMessage(`Chamado #${result.number} criado com sucesso!`);
+      setSuccessMessage(`Chamado #${result.chamadoNumber} criado com sucesso!`);
     } catch (err: any) {
       setError(err.message || 'Erro ao criar chamado');
     } finally {
