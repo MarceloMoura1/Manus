@@ -92,11 +92,11 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
         name: result.name,
         company: result.company,
         phone: result.phone,
-        email: result.email || '',
-        whatsapp: result.whatsapp || '',
+        email: (result as any).email || '',
+        whatsapp: (result as any).whatsapp || '',
         exists: false,
-        source: result.source || 'contact',
-        crmClientId: result.crmClientId || undefined,
+        source: (result as any).source || 'contact',
+        crmClientId: (result as any).crmClientId || undefined,
         customerId: result.id,
       });
       setShowNewCustomerForm(false);
