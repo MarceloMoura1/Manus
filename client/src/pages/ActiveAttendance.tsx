@@ -333,7 +333,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                 <h3 className="text-base font-semibold text-slate-900 mb-4">Criar Chamado</h3>
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-sm font-semibold text-slate-900 mb-2">Título</label>
+                    <label className="block text-sm font-semibold text-slate-900 mb-2">Título *</label>
                     <input
                       type="text"
                       placeholder="Ex: Problema com faturamento"
@@ -352,23 +352,35 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 resize-none text-sm"
                     />
                   </div>
-                  <button
-                    onClick={handleCreateTicket}
-                    disabled={isSearching}
-                    className="w-full px-3 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:bg-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2 text-sm"
-                  >
-                    {isSearching ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Criando...
-                      </>
-                    ) : (
-                      <>
-                        <Plus className="w-4 h-4" />
-                        Criar Chamado
-                      </>
-                    )}
-                  </button>
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      onClick={() => {
+                        setOpenTicket(false);
+                        setTicketTitle('');
+                        setTicketObservation('');
+                      }}
+                      className="flex-1 px-3 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 transition-all duration-200 font-semibold text-sm"
+                    >
+                      Voltar
+                    </button>
+                    <button
+                      onClick={handleCreateTicket}
+                      disabled={isSearching || !ticketTitle.trim()}
+                      className="flex-1 px-3 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:bg-slate-400 disabled:cursor-not-allowed transition-all duration-200 font-semibold flex items-center justify-center gap-2 text-sm"
+                    >
+                      {isSearching ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Criando...
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-4 h-4" />
+                          Criar
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
