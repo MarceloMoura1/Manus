@@ -24,6 +24,9 @@ export type ChamadoWithActivities = {
   id: string;
   number: number;
   customerName: string;
+  customerPhone?: string | null;
+  customerEmail?: string | null;
+  customerCNPJ?: string | null;
   company: string;
   title: string;
   observations: string;
@@ -1021,7 +1024,7 @@ export async function getCustomerChamadoHistory(
     observations: chamado.observations,
     status: chamado.status,
     priority: chamado.priority,
-    assignedTo: chamado.assignedTo,
+    assignedTo: chamado.assignedTo || undefined,
     createdAt: chamado.createdAt.getTime(),
     activities: allActivities
       .filter((a) => a.chamadoId === chamado.chamadoId)
