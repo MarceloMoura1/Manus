@@ -172,6 +172,9 @@ export const chamadosRouter = router({
       z.object({
         customerId: z.string().optional(),
         customerName: StringFieldSchema,
+        customerPhone: z.string().optional(),
+        customerEmail: z.string().optional(),
+        customerCNPJ: z.string().optional(),
         company: StringFieldSchema,
         title: StringFieldSchema,
         observations: ObservationsSchema.optional().default(""),
@@ -207,7 +210,10 @@ export const chamadosRouter = router({
           input.title,
           input.observations,
           input.priority,
-          input.assignedTo
+          input.assignedTo,
+          input.customerPhone,
+          input.customerEmail,
+          input.customerCNPJ
         );
         
         console.log('[SUCCESS] Chamado created:', chamado.id, 'number:', chamado.number);

@@ -1159,6 +1159,9 @@ export function TicketsPage() {
       const result = await createChamadoMutation.mutateAsync({
         customerId,
         customerName: newChamadoForm.customerName,
+        customerPhone: selectedCrmCustomer?.phone || '',
+        customerEmail: selectedCrmCustomer?.email || '',
+        customerCNPJ: selectedCrmCustomer?.cpfCnpj || '',
         company: newChamadoForm.company,
         title: newChamadoForm.title,
         observations: newChamadoForm.observations,

@@ -171,7 +171,10 @@ export async function createChamado(
   title: string,
   observations: string,
   priority: string = 'media',
-  assignedTo?: string
+  assignedTo?: string,
+  customerPhone?: string,
+  customerEmail?: string,
+  customerCNPJ?: string
 ): Promise<ChamadoWithActivities> {
   // Validações de entrada
   if (!clientId || !clientId.trim()) {
@@ -202,6 +205,9 @@ export async function createChamado(
       chamadoNumber,
       customerId: customerId || `cust-${Date.now()}`,
       customerName: sanitizedCustomerName,
+      customerPhone: customerPhone || null,
+      customerEmail: customerEmail || null,
+      customerCNPJ: customerCNPJ || null,
       company: sanitizedCompany,
       title: sanitizedTitle,
       observations: sanitizedObservations,

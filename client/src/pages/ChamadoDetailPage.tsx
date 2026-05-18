@@ -19,6 +19,9 @@ interface Ticket {
   id: string;
   number: number;
   customerName: string;
+  customerPhone?: string;
+  customerEmail?: string;
+  customerCNPJ?: string;
   company: string;
   title: string;
   observations: string;
@@ -269,6 +272,35 @@ export function ChamadoDetailPage({ chamado, onBack }: ChamadoDetailPageProps) {
             <div className="bg-white rounded-lg shadow-md p-4">
               <h3 className="text-sm font-semibold text-slate-600 mb-2">Data de Criação</h3>
               <p className="text-slate-700">{new Date(chamado.createdAt).toLocaleDateString("pt-BR")}</p>
+            </div>
+
+            {/* Card - Dados do Cliente */}
+            <div className="bg-white rounded-lg shadow-md p-4">
+              <h3 className="text-sm font-semibold text-slate-600 mb-3">Dados do Cliente</h3>
+              <div className="space-y-2">
+                <div>
+                  <p className="text-xs text-slate-500">Nome</p>
+                  <p className="text-slate-700 font-medium">{chamado.customerName || 'N/A'}</p>
+                </div>
+                {chamado.customerPhone && (
+                  <div>
+                    <p className="text-xs text-slate-500">Telefone</p>
+                    <p className="text-slate-700 font-medium">{chamado.customerPhone}</p>
+                  </div>
+                )}
+                {chamado.customerEmail && (
+                  <div>
+                    <p className="text-xs text-slate-500">Email</p>
+                    <p className="text-slate-700 font-medium">{chamado.customerEmail}</p>
+                  </div>
+                )}
+                {chamado.customerCNPJ && (
+                  <div>
+                    <p className="text-xs text-slate-500">CNPJ</p>
+                    <p className="text-slate-700 font-medium">{chamado.customerCNPJ}</p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
