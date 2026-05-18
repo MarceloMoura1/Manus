@@ -54,7 +54,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
           phone: result.phone,
           email: result.email || '',
           whatsapp: result.whatsapp || '',
-          exists: result.exists,
+          exists: (result as any).exists ?? true,
           source: result.source || 'contact',
           crmClientId: result.crmClientId || undefined,
           customerId: result.id,
