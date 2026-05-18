@@ -115,7 +115,12 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
     try {
       const result = await createConversationMutation.mutateAsync({
         customerId: customerData.customerId,
+        customerName: customerData.name,
+        phone: customerData.phone,
+        company: customerData.company,
         clientId,
+        fromCrm: customerData.source === 'crm',
+        crmClientId: customerData.crmClientId,
       });
 
       setSuccessMessage(`Conversa iniciada com ${customerData.name}!`);
@@ -142,8 +147,11 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
     try {
       const result = await createTicketMutation.mutateAsync({
         customerId: customerData.customerId,
+        phone: customerData.phone,
         title: ticketTitle,
         observation: ticketObservation,
+        company: customerData.company,
+        customer: customerData.name,
         clientId,
       });
 
