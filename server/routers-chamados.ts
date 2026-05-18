@@ -553,16 +553,9 @@ export const chamadosRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      if (!ctx.user) {
-        throw new TRPCError({
-          code: 'UNAUTHORIZED',
-          message: 'Usuário não autenticado',
-        });
-      }
-
-      // Obter clientId do contexto (geralmente passado no middleware)
-      const clientId = (ctx as any).tenantId || String(ctx.user.id);
-      const attendantName = ctx.user?.name || ctx.user?.email || "Atendente";
+      // Obter clientId do tenantId (sessão MegaDesk)
+      const clientId = ctx.tenantId || String(ctx.user?.id ?? 'unknown');
+      const attendantName = ctx.user?.name || ctx.user?.email || 'Atendente';
 
       if (!clientId || clientId.trim() === '') {
         throw new TRPCError({
