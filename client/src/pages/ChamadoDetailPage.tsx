@@ -18,6 +18,7 @@ interface TicketActivity {
 interface Ticket {
   id: string;
   number: number;
+  customerId: string;
   customerName: string;
   customerPhone?: string;
   customerEmail?: string;
