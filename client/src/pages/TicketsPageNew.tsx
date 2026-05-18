@@ -92,6 +92,28 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
   });
   const pageSize = 10;
 
+  // Buscar dados da empresa automaticamente
+  React.useEffect(() => {
+    if (newChamadoForm.company.trim().length > 2) {
+      const searchCompany = async () => {
+        try {
+          const result = await (trpc.megadesk.searchCustomerByCompany as any).fetch({
+            company: newChamadoForm.company,
+          });
+          if (result?.name) {
+            setNewChamadoForm(prev => ({
+              ...prev,
+              customerName: result.name,
+            }));
+          }
+        } catch (error) {
+          console.log('Empresa nao encontrada');
+        }
+      };
+      searchCompany();
+    }
+  }, [newChamadoForm.company]);
+
   // Queries tRPC
   const chamadosQuery = trpc.chamados.list.useQuery(
     {
@@ -826,22 +848,24 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium text-slate-700 block mb-1">Nome do Cliente *</label>
-              <Input
-                placeholder="Ex: João Silva"
-                value={newChamadoForm.customerName}
-                onChange={e => setNewChamadoForm({...newChamadoForm, customerName: e.target.value})}
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700 block mb-1">Empresa * (será buscada no banco de dados)</label>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Empresa *</label>
               <Input
                 placeholder="Ex: Empresa XYZ Ltda"
                 value={newChamadoForm.company}
                 onChange={e => setNewChamadoForm({...newChamadoForm, company: e.target.value})}
                 autoComplete="off"
               />
-              <p className="text-xs text-slate-500 mt-1">Digite o nome da empresa para buscar no banco de dados</p>
+              <p className="text-xs text-slate-500 mt-1">Digite o nome da empresa para buscar automaticamente</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Nome do Cliente *</label>
+              <Input
+                placeholder="Será preenchido automaticamente"
+                value={newChamadoForm.customerName}
+                onChange={e => setNewChamadoForm({...newChamadoForm, customerName: e.target.value})}
+                disabled={!newChamadoForm.company}
+              />
+              <p className="text-xs text-slate-500 mt-1">Preencha a empresa acima para puxar o nome automaticamente</p>
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700 block mb-1">Título *</label>
