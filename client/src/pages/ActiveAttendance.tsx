@@ -264,12 +264,12 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
           {/* Etapa 1: Buscar Cliente - SEMPRE VISÍVEL */}
           <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300">
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+              <div className="flex flex-col items-center gap-4">
+                <label className="block text-sm font-semibold text-slate-900 flex items-center gap-2">
                   <Phone className="w-4 h-4 text-blue-600" />
                   Número do Cliente
                 </label>
-                <div className="flex gap-3">
+                <div className="flex gap-3 w-full max-w-md">
                   <input
                     type="text"
                     placeholder="Digite o número de telefone..."
@@ -463,17 +463,17 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-3">
+              <div className="flex gap-3 justify-center">
                 <button
                   onClick={handleReset}
-                  className="flex-1 px-6 py-3 bg-slate-100 text-slate-900 rounded-xl hover:bg-slate-200 transition-all duration-200 font-semibold border border-slate-200 hover:shadow-md"
+                  className="px-6 py-3 bg-slate-100 text-slate-900 rounded-xl hover:bg-slate-200 transition-all duration-200 font-semibold border border-slate-200 hover:shadow-md"
                 >
                   Voltar
                 </button>
                 <button
                   onClick={handleStartConversation}
                   disabled={isSearching}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2"
+                  className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2"
                 >
                   {isSearching ? (
                     <>
