@@ -220,10 +220,10 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
               customerData ? "w-96" : "w-full max-w-md"
             )}
           >
-            <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300">
+            <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300" style={{borderRadius: '18px', height: '150px', paddingTop: '34px', paddingBottom: '38px', marginBottom: '-8px', width: '380px'}}>
               <div className="space-y-4">
                 <div className="flex flex-col items-center gap-4">
-                  <label className="block text-sm font-semibold text-slate-900 flex items-center gap-2">
+                  <label className="block text-sm font-semibold text-slate-900 flex items-center gap-2" style={{paddingRight: '111px', fontSize: '16px'}}>
                     <Phone className="w-4 h-4 text-blue-600" />
                     Número do Cliente
                   </label>
@@ -244,7 +244,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                       }}
                       onKeyPress={(e) => e.key === 'Enter' && handleSearchCustomer()}
                       disabled={!!customerData}
-                      className="flex-1 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 disabled:bg-slate-100 disabled:text-slate-500"
+                      className="flex-1 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 disabled:bg-slate-100 disabled:text-slate-500" style={{height: '45px', marginTop: '0px', width: '225px'}}
                     />
                     <button
                       onClick={handleSearchCustomer}
@@ -307,7 +307,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
 
             {/* Card "Deseja abrir um chamado?" (embaixo do input, à esquerda) */}
             {customerData && (
-              <div className="bg-white rounded-xl shadow-md p-6 border border-slate-300 animate-fadeSlideIn">
+              <div className="bg-white rounded-xl shadow-md p-6 border border-slate-300 animate-fadeSlideIn" style={{borderColor: '#9e9e9e'}}>
                 <h3 className="text-base font-semibold text-slate-900 mb-4">Deseja abrir um chamado?</h3>
                 <div className="flex gap-2">
                   <button
