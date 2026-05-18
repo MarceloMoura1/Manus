@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { Phone, User, Building2, CheckCircle, AlertCircle, Loader2, ArrowRight, Plus } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Phone, User, Building2, CheckCircle, AlertCircle, Loader2, ArrowRight, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 
@@ -48,25 +48,22 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
       const result = await searchCustomerMutation.mutateAsync({ phone: phoneNumber, clientId });
       if (result.found) {
         setCustomerData({
-          customerId: result.id,
-          id: result.id,
           name: result.name,
           company: result.company,
           phone: result.phone,
-          exists: true,
-          source: (result as any).source ?? 'contacts',
-          email: (result as any).email ?? '',
-          whatsapp: (result as any).whatsapp ?? '',
-          crmClientId: (result as any).crmClientId ?? null,
+          email: result.email || '',
+          whatsapp: result.whatsapp || '',
+          exists: result.exists,
+          source: result.source,
+          crmClientId: result.crmClientId,
+          customerId: result.customerId,
         });
         setShowNewCustomerForm(false);
       } else {
-        setCustomerData(null);
         setShowNewCustomerForm(true);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao buscar cliente');
-      setShowNewCustomerForm(true);
+    } catch (err: any) {
+      setError(err.message || 'Erro ao buscar cliente');
     } finally {
       setIsSearching(false);
     }
@@ -88,107 +85,73 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
         company: newCustomerCompany,
         clientId,
       });
-      setCustomerData(result);
+
+      setCustomerData({
+        name: result.name,
+        company: result.company,
+        phone: result.phone,
+        email: result.email || '',
+        whatsapp: result.whatsapp || '',
+        exists: false,
+        source: result.source,
+        crmClientId: result.crmClientId,
+        customerId: result.customerId,
+      });
       setShowNewCustomerForm(false);
-      setSuccessMessage('Cliente criado com sucesso!');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao criar cliente');
+    } catch (err: any) {
+      setError(err.message || 'Erro ao criar cliente');
     } finally {
       setIsSearching(false);
     }
   };
 
   const handleStartConversation = async () => {
-    if (!customerData) {
-      setError('Selecione um cliente primeiro');
+    if (!customerData) return;
+
+    setError(null);
+    setSuccessMessage(null);
+    setIsSearching(true);
+
+    try {
+      const result = await createConversationMutation.mutateAsync({
+        customerId: customerData.customerId,
+        clientId,
+      });
+
+      setSuccessMessage(`Conversa iniciada com ${customerData.name}!`);
+      setTimeout(() => {
+        handleReset();
+      }, 2000);
+    } catch (err: any) {
+      setError(err.message || 'Erro ao iniciar conversa');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleCreateTicket = async () => {
+    if (!ticketTitle.trim()) {
+      setError('Por favor, insira um título para o chamado');
       return;
     }
 
     setError(null);
+    setSuccessMessage(null);
     setIsSearching(true);
 
     try {
-      let conversationId = customerData.id || customerData.customerId;
-      let ticketCreated = false;
-      
-      // Etapa 1: Criar chamado se solicitado
-      if (openTicket === true) {
-        if (!ticketTitle.trim()) {
-          setError('Por favor, insira o título do chamado');
-          setIsSearching(false);
-          return;
-        }
+      const result = await createTicketMutation.mutateAsync({
+        customerId: customerData.customerId,
+        title: ticketTitle,
+        description: ticketObservation,
+        clientId,
+      });
 
-        try {
-          const ticketResult = await createTicketMutation.mutateAsync({
-            customerId: customerData.id || customerData.customerId,
-            phone: customerData.phone,
-            title: ticketTitle,
-            company: customerData.company,
-            customer: customerData.name,
-            observation: ticketObservation,
-            clientId,
-          });
-          ticketCreated = true;
-          if (ticketResult.chamadoNumber) {
-            setCreatedChamadoNumber(ticketResult.chamadoNumber);
-            setCreatedChamadoId(ticketResult.ticketId);
-          }
-          console.log('Chamado criado:', ticketResult);
-        } catch (ticketError) {
-          console.error('Erro ao criar chamado:', ticketError);
-          setError('Erro ao criar chamado, mas continuando com a conversa...');
-          // Continuar mesmo se falhar
-        }
-      }
-      
-      // Etapa 2: Criar conversa
-      try {
-        const conversationResult = await createConversationMutation.mutateAsync({
-          customerId: customerData.id || customerData.customerId,
-          customerName: customerData.name,
-          phone: customerData.phone,
-          company: customerData.company,
-          clientId,
-          fromCrm: customerData.source === 'crm',
-          crmClientId: customerData.crmClientId ?? undefined,
-        });
-        conversationId = conversationResult.conversationId || (conversationResult as any).id;
-        if (ticketCreated && createdChamadoNumber) {
-          setSuccessMessage(`Chamado #${String(createdChamadoNumber).padStart(4, '0')} e conversa criados com sucesso!`);
-        } else if (ticketCreated) {
-          setSuccessMessage('Chamado e conversa criados com sucesso!');
-        } else {
-          setSuccessMessage('Conversa iniciada com sucesso!');
-        }
-        console.log('Conversa criada:', conversationResult);
-      } catch (convError) {
-        console.error('Erro ao criar conversa:', convError);
-        setError('Erro ao criar conversa');
-        setIsSearching(false);
-        return;
-      }
-      
-      // Etapa 3: Redirecionar para conversas
-      setTimeout(() => {
-        // Armazenar informações no localStorage
-        localStorage.setItem('MEGADESK_NEW_CONVERSATION_ID', conversationId);
-        localStorage.setItem('MEGADESK_NEW_CONVERSATION_PHONE', customerData.phone);
-        localStorage.setItem('MEGADESK_NEW_CONVERSATION_NAME', customerData.name);
-        
-        // Chamar callback para trocar a view ativa
-        if (onNavigate) {
-          console.log('Navegando para conversas...');
-          onNavigate('conversations');
-        } else {
-          // Fallback: redirecionar via hash
-          window.location.hash = `#/conversas?clientId=${conversationId}&phone=${customerData.phone}`;
-        }
-      }, 500);
-      return;
-    } catch (err) {
-      console.error('Erro geral:', err);
-      setError(err instanceof Error ? err.message : 'Erro ao processar solicitação');
+      setCreatedChamadoNumber(result.number);
+      setCreatedChamadoId(result.id);
+      setSuccessMessage(`Chamado #${result.number} criado com sucesso!`);
+    } catch (err: any) {
+      setError(err.message || 'Erro ao criar chamado');
     } finally {
       setIsSearching(false);
     }
@@ -203,68 +166,51 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
     setOpenTicket(null);
     setTicketTitle('');
     setTicketObservation('');
-    setSuccessMessage(null);
-    setError(null);
     setSearchAttempted(false);
+    setError(null);
+    setSuccessMessage(null);
     setCreatedChamadoNumber(null);
     setCreatedChamadoId(null);
   };
 
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-slate-50 via-blue-50 to-slate-50 overflow-hidden flex items-center justify-center">
-      <div className="max-w-2xl mx-auto w-full px-4 md:px-8 max-h-screen overflow-y-auto">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
+        <div className="text-center mb-12">
+          <div className="flex items-center justify-center gap-3 mb-4">
+            <div className="bg-blue-600 rounded-full p-3">
               <Phone className="w-6 h-6 text-white" />
             </div>
-            <h1 className="text-3xl font-bold text-slate-900">Atendimento Ativo</h1>
+            <h1 className="text-4xl font-bold text-slate-900">Atendimento Ativo</h1>
           </div>
-          <p className="text-slate-600 ml-15">Inicie um atendimento com um cliente</p>
+          <p className="text-slate-600">Inicie um atendimento com um cliente</p>
         </div>
 
-        {/* Success Message */}
-        {successMessage && (
-          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl">
-            <div className="flex items-center gap-3 mb-2">
-              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-              <p className="text-sm text-green-700 font-semibold">{successMessage}</p>
-            </div>
-            {createdChamadoNumber && (
-              <div className="flex items-center justify-between mt-3 pt-3 border-t border-green-200">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-green-600">Número do chamado:</span>
-                  <span className="text-sm font-bold text-green-800 bg-green-100 px-2 py-0.5 rounded-lg">
-                    #{String(createdChamadoNumber).padStart(4, '0')}
-                  </span>
-                </div>
-                <button
-                  onClick={() => onNavigate && onNavigate('tickets')}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-all duration-200 hover:shadow-md"
-                >
-                  <ArrowRight className="w-4 h-4" />
-                  Ver Chamado
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Error Message */}
+        {/* Messages */}
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3">
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
             <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
             <p className="text-sm text-red-700 font-medium">{error}</p>
           </div>
         )}
+        {successMessage && (
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3">
+            <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+            <p className="text-sm text-green-700 font-medium">{successMessage}</p>
+          </div>
+        )}
 
-        {/* LAYOUT FIXO - Sempre visível */}
-        <div className="flex gap-12 h-full">
-          {/* Esquerda: Input de busca */}
-          <div className="flex flex-col gap-6 w-96 flex-shrink-0">
-            {/* Etapa 1: Buscar Cliente - SEMPRE VISÍVEL */}
-            <div className="bg-white rounded-2xl shadow-lg p-8 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300">
+        {/* LAYOUT RESPONSIVO */}
+        <div className="flex gap-8 justify-center items-start">
+          {/* ESQUERDA: Input de busca (animação para esquerda quando cliente encontrado) */}
+          <div
+            className={cn(
+              "transition-all duration-500 ease-out",
+              customerData ? "w-96 translate-x-0" : "w-full max-w-md"
+            )}
+          >
+            <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300">
               <div className="space-y-4">
                 <div className="flex flex-col items-center gap-4">
                   <label className="block text-sm font-semibold text-slate-900 flex items-center gap-2">
@@ -287,19 +233,15 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                       className="px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center gap-2 group"
                     >
                       {isSearching ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        </>
+                        <Loader2 className="w-4 h-4 animate-spin" />
                       ) : (
-                        <>
-                          <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                        </>
+                        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                       )}
                     </button>
                   </div>
                 </div>
 
-                {/* Novo Cliente Form - Visível quando não encontrado */}
+                {/* Novo Cliente Form */}
                 {showNewCustomerForm && searchAttempted && !customerData && (
                   <div className="mt-6 p-6 bg-gradient-to-br from-blue-50 to-slate-50 rounded-xl border border-blue-200">
                     <div className="flex items-center gap-2 mb-4">
@@ -345,10 +287,10 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
             </div>
           </div>
 
-          {/* Direita: Dados do Cliente e Chamado */}
+          {/* CENTRO: Dados do Cliente e Chamado (aparecem quando cliente encontrado) */}
           {customerData && (
-            <div className="flex flex-col gap-6 flex-1 pr-8">
-              {/* Customer Info Card - Lado direito */}
+            <div className="flex flex-col gap-6 w-96 animate-fadeSlideIn">
+              {/* Customer Info Card */}
               <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-lg p-12 text-white border-2 border-slate-400">
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="text-lg font-semibold flex items-center gap-2">
@@ -403,7 +345,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                   )}
                 </div>
                 {customerData.source === 'crm' && customerData.crmClientId && onNavigate && (
-                  <div className="mt-3 flex justify-end">
+                  <div className="mt-4 flex justify-end">
                     <button
                       onClick={() => onNavigate({ route: 'clients', crmClientId: customerData.crmClientId })}
                       className="flex items-center gap-2 bg-white/20 hover:bg-white/30 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-all duration-200 border border-white/30"
@@ -418,11 +360,11 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
               {/* Ticket Option Card */}
               <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400">
                 <h3 className="text-lg font-semibold text-slate-900 mb-6">Deseja abrir um chamado?</h3>
-                <div className="flex gap-3 mb-4">
+                <div className="flex gap-3 mb-6">
                   <button
                     onClick={() => setOpenTicket(false)}
                     className={cn(
-                      'flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 transform hover:scale-105',
+                      'flex-1 px-4 py-3 rounded-lg text-base font-semibold transition-all duration-200 transform hover:scale-105',
                       openTicket === false
                         ? 'bg-gradient-to-r from-slate-700 to-slate-800 text-white shadow-lg'
                         : 'bg-slate-100 border-2 border-slate-200 text-slate-700 hover:border-slate-300'
@@ -433,7 +375,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                   <button
                     onClick={() => setOpenTicket(true)}
                     className={cn(
-                      'flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 transform hover:scale-105',
+                      'flex-1 px-4 py-3 rounded-lg text-base font-semibold transition-all duration-200 transform hover:scale-105',
                       openTicket === true
                         ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg'
                         : 'bg-slate-100 border-2 border-slate-200 text-slate-700 hover:border-slate-300'
@@ -443,56 +385,112 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                   </button>
                 </div>
 
-                {/* Ticket Form */}
-                {openTicket === true && (
-                  <div className="space-y-3 p-4 bg-gradient-to-br from-blue-50 to-slate-50 rounded-lg border-2 border-blue-200">
+                {/* Action Buttons */}
+                <div className="flex gap-3 justify-end pt-4 border-t border-slate-200">
+                  <button
+                    onClick={handleReset}
+                    className="px-4 py-2 text-sm bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-all duration-200 font-semibold border border-slate-200 hover:shadow-md"
+                  >
+                    Voltar
+                  </button>
+                  <button
+                    onClick={handleStartConversation}
+                    disabled={isSearching}
+                    className="px-4 py-2 text-sm bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2"
+                  >
+                    {isSearching ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Processando...
+                      </>
+                    ) : (
+                      <>
+                        <ArrowRight className="w-4 h-4" />
+                        Abrir Conversa
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* DIREITA: Formulário de Chamado (aparece quando SIM é clicado) */}
+          {customerData && openTicket === true && (
+            <div className="w-96 animate-fadeSlideIn">
+              <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-semibold text-slate-900">Criar Chamado</h3>
+                  <button
+                    onClick={() => setOpenTicket(false)}
+                    className="p-2 hover:bg-slate-100 rounded-lg transition-all duration-200"
+                  >
+                    <X className="w-5 h-5 text-slate-600" />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-900 mb-2">Título do Chamado</label>
                     <input
                       type="text"
-                      placeholder="Título do chamado"
+                      placeholder="Ex: Problema com faturamento"
                       value={ticketTitle}
                       onChange={(e) => setTicketTitle(e.target.value)}
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400"
-                    />
-                    <textarea
-                      placeholder="Observações (opcional)"
-                      value={ticketObservation}
-                      onChange={(e) => setTicketObservation(e.target.value)}
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 min-h-[80px] resize-none"
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400"
                     />
                   </div>
-                )}
-              </div>
 
-              {/* Action Buttons */}
-              <div className="flex gap-3 justify-end mt-4 pt-4 border-t border-slate-200">
-                <button
-                  onClick={handleReset}
-                  className="px-4 py-2 text-sm bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-all duration-200 font-semibold border border-slate-200 hover:shadow-md"
-                >
-                  Voltar
-                </button>
-                <button
-                  onClick={handleStartConversation}
-                  disabled={isSearching}
-                  className="px-4 py-2 text-sm bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2"
-                >
-                  {isSearching ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Processando...
-                    </>
-                  ) : (
-                    <>
-                      <ArrowRight className="w-4 h-4" />
-                      Abrir Conversa
-                    </>
-                  )}
-                </button>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-900 mb-2">Descrição (opcional)</label>
+                    <textarea
+                      placeholder="Descreva o problema em detalhes..."
+                      value={ticketObservation}
+                      onChange={(e) => setTicketObservation(e.target.value)}
+                      rows={4}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 resize-none"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleCreateTicket}
+                    disabled={isSearching}
+                    className="w-full px-4 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg hover:from-green-600 hover:to-green-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2 mt-4"
+                  >
+                    {isSearching ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Criando...
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-4 h-4" />
+                        Criar Chamado
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           )}
         </div>
       </div>
+
+      <style>{`
+        @keyframes fadeSlideIn {
+          from {
+            opacity: 0;
+            transform: translateY(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        .animate-fadeSlideIn {
+          animation: fadeSlideIn 0.3s ease-out;
+        }
+      `}</style>
     </div>
   );
 }
