@@ -48,15 +48,16 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
       const result = await searchCustomerMutation.mutateAsync({ phone: phoneNumber, clientId });
       if (result.found) {
         setCustomerData({
+          id: result.id,
           name: result.name,
           company: result.company,
           phone: result.phone,
           email: result.email || '',
           whatsapp: result.whatsapp || '',
           exists: result.exists,
-          source: result.source,
-          crmClientId: result.crmClientId,
-          customerId: result.customerId,
+          source: result.source || 'contact',
+          crmClientId: result.crmClientId || undefined,
+          customerId: result.id,
         });
         setShowNewCustomerForm(false);
       } else {
@@ -87,15 +88,16 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
       });
 
       setCustomerData({
+        id: result.id,
         name: result.name,
         company: result.company,
         phone: result.phone,
         email: result.email || '',
         whatsapp: result.whatsapp || '',
         exists: false,
-        source: result.source,
-        crmClientId: result.crmClientId,
-        customerId: result.customerId,
+        source: result.source || 'contact',
+        crmClientId: result.crmClientId || undefined,
+        customerId: result.id,
       });
       setShowNewCustomerForm(false);
     } catch (err: any) {
@@ -114,13 +116,13 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
 
     try {
       const result = await createConversationMutation.mutateAsync({
-        customerId: customerData.customerId,
+        customerId: customerData.id,
         customerName: customerData.name,
         phone: customerData.phone,
         company: customerData.company,
         clientId,
         fromCrm: customerData.source === 'crm',
-        crmClientId: customerData.crmClientId,
+        crmClientId: customerData.crmClientId || undefined,
       });
 
       setSuccessMessage(`Conversa iniciada com ${customerData.name}!`);
@@ -146,7 +148,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
 
     try {
       const result = await createTicketMutation.mutateAsync({
-        customerId: customerData.customerId,
+        customerId: customerData.id,
         phone: customerData.phone,
         title: ticketTitle,
         observation: ticketObservation,
