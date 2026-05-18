@@ -67,7 +67,7 @@ export const chamadosRouter = router({
    * Listar chamados do usuário autenticado
    * O clientId é derivado de ctx.tenantId
    */
-  list: protectedProcedure
+  list: megadeskProcedure
     .input(
       z.object({
         status: z.enum(["total", "open", "in_progress", "waiting", "closed"]).optional(),
@@ -120,7 +120,7 @@ export const chamadosRouter = router({
    * Obter detalhes de um chamado com atividades
    * Valida que o chamado pertence ao usuário autenticado
    */
-  getDetail: protectedProcedure
+  getDetail: megadeskProcedure
     .input(
       z.object({
         chamadoId: ChamadoIdSchema,
@@ -244,7 +244,7 @@ export const chamadosRouter = router({
    * Atualizar chamado
    * Valida que o chamado pertence ao usuário autenticado
    */
-  update: protectedProcedure
+  update: megadeskProcedure
     .input(
       z.object({
         chamadoId: ChamadoIdSchema,
@@ -306,7 +306,7 @@ export const chamadosRouter = router({
    * Adicionar atividade a um chamado
    * Valida que o chamado pertence ao usuário autenticado
    */
-  addActivity: protectedProcedure
+  addActivity: megadeskProcedure
     .input(
       z.object({
         chamadoId: ChamadoIdSchema,
@@ -367,7 +367,7 @@ export const chamadosRouter = router({
    * Editar atividade de um chamado
    * Valida que o chamado pertence ao usuário autenticado
    */
-  editActivity: protectedProcedure
+  editActivity: megadeskProcedure
     .input(
       z.object({
         activityId: z.string().uuid('ID de atividade inválido'),
@@ -427,7 +427,7 @@ export const chamadosRouter = router({
   /**
    * Listar colaboradores de um chamado
    */
-  getCollaborators: protectedProcedure
+  getCollaborators: megadeskProcedure
     .input(z.object({
       chamadoId: ChamadoIdSchema,
     }))
@@ -461,7 +461,7 @@ export const chamadosRouter = router({
   /**
    * Atualizar colaboradores de um chamado
    */
-  updateCollaborators: protectedProcedure
+  updateCollaborators: megadeskProcedure
     .input(z.object({
       chamadoId: ChamadoIdSchema,
       collaborators: z.array(z.object({
@@ -513,7 +513,7 @@ export const chamadosRouter = router({
   /**
    * Health check para diagnosticar problemas
    */
-  healthCheck: protectedProcedure
+  healthCheck: megadeskProcedure
     .query(async ({ ctx }) => {
       try {
         const clientId = ctx.tenantId || String(ctx.user.id);
@@ -544,7 +544,7 @@ export const chamadosRouter = router({
       }
     }),
 
-  registerActivity: protectedProcedure
+  registerActivity: megadeskProcedure
     .input(
       z.object({
         chamadoId: z.string().min(1, 'chamadoId é obrigatório'),
@@ -596,7 +596,7 @@ export const chamadosRouter = router({
   /**
    * Obter contadores de chamados por status
    */
-  getStatusCounts: protectedProcedure
+  getStatusCounts: megadeskProcedure
     .query(async ({ ctx }) => {
       try {
         const clientId = ctx.tenantId || String(ctx.user.id);
