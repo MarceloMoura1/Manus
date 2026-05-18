@@ -301,8 +301,15 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
     }
 
     try {
+      // Buscar cliente por empresa no banco de dados
+      const searchResult = await trpc.megadesk.searchCustomerByCompany.query({
+        company: newChamadoForm.company,
+      }).catch(() => null);
+
+      let customerId = searchResult?.id || 'cust-' + Date.now();
+
       const result = await createChamadoMutation.mutateAsync({
-        customerId: 'cust-' + Date.now(),
+        customerId: customerId,
         customerName: newChamadoForm.customerName,
         company: newChamadoForm.company,
         title: newChamadoForm.title,
@@ -820,12 +827,14 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
               />
             </div>
             <div>
-              <label className="text-sm font-medium text-slate-700 block mb-1">Empresa *</label>
+              <label className="text-sm font-medium text-slate-700 block mb-1">Empresa * (será buscada no banco de dados)</label>
               <Input
                 placeholder="Ex: Empresa XYZ Ltda"
                 value={newChamadoForm.company}
                 onChange={e => setNewChamadoForm({...newChamadoForm, company: e.target.value})}
+                autoComplete="off"
               />
+              <p className="text-xs text-slate-500 mt-1">Digite o nome da empresa para buscar no banco de dados</p>
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700 block mb-1">Título *</label>
