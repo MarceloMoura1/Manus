@@ -299,7 +299,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
 
           {/* CENTRO: Dados do Cliente e Chamado (aparecem quando cliente encontrado) */}
           {customerData && (
-            <div className="flex flex-col gap-6 w-96 animate-fadeSlideIn">
+            <div className="flex flex-col gap-6 w-full max-w-2xl animate-fadeSlideIn">
               {/* Customer Info Card */}
               <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-lg p-12 text-white border-2 border-slate-400">
                 <div className="flex items-center justify-between mb-6">
