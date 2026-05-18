@@ -876,6 +876,40 @@ export const appRouter = router({
      *   3. O cliente do usuário tem accessReleased=true e status="active".
      * Retorna dados da sessão que são armazenados no localStorage do browser.
      */
+    searchCustomerByCompany: publicProcedure
+      .input(z.object({ company: z.string().min(1) }))
+      .query(async ({ input }) => {
+        try {
+          const { getPool } = await import("./db");
+          const pool = getPool();
+          
+          // Buscar cliente por nome da empresa
+          const [rows] = await pool.execute(
+            `SELECT crm_client_id as id, company_name as company, responsible_name as name, phone, whatsapp, email
+             FROM megadesk_crm_clients
+             WHERE company_name LIKE ?
+             LIMIT 1`,
+            [`%${input.company}%`]
+          ) as any[];
+          
+          if (rows && (rows as any[]).length > 0) {
+            const crm = (rows as any[])[0];
+            return {
+              id: crm.id,
+              company: crm.company,
+              name: crm.name,
+              phone: crm.phone,
+              whatsapp: crm.whatsapp,
+              email: crm.email,
+            };
+          }
+          
+          return null;
+        } catch (error) {
+          console.error("Erro ao buscar cliente por empresa:", error);
+          return null;
+        }
+      }),
     searchCustomer: publicProcedure
       .input(z.object({ phone: z.string().min(1), clientId: z.string().min(1) }))
       .mutation(async ({ input }) => {
