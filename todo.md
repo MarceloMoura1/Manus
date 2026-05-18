@@ -1205,3 +1205,10 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Encerrar/Abrir conversa: confirmação Sim/Não inline sem modal overlay
 - [x] Procedure conversations.reopen para reabrir conversas
 - [x] Procedure conversations.assign salva assignedUserId e assignedUserName
+
+## Fase 121: Correção do erro "Usuário não autenticado" no registerActivity
+- [x] Identificar causa raiz: servidor antigo (processo May15) rodando em paralelo com código desatualizado
+- [x] Confirmar que routers-chamados.ts já estava correto (sem if(!ctx.user) na linha 557)
+- [x] Encerrar processo antigo do servidor (PID 158524) que usava versão cacheada com bug
+- [x] Validar via curl que registerActivity retorna sucesso com x-tenant-id correto
+- [x] Confirmar que 5 testes de chamados-create.test.ts passam
