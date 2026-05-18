@@ -260,91 +260,92 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
         )}
 
         {/* LAYOUT FIXO - Sempre visível */}
-        <div className="flex flex-col gap-6 h-full">
-          {/* Etapa 1: Buscar Cliente - SEMPRE VISÍVEL */}
-          <div className="bg-white rounded-2xl shadow-lg p-8 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300">
-            <div className="space-y-4">
-              <div className="flex flex-col items-center gap-4">
-                <label className="block text-sm font-semibold text-slate-900 flex items-center gap-2">
-                  <Phone className="w-4 h-4 text-blue-600" />
-                  Número do Cliente
-                </label>
-                <div className="flex gap-3 w-full max-w-md">
-                  <input
-                    type="text"
-                    placeholder="Digite o número de telefone..."
-                    value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSearchCustomer()}
-                    disabled={!!customerData}
-                    className="flex-1 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 disabled:bg-slate-100 disabled:text-slate-500"
-                  />
-                  <button
-                    onClick={handleSearchCustomer}
-                    disabled={isSearching || !!customerData}
-                    className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center gap-2 group"
-                  >
-                    {isSearching ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Buscando...
-                      </>
-                    ) : (
-                      <>
-                        Buscar
-                        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* Novo Cliente Form - Visível quando não encontrado */}
-              {showNewCustomerForm && searchAttempted && !customerData && (
-                <div className="mt-6 p-6 bg-gradient-to-br from-blue-50 to-slate-50 rounded-xl border border-blue-200">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Plus className="w-5 h-5 text-blue-600" />
-                    <p className="text-sm font-semibold text-slate-900">Cliente não encontrado. Crie um novo:</p>
-                  </div>
-                  <div className="space-y-3">
+        <div className="flex gap-6 h-full">
+          {/* Esquerda: Input de busca */}
+          <div className="flex flex-col gap-6 w-80 flex-shrink-0">
+            {/* Etapa 1: Buscar Cliente - SEMPRE VISÍVEL */}
+            <div className="bg-white rounded-2xl shadow-lg p-8 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300">
+              <div className="space-y-4">
+                <div className="flex flex-col items-center gap-4">
+                  <label className="block text-sm font-semibold text-slate-900 flex items-center gap-2">
+                    <Phone className="w-4 h-4 text-blue-600" />
+                    Número do Cliente
+                  </label>
+                  <div className="flex gap-3 w-full">
                     <input
                       type="text"
-                      placeholder="Nome do cliente"
-                      value={newCustomerName}
-                      onChange={(e) => setNewCustomerName(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Nome da empresa"
-                      value={newCustomerCompany}
-                      onChange={(e) => setNewCustomerCompany(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400"
+                      placeholder="Digite o número..."
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleSearchCustomer()}
+                      disabled={!!customerData}
+                      className="flex-1 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                     <button
-                      onClick={handleCreateCustomer}
-                      disabled={isSearching}
-                      className="w-full px-4 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg hover:from-green-600 hover:to-green-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2"
+                      onClick={handleSearchCustomer}
+                      disabled={isSearching || !!customerData}
+                      className="px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center gap-2 group"
                     >
                       {isSearching ? (
                         <>
                           <Loader2 className="w-4 h-4 animate-spin" />
-                          Criando...
                         </>
                       ) : (
                         <>
-                          <Plus className="w-4 h-4" />
-                          Criar Cliente
+                          <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                         </>
                       )}
                     </button>
                   </div>
                 </div>
-              )}
+
+                {/* Novo Cliente Form - Visível quando não encontrado */}
+                {showNewCustomerForm && searchAttempted && !customerData && (
+                  <div className="mt-6 p-6 bg-gradient-to-br from-blue-50 to-slate-50 rounded-xl border border-blue-200">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Plus className="w-5 h-5 text-blue-600" />
+                      <p className="text-sm font-semibold text-slate-900">Cliente não encontrado. Crie um novo:</p>
+                    </div>
+                    <div className="space-y-3">
+                      <input
+                        type="text"
+                        placeholder="Nome do cliente"
+                        value={newCustomerName}
+                        onChange={(e) => setNewCustomerName(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Nome da empresa"
+                        value={newCustomerCompany}
+                        onChange={(e) => setNewCustomerCompany(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400"
+                      />
+                      <button
+                        onClick={handleCreateCustomer}
+                        disabled={isSearching}
+                        className="w-full px-4 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:shadow-lg hover:from-green-600 hover:to-green-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2"
+                      >
+                        {isSearching ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Criando...
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="w-4 h-4" />
+                            Criar Cliente
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Etapa 2: Dados do Cliente ao lado - Visível quando cliente encontrado */}
+          {/* Direita: Dados do Cliente e Chamado */}
           {customerData && (
             <div className="flex flex-col gap-4 flex-1">
               {/* Customer Info Card - Lado direito */}
@@ -463,17 +464,17 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-3 justify-center">
+              <div className="flex gap-3 justify-end mt-4 pt-4 border-t border-slate-200">
                 <button
                   onClick={handleReset}
-                  className="px-6 py-2 text-sm bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-all duration-200 font-semibold border border-slate-200 hover:shadow-md"
+                  className="px-4 py-2 text-sm bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-all duration-200 font-semibold border border-slate-200 hover:shadow-md"
                 >
                   Voltar
                 </button>
                 <button
                   onClick={handleStartConversation}
                   disabled={isSearching}
-                  className="px-6 py-2 text-sm bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2"
+                  className="px-4 py-2 text-sm bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2"
                 >
                   {isSearching ? (
                     <>
