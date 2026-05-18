@@ -969,3 +969,68 @@ export async function getAttachments(chamadoId: string, clientId: string) {
   
   return attachments;
 }
+
+
+/**
+ * Obter histórico completo de chamados de um cliente (dossiê)
+ */
+export async function getCustomerChamadoHistory(
+  clientId: string,
+  customerId: string
+): Promise<ChamadoWithActivities[]> {
+  if (!clientId || !clientId.trim()) {
+    throw new Error('clientId não pode estar vazio');
+  }
+  if (!customerId || !customerId.trim()) {
+    throw new Error('customerId não pode estar vazio');
+  }
+
+  const chamados = await db
+    .select()
+    .from(megadeskDomainChamados)
+    .where(
+      and(
+        eq(megadeskDomainChamados.clientId, clientId),
+        eq(megadeskDomainChamados.customerId, customerId)
+      )
+    )
+    .orderBy(desc(megadeskDomainChamados.createdAt));
+
+  // Buscar atividades para todos os chamados
+  const chamadoIds = chamados.map((c) => c.chamadoId);
+  let allActivities: any[] = [];
+
+  if (chamadoIds.length > 0) {
+    allActivities = await db
+      .select()
+      .from(megadeskDomainChamadoActivities)
+      .where(inArray(megadeskDomainChamadoActivities.chamadoId, chamadoIds))
+      .orderBy(desc(megadeskDomainChamadoActivities.createdAt));
+  }
+
+  // Mapear atividades para cada chamado
+  return chamados.map((chamado) => ({
+    id: chamado.chamadoId,
+    number: chamado.chamadoNumber,
+    customerName: chamado.customerName,
+    customerPhone: chamado.customerPhone,
+    customerEmail: chamado.customerEmail,
+    customerCNPJ: chamado.customerCNPJ,
+    company: chamado.company,
+    title: chamado.title,
+    observations: chamado.observations,
+    status: chamado.status,
+    priority: chamado.priority,
+    assignedTo: chamado.assignedTo,
+    createdAt: chamado.createdAt.getTime(),
+    activities: allActivities
+      .filter((a) => a.chamadoId === chamado.chamadoId)
+      .map((a) => ({
+        id: a.activityId,
+        date: a.createdAt.getTime(),
+        description: a.description,
+        attendant: a.attendant,
+        actionType: a.actionType,
+      })),
+  }));
+}

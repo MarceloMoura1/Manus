@@ -28,6 +28,7 @@ import {
   registerActivity,
   addAttachment,
   getAttachments,
+  getCustomerChamadoHistory,
   type ChamadoWithActivities,
 } from "./db-chamados";
 
@@ -701,6 +702,34 @@ export const chamadosRouter = router({
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: `Erro ao obter anexos: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
+        });
+      }
+    }),
+
+  getCustomerHistory: megadeskProcedure
+    .input(
+      z.object({
+        customerId: z.string().min(1),
+      })
+    )
+    .query(async ({ input, ctx }) => {
+      try {
+        const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
+        if (!clientId || clientId.trim() === '') {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Identificacao de cliente invalida",
+          });
+        }
+        checkRateLimit(clientId);
+        const chamados = await getCustomerChamadoHistory(clientId, input.customerId);
+        return chamados;
+      } catch (error) {
+        console.error('[ERROR] Failed to get customer history:', error);
+        if (error instanceof TRPCError) throw error;
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Erro ao obter historico do cliente: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
         });
       }
     }),

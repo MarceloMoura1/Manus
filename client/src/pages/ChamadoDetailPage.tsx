@@ -43,12 +43,58 @@ export function ChamadoDetailPage({ chamado, onBack }: ChamadoDetailPageProps) {
   const [showActivityModal, setShowActivityModal] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showAttendantModal, setShowAttendantModal] = useState(false);
+  const [showEditActivityModal, setShowEditActivityModal] = useState(false);
+  const [showCustomerHistoryModal, setShowCustomerHistoryModal] = useState(false);
+  const [customerHistory, setCustomerHistory] = useState<any[]>([]);
   const [newActivityText, setNewActivityText] = useState("");
+  const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
+  const [editingActivityText, setEditingActivityText] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [selectedAttendant, setSelectedAttendant] = useState(chamado?.assignedTo || "");
 
   const addActivityMutation = trpc.chamados.addActivity.useMutation();
   const updateChamadoMutation = trpc.chamados.update.useMutation();
+  const editActivityMutation = trpc.chamados.editActivity.useMutation();
+  const customerHistoryQuery = trpc.chamados.getCustomerHistory.useQuery(
+    { customerId: chamado?.customerId || '' },
+    { enabled: false }
+  );
+
+  const handleOpenCustomerHistory = async () => {
+    try {
+      const history = await customerHistoryQuery.refetch();
+      if (history.data) {
+        setCustomerHistory(history.data);
+        setShowCustomerHistoryModal(true);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar historico do cliente:', error);
+    }
+  };
+
+  const handleEditActivity = (activityId: string, currentText: string) => {
+    setEditingActivityId(activityId);
+    setEditingActivityText(currentText);
+    setShowEditActivityModal(true);
+  };
+
+  const handleSaveEditedActivity = async () => {
+    if (!editingActivityId || !editingActivityText.trim()) return;
+
+    try {
+      await editActivityMutation.mutateAsync({
+        activityId: editingActivityId,
+        chamadoId: chamado.id,
+        description: editingActivityText,
+      });
+
+      setEditingActivityId(null);
+      setEditingActivityText("");
+      setShowEditActivityModal(false);
+    } catch (error) {
+      console.error("Erro ao editar atividade:", error);
+    }
+  };
 
   const handleAddActivity = async () => {
     if (!newActivityText.trim()) return;
@@ -181,6 +227,18 @@ export function ChamadoDetailPage({ chamado, onBack }: ChamadoDetailPageProps) {
           {/* Separador */}
           <div className="h-8 w-px bg-slate-300"></div>
 
+          {/* Dossiê do Cliente */}
+          <button
+            onClick={handleOpenCustomerHistory}
+            className="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg font-medium transition"
+            title="Ver histórico completo do cliente"
+          >
+            📋 Dossiê
+          </button>
+
+          {/* Separador */}
+          <div className="h-8 w-px bg-slate-300"></div>
+
           {/* Anexar Arquivos */}
           <div className="flex items-center gap-2">
             <label className="cursor-pointer">
@@ -239,9 +297,13 @@ export function ChamadoDetailPage({ chamado, onBack }: ChamadoDetailPageProps) {
                               ).toLocaleString("pt-BR")}
                             </p>
                           </div>
-                          <button className="text-blue-600 hover:text-blue-800 p-2 hover:bg-blue-200 rounded transition">
-                            <Edit2 className="w-4 h-4" />
-                          </button>
+                          <button 
+                          onClick={() => handleEditActivity(activity.id, activity.description)}
+                          className="text-blue-600 hover:text-blue-800 p-2 hover:bg-blue-200 rounded transition"
+                          title="Editar atividade"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
                         </div>
                         <p className="text-slate-700">{activity.description}</p>
                       </div>
@@ -374,6 +436,78 @@ export function ChamadoDetailPage({ chamado, onBack }: ChamadoDetailPageProps) {
                 {attendant}
               </button>
             ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal - Editar Atividade */}
+      <Dialog open={showEditActivityModal} onOpenChange={setShowEditActivityModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar Atividade</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <textarea
+              value={editingActivityText}
+              onChange={(e) => setEditingActivityText(e.target.value)}
+              placeholder="Edite o texto da atividade..."
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              rows={4}
+            />
+            <div className="flex gap-2 justify-end">
+              <Button onClick={() => setShowEditActivityModal(false)} variant="outline">
+                Cancelar
+              </Button>
+              <Button onClick={handleSaveEditedActivity} className="bg-blue-600 hover:bg-blue-700">
+                Salvar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal - Dossiê do Cliente */}
+      <Dialog open={showCustomerHistoryModal} onOpenChange={setShowCustomerHistoryModal}>
+        <DialogContent className="max-w-4xl max-h-96 overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Dossiê do Cliente - {chamado.customerName}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {customerHistory.length === 0 ? (
+              <p className="text-slate-600">Nenhum chamado encontrado para este cliente.</p>
+            ) : (
+              <div className="space-y-3">
+                {customerHistory.map((cham) => (
+                  <div key={cham.id} className="border border-slate-300 rounded-lg p-3 hover:bg-slate-50">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-semibold text-slate-900">#{String(cham.number).padStart(4, '0')} - {cham.title}</p>
+                        <p className="text-sm text-slate-600 mt-1">{cham.observations}</p>
+                        <p className="text-xs text-slate-500 mt-2">
+                          Abertura: {new Date(cham.createdAt).toLocaleString('pt-BR')}
+                        </p>
+                      </div>
+                      <span className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap ml-2 ${
+                        cham.status === 'closed' ? 'bg-green-100 text-green-800' :
+                        cham.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
+                        cham.status === 'waiting' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-slate-100 text-slate-800'
+                      }`}>
+                        {cham.status === 'closed' ? 'Fechado' :
+                         cham.status === 'in_progress' ? 'Em Progresso' :
+                         cham.status === 'waiting' ? 'Aguardando' :
+                         'Aberto'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button onClick={() => setShowCustomerHistoryModal(false)} variant="outline">
+              Fechar
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

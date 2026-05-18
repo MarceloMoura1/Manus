@@ -1230,12 +1230,12 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [ ] Puxar dados do cliente (Nome, Telefone, CNPJ, Email) do banco de dados
 - [ ] Implementar funcionalidade "Dossiê do cliente" com histórico completo de chamados
 
-## Fase 124: Implementação das edições simples (em progresso)
+## Fase 124: Implementação das edições simples (concluída)
 - [x] Adicionar campos customerPhone, customerEmail, customerCNPJ à tabela de chamados
 - [x] Atualizar função createChamado para aceitar esses parâmetros
 - [x] Atualizar procedure de criar chamado para puxar dados do cliente
 - [x] Puxar dados do cliente (Nome, Telefone, CNPJ, Email) no detalhe do chamado
-- [ ] Corrigir exibição de data/hora no card do chamado
-- [ ] Implementar funcionalidade de anexos com balão "atendente adicionou anexo"
-- [ ] Adicionar ícone "Editar chamado" no balão
-- [ ] Implementar funcionalidade "Dossiê do cliente" com histórico completo
+- [x] Corrigir exibição de data/hora no card do chamado
+- [x] Implementar funcionalidade de anexos com balão "atendente adicionou anexo"
+- [x] Adicionar ícone "Editar chamado" no balão
+- [x] Implementar funcionalidade "Dossiê do cliente" com histórico completo
