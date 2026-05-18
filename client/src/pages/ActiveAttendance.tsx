@@ -260,9 +260,9 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
         )}
 
         {/* LAYOUT FIXO - Sempre visível */}
-        <div className="space-y-6">
+        <div className="flex flex-col gap-6 h-full">
           {/* Etapa 1: Buscar Cliente - SEMPRE VISÍVEL */}
-          <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300">
+          <div className="bg-white rounded-2xl shadow-lg p-8 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300">
             <div className="space-y-4">
               <div className="flex flex-col items-center gap-4">
                 <label className="block text-sm font-semibold text-slate-900 flex items-center gap-2">
@@ -344,17 +344,17 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
             </div>
           </div>
 
-          {/* Etapa 2: Dados do Cliente e Opção de Chamado - Visível quando cliente encontrado */}
+          {/* Etapa 2: Dados do Cliente ao lado - Visível quando cliente encontrado */}
           {customerData && (
-            <>
-              {/* Customer Info Card */}
-              <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-lg p-12 text-white border-2 border-slate-400">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold flex items-center gap-2">
+            <div className="flex flex-col gap-4 flex-1">
+              {/* Customer Info Card - Lado direito */}
+              <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-lg p-8 text-white border-2 border-slate-400">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-base font-semibold flex items-center gap-2">
                     <User className="w-5 h-5" />
                     Dados do Cliente
                   </h3>
-                  <span className={`text-xs font-bold px-3 py-1 rounded-full ${
+                  <span className={`text-xs font-bold px-2 py-1 rounded-full ${
                     customerData.source === 'crm'
                       ? 'bg-yellow-400 text-yellow-900'
                       : 'bg-white/20 text-white'
@@ -362,52 +362,52 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                     {customerData.source === 'crm' ? '📋 CRM' : '💬 Contato'}
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
-                    <p className="text-sm text-blue-100 mb-1">Nome</p>
-                    <p className="text-xl font-bold">{customerData.name}</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm border border-white/20">
+                    <p className="text-xs text-blue-100 mb-1">Nome</p>
+                    <p className="text-sm font-bold truncate">{customerData.name}</p>
                   </div>
-                  <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
-                    <p className="text-sm text-blue-100 mb-1">Empresa</p>
-                    <p className="text-xl font-bold flex items-center gap-2">
-                      <Building2 className="w-5 h-5" />
-                      {customerData.company}
+                  <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm border border-white/20">
+                    <p className="text-xs text-blue-100 mb-1">Empresa</p>
+                    <p className="text-sm font-bold flex items-center gap-1 truncate">
+                      <Building2 className="w-4 h-4 flex-shrink-0" />
+                      <span className="truncate">{customerData.company}</span>
                     </p>
                   </div>
-                  <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
-                    <p className="text-sm text-blue-100 mb-1">Telefone</p>
-                    <p className="text-xl font-bold flex items-center gap-2">
-                      <Phone className="w-5 h-5" />
+                  <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm border border-white/20">
+                    <p className="text-xs text-blue-100 mb-1">Telefone</p>
+                    <p className="text-sm font-bold flex items-center gap-1">
+                      <Phone className="w-4 h-4 flex-shrink-0" />
                       {customerData.phone}
                     </p>
                   </div>
-                  <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
-                    <p className="text-sm text-blue-100 mb-1">Status</p>
-                    <p className="text-xl font-bold flex items-center gap-2">
-                      <CheckCircle className="w-5 h-5" />
+                  <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm border border-white/20">
+                    <p className="text-xs text-blue-100 mb-1">Status</p>
+                    <p className="text-sm font-bold flex items-center gap-1">
+                      <CheckCircle className="w-4 h-4 flex-shrink-0" />
                       {customerData.exists ? 'Existente' : 'Novo'}
                     </p>
                   </div>
                   {customerData.source === 'crm' && customerData.email && (
-                    <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
-                      <p className="text-sm text-blue-100 mb-1">E-mail</p>
-                      <p className="text-base font-semibold truncate">{customerData.email}</p>
+                    <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm border border-white/20 col-span-2">
+                      <p className="text-xs text-blue-100 mb-1">E-mail</p>
+                      <p className="text-sm font-semibold truncate">{customerData.email}</p>
                     </div>
                   )}
                   {customerData.source === 'crm' && customerData.whatsapp && (
-                    <div className="bg-white/10 rounded-xl p-4 backdrop-blur-sm border border-white/20">
-                      <p className="text-sm text-blue-100 mb-1">WhatsApp</p>
-                      <p className="text-base font-semibold">{customerData.whatsapp}</p>
+                    <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm border border-white/20 col-span-2">
+                      <p className="text-xs text-blue-100 mb-1">WhatsApp</p>
+                      <p className="text-sm font-semibold">{customerData.whatsapp}</p>
                     </div>
                   )}
                 </div>
                 {customerData.source === 'crm' && customerData.crmClientId && onNavigate && (
-                  <div className="mt-4 flex justify-end">
+                  <div className="mt-3 flex justify-end">
                     <button
                       onClick={() => onNavigate({ route: 'clients', crmClientId: customerData.crmClientId })}
-                      className="flex items-center gap-2 bg-white/20 hover:bg-white/30 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200 border border-white/30"
+                      className="flex items-center gap-2 bg-white/20 hover:bg-white/30 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-all duration-200 border border-white/30"
                     >
-                      <ArrowRight className="w-4 h-4" />
+                      <ArrowRight className="w-3 h-3" />
                       Ver no CRM
                     </button>
                   </div>
@@ -415,13 +415,13 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
               </div>
 
               {/* Ticket Option Card */}
-              <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400">
-                <h3 className="text-lg font-semibold text-slate-900 mb-6">Deseja abrir um chamado?</h3>
-                <div className="flex gap-3 mb-6">
+              <div className="bg-white rounded-2xl shadow-lg p-8 border-2 border-slate-400">
+                <h3 className="text-base font-semibold text-slate-900 mb-4">Deseja abrir um chamado?</h3>
+                <div className="flex gap-3 mb-4">
                   <button
                     onClick={() => setOpenTicket(false)}
                     className={cn(
-                      'flex-1 px-4 py-3 rounded-xl font-semibold transition-all duration-200 transform hover:scale-105',
+                      'flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 transform hover:scale-105',
                       openTicket === false
                         ? 'bg-gradient-to-r from-slate-700 to-slate-800 text-white shadow-lg'
                         : 'bg-slate-100 border-2 border-slate-200 text-slate-700 hover:border-slate-300'
@@ -432,7 +432,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                   <button
                     onClick={() => setOpenTicket(true)}
                     className={cn(
-                      'flex-1 px-4 py-3 rounded-xl font-semibold transition-all duration-200 transform hover:scale-105',
+                      'flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 transform hover:scale-105',
                       openTicket === true
                         ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg'
                         : 'bg-slate-100 border-2 border-slate-200 text-slate-700 hover:border-slate-300'
@@ -444,19 +444,19 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
 
                 {/* Ticket Form */}
                 {openTicket === true && (
-                  <div className="space-y-4 p-6 bg-gradient-to-br from-blue-50 to-slate-50 rounded-xl border-2 border-blue-200">
+                  <div className="space-y-3 p-4 bg-gradient-to-br from-blue-50 to-slate-50 rounded-lg border-2 border-blue-200">
                     <input
                       type="text"
                       placeholder="Título do chamado"
                       value={ticketTitle}
                       onChange={(e) => setTicketTitle(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400"
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400"
                     />
                     <textarea
                       placeholder="Observações (opcional)"
                       value={ticketObservation}
                       onChange={(e) => setTicketObservation(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 min-h-[100px] resize-none"
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 min-h-[80px] resize-none"
                     />
                   </div>
                 )}
@@ -466,14 +466,14 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
               <div className="flex gap-3 justify-center">
                 <button
                   onClick={handleReset}
-                  className="px-6 py-3 bg-slate-100 text-slate-900 rounded-xl hover:bg-slate-200 transition-all duration-200 font-semibold border border-slate-200 hover:shadow-md"
+                  className="px-6 py-2 text-sm bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-all duration-200 font-semibold border border-slate-200 hover:shadow-md"
                 >
                   Voltar
                 </button>
                 <button
                   onClick={handleStartConversation}
                   disabled={isSearching}
-                  className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2"
+                  className="px-6 py-2 text-sm bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2"
                 >
                   {isSearching ? (
                     <>
@@ -488,7 +488,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                   )}
                 </button>
               </div>
-            </>
+            </div>
           )}
         </div>
       </div>
