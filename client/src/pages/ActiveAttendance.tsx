@@ -260,9 +260,9 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
         )}
 
         {/* LAYOUT FIXO - Sempre visível */}
-        <div className="flex gap-6 h-full">
+        <div className="flex gap-12 h-full">
           {/* Esquerda: Input de busca */}
-          <div className="flex flex-col gap-6 w-80 flex-shrink-0">
+          <div className="flex flex-col gap-6 w-96 flex-shrink-0">
             {/* Etapa 1: Buscar Cliente - SEMPRE VISÍVEL */}
             <div className="bg-white rounded-2xl shadow-lg p-8 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300">
               <div className="space-y-4">
@@ -347,11 +347,11 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
 
           {/* Direita: Dados do Cliente e Chamado */}
           {customerData && (
-            <div className="flex flex-col gap-4 flex-1">
+            <div className="flex flex-col gap-6 flex-1 pr-8">
               {/* Customer Info Card - Lado direito */}
-              <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-lg p-8 text-white border-2 border-slate-400">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-base font-semibold flex items-center gap-2">
+              <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-lg p-12 text-white border-2 border-slate-400">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-semibold flex items-center gap-2">
                     <User className="w-5 h-5" />
                     Dados do Cliente
                   </h3>
@@ -363,42 +363,42 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                     {customerData.source === 'crm' ? '📋 CRM' : '💬 Contato'}
                   </span>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm border border-white/20">
-                    <p className="text-xs text-blue-100 mb-1">Nome</p>
-                    <p className="text-sm font-bold truncate">{customerData.name}</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-white/10 rounded-lg p-4 backdrop-blur-sm border border-white/20">
+                    <p className="text-xs text-blue-100 mb-2">Nome</p>
+                    <p className="text-base font-bold truncate">{customerData.name}</p>
                   </div>
-                  <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm border border-white/20">
-                    <p className="text-xs text-blue-100 mb-1">Empresa</p>
-                    <p className="text-sm font-bold flex items-center gap-1 truncate">
+                  <div className="bg-white/10 rounded-lg p-4 backdrop-blur-sm border border-white/20">
+                    <p className="text-xs text-blue-100 mb-2">Empresa</p>
+                    <p className="text-base font-bold flex items-center gap-1 truncate">
                       <Building2 className="w-4 h-4 flex-shrink-0" />
                       <span className="truncate">{customerData.company}</span>
                     </p>
                   </div>
-                  <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm border border-white/20">
-                    <p className="text-xs text-blue-100 mb-1">Telefone</p>
-                    <p className="text-sm font-bold flex items-center gap-1">
+                  <div className="bg-white/10 rounded-lg p-4 backdrop-blur-sm border border-white/20">
+                    <p className="text-xs text-blue-100 mb-2">Telefone</p>
+                    <p className="text-base font-bold flex items-center gap-1">
                       <Phone className="w-4 h-4 flex-shrink-0" />
                       {customerData.phone}
                     </p>
                   </div>
-                  <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm border border-white/20">
-                    <p className="text-xs text-blue-100 mb-1">Status</p>
-                    <p className="text-sm font-bold flex items-center gap-1">
+                  <div className="bg-white/10 rounded-lg p-4 backdrop-blur-sm border border-white/20">
+                    <p className="text-xs text-blue-100 mb-2">Status</p>
+                    <p className="text-base font-bold flex items-center gap-1">
                       <CheckCircle className="w-4 h-4 flex-shrink-0" />
                       {customerData.exists ? 'Existente' : 'Novo'}
                     </p>
                   </div>
                   {customerData.source === 'crm' && customerData.email && (
-                    <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm border border-white/20 col-span-2">
-                      <p className="text-xs text-blue-100 mb-1">E-mail</p>
-                      <p className="text-sm font-semibold truncate">{customerData.email}</p>
+                    <div className="bg-white/10 rounded-lg p-4 backdrop-blur-sm border border-white/20 col-span-2">
+                      <p className="text-xs text-blue-100 mb-2">E-mail</p>
+                      <p className="text-base font-semibold truncate">{customerData.email}</p>
                     </div>
                   )}
                   {customerData.source === 'crm' && customerData.whatsapp && (
-                    <div className="bg-white/10 rounded-lg p-3 backdrop-blur-sm border border-white/20 col-span-2">
-                      <p className="text-xs text-blue-100 mb-1">WhatsApp</p>
-                      <p className="text-sm font-semibold">{customerData.whatsapp}</p>
+                    <div className="bg-white/10 rounded-lg p-4 backdrop-blur-sm border border-white/20 col-span-2">
+                      <p className="text-xs text-blue-100 mb-2">WhatsApp</p>
+                      <p className="text-base font-semibold">{customerData.whatsapp}</p>
                     </div>
                   )}
                 </div>
@@ -416,8 +416,8 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
               </div>
 
               {/* Ticket Option Card */}
-              <div className="bg-white rounded-2xl shadow-lg p-8 border-2 border-slate-400">
-                <h3 className="text-base font-semibold text-slate-900 mb-4">Deseja abrir um chamado?</h3>
+              <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400">
+                <h3 className="text-lg font-semibold text-slate-900 mb-6">Deseja abrir um chamado?</h3>
                 <div className="flex gap-3 mb-4">
                   <button
                     onClick={() => setOpenTicket(false)}
