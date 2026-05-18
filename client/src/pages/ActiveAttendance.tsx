@@ -158,7 +158,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
       });
 
       setCreatedChamadoNumber(result.chamadoNumber);
-      setCreatedChamadoId(result.id);
+      setCreatedChamadoId(result.ticketId);
       setSuccessMessage(`Chamado #${result.chamadoNumber} criado com sucesso!`);
     } catch (err: any) {
       setError(err.message || 'Erro ao criar chamado');
