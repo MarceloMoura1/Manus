@@ -758,6 +758,11 @@ type TicketActivity = {
 
 export function TicketsPage() {
   const { user } = useAuth();
+  // Sessão MegaDesk para obter clientId
+  const sessionData = React.useMemo(() => {
+    try { return JSON.parse(localStorage.getItem(MEGADESK_SESSION_KEY) || 'null'); } catch { return null; }
+  }, []);
+  const clientId: string = sessionData?.clientId ?? '';
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState<'total' | 'open' | 'in_progress' | 'waiting' | 'closed'>('total');
   const [chamadoFilter, setChamadoFilter] = React.useState<'all' | 'mine'>('all');
@@ -805,6 +810,11 @@ export function TicketsPage() {
   const [validationErrors, setValidationErrors] = React.useState<ValidationError[]>([]);
   const [currentPage, setCurrentPage] = React.useState(1);
   const ITEMS_PER_PAGE = 20;
+  // Estados para busca de empresa no modal de novo chamado
+  const [companySearchResults, setCompanySearchResults] = React.useState<any[]>([]);
+  const [isSearchingCompany, setIsSearchingCompany] = React.useState(false);
+  const [selectedCrmCustomer, setSelectedCrmCustomer] = React.useState<any | null>(null);
+  const [showCompanyDropdown, setShowCompanyDropdown] = React.useState(false);
 
   // Queries tRPC
   const chamadosQuery = trpc.chamados.list.useQuery(
@@ -813,9 +823,8 @@ export function TicketsPage() {
       limit: ITEMS_PER_PAGE,
       offset: (currentPage - 1) * ITEMS_PER_PAGE,
     },
-    { enabled: !!user?.user?.id }
+        { enabled: !!clientId }
   );
-
   // Calcular total de páginas
   const totalChamados = chamadosQuery.data?.total || 0;
   const totalPages = Math.ceil(totalChamados / ITEMS_PER_PAGE);
@@ -1144,8 +1153,11 @@ export function TicketsPage() {
     setValidationErrors([]);
 
     try {
+      // Usar o customerId do CRM se encontrado, caso contrário vazio (backend gera fallback)
+      const customerId = selectedCrmCustomer?.id || '';
+      
       const result = await createChamadoMutation.mutateAsync({
-        customerId: 'cust-' + Date.now(),
+        customerId,
         customerName: newChamadoForm.customerName,
         company: newChamadoForm.company,
         title: newChamadoForm.title,
@@ -1154,23 +1166,57 @@ export function TicketsPage() {
       });
 
       if (result.chamado) {
-        showToast('Chamado criado com sucesso!', 'success');
+        showToast(`Chamado #${result.chamado.number} criado com sucesso!`, 'success');
         setShowNewChamadoModal(false);
-        setNewChamadoForm({
-          customerName: '',
-          company: '',
-          title: '',
-          observations: '',
-          priority: 'media',
-        });
-        // Invalidar cache de todas as queries de chamados
+        setNewChamadoForm({ customerName: '', company: '', title: '', observations: '', priority: 'media' });
+        setSelectedCrmCustomer(null);
+        setCompanySearchResults([]);
+        setShowCompanyDropdown(false);
+        // Invalidar cache
         await utils.chamados.list.invalidate();
-        // Refetch para garantir que os dados mais recentes sejam carregados
         await chamadosQuery.refetch();
       }
-    } catch (error) {
-      showToast('Erro ao criar chamado', 'error');
+    } catch (error: any) {
+      const msg = error?.message || 'Erro ao criar chamado';
+      showToast(msg, 'error');
     }
+  };
+
+  // Buscar empresa no banco de dados com debounce
+  const handleCompanySearch = React.useCallback(
+    React.useMemo(() => {
+      let timer: ReturnType<typeof setTimeout>;
+      return (value: string) => {
+        clearTimeout(timer);
+        setNewChamadoForm(prev => ({ ...prev, company: value, customerName: '' }));
+        setSelectedCrmCustomer(null);
+        if (value.length < 2) {
+          setCompanySearchResults([]);
+          setShowCompanyDropdown(false);
+          return;
+        }
+        setIsSearchingCompany(true);
+        timer = setTimeout(async () => {
+          try {
+            const results = await (trpc.megadesk.searchCustomerByCompany as any).fetch({ company: value, clientId });
+            setCompanySearchResults(results || []);
+            setShowCompanyDropdown(true);
+          } catch {
+            setCompanySearchResults([]);
+          } finally {
+            setIsSearchingCompany(false);
+          }
+        }, 400);
+      };
+    }, [clientId]),
+    [clientId]
+  );
+
+  const handleSelectCompany = (customer: any) => {
+    setSelectedCrmCustomer(customer);
+    setNewChamadoForm(prev => ({ ...prev, company: customer.company, customerName: customer.name || '' }));
+    setShowCompanyDropdown(false);
+    setCompanySearchResults([]);
   };
 
   const chamados = chamadosQuery.data?.chamados || [];
@@ -1460,37 +1506,77 @@ export function TicketsPage() {
           </DialogHeader>
 
           <div className="space-y-4 px-2">
+            {/* 1. Empresa - com busca automática no banco */}
+            <div className="relative">
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 block mb-2">
+                Empresa <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <Input
+                  placeholder="Digite o nome da empresa..."
+                  value={newChamadoForm.company}
+                  onChange={e => handleCompanySearch(e.target.value)}
+                  onBlur={() => setTimeout(() => setShowCompanyDropdown(false), 200)}
+                  autoComplete="off"
+                  className={`bg-slate-50 dark:bg-slate-700 border-2 transition-colors pr-8 ${
+                    validationErrors.find(e => e.field === 'company')
+                      ? 'border-red-500 dark:border-red-500'
+                      : selectedCrmCustomer ? 'border-green-500' : 'border-slate-200 dark:border-slate-600 focus:border-blue-500'
+                  }`}
+                />
+                {isSearchingCompany && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                )}
+                {selectedCrmCustomer && !isSearchingCompany && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500">✓</div>
+                )}
+              </div>
+              {/* Dropdown de sugestões */}
+              {showCompanyDropdown && companySearchResults.length > 0 && (
+                <div className="absolute z-50 w-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                  {companySearchResults.map((customer: any) => (
+                    <button
+                      key={customer.id}
+                      type="button"
+                      onMouseDown={() => handleSelectCompany(customer)}
+                      className="w-full text-left px-4 py-3 hover:bg-blue-50 dark:hover:bg-slate-700 transition-colors border-b border-slate-100 dark:border-slate-700 last:border-0"
+                    >
+                      <div className="font-semibold text-slate-900 dark:text-white text-sm">{customer.company}</div>
+                      {customer.name && <div className="text-xs text-slate-500 dark:text-slate-400">{customer.name}</div>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {showCompanyDropdown && companySearchResults.length === 0 && !isSearchingCompany && newChamadoForm.company.length >= 2 && (
+                <div className="absolute z-50 w-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-lg px-4 py-3 text-sm text-slate-500 dark:text-slate-400">
+                  Nenhuma empresa encontrada
+                </div>
+              )}
+              {validationErrors.find(e => e.field === 'company') && (
+                <p className="text-xs text-red-500 dark:text-red-400 mt-1 font-medium">{validationErrors.find(e => e.field === 'company')?.message}</p>
+              )}
+            </div>
+
+            {/* 2. Nome do Cliente - preenchido automaticamente */}
             <div>
-              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 block mb-2">Nome do Cliente</label>
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 block mb-2">
+                Nome do Cliente <span className="text-red-500">*</span>
+                {selectedCrmCustomer && <span className="ml-2 text-xs text-green-600 font-normal">✓ Encontrado no banco</span>}
+              </label>
               <Input
-                placeholder="Ex: Joao Silva"
+                placeholder={selectedCrmCustomer ? '' : 'Selecione a empresa acima ou digite manualmente'}
                 value={newChamadoForm.customerName}
                 onChange={e => setNewChamadoForm({...newChamadoForm, customerName: e.target.value})}
                 className={`bg-slate-50 dark:bg-slate-700 border-2 transition-colors ${
                   validationErrors.find(e => e.field === 'customerName')
                     ? 'border-red-500 dark:border-red-500'
-                    : 'border-slate-200 dark:border-slate-600 focus:border-blue-500'
+                    : selectedCrmCustomer ? 'border-green-500' : 'border-slate-200 dark:border-slate-600 focus:border-blue-500'
                 }`}
               />
               {validationErrors.find(e => e.field === 'customerName') && (
                 <p className="text-xs text-red-500 dark:text-red-400 mt-1 font-medium">{validationErrors.find(e => e.field === 'customerName')?.message}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 block mb-2">Empresa</label>
-              <Input
-                placeholder="Ex: Empresa XYZ"
-                value={newChamadoForm.company}
-                onChange={e => setNewChamadoForm({...newChamadoForm, company: e.target.value})}
-                className={`bg-slate-50 dark:bg-slate-700 border-2 transition-colors ${
-                  validationErrors.find(e => e.field === 'company')
-                    ? 'border-red-500 dark:border-red-500'
-                    : 'border-slate-200 dark:border-slate-600 focus:border-blue-500'
-                }`}
-              />
-              {validationErrors.find(e => e.field === 'company') && (
-                <p className="text-xs text-red-500 dark:text-red-400 mt-1 font-medium">{validationErrors.find(e => e.field === 'company')?.message}</p>
               )}
             </div>
 

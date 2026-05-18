@@ -10,6 +10,7 @@ const t = initTRPC.context<TrpcContext>().create({
 export const router = t.router;
 export const publicProcedure = t.procedure;
 export const isolatedProcedure = t.procedure;
+export const createCallerFactory = t.createCallerFactory;
 
 const requireUser = t.middleware(async opts => {
   const { ctx, next } = opts;
@@ -27,6 +28,17 @@ const requireUser = t.middleware(async opts => {
 });
 
 export const protectedProcedure = t.procedure.use(requireUser);
+
+// Procedure para o MegaDesk: valida tenantId via header x-tenant-id sem exigir Manus OAuth
+const requireTenant = t.middleware(async opts => {
+  const { ctx, next } = opts;
+  const tenantId = ctx.tenantId;
+  if (!tenantId || tenantId.trim() === '') {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão MegaDesk inválida. Faça login novamente." });
+  }
+  return next({ ctx: { ...ctx, tenantId } });
+});
+export const megadeskProcedure = t.procedure.use(requireTenant);
 
 export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {

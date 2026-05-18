@@ -877,37 +877,37 @@ export const appRouter = router({
      * Retorna dados da sessão que são armazenados no localStorage do browser.
      */
     searchCustomerByCompany: publicProcedure
-      .input(z.object({ company: z.string().min(1) }))
+      .input(z.object({ company: z.string().min(1), clientId: z.string().min(1) }))
       .query(async ({ input }) => {
         try {
           const { getPool } = await import("./db");
           const pool = getPool();
           
-          // Buscar cliente por nome da empresa
+          // Buscar clientes por nome da empresa, filtrado por clientId (isolamento multiempresa)
           const [rows] = await pool.execute(
             `SELECT crm_client_id as id, company_name as company, responsible_name as name, phone, whatsapp, email
              FROM megadesk_crm_clients
-             WHERE company_name LIKE ?
-             LIMIT 1`,
-            [`%${input.company}%`]
+             WHERE client_id = ? AND company_name LIKE ?
+             ORDER BY company_name ASC
+             LIMIT 10`,
+            [input.clientId, `%${input.company}%`]
           ) as any[];
           
           if (rows && (rows as any[]).length > 0) {
-            const crm = (rows as any[])[0];
-            return {
+            return (rows as any[]).map((crm: any) => ({
               id: crm.id,
               company: crm.company,
               name: crm.name,
               phone: crm.phone,
               whatsapp: crm.whatsapp,
               email: crm.email,
-            };
+            }));
           }
           
-          return null;
+          return [];
         } catch (error) {
           console.error("Erro ao buscar cliente por empresa:", error);
-          return null;
+          return [];
         }
       }),
     searchCustomer: publicProcedure

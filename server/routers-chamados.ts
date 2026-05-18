@@ -9,7 +9,7 @@
  * - Isolamento de tenant garantido
  */
 
-import { router, protectedProcedure } from "./_core/trpc";
+import { router, protectedProcedure, megadeskProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import {
@@ -167,7 +167,7 @@ export const chamadosRouter = router({
    * Criar novo chamado
    * O clientId é derivado de ctx.tenantId
    */
-  create: protectedProcedure
+  create: megadeskProcedure
     .input(
       z.object({
         customerId: z.string().optional(),
@@ -181,7 +181,7 @@ export const chamadosRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId;
         
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
