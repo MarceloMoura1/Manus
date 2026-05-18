@@ -213,11 +213,11 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
 
         {/* LAYOUT RESPONSIVO */}
         <div className="flex gap-8 justify-center items-start">
-          {/* ESQUERDA: Input de busca (animação para esquerda quando cliente encontrado) */}
+          {/* ESQUERDA: Input de busca + Card de Chamado (animação para esquerda quando cliente encontrado) */}
           <div
             className={cn(
-              "transition-all duration-500 ease-out",
-              customerData ? "w-96 translate-x-0" : "w-full max-w-md"
+              "flex flex-col gap-6 transition-all duration-500 ease-out",
+              customerData ? "w-96" : "w-full max-w-md"
             )}
           >
             <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300">
@@ -295,9 +295,40 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                 )}
               </div>
             </div>
+
+            {/* Card "Deseja abrir um chamado?" (embaixo do input, à esquerda) */}
+            {customerData && (
+              <div className="bg-white rounded-xl shadow-md p-6 border border-slate-300 animate-fadeSlideIn">
+                <h3 className="text-base font-semibold text-slate-900 mb-4">Deseja abrir um chamado?</h3>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setOpenTicket(false)}
+                    className={cn(
+                      'flex-1 px-3 py-2 rounded-lg text-sm font-semibold transition-all duration-200',
+                      openTicket === false
+                        ? 'bg-slate-700 text-white'
+                        : 'bg-slate-100 border border-slate-200 text-slate-700 hover:border-slate-300'
+                    )}
+                  >
+                    Não
+                  </button>
+                  <button
+                    onClick={() => setOpenTicket(true)}
+                    className={cn(
+                      'flex-1 px-3 py-2 rounded-lg text-sm font-semibold transition-all duration-200',
+                      openTicket === true
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-slate-100 border border-slate-200 text-slate-700 hover:border-slate-300'
+                    )}
+                  >
+                    Sim
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* CENTRO: Dados do Cliente e Chamado (aparecem quando cliente encontrado) */}
+          {/* CENTRO: Dados do Cliente (aparecem quando cliente encontrado) */}
           {customerData && (
             <div className="flex flex-col gap-6 w-full max-w-2xl animate-fadeSlideIn">
               {/* Customer Info Card */}
@@ -367,61 +398,7 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                 )}
               </div>
 
-              {/* Ticket Option Card */}
-              <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400">
-                <h3 className="text-lg font-semibold text-slate-900 mb-6">Deseja abrir um chamado?</h3>
-                <div className="flex gap-3 mb-6">
-                  <button
-                    onClick={() => setOpenTicket(false)}
-                    className={cn(
-                      'flex-1 px-4 py-3 rounded-lg text-base font-semibold transition-all duration-200 transform hover:scale-105',
-                      openTicket === false
-                        ? 'bg-gradient-to-r from-slate-700 to-slate-800 text-white shadow-lg'
-                        : 'bg-slate-100 border-2 border-slate-200 text-slate-700 hover:border-slate-300'
-                    )}
-                  >
-                    Não
-                  </button>
-                  <button
-                    onClick={() => setOpenTicket(true)}
-                    className={cn(
-                      'flex-1 px-4 py-3 rounded-lg text-base font-semibold transition-all duration-200 transform hover:scale-105',
-                      openTicket === true
-                        ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg'
-                        : 'bg-slate-100 border-2 border-slate-200 text-slate-700 hover:border-slate-300'
-                    )}
-                  >
-                    Sim
-                  </button>
-                </div>
 
-                {/* Action Buttons */}
-                <div className="flex gap-3 justify-end pt-4 border-t border-slate-200">
-                  <button
-                    onClick={handleReset}
-                    className="px-4 py-2 text-sm bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-all duration-200 font-semibold border border-slate-200 hover:shadow-md"
-                  >
-                    Voltar
-                  </button>
-                  <button
-                    onClick={handleStartConversation}
-                    disabled={isSearching}
-                    className="px-4 py-2 text-sm bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center justify-center gap-2"
-                  >
-                    {isSearching ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Processando...
-                      </>
-                    ) : (
-                      <>
-                        <ArrowRight className="w-4 h-4" />
-                        Abrir Conversa
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
             </div>
           )}
 
