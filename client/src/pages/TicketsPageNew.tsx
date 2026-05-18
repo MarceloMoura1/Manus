@@ -302,11 +302,18 @@ export function TicketsPageNew({ onNavigate }: { onNavigate?: (route: any) => vo
 
     try {
       // Buscar cliente por empresa no banco de dados
-      const searchResult = await trpc.megadesk.searchCustomerByCompany.query({
-        company: newChamadoForm.company,
-      }).catch(() => null);
-
-      let customerId = searchResult?.id || 'cust-' + Date.now();
+      let customerId = 'cust-' + Date.now();
+      try {
+        // searchCustomerByCompany é uma query tRPC, chamar diretamente
+        const searchResult = await (trpc.megadesk.searchCustomerByCompany as any).fetch({
+          company: newChamadoForm.company,
+        });
+        if (searchResult?.id) {
+          customerId = searchResult.id;
+        }
+      } catch (searchError) {
+        console.log('Empresa não encontrada, criando novo cliente');
+      }
 
       const result = await createChamadoMutation.mutateAsync({
         customerId: customerId,
