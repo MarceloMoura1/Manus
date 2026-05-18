@@ -1212,3 +1212,13 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Encerrar processo antigo do servidor (PID 158524) que usava versão cacheada com bug
 - [x] Validar via curl que registerActivity retorna sucesso com x-tenant-id correto
 - [x] Confirmar que 5 testes de chamados-create.test.ts passam
+
+## Fase 122: Refatoração do layout do modal "Novo Chamado"
+- [x] Alterar fundo do modal de gradiente azul para branco
+- [x] Alterar bordas dos inputs de azul/slate para cinza escuro (slate-400)
+- [x] Alterar textos dos labels de slate-700 para preto puro
+- [x] Alterar fundo dos inputs de slate-50 para branco
+- [x] Manter fundo azul do botão "Criar Chamado" (blue-600)
+- [x] Alterar botão "Cancelar" para ter borda cinza escuro e texto preto
+- [x] Atualizar dropdown de sugestões com fundo branco e borda cinza
+- [x] Atualizar mensagens de erro para vermelho mais escuro (red-600)

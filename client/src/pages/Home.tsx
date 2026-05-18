@@ -1497,18 +1497,18 @@ export function TicketsPage() {
 
       {/* Modal de Novo Chamado */}
       <Dialog open={showNewChamadoModal} onOpenChange={setShowNewChamadoModal}>
-        <DialogContent className="max-w-md bg-white dark:bg-slate-800 border-2 border-blue-200 dark:border-blue-900 shadow-xl rounded-lg" style={{backgroundColor: '#ffffff'}}>
-          <DialogHeader className="bg-gradient-to-r from-blue-500 to-blue-600 -m-6 mb-4 p-6 rounded-t-lg">
-            <DialogTitle className="text-white text-lg font-bold flex items-center gap-2">
+        <DialogContent className="max-w-md bg-white border border-slate-300 shadow-lg rounded-lg p-0">
+          <div className="bg-blue-600 p-4 rounded-t-lg">
+            <h2 className="text-white text-lg font-bold flex items-center gap-2">
               <Plus className="w-5 h-5" />
               Novo Chamado
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4 px-2">
+            </h2>
+          </div>
+          <div className="p-6">
+          <div className="space-y-4">
             {/* 1. Empresa - com busca automática no banco */}
             <div className="relative">
-              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 block mb-2">
+              <label className="text-sm font-semibold text-black block mb-2">
                 Empresa <span className="text-red-500">*</span>
               </label>
               <div className="relative">
@@ -1518,10 +1518,10 @@ export function TicketsPage() {
                   onChange={e => handleCompanySearch(e.target.value)}
                   onBlur={() => setTimeout(() => setShowCompanyDropdown(false), 200)}
                   autoComplete="off"
-                  className={`bg-slate-50 dark:bg-slate-700 border-2 transition-colors pr-8 ${
+                  className={`bg-white border-2 transition-colors pr-8 text-black ${
                     validationErrors.find(e => e.field === 'company')
-                      ? 'border-red-500 dark:border-red-500'
-                      : selectedCrmCustomer ? 'border-green-500' : 'border-slate-200 dark:border-slate-600 focus:border-blue-500'
+                      ? 'border-red-500'
+                      : selectedCrmCustomer ? 'border-green-500' : 'border-slate-400 focus:border-blue-500'
                   }`}
                 />
                 {isSearchingCompany && (
@@ -1535,85 +1535,85 @@ export function TicketsPage() {
               </div>
               {/* Dropdown de sugestões */}
               {showCompanyDropdown && companySearchResults.length > 0 && (
-                <div className="absolute z-50 w-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
                   {companySearchResults.map((customer: any) => (
                     <button
                       key={customer.id}
                       type="button"
                       onMouseDown={() => handleSelectCompany(customer)}
-                      className="w-full text-left px-4 py-3 hover:bg-blue-50 dark:hover:bg-slate-700 transition-colors border-b border-slate-100 dark:border-slate-700 last:border-0"
+                      className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors border-b border-slate-200 last:border-0 text-black"
                     >
-                      <div className="font-semibold text-slate-900 dark:text-white text-sm">{customer.company}</div>
-                      {customer.name && <div className="text-xs text-slate-500 dark:text-slate-400">{customer.name}</div>}
+                      <div className="font-semibold text-black text-sm">{customer.company}</div>
+                      {customer.name && <div className="text-xs text-slate-600">{customer.name}</div>}
                     </button>
                   ))}
                 </div>
               )}
               {showCompanyDropdown && companySearchResults.length === 0 && !isSearchingCompany && newChamadoForm.company.length >= 2 && (
-                <div className="absolute z-50 w-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-lg px-4 py-3 text-sm text-slate-500 dark:text-slate-400">
+                <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg px-4 py-3 text-sm text-slate-600">
                   Nenhuma empresa encontrada
                 </div>
               )}
               {validationErrors.find(e => e.field === 'company') && (
-                <p className="text-xs text-red-500 dark:text-red-400 mt-1 font-medium">{validationErrors.find(e => e.field === 'company')?.message}</p>
+                <p className="text-xs text-red-600 mt-1 font-medium">{validationErrors.find(e => e.field === 'company')?.message}</p>
               )}
             </div>
 
             {/* 2. Nome do Cliente - preenchido automaticamente */}
             <div>
-              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 block mb-2">
+              <label className="text-sm font-semibold text-black block mb-2">
                 Nome do Cliente <span className="text-red-500">*</span>
-                {selectedCrmCustomer && <span className="ml-2 text-xs text-green-600 font-normal">✓ Encontrado no banco</span>}
+                {selectedCrmCustomer && <span className="ml-2 text-xs text-green-700 font-normal">✓ Encontrado no banco</span>}
               </label>
               <Input
                 placeholder={selectedCrmCustomer ? '' : 'Selecione a empresa acima ou digite manualmente'}
                 value={newChamadoForm.customerName}
                 onChange={e => setNewChamadoForm({...newChamadoForm, customerName: e.target.value})}
-                className={`bg-slate-50 dark:bg-slate-700 border-2 transition-colors ${
+                className={`bg-white border-2 transition-colors text-black ${
                   validationErrors.find(e => e.field === 'customerName')
-                    ? 'border-red-500 dark:border-red-500'
-                    : selectedCrmCustomer ? 'border-green-500' : 'border-slate-200 dark:border-slate-600 focus:border-blue-500'
+                    ? 'border-red-500'
+                    : selectedCrmCustomer ? 'border-green-500' : 'border-slate-400 focus:border-blue-500'
                 }`}
               />
               {validationErrors.find(e => e.field === 'customerName') && (
-                <p className="text-xs text-red-500 dark:text-red-400 mt-1 font-medium">{validationErrors.find(e => e.field === 'customerName')?.message}</p>
+                <p className="text-xs text-red-600 mt-1 font-medium">{validationErrors.find(e => e.field === 'customerName')?.message}</p>
               )}
             </div>
 
             <div>
-              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 block mb-2">Título</label>
+              <label className="text-sm font-semibold text-black block mb-2">Título</label>
               <Input
                 placeholder="Ex: Problema com login"
                 value={newChamadoForm.title}
                 onChange={e => setNewChamadoForm({...newChamadoForm, title: e.target.value})}
-                className={`bg-slate-50 dark:bg-slate-700 border-2 transition-colors ${
+                className={`bg-white border-2 transition-colors text-black ${
                   validationErrors.find(e => e.field === 'title')
-                    ? 'border-red-500 dark:border-red-500'
-                    : 'border-slate-200 dark:border-slate-600 focus:border-blue-500'
+                    ? 'border-red-500'
+                    : 'border-slate-400 focus:border-blue-500'
                 }`}
               />
               {validationErrors.find(e => e.field === 'title') && (
-                <p className="text-xs text-red-500 dark:text-red-400 mt-1 font-medium">{validationErrors.find(e => e.field === 'title')?.message}</p>
+                <p className="text-xs text-red-600 mt-1 font-medium">{validationErrors.find(e => e.field === 'title')?.message}</p>
               )}
             </div>
 
             <div>
-              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 block mb-2">Observações</label>
+              <label className="text-sm font-semibold text-black block mb-2">Observações</label>
               <Input
                 placeholder="Detalhes adicionais..."
                 value={newChamadoForm.observations}
                 onChange={e => setNewChamadoForm({...newChamadoForm, observations: e.target.value})}
-                className="bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-blue-500 transition-colors"
+                className="bg-white border-2 border-slate-400 focus:border-blue-500 transition-colors text-black"
               />
             </div>
 
             <div>
-              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 block mb-2">Prioridade</label>
+              <label className="text-sm font-semibold text-black block mb-2">Prioridade</label>
               <Select value={newChamadoForm.priority} onValueChange={priority => setNewChamadoForm({...newChamadoForm, priority: priority as 'media' | 'baixa' | 'alta' | 'critica'})}>
-                <SelectTrigger className="bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-blue-500 transition-colors">
+                <SelectTrigger className="bg-white border-2 border-slate-400 focus:border-blue-500 transition-colors text-black">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-600">
+                <SelectContent className="bg-white border border-slate-300">
                   <SelectItem value="baixa">🟢 Baixa</SelectItem>
                   <SelectItem value="media">🟡 Média</SelectItem>
                   <SelectItem value="alta">🔴 Alta</SelectItem>
@@ -1622,22 +1622,23 @@ export function TicketsPage() {
               </Select>
             </div>
 
-            <div className="flex gap-3 pt-6 border-t border-slate-200 dark:border-slate-700 mt-6">
+            <div className="flex gap-3 pt-4 border-t border-slate-300 mt-4">
               <Button
                 onClick={handleCreateChamado}
                 disabled={createChamadoMutation.isPending}
-                className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold shadow-md hover:shadow-lg transition-all"
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-md hover:shadow-lg transition-all"
               >
                 {createChamadoMutation.isPending ? '⏳ Criando...' : '✅ Criar Chamado'}
               </Button>
               <Button
                 onClick={() => setShowNewChamadoModal(false)}
                 variant="outline"
-                className="flex-1 border-2 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 font-semibold transition-colors"
+                className="flex-1 border-2 border-slate-400 text-black hover:bg-slate-100 font-semibold transition-colors"
               >
                 ✕ Cancelar
               </Button>
             </div>
+          </div>
           </div>
         </DialogContent>
       </Dialog>
