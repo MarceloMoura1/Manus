@@ -1498,6 +1498,7 @@ export function TicketsPage() {
       {/* Modal de Novo Chamado */}
       <Dialog open={showNewChamadoModal} onOpenChange={setShowNewChamadoModal}>
         <DialogContent className="max-w-md bg-white border border-slate-300 shadow-lg rounded-lg p-0">
+          <DialogTitle className="sr-only">Novo Chamado</DialogTitle>
           <div className="bg-blue-600 p-4 rounded-t-lg">
             <h2 className="text-white text-lg font-bold flex items-center gap-2">
               <Plus className="w-5 h-5" />
