@@ -77,7 +77,7 @@ export const chamadosRouter = router({
     )
     .query(async ({ input, ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
         
         // Validar clientId
         if (!clientId || clientId.trim() === '') {
@@ -128,7 +128,7 @@ export const chamadosRouter = router({
     )
     .query(async ({ input, ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
         
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
@@ -258,7 +258,7 @@ export const chamadosRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
         
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
@@ -316,7 +316,7 @@ export const chamadosRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
         
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
@@ -377,7 +377,7 @@ export const chamadosRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
         
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
@@ -433,7 +433,7 @@ export const chamadosRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
             code: "UNAUTHORIZED",
@@ -471,7 +471,7 @@ export const chamadosRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
             code: "UNAUTHORIZED",
@@ -516,7 +516,7 @@ export const chamadosRouter = router({
   healthCheck: megadeskProcedure
     .query(async ({ ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
         
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
@@ -562,7 +562,7 @@ export const chamadosRouter = router({
 
       // Obter clientId do contexto (geralmente passado no middleware)
       const clientId = (ctx as any).tenantId || String(ctx.user.id);
-      const attendantName = ctx.user.name || ctx.user.email || 'Atendente';
+      const attendantName = ctx.user?.name || ctx.user?.email || "Atendente";
 
       if (!clientId || clientId.trim() === '') {
         throw new TRPCError({
@@ -599,7 +599,7 @@ export const chamadosRouter = router({
   getStatusCounts: megadeskProcedure
     .query(async ({ ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
         
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
