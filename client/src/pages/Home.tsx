@@ -1451,7 +1451,7 @@ export function TicketsPage() {
 
       {/* Modal de Novo Chamado */}
       <Dialog open={showNewChamadoModal} onOpenChange={setShowNewChamadoModal}>
-        <DialogContent className="max-w-md bg-white dark:bg-slate-800 border-2 border-blue-200 dark:border-blue-900 shadow-xl rounded-lg">
+        <DialogContent className="max-w-md bg-white dark:bg-slate-800 border-2 border-blue-200 dark:border-blue-900 shadow-xl rounded-lg" style={{backgroundColor: '#ffffff'}}>
           <DialogHeader className="bg-gradient-to-r from-blue-500 to-blue-600 -m-6 mb-4 p-6 rounded-t-lg">
             <DialogTitle className="text-white text-lg font-bold flex items-center gap-2">
               <Plus className="w-5 h-5" />
