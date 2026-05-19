@@ -1287,12 +1287,12 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Adicionar filtro funcional na página de Chamados
 
 ### Aba Equipe
-- [ ] Criar procedures tRPC para gerenciar usuários
-- [ ] Implementar UI para adicionar/remover/editar usuários
-- [ ] Implementar sistema de permissões
-- [ ] Respeitar limite de usuários do MegaAdmin
+- [x] Criar procedures tRPC para gerenciar usuários
+- [x] Implementar UI para adicionar/remover/editar usuários
+- [x] Implementar sistema de permissões
+- [x] Respeitar limite de usuários do MegaAdmin
 
 ### Aba Backup
-- [ ] Implementar backup automático
-- [ ] Implementar exportação de dados
-- [ ] Implementar restauração de dados
+- [x] Implementar backup automático
+- [x] Implementar exportação de dados
+- [x] Implementar restauração de dados
