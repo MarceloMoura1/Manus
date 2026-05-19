@@ -11,6 +11,7 @@ import { registerIntegrationApi } from "../integrationApi";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
+import { addSseClient, startWhatsAppSession, disconnectWhatsApp, getSessionStatus } from "../whatsapp-baileys";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -84,6 +85,56 @@ async function startServer() {
       });
     }
   });
+
+  // ─── Baileys WhatsApp QR Code (SSE) ───────────────────────────────────────
+  // GET /api/baileys/qr-stream?clientId=xxx — SSE stream de status/QR
+  app.get("/api/baileys/qr-stream", (req, res) => {
+    const clientId = String(req.query.clientId || "");
+    if (!clientId) return res.status(400).json({ error: "clientId required" });
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    const send = (data: string) => res.write(data);
+    const cleanup = addSseClient(clientId, send);
+
+    req.on("close", cleanup);
+  });
+
+  // POST /api/baileys/start — iniciar sessão e gerar QR
+  app.post("/api/baileys/start", async (req, res) => {
+    const { clientId } = req.body;
+    if (!clientId) return res.status(400).json({ error: "clientId required" });
+    try {
+      await startWhatsAppSession(clientId);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Erro ao iniciar sessão" });
+    }
+  });
+
+  // POST /api/baileys/disconnect — desconectar sessão
+  app.post("/api/baileys/disconnect", async (req, res) => {
+    const { clientId } = req.body;
+    if (!clientId) return res.status(400).json({ error: "clientId required" });
+    try {
+      await disconnectWhatsApp(clientId);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Erro ao desconectar" });
+    }
+  });
+
+  // GET /api/baileys/status?clientId=xxx — status atual
+  app.get("/api/baileys/status", (req, res) => {
+    const clientId = String(req.query.clientId || "");
+    if (!clientId) return res.status(400).json({ error: "clientId required" });
+    res.json(getSessionStatus(clientId));
+  });
+  // ────────────────────────────────────────────────────────────────────────────
 
   // tRPC API
   app.use(
