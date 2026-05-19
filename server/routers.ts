@@ -14,6 +14,7 @@ import { chamadosRouter } from "./routers-chamados";
 import { crmRouter } from "./routers-crm";
 import { whatsappRouter as whatsappModuleRouter } from "./modules/whatsapp/whatsapp.router";
 import { whatsappRouter } from "./routers-whatsapp";
+import { companyRouter } from "./routers-company";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -249,6 +250,7 @@ export const appRouter = router({
   chamados: chamadosRouter,
   crm: crmRouter,
   whatsapp: whatsappRouter,
+  company: companyRouter,
   auth: router({
     me: publicProcedure.query(({ ctx }) => ({ user: ctx.user })),
     logout: publicProcedure.mutation(({ ctx }) => {
