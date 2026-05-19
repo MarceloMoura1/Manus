@@ -527,6 +527,26 @@ export const megadeskWhatsappConfig = mysqlTable("megadesk_whatsapp_config", {
   clientIdx: index("idx_mwc_client").on(t.clientId),
 }));
 
+// ─── Notifications Table ──────────────────────────────────────────────────────
+export const megadeskNotifications = mysqlTable("megadesk_notifications", {
+  notificationId: varchar("notification_id", { length: 80 }).primaryKey(),
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  userId: varchar("user_id", { length: 80 }).notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  message: text("message").notNull(),
+  type: mysqlEnum("type", ["info", "success", "warning", "error", "system"]).notNull().default("info"),
+  isRead: boolean("is_read").notNull().default(false),
+  actionUrl: varchar("action_url", { length: 500 }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  readAt: timestamp("read_at"),
+}, (t) => ({
+  clientIdx: index("idx_mn_client").on(t.clientId),
+  userIdx: index("idx_mn_user").on(t.userId),
+  clientUserIdx: index("idx_mn_client_user").on(t.clientId, t.userId),
+  isReadIdx: index("idx_mn_is_read").on(t.isRead),
+  createdAtIdx: index("idx_mn_created_at").on(t.createdAt),
+}));
+
 // ─── Bot Scripts Table ────────────────────────────────────────────────────────
 export const megadeskBotScripts = mysqlTable("megadesk_bot_scripts", {
   scriptId: varchar("script_id", { length: 80 }).primaryKey(),
@@ -559,3 +579,5 @@ export type WaConversation = typeof waConversations.$inferSelect;
 export type InsertWaConversation = typeof waConversations.$inferInsert;
 export type WaMessage = typeof waMessages.$inferSelect;
 export type InsertWaMessage = typeof waMessages.$inferInsert;
+export type MegadeskNotification = typeof megadeskNotifications.$inferSelect;
+export type InsertMegadeskNotification = typeof megadeskNotifications.$inferInsert;

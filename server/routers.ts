@@ -17,6 +17,7 @@ import { whatsappRouter } from "./routers-whatsapp";
 import { companyRouter } from "./routers-company";
 import { ticketStatusesRouter } from "./routers-ticket-statuses";
 import { botScriptsRouter } from "./routers-bot-scripts";
+import { notificationsRouter } from "./routers-notifications";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -255,6 +256,7 @@ export const appRouter = router({
   company: companyRouter,
   ticketStatuses: ticketStatusesRouter,
   botScripts: botScriptsRouter,
+  notifications: notificationsRouter,
   auth: router({
     me: publicProcedure.query(({ ctx }) => ({ user: ctx.user })),
     logout: publicProcedure.mutation(({ ctx }) => {

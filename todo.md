@@ -1409,3 +1409,17 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Otimizar espaçamento dos botões
 - [x] Implementar hover effects nos títulos
 - [x] Validar design final
+
+
+## Fase 138: Página de Notificações Funcional
+
+- [x] Criar página NotificationsPage.tsx
+- [x] Implementar schema de notificações no banco de dados
+- [x] Criar procedures tRPC para notificações (getNotifications, markAsRead, deleteNotification, markAllAsRead, createNotification)
+- [x] Implementar layout bonito com cards de notificações
+- [x] Adicionar botões de visualizado/fechar
+- [x] Implementar filtros (todas, não lidas)
+- [x] Adicionar status visual (lida/não lida)
+- [x] Corrigir erros de TypeScript
+- [ ] Testar funcionalidade completa
+- [ ] Adicionar notificações em tempo real (WebSocket)

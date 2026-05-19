@@ -6,6 +6,7 @@ import { Home } from "./pages/Home";
 import AdminPanel from "./pages/AdminPanel";
 import { SettingsPage } from "./pages/SettingsPage";
 import { BotConfigPage } from "./pages/BotConfigPage";
+import { NotificationsPage } from "./pages/NotificationsPage";
 import { AIAssistant } from "./components/AIAssistant";
 import { trpc } from "./lib/trpc";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -23,6 +24,11 @@ function isSettingsRoute() {
 function isBotConfigRoute() {
   const pathname = window.location.pathname.toLowerCase();
   return pathname === "/bot-config" || pathname.startsWith("/bot-config/");
+}
+
+function isNotificationsRoute() {
+  const pathname = window.location.pathname.toLowerCase();
+  return pathname === "/notifications" || pathname.startsWith("/notifications/");
 }
 
 export default function App() {
@@ -55,13 +61,13 @@ export default function App() {
   );
 
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
-  const platform = isAdminRoute() ? "megaadmin" : isSettingsRoute() || isBotConfigRoute() ? "megadesk" : "megadesk";
+  const platform = isAdminRoute() ? "megaadmin" : isSettingsRoute() || isBotConfigRoute() || isNotificationsRoute() ? "megadesk" : "megadesk";
 
   return (
     <ThemeProvider>
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
-          {isAdminRoute() ? <AdminPanel /> : isBotConfigRoute() ? <BotConfigPage /> : isSettingsRoute() ? <SettingsPage /> : <Home />}
+          {isAdminRoute() ? <AdminPanel /> : isBotConfigRoute() ? <BotConfigPage /> : isNotificationsRoute() ? <NotificationsPage /> : isSettingsRoute() ? <SettingsPage /> : <Home />}
 
           <AIAssistant
             isOpen={isAssistantOpen}
