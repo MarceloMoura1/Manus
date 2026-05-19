@@ -1323,7 +1323,7 @@ export function SettingsPage() {
   const userRole = session?.userRole ?? 'viewer';
   const isAdmin = userRole === 'admin';
 
-  const [activeTab, setActiveTab] = useState('whatsapp');
+  const [activeTab, setActiveTab] = useState(isAdmin ? 'whatsapp' : 'account');
 
   // ─── Aba: WhatsApp ────────────────────────────────────────────────────────
   const [phoneNumberId, setPhoneNumberId] = useState('');
@@ -1449,17 +1449,19 @@ export function SettingsPage() {
   };
 
   // ─── Tabs disponíveis ─────────────────────────────────────────────────────
-  // Abas admin ficam visíveis mas com lock se não for admin
-  const tabs = [
-    { value: 'whatsapp', label: 'WhatsApp' },
-    { value: 'account', label: 'Conta' },
-    { value: 'notifications', label: 'Notificações' },
-    { value: 'attendance', label: 'Atendimento' },
+  // Abas adminOnly são completamente ocultadas para não-admin (sem cadeado)
+  const allTabs = [
+    { value: 'whatsapp', label: 'WhatsApp', adminOnly: true },
+    { value: 'account', label: 'Conta', adminOnly: false },
+    { value: 'notifications', label: 'Notificações', adminOnly: false },
+    { value: 'attendance', label: 'Atendimento', adminOnly: false },
     { value: 'geral', label: '🏢 Geral', adminOnly: true },
     { value: 'chamados', label: '🎫 Chamados', adminOnly: true },
     { value: 'equipe', label: '👥 Equipe', adminOnly: true },
     { value: 'backup', label: '💾 Backup', adminOnly: true },
   ];
+  // Filtrar: admin vê tudo, não-admin não vê abas adminOnly
+  const tabs = allTabs.filter(tab => isAdmin || !tab.adminOnly);
 
   return (
     <div className="min-h-screen bg-background p-6">
@@ -1481,10 +1483,9 @@ export function SettingsPage() {
               <TabsTrigger
                 key={tab.value}
                 value={tab.value}
-                className={`text-xs sm:text-sm ${tab.adminOnly && !isAdmin ? 'opacity-50' : ''}`}
+                className="text-xs sm:text-sm"
               >
                 {tab.label}
-                {tab.adminOnly && !isAdmin && <Lock className="w-3 h-3 ml-1" />}
               </TabsTrigger>
             ))}
           </TabsList>
