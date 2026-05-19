@@ -3,7 +3,7 @@ import { useAuth } from '@/_core/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+// Tabs removidos: layout agora usa lista lateral com condicionais
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -1463,35 +1463,101 @@ export function SettingsPage() {
   // Filtrar: admin vê tudo, não-admin não vê abas adminOnly
   const tabs = allTabs.filter(tab => isAdmin || !tab.adminOnly);
 
+  // ─── Ícones por aba ────────────────────────────────────────────────────────
+  const tabIcons: Record<string, React.ElementType> = {
+    whatsapp: MessageSquare,
+    account: Users,
+    notifications: Bell,
+    attendance: Phone,
+    geral: Building2,
+    chamados: Tag,
+    equipe: Shield,
+    backup: Database,
+  };
+
+  const tabDescriptions: Record<string, string> = {
+    whatsapp: 'Integração WhatsApp API',
+    account: 'Dados pessoais e senha',
+    notifications: 'Alertas e sons',
+    attendance: 'Respostas e atalhos',
+    geral: 'Dados da empresa',
+    chamados: 'Status personalizados',
+    equipe: 'Usuários e permissões',
+    backup: 'Exportação e restauração',
+  };
+
   return (
     <div className="min-h-screen bg-background p-6">
-      <div className="max-w-5xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground">Configurações</h1>
-          <p className="text-muted-foreground mt-2">Personalize sua experiência no MegaDesk</p>
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-foreground">Configurações</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Personalize sua experiência no MegaDesk</p>
           {isAdmin && (
-            <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-full">
+            <div className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-full">
               <Shield className="w-3.5 h-3.5 text-red-600" />
               <span className="text-xs font-medium text-red-700">Modo Administrador — Acesso completo</span>
             </div>
           )}
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="flex flex-wrap h-auto gap-1 p-1 mb-2">
-            {tabs.map((tab) => (
-              <TabsTrigger
-                key={tab.value}
-                value={tab.value}
-                className="text-xs sm:text-sm"
-              >
-                {tab.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+        {/* Layout: lista lateral + conteúdo */}
+        <div className="flex gap-6 items-start">
+          {/* ─── Lista lateral ─────────────────────────────────────────── */}
+          <div className="w-56 flex-shrink-0">
+            <nav className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+              {isAdmin && (
+                <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Administrador</p>
+                </div>
+              )}
+              <ul className="py-1">
+                {tabs.map((tab, idx) => {
+                  const Icon = tabIcons[tab.value] ?? Settings2;
+                  const isActive = activeTab === tab.value;
+                  // Separador visual entre abas admin e não-admin
+                  const prevTab = tabs[idx - 1];
+                  const showSeparator = idx > 0 && tab.adminOnly && !prevTab?.adminOnly;
+                  return (
+                    <React.Fragment key={tab.value}>
+                      {showSeparator && <li className="mx-3 my-1 border-t border-slate-100" />}
+                      <li>
+                        <button
+                          onClick={() => setActiveTab(tab.value)}
+                          className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-all duration-150 group ${
+                            isActive
+                              ? 'bg-blue-50 text-blue-700'
+                              : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                          }`}
+                        >
+                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors ${
+                            isActive ? 'bg-blue-100' : 'bg-slate-100 group-hover:bg-slate-200'
+                          }`}>
+                            <Icon className={`w-3.5 h-3.5 ${
+                              isActive ? 'text-blue-600' : 'text-slate-500'
+                            }`} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className={`text-sm font-medium leading-tight truncate ${
+                              isActive ? 'text-blue-700' : 'text-slate-700'
+                            }`}>{tab.label.replace(/^\p{Emoji}\s*/u, '')}</p>
+                            <p className="text-[10px] text-slate-400 truncate mt-0.5">{tabDescriptions[tab.value]}</p>
+                          </div>
+                          {isActive && <div className="ml-auto w-1 h-4 bg-blue-500 rounded-full flex-shrink-0" />}
+                        </button>
+                      </li>
+                    </React.Fragment>
+                  );
+                })}
+              </ul>
+            </nav>
+          </div>
+
+          {/* ─── Conteúdo da aba selecionada ───────────────────────────── */}
+          <div className="flex-1 min-w-0">
 
           {/* ─── Aba: WhatsApp ─────────────────────────────────────────── */}
-          <TabsContent value="whatsapp" className="space-y-6">
+          {activeTab === 'whatsapp' && <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {renderStatusCard('Conexão', connectionStatus, 'Conexão com WhatsApp API')}
               {renderStatusCard('Webhook', webhookStatus, 'Status do webhook')}
@@ -1571,10 +1637,10 @@ export function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
+          </div>}
 
-          {/* ─── Aba: Conta ────────────────────────────────────────────── */}
-          <TabsContent value="account" className="space-y-6">
+          {/* ─── Aba: Conta ──────────────────────────────────────────── */}
+          {activeTab === 'account' && <div className="space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle>Informações da Conta</CardTitle>
@@ -1617,10 +1683,10 @@ export function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
+          </div>}
 
-          {/* ─── Aba: Notificações ─────────────────────────────────────── */}
-          <TabsContent value="notifications" className="space-y-6">
+          {/* ─── Aba: Notificações ─────────────────────────────────────────── */}
+          {activeTab === 'notifications' && <div className="space-y-6">
             <Card className="border border-slate-200 shadow-sm">
               <CardHeader className="pb-4">
                 <CardTitle className="text-lg">Notificações Gerais</CardTitle>
@@ -1675,10 +1741,10 @@ export function SettingsPage() {
                 <StatusSwitch checked={notificationSettings.trackingNotificationsEnabled} onCheckedChange={(v) => setNotificationSettings(p => ({ ...p, trackingNotificationsEnabled: v }))} label="Rastreamento" description="Notificações de rastreio" icon={MapPin} />
               </CardContent>
             </Card>
-          </TabsContent>
+          </div>}
 
-          {/* ─── Aba: Atendimento ──────────────────────────────────────── */}
-          <TabsContent value="attendance" className="space-y-6">
+          {/* ─── Aba: Atendimento ────────────────────────────────────────── */}
+          {activeTab === 'attendance' && <div className="space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle>Configurações de Atendimento</CardTitle>
@@ -1738,28 +1804,22 @@ export function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
+          </div>}
 
-          {/* ─── Aba: Geral (ADMIN) ────────────────────────────────────── */}
-          <TabsContent value="geral">
-            <TabGeral clientId={clientId} userRole={userRole} />
-          </TabsContent>
+          {/* ─── Aba: Geral (ADMIN) ────────────────────────────────────────── */}
+          {activeTab === 'geral' && <TabGeral clientId={clientId} userRole={userRole} />}
 
-          {/* ─── Aba: Chamados (ADMIN) ─────────────────────────────────── */}
-          <TabsContent value="chamados">
-            <TabChamados clientId={clientId} userRole={userRole} />
-          </TabsContent>
+          {/* ─── Aba: Chamados (ADMIN) ────────────────────────────────────────── */}
+          {activeTab === 'chamados' && <TabChamados clientId={clientId} userRole={userRole} />}
 
-          {/* ─── Aba: Equipe (ADMIN) ───────────────────────────────────── */}
-          <TabsContent value="equipe">
-            <TabEquipe clientId={clientId} userRole={userRole} />
-          </TabsContent>
+          {/* ─── Aba: Equipe (ADMIN) ───────────────────────────────────────────── */}
+          {activeTab === 'equipe' && <TabEquipe clientId={clientId} userRole={userRole} />}
 
-          {/* ─── Aba: Backup (ADMIN) ───────────────────────────────────── */}
-          <TabsContent value="backup">
-            <TabBackup clientId={clientId} userRole={userRole} />
-          </TabsContent>
-        </Tabs>
+          {/* ─── Aba: Backup (ADMIN) ───────────────────────────────────────────── */}
+          {activeTab === 'backup' && <TabBackup clientId={clientId} userRole={userRole} />}
+
+          </div>{/* fim conteúdo */}
+        </div>{/* fim flex layout */}
       </div>
     </div>
   );
