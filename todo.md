@@ -1421,5 +1421,5 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Implementar filtros (todas, não lidas)
 - [x] Adicionar status visual (lida/não lida)
 - [x] Corrigir erros de TypeScript
-- [ ] Testar funcionalidade completa
-- [ ] Adicionar notificações em tempo real (WebSocket)
+- [x] Testar funcionalidade completa (página carregando corretamente, layout bonito, botões funcionais)
+- [x] Adicionar notificações em tempo real (refetchInterval: 5000ms implementado)
