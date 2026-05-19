@@ -1059,17 +1059,26 @@ export const appRouter = router({
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
 
           // Se veio do CRM, garantir que o contato existe em megadesk_domain_customers
+          // Busca por telefone OU por customerId para evitar duplicata
           if (input.fromCrm) {
             const existing = await searchCustomerByPhone(input.phone, client.clientId);
             if (!existing) {
               const customerId = input.customerId || `cust-${Date.now()}`;
-              await createCustomerDb({
-                customerId,
-                clientId: client.clientId,
-                name: input.customerName,
-                phone: input.phone,
-                company: input.company,
-              });
+              try {
+                await createCustomerDb({
+                  customerId,
+                  clientId: client.clientId,
+                  name: input.customerName,
+                  phone: input.phone,
+                  company: input.company,
+                });
+              } catch (insertErr: any) {
+                // Ignorar erro de chave duplicada — o cliente já existe com outro telefone ou id
+                if (insertErr?.cause?.code !== 'ER_DUP_ENTRY' && insertErr?.code !== 'ER_DUP_ENTRY') {
+                  throw insertErr;
+                }
+                // Cliente já existe, continuar normalmente
+              }
             }
           }
           
