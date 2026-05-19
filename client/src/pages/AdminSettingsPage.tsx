@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
-import { MessageSquare, Check, AlertCircle, Loader2, Eye, EyeOff, Upload, Building2 } from "lucide-react";
+import { MessageSquare, Check, AlertCircle, Loader2, Eye, EyeOff, Upload, Building2, Lock } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { toast } from "sonner";
 
 interface AdminSettingsPageProps {
@@ -14,9 +15,23 @@ interface AdminSettingsPageProps {
 }
 
 export function AdminSettingsPage({ clientId }: AdminSettingsPageProps) {
+  const { user } = useAuth();
   const [showAccessToken, setShowAccessToken] = useState(false);
   const [showWebhookToken, setShowWebhookToken] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
+
+  // Verificar se o usuário é admin
+  if (!user || (user as any)?.role !== "admin") {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-center">
+          <Lock className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-slate-900">Acesso Restrito</h3>
+          <p className="text-slate-600 mt-2">Apenas administradores podem acessar as configurações.</p>
+        </div>
+      </div>
+    );
+  }
 
   // Company form state
   const [companyFormData, setCompanyFormData] = useState({

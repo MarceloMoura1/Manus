@@ -27,6 +27,7 @@ import { Toaster } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { MODULE_LABELS } from "@shared/const";
 import { AdminsSection } from "./AdminsSection";
+import { AdminSettingsPage } from "./AdminSettingsPage";
 import { ClientEditPage } from "./ClientEditPage";
 
 function cn(...classes: Array<string | false | undefined | null>) {
@@ -48,7 +49,7 @@ type ModuleName = (typeof ALL_MODULES)[number];
 
 // MODULE_LABELS importado de @shared/const
 
-type Section = "dashboard" | "clients" | "users" | "admins" | "backups";
+type Section = "dashboard" | "clients" | "users" | "admins" | "backups" | "settings";
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function getAdminLoginUrl() {
   const origin = window.location.origin;
@@ -352,6 +353,7 @@ const NAV_ITEMS = [
   { key: "clients" as Section, label: "Clientes", icon: Building2 },
   { key: "users" as Section, label: "Usuários", icon: Users },
   { key: "admins" as Section, label: "Administradores", icon: ShieldCheck },
+  { key: "settings" as Section, label: "Configurações", icon: Settings },
   { key: "backups" as Section, label: "Backups", icon: Database },
 ];
 
@@ -1278,6 +1280,12 @@ export default function AdminPanel() {
             {/* Admins */}
             {active === "admins" && (
               <AdminsSection currentUserEmail={user.email ?? ""} />
+            )}
+            {/* Settings */}
+            {active === "settings" && (
+              <section className="space-y-6">
+                <AdminSettingsPage clientId={selectedClient?.clientId || ""} />
+              </section>
             )}
             {/* Backups */}
             {active === "backups" && (

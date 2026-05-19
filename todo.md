@@ -1296,3 +1296,10 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Implementar backup automático
 - [x] Implementar exportação de dados
 - [x] Implementar restauração de dados
+
+## Fase 128: Aba WhatsApp integrada na pagina de Configuracoes do Admin (concluida)
+- [x] Integrar AdminSettingsPage no AdminPanel como nova secao "Configuracoes"
+- [x] Adicionar protecao de role admin para acessar a pagina
+- [x] Implementar Aba WhatsApp com formulario de credenciais
+- [x] Implementar Aba Geral com dados da empresa
+- [x] Testar fluxo completo de acesso e preenchimento de formularios
