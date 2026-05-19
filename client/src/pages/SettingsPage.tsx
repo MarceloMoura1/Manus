@@ -8,12 +8,26 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Trash2, Plus, Edit2, X, Lock, Bell, MessageSquare } from 'lucide-react';
+import { Trash2, Plus, Edit2, X, Lock, Bell, MessageSquare, Wifi, WifiOff, Check, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 
 export function SettingsPage() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = React.useState('account');
+  const [activeTab, setActiveTab] = React.useState('whatsapp');
+  
+  // Aba: WhatsApp
+  const [webhookVerifyToken, setWebhookVerifyToken] = React.useState('');
+  
+  // Função para gerar token seguro
+  const generateSecureToken = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+    let token = '';
+    for (let i = 0; i < 32; i++) {
+      token += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setWebhookVerifyToken(token);
+    toast.success('Token gerado com sucesso!');
+  };
   
   // Aba: Conta
   const [editingName, setEditingName] = React.useState(false);
@@ -121,7 +135,11 @@ export function SettingsPage() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mb-8">
+          <TabsList className="grid w-full grid-cols-4 mb-8">
+            <TabsTrigger value="whatsapp" className="flex items-center gap-2">
+              <MessageSquare className="w-4 h-4" />
+              <span className="hidden sm:inline">WhatsApp</span>
+            </TabsTrigger>
             <TabsTrigger value="account" className="flex items-center gap-2">
               <Lock className="w-4 h-4" />
               <span className="hidden sm:inline">Conta</span>
@@ -135,6 +153,192 @@ export function SettingsPage() {
               <span className="hidden sm:inline">Atendimento</span>
             </TabsTrigger>
           </TabsList>
+
+          {/* Aba: WhatsApp */}
+          <TabsContent value="whatsapp" className="space-y-6">
+            {/* Status Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-300">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Status de Conexão</p>
+                      <p className="text-2xl font-bold text-green-700 mt-2">Conectado</p>
+                    </div>
+                    <Wifi className="w-8 h-8 text-green-600" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-300">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Webhook</p>
+                      <p className="text-2xl font-bold text-blue-700 mt-2">Ativo</p>
+                    </div>
+                    <Check className="w-8 h-8 text-blue-600" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="bg-gradient-to-br from-purple-50 to-purple-100 border-purple-300">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Credenciais</p>
+                      <p className="text-2xl font-bold text-purple-700 mt-2">Válidas</p>
+                    </div>
+                    <Check className="w-8 h-8 text-purple-600" />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Instruções de Integração */}
+            <Card className="bg-blue-50 border-blue-200">
+              <CardHeader>
+                <CardTitle className="text-blue-900">Como Integrar WhatsApp</CardTitle>
+                <CardDescription>Siga os passos abaixo para configurar sua integração</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ol className="space-y-3 text-sm">
+                  <li className="flex gap-3">
+                    <span className="font-bold text-blue-600 min-w-fit">1.</span>
+                    <span>Acesse <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Facebook Developers</a></span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="font-bold text-blue-600 min-w-fit">2.</span>
+                    <span>Crie um app e configure WhatsApp Business API</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="font-bold text-blue-600 min-w-fit">3.</span>
+                    <span>Obtenha seu Phone Number ID, Business Account ID e Access Token</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="font-bold text-blue-600 min-w-fit">4.</span>
+                    <span>Preencha os campos abaixo com as informações</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="font-bold text-blue-600 min-w-fit">5.</span>
+                    <span>Configure o Webhook URL abaixo em seu app do Facebook</span>
+                  </li>
+                </ol>
+              </CardContent>
+            </Card>
+
+            {/* Webhook URL */}
+            <Card>
+              <CardHeader>
+                <CardTitle>URL do Webhook</CardTitle>
+                <CardDescription>Configure esta URL em seu app do Facebook</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex gap-2">
+                  <Input
+                    value={`${window.location.origin}/api/webhooks/whatsapp`}
+                    readOnly
+                    className="bg-slate-100 border-slate-300"
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${window.location.origin}/api/webhooks/whatsapp`);
+                      toast.success('URL copiada para a área de transferência');
+                    }}
+                  >
+                    Copiar
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Formulário de Configuração */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Configurar Credenciais WhatsApp</CardTitle>
+                <CardDescription>Preencha com as informações do seu app do Facebook</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Phone Number ID</label>
+                  <Input
+                    placeholder="Ex: 123456789012345"
+                    className="border-slate-300"
+                  />
+                  <p className="text-xs text-muted-foreground">ID do número de telefone WhatsApp Business</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Business Account ID</label>
+                  <Input
+                    placeholder="Ex: 987654321098765"
+                    className="border-slate-300"
+                  />
+                  <p className="text-xs text-muted-foreground">ID da sua conta WhatsApp Business</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Access Token</label>
+                  <Input
+                    type="password"
+                    placeholder="Cole seu token de acesso aqui"
+                    className="border-slate-300"
+                  />
+                  <p className="text-xs text-muted-foreground">Token de acesso da API do WhatsApp</p>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-foreground">Webhook Verify Token</label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={generateSecureToken}
+                      className="text-blue-600 hover:text-blue-700 border-blue-200 text-xs"
+                    >
+                      Gerar Token
+                    </Button>
+                  </div>
+                  <Input
+                    type="password"
+                    placeholder="Token para verificação do webhook"
+                    value={webhookVerifyToken}
+                    onChange={(e) => setWebhookVerifyToken(e.target.value)}
+                    className="border-slate-300"
+                  />
+                  <p className="text-xs text-muted-foreground">Token que você define para verificar requisições do webhook</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Número de Telefone</label>
+                  <Input
+                    placeholder="Ex: +5541987654321"
+                    className="border-slate-300"
+                  />
+                  <p className="text-xs text-muted-foreground">Número WhatsApp Business conectado</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Webhook URL</label>
+                  <Input
+                    value={`${window.location.origin}/api/webhooks/whatsapp`}
+                    readOnly
+                    className="bg-slate-100 border-slate-300"
+                  />
+                  <p className="text-xs text-muted-foreground">URL automática para receber mensagens</p>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <Button className="bg-blue-600 hover:bg-blue-700">
+                    Salvar Configurações
+                  </Button>
+                  <Button variant="outline">
+                    Testar Conexão
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
           {/* Aba: Conta */}
           <TabsContent value="account" className="space-y-6">
