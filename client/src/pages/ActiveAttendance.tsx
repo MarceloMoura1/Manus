@@ -125,10 +125,15 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
         crmClientId: customerData.crmClientId || undefined,
       });
 
-      setSuccessMessage(`Conversa iniciada com ${customerData.name}!`);
+      setSuccessMessage(`Conversa iniciada com ${customerData.name}! Redirecionando...`);
+      // Redirecionar para a página de Conversas após 1.2s
       setTimeout(() => {
-        handleReset();
-      }, 2000);
+        if (onNavigate) {
+          onNavigate('conversations');
+        } else {
+          handleReset();
+        }
+      }, 1200);
     } catch (err: any) {
       setError(err.message || 'Erro ao iniciar conversa');
     } finally {

@@ -1107,7 +1107,8 @@ export const appRouter = router({
           };
           conversations.push(newConversation);
           audit("MegaDesk", `Conversa iniciada com ${input.customerName}`, client.clientId);
-          await persistSyncState();
+          // Não chamar persistSyncState() aqui — a conversa já foi salva diretamente no banco
+          // via createConversationDb acima. persistSyncState faz DELETE+INSERT em massa e é muito lento.
           return { ok: true, conversationId };
         } catch (error) {
           console.error("Erro ao criar conversa:", error);
