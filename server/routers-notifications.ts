@@ -1,4 +1,4 @@
-import { router, protectedProcedure } from "./_core/trpc";
+import { router, publicProcedure, protectedProcedure, megadeskProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { getDb } from "./db";
 import { megadeskNotifications } from "../drizzle/schema";
@@ -10,7 +10,7 @@ import { TRPCError } from "@trpc/server";
 
 export const notificationsRouter = router({
   // Get all notifications for current user
-  getNotifications: protectedProcedure
+  getNotifications: megadeskProcedure
     .input(
       z.object({
         clientId: z.string(),
@@ -22,7 +22,6 @@ export const notificationsRouter = router({
     .query(async ({ input, ctx }) => {
       try {
         const dbInstance = getDb();
-        const userIdStr = String(ctx.user?.id || "");
         
         // Filter by clientId only (notifications are already scoped to client)
         const whereConditions = [
@@ -75,7 +74,7 @@ export const notificationsRouter = router({
     }),
 
   // Mark notification as read
-  markAsRead: protectedProcedure
+  markAsRead: megadeskProcedure
     .input(
       z.object({
         clientId: z.string(),
@@ -125,7 +124,7 @@ export const notificationsRouter = router({
     }),
 
   // Delete notification
-  deleteNotification: protectedProcedure
+  deleteNotification: megadeskProcedure
     .input(
       z.object({
         clientId: z.string(),
@@ -171,7 +170,7 @@ export const notificationsRouter = router({
     }),
 
   // Mark all as read
-  markAllAsRead: protectedProcedure
+  markAllAsRead: megadeskProcedure
     .input(
       z.object({
         clientId: z.string(),
@@ -207,7 +206,7 @@ export const notificationsRouter = router({
     }),
 
   // Create notification (for testing)
-  createNotification: protectedProcedure
+  createNotification: megadeskProcedure
     .input(
       z.object({
         clientId: z.string(),

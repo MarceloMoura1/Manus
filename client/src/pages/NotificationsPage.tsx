@@ -44,20 +44,24 @@ export function NotificationsPage() {
     }
     
     // Fallback: use a default clientId for testing
-    const defaultClientId = "MegaDesk Testes";
+    const defaultClientId = "test-client-dev";
     console.log("Using default clientId:", defaultClientId);
     setClientId(defaultClientId);
   }, []);
 
   // Fetch notifications
-  const { data: notificationsData, isLoading, refetch } = trpc.notifications.getNotifications.useQuery(
+  const { data: notificationsData, isLoading, refetch, error } = trpc.notifications.getNotifications.useQuery(
     {
       clientId,
       unreadOnly: activeTab === "unread",
       limit: 100,
     },
-    { enabled: !!clientId && !!user, refetchInterval: 5000 }
+    { enabled: !!clientId, refetchInterval: 5000 }
   );
+
+  useEffect(() => {
+    console.log("Notifications Query Debug:", { clientId, notificationsData, error, isLoading, user });
+  }, [notificationsData, error, isLoading, clientId, user]);
 
   // Mutations
   const markAsReadMutation = trpc.notifications.markAsRead.useMutation({
@@ -199,7 +203,12 @@ export function NotificationsPage() {
           </TabsList>
 
           <TabsContent value={activeTab} className="mt-6">
-            {isLoading ? (
+            {error ? (
+              <Card className="p-6 bg-red-50 border-red-200">
+                <p className="text-red-700 font-semibold">Erro ao carregar notificações</p>
+                <p className="text-red-600 text-sm mt-1">{error.message}</p>
+              </Card>
+            ) : isLoading ? (
               <div className="space-y-4">
                 {[1, 2, 3].map((i) => (
                   <Card key={i} className="p-4 bg-white animate-pulse">
@@ -251,24 +260,23 @@ export function NotificationsPage() {
                         {!notification.isRead && (
                           <Button
                             onClick={() => handleMarkAsRead(notification.notificationId)}
-                            disabled={markAsReadMutation.isPending}
+                            variant="ghost"
                             size="sm"
-                            variant="outline"
-                            className="gap-1"
-                            title="Marcar como lida"
+                            className="gap-1 text-xs"
+                            disabled={markAsReadMutation.isPending}
                           >
-                            <Check className="w-4 h-4" />
+                            <Check className="w-3 h-3" />
+                            Visualizado
                           </Button>
                         )}
                         <Button
                           onClick={() => handleDelete(notification.notificationId)}
-                          disabled={deleteNotificationMutation.isPending}
+                          variant="ghost"
                           size="sm"
-                          variant="outline"
-                          className="gap-1 text-red-600 hover:text-red-700 hover:bg-red-50"
-                          title="Deletar notificação"
+                          className="gap-1 text-xs text-red-500 hover:text-red-700"
+                          disabled={deleteNotificationMutation.isPending}
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-3 h-3" />
                         </Button>
                       </div>
                     </div>

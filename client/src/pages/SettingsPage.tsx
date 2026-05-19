@@ -488,46 +488,110 @@ export function SettingsPage() {
 
           {/* Aba: Notificações */}
           <TabsContent value="notifications" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Configurações de Notificações</CardTitle>
-                <CardDescription>Personalize como você recebe notificações</CardDescription>
+            {/* Notificações Gerais */}
+            <Card className="border border-slate-200 shadow-sm">
+              <CardHeader className="pb-4">
+                <CardTitle className="text-lg">Notificações Gerais</CardTitle>
+                <CardDescription>Controle principal de notificações</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium">Notificações Gerais</p>
-                    <p className="text-sm text-muted-foreground">Ativar/desativar todas as notificações</p>
+                {/* Notificações Gerais */}
+                <div className={`p-4 rounded-lg border-2 transition-all ${
+                  notificationSettings.notificationsEnabled
+                    ? 'bg-green-50 border-green-200'
+                    : 'bg-red-50 border-red-200'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold text-slate-900">Notificações Gerais</p>
+                      <p className="text-sm text-slate-600 mt-1">Ativar/desativar todas as notificações da plataforma</p>
+                    </div>
+                    <Switch
+                      checked={notificationSettings.notificationsEnabled}
+                      onCheckedChange={(checked) =>
+                        setNotificationSettings(prev => ({
+                          ...prev,
+                          notificationsEnabled: checked,
+                        }))
+                      }
+                      className={`${
+                        notificationSettings.notificationsEnabled
+                          ? 'data-[state=checked]:bg-green-500'
+                          : 'data-[state=unchecked]:bg-red-500'
+                      }`}
+                    />
                   </div>
-                  <Switch
-                    checked={notificationSettings.notificationsEnabled}
-                    onCheckedChange={(checked) =>
-                      setNotificationSettings(prev => ({
-                        ...prev,
-                        notificationsEnabled: checked,
-                      }))
-                    }
-                  />
+                  <div className="mt-3 flex items-center gap-2">
+                    {notificationSettings.notificationsEnabled ? (
+                      <>
+                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                        <span className="text-xs font-medium text-green-700">Ativado</span>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                        <span className="text-xs font-medium text-red-700">Desativado</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Som e Volume */}
+            <Card className="border border-slate-200 shadow-sm">
+              <CardHeader className="pb-4">
+                <CardTitle className="text-lg">Som e Volume</CardTitle>
+                <CardDescription>Configure o som das notificações</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Som de Notificação */}
+                <div className={`p-4 rounded-lg border-2 transition-all ${
+                  notificationSettings.soundEnabled
+                    ? 'bg-green-50 border-green-200'
+                    : 'bg-red-50 border-red-200'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold text-slate-900">Som de Notificação</p>
+                      <p className="text-sm text-slate-600 mt-1">Reproduzir som ao receber notificações</p>
+                    </div>
+                    <Switch
+                      checked={notificationSettings.soundEnabled}
+                      onCheckedChange={(checked) =>
+                        setNotificationSettings(prev => ({
+                          ...prev,
+                          soundEnabled: checked,
+                        }))
+                      }
+                      className={`${
+                        notificationSettings.soundEnabled
+                          ? 'data-[state=checked]:bg-green-500'
+                          : 'data-[state=unchecked]:bg-red-500'
+                      }`}
+                    />
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    {notificationSettings.soundEnabled ? (
+                      <>
+                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                        <span className="text-xs font-medium text-green-700">Ativado</span>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                        <span className="text-xs font-medium text-red-700">Desativado</span>
+                      </>
+                    )}
+                  </div>
                 </div>
 
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium">Som de Notificação</p>
-                    <p className="text-sm text-muted-foreground">Reproduzir som ao receber notificações</p>
+                {/* Volume do Som */}
+                <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="font-semibold text-slate-900">Volume do Som</p>
+                    <span className="text-sm font-medium text-slate-600">{notificationSettings.soundVolume}%</span>
                   </div>
-                  <Switch
-                    checked={notificationSettings.soundEnabled}
-                    onCheckedChange={(checked) =>
-                      setNotificationSettings(prev => ({
-                        ...prev,
-                        soundEnabled: checked,
-                      }))
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <p className="font-medium">Volume do Som</p>
                   <Slider
                     value={[notificationSettings.soundVolume]}
                     onValueChange={(value) =>
@@ -538,17 +602,42 @@ export function SettingsPage() {
                     }
                     max={100}
                     step={1}
+                    className="w-full"
                   />
-                  <p className="text-sm text-muted-foreground">{notificationSettings.soundVolume}%</p>
                 </div>
+              </CardContent>
+            </Card>
 
-                <div className="border-t pt-4 space-y-4">
-                  <p className="font-medium">Tipos de Notificações</p>
-
+            {/* Tipos de Notificações */}
+            <Card className="border border-slate-200 shadow-sm">
+              <CardHeader className="pb-4">
+                <CardTitle className="text-lg">Tipos de Notificações</CardTitle>
+                <CardDescription>Escolha quais notificações deseja receber</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {/* WhatsApp */}
+                <div className={`p-4 rounded-lg border-2 transition-all ${
+                  notificationSettings.whatsappNotificationsEnabled
+                    ? 'bg-green-50 border-green-200'
+                    : 'bg-red-50 border-red-200'
+                }`}>
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <MessageSquare className="w-4 h-4" />
-                      <p>Notificações do WhatsApp</p>
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${
+                        notificationSettings.whatsappNotificationsEnabled
+                          ? 'bg-green-100'
+                          : 'bg-red-100'
+                      }`}>
+                        <MessageSquare className={`w-5 h-5 ${
+                          notificationSettings.whatsappNotificationsEnabled
+                            ? 'text-green-600'
+                            : 'text-red-600'
+                        }`} />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-900">WhatsApp</p>
+                        <p className="text-sm text-slate-600">Notificações de mensagens</p>
+                      </div>
                     </div>
                     <Switch
                       checked={notificationSettings.whatsappNotificationsEnabled}
@@ -558,13 +647,38 @@ export function SettingsPage() {
                           whatsappNotificationsEnabled: checked,
                         }))
                       }
+                      className={`${
+                        notificationSettings.whatsappNotificationsEnabled
+                          ? 'data-[state=checked]:bg-green-500'
+                          : 'data-[state=unchecked]:bg-red-500'
+                      }`}
                     />
                   </div>
+                </div>
 
+                {/* Chamados */}
+                <div className={`p-4 rounded-lg border-2 transition-all ${
+                  notificationSettings.ticketsNotificationsEnabled
+                    ? 'bg-green-50 border-green-200'
+                    : 'bg-red-50 border-red-200'
+                }`}>
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Bell className="w-4 h-4" />
-                      <p>Notificações de Chamados</p>
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${
+                        notificationSettings.ticketsNotificationsEnabled
+                          ? 'bg-green-100'
+                          : 'bg-red-100'
+                      }`}>
+                        <Bell className={`w-5 h-5 ${
+                          notificationSettings.ticketsNotificationsEnabled
+                            ? 'text-green-600'
+                            : 'text-red-600'
+                        }`} />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-900">Chamados</p>
+                        <p className="text-sm text-slate-600">Notificações de tickets</p>
+                      </div>
                     </div>
                     <Switch
                       checked={notificationSettings.ticketsNotificationsEnabled}
@@ -574,13 +688,38 @@ export function SettingsPage() {
                           ticketsNotificationsEnabled: checked,
                         }))
                       }
+                      className={`${
+                        notificationSettings.ticketsNotificationsEnabled
+                          ? 'data-[state=checked]:bg-green-500'
+                          : 'data-[state=unchecked]:bg-red-500'
+                      }`}
                     />
                   </div>
+                </div>
 
+                {/* IA */}
+                <div className={`p-4 rounded-lg border-2 transition-all ${
+                  notificationSettings.iaNotificationsEnabled
+                    ? 'bg-green-50 border-green-200'
+                    : 'bg-red-50 border-red-200'
+                }`}>
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Wifi className="w-4 h-4" />
-                      <p>Notificações da IA</p>
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${
+                        notificationSettings.iaNotificationsEnabled
+                          ? 'bg-green-100'
+                          : 'bg-red-100'
+                      }`}>
+                        <Wifi className={`w-5 h-5 ${
+                          notificationSettings.iaNotificationsEnabled
+                            ? 'text-green-600'
+                            : 'text-red-600'
+                        }`} />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-900">Assistente IA</p>
+                        <p className="text-sm text-slate-600">Notificações do assistente</p>
+                      </div>
                     </div>
                     <Switch
                       checked={notificationSettings.iaNotificationsEnabled}
@@ -590,6 +729,11 @@ export function SettingsPage() {
                           iaNotificationsEnabled: checked,
                         }))
                       }
+                      className={`${
+                        notificationSettings.iaNotificationsEnabled
+                          ? 'data-[state=checked]:bg-green-500'
+                          : 'data-[state=unchecked]:bg-red-500'
+                      }`}
                     />
                   </div>
                 </div>
