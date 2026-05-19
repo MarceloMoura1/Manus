@@ -414,16 +414,12 @@ function ConversationsPage() {
 
   const { data: conversationsData } = trpc.megadesk.getConversations.useQuery(
     { clientId },
-    { enabled: !!clientId }
+    { enabled: !!clientId, refetchInterval: 5000, refetchOnWindowFocus: true }
   );
 
   React.useEffect(() => {
-    if (conversationsData && conversationsData.length > 0) {
+    if (conversationsData) {
       setConversations(conversationsData);
-    } else {
-      setConversations([
-        { id: 'cust-1778848377677', name: 'João Silva', phone: '11999999999', company: 'Tech Solutions', lastMessage: 'Olá, tudo bem?', timestamp: Date.now(), status: 'open', isUnread: true },
-      ]);
     }
   }, [conversationsData]);
 

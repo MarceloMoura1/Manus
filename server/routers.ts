@@ -1119,20 +1119,21 @@ export const appRouter = router({
       .input(z.object({ clientId: z.string().min(1) }))
       .query(async ({ input }) => {
         try {
-          await hydrateSyncState();
           const client = getReleasedClientOrThrow(input.clientId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
           
-          // Retornar conversas do cliente
-          const clientConversations = conversations.filter(c => c.clientId === client.clientId);
-          return clientConversations.map(c => ({
-            id: c.id,
-            name: c.name,
+          // Ler diretamente do banco para incluir conversas do Baileys em tempo real
+          const { getConversationsByClientId } = await import("./db");
+          const rows = await getConversationsByClientId(client.clientId);
+          return rows.map(c => ({
+            id: c.conversationId,
+            name: c.customerName,
             phone: c.phone,
-            company: c.company,
-            status: c.status,
+            company: c.company ?? "",
+            status: c.status as "open" | "bot" | "closed",
             lastMessage: c.lastMessage,
-            timestamp: c.time,
+            timestamp: c.updatedAt ? new Date(c.updatedAt).getTime() : new Date(c.createdAt ?? Date.now()).getTime(),
+            isUnread: c.status === "bot",
           }));
         } catch (error) {
           console.error("Erro ao buscar conversas:", error);

@@ -15,6 +15,7 @@ import QRCode from "qrcode";
 import path from "path";
 import fs from "fs";
 import pino from "pino";
+import { getPool } from "./db";
 
 // Diretório para armazenar sessões
 const SESSIONS_DIR = path.join(process.cwd(), ".baileys-sessions");
@@ -187,27 +188,39 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
       }
     });
 
-    // Receber mensagens
+    // Receber mensagens e persistir no banco
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
       if (type !== "notify") return;
       for (const msg of messages) {
         if (!msg.message) continue;
+        // Ignorar mensagens enviadas pelo próprio número
+        if (msg.key.fromMe) continue;
         const from = msg.key.remoteJid || "";
         const isGroup = from.endsWith("@g.us");
         if (isGroup) continue;
 
+        const phone = from.replace("@s.whatsapp.net", "");
         const text =
           msg.message.conversation ||
           msg.message.extendedTextMessage?.text ||
-          "";
+          msg.message.imageMessage?.caption ||
+          msg.message.videoMessage?.caption ||
+          "[mídia]";
 
-        if (text) {
-          broadcast(clientId, "message", {
-            from: from.replace("@s.whatsapp.net", ""),
-            text,
-            timestamp: msg.messageTimestamp,
-          });
+        const timestamp = Number(msg.messageTimestamp) * 1000;
+        const now = new Date(timestamp);
+
+        try {
+          await handleIncomingMessage(clientId, phone, text, now);
+        } catch (err) {
+          console.error("[Baileys] Erro ao persistir mensagem:", err);
         }
+
+        broadcast(clientId, "message", {
+          from: phone,
+          text,
+          timestamp: msg.messageTimestamp,
+        });
       }
     });
   } catch (err) {
@@ -279,5 +292,98 @@ export async function restoreExistingSessions(): Promise<void> {
         console.error(`[Baileys] Falha ao restaurar sessão ${clientId}:`, err);
       }
     }
+  }
+}
+
+/**
+ * Processa mensagem recebida: cria ou atualiza a conversa no banco com status "bot"
+ * Garante isolamento por clientId e que a conversa aparece na página de Conversas
+ */
+async function handleIncomingMessage(
+  clientId: string,
+  phone: string,
+  text: string,
+  timestamp: Date
+): Promise<void> {
+  const pool = getPool();
+
+  // Formatar o número de telefone (remover caracteres não numéricos)
+  const cleanPhone = phone.replace(/\D/g, "");
+
+  // 1. Buscar conversa existente para esse telefone + clientId com status != closed
+  const [existingRows] = await pool.execute(
+    `SELECT conversation_id, messages_json, customer_name, company
+     FROM megadesk_domain_conversations
+     WHERE client_id = ? AND phone = ? AND status != 'closed'
+     ORDER BY created_at DESC LIMIT 1`,
+    [clientId, cleanPhone]
+  ) as any[];
+
+  const nowLabel = timestamp.toLocaleString("pt-BR");
+  const messageEntry = {
+    id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+    sender: "customer",
+    text,
+    timestamp: timestamp.toISOString(),
+    type: "text",
+  };
+
+  if (existingRows && existingRows.length > 0) {
+    // 2a. Conversa já existe — adicionar mensagem e atualizar last_message
+    const existing = existingRows[0];
+    let messages: any[] = [];
+    try {
+      messages = JSON.parse(existing.messages_json || "[]");
+    } catch { messages = []; }
+    messages.push(messageEntry);
+
+    await pool.execute(
+      `UPDATE megadesk_domain_conversations
+       SET messages_json = ?, last_message = ?, time_label = ?, status = 'bot', updated_at = NOW()
+       WHERE conversation_id = ? AND client_id = ?`,
+      [JSON.stringify(messages), text, nowLabel, existing.conversation_id, clientId]
+    );
+
+    console.log(`[Baileys] Mensagem adicionada à conversa existente ${existing.conversation_id}`);
+  } else {
+    // 2b. Nova conversa — criar com status "bot"
+    const conversationId = `conv-baileys-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
+
+    // Tentar buscar nome do cliente cadastrado
+    const [customerRows] = await pool.execute(
+      `SELECT name, company FROM megadesk_domain_customers
+       WHERE client_id = ? AND phone = ? LIMIT 1`,
+      [clientId, cleanPhone]
+    ) as any[];
+
+    const customerName =
+      customerRows && customerRows.length > 0
+        ? customerRows[0].name
+        : `+${cleanPhone}`;
+    const company =
+      customerRows && customerRows.length > 0
+        ? customerRows[0].company || ""
+        : "";
+
+    const messages = [messageEntry];
+
+    await pool.execute(
+      `INSERT INTO megadesk_domain_conversations
+         (conversation_id, client_id, customer_name, phone, company, status,
+          last_message, time_label, messages_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'bot', ?, ?, ?, NOW(), NOW())`,
+      [
+        conversationId,
+        clientId,
+        customerName,
+        cleanPhone,
+        company,
+        text,
+        nowLabel,
+        JSON.stringify(messages),
+      ]
+    );
+
+    console.log(`[Baileys] Nova conversa criada: ${conversationId} para +${cleanPhone}`);
   }
 }
