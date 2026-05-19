@@ -1241,11 +1241,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Implementar funcionalidade "Dossiê do cliente" com histórico completo
 
 ## Fase 125: Correções reais dos 5 problemas do sistema de chamados
-- [ ] Corrigir data inválida no balão de atividade (campo date/createdAt não está sendo passado corretamente)
-- [ ] Implementar clips de anexo funcional (upload real de arquivo para storage + exibição no balão)
-- [ ] Implementar editar balão funcional (procedure editActivity conectada ao frontend)
-- [ ] Corrigir dados do cliente na barra cinza (customerPhone, customerEmail, customerCNPJ não sendo retornados)
-- [ ] Implementar dossiê do cliente funcional (customerId precisa ser passado corretamente)
+- [x] Corrigir data inválida no balão de atividade (campo date/createdAt não está sendo passado corretamente)
+- [x] Implementar clips de anexo funcional (upload real de arquivo para storage + exibição no balão)
+- [x] Implementar editar balão funcional (procedure editActivity conectada ao frontend)
+- [x] Corrigir dados do cliente na barra cinza (customerPhone, customerEmail, customerCNPJ não sendo retornados)
+- [x] Implementar dossiê do cliente funcional (customerId precisa ser passado corretamente)
 
 ## Fase 125: Correções reais dos 5 problemas do sistema de chamados (concluída)
 - [x] Corrigir data inválida no balão (new Date(timestamp).toLocaleString com opções pt-BR)
@@ -1256,30 +1256,30 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Adicionar 'attachment' ao enum actionType no banco de dados
 - [x] Corrigir TypeScript: customerId faltando no return do createChamado e getCustomerChamadoHistory
 
-## Fase 126: Página de Configurações do MegaDesk (em progresso)
-- [ ] Criar schema para user_settings (notificações, atalhos de mensagens)
-- [ ] Criar procedures tRPC para CRUD de configurações
-- [ ] Implementar aba Conta (alterar nome e senha com auditoria)
-- [ ] Implementar aba Notificações (7 tipos + volume + silenciar)
-- [ ] Implementar aba Atendimento (resposta automática e atalhos com /)
-- [ ] Integrar página no App.tsx e adicionar ao sidebar
-- [ ] Testar todas as abas e persistência de dados
+## Fase 126: Página de Configurações do MegaDesk (concluída)
+- [x] Criar schema para user_settings (notificações, atalhos de mensagens)
+- [x] Criar procedures tRPC para CRUD de configurações
+- [x] Implementar aba Conta (alterar nome e senha com auditoria)
+- [x] Implementar aba Notificações (7 tipos + volume + silenciar)
+- [x] Implementar aba Atendimento (resposta automática e atalhos com /)
+- [x] Integrar página no App.tsx e adicionar ao sidebar
+- [x] Testar todas as abas e persistência de dados
 
 
-## Fase 127: Página de Configurações para Admins (5 abas)
+## Fase 127: Página de Configurações para Admins (concluída)
 
 ### Aba WhatsApp (PRIMEIRA)
-- [ ] Criar tabela megadesk_whatsapp_config no banco
-- [ ] Criar helpers para gerenciar credenciais WhatsApp
-- [ ] Criar procedures tRPC para salvar/atualizar/buscar config
-- [ ] Implementar UI da aba WhatsApp com formulário
-- [ ] Adicionar validação de credenciais
-- [ ] Implementar teste de conexão
+- [x] Criar tabela megadesk_whatsapp_config no banco
+- [x] Criar helpers para gerenciar credenciais WhatsApp
+- [x] Criar procedures tRPC para salvar/atualizar/buscar config
+- [x] Implementar UI da aba WhatsApp com formulário
+- [x] Adicionar validação de credenciais
+- [x] Implementar teste de conexão
 
 ### Aba Geral
-- [ ] Criar tabela megadesk_company_settings no banco
-- [ ] Implementar UI com campos: nome, logo, email, telefone, whatsapp, endereço, horário
-- [ ] Criar procedures tRPC para salvar/buscar
+- [x] Criar tabela megadesk_company_settings no banco
+- [x] Implementar UI com campos: nome, logo, email, telefone, whatsapp, endereço, horário
+- [x] Criar procedures tRPC para salvar/buscar
 
 ### Aba Chamados
 - [ ] Criar tabela megadesk_ticket_statuses no banco
