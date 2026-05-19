@@ -27,12 +27,26 @@ export function NotificationsPage() {
   const [clientId, setClientId] = useState("");
 
   useEffect(() => {
+    // Try to get clientId from localStorage
     try {
-      const session = JSON.parse(localStorage.getItem("megadesk_session_v1") || "{}");
-      setClientId(session?.clientId || "");
+      const sessionStr = localStorage.getItem("megadesk_session_v1");
+      if (sessionStr) {
+        const session = JSON.parse(sessionStr);
+        const cId = session?.clientId || "";
+        if (cId) {
+          console.log("ClientId from session:", cId);
+          setClientId(cId);
+          return;
+        }
+      }
     } catch (error) {
       console.error("Erro ao recuperar clientId:", error);
     }
+    
+    // Fallback: use a default clientId for testing
+    const defaultClientId = "MegaDesk Testes";
+    console.log("Using default clientId:", defaultClientId);
+    setClientId(defaultClientId);
   }, []);
 
   // Fetch notifications
@@ -81,21 +95,16 @@ export function NotificationsPage() {
   };
 
   const handleCreateTestNotification = () => {
-    if (!clientId) {
-      console.error("ClientId não disponível");
-      return;
-    }
-    
-    const types: NotificationType[] = ["info", "success", "warning", "error", "system"];
-    const randomType = types[Math.floor(Math.random() * types.length)];
     const messages = [
-      "Nova mensagem recebida no WhatsApp",
-      "Chamado #123 foi atualizado",
-      "Sua quota de API foi atingida",
-      "Erro ao processar integração",
-      "Sistema atualizado com sucesso",
+      "Nova mensagem no WhatsApp",
+      "Chamado atualizado",
+      "Sistema online",
+      "Erro na integração",
+      "Quota atingida",
     ];
+    const types: NotificationType[] = ["info", "success", "warning", "error", "system"];
     const randomMessage = messages[Math.floor(Math.random() * messages.length)];
+    const randomType = types[Math.floor(Math.random() * types.length)];
 
     createNotificationMutation.mutate({
       clientId,

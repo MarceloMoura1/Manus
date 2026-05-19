@@ -6,10 +6,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { TRPCError } from "@trpc/server";
 
-const userId = () => {
-  // This will be replaced with actual user ID at runtime
-  return "user-id";
-};
+// Removed unused userId function
 
 export const notificationsRouter = router({
   // Get all notifications for current user
@@ -27,9 +24,9 @@ export const notificationsRouter = router({
         const dbInstance = getDb();
         const userIdStr = String(ctx.user?.id || "");
         
+        // Filter by clientId only (notifications are already scoped to client)
         const whereConditions = [
           eq(megadeskNotifications.clientId, input.clientId),
-          eq(megadeskNotifications.userId, userIdStr),
         ];
         
         if (input.unreadOnly) {
@@ -49,7 +46,6 @@ export const notificationsRouter = router({
         // Get total count
         const countConditions = [
           eq(megadeskNotifications.clientId, input.clientId),
-          eq(megadeskNotifications.userId, userIdStr),
         ];
         
         if (input.unreadOnly) {

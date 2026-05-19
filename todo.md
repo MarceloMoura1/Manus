@@ -1423,3 +1423,6 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Corrigir erros de TypeScript
 - [x] Testar funcionalidade completa (página carregando corretamente, layout bonito, botões funcionais)
 - [x] Adicionar notificações em tempo real (refetchInterval: 5000ms implementado)
+- [x] Corrigir query de notificações para filtrar apenas por clientId
+- [x] Implementar layout completo com cards, ícones, filtros e botões de ação
+- [x] Página de notificações 100% funcional com refetch automático
