@@ -54,6 +54,24 @@ export const megadeskSettingsRouter = router({
     )
     .query(async ({ input }) => {
       requireClientAdmin(input.userRole);
+      
+      // Buscar dados sincronizados do cliente (sempre puxar dados mais recentes)
+      const syncedData = await getSyncedClientData(input.clientId);
+      if (syncedData && syncedData.companySettings) {
+        const cs = syncedData.companySettings;
+        return {
+          settingId: cs.settingId,
+          clientId: cs.clientId,
+          companyName: cs.companyName || '',
+          logoUrl: cs.logoUrl || '',
+          email: cs.email || '',
+          phone: cs.phone || '',
+          whatsapp: cs.whatsapp || '',
+          address: cs.address || '',
+          businessHours: cs.businessHours || '',
+        };
+      }
+      
       const pool = getPool();
       const [rows] = await pool.execute(
         "SELECT * FROM megadesk_company_settings WHERE client_id = ?",
