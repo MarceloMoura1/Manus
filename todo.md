@@ -1282,9 +1282,9 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Criar procedures tRPC para salvar/buscar
 
 ### Aba Chamados
-- [ ] Criar tabela megadesk_ticket_statuses no banco
-- [ ] Implementar UI para criar/editar/deletar status personalizados
-- [ ] Adicionar filtro funcional na página de Chamados
+- [x] Criar tabela megadesk_ticket_statuses no banco
+- [x] Implementar UI para criar/editar/deletar status personalizados
+- [x] Adicionar filtro funcional na página de Chamados
 
 ### Aba Equipe
 - [ ] Criar procedures tRPC para gerenciar usuários

@@ -155,6 +155,20 @@ export const megadeskDomainChamadoSequence = mysqlTable("megadesk_domain_chamado
   clientIdx: index("idx_mdcs_client").on(table.clientId),
 }));
 
+export const megadeskTicketStatuses = mysqlTable("megadesk_ticket_statuses", {
+  statusId: varchar("status_id", { length: 80 }).primaryKey(),
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  name: varchar("name", { length: 120 }).notNull(),
+  color: varchar("color", { length: 7 }).notNull().default("#3b82f6"),
+  order: int("order").notNull().default(0),
+  isDefault: boolean("is_default").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+}, (table) => ({
+  clientIdx: index("idx_mts_client").on(table.clientId),
+  clientNameUniqueIdx: uniqueIndex("idx_mts_client_name_unique").on(table.clientId, table.name),
+}));
+
 
 export const megadeskDomainChamadoHistory = mysqlTable("megadesk_domain_chamado_history", {
   historyId: varchar("history_id", { length: 80 }).primaryKey(),
