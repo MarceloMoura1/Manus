@@ -904,7 +904,7 @@ export async function getStatusCounts(clientId: string): Promise<{
       .where(eq(megadeskDomainChamados.clientId, clientId));
 
     const counts = {
-      total: 0,
+      total: allChamados.length, // Total de TODOS os chamados
       open: 0,
       in_progress: 0,
       waiting: 0,
@@ -913,18 +913,14 @@ export async function getStatusCounts(clientId: string): Promise<{
 
     // Contar por status
     for (const chamado of allChamados) {
-      if (chamado.status === 'closed') {
-        counts.closed++;
-      } else {
-        counts.total++;
-      }
-      
       if (chamado.status === 'open') {
         counts.open++;
       } else if (chamado.status === 'in_progress') {
         counts.in_progress++;
       } else if (chamado.status === 'waiting') {
         counts.waiting++;
+      } else if (chamado.status === 'closed') {
+        counts.closed++;
       }
     }
 

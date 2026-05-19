@@ -1316,9 +1316,10 @@ export function TicketsPage() {
         status: newStatus,
       });
 
-      // Recarregar a lista de chamados
+      // Recarregar a lista de chamados e atualizar contadores
       await chamadosQuery.refetch();
       await utils.chamados.list.invalidate();
+      await utils.chamados.getStatusCounts.invalidate();
     } catch (error) {
       console.error('Erro ao atualizar status:', error);
       // Reverter para status anterior se falhar
@@ -1374,7 +1375,7 @@ export function TicketsPage() {
         actionType: 'close',
       });
 
-      // Recarregar a lista de chamados
+      // Recarregar a lista de chamados e atualizar contadores
       const refetchedChamado = await chamadosQuery.refetch();
       if (refetchedChamado.data?.chamados) {
         const updated = refetchedChamado.data.chamados.find((c: any) => c.id === selectedChamado.id);
@@ -1383,6 +1384,7 @@ export function TicketsPage() {
         }
       }
       await utils.chamados.list.invalidate();
+      await utils.chamados.getStatusCounts.invalidate();
     } catch (error) {
       console.error('Erro ao encerrar chamado:', error);
       showToast('Erro ao sincronizar encerramento', 'error');
@@ -1430,8 +1432,9 @@ export function TicketsPage() {
         setSelectedCrmCustomer(null);
         setCompanySearchResults([]);
         setShowCompanyDropdown(false);
-        // Invalidar cache
+        // Invalidar cache e atualizar contadores
         await utils.chamados.list.invalidate();
+        await utils.chamados.getStatusCounts.invalidate();
         await chamadosQuery.refetch();
       }
     } catch (error: any) {
