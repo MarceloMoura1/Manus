@@ -2,7 +2,7 @@
  * tRPC router para gerenciar configurações de WhatsApp
  * Apenas admins podem acessar estas procedures
  */
-import { router, protectedProcedure, adminProcedure } from "./trpc";
+import { router, protectedProcedure, adminProcedure } from "./_core/trpc";
 import { z } from "zod";
 import {
   getWhatsappConfig,
@@ -11,7 +11,7 @@ import {
   updateWebhookStatus,
   deleteWhatsappConfig,
 } from "./db-whatsapp";
-import { getReleasedClientOrThrow } from "./db";
+import { getReleasedClientOrThrow } from "./_core/context";
 
 export const whatsappRouter = router({
   /**

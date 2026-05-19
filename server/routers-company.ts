@@ -1,10 +1,10 @@
 /**
  * tRPC router para gerenciar dados da empresa
  */
-import { router, adminProcedure } from "./trpc";
+import { router, adminProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { getCompanySettings, saveCompanySettings } from "./db-company";
-import { getReleasedClientOrThrow } from "./db";
+import { getReleasedClientOrThrow } from "./_core/context";
 
 export const companyRouter = router({
   /**
