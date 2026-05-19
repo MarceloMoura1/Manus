@@ -2,7 +2,7 @@
  * tRPC router para gerenciar scripts de bot IA
  */
 import { z } from "zod";
-import { router, protectedProcedure } from "./_core/trpc";
+import { router, megadeskProcedure } from "./_core/trpc";
 import {
   createBotScript,
   getBotScripts,
@@ -21,16 +21,20 @@ export const botScriptsRouter = router({
   /**
    * Listar todos os scripts de bot de um cliente
    */
-  list: protectedProcedure
+  list: megadeskProcedure
     .input(z.object({ clientId: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      // Validar que clientId pertence ao tenant
+      if (input.clientId !== ctx.tenantId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Acesso negado" });
+      }
       return getBotScripts(input.clientId);
     }),
 
   /**
    * Obter um script específico
    */
-  get: protectedProcedure
+  get: megadeskProcedure
     .input(z.object({ clientId: z.string(), scriptId: z.string() }))
     .query(async ({ input }) => {
       const script = await getBotScript(input.clientId, input.scriptId);
@@ -46,7 +50,7 @@ export const botScriptsRouter = router({
   /**
    * Criar novo script de bot
    */
-  create: protectedProcedure
+  create: megadeskProcedure
     .input(
       z.object({
         clientId: z.string(),
@@ -69,7 +73,7 @@ export const botScriptsRouter = router({
   /**
    * Atualizar script de bot
    */
-  update: protectedProcedure
+  update: megadeskProcedure
     .input(
       z.object({
         clientId: z.string(),
@@ -102,7 +106,7 @@ export const botScriptsRouter = router({
   /**
    * Deletar script de bot
    */
-  delete: protectedProcedure
+  delete: megadeskProcedure
     .input(z.object({ clientId: z.string(), scriptId: z.string() }))
     .mutation(async ({ input }) => {
       const script = await getBotScript(input.clientId, input.scriptId);
@@ -120,7 +124,7 @@ export const botScriptsRouter = router({
   /**
    * Ativar script de bot
    */
-  activate: protectedProcedure
+  activate: megadeskProcedure
     .input(z.object({ clientId: z.string(), scriptId: z.string() }))
     .mutation(async ({ input }) => {
       const script = await getBotScript(input.clientId, input.scriptId);
@@ -138,7 +142,7 @@ export const botScriptsRouter = router({
   /**
    * Desativar script de bot
    */
-  deactivate: protectedProcedure
+  deactivate: megadeskProcedure
     .input(z.object({ clientId: z.string(), scriptId: z.string() }))
     .mutation(async ({ input }) => {
       const script = await getBotScript(input.clientId, input.scriptId);
@@ -156,13 +160,13 @@ export const botScriptsRouter = router({
   /**
    * Obter script ativo
    */
-  getActive: protectedProcedure
+  getActive: megadeskProcedure
     .input(z.object({ clientId: z.string() }))
     .query(async ({ input }) => {
       return getActiveBotScript(input.clientId);
     }),
 
-  testScript: protectedProcedure
+  testScript: megadeskProcedure
     .input(
       z.object({
         clientId: z.string(),

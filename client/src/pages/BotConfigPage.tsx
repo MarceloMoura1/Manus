@@ -1,414 +1,499 @@
-import { useAuth } from "@/_core/hooks/useAuth";
-import { trpc } from "@/lib/trpc";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Spinner } from "@/components/ui/spinner";
-import { toast } from "sonner";
-import { Trash2, Send, Zap } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+'use client';
+
+import { useState, useEffect } from 'react';
+import { trpc } from '@/lib/trpc';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
+import { Trash2, Send, Edit2, Check } from 'lucide-react';
 
 interface BotScript {
   scriptId: string;
   clientId: string;
   name: string;
-  description?: string;
+  description: string | null;
   systemPrompt: string;
-  initialMessage?: string;
+  initialMessage: string | null;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
 
 interface ChatMessage {
-  role: "user" | "assistant";
+  role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
 }
 
 export function BotConfigPage() {
-  const { user } = useAuth();
-  const clientId = user?.clientId;
-
-  // Estados do painel esquerdo (Novo Roteiro)
-  const [newScriptName, setNewScriptName] = useState("");
-  const [newScriptDescription, setNewScriptDescription] = useState("");
-  const [newScriptPrompt, setNewScriptPrompt] = useState("");
-  const [newScriptInitialMsg, setNewScriptInitialMsg] = useState("");
-
-  // Estados do painel central (Lista de Roteiros)
+  const [clientId, setClientId] = useState<string | null>(null);
   const [scripts, setScripts] = useState<BotScript[]>([]);
   const [selectedScript, setSelectedScript] = useState<BotScript | null>(null);
 
-  // Estados do painel direito (Teste do Roteiro)
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [isLoadingChat, setIsLoadingChat] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  // Estados do formulário
+  const [formName, setFormName] = useState('');
+  const [formDescription, setFormDescription] = useState('');
+  const [formPrompt, setFormPrompt] = useState('');
+  const [formInitialMsg, setFormInitialMsg] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
 
-  // Queries e Mutations
-  const { data: scriptsList, refetch: refetchScripts } = trpc.botScripts.list.useQuery(
-    { clientId: clientId || "" },
+  // Estados de edição
+  const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
+  const [editingPrompt, setEditingPrompt] = useState('');
+
+  // Estados do chat
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isLoadingChat, setIsLoadingChat] = useState(false);
+
+  // Obter clientId da sessão
+  useEffect(() => {
+    try {
+      const SESSION_KEY = 'megadesk_session_v1';
+      const raw = localStorage.getItem(SESSION_KEY) ?? sessionStorage.getItem(SESSION_KEY);
+      if (raw) {
+        const session = JSON.parse(raw);
+        setClientId(session.clientId);
+      }
+    } catch (e) {
+      console.error('Erro ao obter clientId:', e);
+    }
+  }, []);
+
+  // Mutations
+  const createScriptMutation = trpc.botScripts.create.useMutation();
+  const updateScriptMutation = trpc.botScripts.update.useMutation();
+  const deleteScriptMutation = trpc.botScripts.delete.useMutation();
+  const activateScriptMutation = trpc.botScripts.activate.useMutation();
+  const deactivateScriptMutation = trpc.botScripts.deactivate.useMutation();
+  const { data: scriptsData, refetch: refetchScripts } = trpc.botScripts.list.useQuery(
+    { clientId: clientId || '' },
     { enabled: !!clientId }
   );
-
-  const createScriptMutation = trpc.botScripts.create.useMutation({
-    onSuccess: () => {
-      toast.success("Roteiro criado com sucesso!");
-      setNewScriptName("");
-      setNewScriptDescription("");
-      setNewScriptPrompt("");
-      setNewScriptInitialMsg("");
-      refetchScripts();
-    },
-    onError: (error) => {
-      toast.error(error.message || "Erro ao criar roteiro");
-    },
-  });
-
-  const deleteScriptMutation = trpc.botScripts.delete.useMutation({
-    onSuccess: () => {
-      toast.success("Roteiro deletado com sucesso!");
-      setSelectedScript(null);
-      setChatMessages([]);
-      refetchScripts();
-    },
-    onError: (error) => {
-      toast.error(error.message || "Erro ao deletar roteiro");
-    },
-  });
-
-  const activateScriptMutation = trpc.botScripts.activate.useMutation({
-    onSuccess: () => {
-      toast.success("Roteiro ativado!");
-      refetchScripts();
-    },
-    onError: (error) => {
-      toast.error(error.message || "Erro ao ativar roteiro");
-    },
-  });
-
-  const deactivateScriptMutation = trpc.botScripts.deactivate.useMutation({
-    onSuccess: () => {
-      toast.success("Roteiro desativado!");
-      refetchScripts();
-    },
-    onError: (error) => {
-      toast.error(error.message || "Erro ao desativar roteiro");
-    },
-  });
-
   const testScriptMutation = trpc.botScripts.testScript.useMutation();
 
-  // Atualizar lista de scripts
+  // Carregar roteiros
   useEffect(() => {
-    if (scriptsList) {
-      setScripts(scriptsList);
+    if (scriptsData) {
+      setScripts(scriptsData);
     }
-  }, [scriptsList]);
+  }, [scriptsData]);
 
-  // Auto-scroll para o final do chat
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages]);
+  const loadScripts = async () => {
+    if (refetchScripts) {
+      await refetchScripts();
+    }
+  };
 
-  // Handlers
   const handleCreateScript = async () => {
-    if (!clientId || !newScriptName.trim() || !newScriptPrompt.trim()) {
-      toast.error("Preencha Nome e System Prompt");
+    if (!clientId || !formName.trim() || !formPrompt.trim()) {
+      toast.error('Preencha todos os campos obrigatórios');
       return;
     }
 
-    await createScriptMutation.mutateAsync({
-      clientId,
-      name: newScriptName,
-      description: newScriptDescription,
-      systemPrompt: newScriptPrompt,
-      initialMessage: newScriptInitialMsg,
-    });
+    setIsCreating(true);
+    try {
+      await createScriptMutation.mutateAsync({
+        clientId,
+        name: formName,
+        description: formDescription,
+        systemPrompt: formPrompt,
+        initialMessage: formInitialMsg,
+      });
+
+      toast.success('Roteiro criado com sucesso!');
+      setFormName('');
+      setFormDescription('');
+      setFormPrompt('');
+      setFormInitialMsg('');
+      await loadScripts();
+    } catch (error) {
+      console.error('Erro ao criar roteiro:', error);
+      toast.error('Erro ao criar roteiro');
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const handleUpdatePrompt = async (scriptId: string) => {
+    if (!clientId || !editingPrompt.trim()) {
+      toast.error('Preencha o System Prompt');
+      return;
+    }
+
+    try {
+      await updateScriptMutation.mutateAsync({
+        clientId,
+        scriptId,
+        systemPrompt: editingPrompt,
+      });
+
+      toast.success('Roteiro atualizado com sucesso!');
+      setEditingScriptId(null);
+      setEditingPrompt('');
+      await loadScripts();
+    } catch (error) {
+      console.error('Erro ao atualizar roteiro:', error);
+      toast.error('Erro ao atualizar roteiro');
+    }
   };
 
   const handleDeleteScript = async (scriptId: string) => {
     if (!clientId) return;
-    await deleteScriptMutation.mutateAsync({ clientId, scriptId });
+
+    if (!confirm('Tem certeza que deseja deletar este roteiro?')) return;
+
+    try {
+      await deleteScriptMutation.mutateAsync({ clientId, scriptId });
+      toast.success('Roteiro deletado com sucesso!');
+      if (selectedScript?.scriptId === scriptId) {
+        setSelectedScript(null);
+        setChatMessages([]);
+      }
+      await loadScripts();
+    } catch (error) {
+      console.error('Erro ao deletar roteiro:', error);
+      toast.error('Erro ao deletar roteiro');
+    }
   };
 
   const handleActivateScript = async (scriptId: string) => {
     if (!clientId) return;
-    await activateScriptMutation.mutateAsync({ clientId, scriptId });
+
+    try {
+      await activateScriptMutation.mutateAsync({ clientId, scriptId });
+      toast.success('Roteiro ativado!');
+      await loadScripts();
+    } catch (error) {
+      console.error('Erro ao ativar roteiro:', error);
+      toast.error('Erro ao ativar roteiro');
+    }
   };
 
   const handleDeactivateScript = async (scriptId: string) => {
     if (!clientId) return;
-    await deactivateScriptMutation.mutateAsync({ clientId, scriptId });
+
+    try {
+      await deactivateScriptMutation.mutateAsync({ clientId, scriptId });
+      toast.success('Roteiro desativado!');
+      await loadScripts();
+    } catch (error) {
+      console.error('Erro ao desativar roteiro:', error);
+      toast.error('Erro ao desativar roteiro');
+    }
   };
 
   const handleSelectScript = (script: BotScript) => {
     setSelectedScript(script);
-    setChatMessages([]);
+    setChatMessages([
+      {
+        role: 'assistant',
+        content: script.initialMessage || 'Olá! Como posso ajudá-lo?',
+        timestamp: new Date(),
+      },
+    ]);
   };
 
   const handleSendMessage = async () => {
     if (!chatInput.trim() || !selectedScript || !clientId) return;
 
-    const userMessageContent = chatInput;
     const userMessage: ChatMessage = {
-      role: "user",
-      content: userMessageContent,
+      role: 'user',
+      content: chatInput,
       timestamp: new Date(),
     };
+
     setChatMessages((prev) => [...prev, userMessage]);
-    setChatInput("");
+    setChatInput('');
     setIsLoadingChat(true);
 
     try {
       const response = await testScriptMutation.mutateAsync({
         clientId,
         scriptId: selectedScript.scriptId,
-        userMessage: userMessageContent,
-        conversationHistory: chatMessages.map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        })),
+        userMessage: chatInput,
+        conversationHistory: chatMessages,
       });
 
       const botMessage: ChatMessage = {
-        role: "assistant",
-        content: response.botResponse,
+        role: 'assistant',
+        content: response.botResponse || 'Desculpe, houve um erro na resposta.',
         timestamp: new Date(),
       };
+
       setChatMessages((prev) => [...prev, botMessage]);
     } catch (error) {
-      console.error("Erro ao enviar mensagem:", error);
-      toast.error("Erro ao gerar resposta do bot");
+      console.error('Erro ao enviar mensagem:', error);
+      toast.error('Erro ao enviar mensagem');
     } finally {
       setIsLoadingChat(false);
     }
   };
 
-  if (!clientId) {
-    return <div className="p-6">Carregando...</div>;
-  }
-
   return (
-    <div className="p-6 bg-background min-h-screen">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">Configuração do Bot</h1>
-        <p className="text-muted-foreground">Crie e teste roteiros de IA</p>
-      </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-slate-900">Configuração do Bot</h1>
+          <p className="text-slate-600 mt-2">Crie e teste roteiros de IA para sua plataforma</p>
+        </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Painel Esquerdo: Novo Roteiro */}
-        <Card className="p-6 border border-border">
-          <h2 className="text-xl font-bold mb-4">Novo Roteiro</h2>
+        {/* Main Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Painel Esquerdo: Novo Roteiro */}
+          <div className="lg:col-span-1">
+            <Card className="p-6 bg-white shadow-sm border-slate-200">
+              <h2 className="text-xl font-bold text-slate-900 mb-6">Novo Roteiro</h2>
 
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium">Nome</label>
-              <Input
-                placeholder="Ex: Suporte Técnico"
-                value={newScriptName}
-                onChange={(e) => setNewScriptName(e.target.value)}
-              />
-            </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Nome</label>
+                  <Input
+                    placeholder="Ex: Suporte Técnico"
+                    value={formName}
+                    onChange={(e) => setFormName(e.target.value)}
+                    className="border-slate-300"
+                  />
+                </div>
 
-            <div>
-              <label className="text-sm font-medium">Descrição</label>
-              <Input
-                placeholder="Descrição do roteiro"
-                value={newScriptDescription}
-                onChange={(e) => setNewScriptDescription(e.target.value)}
-              />
-            </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Descrição</label>
+                  <Input
+                    placeholder="Descrição do roteiro"
+                    value={formDescription}
+                    onChange={(e) => setFormDescription(e.target.value)}
+                    className="border-slate-300"
+                  />
+                </div>
 
-            <div>
-              <label className="text-sm font-medium">System Prompt</label>
-              <Textarea
-                placeholder="Instruções para o bot..."
-                value={newScriptPrompt}
-                onChange={(e) => setNewScriptPrompt(e.target.value)}
-                className="min-h-[120px]"
-              />
-            </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">System Prompt</label>
+                  <Textarea
+                    placeholder="Instruções para o bot..."
+                    value={formPrompt}
+                    onChange={(e) => setFormPrompt(e.target.value)}
+                    rows={4}
+                    className="border-slate-300 resize-none"
+                  />
+                </div>
 
-            <div>
-              <label className="text-sm font-medium">Mensagem Inicial</label>
-              <Textarea
-                placeholder="Mensagem de boas-vindas"
-                value={newScriptInitialMsg}
-                onChange={(e) => setNewScriptInitialMsg(e.target.value)}
-                className="min-h-[80px]"
-              />
-            </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Mensagem Inicial</label>
+                  <Textarea
+                    placeholder="Mensagem de boas-vindas"
+                    value={formInitialMsg}
+                    onChange={(e) => setFormInitialMsg(e.target.value)}
+                    rows={3}
+                    className="border-slate-300 resize-none"
+                  />
+                </div>
 
-            <Button
-              onClick={handleCreateScript}
-              disabled={createScriptMutation.isPending}
-              className="w-full bg-blue-600 hover:bg-blue-700"
-            >
-              {createScriptMutation.isPending ? (
-                <>
-                  <Spinner className="mr-2 h-4 w-4" />
-                  Criando...
-                </>
-              ) : (
-                <>
-                  <Zap className="mr-2 h-4 w-4" />
-                  Criar
-                </>
-              )}
-            </Button>
-          </div>
-        </Card>
-
-        {/* Painel Central: Lista de Roteiros */}
-        <Card className="p-6 border border-border">
-          <h2 className="text-xl font-bold mb-4">Roteiros</h2>
-
-          <div className="space-y-3 max-h-[600px] overflow-y-auto">
-            {scripts.length === 0 ? (
-              <p className="text-muted-foreground text-sm">Nenhum roteiro criado</p>
-            ) : (
-              scripts.map((script) => (
-                <div
-                  key={script.scriptId}
-                  className={`p-3 border rounded-lg cursor-pointer transition-colors ${
-                    selectedScript?.scriptId === script.scriptId
-                      ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
-                      : "border-border hover:border-blue-300"
-                  }`}
-                  onClick={() => handleSelectScript(script)}
+                <Button
+                  onClick={handleCreateScript}
+                  disabled={isCreating}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg"
                 >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <h3 className="font-medium">{script.name}</h3>
+                  {isCreating ? 'Criando...' : '+ Criar Roteiro'}
+                </Button>
+              </div>
+            </Card>
+          </div>
+
+          {/* Painel Central: Roteiros */}
+          <div className="lg:col-span-1">
+            <Card className="p-6 bg-white shadow-sm border-slate-200">
+              <h2 className="text-xl font-bold text-slate-900 mb-6">Roteiros</h2>
+
+              <div className="space-y-4 max-h-96 overflow-y-auto">
+                {scripts.length === 0 ? (
+                  <p className="text-slate-500 text-center py-8">Nenhum roteiro criado</p>
+                ) : (
+                  scripts.map((script) => (
+                    <div
+                      key={script.scriptId}
+                      className="border border-slate-200 rounded-lg p-4 bg-slate-50 hover:bg-slate-100 transition cursor-pointer"
+                      onClick={() => handleSelectScript(script)}
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <h3 className="font-semibold text-slate-900">{script.name}</h3>
+                        {script.isActive && (
+                          <Badge className="bg-green-500 text-white">Ativo</Badge>
+                        )}
+                      </div>
+
                       {script.description && (
-                        <p className="text-xs text-muted-foreground mt-1">{script.description}</p>
+                        <p className="text-sm text-slate-600 mb-3">{script.description}</p>
+                      )}
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {script.isActive ? (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeactivateScript(script.scriptId);
+                              }}
+                              className="text-slate-700 border-slate-300"
+                            >
+                              <Check className="w-4 h-4 mr-1" />
+                              Desativar
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleActivateScript(script.scriptId);
+                            }}
+                            className="text-slate-700 border-slate-300"
+                          >
+                            <Check className="w-4 h-4 mr-1" />
+                            Ativar
+                          </Button>
+                        )}
+
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingScriptId(script.scriptId);
+                            setEditingPrompt(script.systemPrompt);
+                          }}
+                          className="text-blue-600 hover:bg-blue-50"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </Button>
+
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteScript(script.scriptId);
+                          }}
+                          className="text-red-600 hover:bg-red-50"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+
+                      {/* Modal de Edição */}
+                      {editingScriptId === script.scriptId && (
+                        <div className="mt-4 pt-4 border-t border-slate-200">
+                          <label className="block text-sm font-medium text-slate-700 mb-2">
+                            Editar System Prompt
+                          </label>
+                          <Textarea
+                            value={editingPrompt}
+                            onChange={(e) => setEditingPrompt(e.target.value)}
+                            rows={4}
+                            className="border-slate-300 resize-none mb-3"
+                          />
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => handleUpdatePrompt(script.scriptId)}
+                              className="bg-blue-600 hover:bg-blue-700 text-white"
+                            >
+                              Salvar
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setEditingScriptId(null);
+                                setEditingPrompt('');
+                              }}
+                              className="text-slate-700 border-slate-300"
+                            >
+                              Cancelar
+                            </Button>
+                          </div>
+                        </div>
                       )}
                     </div>
-                    <Badge variant={script.isActive ? "default" : "secondary"}>
-                      {script.isActive ? "Ativo" : "Inativo"}
-                    </Badge>
+                  ))
+                )}
+              </div>
+            </Card>
+          </div>
+
+          {/* Painel Direito: Teste do Roteiro */}
+          <div className="lg:col-span-1">
+            <Card className="p-6 bg-white shadow-sm border-slate-200 flex flex-col h-full">
+              <h2 className="text-xl font-bold text-slate-900 mb-6">Teste do Roteiro</h2>
+
+              {!selectedScript ? (
+                <div className="flex items-center justify-center flex-1 text-slate-500">
+                  <p>Selecione um roteiro para testar</p>
+                </div>
+              ) : (
+                <div className="flex flex-col flex-1">
+                  {/* Chat Messages */}
+                  <div className="flex-1 overflow-y-auto mb-4 space-y-3 bg-slate-50 rounded-lg p-4">
+                    {chatMessages.map((msg, idx) => (
+                      <div
+                        key={idx}
+                        className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div
+                          className={`max-w-xs px-4 py-2 rounded-lg ${
+                            msg.role === 'user'
+                              ? 'bg-blue-600 text-white rounded-br-none'
+                              : 'bg-slate-200 text-slate-900 rounded-bl-none'
+                          }`}
+                        >
+                          <p className="text-sm">{msg.content}</p>
+                          <p className="text-xs mt-1 opacity-70">
+                            {msg.timestamp.toLocaleTimeString('pt-BR', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    {isLoadingChat && (
+                      <div className="flex justify-start">
+                        <div className="bg-slate-200 text-slate-900 px-4 py-2 rounded-lg rounded-bl-none">
+                          <p className="text-sm">Digitando...</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex gap-2 mt-3">
-                    {script.isActive ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeactivateScript(script.scriptId);
-                        }}
-                      >
-                        ✓ Ativar
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleActivateScript(script.scriptId);
-                        }}
-                      >
-                        ✓ Ativar
-                      </Button>
-                    )}
-
+                  {/* Input */}
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Digite sua mensagem..."
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                      disabled={isLoadingChat}
+                      className="border-slate-300"
+                    />
                     <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteScript(script.scriptId);
-                      }}
+                      onClick={handleSendMessage}
+                      disabled={isLoadingChat || !chatInput.trim()}
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Send className="w-4 h-4" />
                     </Button>
                   </div>
                 </div>
-              ))
-            )}
+              )}
+            </Card>
           </div>
-        </Card>
-
-        {/* Painel Direito: Teste do Roteiro */}
-        <Card className="p-6 border border-border flex flex-col">
-          <h2 className="text-xl font-bold mb-4">Teste do Roteiro</h2>
-
-          {!selectedScript ? (
-            <div className="flex-1 flex items-center justify-center text-muted-foreground">
-              Selecione um roteiro para testar
-            </div>
-          ) : (
-            <>
-              {/* Chat Messages */}
-              <div className="flex-1 overflow-y-auto mb-4 space-y-3 bg-muted/30 p-4 rounded-lg min-h-[300px]">
-                {chatMessages.length === 0 && (
-                  <div className="text-center text-muted-foreground text-sm py-8">
-                    {selectedScript.initialMessage || "Comece a conversa..."}
-                  </div>
-                )}
-
-                {chatMessages.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                  >
-                    <div
-                      className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                        msg.role === "user"
-                          ? "bg-blue-600 text-white rounded-br-none"
-                          : "bg-gray-200 dark:bg-gray-700 text-foreground rounded-bl-none"
-                      }`}
-                    >
-                      <p className="text-sm">{msg.content}</p>
-                      <p className="text-xs opacity-70 mt-1">
-                        {msg.timestamp.toLocaleTimeString()}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-
-                {isLoadingChat && (
-                  <div className="flex justify-start">
-                    <div className="bg-gray-200 dark:bg-gray-700 px-4 py-2 rounded-lg">
-                      <Spinner className="h-4 w-4" />
-                    </div>
-                  </div>
-                )}
-
-                <div ref={chatEndRef} />
-              </div>
-
-              {/* Input Area */}
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Digite sua mensagem..."
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyPress={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendMessage();
-                    }
-                  }}
-                  disabled={isLoadingChat}
-                />
-                <Button
-                  onClick={handleSendMessage}
-                  disabled={isLoadingChat || !chatInput.trim()}
-                  size="icon"
-                >
-                  <Send className="h-4 w-4" />
-                </Button>
-              </div>
-            </>
-          )}
-        </Card>
+        </div>
       </div>
     </div>
   );

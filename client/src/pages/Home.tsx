@@ -10,6 +10,7 @@ import { ConversasPage } from "./ConversasPage";
 import { WhatsAppConfigPage } from "./WhatsAppConfigPage";
 import { SettingsPage as SettingsPageComponent } from "./SettingsPage";
 import { AdminSettingsPage } from "./AdminSettingsPage";
+import { BotConfigPage } from "./BotConfigPage";
 import { TimelineActivity } from "@/components/TimelineActivity";
 
 import { Button } from "@/components/ui/button";
@@ -2319,16 +2320,7 @@ function SettingsPagePlaceholder() {
   );
 }
 
-function BotConfigPage() {
-  return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <h2 className="text-2xl font-bold text-slate-900 mb-4">Configurar Bot</h2>
-        <p className="text-slate-600">Treine e configure o bot de IA.</p>
-      </div>
-    </div>
-  );
-}
+// BotConfigPage é importada de BotConfigPage.tsx
 
 function AIAssistantPage() {
   // IMPORTANTE: usar a mesma chave que o login salva a sessão
