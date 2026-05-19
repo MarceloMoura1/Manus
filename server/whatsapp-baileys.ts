@@ -153,23 +153,30 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
       }
 
       if (connection === "close") {
-        const shouldReconnect =
-          (lastDisconnect?.error as Boom)?.output?.statusCode !==
-          DisconnectReason.loggedOut;
+        const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+        const isConflict = statusCode === DisconnectReason.connectionReplaced;
 
         session.status = "disconnected";
         session.qrDataUrl = undefined;
         broadcast(clientId, "status", { status: "disconnected" });
 
-        if (shouldReconnect) {
-          // Tentar reconectar após 3 segundos
-          setTimeout(() => startWhatsAppSession(clientId), 3000);
+        if (isLoggedOut || isConflict) {
+          // Deslogado explicitamente pelo usuário OU conflito de sessão
+          // NÃO apagar arquivos automaticamente — deixar o usuário decidir
+          console.log(`[Baileys] Sessão encerrada (${isLoggedOut ? 'logout' : 'conflito'}). Reconecte via QR Code.`);
+          // Remover sock para evitar uso de socket morto
+          session.sock = undefined;
         } else {
-          // Usuário deslogou — limpar sessão salva
-          const sessionDir = getSessionDir(clientId);
-          if (fs.existsSync(sessionDir)) {
-            fs.rmSync(sessionDir, { recursive: true, force: true });
-          }
+          // Queda de conexão temporária — reconectar após 5 segundos
+          console.log(`[Baileys] Conexão perdida (código: ${statusCode}). Reconectando em 5s...`);
+          setTimeout(() => {
+            // Verificar se ainda não foi reconectado por outra instância
+            const current = sessions.get(clientId);
+            if (current && current.status === "disconnected") {
+              startWhatsAppSession(clientId);
+            }
+          }, 5000);
         }
       }
 
@@ -180,6 +187,7 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
         session.phoneNumber = phoneNumber;
         session.qrDataUrl = undefined;
         session.connectedAt = Date.now();
+        console.log(`[Baileys] ✅ Conectado! Número: +${phoneNumber}, clientId: ${clientId}`);
         broadcast(clientId, "status", {
           status: "connected",
           phoneNumber,
@@ -406,23 +414,26 @@ export async function sendBaileysMessage(
 ): Promise<{ ok: boolean; error?: string }> {
   // Tentar encontrar sessão pelo clientId original ou sanitizado
   const sanitizedId = clientId.replace(/[^a-zA-Z0-9-_]/g, "_");
+  
+  // Função auxiliar: sessão válida = tem sock e status é connected ou connecting (pode estar reconectando)
+  const isUsable = (s: SessionInfo | undefined): boolean => !!(s?.sock && (s.status === "connected" || s.status === "connecting"));
+  
   let session = sessions.get(clientId);
-  if (!session || session.status !== "connected" || !session.sock) {
-    // Fallback: tentar pelo clientId sanitizado (nome do diretório)
+  if (!isUsable(session)) {
     session = sessions.get(sanitizedId);
   }
-  if (!session || session.status !== "connected" || !session.sock) {
-    // Fallback: buscar qualquer sessão conectada que corresponda ao clientId
+  if (!isUsable(session)) {
+    // Fallback: buscar qualquer sessão com sock ativo
     for (const [key, s] of sessions.entries()) {
-      if (s.status === "connected" && s.sock && 
-          (key === clientId || key === sanitizedId || clientId.includes(key) || key.includes(clientId.replace(/[^a-zA-Z0-9]/g, "")))) {
+      if (s.sock && (s.status === "connected" || s.status === "connecting")) {
         session = s;
+        console.log(`[Baileys] Usando sessão fallback: ${key} para clientId: ${clientId}`);
         break;
       }
     }
   }
-  if (!session || session.status !== "connected" || !session.sock) {
-    console.error(`[Baileys] Sessão não encontrada para clientId: ${clientId} (sanitized: ${sanitizedId}). Sessões ativas: ${[...sessions.keys()].join(", ")}`);
+  if (!session?.sock) {
+    console.error(`[Baileys] Sessão não encontrada para clientId: ${clientId} (sanitized: ${sanitizedId}). Sessões ativas: ${[...sessions.entries()].map(([k,v]) => k+':'+v.status).join(", ")}`);
     return { ok: false, error: "WhatsApp não conectado para este cliente" };
   }
 
