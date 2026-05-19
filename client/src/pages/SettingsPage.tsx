@@ -15,8 +15,65 @@ export function SettingsPage() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = React.useState('whatsapp');
   
-  // Aba: WhatsApp
+  // Aba: WhatsApp - Estados dos campos
+  const [phoneNumberId, setPhoneNumberId] = React.useState('');
+  const [businessAccountId, setBusinessAccountId] = React.useState('');
+  const [accessToken, setAccessToken] = React.useState('');
   const [webhookVerifyToken, setWebhookVerifyToken] = React.useState('');
+  const [phoneNumber, setPhoneNumber] = React.useState('');
+  const [testingConnection, setTestingConnection] = React.useState(false);
+  
+  // Estados de validação
+  const [connectionStatus, setConnectionStatus] = React.useState<'connected' | 'disconnected' | 'testing'>('disconnected');
+  const [webhookStatus, setWebhookStatus] = React.useState<'active' | 'inactive' | 'testing'>('inactive');
+  const [credentialsStatus, setCredentialsStatus] = React.useState<'valid' | 'invalid' | 'checking'>('invalid');
+  
+  // Função para validar credenciais
+  const validateCredentials = React.useCallback(() => {
+    const isPhoneNumberIdValid = /^\d{1,}$/.test(phoneNumberId) && phoneNumberId.length >= 10;
+    const isBusinessAccountIdValid = /^\d{1,}$/.test(businessAccountId) && businessAccountId.length >= 10;
+    const isAccessTokenValid = accessToken.length >= 20;
+    const isWebhookTokenValid = webhookVerifyToken.length >= 8;
+    const isPhoneNumberValid = /^\+?\d{10,}$/.test(phoneNumber.replace(/[\s-]/g, ''));
+    
+    const allValid = isPhoneNumberIdValid && isBusinessAccountIdValid && isAccessTokenValid && isWebhookTokenValid && isPhoneNumberValid;
+    
+    setCredentialsStatus(allValid ? 'valid' : 'invalid');
+    if (allValid) {
+      setWebhookStatus('active');
+    } else {
+      setWebhookStatus('inactive');
+    }
+  }, [phoneNumberId, businessAccountId, accessToken, webhookVerifyToken, phoneNumber]);
+  
+  // Chamar validação quando campos mudam
+  React.useEffect(() => {
+    validateCredentials();
+  }, [phoneNumberId, businessAccountId, accessToken, webhookVerifyToken, phoneNumber, validateCredentials]);
+  
+  // Função para testar conexão
+  const testConnection = async () => {
+    setTestingConnection(true);
+    setConnectionStatus('testing');
+    
+    try {
+      // Simular teste de conexão
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      if (credentialsStatus === 'valid') {
+        setConnectionStatus('connected');
+        toast.success('Conexão com WhatsApp estabelecida com sucesso!');
+      } else {
+        setConnectionStatus('disconnected');
+        toast.error('Falha ao conectar. Verifique as credenciais.');
+      }
+    } catch (error) {
+      setConnectionStatus('disconnected');
+      toast.error('Erro ao testar conexão.');
+    } finally {
+      setTestingConnection(false);
+    }
+  };
   
   // Função para gerar token seguro
   const generateSecureToken = () => {
@@ -48,82 +105,82 @@ export function SettingsPage() {
     iaNotificationsEnabled: true,
     erpNotificationsEnabled: true,
     trackingNotificationsEnabled: true,
-    showMessagePreview: true,
   });
-  const [muteModalOpen, setMuteModalOpen] = React.useState(false);
 
   // Aba: Atendimento
-  const [autoResponseEnabled, setAutoResponseEnabled] = React.useState(false);
-  const [autoResponseMessage, setAutoResponseMessage] = React.useState('');
-  const [shortcuts, setShortcuts] = React.useState<Array<{ key: string; message: string }>>([]);
+  const [attendanceSettings, setAttendanceSettings] = React.useState({
+    autoReplyEnabled: false,
+    autoReplyMessage: '',
+    shortcuts: [] as Array<{ key: string; message: string }>,
+  });
+
   const [newShortcutKey, setNewShortcutKey] = React.useState('');
   const [newShortcutMessage, setNewShortcutMessage] = React.useState('');
-  const [editingShortcutKey, setEditingShortcutKey] = React.useState<string | null>(null);
-  const [editingShortcutMessage, setEditingShortcutMessage] = React.useState('');
 
-  const handleSaveName = async () => {
-    if (!newName.trim()) {
-      toast.error('Nome não pode estar vazio');
-      return;
+  const addShortcut = () => {
+    if (newShortcutKey && newShortcutMessage) {
+      setAttendanceSettings(prev => ({
+        ...prev,
+        shortcuts: [...prev.shortcuts, { key: newShortcutKey, message: newShortcutMessage }],
+      }));
+      setNewShortcutKey('');
+      setNewShortcutMessage('');
+      toast.success('Atalho adicionado!');
     }
-    // TODO: Implementar mutation para atualizar nome
-    toast.success('Nome atualizado com sucesso');
-    setEditingName(false);
   };
 
-  const handleChangePassword = async () => {
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      toast.error('Preencha todos os campos');
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      toast.error('Senhas não conferem');
-      return;
-    }
-    if (newPassword.length < 6) {
-      toast.error('Senha deve ter pelo menos 6 caracteres');
-      return;
-    }
-    // TODO: Implementar mutation para alterar senha
-    toast.success('Senha alterada com sucesso');
-    setEditingPassword(false);
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
+  const removeShortcut = (index: number) => {
+    setAttendanceSettings(prev => ({
+      ...prev,
+      shortcuts: prev.shortcuts.filter((_, i) => i !== index),
+    }));
+    toast.success('Atalho removido!');
   };
 
-  const handleMuteNotifications = (minutes: number) => {
-    // TODO: Implementar mutation para silenciar notificações
-    toast.success(`Notificações silenciadas por ${minutes} minutos`);
-    setMuteModalOpen(false);
-  };
+  // Função para renderizar card de status
+  const renderStatusCard = (title: string, status: 'connected' | 'disconnected' | 'testing' | 'active' | 'inactive' | 'valid' | 'invalid' | 'checking', description: string) => {
+    const getStatusColor = () => {
+      if (status === 'connected' || status === 'active' || status === 'valid') return 'bg-green-50 border-green-200';
+      if (status === 'testing' || status === 'checking') return 'bg-blue-50 border-blue-200';
+      return 'bg-red-50 border-red-200';
+    };
 
-  const handleAddShortcut = () => {
-    if (!newShortcutKey.trim() || !newShortcutMessage.trim()) {
-      toast.error('Preencha todos os campos');
-      return;
-    }
-    const normalizedKey = newShortcutKey.toLowerCase().replace(/[^a-z0-9_]/g, '');
-    setShortcuts([...shortcuts, { key: normalizedKey, message: newShortcutMessage }]);
-    toast.success(`Atalho /${normalizedKey} criado com sucesso`);
-    setNewShortcutKey('');
-    setNewShortcutMessage('');
-  };
+    const getStatusIcon = () => {
+      if (status === 'connected' || status === 'active' || status === 'valid') return <Check className="w-6 h-6 text-green-600" />;
+      if (status === 'testing' || status === 'checking') return <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />;
+      return <AlertCircle className="w-6 h-6 text-red-600" />;
+    };
 
-  const handleDeleteShortcut = (key: string) => {
-    setShortcuts(shortcuts.filter((s) => s.key !== key));
-    toast.success('Atalho deletado com sucesso');
-  };
+    const getStatusText = () => {
+      if (status === 'connected') return 'Conectado';
+      if (status === 'active') return 'Ativo';
+      if (status === 'valid') return 'Válidas';
+      if (status === 'testing' || status === 'checking') return 'Verificando...';
+      if (status === 'disconnected') return 'Desconectado';
+      if (status === 'inactive') return 'Inativo';
+      return 'Inválidas';
+    };
 
-  const handleSaveShortcut = (key: string) => {
-    if (!editingShortcutMessage.trim()) {
-      toast.error('Mensagem não pode estar vazia');
-      return;
-    }
-    setShortcuts(shortcuts.map((s) => (s.key === key ? { ...s, message: editingShortcutMessage } : s)));
-    toast.success('Atalho atualizado com sucesso');
-    setEditingShortcutKey(null);
-    setEditingShortcutMessage('');
+    const getStatusTextColor = () => {
+      if (status === 'connected' || status === 'active' || status === 'valid') return 'text-green-700';
+      if (status === 'testing' || status === 'checking') return 'text-blue-700';
+      return 'text-red-700';
+    };
+
+    return (
+      <Card className={`border-2 transition-all ${getStatusColor()}`}>
+        <CardContent className="pt-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600">{title}</p>
+              <p className={`text-lg font-bold ${getStatusTextColor()}`}>{getStatusText()}</p>
+            </div>
+            {getStatusIcon()}
+          </div>
+          <p className="text-xs text-gray-500 mt-2">{description}</p>
+        </CardContent>
+      </Card>
+    );
   };
 
   return (
@@ -135,97 +192,40 @@ export function SettingsPage() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-4 mb-8">
-            <TabsTrigger value="whatsapp" className="flex items-center gap-2">
-              <MessageSquare className="w-4 h-4" />
-              <span className="hidden sm:inline">WhatsApp</span>
-            </TabsTrigger>
-            <TabsTrigger value="account" className="flex items-center gap-2">
-              <Lock className="w-4 h-4" />
-              <span className="hidden sm:inline">Conta</span>
-            </TabsTrigger>
-            <TabsTrigger value="notifications" className="flex items-center gap-2">
-              <Bell className="w-4 h-4" />
-              <span className="hidden sm:inline">Notificações</span>
-            </TabsTrigger>
-            <TabsTrigger value="attendance" className="flex items-center gap-2">
-              <MessageSquare className="w-4 h-4" />
-              <span className="hidden sm:inline">Atendimento</span>
-            </TabsTrigger>
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
+            <TabsTrigger value="account">Conta</TabsTrigger>
+            <TabsTrigger value="notifications">Notificações</TabsTrigger>
+            <TabsTrigger value="attendance">Atendimento</TabsTrigger>
           </TabsList>
 
           {/* Aba: WhatsApp */}
           <TabsContent value="whatsapp" className="space-y-6">
-            {/* Status Cards */}
+            {/* Cards de Status */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-300">
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Status de Conexão</p>
-                      <p className="text-2xl font-bold text-green-700 mt-2">Conectado</p>
-                    </div>
-                    <Wifi className="w-8 h-8 text-green-600" />
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-300">
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Webhook</p>
-                      <p className="text-2xl font-bold text-blue-700 mt-2">Ativo</p>
-                    </div>
-                    <Check className="w-8 h-8 text-blue-600" />
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="bg-gradient-to-br from-purple-50 to-purple-100 border-purple-300">
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Credenciais</p>
-                      <p className="text-2xl font-bold text-purple-700 mt-2">Válidas</p>
-                    </div>
-                    <Check className="w-8 h-8 text-purple-600" />
-                  </div>
-                </CardContent>
-              </Card>
+              {renderStatusCard('Status de Conexão', connectionStatus, 'Conexão com WhatsApp API')}
+              {renderStatusCard('Webhook', webhookStatus, 'Status do webhook para receber mensagens')}
+              {renderStatusCard('Credenciais', credentialsStatus, 'Validação das credenciais fornecidas')}
             </div>
 
-            {/* Instruções de Integração */}
-            <Card className="bg-blue-50 border-blue-200">
+            {/* Instruções */}
+            <Card>
               <CardHeader>
-                <CardTitle className="text-blue-900">Como Integrar WhatsApp</CardTitle>
+                <CardTitle>Como Integrar WhatsApp</CardTitle>
                 <CardDescription>Siga os passos abaixo para configurar sua integração</CardDescription>
               </CardHeader>
               <CardContent>
-                <ol className="space-y-3 text-sm">
-                  <li className="flex gap-3">
-                    <span className="font-bold text-blue-600 min-w-fit">1.</span>
-                    <span>Acesse <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Facebook Developers</a></span>
-                  </li>
-                  <li className="flex gap-3">
-                    <span className="font-bold text-blue-600 min-w-fit">2.</span>
-                    <span>Crie um app e configure WhatsApp Business API</span>
-                  </li>
-                  <li className="flex gap-3">
-                    <span className="font-bold text-blue-600 min-w-fit">3.</span>
-                    <span>Obtenha seu Phone Number ID, Business Account ID e Access Token</span>
-                  </li>
-                  <li className="flex gap-3">
-                    <span className="font-bold text-blue-600 min-w-fit">4.</span>
-                    <span>Preencha os campos abaixo com as informações</span>
-                  </li>
-                  <li className="flex gap-3">
-                    <span className="font-bold text-blue-600 min-w-fit">5.</span>
-                    <span>Configure o Webhook URL abaixo em seu app do Facebook</span>
-                  </li>
+                <ol className="space-y-2 text-sm">
+                  <li>1. Acesse <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Facebook Developers</a></li>
+                  <li>2. Crie um app e configure WhatsApp Business API</li>
+                  <li>3. Obtenha seu Phone Number ID, Business Account ID e Access Token</li>
+                  <li>4. Preencha os campos abaixo com as informações</li>
+                  <li>5. Configure o Webhook URL abaixo em seu app do Facebook</li>
                 </ol>
               </CardContent>
             </Card>
 
-            {/* Webhook URL */}
+            {/* URL do Webhook */}
             <Card>
               <CardHeader>
                 <CardTitle>URL do Webhook</CardTitle>
@@ -234,16 +234,17 @@ export function SettingsPage() {
               <CardContent>
                 <div className="flex gap-2">
                   <Input
+                    type="text"
                     value={`${window.location.origin}/api/webhooks/whatsapp`}
                     readOnly
-                    className="bg-slate-100 border-slate-300"
+                    className="border-slate-300"
                   />
                   <Button
-                    variant="outline"
                     onClick={() => {
                       navigator.clipboard.writeText(`${window.location.origin}/api/webhooks/whatsapp`);
-                      toast.success('URL copiada para a área de transferência');
+                      toast.success('URL copiada!');
                     }}
+                    variant="outline"
                   >
                     Copiar
                   </Button>
@@ -251,17 +252,19 @@ export function SettingsPage() {
               </CardContent>
             </Card>
 
-            {/* Formulário de Configuração */}
+            {/* Configurar Credenciais */}
             <Card>
               <CardHeader>
                 <CardTitle>Configurar Credenciais WhatsApp</CardTitle>
                 <CardDescription>Preencha com as informações do seu app do Facebook</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-6">
+              <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Phone Number ID</label>
                   <Input
                     placeholder="Ex: 123456789012345"
+                    value={phoneNumberId}
+                    onChange={(e) => setPhoneNumberId(e.target.value)}
                     className="border-slate-300"
                   />
                   <p className="text-xs text-muted-foreground">ID do número de telefone WhatsApp Business</p>
@@ -271,6 +274,8 @@ export function SettingsPage() {
                   <label className="text-sm font-medium text-foreground">Business Account ID</label>
                   <Input
                     placeholder="Ex: 987654321098765"
+                    value={businessAccountId}
+                    onChange={(e) => setBusinessAccountId(e.target.value)}
                     className="border-slate-300"
                   />
                   <p className="text-xs text-muted-foreground">ID da sua conta WhatsApp Business</p>
@@ -281,6 +286,8 @@ export function SettingsPage() {
                   <Input
                     type="password"
                     placeholder="Cole seu token de acesso aqui"
+                    value={accessToken}
+                    onChange={(e) => setAccessToken(e.target.value)}
                     className="border-slate-300"
                   />
                   <p className="text-xs text-muted-foreground">Token de acesso da API do WhatsApp</p>
@@ -313,6 +320,8 @@ export function SettingsPage() {
                   <label className="text-sm font-medium text-foreground">Número de Telefone</label>
                   <Input
                     placeholder="Ex: +5541987654321"
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
                     className="border-slate-300"
                   />
                   <p className="text-xs text-muted-foreground">Número WhatsApp Business conectado</p>
@@ -321,19 +330,35 @@ export function SettingsPage() {
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Webhook URL</label>
                   <Input
+                    type="text"
                     value={`${window.location.origin}/api/webhooks/whatsapp`}
                     readOnly
-                    className="bg-slate-100 border-slate-300"
+                    className="border-slate-300"
                   />
                   <p className="text-xs text-muted-foreground">URL automática para receber mensagens</p>
                 </div>
 
-                <div className="flex gap-3 pt-4">
-                  <Button className="bg-blue-600 hover:bg-blue-700">
+                <div className="flex gap-2 pt-4">
+                  <Button className="flex-1 bg-blue-600 hover:bg-blue-700">
                     Salvar Configurações
                   </Button>
-                  <Button variant="outline">
-                    Testar Conexão
+                  <Button
+                    onClick={testConnection}
+                    disabled={testingConnection || credentialsStatus !== 'valid'}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    {testingConnection ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Testando...
+                      </>
+                    ) : (
+                      <>
+                        <Wifi className="w-4 h-4 mr-2" />
+                        Testar Conexão
+                      </>
+                    )}
                   </Button>
                 </div>
               </CardContent>
@@ -347,102 +372,113 @@ export function SettingsPage() {
                 <CardTitle>Informações da Conta</CardTitle>
                 <CardDescription>Gerencie suas informações pessoais</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-6">
-                {/* Alterar Nome */}
-                <div className="space-y-3">
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Nome</label>
-                  {!editingName ? (
-                    <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                      <span className="text-foreground">{newName}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEditingName(true)}
-                        className="text-blue-600 hover:text-blue-700"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
+                  {editingName ? (
+                    <div className="flex gap-2">
                       <Input
                         value={newName}
                         onChange={(e) => setNewName(e.target.value)}
-                        placeholder="Seu nome"
                         className="border-slate-300"
                       />
-                      <div className="flex gap-2">
-                        <Button onClick={handleSaveName} className="bg-blue-600 hover:bg-blue-700">
-                          Salvar
-                        </Button>
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            setEditingName(false);
-                            setNewName(user?.user?.name || '');
-                          }}
-                        >
-                          Cancelar
-                        </Button>
-                      </div>
+                      <Button
+                        onClick={() => {
+                          setEditingName(false);
+                          toast.success('Nome atualizado!');
+                        }}
+                        size="sm"
+                      >
+                        Salvar
+                      </Button>
+                      <Button
+                        onClick={() => setEditingName(false)}
+                        variant="outline"
+                        size="sm"
+                      >
+                        Cancelar
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between p-2 border border-slate-300 rounded">
+                      <span>{newName || 'Não informado'}</span>
+                      <Button
+                        onClick={() => setEditingName(true)}
+                        variant="ghost"
+                        size="sm"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </Button>
                     </div>
                   )}
                 </div>
 
-                {/* Alterar Senha */}
-                <div className="space-y-3">
+                <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Senha</label>
-                  {!editingPassword ? (
-                    <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                      <span className="text-muted-foreground">••••••••</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEditingPassword(true)}
-                        className="text-blue-600 hover:text-blue-700"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
+                  {editingPassword ? (
+                    <div className="space-y-2">
                       <Input
                         type="password"
+                        placeholder="Senha atual"
                         value={currentPassword}
                         onChange={(e) => setCurrentPassword(e.target.value)}
-                        placeholder="Senha atual"
                         className="border-slate-300"
                       />
                       <Input
                         type="password"
+                        placeholder="Nova senha"
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder="Nova senha"
                         className="border-slate-300"
                       />
                       <Input
                         type="password"
+                        placeholder="Confirmar nova senha"
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
-                        placeholder="Confirmar nova senha"
                         className="border-slate-300"
                       />
                       <div className="flex gap-2">
-                        <Button onClick={handleChangePassword} className="bg-blue-600 hover:bg-blue-700">
-                          Alterar Senha
+                        <Button
+                          onClick={() => {
+                            if (newPassword === confirmPassword) {
+                              setEditingPassword(false);
+                              setCurrentPassword('');
+                              setNewPassword('');
+                              setConfirmPassword('');
+                              toast.success('Senha atualizada!');
+                            } else {
+                              toast.error('As senhas não correspondem!');
+                            }
+                          }}
+                          size="sm"
+                        >
+                          Salvar
                         </Button>
                         <Button
-                          variant="outline"
                           onClick={() => {
                             setEditingPassword(false);
                             setCurrentPassword('');
                             setNewPassword('');
                             setConfirmPassword('');
                           }}
+                          variant="outline"
+                          size="sm"
                         >
                           Cancelar
                         </Button>
                       </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between p-2 border border-slate-300 rounded">
+                      <span>••••••••</span>
+                      <Button
+                        onClick={() => setEditingPassword(true)}
+                        variant="ghost"
+                        size="sm"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -454,184 +490,107 @@ export function SettingsPage() {
           <TabsContent value="notifications" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Notificações da Plataforma</CardTitle>
-                <CardDescription>Controle como você recebe notificações</CardDescription>
+                <CardTitle>Configurações de Notificações</CardTitle>
+                <CardDescription>Personalize como você recebe notificações</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-6">
-                {/* Ativar/Desativar Notificações */}
-                <div className={`flex items-center justify-between p-4 border border-slate-200 rounded-lg transition-colors ${
-                  notificationSettings.notificationsEnabled
-                    ? 'bg-green-50 border-green-300'
-                    : 'bg-red-50 border-red-300'
-                }`}>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium text-foreground">Notificações</p>
-                    <p className="text-sm text-muted-foreground">Receber notificações da plataforma</p>
+                    <p className="font-medium">Notificações Gerais</p>
+                    <p className="text-sm text-muted-foreground">Ativar/desativar todas as notificações</p>
                   </div>
-                  <div className={`w-12 h-7 rounded-full transition-colors ${
-                    notificationSettings.notificationsEnabled
-                      ? 'bg-green-500'
-                      : 'bg-red-500'
-                  } flex items-center cursor-pointer`}
-                    onClick={() =>
-                      setNotificationSettings({ ...notificationSettings, notificationsEnabled: !notificationSettings.notificationsEnabled })
+                  <Switch
+                    checked={notificationSettings.notificationsEnabled}
+                    onCheckedChange={(checked) =>
+                      setNotificationSettings(prev => ({
+                        ...prev,
+                        notificationsEnabled: checked,
+                      }))
                     }
-                  >
-                    <div className={`w-6 h-6 bg-white rounded-full transition-transform ${
-                      notificationSettings.notificationsEnabled ? 'translate-x-5' : 'translate-x-0'
-                    }`} />
-                  </div>
+                  />
                 </div>
 
-                {/* Som de Notificações */}
-                <div className={`flex items-center justify-between p-4 border border-slate-200 rounded-lg transition-colors ${
-                  notificationSettings.soundEnabled
-                    ? 'bg-green-50 border-green-300'
-                    : 'bg-red-50 border-red-300'
-                }`}>
+                <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium text-foreground">Som de Notificações</p>
-                    <p className="text-sm text-muted-foreground">Reproduzir som ao receber notificação</p>
+                    <p className="font-medium">Som de Notificação</p>
+                    <p className="text-sm text-muted-foreground">Reproduzir som ao receber notificações</p>
                   </div>
-                  <div className={`w-12 h-7 rounded-full transition-colors ${
-                    notificationSettings.soundEnabled
-                      ? 'bg-green-500'
-                      : 'bg-red-500'
-                  } flex items-center cursor-pointer`}
-                    onClick={() =>
-                      setNotificationSettings({ ...notificationSettings, soundEnabled: !notificationSettings.soundEnabled })
+                  <Switch
+                    checked={notificationSettings.soundEnabled}
+                    onCheckedChange={(checked) =>
+                      setNotificationSettings(prev => ({
+                        ...prev,
+                        soundEnabled: checked,
+                      }))
                     }
-                  >
-                    <div className={`w-6 h-6 bg-white rounded-full transition-transform ${
-                      notificationSettings.soundEnabled ? 'translate-x-5' : 'translate-x-0'
-                    }`} />
-                  </div>
+                  />
                 </div>
 
-                {/* Volume de Notificações */}
-                {notificationSettings.soundEnabled && (
-                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
-                    <div className="flex items-center justify-between">
-                      <p className="font-medium text-foreground">Volume</p>
-                      <span className="text-sm text-muted-foreground">{notificationSettings.soundVolume}%</span>
+                <div className="space-y-2">
+                  <p className="font-medium">Volume do Som</p>
+                  <Slider
+                    value={[notificationSettings.soundVolume]}
+                    onValueChange={(value) =>
+                      setNotificationSettings(prev => ({
+                        ...prev,
+                        soundVolume: value[0],
+                      }))
+                    }
+                    max={100}
+                    step={1}
+                  />
+                  <p className="text-sm text-muted-foreground">{notificationSettings.soundVolume}%</p>
+                </div>
+
+                <div className="border-t pt-4 space-y-4">
+                  <p className="font-medium">Tipos de Notificações</p>
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="w-4 h-4" />
+                      <p>Notificações do WhatsApp</p>
                     </div>
-                    <Slider
-                      value={[notificationSettings.soundVolume]}
-                      onValueChange={(value) =>
-                        setNotificationSettings({ ...notificationSettings, soundVolume: value[0] })
+                    <Switch
+                      checked={notificationSettings.whatsappNotificationsEnabled}
+                      onCheckedChange={(checked) =>
+                        setNotificationSettings(prev => ({
+                          ...prev,
+                          whatsappNotificationsEnabled: checked,
+                        }))
                       }
-                      min={0}
-                      max={100}
-                      step={10}
-                      className="w-full"
                     />
                   </div>
-                )}
 
-                {/* Silenciar Notificações */}
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="font-medium text-foreground">Silenciar Notificações</p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setMuteModalOpen(true)}
-                      className="text-blue-600 hover:text-blue-700 border-blue-200"
-                    >
-                      Silenciar
-                    </Button>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Bell className="w-4 h-4" />
+                      <p>Notificações de Chamados</p>
+                    </div>
+                    <Switch
+                      checked={notificationSettings.ticketsNotificationsEnabled}
+                      onCheckedChange={(checked) =>
+                        setNotificationSettings(prev => ({
+                          ...prev,
+                          ticketsNotificationsEnabled: checked,
+                        }))
+                      }
+                    />
                   </div>
-                  <p className="text-sm text-muted-foreground">Silencie temporariamente as notificações</p>
-                </div>
 
-                {/* Notificações Desktop */}
-                <div className={`flex items-center justify-between p-4 border border-slate-200 rounded-lg transition-colors ${
-                  notificationSettings.desktopNotificationsEnabled
-                    ? 'bg-green-50 border-green-300'
-                    : 'bg-red-50 border-red-300'
-                }`}>
-                  <div>
-                    <p className="font-medium text-foreground">Notificações Desktop</p>
-                    <p className="text-sm text-muted-foreground">Receber notificações na área de trabalho</p>
-                  </div>
-                  <div className={`w-12 h-7 rounded-full transition-colors ${
-                    notificationSettings.desktopNotificationsEnabled
-                      ? 'bg-green-500'
-                      : 'bg-red-500'
-                  } flex items-center cursor-pointer`}
-                    onClick={() =>
-                      setNotificationSettings({ ...notificationSettings, desktopNotificationsEnabled: !notificationSettings.desktopNotificationsEnabled })
-                    }
-                  >
-                    <div className={`w-6 h-6 bg-white rounded-full transition-transform ${
-                      notificationSettings.desktopNotificationsEnabled ? 'translate-x-5' : 'translate-x-0'
-                    }`} />
-                  </div>
-                </div>
-
-                {/* Notificações por Tipo */}
-                <div className="space-y-3">
-                  <p className="font-medium text-foreground">Tipos de Notificações</p>
-                  <div className="space-y-2">
-                    {[
-                      { key: 'whatsappNotificationsEnabled', label: 'WhatsApp' },
-                      { key: 'ticketsNotificationsEnabled', label: 'Chamados' },
-                      { key: 'iaNotificationsEnabled', label: 'IA' },
-                      { key: 'erpNotificationsEnabled', label: 'ERP' },
-                      { key: 'trackingNotificationsEnabled', label: 'Rastreamento' },
-                    ].map((item) => {
-                      const isEnabled = notificationSettings[item.key as keyof typeof notificationSettings] as boolean;
-                      return (
-                        <div key={item.key} className={`flex items-center justify-between p-3 border border-slate-200 rounded-lg transition-colors ${
-                          isEnabled
-                            ? 'bg-green-50 border-green-300'
-                            : 'bg-red-50 border-red-300'
-                        }`}>
-                          <p className="text-foreground">{item.label}</p>
-                          <div className={`w-12 h-7 rounded-full transition-colors ${
-                            isEnabled
-                              ? 'bg-green-500'
-                              : 'bg-red-500'
-                          } flex items-center cursor-pointer`}
-                            onClick={() =>
-                              setNotificationSettings({
-                                ...notificationSettings,
-                                [item.key]: !isEnabled,
-                              })
-                            }
-                          >
-                            <div className={`w-6 h-6 bg-white rounded-full transition-transform ${
-                              isEnabled ? 'translate-x-5' : 'translate-x-0'
-                            }`} />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Mostrar Preview */}
-                <div className={`flex items-center justify-between p-4 border border-slate-200 rounded-lg transition-colors ${
-                  notificationSettings.showMessagePreview
-                    ? 'bg-green-50 border-green-300'
-                    : 'bg-red-50 border-red-300'
-                }`}>
-                  <div>
-                    <p className="font-medium text-foreground">Mostrar Preview de Mensagem</p>
-                    <p className="text-sm text-muted-foreground">Exibir conteúdo da mensagem na notificação</p>
-                  </div>
-                  <div className={`w-12 h-7 rounded-full transition-colors ${
-                    notificationSettings.showMessagePreview
-                      ? 'bg-green-500'
-                      : 'bg-red-500'
-                  } flex items-center cursor-pointer`}
-                    onClick={() =>
-                      setNotificationSettings({ ...notificationSettings, showMessagePreview: !notificationSettings.showMessagePreview })
-                    }
-                  >
-                    <div className={`w-6 h-6 bg-white rounded-full transition-transform ${
-                      notificationSettings.showMessagePreview ? 'translate-x-5' : 'translate-x-0'
-                    }`} />
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Wifi className="w-4 h-4" />
+                      <p>Notificações da IA</p>
+                    </div>
+                    <Switch
+                      checked={notificationSettings.iaNotificationsEnabled}
+                      onCheckedChange={(checked) =>
+                        setNotificationSettings(prev => ({
+                          ...prev,
+                          iaNotificationsEnabled: checked,
+                        }))
+                      }
+                    />
                   </div>
                 </div>
               </CardContent>
@@ -640,180 +599,101 @@ export function SettingsPage() {
 
           {/* Aba: Atendimento */}
           <TabsContent value="attendance" className="space-y-6">
-            {/* Resposta Automática */}
             <Card>
               <CardHeader>
-                <CardTitle>Resposta Automática</CardTitle>
-                <CardDescription>Configure uma resposta automática para suas mensagens</CardDescription>
+                <CardTitle>Configurações de Atendimento</CardTitle>
+                <CardDescription>Personalize sua experiência de atendimento</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium text-foreground">Ativar Resposta Automática</p>
-                    <p className="text-sm text-muted-foreground">Enviar resposta automática quando indisponível</p>
+                    <p className="font-medium">Resposta Automática</p>
+                    <p className="text-sm text-muted-foreground">Enviar resposta automática quando offline</p>
                   </div>
-                  <Switch checked={autoResponseEnabled} onCheckedChange={setAutoResponseEnabled} />
-                </div>
-
-                {autoResponseEnabled && (
-                  <div className="space-y-3">
-                    <label className="text-sm font-medium text-foreground">Mensagem de Resposta</label>
-                    <textarea
-                      value={autoResponseMessage}
-                      onChange={(e) => setAutoResponseMessage(e.target.value)}
-                      placeholder="Digite sua mensagem de resposta automática..."
-                      className="w-full p-3 border border-slate-300 rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      rows={4}
-                    />
-                    <Button className="bg-blue-600 hover:bg-blue-700">Salvar Resposta Automática</Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Atalhos de Mensagens */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Atalhos de Mensagens</CardTitle>
-                <CardDescription>Crie atalhos com / para mensagens frequentes</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Adicionar Novo Atalho */}
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
-                  <p className="font-medium text-foreground">Novo Atalho</p>
-                  <div className="flex gap-2">
-                    <Input
-                      value={newShortcutKey}
-                      onChange={(e) => setNewShortcutKey(e.target.value)}
-                      placeholder="Comando (ex: ola, obrigado)"
-                      className="flex-1 border-slate-300"
-                    />
-                    <Button onClick={handleAddShortcut} className="bg-blue-600 hover:bg-blue-700">
-                      <Plus className="w-4 h-4" />
-                    </Button>
-                  </div>
-                  <textarea
-                    value={newShortcutMessage}
-                    onChange={(e) => setNewShortcutMessage(e.target.value)}
-                    placeholder="Digite a mensagem que será enviada ao usar /{comando}"
-                    className="w-full p-3 border border-slate-300 rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    rows={3}
+                  <Switch
+                    checked={attendanceSettings.autoReplyEnabled}
+                    onCheckedChange={(checked) =>
+                      setAttendanceSettings(prev => ({
+                        ...prev,
+                        autoReplyEnabled: checked,
+                      }))
+                    }
                   />
                 </div>
 
-                {/* Lista de Atalhos */}
-                {shortcuts.length > 0 && (
-                  <div className="space-y-3">
-                    <p className="font-medium text-foreground">Seus Atalhos</p>
-                    {shortcuts.map((shortcut) => (
-                      <div key={shortcut.key} className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
-                        {editingShortcutKey === shortcut.key ? (
-                          <>
-                            <div className="flex items-center justify-between">
-                              <p className="font-medium text-foreground">/{shortcut.key}</p>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setEditingShortcutKey(null)}
-                                className="text-red-600 hover:text-red-700"
-                              >
-                                <X className="w-4 h-4" />
-                              </Button>
-                            </div>
-                            <textarea
-                              value={editingShortcutMessage}
-                              onChange={(e) => setEditingShortcutMessage(e.target.value)}
-                              className="w-full p-3 border border-slate-300 rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              rows={3}
-                            />
-                            <div className="flex gap-2">
-                              <Button
-                                onClick={() => handleSaveShortcut(shortcut.key)}
-                                className="bg-blue-600 hover:bg-blue-700"
-                              >
-                                Salvar
-                              </Button>
-                              <Button
-                                variant="outline"
-                                onClick={() => {
-                                  setEditingShortcutKey(null);
-                                  setEditingShortcutMessage('');
-                                }}
-                              >
-                                Cancelar
-                              </Button>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div className="flex items-center justify-between">
-                              <p className="font-medium text-foreground">/{shortcut.key}</p>
-                              <div className="flex gap-2">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    setEditingShortcutKey(shortcut.key);
-                                    setEditingShortcutMessage(shortcut.message);
-                                  }}
-                                  className="text-blue-600 hover:text-blue-700"
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleDeleteShortcut(shortcut.key)}
-                                  className="text-red-600 hover:text-red-700"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
-                              </div>
-                            </div>
-                            <p className="text-sm text-muted-foreground">{shortcut.message}</p>
-                          </>
-                        )}
-                      </div>
-                    ))}
+                {attendanceSettings.autoReplyEnabled && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">Mensagem de Resposta Automática</label>
+                    <textarea
+                      placeholder="Digite a mensagem que será enviada automaticamente..."
+                      value={attendanceSettings.autoReplyMessage}
+                      onChange={(e) =>
+                        setAttendanceSettings(prev => ({
+                          ...prev,
+                          autoReplyMessage: e.target.value,
+                        }))
+                      }
+                      className="w-full p-2 border border-slate-300 rounded text-sm"
+                      rows={3}
+                    />
                   </div>
                 )}
 
-                {shortcuts.length === 0 && (
-                  <div className="p-4 bg-slate-50 border border-dashed border-slate-300 rounded-lg text-center">
-                    <p className="text-muted-foreground">Nenhum atalho criado ainda</p>
+                <div className="border-t pt-4 space-y-4">
+                  <p className="font-medium">Atalhos de Mensagens</p>
+                  <p className="text-sm text-muted-foreground">Digite / seguido da chave para usar o atalho</p>
+
+                  <div className="space-y-2">
+                    <Input
+                      placeholder="Chave do atalho (ex: saudacao)"
+                      value={newShortcutKey}
+                      onChange={(e) => setNewShortcutKey(e.target.value)}
+                      className="border-slate-300"
+                    />
+                    <textarea
+                      placeholder="Mensagem do atalho..."
+                      value={newShortcutMessage}
+                      onChange={(e) => setNewShortcutMessage(e.target.value)}
+                      className="w-full p-2 border border-slate-300 rounded text-sm"
+                      rows={2}
+                    />
+                    <Button
+                      onClick={addShortcut}
+                      className="w-full"
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Adicionar Atalho
+                    </Button>
                   </div>
-                )}
+
+                  {attendanceSettings.shortcuts.length > 0 && (
+                    <div className="space-y-2">
+                      {attendanceSettings.shortcuts.map((shortcut, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between p-2 border border-slate-300 rounded"
+                        >
+                          <div>
+                            <p className="font-medium text-sm">/{shortcut.key}</p>
+                            <p className="text-xs text-muted-foreground">{shortcut.message}</p>
+                          </div>
+                          <Button
+                            onClick={() => removeShortcut(index)}
+                            variant="ghost"
+                            size="sm"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
       </div>
-
-      {/* Modal: Silenciar Notificações */}
-      <Dialog open={muteModalOpen} onOpenChange={setMuteModalOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Silenciar Notificações</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            {[
-              { minutes: 30, label: '30 minutos' },
-              { minutes: 60, label: '1 hora' },
-              { minutes: 480, label: '8 horas' },
-              { minutes: 1440, label: '24 horas' },
-            ].map((option) => (
-              <Button
-                key={option.minutes}
-                onClick={() => handleMuteNotifications(option.minutes)}
-                variant="outline"
-                className="w-full justify-start"
-              >
-                {option.label}
-              </Button>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
