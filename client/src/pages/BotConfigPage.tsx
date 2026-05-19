@@ -315,21 +315,22 @@ export function BotConfigPage() {
                   scripts.map((script) => (
                     <div
                       key={script.scriptId}
-                      className="border border-slate-200 rounded-lg p-4 bg-slate-50 hover:bg-slate-100 transition cursor-pointer"
+                      className="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md hover:border-slate-300 transition-all duration-200 cursor-pointer group"
                       onClick={() => handleSelectScript(script)}
                     >
-                      <div className="flex items-start justify-between mb-3">
-                        <h3 className="font-semibold text-slate-900">{script.name}</h3>
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-slate-900 text-base mb-1 group-hover:text-blue-600 transition">{script.name}</h3>
+                          {script.description && (
+                            <p className="text-sm text-slate-500 line-clamp-1">{script.description}</p>
+                          )}
+                        </div>
                         {script.isActive && (
-                          <Badge className="bg-green-500 text-white">Ativo</Badge>
+                          <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200 ml-2 flex-shrink-0">Ativo</Badge>
                         )}
                       </div>
 
-                      {script.description && (
-                        <p className="text-sm text-slate-600 mb-3">{script.description}</p>
-                      )}
-
-                      <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap pt-3 border-t border-slate-100">
                         {script.isActive ? (
                           <>
                             <Button
@@ -339,7 +340,7 @@ export function BotConfigPage() {
                                 e.stopPropagation();
                                 handleDeactivateScript(script.scriptId);
                               }}
-                              className="text-slate-700 border-slate-300"
+                              className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 text-xs"
                             >
                               <Check className="w-4 h-4 mr-1" />
                               Desativar
@@ -353,7 +354,7 @@ export function BotConfigPage() {
                               e.stopPropagation();
                               handleActivateScript(script.scriptId);
                             }}
-                            className="text-slate-700 border-slate-300"
+                            className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 text-xs"
                           >
                             <Check className="w-4 h-4 mr-1" />
                             Ativar
@@ -368,7 +369,7 @@ export function BotConfigPage() {
                             setEditingScriptId(script.scriptId);
                             setEditingPrompt(script.systemPrompt);
                           }}
-                          className="text-blue-600 hover:bg-blue-50"
+                          className="text-blue-600 hover:bg-blue-50 p-1.5 h-auto"
                         >
                           <Edit2 className="w-4 h-4" />
                         </Button>
@@ -380,7 +381,7 @@ export function BotConfigPage() {
                             e.stopPropagation();
                             handleDeleteScript(script.scriptId);
                           }}
-                          className="text-red-600 hover:bg-red-50"
+                          className="text-red-600 hover:bg-red-50 p-1.5 h-auto"
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>
@@ -413,7 +414,7 @@ export function BotConfigPage() {
                                 setEditingScriptId(null);
                                 setEditingPrompt('');
                               }}
-                              className="text-slate-700 border-slate-300"
+                              className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 text-xs"
                             >
                               Cancelar
                             </Button>

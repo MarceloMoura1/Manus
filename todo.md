@@ -1397,3 +1397,15 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] "Roteiros" com marginLeft: '-249px'
 - [x] Remover estilos duplicados
 - [x] Validar layout final
+
+
+## Fase 136: Melhoria de Design dos Roteiros
+
+- [x] Melhorar visual dos cards de roteiros
+- [x] Adicionar sombra e hover effects
+- [x] Aprimorar badge de status com cor esmeralda
+- [x] Melhorar tipografia e hierarquia visual
+- [x] Adicionar separador visual entre informações e ações
+- [x] Otimizar espaçamento dos botões
+- [x] Implementar hover effects nos títulos
+- [x] Validar design final
