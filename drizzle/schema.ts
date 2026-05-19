@@ -527,7 +527,24 @@ export const megadeskWhatsappConfig = mysqlTable("megadesk_whatsapp_config", {
   clientIdx: index("idx_mwc_client").on(t.clientId),
 }));
 
+// ─── Bot Scripts Table ────────────────────────────────────────────────────────
+export const megadeskBotScripts = mysqlTable("megadesk_bot_scripts", {
+  scriptId: varchar("script_id", { length: 80 }).primaryKey(),
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  systemPrompt: text("system_prompt").notNull(),
+  initialMessage: text("initial_message"),
+  isActive: boolean("is_active").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+}, (t) => ({
+  clientIdx: index("idx_mbs_client").on(t.clientId),
+}));
+
 // ─── User Settings Types ──────────────────────────────────────────────────────
+export type MegadeskBotScript = typeof megadeskBotScripts.$inferSelect;
+export type InsertMegadeskBotScript = typeof megadeskBotScripts.$inferInsert;
 export type MegadeskUserSettings = typeof megadeskUserSettings.$inferSelect;
 export type InsertMegadeskUserSettings = typeof megadeskUserSettings.$inferInsert;
 export type MegadeskUserShortcut = typeof megadeskUserShortcuts.$inferSelect;

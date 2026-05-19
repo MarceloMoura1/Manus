@@ -16,6 +16,7 @@ import { whatsappRouter as whatsappModuleRouter } from "./modules/whatsapp/whats
 import { whatsappRouter } from "./routers-whatsapp";
 import { companyRouter } from "./routers-company";
 import { ticketStatusesRouter } from "./routers-ticket-statuses";
+import { botScriptsRouter } from "./routers-bot-scripts";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -253,6 +254,7 @@ export const appRouter = router({
   whatsapp: whatsappRouter,
   company: companyRouter,
   ticketStatuses: ticketStatusesRouter,
+  botScripts: botScriptsRouter,
   auth: router({
     me: publicProcedure.query(({ ctx }) => ({ user: ctx.user })),
     logout: publicProcedure.mutation(({ ctx }) => {

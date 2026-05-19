@@ -1303,3 +1303,37 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Implementar Aba WhatsApp com formulario de credenciais
 - [x] Implementar Aba Geral com dados da empresa
 - [x] Testar fluxo completo de acesso e preenchimento de formularios
+
+
+## Fase 129: Página "Configuração do Bot" (em progresso)
+
+### Painel Esquerdo: Novo Roteiro
+- [ ] Criar tabela megadesk_bot_scripts no banco
+- [ ] Campo Nome do roteiro
+- [ ] Campo Descrição do roteiro
+- [ ] Campo System Prompt (instruções para o bot)
+- [ ] Campo Mensagem Inicial (boas-vindas)
+- [ ] Botão Criar para salvar novo roteiro
+
+### Painel Central: Lista de Roteiros
+- [ ] Listar todos os roteiros salvos
+- [ ] Botão Ativar/Desativar para cada roteiro
+- [ ] Badge verde "Ativo" quando roteiro está ativado
+- [ ] Botão Deletar (ícone lixeira) para remover roteiro
+- [ ] Scroll vertical se houver muitos roteiros
+
+### Painel Direito: Teste do Roteiro
+- [ ] Chat em tempo real com Gemini IA
+- [ ] Integração com Gemini IA do sistema
+- [ ] Mensagens do usuário e bot em tempo real
+- [ ] Histórico de conversa durante a sessão
+- [ ] Input responsivo para enviar mensagens
+- [ ] Botão Enviar com ícone de avião
+- [ ] Indicador de digitação do bot
+
+### Integração
+- [ ] Criar procedures tRPC para CRUD de bot scripts
+- [ ] Criar página BotConfigPage com layout de 3 painéis
+- [ ] Adicionar rota /bot-config no App.tsx
+- [ ] Adicionar "Configuração do Bot" ao sidebar
+- [ ] Testar fluxo completo com Gemini IA
