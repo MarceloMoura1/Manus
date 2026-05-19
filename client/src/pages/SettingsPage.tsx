@@ -202,7 +202,7 @@ function TabGeral({ clientId, userRole }: { clientId: string; userRole: string }
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Nome da empresa */}
-          <Card className="border-slate-200 shadow-sm">
+          <Card className="bg-white border-slate-200 shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
                 <Building2 className="w-4 h-4 text-blue-500" /> Nome da Empresa
@@ -218,7 +218,7 @@ function TabGeral({ clientId, userRole }: { clientId: string; userRole: string }
           </Card>
 
           {/* E-mail */}
-          <Card className="border-slate-200 shadow-sm">
+          <Card className="bg-white border-slate-200 shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
                 <Mail className="w-4 h-4 text-green-500" /> E-mail Principal
@@ -235,7 +235,7 @@ function TabGeral({ clientId, userRole }: { clientId: string; userRole: string }
           </Card>
 
           {/* Telefone */}
-          <Card className="border-slate-200 shadow-sm">
+          <Card className="bg-white border-slate-200 shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
                 <Phone className="w-4 h-4 text-purple-500" /> Telefone
@@ -251,7 +251,7 @@ function TabGeral({ clientId, userRole }: { clientId: string; userRole: string }
           </Card>
 
           {/* WhatsApp */}
-          <Card className="border-slate-200 shadow-sm">
+          <Card className="bg-white border-slate-200 shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
                 <MessageSquare className="w-4 h-4 text-green-600" /> WhatsApp Principal
@@ -267,7 +267,7 @@ function TabGeral({ clientId, userRole }: { clientId: string; userRole: string }
           </Card>
 
           {/* Endereço */}
-          <Card className="border-slate-200 shadow-sm md:col-span-2">
+          <Card className="bg-white border-slate-200 shadow-sm md:col-span-2">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
                 <MapPin className="w-4 h-4 text-red-500" /> Endereço
@@ -283,7 +283,7 @@ function TabGeral({ clientId, userRole }: { clientId: string; userRole: string }
           </Card>
 
           {/* Horário de funcionamento */}
-          <Card className="border-slate-200 shadow-sm md:col-span-2">
+          <Card className="bg-white border-slate-200 shadow-sm md:col-span-2">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
                 <Clock className="w-4 h-4 text-orange-500" /> Horário de Funcionamento
@@ -300,7 +300,7 @@ function TabGeral({ clientId, userRole }: { clientId: string; userRole: string }
           </Card>
 
           {/* Logo URL */}
-          <Card className="border-slate-200 shadow-sm md:col-span-2">
+          <Card className="bg-white border-slate-200 shadow-sm md:col-span-2">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
                 <Image className="w-4 h-4 text-indigo-500" /> URL do Logotipo
@@ -439,7 +439,7 @@ function TabChamados({ clientId, userRole }: { clientId: string; userRole: strin
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {statuses.map((status) => (
-            <Card key={status.statusId} className="border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+            <Card key={status.statusId} className="bg-white border-slate-200 shadow-sm hover:shadow-md transition-shadow">
               <CardContent className="pt-4 pb-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -820,7 +820,7 @@ function TabEquipe({ clientId, userRole }: { clientId: string; userRole: string 
       ) : (
         <div className="space-y-3">
           {users.map((user) => (
-            <Card key={user.userId} className={`border shadow-sm ${user.status === 'blocked' ? 'opacity-60 border-red-200' : 'border-slate-200'}`}>
+            <Card key={user.userId} className={`bg-white border shadow-sm ${user.status === 'blocked' ? 'opacity-60 border-red-200' : 'border-slate-200'}`}>
               <CardContent className="pt-4 pb-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -1236,7 +1236,7 @@ function TabBackup({ clientId, userRole }: { clientId: string; userRole: string 
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             {statItems.map((item) => (
-              <Card key={item.label} className="border-slate-200 shadow-sm">
+              <Card key={item.label} className="bg-white border-slate-200 shadow-sm">
                 <CardContent className="pt-4 pb-4">
                   <div className={`w-8 h-8 rounded-lg ${item.bg} flex items-center justify-center mb-2`}>
                     <item.icon className={`w-4 h-4 ${item.color}`} />
@@ -1251,7 +1251,7 @@ function TabBackup({ clientId, userRole }: { clientId: string; userRole: string 
       </div>
 
       {/* Exportação de dados */}
-      <Card className="border-slate-200 shadow-sm">
+        <Card className="bg-white border-slate-200 shadow-sm">
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <Download className="w-5 h-5 text-teal-600" /> Exportar Dados
@@ -1575,7 +1575,7 @@ export function SettingsPage() {
               {renderStatusCard('Webhook', webhookStatus, 'Status do webhook')}
               {renderStatusCard('Credenciais', credentialsStatus, 'Validação das credenciais')}
             </div>
-            <Card>
+            <Card className="bg-white">
               <CardHeader>
                 <CardTitle>Como Integrar WhatsApp</CardTitle>
                 <CardDescription>Siga os passos abaixo para configurar sua integração</CardDescription>
@@ -1589,7 +1589,7 @@ export function SettingsPage() {
                 </ol>
               </CardContent>
             </Card>
-            <Card>
+            <Card className="bg-white">
               <CardHeader>
                 <CardTitle>URL do Webhook</CardTitle>
                 <CardDescription>Configure esta URL em seu app do Facebook</CardDescription>
@@ -1603,7 +1603,7 @@ export function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
-            <Card>
+            <Card className="bg-white">
               <CardHeader>
                 <CardTitle>Configurar Credenciais WhatsApp</CardTitle>
               </CardHeader>
@@ -1653,7 +1653,7 @@ export function SettingsPage() {
 
           {/* ─── Aba: Conta ──────────────────────────────────────────── */}
           {activeTab === 'account' && <div className="space-y-6">
-            <Card>
+            <Card className="bg-white">
               <CardHeader>
                 <CardTitle>Informações da Conta</CardTitle>
                 <CardDescription>Gerencie suas informações pessoais</CardDescription>
@@ -1699,7 +1699,7 @@ export function SettingsPage() {
 
           {/* ─── Aba: Notificações ─────────────────────────────────────────── */}
           {activeTab === 'notifications' && <div className="space-y-6">
-            <Card className="border border-slate-200 shadow-sm">
+            <Card className="bg-white border border-slate-200 shadow-sm">
               <CardHeader className="pb-4">
                 <CardTitle className="text-lg">Notificações Gerais</CardTitle>
                 <CardDescription>Controle principal de notificações</CardDescription>
@@ -1714,7 +1714,7 @@ export function SettingsPage() {
                 />
               </CardContent>
             </Card>
-            <Card className="border border-slate-200 shadow-sm">
+            <Card className="bg-white border border-slate-200 shadow-sm">
               <CardHeader className="pb-4">
                 <CardTitle className="text-lg">Som e Volume</CardTitle>
                 <CardDescription>Configure o som das notificações</CardDescription>
@@ -1740,7 +1740,7 @@ export function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
-            <Card className="border border-slate-200 shadow-sm">
+            <Card className="bg-white border border-slate-200 shadow-sm">
               <CardHeader className="pb-4">
                 <CardTitle className="text-lg">Tipos de Notificações</CardTitle>
                 <CardDescription>Escolha quais notificações deseja receber</CardDescription>
@@ -1757,7 +1757,7 @@ export function SettingsPage() {
 
           {/* ─── Aba: Atendimento ────────────────────────────────────────── */}
           {activeTab === 'attendance' && <div className="space-y-6">
-            <Card>
+            <Card className="bg-white">
               <CardHeader>
                 <CardTitle>Configurações de Atendimento</CardTitle>
                 <CardDescription>Personalize sua experiência de atendimento</CardDescription>
