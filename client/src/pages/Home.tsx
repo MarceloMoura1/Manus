@@ -324,311 +324,332 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
 }
 
 function ConversationsPage() {
-  // Obter clientId da sessão do usuário logado
+  // Obter dados da sessão
   const sessionData = React.useMemo(() => {
     try { return JSON.parse(localStorage.getItem(MEGADESK_SESSION_KEY) || 'null'); } catch { return null; }
   }, []);
   const clientId: string = sessionData?.clientId ?? '';
+  const userName: string = sessionData?.userName ?? 'Atendente';
 
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState<'open' | 'bot' | 'closed'>('open');
   const [selectedConversation, setSelectedConversation] = React.useState<string | null>(null);
   const [conversations, setConversations] = React.useState<any[]>([]);
+  const [messageInput, setMessageInput] = React.useState('');
   const [editModalOpen, setEditModalOpen] = React.useState(false);
   const [editName, setEditName] = React.useState('');
   const [editCompany, setEditCompany] = React.useState('');
   const [closeConfirmOpen, setCloseConfirmOpen] = React.useState(false);
   const [reopenConfirmOpen, setReopenConfirmOpen] = React.useState(false);
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const messagesEndRef = React.useRef<HTMLDivElement>(null);
 
   // Mutations tRPC
   const closeConversationMutation = trpc.megadesk.closeConversation.useMutation();
   const updateCustomerMutation = trpc.megadesk.updateCustomerInfo.useMutation();
 
-  // Função para exibir toast
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ message, type });
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Função para encerrar conversa
   const handleCloseConversation = async () => {
     if (!selectedConversation) return;
-    
-    // Atualizacao otimista - fecha o modal e atualiza a lista imediatamente
     setCloseConfirmOpen(false);
-    setConversations(prev => prev.map(conv => 
+    setConversations(prev => prev.map(conv =>
       conv.id === selectedConversation ? { ...conv, status: 'closed' } : conv
     ));
     showToast('Conversa encerrada!', 'success');
-    
-    // Envia a requisicao para o backend em background
     try {
       await closeConversationMutation.mutateAsync({ conversationId: selectedConversation, clientId });
-    } catch (error) {
-      console.error('Erro ao encerrar conversa:', error);
-      // Reverter a mudanca se falhar
-      setConversations(prev => prev.map(conv => 
+    } catch {
+      setConversations(prev => prev.map(conv =>
         conv.id === selectedConversation ? { ...conv, status: 'open' } : conv
       ));
       showToast('Erro ao encerrar conversa', 'error');
     }
   };
 
-  // Função para reabrir conversa
   const handleReopenConversation = async () => {
     if (!selectedConversation) return;
-    
-    try {
-      // Aqui você pode implementar a lógica de reabertura se houver um endpoint
-      // Por enquanto, vamos apenas atualizar o status localmente
-      setConversations(prev => prev.map(conv => 
-        conv.id === selectedConversation ? { ...conv, status: 'open' } : conv
-      ));
-      
-      setReopenConfirmOpen(false);
-      showToast('Conversa reabierta com sucesso!', 'success');
-    } catch (error) {
-      console.error('Erro ao reabrir conversa:', error);
-      showToast('Erro ao reabrir conversa', 'error');
-    }
+    setConversations(prev => prev.map(conv =>
+      conv.id === selectedConversation ? { ...conv, status: 'open' } : conv
+    ));
+    setReopenConfirmOpen(false);
+    showToast('Conversa reaberta com sucesso!', 'success');
   };
 
-  // Capturar parâmetros da URL e localStorage ao carregar a página
   React.useEffect(() => {
-    // Verificar localStorage para nova conversa criada
     const newConvId = localStorage.getItem('MEGADESK_NEW_CONVERSATION_ID');
     const newConvPhone = localStorage.getItem('MEGADESK_NEW_CONVERSATION_PHONE');
-    
     if (newConvId && newConvPhone) {
-      // Auto-selecionar a conversa criada
       setSelectedConversation(newConvId);
       setSelectedFilter('open');
-      
-      // Limpar localStorage
       localStorage.removeItem('MEGADESK_NEW_CONVERSATION_ID');
       localStorage.removeItem('MEGADESK_NEW_CONVERSATION_PHONE');
     } else {
-      // Ler parâmetros do hash (ex: #/conversas?clientId=...&phone=...)
       const hash = window.location.hash;
       const queryStart = hash.indexOf('?');
-      
       if (queryStart !== -1) {
-        const queryString = hash.substring(queryStart + 1);
-        const params = new URLSearchParams(queryString);
-        const clientId = params.get('clientId');
+        const params = new URLSearchParams(hash.substring(queryStart + 1));
+        const cId = params.get('clientId');
         const phone = params.get('phone');
-        
-        if (clientId && phone) {
-          // Abrir automaticamente a conversa do cliente
-          setSelectedConversation(clientId);
-          // Limpar os parâmetros da URL
+        if (cId && phone) {
+          setSelectedConversation(cId);
           window.history.replaceState({}, document.title, window.location.pathname + '#/conversas');
         }
       }
     }
   }, []);
 
-  // Carregar conversas via tRPC
   const { data: conversationsData } = trpc.megadesk.getConversations.useQuery(
     { clientId },
     { enabled: !!clientId }
   );
-  
+
   React.useEffect(() => {
     if (conversationsData && conversationsData.length > 0) {
       setConversations(conversationsData);
     } else {
-      // Mock data como fallback
       setConversations([
-        { id: 'cust-1778848377677', name: 'João Silva', phone: '11999999999', company: 'Tech Solutions', lastMessage: 'Olá, tudo bem?', timestamp: '10:30', status: 'open' },
+        { id: 'cust-1778848377677', name: 'João Silva', phone: '11999999999', company: 'Tech Solutions', lastMessage: 'Olá, tudo bem?', timestamp: Date.now(), status: 'open', isUnread: true },
       ]);
     }
   }, [conversationsData]);
 
-  // Mock data para conversas (será substituído por dados reais do banco)
-  const mockConversations = conversations;
+  React.useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [selectedConversation]);
 
-  const filters: Array<{ id: 'open' | 'bot' | 'closed'; label: string; color: string }> = [
-    { id: 'open', label: 'Abertas', color: 'bg-green-500' },
-    { id: 'bot', label: 'Atendimento BOT', color: 'bg-slate-700' },
-    { id: 'closed', label: 'Fechadas', color: 'bg-slate-900' },
+  const filters: Array<{ id: 'open' | 'bot' | 'closed'; label: string; dot: string; count: number }> = [
+    { id: 'open', label: 'Abertas', dot: 'bg-emerald-500', count: conversations.filter(c => c.status === 'open').length },
+    { id: 'bot', label: 'BOT', dot: 'bg-violet-500', count: conversations.filter(c => c.status === 'bot').length },
+    { id: 'closed', label: 'Fechadas', dot: 'bg-slate-400', count: conversations.filter(c => c.status === 'closed').length },
   ];
 
+  const filteredConversations = conversations.filter(conv => {
+    const matchesFilter = conv.status === selectedFilter;
+    const matchesSearch = searchTerm === '' ||
+      conv.phone?.includes(searchTerm) ||
+      conv.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      conv.company?.toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesFilter && matchesSearch;
+  });
+
+  const selectedConv = conversations.find(c => c.id === selectedConversation);
+
+  const formatTime = (ts: any) => {
+    if (!ts) return '';
+    if (typeof ts === 'string' && ts.includes(':')) return ts;
+    const d = new Date(ts);
+    return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const formatDate = (ts: any) => {
+    if (!ts) return '';
+    if (typeof ts === 'string' && ts.includes(':')) return new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    return new Date(ts).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  };
+
+  const getInitials = (name: string) => name?.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() || '?';
+
+  const avatarColors = ['bg-violet-500', 'bg-blue-500', 'bg-emerald-500', 'bg-orange-500', 'bg-pink-500', 'bg-teal-500'];
+  const getAvatarColor = (id: string) => avatarColors[id?.charCodeAt(0) % avatarColors.length] || 'bg-slate-500';
+
   return (
-    <div className="flex h-full gap-6">
-      {/* Left Panel - Conversations List */}
-      <div className="w-1/3 bg-white rounded-2xl shadow-lg border border-slate-100 p-6 flex flex-col">
-        <div className="mb-4">
-          <div className="flex items-center gap-2 mb-1">
-            <MessageCircle className="w-5 h-5 text-slate-600" />
-            <h2 className="text-xl font-bold text-slate-900">Conversas</h2>
-          </div>
+    <div className="flex h-full overflow-hidden rounded-2xl shadow-xl border border-slate-200 bg-white">
 
-        </div>
+      {/* ─── Coluna Esquerda: Lista de Conversas ─── */}
+      <div className="w-80 flex-shrink-0 flex flex-col border-r border-slate-100 bg-slate-50">
 
-        {/* Search Bar */}
-        <div className="relative mb-4">
-          <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Buscar número..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-          />
-        </div>
-
-        {/* Filter Tabs */}
-        <div className="mb-6">
-          <div className="flex gap-4 pb-3 border-b border-slate-200">
-            {filters.map((filter, index) => (
-              <div key={filter.id} className="flex items-center">
-                <button
-                  onClick={() => setSelectedFilter(filter.id)}
-                  className={cn(
-                    'filter-button flex items-center gap-2 px-0 py-2 font-medium text-sm transition-all duration-200 whitespace-nowrap cursor-pointer',
-                    selectedFilter === filter.id
-                      ? 'active text-slate-900 font-semibold'
-                      : 'text-slate-600 hover:text-slate-900'
-                  )}
-                >
-                  <div className={cn('filter-dot w-2 h-2 rounded-full', filter.color)}></div>
-                  {filter.label}
-                </button>
-                {index < filters.length - 1 && (
-                  <div className="w-px h-5 bg-slate-300 mx-2"></div>
-                )}
+        {/* Header */}
+        <div className="px-4 pt-5 pb-3 bg-white border-b border-slate-100">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center">
+                <MessageCircle className="w-4 h-4 text-white" />
               </div>
-            ))}
+              <div>
+                <h2 className="text-base font-bold text-slate-900 leading-tight">Conversas</h2>
+                <p className="text-xs text-slate-500">{conversations.length} conversa{conversations.length !== 1 ? 's' : ''}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Busca */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Buscar por nome, telefone..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm transition-all"
+            />
           </div>
         </div>
 
-        {/* Conversations List */}
-        <div className="flex-1 overflow-y-auto space-y-2">
-          {mockConversations && mockConversations.length > 0 ? (
-            mockConversations
-              .filter((conv) => {
-                const matchesFilter = conv.status === selectedFilter;
-                const matchesSearch = searchTerm === '' || conv.phone.includes(searchTerm) || conv.name.toLowerCase().includes(searchTerm.toLowerCase());
-                return matchesFilter && matchesSearch;
-              })
-              .map((conv) => (
+        {/* Filtros */}
+        <div className="flex gap-1 px-3 py-2 bg-white border-b border-slate-100">
+          {filters.map(filter => (
+            <button
+              key={filter.id}
+              onClick={() => setSelectedFilter(filter.id)}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200',
+                selectedFilter === filter.id
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-100'
+              )}
+            >
+              <span className={cn('w-1.5 h-1.5 rounded-full', selectedFilter === filter.id ? 'bg-white' : filter.dot)} />
+              {filter.label}
+              <span className={cn(
+                'ml-0.5 text-xs font-bold',
+                selectedFilter === filter.id ? 'text-blue-100' : 'text-slate-400'
+              )}>{filter.count}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Lista */}
+        <div className="flex-1 overflow-y-auto">
+          {filteredConversations.length > 0 ? (
+            filteredConversations.map(conv => (
               <button
                 key={conv.id}
                 onClick={() => setSelectedConversation(conv.id)}
                 className={cn(
-                  'w-full text-left p-3 rounded-lg transition-all duration-200 border-l-4',
+                  'w-full text-left px-4 py-3 border-b border-slate-100 transition-all duration-150 relative',
                   selectedConversation === conv.id
-                    ? 'bg-blue-50 border-l-blue-500 shadow-md'
-                    : 'bg-white border-l-transparent hover:bg-slate-50'
+                    ? 'bg-blue-50 border-l-4 border-l-blue-500'
+                    : 'hover:bg-white border-l-4 border-l-transparent'
                 )}
               >
-                <div className="flex items-start justify-between">
+                <div className="flex items-start gap-3">
+                  {/* Avatar */}
+                  <div className={cn('w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white text-sm font-bold', getAvatarColor(conv.id))}>
+                    {getInitials(conv.name)}
+                  </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-slate-900 truncate">{conv.name}</p>
-                    <p className="text-xs text-slate-500 truncate">{conv.company}</p>
-                    <p className={cn(
-                      'text-sm truncate mt-1',
-                      conv.status === 'closed'
-                        ? 'text-slate-500 italic'
-                        : conv.isUnread ? 'font-bold text-slate-900' : 'text-slate-600'
-                    )}>
-                      {conv.status === 'closed' ? 'Conversa encerrada' : conv.lastMessage}
+                    <div className="flex items-center justify-between mb-0.5">
+                      <p className={cn('text-sm font-semibold truncate', conv.isUnread ? 'text-slate-900' : 'text-slate-700')}>{conv.name}</p>
+                      <span className="text-xs text-slate-400 flex-shrink-0 ml-2">{formatDate(conv.timestamp)}</span>
+                    </div>
+                    <p className="text-xs text-slate-500 truncate mb-1">{conv.company || conv.phone}</p>
+                    <p className={cn('text-xs truncate', conv.isUnread ? 'font-semibold text-slate-800' : 'text-slate-500')}>
+                      {conv.status === 'closed' ? '✓ Encerrada' : conv.lastMessage || 'Sem mensagens'}
                     </p>
                   </div>
-                  <span className="text-xs text-slate-400 ml-2 flex-shrink-0">
-                    {typeof conv.timestamp === 'string' && conv.timestamp.includes(':')
-                      ? new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
-                      : new Date(conv.timestamp).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
-                  </span>
+                  {conv.isUnread && (
+                    <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 mt-1" />
+                  )}
                 </div>
               </button>
             ))
           ) : (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <MessageCircle className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                <p className="text-slate-500 text-sm">Nenhuma conversa neste filtro</p>
-              </div>
+            <div className="flex flex-col items-center justify-center h-48 text-center px-6">
+              <MessageCircle className="w-10 h-10 text-slate-200 mb-3" />
+              <p className="text-sm font-medium text-slate-500">Nenhuma conversa</p>
+              <p className="text-xs text-slate-400 mt-1">Tente outro filtro ou busca</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Right Panel - Chat View */}
-      <div className="flex-1 bg-white rounded-2xl shadow-lg border border-slate-100 p-6 flex flex-col">
-        {selectedConversation && mockConversations ? (
-          (() => {
-            const selectedConv = mockConversations.find((c) => c.id === selectedConversation);
-            return selectedConv ? (
-              <div className="flex flex-col h-full">
-                <div className="border-b border-slate-200 pb-4 mb-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-bold text-slate-900">{selectedConv.name}</h3>
-                      <button
-                        onClick={() => {
-                          setEditName(selectedConv.name);
-                          setEditCompany(selectedConv.company);
-                          setEditModalOpen(true);
-                        }}
-                        className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
-                        title="Editar cliente"
-                      >
-                        <Cog className="w-4 h-4 text-slate-500 hover:text-slate-700" />
-                      </button>
-                    </div>
-                    <button
-                      onClick={() => {
-                        if (selectedConv.status === 'closed') {
-                          setReopenConfirmOpen(true);
-                        } else {
-                          setCloseConfirmOpen(true);
-                        }
-                      }}
-                      className="px-3 py-1 text-sm bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-colors font-medium"
-                    >
-                      {selectedConv.status === 'closed' ? 'Abrir Conversa' : 'Encerrar Conversa'}
-                    </button>
-                  </div>
-                  <p className="text-sm text-slate-600">{selectedConv.phone} • {selectedConv.company}</p>
+      {/* ─── Coluna Direita: Chat ─── */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {selectedConv ? (
+          <>
+            {/* Header do Chat */}
+            <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-slate-100 flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <div className={cn('w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold', getAvatarColor(selectedConv.id))}>
+                  {getInitials(selectedConv.name)}
                 </div>
-                <div className="flex-1 overflow-y-auto space-y-4 mb-4">
-                  <div className="bg-slate-50 p-4 rounded-lg">
-                    <p className="text-sm text-slate-700">{selectedConv.lastMessage}</p>
-                    <p className="text-xs text-slate-500 mt-2">{selectedConv.timestamp}</p>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-slate-900">{selectedConv.name}</h3>
+                    <span className={cn(
+                      'text-xs px-2 py-0.5 rounded-full font-medium',
+                      selectedConv.status === 'open' ? 'bg-emerald-100 text-emerald-700' :
+                      selectedConv.status === 'bot' ? 'bg-violet-100 text-violet-700' :
+                      'bg-slate-100 text-slate-600'
+                    )}>
+                      {selectedConv.status === 'open' ? 'Aberta' : selectedConv.status === 'bot' ? 'BOT' : 'Fechada'}
+                    </span>
                   </div>
-                </div>
-                <div className="border-t border-slate-200 pt-4 space-y-3">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="Digite sua mensagem..."
-                      className="flex-1 px-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <button className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
-                      <Send className="w-4 h-4" />
-                    </button>
-                  </div>
+                  <p className="text-xs text-slate-500">{selectedConv.phone} {selectedConv.company ? `• ${selectedConv.company}` : ''}</p>
                 </div>
               </div>
-            ) : (
-              <div className="flex items-center justify-center h-full">
-                <div className="text-center">
-                  <MessageCircle className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-                  <h3 className="text-lg font-bold text-slate-900 mb-2">Conversa não encontrada</h3>
-                  <p className="text-slate-600 text-sm">Selecione uma conversa válida da lista</p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setEditName(selectedConv.name); setEditCompany(selectedConv.company || ''); setEditModalOpen(true); }}
+                  className="p-2 hover:bg-slate-100 rounded-xl transition-colors text-slate-500 hover:text-slate-700"
+                  title="Editar cliente"
+                >
+                  <Edit2 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => selectedConv.status === 'closed' ? setReopenConfirmOpen(true) : setCloseConfirmOpen(true)}
+                  className={cn(
+                    'px-4 py-2 rounded-xl text-sm font-medium transition-all',
+                    selectedConv.status === 'closed'
+                      ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                      : 'bg-red-50 text-red-600 hover:bg-red-100'
+                  )}
+                >
+                  {selectedConv.status === 'closed' ? 'Reabrir' : 'Encerrar'}
+                </button>
+              </div>
+            </div>
+
+            {/* Área de Mensagens */}
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3" style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)' }}>
+              {/* Mensagem de exemplo */}
+              <div className="flex justify-start">
+                <div className="max-w-xs lg:max-w-md">
+                  <div className="bg-white rounded-2xl rounded-tl-sm px-4 py-2.5 shadow-sm border border-slate-100">
+                    <p className="text-sm text-slate-800">{selectedConv.lastMessage || 'Conversa iniciada'}</p>
+                    <p className="text-xs text-slate-400 mt-1 text-right">{formatTime(selectedConv.timestamp)}</p>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1 ml-1">{selectedConv.name}</p>
                 </div>
               </div>
-            );
-          })()
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Input de Mensagem */}
+            <div className="px-6 py-4 bg-white border-t border-slate-100 flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="flex-1 relative">
+                  <input
+                    type="text"
+                    placeholder="Digite sua mensagem..."
+                    value={messageInput}
+                    onChange={(e) => setMessageInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (messageInput.trim()) { showToast('Mensagem enviada!'); setMessageInput(''); } } }}
+                    className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm transition-all pr-12"
+                  />
+                </div>
+                <button
+                  onClick={() => { if (messageInput.trim()) { showToast('Mensagem enviada!'); setMessageInput(''); } }}
+                  className="w-11 h-11 bg-gradient-to-br from-blue-500 to-violet-600 text-white rounded-2xl flex items-center justify-center hover:shadow-lg hover:scale-105 transition-all duration-200 flex-shrink-0"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-xs text-slate-400 mt-2 ml-1">Enviando como <span className="font-medium text-slate-600">{userName}</span></p>
+            </div>
+          </>
         ) : (
-          <div className="flex items-center justify-center h-full">
+          <div className="flex-1 flex flex-col items-center justify-center" style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)' }}>
             <div className="text-center">
-              <MessageCircle className="w-16 h-16 text-slate-300 mb-4" />
-              <h3 className="text-lg font-bold text-slate-900 mb-2">Selecione uma conversa para visualizar</h3>
-              <p className="text-slate-600 text-sm">Clique em uma conversa da lista para ver os detalhes</p>
+              <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-100 to-violet-100 flex items-center justify-center mx-auto mb-5">
+                <MessageCircle className="w-10 h-10 text-blue-400" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-700 mb-2">Selecione uma conversa</h3>
+              <p className="text-slate-400 text-sm max-w-xs">Escolha uma conversa da lista à esquerda para começar a atender</p>
             </div>
           </div>
         )}
@@ -718,14 +739,11 @@ function ConversationsPage() {
               </button>
               <button
                 onClick={() => {
-                  if (selectedConversation && mockConversations) {
-                    const conv = mockConversations.find(c => c.id === selectedConversation);
-                    if (conv) {
-                      conv.name = editName;
-                      conv.company = editCompany;
-                      setToastMessage({ message: 'Cliente atualizado com sucesso!', type: 'success' });
-                      setTimeout(() => setToastMessage(null), 3000);
-                    }
+                  if (selectedConversation) {
+                    setConversations(prev => prev.map(c =>
+                      c.id === selectedConversation ? { ...c, name: editName, company: editCompany } : c
+                    ));
+                    showToast('Cliente atualizado com sucesso!', 'success');
                   }
                   setEditModalOpen(false);
                 }}
