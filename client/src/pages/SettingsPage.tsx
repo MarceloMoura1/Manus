@@ -832,7 +832,7 @@ function TabEquipe({ clientId, userRole }: { clientId: string; userRole: string 
                       <p className="text-xs text-slate-500 truncate">{user.email}</p>
                       {/* Permissões */}
                       <div className="flex flex-wrap gap-1 mt-2">
-                        {user.permissions.slice(0, 4).map((perm) => {
+                        {user.permissions.slice(0, 4).map((perm: string) => {
                           const p = AVAILABLE_PERMISSIONS.find(ap => ap.key === perm);
                           return p ? (
                             <span key={perm} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-slate-100 text-slate-600">

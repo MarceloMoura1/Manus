@@ -8,6 +8,7 @@ import { TRPCError } from "@trpc/server";
 import { getPool } from "./db";
 import { randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
+import { syncClientDataToDb, syncTeamUsersToDb, validateSyncIntegrity, getSyncedClientData } from "./sync-megadesk";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -265,23 +266,13 @@ export const megadeskSettingsRouter = router({
     )
     .query(async ({ input }) => {
       requireClientAdmin(input.userRole);
-      const pool = getPool();
-      const [rows] = await pool.execute(
-        "SELECT user_id, name, email, role, status, permissions_json FROM megadesk_domain_client_users WHERE client_id = ? ORDER BY created_at ASC",
-        [input.clientId]
-      ) as any;
-      return (rows as any[]).map((r) => {
-        let permissions: string[] = [];
-        try { permissions = JSON.parse(r.permissions_json || "[]"); } catch {}
-        return {
-          userId: r.user_id,
-          name: r.name,
-          email: r.email,
-          role: r.role,
-          status: r.status,
-          permissions,
-        };
-      });
+      const { getSyncedClientData, validateSyncIntegrity } = await import('./sync-megadesk');
+      const integrity = await validateSyncIntegrity(input.clientId);
+      if (!integrity.isSynced) {
+        console.warn(`[SYNC WARNING] Integridade comprometida para ${input.clientId}:`, integrity.issues);
+      }
+      const syncedData = await getSyncedClientData(input.clientId);
+      return syncedData.users;
     }),
 
   /**
