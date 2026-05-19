@@ -1224,11 +1224,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Atualizar mensagens de erro para vermelho mais escuro (red-600)
 
 ## Fase 123: Edições simples no sistema de chamados
-- [ ] Habilitar adição de anexos quando chamado está aberto + balão "atendente adicionou anexo"
-- [ ] Corrigir exibição de data/hora inválida no card do chamado
-- [ ] Adicionar ícone "Editar chamado" no balão para editar texto/arquivo
-- [ ] Puxar dados do cliente (Nome, Telefone, CNPJ, Email) do banco de dados
-- [ ] Implementar funcionalidade "Dossiê do cliente" com histórico completo de chamados
+- [x] Habilitar adição de anexos quando chamado está aberto + balão "atendente adicionou anexo"
+- [x] Corrigir exibição de data/hora inválida no card do chamado
+- [x] Adicionar ícone "Editar chamado" no balão para editar texto/arquivo
+- [x] Puxar dados do cliente (Nome, Telefone, CNPJ, Email) do banco de dados
+- [x] Implementar funcionalidade "Dossiê do cliente" com histórico completo de chamados
 
 ## Fase 124: Implementação das edições simples (concluída)
 - [x] Adicionar campos customerPhone, customerEmail, customerCNPJ à tabela de chamados
