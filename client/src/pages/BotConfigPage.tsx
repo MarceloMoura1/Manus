@@ -430,7 +430,7 @@ export function BotConfigPage() {
 
           {/* Painel Direito: Teste do Roteiro */}
           <div className="lg:col-span-2">
-            <Card className="p-6 bg-white shadow-sm border-slate-200 flex flex-col h-full" style={{marginLeft: '-183px', marginRight: '-317px'}}>
+            <Card className="p-6 bg-white shadow-sm border-slate-200 flex flex-col h-full" style={{marginLeft: '-180px', marginRight: '-378px'}}>
               <h2 className="text-xl font-bold text-slate-900 mb-6">Teste do Roteiro</h2>
 
               {!selectedScript ? (
