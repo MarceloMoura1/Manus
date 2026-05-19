@@ -1,4 +1,3 @@
-import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -9,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { toast } from "sonner";
 import { Trash2, Send, Zap } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
 
 interface BotScript {
   scriptId: string;
@@ -100,6 +100,8 @@ export function BotConfigPage() {
     },
   });
 
+  const testScriptMutation = trpc.botScripts.testScript.useMutation();
+
   // Atualizar lista de scripts
   useEffect(() => {
     if (scriptsList) {
@@ -130,51 +132,31 @@ export function BotConfigPage() {
 
   const handleDeleteScript = async (scriptId: string) => {
     if (!clientId) return;
-    if (!confirm("Tem certeza que deseja deletar este roteiro?")) return;
-
     await deleteScriptMutation.mutateAsync({ clientId, scriptId });
   };
 
-  const handleToggleActive = async (script: BotScript) => {
+  const handleActivateScript = async (scriptId: string) => {
     if (!clientId) return;
+    await activateScriptMutation.mutateAsync({ clientId, scriptId });
+  };
 
-    if (script.isActive) {
-      await deactivateScriptMutation.mutateAsync({
-        clientId,
-        scriptId: script.scriptId,
-      });
-    } else {
-      await activateScriptMutation.mutateAsync({
-        clientId,
-        scriptId: script.scriptId,
-      });
-    }
+  const handleDeactivateScript = async (scriptId: string) => {
+    if (!clientId) return;
+    await deactivateScriptMutation.mutateAsync({ clientId, scriptId });
   };
 
   const handleSelectScript = (script: BotScript) => {
     setSelectedScript(script);
-    // Inicializar chat com mensagem inicial do roteiro
-    if (script.initialMessage) {
-      setChatMessages([
-        {
-          role: "assistant",
-          content: script.initialMessage,
-          timestamp: new Date(),
-        },
-      ]);
-    } else {
-      setChatMessages([]);
-    }
-    setChatInput("");
+    setChatMessages([]);
   };
 
   const handleSendMessage = async () => {
-    if (!chatInput.trim() || !selectedScript) return;
+    if (!chatInput.trim() || !selectedScript || !clientId) return;
 
-    // Adicionar mensagem do usuário
+    const userMessageContent = chatInput;
     const userMessage: ChatMessage = {
       role: "user",
-      content: chatInput,
+      content: userMessageContent,
       timestamp: new Date(),
     };
     setChatMessages((prev) => [...prev, userMessage]);
@@ -182,249 +164,251 @@ export function BotConfigPage() {
     setIsLoadingChat(true);
 
     try {
-      // TODO: Integrar com Gemini IA para gerar resposta do bot
-      // Por enquanto, simular resposta
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const response = await testScriptMutation.mutateAsync({
+        clientId,
+        scriptId: selectedScript.scriptId,
+        userMessage: userMessageContent,
+        conversationHistory: chatMessages.map((msg) => ({
+          role: msg.role,
+          content: msg.content,
+        })),
+      });
 
       const botMessage: ChatMessage = {
         role: "assistant",
-        content: `[Resposta do bot baseada no roteiro: "${selectedScript.name}"] Entendi sua mensagem: "${chatInput}"`,
+        content: response.botResponse,
         timestamp: new Date(),
       };
       setChatMessages((prev) => [...prev, botMessage]);
     } catch (error) {
-      toast.error("Erro ao enviar mensagem");
+      console.error("Erro ao enviar mensagem:", error);
+      toast.error("Erro ao gerar resposta do bot");
     } finally {
       setIsLoadingChat(false);
     }
   };
 
   if (!clientId) {
-    return <div className="p-8 text-center">Carregando...</div>;
+    return <div className="p-6">Carregando...</div>;
   }
 
   return (
-    <div className="h-full flex flex-col bg-background">
-      {/* Header */}
-      <div className="border-b border-border p-6">
-        <h1 className="text-3xl font-bold text-foreground">Configuração do Bot</h1>
-        <p className="text-sm text-muted-foreground mt-1">Crie e teste roteiros de IA</p>
+    <div className="p-6 bg-background min-h-screen">
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold">Configuração do Bot</h1>
+        <p className="text-muted-foreground">Crie e teste roteiros de IA</p>
       </div>
 
-      {/* Main Content - 3 Painéis */}
-      <div className="flex-1 overflow-hidden flex gap-6 p-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Painel Esquerdo: Novo Roteiro */}
-        <div className="w-96 flex-shrink-0 overflow-y-auto">
-          <Card className="p-6">
-            <h2 className="text-xl font-semibold text-foreground mb-4">Novo Roteiro</h2>
+        <Card className="p-6 border border-border">
+          <h2 className="text-xl font-bold mb-4">Novo Roteiro</h2>
 
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-foreground">Nome</label>
-                <Input
-                  placeholder="Ex: Suporte Técnico"
-                  value={newScriptName}
-                  onChange={(e) => setNewScriptName(e.target.value)}
-                  className="mt-1"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-foreground">Descrição</label>
-                <Input
-                  placeholder="Descrição do roteiro"
-                  value={newScriptDescription}
-                  onChange={(e) => setNewScriptDescription(e.target.value)}
-                  className="mt-1"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-foreground">System Prompt</label>
-                <Textarea
-                  placeholder="Instruções para o bot IA..."
-                  value={newScriptPrompt}
-                  onChange={(e) => setNewScriptPrompt(e.target.value)}
-                  className="mt-1 min-h-32"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-foreground">Mensagem Inicial</label>
-                <Textarea
-                  placeholder="Mensagem de boas-vindas..."
-                  value={newScriptInitialMsg}
-                  onChange={(e) => setNewScriptInitialMsg(e.target.value)}
-                  className="mt-1 min-h-24"
-                />
-              </div>
-
-              <Button
-                onClick={handleCreateScript}
-                disabled={createScriptMutation.isPending}
-                className="w-full bg-blue-600 hover:bg-blue-700"
-              >
-                {createScriptMutation.isPending ? (
-                  <>
-                    <Spinner className="mr-2 h-4 w-4" />
-                    Criando...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="mr-2 h-4 w-4" />
-                    Criar
-                  </>
-                )}
-              </Button>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Nome</label>
+              <Input
+                placeholder="Ex: Suporte Técnico"
+                value={newScriptName}
+                onChange={(e) => setNewScriptName(e.target.value)}
+              />
             </div>
-          </Card>
-        </div>
+
+            <div>
+              <label className="text-sm font-medium">Descrição</label>
+              <Input
+                placeholder="Descrição do roteiro"
+                value={newScriptDescription}
+                onChange={(e) => setNewScriptDescription(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium">System Prompt</label>
+              <Textarea
+                placeholder="Instruções para o bot..."
+                value={newScriptPrompt}
+                onChange={(e) => setNewScriptPrompt(e.target.value)}
+                className="min-h-[120px]"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium">Mensagem Inicial</label>
+              <Textarea
+                placeholder="Mensagem de boas-vindas"
+                value={newScriptInitialMsg}
+                onChange={(e) => setNewScriptInitialMsg(e.target.value)}
+                className="min-h-[80px]"
+              />
+            </div>
+
+            <Button
+              onClick={handleCreateScript}
+              disabled={createScriptMutation.isPending}
+              className="w-full bg-blue-600 hover:bg-blue-700"
+            >
+              {createScriptMutation.isPending ? (
+                <>
+                  <Spinner className="mr-2 h-4 w-4" />
+                  Criando...
+                </>
+              ) : (
+                <>
+                  <Zap className="mr-2 h-4 w-4" />
+                  Criar
+                </>
+              )}
+            </Button>
+          </div>
+        </Card>
 
         {/* Painel Central: Lista de Roteiros */}
-        <div className="w-80 flex-shrink-0 overflow-y-auto">
-          <Card className="p-6">
-            <h2 className="text-xl font-semibold text-foreground mb-4">Roteiros</h2>
+        <Card className="p-6 border border-border">
+          <h2 className="text-xl font-bold mb-4">Roteiros</h2>
 
-            <div className="space-y-3">
-              {scripts.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Nenhum roteiro criado</p>
-              ) : (
-                scripts.map((script) => (
-                  <div
-                    key={script.scriptId}
-                    onClick={() => handleSelectScript(script)}
-                    className={`p-4 rounded-lg border cursor-pointer transition-all ${
-                      selectedScript?.scriptId === script.scriptId
-                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
-                        : "border-border hover:border-blue-300"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-medium text-foreground truncate">{script.name}</h3>
-                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                          {script.description}
-                        </p>
-                      </div>
-                      {script.isActive && (
-                        <Badge className="bg-green-600 text-white flex-shrink-0">Ativo</Badge>
+          <div className="space-y-3 max-h-[600px] overflow-y-auto">
+            {scripts.length === 0 ? (
+              <p className="text-muted-foreground text-sm">Nenhum roteiro criado</p>
+            ) : (
+              scripts.map((script) => (
+                <div
+                  key={script.scriptId}
+                  className={`p-3 border rounded-lg cursor-pointer transition-colors ${
+                    selectedScript?.scriptId === script.scriptId
+                      ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
+                      : "border-border hover:border-blue-300"
+                  }`}
+                  onClick={() => handleSelectScript(script)}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <h3 className="font-medium">{script.name}</h3>
+                      {script.description && (
+                        <p className="text-xs text-muted-foreground mt-1">{script.description}</p>
                       )}
                     </div>
-
-                    <div className="flex gap-2 mt-3">
-                      <Button
-                        size="sm"
-                        variant={script.isActive ? "destructive" : "default"}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleActive(script);
-                        }}
-                        disabled={
-                          activateScriptMutation.isPending ||
-                          deactivateScriptMutation.isPending
-                        }
-                      >
-                        {script.isActive ? "Desativar" : "Ativar"}
-                      </Button>
-
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteScript(script.scriptId);
-                        }}
-                        disabled={deleteScriptMutation.isPending}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
+                    <Badge variant={script.isActive ? "default" : "secondary"}>
+                      {script.isActive ? "Ativo" : "Inativo"}
+                    </Badge>
                   </div>
-                ))
-              )}
-            </div>
-          </Card>
-        </div>
+
+                  <div className="flex gap-2 mt-3">
+                    {script.isActive ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeactivateScript(script.scriptId);
+                        }}
+                      >
+                        ✓ Ativar
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleActivateScript(script.scriptId);
+                        }}
+                      >
+                        ✓ Ativar
+                      </Button>
+                    )}
+
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteScript(script.scriptId);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
 
         {/* Painel Direito: Teste do Roteiro */}
-        <div className="flex-1 flex flex-col min-w-0">
-          <Card className="flex-1 flex flex-col p-6">
-            <h2 className="text-xl font-semibold text-foreground mb-4">Teste do Roteiro</h2>
+        <Card className="p-6 border border-border flex flex-col">
+          <h2 className="text-xl font-bold mb-4">Teste do Roteiro</h2>
 
-            {!selectedScript ? (
-              <div className="flex-1 flex items-center justify-center text-center">
-                <p className="text-muted-foreground">Selecione um roteiro para testar</p>
-              </div>
-            ) : (
-              <>
-                {/* Chat Messages */}
-                <div className="flex-1 overflow-y-auto mb-4 space-y-3 bg-muted/30 rounded-lg p-4">
-                  {chatMessages.length === 0 ? (
-                    <div className="flex items-center justify-center h-full text-muted-foreground">
-                      <p>Comece a conversa...</p>
-                    </div>
-                  ) : (
-                    <>
-                      {chatMessages.map((msg, idx) => (
-                        <div
-                          key={idx}
-                          className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                        >
-                          <div
-                            className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                              msg.role === "user"
-                                ? "bg-blue-600 text-white rounded-br-none"
-                                : "bg-background border border-border text-foreground rounded-bl-none"
-                            }`}
-                          >
-                            <p className="text-sm">{msg.content}</p>
-                            <p className="text-xs mt-1 opacity-70">
-                              {msg.timestamp.toLocaleTimeString("pt-BR", {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                      {isLoadingChat && (
-                        <div className="flex justify-start">
-                          <div className="bg-background border border-border text-foreground px-4 py-2 rounded-lg rounded-bl-none">
-                            <Spinner className="h-4 w-4" />
-                          </div>
-                        </div>
-                      )}
-                      <div ref={chatEndRef} />
-                    </>
-                  )}
-                </div>
+          {!selectedScript ? (
+            <div className="flex-1 flex items-center justify-center text-muted-foreground">
+              Selecione um roteiro para testar
+            </div>
+          ) : (
+            <>
+              {/* Chat Messages */}
+              <div className="flex-1 overflow-y-auto mb-4 space-y-3 bg-muted/30 p-4 rounded-lg min-h-[300px]">
+                {chatMessages.length === 0 && (
+                  <div className="text-center text-muted-foreground text-sm py-8">
+                    {selectedScript.initialMessage || "Comece a conversa..."}
+                  </div>
+                )}
 
-                {/* Chat Input */}
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Digite sua mensagem..."
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyPress={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendMessage();
-                      }
-                    }}
-                    disabled={isLoadingChat}
-                  />
-                  <Button
-                    onClick={handleSendMessage}
-                    disabled={isLoadingChat || !chatInput.trim()}
-                    size="icon"
+                {chatMessages.map((msg, idx) => (
+                  <div
+                    key={idx}
+                    className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
                   >
-                    <Send className="h-4 w-4" />
-                  </Button>
-                </div>
-              </>
-            )}
-          </Card>
-        </div>
+                    <div
+                      className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                        msg.role === "user"
+                          ? "bg-blue-600 text-white rounded-br-none"
+                          : "bg-gray-200 dark:bg-gray-700 text-foreground rounded-bl-none"
+                      }`}
+                    >
+                      <p className="text-sm">{msg.content}</p>
+                      <p className="text-xs opacity-70 mt-1">
+                        {msg.timestamp.toLocaleTimeString()}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+
+                {isLoadingChat && (
+                  <div className="flex justify-start">
+                    <div className="bg-gray-200 dark:bg-gray-700 px-4 py-2 rounded-lg">
+                      <Spinner className="h-4 w-4" />
+                    </div>
+                  </div>
+                )}
+
+                <div ref={chatEndRef} />
+              </div>
+
+              {/* Input Area */}
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Digite sua mensagem..."
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
+                  }}
+                  disabled={isLoadingChat}
+                />
+                <Button
+                  onClick={handleSendMessage}
+                  disabled={isLoadingChat || !chatInput.trim()}
+                  size="icon"
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
+            </>
+          )}
+        </Card>
       </div>
     </div>
   );

@@ -15,6 +15,7 @@ import {
 } from "./db-bot-scripts";
 
 import { TRPCError } from "@trpc/server";
+import { invokeLLM } from "./_core/llm";
 
 export const botScriptsRouter = router({
   /**
@@ -159,5 +160,72 @@ export const botScriptsRouter = router({
     .input(z.object({ clientId: z.string() }))
     .query(async ({ input }) => {
       return getActiveBotScript(input.clientId);
+    }),
+
+  testScript: protectedProcedure
+    .input(
+      z.object({
+        clientId: z.string(),
+        scriptId: z.string(),
+        userMessage: z.string(),
+        conversationHistory: z
+          .array(
+            z.object({
+              role: z.enum(["user", "assistant"]),
+              content: z.string(),
+            })
+          )
+          .optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const script = await getBotScript(input.clientId, input.scriptId);
+      if (!script) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bot script not found",
+        });
+      }
+
+      const messages: Array<{
+        role: "user" | "assistant" | "system";
+        content: string;
+      }> = [
+        {
+          role: "system",
+          content: script.systemPrompt,
+        },
+      ];
+
+      if (input.conversationHistory && input.conversationHistory.length > 0) {
+        messages.push(...input.conversationHistory);
+      }
+
+      messages.push({
+        role: "user",
+        content: input.userMessage,
+      });
+
+      try {
+        const response = await invokeLLM({
+          messages,
+        });
+
+        const messageContent = response.choices?.[0]?.message?.content;
+        const botResponse = typeof messageContent === "string" 
+          ? messageContent 
+          : "Desculpe, não consegui gerar uma resposta.";
+
+        return {
+          success: true,
+          botResponse,
+        };
+      } catch (error) {
+        console.error("Erro ao chamar Gemini IA:", error);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Erro ao gerar resposta do bot",
+        });
+      }
     }),
 });
