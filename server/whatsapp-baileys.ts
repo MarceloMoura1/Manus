@@ -199,7 +199,8 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
         const isGroup = from.endsWith("@g.us");
         if (isGroup) continue;
 
-        const phone = from.replace("@s.whatsapp.net", "");
+        const phone = from.replace("@s.whatsapp.net", "").replace(":.*", "").split(":")[0];
+        const pushName = msg.pushName || null; // Nome do contato no WhatsApp
         const text =
           msg.message.conversation ||
           msg.message.extendedTextMessage?.text ||
@@ -211,7 +212,7 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
         const now = new Date(timestamp);
 
         try {
-          await handleIncomingMessage(clientId, phone, text, now);
+          await handleIncomingMessage(clientId, phone, text, now, pushName);
         } catch (err) {
           console.error("[Baileys] Erro ao persistir mensagem:", err);
         }
@@ -303,7 +304,8 @@ async function handleIncomingMessage(
   clientId: string,
   phone: string,
   text: string,
-  timestamp: Date
+  timestamp: Date,
+  pushName?: string | null
 ): Promise<void> {
   const pool = getPool();
 
@@ -361,7 +363,7 @@ async function handleIncomingMessage(
     const customerName =
       customerRows && customerRows.length > 0
         ? customerRows[0].name
-        : `+${cleanPhone}`;
+        : pushName || `+${cleanPhone}`; // Usa pushName do WhatsApp se disponível
     const company =
       customerRows && customerRows.length > 0
         ? customerRows[0].company || ""
@@ -402,8 +404,25 @@ export async function sendBaileysMessage(
   text: string,
   agentName: string
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = sessions.get(clientId);
+  // Tentar encontrar sessão pelo clientId original ou sanitizado
+  const sanitizedId = clientId.replace(/[^a-zA-Z0-9-_]/g, "_");
+  let session = sessions.get(clientId);
   if (!session || session.status !== "connected" || !session.sock) {
+    // Fallback: tentar pelo clientId sanitizado (nome do diretório)
+    session = sessions.get(sanitizedId);
+  }
+  if (!session || session.status !== "connected" || !session.sock) {
+    // Fallback: buscar qualquer sessão conectada que corresponda ao clientId
+    for (const [key, s] of sessions.entries()) {
+      if (s.status === "connected" && s.sock && 
+          (key === clientId || key === sanitizedId || clientId.includes(key) || key.includes(clientId.replace(/[^a-zA-Z0-9]/g, "")))) {
+        session = s;
+        break;
+      }
+    }
+  }
+  if (!session || session.status !== "connected" || !session.sock) {
+    console.error(`[Baileys] Sessão não encontrada para clientId: ${clientId} (sanitized: ${sanitizedId}). Sessões ativas: ${[...sessions.keys()].join(", ")}`);
     return { ok: false, error: "WhatsApp não conectado para este cliente" };
   }
 
