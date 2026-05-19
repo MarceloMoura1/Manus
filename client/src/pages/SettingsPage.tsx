@@ -78,14 +78,18 @@ function StatusSwitch({ checked, onCheckedChange, label, description, icon: Icon
   icon?: React.ElementType;
 }) {
   return (
-    <div className={`p-4 rounded-xl border-2 transition-all duration-200 ${
-      checked ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+    <div className={`p-4 rounded-xl border-2 transition-all duration-300 ${
+      checked ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-300 shadow-md shadow-green-100' : 'bg-gradient-to-r from-red-50 to-rose-50 border-red-300 shadow-md shadow-red-100'
     }`}>
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-1">
           {Icon && (
-            <div className={`p-2 rounded-lg ${checked ? 'bg-green-100' : 'bg-red-100'}`}>
-              <Icon className={`w-4 h-4 ${checked ? 'text-green-600' : 'text-red-600'}`} />
+            <div className={`p-2.5 rounded-lg transition-all duration-300 ${
+              checked ? 'bg-gradient-to-br from-green-100 to-emerald-100 scale-110' : 'bg-gradient-to-br from-red-100 to-rose-100'
+            }`}>
+              <Icon className={`w-5 h-5 transition-colors duration-300 ${
+                checked ? 'text-green-600' : 'text-red-600'
+              }`} />
             </div>
           )}
           <div>
@@ -93,16 +97,24 @@ function StatusSwitch({ checked, onCheckedChange, label, description, icon: Icon
             {description && <p className="text-xs text-slate-500 mt-0.5">{description}</p>}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className={`text-xs font-medium ${checked ? 'text-green-700' : 'text-red-700'}`}>
-            {checked ? 'Ativado' : 'Desativado'}
-          </span>
-          <Switch
-            checked={checked}
-            onCheckedChange={onCheckedChange}
-            className={checked ? 'data-[state=checked]:bg-green-500' : 'data-[state=unchecked]:bg-red-500'}
+        <button
+          onClick={() => onCheckedChange(!checked)}
+          className={`relative inline-flex h-8 w-16 items-center rounded-full transition-all duration-300 flex-shrink-0 ml-4 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+            checked ? 'bg-gradient-to-r from-green-500 to-emerald-500 shadow-lg shadow-green-400/50 focus:ring-green-400' : 'bg-gradient-to-r from-red-500 to-rose-500 shadow-lg shadow-red-400/50 focus:ring-red-400'
+          }`}
+        >
+          <span
+            className={`inline-block h-6 w-6 transform rounded-full bg-white shadow-lg transition-all duration-300 ${
+              checked ? 'translate-x-9' : 'translate-x-1'
+            }`}
           />
-        </div>
+          <span className="absolute left-1.5 flex h-6 w-6 items-center justify-center text-xs font-bold text-red-600 transition-opacity duration-300" style={{ opacity: checked ? 0 : 1 }}>
+            ✕
+          </span>
+          <span className="absolute right-1.5 flex h-6 w-6 items-center justify-center text-xs font-bold text-green-600 transition-opacity duration-300" style={{ opacity: checked ? 1 : 0 }}>
+            ✓
+          </span>
+        </button>
       </div>
     </div>
   );
