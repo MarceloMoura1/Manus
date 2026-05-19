@@ -465,6 +465,24 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
                 )}
               </div>
 
+              {/* Botão principal: Iniciar Conversa */}
+              <button
+                onClick={handleStartConversation}
+                disabled={isSearching}
+                className="w-full flex items-center justify-center gap-3 px-6 py-4 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:from-slate-400 disabled:to-slate-500 disabled:cursor-not-allowed text-white font-bold text-base rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 active:scale-[0.98]"
+              >
+                {isSearching ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Iniciando conversa...
+                  </>
+                ) : (
+                  <>
+                    <span className="text-xl">💬</span>
+                    Iniciar Conversa no WhatsApp
+                  </>
+                )}
+              </button>
 
             </div>
           )}
