@@ -334,8 +334,9 @@ function ConversationsPage() {
 
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState<'open' | 'bot' | 'closed'>('open');
-  const [ownerFilter, setOwnerFilter] = React.useState<'all' | 'mine' | 'specific'>('all');
+  const [ownerFilter, setOwnerFilter] = React.useState<'all' | 'mine' | 'history'>('all');
   const [attendantFilter, setAttendantFilter] = React.useState<string>('');
+  const [historySearch, setHistorySearch] = React.useState<string>('');
   const [attendantDropdownOpen, setAttendantDropdownOpen] = React.useState(false);
   const [selectedConversation, setSelectedConversation] = React.useState<string | null>(null);
   const [conversations, setConversations] = React.useState<any[]>([]);
@@ -437,7 +438,20 @@ function ConversationsPage() {
     return [...new Set(names)] as string[];
   }, [conversations]);
 
+  // Modo Histórico: busca em TODAS as conversas (abertas + fechadas + bot), sem filtro de status
+  const isHistoryMode = ownerFilter === 'history';
+
   const filteredConversations = conversations.filter(conv => {
+    if (isHistoryMode) {
+      // Histórico: ignora filtro de status, busca em tudo pelo termo de histórico
+      if (historySearch.trim() === '') return true;
+      const q = historySearch.toLowerCase();
+      return (
+        conv.name?.toLowerCase().includes(q) ||
+        conv.company?.toLowerCase().includes(q) ||
+        conv.phone?.includes(historySearch)
+      );
+    }
     const matchesFilter = conv.status === selectedFilter;
     const matchesSearch = searchTerm === '' ||
       conv.phone?.includes(searchTerm) ||
@@ -446,7 +460,6 @@ function ConversationsPage() {
     const matchesOwner =
       ownerFilter === 'all' ? true :
       ownerFilter === 'mine' ? (conv.assignedTo === userName || conv.assignedTo === sessionData?.userId) :
-      ownerFilter === 'specific' ? (attendantFilter === '' || conv.assignedTo === attendantFilter) :
       true;
     return matchesFilter && matchesSearch && matchesOwner;
   });
@@ -491,62 +504,101 @@ function ConversationsPage() {
               </div>
             </div>
           </div>
-          {/* Linha 2: Filtros Todas / Minhas / Específico */}
+          {/* Linha 2: Filtros Todas / Minhas / Histórico */}
           <div className="flex items-center gap-2 mb-2">
             <div className="flex rounded-lg border border-slate-200 overflow-hidden flex-1">
-              {(['all', 'mine', 'specific'] as const).map((f, i) => (
+              {(['all', 'mine', 'history'] as const).map((f, i) => (
                 <button
                   key={f}
-                  onClick={() => { setOwnerFilter(f); if (f !== 'specific') setAttendantFilter(''); }}
+                  onClick={() => { setOwnerFilter(f); setAttendantFilter(''); if (f !== 'history') setHistorySearch(''); }}
                   className={cn(
                     'flex-1 px-3 py-1.5 text-xs font-medium transition-all duration-150',
                     i > 0 && 'border-l border-slate-200',
-                    ownerFilter === f ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                    ownerFilter === f
+                      ? f === 'history' ? 'bg-amber-500 text-white' : 'bg-blue-600 text-white'
+                      : 'bg-white text-slate-600 hover:bg-slate-50'
                   )}
                 >
-                  {f === 'all' ? 'Todas' : f === 'mine' ? 'Minhas' : 'Específico'}
+                  {f === 'all' ? 'Todas' : f === 'mine' ? 'Minhas' : '🔎 Histórico'}
                 </button>
               ))}
             </div>
           </div>
-          {/* Linha 3: Dropdown Filtrar por Atendente */}
-          <div className="relative mb-3">
-            <button
-              onClick={() => setAttendantDropdownOpen(o => !o)}
-              className="w-full flex items-center justify-between gap-1 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50 transition-colors"
-            >
-              <span className="truncate">{attendantFilter || 'Filtrar por atendente...'}</span>
-              <ChevronDown className="w-3 h-3 flex-shrink-0 text-slate-400" />
-            </button>
-            {attendantDropdownOpen && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 overflow-hidden">
-                <button
-                  onClick={() => { setAttendantFilter(''); setOwnerFilter('all'); setAttendantDropdownOpen(false); }}
-                  className="w-full text-left px-3 py-2 text-xs text-slate-600 hover:bg-slate-50"
-                >Todos os atendentes</button>
-                {attendants.length > 0 ? attendants.map(att => (
+
+          {/* Linha 3a: Campo de busca do Histórico (aparece apenas no modo histórico) */}
+          {ownerFilter === 'history' && (
+            <div className="mb-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+              <p className="text-xs font-semibold text-amber-700 mb-2 flex items-center gap-1">
+                <span>🔍</span> Busca no histórico completo
+              </p>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-amber-400" />
+                <input
+                  type="text"
+                  placeholder="Nome, empresa ou telefone..."
+                  value={historySearch}
+                  onChange={(e) => setHistorySearch(e.target.value)}
+                  autoFocus
+                  className="w-full pl-8 pr-3 py-2 rounded-lg border border-amber-200 bg-white focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent text-xs transition-all placeholder-amber-300"
+                />
+                {historySearch && (
                   <button
-                    key={att}
-                    onClick={() => { setAttendantFilter(att); setOwnerFilter('specific'); setAttendantDropdownOpen(false); }}
-                    className={cn('w-full text-left px-3 py-2 text-xs hover:bg-slate-50', attendantFilter === att ? 'text-blue-600 font-semibold' : 'text-slate-700')}
-                  >{att}</button>
-                )) : (
-                  <p className="px-3 py-2 text-xs text-slate-400">Nenhum atendente</p>
+                    onClick={() => setHistorySearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-amber-400 hover:text-amber-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 )}
               </div>
-            )}
-          </div>
-          {/* Linha 3: Busca */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Buscar por nome, empresa, telefone..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm transition-all"
-            />
-          </div>
+              <p className="text-xs text-amber-500 mt-1.5">
+                {filteredConversations.length} resultado{filteredConversations.length !== 1 ? 's' : ''} — abertas, fechadas e BOT
+              </p>
+            </div>
+          )}
+
+          {/* Linha 3b: Dropdown Filtrar por Atendente (apenas fora do modo histórico) */}
+          {ownerFilter !== 'history' && (
+            <div className="relative mb-3">
+              <button
+                onClick={() => setAttendantDropdownOpen(o => !o)}
+                className="w-full flex items-center justify-between gap-1 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                <span className="truncate">{attendantFilter || 'Filtrar por atendente...'}</span>
+                <ChevronDown className="w-3 h-3 flex-shrink-0 text-slate-400" />
+              </button>
+              {attendantDropdownOpen && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 overflow-hidden">
+                  <button
+                    onClick={() => { setAttendantFilter(''); setOwnerFilter('all'); setAttendantDropdownOpen(false); }}
+                    className="w-full text-left px-3 py-2 text-xs text-slate-600 hover:bg-slate-50"
+                  >Todos os atendentes</button>
+                  {attendants.length > 0 ? attendants.map(att => (
+                    <button
+                      key={att}
+                      onClick={() => { setAttendantFilter(att); setAttendantDropdownOpen(false); }}
+                      className={cn('w-full text-left px-3 py-2 text-xs hover:bg-slate-50', attendantFilter === att ? 'text-blue-600 font-semibold' : 'text-slate-700')}
+                    >{att}</button>
+                  )) : (
+                    <p className="px-3 py-2 text-xs text-slate-400">Nenhum atendente</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Linha 4: Busca geral (apenas fora do modo histórico) */}
+          {ownerFilter !== 'history' && (
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Buscar por nome, empresa, telefone..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm transition-all"
+              />
+            </div>
+          )}
         </div>
 
         {/* Filtros */}
@@ -597,9 +649,21 @@ function ConversationsPage() {
                       <span className="text-xs text-slate-400 flex-shrink-0 ml-2">{formatDate(conv.timestamp)}</span>
                     </div>
                     <p className="text-xs text-slate-500 truncate mb-1">{conv.company || conv.phone}</p>
-                    <p className={cn('text-xs truncate', conv.isUnread ? 'font-semibold text-slate-800' : 'text-slate-500')}>
-                      {conv.status === 'closed' ? '✓ Encerrada' : conv.lastMessage || 'Sem mensagens'}
-                    </p>
+                    <div className="flex items-center gap-1.5">
+                      {isHistoryMode && (
+                        <span className={cn(
+                          'text-xs px-1.5 py-0.5 rounded-full font-medium flex-shrink-0',
+                          conv.status === 'open' ? 'bg-emerald-100 text-emerald-700' :
+                          conv.status === 'bot' ? 'bg-violet-100 text-violet-700' :
+                          'bg-slate-100 text-slate-500'
+                        )}>
+                          {conv.status === 'open' ? 'Aberta' : conv.status === 'bot' ? 'BOT' : 'Fechada'}
+                        </span>
+                      )}
+                      <p className={cn('text-xs truncate', conv.isUnread ? 'font-semibold text-slate-800' : 'text-slate-500')}>
+                        {conv.lastMessage || 'Sem mensagens'}
+                      </p>
+                    </div>
                   </div>
                   {conv.isUnread && (
                     <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 mt-1" />
@@ -610,8 +674,14 @@ function ConversationsPage() {
           ) : (
             <div className="flex flex-col items-center justify-center h-48 text-center px-6">
               <MessageCircle className="w-10 h-10 text-slate-200 mb-3" />
-              <p className="text-sm font-medium text-slate-500">Nenhuma conversa</p>
-              <p className="text-xs text-slate-400 mt-1">Tente outro filtro ou busca</p>
+              <p className="text-sm font-medium text-slate-500">
+                {isHistoryMode ? 'Nenhum resultado' : 'Nenhuma conversa'}
+              </p>
+              <p className="text-xs text-slate-400 mt-1">
+                {isHistoryMode
+                  ? 'Digite um nome, empresa ou telefone para buscar'
+                  : 'Tente outro filtro ou busca'}
+              </p>
             </div>
           )}
         </div>
