@@ -522,7 +522,7 @@ function TabChamados({ clientId, userRole }: { clientId: string; userRole: strin
 
       {/* Dialog: Criar status */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md bg-white border-2 border-black">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Tag className="w-5 h-5 text-orange-500" /> Novo Status de Chamado
@@ -595,7 +595,7 @@ function TabChamados({ clientId, userRole }: { clientId: string; userRole: strin
 
       {/* Dialog: Editar status */}
       <Dialog open={!!editingStatus} onOpenChange={() => setEditingStatus(null)}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md bg-white border-2 border-black">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Edit2 className="w-5 h-5 text-blue-500" /> Editar Status
@@ -916,7 +916,7 @@ function TabEquipe({ clientId, userRole }: { clientId: string; userRole: string 
 
       {/* Dialog: Adicionar usuário */}
       <Dialog open={showAddUser} onOpenChange={setShowAddUser}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg bg-white border-2 border-black">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserPlus className="w-5 h-5 text-purple-500" /> Adicionar Usuário
@@ -1023,7 +1023,7 @@ function TabEquipe({ clientId, userRole }: { clientId: string; userRole: string 
 
       {/* Dialog: Editar permissões */}
       <Dialog open={!!editingUser} onOpenChange={() => setEditingUser(null)}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg bg-white border-2 border-black">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Shield className="w-5 h-5 text-blue-500" /> Editar Permissões — {editingUser?.name}
@@ -1102,7 +1102,7 @@ function TabEquipe({ clientId, userRole }: { clientId: string; userRole: string 
 
       {/* Dialog: Redefinir senha */}
       <Dialog open={!!resetPasswordUser} onOpenChange={() => { setResetPasswordUser(null); setNewPassword(''); }}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md bg-white border-2 border-black">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Key className="w-5 h-5 text-amber-500" /> Redefinir Senha — {resetPasswordUser?.name}
