@@ -490,11 +490,35 @@ export const megadeskUserShortcuts = mysqlTable("megadesk_user_shortcuts", {
   clientUserKeyIdx: uniqueIndex("idx_mus_client_user_key").on(t.clientId, t.userId, t.shortcutKey),
 }));
 
+/**
+ * megadesk_whatsapp_config — configurações de integração WhatsApp por cliente
+ * Armazena credenciais de forma segura (criptografadas)
+ */
+export const megadeskWhatsappConfig = mysqlTable("megadesk_whatsapp_config", {
+  id: varchar("id", { length: 80 }).primaryKey(), // UUID
+  clientId: varchar("client_id", { length: 80 }).notNull().unique(),
+  phoneNumberId: varchar("phone_number_id", { length: 255 }).notNull(),
+  businessAccountId: varchar("business_account_id", { length: 255 }).notNull(),
+  accessToken: text("access_token").notNull(), // Será criptografado
+  webhookVerifyToken: varchar("webhook_verify_token", { length: 255 }).notNull(),
+  webhookUrl: varchar("webhook_url", { length: 500 }),
+  phoneNumber: varchar("phone_number", { length: 20 }), // +55 11 99999-9999
+  isConnected: boolean("is_connected").notNull().default(false),
+  webhookStatus: mysqlEnum("webhook_status", ["pending", "verified", "failed"]).notNull().default("pending"),
+  lastWebhookTest: timestamp("last_webhook_test"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+}, (t) => ({
+  clientIdx: index("idx_mwc_client").on(t.clientId),
+}));
+
 // ─── User Settings Types ──────────────────────────────────────────────────────
 export type MegadeskUserSettings = typeof megadeskUserSettings.$inferSelect;
 export type InsertMegadeskUserSettings = typeof megadeskUserSettings.$inferInsert;
 export type MegadeskUserShortcut = typeof megadeskUserShortcuts.$inferSelect;
 export type InsertMegadeskUserShortcut = typeof megadeskUserShortcuts.$inferInsert;
+export type MegadeskWhatsappConfig = typeof megadeskWhatsappConfig.$inferSelect;
+export type InsertMegadeskWhatsappConfig = typeof megadeskWhatsappConfig.$inferInsert;
 
 // ─── WhatsApp Module Types ─────────────────────────────────────────────────────
 export type WaAccount = typeof waAccounts.$inferSelect;

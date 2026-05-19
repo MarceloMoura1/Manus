@@ -2,10 +2,12 @@
  * Helpers para gerenciar configurações de usuário (notificações, atalhos)
  * Isolamento de tenant garantido em todas as operações
  */
-import { db } from "./db";
+import { getDb } from "./db";
 import { megadeskUserSettings, megadeskUserShortcuts } from "../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
+
+const db = getDb();
 
 /**
  * Buscar ou criar configurações padrão do usuário

@@ -1264,3 +1264,35 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [ ] Implementar aba Atendimento (resposta automática e atalhos com /)
 - [ ] Integrar página no App.tsx e adicionar ao sidebar
 - [ ] Testar todas as abas e persistência de dados
+
+
+## Fase 127: Página de Configurações para Admins (5 abas)
+
+### Aba WhatsApp (PRIMEIRA)
+- [ ] Criar tabela megadesk_whatsapp_config no banco
+- [ ] Criar helpers para gerenciar credenciais WhatsApp
+- [ ] Criar procedures tRPC para salvar/atualizar/buscar config
+- [ ] Implementar UI da aba WhatsApp com formulário
+- [ ] Adicionar validação de credenciais
+- [ ] Implementar teste de conexão
+
+### Aba Geral
+- [ ] Criar tabela megadesk_company_settings no banco
+- [ ] Implementar UI com campos: nome, logo, email, telefone, whatsapp, endereço, horário
+- [ ] Criar procedures tRPC para salvar/buscar
+
+### Aba Chamados
+- [ ] Criar tabela megadesk_ticket_statuses no banco
+- [ ] Implementar UI para criar/editar/deletar status personalizados
+- [ ] Adicionar filtro funcional na página de Chamados
+
+### Aba Equipe
+- [ ] Criar procedures tRPC para gerenciar usuários
+- [ ] Implementar UI para adicionar/remover/editar usuários
+- [ ] Implementar sistema de permissões
+- [ ] Respeitar limite de usuários do MegaAdmin
+
+### Aba Backup
+- [ ] Implementar backup automático
+- [ ] Implementar exportação de dados
+- [ ] Implementar restauração de dados

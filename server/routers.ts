@@ -12,7 +12,8 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { createNewTenant, releaseTenantAccess, pauseTenantAccess, getTenantInfo, deleteTenant, listAllTenants } from "./_core/tenant-operations";
 import { chamadosRouter } from "./routers-chamados";
 import { crmRouter } from "./routers-crm";
-import { whatsappRouter } from "./modules/whatsapp/whatsapp.router";
+import { whatsappRouter as whatsappModuleRouter } from "./modules/whatsapp/whatsapp.router";
+import { whatsappRouter } from "./routers-whatsapp";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -247,6 +248,7 @@ function sanitizeClient(client: MegaClient) {
 export const appRouter = router({
   chamados: chamadosRouter,
   crm: crmRouter,
+  whatsapp: whatsappRouter,
   auth: router({
     me: publicProcedure.query(({ ctx }) => ({ user: ctx.user })),
     logout: publicProcedure.mutation(({ ctx }) => {
