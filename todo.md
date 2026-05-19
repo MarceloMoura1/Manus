@@ -1366,3 +1366,14 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Validar visibilidade completa de todos os painéis
 - [x] Testar layout responsivo sem cortes
 - [x] Confirmar que todas as informações estão acessíveis
+
+
+## Fase 133: Restauração das Edições do Usuário e Ajuste de Layout
+
+- [x] Restaurar margins negativas dos cards conforme edições do usuário
+- [x] Alterar grid de 3 colunas para 4 colunas
+- [x] Posicionar "Novo Roteiro" mais à esquerda
+- [x] Posicionar "Roteiros" mais à esquerda
+- [x] Aumentar largura do "Teste do Roteiro" (2 colunas)
+- [x] Adicionar padding horizontal para acomodar as margins
+- [x] Validar que todos os painéis estão visíveis e funcionais
