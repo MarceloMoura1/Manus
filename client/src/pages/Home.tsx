@@ -114,6 +114,7 @@ type MegaDeskSession = {
   userName: string;
   userEmail: string;
   userRole: 'admin' | 'manager' | 'agent' | 'viewer';
+  role?: 'admin' | 'user'; // Compatibilidade com sistema de roles
   plan: string;
   modules: string[];
   // Token refresh management

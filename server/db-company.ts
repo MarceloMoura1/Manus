@@ -29,7 +29,7 @@ export async function getCompanySettings(clientId: string): Promise<CompanySetti
     sql`SELECT * FROM megadesk_company_settings WHERE client_id = ${clientId}`
   );
   
-  if (!result || result.length === 0) return null;
+  if (!result || (Array.isArray(result) && result.length === 0)) return null;
   
   const row = result[0] as any;
   return {

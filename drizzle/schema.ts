@@ -504,6 +504,7 @@ export const megadeskWhatsappConfig = mysqlTable("megadesk_whatsapp_config", {
   webhookUrl: varchar("webhook_url", { length: 500 }),
   phoneNumber: varchar("phone_number", { length: 20 }), // +55 11 99999-9999
   isConnected: boolean("is_connected").notNull().default(false),
+  connectionStatus: boolean("connection_status").notNull().default(false), // Alias para isConnected
   webhookStatus: mysqlEnum("webhook_status", ["pending", "verified", "failed"]).notNull().default("pending"),
   lastWebhookTest: timestamp("last_webhook_test"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
