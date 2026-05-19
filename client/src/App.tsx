@@ -50,7 +50,8 @@ export default function App() {
               if (megadeskSession) {
                 const parsed = JSON.parse(megadeskSession);
                 if (parsed?.clientId) headers["x-tenant-id"] = parsed.clientId;
-                if (parsed?.role) headers["x-user-role"] = parsed.role;
+                if (parsed?.userRole) headers["x-user-role"] = parsed.userRole;
+                else if (parsed?.role) headers["x-user-role"] = parsed.role;
               }
             } catch { /* ignore */ }
             return headers;

@@ -18,6 +18,7 @@ import { companyRouter } from "./routers-company";
 import { ticketStatusesRouter } from "./routers-ticket-statuses";
 import { botScriptsRouter } from "./routers-bot-scripts";
 import { notificationsRouter } from "./routers-notifications";
+import { megadeskSettingsRouter } from "./routers-megadesk-settings";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -255,6 +256,7 @@ export const appRouter = router({
   whatsapp: whatsappRouter,
   company: companyRouter,
   ticketStatuses: ticketStatusesRouter,
+  megadeskSettings: megadeskSettingsRouter,
   botScripts: botScriptsRouter,
   notifications: notificationsRouter,
   auth: router({

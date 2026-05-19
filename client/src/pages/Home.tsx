@@ -52,6 +52,7 @@ import {
   Edit2,
   Building2,
   Smartphone,
+  Tag,
 } from "lucide-react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
@@ -768,7 +769,7 @@ export function TicketsPage() {
   }, []);
   const clientId: string = sessionData?.clientId ?? '';
   const [searchTerm, setSearchTerm] = React.useState('');
-  const [selectedFilter, setSelectedFilter] = React.useState<'total' | 'open' | 'in_progress' | 'waiting' | 'closed'>('total');
+  const [selectedFilter, setSelectedFilter] = React.useState<string>('total');
   const [chamadoFilter, setChamadoFilter] = React.useState<'all' | 'mine'>('all');
   const [selectedChamado, setSelectedChamado] = React.useState<any | null>(null);
   const [showForwardCard, setShowForwardCard] = React.useState(false);
@@ -823,7 +824,7 @@ export function TicketsPage() {
   // Queries tRPC
   const chamadosQuery = trpc.chamados.list.useQuery(
     {
-      status: selectedFilter,
+      status: selectedFilter as 'total' | 'open' | 'in_progress' | 'waiting' | 'closed',
       limit: ITEMS_PER_PAGE,
       offset: (currentPage - 1) * ITEMS_PER_PAGE,
     },
@@ -858,6 +859,12 @@ export function TicketsPage() {
     undefined,
     { enabled: !!user?.user?.id }
   );
+  // Status personalizados do cliente
+  const customStatusesQuery = trpc.megadeskSettings.listTicketStatuses.useQuery(
+    { clientId, userRole: sessionData?.userRole ?? 'viewer' },
+    { enabled: !!clientId }
+  );
+  const customStatuses = customStatusesQuery.data ?? [];
 
   // Resetar pagina quando o filtro muda
   React.useEffect(() => {
@@ -1259,12 +1266,23 @@ export function TicketsPage() {
   };
   console.log('[DEBUG] statusCounts:', statusCounts);
 
-  const statusCards: Array<{ id: 'total' | 'open' | 'in_progress' | 'waiting' | 'closed'; label: string; value: number; gradient: string; bgGradient: string; icon: any; iconColor: string }> = [
+  const statusCards: Array<{ id: string; label: string; value: number; gradient: string; bgGradient: string; icon: any; iconColor: string; customColor?: string }> = [
     { id: 'total', label: 'Total', value: statusCounts.total, gradient: 'from-slate-600 to-slate-900', bgGradient: 'from-slate-50 to-slate-100', icon: Ticket, iconColor: 'text-slate-700' },
     { id: 'open', label: 'Abertos', value: statusCounts.open, gradient: 'from-blue-400 to-blue-600', bgGradient: 'from-blue-50 to-blue-100', icon: AlertCircle, iconColor: 'text-blue-600' },
     { id: 'in_progress', label: 'Em Progresso', value: statusCounts.in_progress, gradient: 'from-amber-400 to-amber-600', bgGradient: 'from-amber-50 to-amber-100', icon: Clock, iconColor: 'text-amber-600' },
     { id: 'waiting', label: 'Aguardando', value: statusCounts.waiting, gradient: 'from-orange-400 to-orange-600', bgGradient: 'from-orange-50 to-orange-100', icon: Hourglass, iconColor: 'text-orange-600' },
     { id: 'closed', label: 'Fechados', value: statusCounts.closed, gradient: 'from-emerald-400 to-emerald-600', bgGradient: 'from-emerald-50 to-emerald-100', icon: CheckCircle2, iconColor: 'text-emerald-600' },
+    // Status personalizados do cliente
+    ...customStatuses.map((cs) => ({
+      id: `custom_${cs.statusId}`,
+      label: cs.name,
+      value: 0,
+      gradient: 'from-slate-400 to-slate-600',
+      bgGradient: 'from-slate-50 to-slate-100',
+      icon: Tag,
+      iconColor: 'text-slate-600',
+      customColor: cs.color,
+    })),
   ];
 
   const getStatusBadgeColor = (status: string) => {
@@ -1339,36 +1357,67 @@ export function TicketsPage() {
       </div>
 
       {/* Cards de Status - Estilizados */}
-      <div className="grid grid-cols-5 gap-4">
+      <div className="flex flex-wrap gap-4">
         {statusCards.map((card: any, idx) => {
           const Icon = card.icon;
           const isSelected = selectedFilter === card.id;
+          // Para status personalizados, usar a cor hex diretamente
+          const cardStyle = card.customColor ? {
+            borderColor: isSelected ? card.customColor : 'transparent',
+            backgroundColor: isSelected ? `${card.customColor}15` : undefined,
+          } : {};
           return (
             <button
               key={card.id}
               onClick={() => setSelectedFilter(card.id)}
-              className={`group relative overflow-hidden rounded-2xl bg-gradient-to-br ${card.bgGradient} p-6 transition-all duration-300 border-2 ${
+              style={cardStyle}
+              className={`group relative overflow-hidden rounded-2xl ${
+                card.customColor ? '' : `bg-gradient-to-br ${card.bgGradient}`
+              } p-5 transition-all duration-300 border-2 min-w-[140px] flex-1 ${
                 isSelected
-                  ? `border-current shadow-xl scale-105`
+                  ? `${card.customColor ? '' : 'border-current'} shadow-xl scale-105`
                   : `border-transparent hover:shadow-lg hover:scale-102 hover:-translate-y-1`
               }`}
             >
-              <div className={`absolute -top-8 -right-8 w-32 h-32 bg-gradient-to-br ${card.gradient} rounded-full blur-2xl opacity-10 group-hover:opacity-20 transition-all duration-300`} />
+              {!card.customColor && (
+                <div className={`absolute -top-8 -right-8 w-32 h-32 bg-gradient-to-br ${card.gradient} rounded-full blur-2xl opacity-10 group-hover:opacity-20 transition-all duration-300`} />
+              )}
               
               <div className="relative z-10">
                 <div className="flex items-center justify-between mb-3">
-                  <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${card.gradient} flex items-center justify-center`}>
+                  <div
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                      card.customColor ? '' : `bg-gradient-to-br ${card.gradient}`
+                    }`}
+                    style={card.customColor ? { backgroundColor: card.customColor } : {}}
+                  >
                     <Icon className="w-5 h-5 text-white" />
                   </div>
-                  <div className={`w-1.5 h-1.5 rounded-full bg-gradient-to-r ${card.gradient} ${isSelected ? 'animate-pulse' : ''}`} />
+                  <div
+                    className={`w-1.5 h-1.5 rounded-full ${card.customColor ? '' : `bg-gradient-to-r ${card.gradient}`} ${isSelected ? 'animate-pulse' : ''}`}
+                    style={card.customColor ? { backgroundColor: card.customColor } : {}}
+                  />
                 </div>
                 <p className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">{card.label}</p>
-                <p className={`text-3xl font-black bg-gradient-to-r ${card.gradient} bg-clip-text text-transparent group-hover:scale-110 transition-transform duration-300 origin-left`}>
+                <p
+                  className={`text-3xl font-black group-hover:scale-110 transition-transform duration-300 origin-left ${
+                    card.customColor ? '' : `bg-gradient-to-r ${card.gradient} bg-clip-text text-transparent`
+                  }`}
+                  style={card.customColor ? { color: card.customColor } : {}}
+                >
                   {card.value}
                 </p>
               </div>
               
-              <div className={`absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r ${card.gradient} transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left`} />
+              {!card.customColor && (
+                <div className={`absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r ${card.gradient} transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left`} />
+              )}
+              {card.customColor && (
+                <div
+                  className="absolute bottom-0 left-0 right-0 h-0.5 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left"
+                  style={{ backgroundColor: card.customColor }}
+                />
+              )}
             </button>
           );
         })}

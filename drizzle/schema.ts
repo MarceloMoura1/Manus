@@ -286,6 +286,22 @@ export const megadeskCrmClients = mysqlTable("megadesk_crm_clients", {
   phoneIdx: index("idx_mcc_phone").on(table.phone),
 }));
 
+export const megadeskCompanySettings = mysqlTable("megadesk_company_settings", {
+  settingId: varchar("setting_id", { length: 80 }).primaryKey(),
+  clientId: varchar("client_id", { length: 80 }).notNull().unique(),
+  companyName: varchar("company_name", { length: 255 }).notNull().default(""),
+  logoUrl: text("logo_url"),
+  email: varchar("email", { length: 255 }).notNull().default(""),
+  phone: varchar("phone", { length: 40 }).notNull().default(""),
+  whatsapp: varchar("whatsapp", { length: 40 }).notNull().default(""),
+  address: varchar("address", { length: 255 }).notNull().default(""),
+  businessHours: text("business_hours"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+}, (table) => ({
+  clientIdx: index("idx_mcs_client").on(table.clientId),
+}));
+
 export const megadeskDomainAuditLogs = mysqlTable("megadesk_domain_audit_logs", {
   auditId: varchar("audit_id", { length: 100 }).primaryKey(),
   platform: mysqlEnum("platform", ["MegaAdmin", "MegaDesk"]).notNull(),

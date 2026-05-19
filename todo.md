@@ -1426,3 +1426,37 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Corrigir query de notificações para filtrar apenas por clientId
 - [x] Implementar layout completo com cards, ícones, filtros e botões de ação
 - [x] Página de notificações 100% funcional com refetch automático
+
+## Fase 140: Novas Abas de Configurações (Admin Only)
+
+### Schema e Backend
+- [ ] Criar tabela megadesk_company_settings (nome, logo, email, telefone, whatsapp, endereço, horário)
+- [ ] Criar tabela megadesk_ticket_statuses (status personalizados por cliente)
+- [ ] Verificar se tabela de usuários já tem campos necessários para equipe
+- [ ] Criar procedures tRPC: company.getSettings, company.saveSettings
+- [ ] Criar procedures tRPC: ticketStatuses.list, ticketStatuses.create, ticketStatuses.update, ticketStatuses.delete
+- [ ] Criar procedures tRPC: team.listUsers, team.addUser, team.removeUser, team.updatePermissions, team.resetPassword
+- [ ] Criar procedures tRPC: backup.exportData, backup.getBackupList
+
+### Frontend - SettingsPage.tsx
+- [ ] Adicionar controle de acesso ADMIN para abas Geral, Chamados, Equipe, Backup
+- [ ] Implementar Aba Geral (dados da empresa com logo upload)
+- [ ] Implementar Aba Chamados (status personalizados com CRUD)
+- [ ] Implementar Aba Equipe (gerenciamento de usuários com permissões)
+- [ ] Implementar Aba Backup (exportação e restauração)
+
+### Integração
+- [ ] Integrar status personalizados na página de Chamados (filtros e cards dinâmicos)
+- [ ] Garantir isolamento multi-tenant em todas as novas procedures
+
+## Fase 140: Novas Abas de Configurações (Admin)
+
+- [x] Aba Geral: campos de dados da empresa (nome, logo, email, telefone, WhatsApp, endereço, horário)
+- [x] Aba Chamados: status personalizados com cor, criação/edição/exclusão
+- [x] Aba Equipe: adicionar/remover/editar usuários com permissões granulares
+- [x] Aba Backup: exportação de dados e estatísticas
+- [x] Controle de acesso ADMIN em todas as abas (somente admin do cliente vê)
+- [x] Status personalizados integrados na página de Chamados como cards dinâmicos com cor customizada
+- [x] Tabela megadesk_company_settings criada no banco
+- [x] Router megadeskSettingsRouter criado e registrado no appRouter
+- [x] Zero erros TypeScript
