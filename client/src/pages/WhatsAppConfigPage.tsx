@@ -1,6 +1,6 @@
 /**
- * WhatsAppConfigPage — Configuração de contas WhatsApp Business por cliente.
- * Cada cliente pode conectar múltiplos números da Meta (Phone Number ID, Business Account ID, Access Token).
+ * WhatsAppConfigPage — Configuração de conta WhatsApp Business por cliente.
+ * Admins podem conectar e gerenciar a integração WhatsApp.
  */
 import React, { useState } from "react";
 import { trpc } from "@/lib/trpc";
@@ -22,8 +22,6 @@ import {
   Smartphone,
   Plus,
   Trash2,
-  Power,
-  PowerOff,
   Eye,
   EyeOff,
   CheckCircle2,
@@ -36,185 +34,88 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-// ─── Tipos ────────────────────────────────────────────────────────────────────
-
-interface WaAccount {
-  id: string;
-  displayName: string;
-  phoneNumber?: string | null;
-  phoneNumberId: string;
-  businessAccountId: string;
-  status: "active" | "inactive" | "error";
-  createdAt: string | Date;
-  updatedAt: string | Date;
-}
-
-interface AccountFormData {
-  displayName: string;
-  phoneNumberId: string;
-  businessAccountId: string;
-  accessToken: string;
-  webhookVerifyToken: string;
-}
-
-const EMPTY_FORM: AccountFormData = {
-  displayName: "",
-  phoneNumberId: "",
-  businessAccountId: "",
-  accessToken: "",
-  webhookVerifyToken: "",
-};
-
-// ─── Componente principal ─────────────────────────────────────────────────────
-
 export function WhatsAppConfigPage() {
   const session = JSON.parse(localStorage.getItem("megadesk_session_v1") || "{}");
   const clientId: string = session?.clientId ?? "";
 
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [editAccount, setEditAccount] = useState<WaAccount | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<WaAccount | null>(null);
-  const [form, setForm] = useState<AccountFormData>(EMPTY_FORM);
+  const [showModal, setShowModal] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [showWebhookToken, setShowWebhookToken] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    phoneNumberId: "",
+    businessAccountId: "",
+    accessToken: "",
+    webhookVerifyToken: "",
+    phoneNumber: "",
+  });
 
   // ─── Queries ────────────────────────────────────────────────────────────────
 
-  const {
-    data: accounts,
-    isLoading,
-    refetch,
-  } = trpc.whatsapp.listAccounts.useQuery(
+  const { data: config, isLoading, refetch } = trpc.whatsapp.getConfig.useQuery(
     { clientId },
     { enabled: !!clientId, refetchInterval: 30_000 }
   );
 
   // ─── Mutations ──────────────────────────────────────────────────────────────
 
-  const connectMut = trpc.whatsapp.connectAccount.useMutation({
+  const saveMut = trpc.whatsapp.saveConfig.useMutation({
     onSuccess: () => {
-      toast.success("Conta WhatsApp conectada com sucesso!");
-      setShowAddModal(false);
-      setForm(EMPTY_FORM);
+      toast.success("Configuração WhatsApp salva com sucesso!");
+      setShowModal(false);
+      setForm({
+        phoneNumberId: "",
+        businessAccountId: "",
+        accessToken: "",
+        webhookVerifyToken: "",
+        phoneNumber: "",
+      });
       refetch();
     },
-    onError: (e) => setFormError(e.message),
+    onError: (e: any) => setFormError(e?.message || "Erro ao salvar configuração"),
   });
 
-  const updateMut = trpc.whatsapp.updateAccount.useMutation({
-    onSuccess: () => {
-      toast.success("Conta atualizada com sucesso!");
-      setEditAccount(null);
-      setForm(EMPTY_FORM);
-      refetch();
+  const testMut = trpc.whatsapp.testConnection.useMutation({
+    onSuccess: (data: any) => {
+      if (data.success) {
+        toast.success(data.message);
+      } else {
+        toast.error(data.message);
+      }
     },
-    onError: (e) => setFormError(e.message),
+    onError: (e: any) => toast.error(e?.message || "Erro ao testar conexão"),
   });
 
-  const disconnectMut = trpc.whatsapp.disconnectAccount.useMutation({
+  const deleteMut = trpc.whatsapp.deleteConfig.useMutation({
     onSuccess: () => {
-      toast.success("Conta desativada.");
+      toast.success("Configuração WhatsApp removida.");
       refetch();
     },
-    onError: (e: any) => toast.error(e?.message || 'Erro ao desativar conta'),
-  });
-
-  const removeMut = trpc.whatsapp.deleteConfig.useMutation({
-    onSuccess: () => {
-      toast.success("Conta removida com sucesso.");
-      setDeleteTarget(null);
-      refetch();
-    },
-    onError: (e: any) => toast.error(e?.message || 'Erro ao desativar conta'),
+    onError: (e: any) => toast.error(e?.message || "Erro ao remover configuração"),
   });
 
   // ─── Handlers ───────────────────────────────────────────────────────────────
 
-  function openAdd() {
-    setForm(EMPTY_FORM);
+  function handleSubmit() {
     setFormError(null);
-    setShowToken(false);
-    setShowWebhookToken(false);
-    setShowAddModal(true);
-  }
-
-  function openEdit(acc: WaAccount) {
-    setForm({
-      displayName: acc.displayName,
-      phoneNumberId: acc.phoneNumberId,
-      businessAccountId: acc.businessAccountId,
-      accessToken: "",
-      webhookVerifyToken: "",
-    });
-    setFormError(null);
-    setShowToken(false);
-    setShowWebhookToken(false);
-    setEditAccount(acc);
-  }
-
-  function handleSubmitAdd() {
-    setFormError(null);
-    if (!form.displayName.trim()) return setFormError("Nome da conta é obrigatório.");
     if (!form.phoneNumberId.trim()) return setFormError("Phone Number ID é obrigatório.");
     if (!form.businessAccountId.trim()) return setFormError("Business Account ID é obrigatório.");
     if (!form.accessToken.trim()) return setFormError("Access Token é obrigatório.");
-    connectMut.mutate({
+
+    saveMut.mutate({
       clientId,
-      displayName: form.displayName.trim(),
       phoneNumberId: form.phoneNumberId.trim(),
       businessAccountId: form.businessAccountId.trim(),
       accessToken: form.accessToken.trim(),
-      webhookVerifyToken: form.webhookVerifyToken.trim() || undefined,
+      webhookVerifyToken: form.webhookVerifyToken.trim() || "",
+      phoneNumber: form.phoneNumber.trim() || "",
+      webhookUrl: `${window.location.origin}/api/webhooks/meta`,
     });
-  }
-
-  function handleSubmitEdit() {
-    if (!editAccount) return;
-    setFormError(null);
-    if (!form.displayName.trim()) return setFormError("Nome da conta é obrigatório.");
-    updateMut.mutate({
-      clientId,
-      accountId: editAccount.id,
-      displayName: form.displayName.trim(),
-      ...(form.accessToken.trim() ? { accessToken: form.accessToken.trim() } : {}),
-    });
-  }
-
-  function handleToggle(acc: WaAccount) {
-    if (acc.status === "active") {
-      disconnectMut.mutate({ clientId, accountId: acc.id });
-    } else {
-      // Reativar: usar updateAccount com status active
-      updateMut.mutate({ clientId, accountId: acc.id, status: "active" });
-    }
   }
 
   function copyWebhookUrl() {
     const url = `${window.location.origin}/api/webhooks/meta`;
     navigator.clipboard.writeText(url).then(() => toast.success("URL copiada!"));
-  }
-
-  // ─── Helpers visuais ─────────────────────────────────────────────────────────
-
-  function StatusBadge({ status }: { status: WaAccount["status"] }) {
-    if (status === "active")
-      return (
-        <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 gap-1">
-          <CheckCircle2 className="w-3 h-3" /> Ativo
-        </Badge>
-      );
-    if (status === "error")
-      return (
-        <Badge className="bg-red-100 text-red-700 border-red-200 gap-1">
-          <XCircle className="w-3 h-3" /> Erro
-        </Badge>
-      );
-    return (
-      <Badge className="bg-slate-100 text-slate-600 border-slate-200 gap-1">
-        <AlertCircle className="w-3 h-3" /> Inativo
-      </Badge>
-    );
   }
 
   // ─── Render ──────────────────────────────────────────────────────────────────
@@ -229,12 +130,12 @@ export function WhatsAppConfigPage() {
             Configuração WhatsApp
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Conecte seus números WhatsApp Business via Meta Cloud API.
+            Conecte seu número WhatsApp Business via Meta Cloud API.
           </p>
         </div>
-        <Button onClick={openAdd} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white">
+        <Button onClick={() => setShowModal(true)} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white">
           <Plus className="w-4 h-4" />
-          Adicionar conta
+          {config ? "Atualizar" : "Conectar"}
         </Button>
       </div>
 
@@ -278,336 +179,222 @@ export function WhatsAppConfigPage() {
         </div>
       </div>
 
-      {/* Lista de contas */}
+      {/* Status */}
       {isLoading ? (
         <div className="flex items-center justify-center py-16 text-slate-400">
-          <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Carregando contas...
+          <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Carregando...
         </div>
-      ) : !accounts || accounts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-3">
+      ) : !config ? (
+        <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50">
           <Smartphone className="w-12 h-12 opacity-30" />
           <p className="text-sm font-medium">Nenhuma conta conectada</p>
           <p className="text-xs text-center max-w-xs">
-            Clique em "Adicionar conta" para conectar seu primeiro número WhatsApp Business.
+            Clique em "Conectar" para configurar seu número WhatsApp Business.
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
-          {(accounts as WaAccount[]).map((acc) => (
-            <div
-              key={acc.id}
-              className="rounded-xl border border-slate-200 bg-white shadow-sm p-4 flex items-center gap-4 hover:shadow-md transition-shadow"
-            >
-              {/* Ícone */}
-              <div
-                className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                  acc.status === "active"
-                    ? "bg-emerald-100"
-                    : acc.status === "error"
-                    ? "bg-red-100"
-                    : "bg-slate-100"
-                }`}
-              >
-                <Smartphone
-                  className={`w-5 h-5 ${
-                    acc.status === "active"
-                      ? "text-emerald-600"
-                      : acc.status === "error"
-                      ? "text-red-500"
-                      : "text-slate-400"
-                  }`}
-                />
-              </div>
-
-              {/* Info */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-slate-900 text-sm">{acc.displayName}</span>
-                  <StatusBadge status={acc.status} />
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-6">
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
+                  <Smartphone className="w-5 h-5 text-emerald-600" />
                 </div>
-                <div className="flex items-center gap-3 mt-1 flex-wrap">
-                  {acc.phoneNumber && (
-                    <span className="text-xs text-slate-500">📱 {acc.phoneNumber}</span>
-                  )}
-                  <span className="text-xs text-slate-400 font-mono">
-                    ID: {acc.phoneNumberId}
-                  </span>
-                  <span className="text-xs text-slate-400 font-mono">
-                    WABA: {acc.businessAccountId}
-                  </span>
+                <div>
+                  <p className="font-semibold text-slate-900">WhatsApp Business</p>
+                  <p className="text-sm text-slate-500">{config.phoneNumber || "Número não configurado"}</p>
                 </div>
               </div>
 
-              {/* Ações */}
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => openEdit(acc)}
-                  className="text-xs"
-                >
-                  Editar
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleToggle(acc)}
-                  disabled={disconnectMut.isPending || updateMut.isPending}
-                  className={`text-xs gap-1 ${
-                    acc.status === "active"
-                      ? "border-amber-300 text-amber-700 hover:bg-amber-50"
-                      : "border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-                  }`}
-                >
-                  {acc.status === "active" ? (
-                    <><PowerOff className="w-3 h-3" /> Desativar</>
-                  ) : (
-                    <><Power className="w-3 h-3" /> Ativar</>
-                  )}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setDeleteTarget(acc)}
-                  className="text-xs gap-1 border-red-200 text-red-600 hover:bg-red-50"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </Button>
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-600">Phone Number ID:</span>
+                  <code className="bg-slate-100 px-2 py-1 rounded text-xs font-mono text-slate-700">
+                    {config.phoneNumberId}
+                  </code>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-600">Business Account ID:</span>
+                  <code className="bg-slate-100 px-2 py-1 rounded text-xs font-mono text-slate-700">
+                    {config.businessAccountId}
+                  </code>
+                </div>
+                <div className="flex items-center gap-2 mt-4">
+                  <span className="text-slate-600">Status da conexão:</span>
+                  <Badge className={config.connectionStatus ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}>
+                    {config.connectionStatus ? "✓ Ativo" : "○ Inativo"}
+                  </Badge>
+                </div>
               </div>
             </div>
-          ))}
+
+            <div className="flex flex-col gap-2">
+              <Button
+                onClick={() => testMut.mutate({ clientId })}
+                disabled={testMut.isPending}
+                variant="outline"
+                size="sm"
+                className="gap-1"
+              >
+                <RefreshCw className="w-3 h-3" /> Testar
+              </Button>
+              <Button
+                onClick={() => setShowModal(true)}
+                variant="outline"
+                size="sm"
+              >
+                Editar
+              </Button>
+              <AlertDialog>
+                <Button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const dialog = document.querySelector('[role="alertdialog"]');
+                    if (dialog) {
+                      const trigger = dialog.querySelector('[role="button"]');
+                      if (trigger) trigger.dispatchEvent(new Event("click"));
+                    }
+                  }}
+                  variant="outline"
+                  size="sm"
+                  className="text-red-600 border-red-200 hover:bg-red-50"
+                >
+                  Remover
+                </Button>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Remover configuração WhatsApp?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Esta ação não pode ser desfeita. Você perderá a integração WhatsApp.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => deleteMut.mutate({ clientId })}
+                      className="bg-red-600 hover:bg-red-700"
+                    >
+                      Remover
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* ─── Modal Adicionar ─────────────────────────────────────────────────── */}
-      <Dialog open={showAddModal} onOpenChange={(o) => { if (!o) { setShowAddModal(false); setFormError(null); } }}>
+      {/* ─── Modal ─────────────────────────────────────────────────────────── */}
+      <Dialog open={showModal} onOpenChange={(o) => { if (!o) { setShowModal(false); setFormError(null); } }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Smartphone className="w-5 h-5 text-emerald-600" />
-              Adicionar conta WhatsApp
+              {config ? "Atualizar" : "Conectar"} WhatsApp
             </DialogTitle>
           </DialogHeader>
-          <AccountForm
-            form={form}
-            setForm={setForm}
-            showToken={showToken}
-            setShowToken={setShowToken}
-            showWebhookToken={showWebhookToken}
-            setShowWebhookToken={setShowWebhookToken}
-            error={formError}
-            isLoading={connectMut.isPending}
-            onSubmit={handleSubmitAdd}
-            onCancel={() => { setShowAddModal(false); setFormError(null); }}
-            submitLabel="Conectar conta"
-          />
-        </DialogContent>
-      </Dialog>
 
-      {/* ─── Modal Editar ────────────────────────────────────────────────────── */}
-      <Dialog open={!!editAccount} onOpenChange={(o) => { if (!o) { setEditAccount(null); setFormError(null); } }}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Smartphone className="w-5 h-5 text-blue-600" />
-              Editar conta — {editAccount?.displayName}
-            </DialogTitle>
-          </DialogHeader>
-          <AccountForm
-            form={form}
-            setForm={setForm}
-            showToken={showToken}
-            setShowToken={setShowToken}
-            showWebhookToken={showWebhookToken}
-            setShowWebhookToken={setShowWebhookToken}
-            error={formError}
-            isLoading={updateMut.isPending}
-            onSubmit={handleSubmitEdit}
-            onCancel={() => { setEditAccount(null); setFormError(null); }}
-            submitLabel="Salvar alterações"
-            isEdit
-          />
-        </DialogContent>
-      </Dialog>
+          <div className="space-y-4">
+            {formError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+                {formError}
+              </div>
+            )}
 
-      {/* ─── Confirmação de remoção ──────────────────────────────────────────── */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remover conta WhatsApp?</AlertDialogTitle>
-            <AlertDialogDescription>
-              A conta <strong>{deleteTarget?.displayName}</strong> será removida permanentemente.
-              Todas as conversas vinculadas a este número serão mantidas, mas novos webhooks não
-              serão processados.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => deleteTarget && removeMut.mutate({ clientId, accountId: deleteTarget.id })}
-              className="bg-red-600 hover:bg-red-700 text-white"
-            >
-              Remover
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
-  );
-}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Phone Number ID *
+              </label>
+              <Input
+                placeholder="123456789"
+                value={form.phoneNumberId}
+                onChange={(e) => setForm({ ...form, phoneNumberId: e.target.value })}
+              />
+            </div>
 
-// ─── Formulário reutilizável ──────────────────────────────────────────────────
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Business Account ID *
+              </label>
+              <Input
+                placeholder="987654321"
+                value={form.businessAccountId}
+                onChange={(e) => setForm({ ...form, businessAccountId: e.target.value })}
+              />
+            </div>
 
-interface AccountFormProps {
-  form: AccountFormData;
-  setForm: React.Dispatch<React.SetStateAction<AccountFormData>>;
-  showToken: boolean;
-  setShowToken: (v: boolean) => void;
-  showWebhookToken: boolean;
-  setShowWebhookToken: (v: boolean) => void;
-  error: string | null;
-  isLoading: boolean;
-  onSubmit: () => void;
-  onCancel: () => void;
-  submitLabel: string;
-  isEdit?: boolean;
-}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Access Token *
+              </label>
+              <div className="relative">
+                <Input
+                  type={showToken ? "text" : "password"}
+                  placeholder="EAA..."
+                  value={form.accessToken}
+                  onChange={(e) => setForm({ ...form, accessToken: e.target.value })}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowToken(!showToken)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700"
+                >
+                  {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
 
-function AccountForm({
-  form,
-  setForm,
-  showToken,
-  setShowToken,
-  showWebhookToken,
-  setShowWebhookToken,
-  error,
-  isLoading,
-  onSubmit,
-  onCancel,
-  submitLabel,
-  isEdit,
-}: AccountFormProps) {
-  const field = (key: keyof AccountFormData) => ({
-    value: form[key],
-    onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
-      setForm((f) => ({ ...f, [key]: e.target.value })),
-  });
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Webhook Verify Token
+              </label>
+              <div className="relative">
+                <Input
+                  type={showWebhookToken ? "text" : "password"}
+                  placeholder="seu-token-secreto"
+                  value={form.webhookVerifyToken}
+                  onChange={(e) => setForm({ ...form, webhookVerifyToken: e.target.value })}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowWebhookToken(!showWebhookToken)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700"
+                >
+                  {showWebhookToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
 
-  return (
-    <div className="flex flex-col gap-4 pt-2">
-      {/* Nome */}
-      <div className="flex flex-col gap-1.5">
-        <label className="text-sm font-medium text-slate-700">Nome da conta</label>
-        <Input placeholder="Ex: Suporte Principal" {...field("displayName")} />
-        <p className="text-xs text-slate-400">Nome para identificar este número internamente.</p>
-      </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Número de Telefone (opcional)
+              </label>
+              <Input
+                placeholder="+55 11 99999-9999"
+                value={form.phoneNumber}
+                onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })}
+              />
+            </div>
 
-      {/* Phone Number ID */}
-      <div className="flex flex-col gap-1.5">
-        <label className="text-sm font-medium text-slate-700">Phone Number ID</label>
-        <Input
-          placeholder="Ex: 123456789012345"
-          {...field("phoneNumberId")}
-          disabled={isEdit}
-          className={isEdit ? "bg-slate-50 text-slate-400" : ""}
-        />
-        <p className="text-xs text-slate-400">
-          Encontrado em: Meta for Developers → App → WhatsApp → API Setup → Phone Number ID.
-        </p>
-      </div>
-
-      {/* Business Account ID */}
-      <div className="flex flex-col gap-1.5">
-        <label className="text-sm font-medium text-slate-700">Business Account ID (WABA ID)</label>
-        <Input
-          placeholder="Ex: 987654321098765"
-          {...field("businessAccountId")}
-          disabled={isEdit}
-          className={isEdit ? "bg-slate-50 text-slate-400" : ""}
-        />
-        <p className="text-xs text-slate-400">
-          Encontrado em: Meta Business Suite → Configurações → Contas WhatsApp Business.
-        </p>
-      </div>
-
-      {/* Access Token */}
-      <div className="flex flex-col gap-1.5">
-        <label className="text-sm font-medium text-slate-700">
-          Access Token {isEdit && <span className="text-slate-400 font-normal">(deixe em branco para manter)</span>}
-        </label>
-        <div className="relative">
-          <Input
-            type={showToken ? "text" : "password"}
-            placeholder={isEdit ? "Novo token (opcional)" : "EAABwzLixnjYBO..."}
-            {...field("accessToken")}
-            className="pr-10"
-          />
-          <button
-            type="button"
-            onClick={() => setShowToken(!showToken)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-          >
-            {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
-        </div>
-        <p className="text-xs text-slate-400">
-          Token permanente gerado no painel Meta for Developers. Nunca compartilhe este token.
-        </p>
-      </div>
-
-      {/* Webhook Verify Token */}
-      {!isEdit && (
-        <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium text-slate-700">
-            Webhook Verify Token <span className="text-slate-400 font-normal">(opcional)</span>
-          </label>
-          <div className="relative">
-            <Input
-              type={showWebhookToken ? "text" : "password"}
-              placeholder="Token secreto para verificação do webhook"
-              {...field("webhookVerifyToken")}
-              className="pr-10"
-            />
-            <button
-              type="button"
-              onClick={() => setShowWebhookToken(!showWebhookToken)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-            >
-              {showWebhookToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
+            <div className="flex gap-2 pt-4">
+              <Button
+                onClick={handleSubmit}
+                disabled={saveMut.isPending}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700"
+              >
+                {saveMut.isPending ? "Salvando..." : "Salvar"}
+              </Button>
+              <Button
+                onClick={() => setShowModal(false)}
+                variant="outline"
+                className="flex-1"
+              >
+                Cancelar
+              </Button>
+            </div>
           </div>
-          <p className="text-xs text-slate-400">
-            Token que você define no painel Meta para verificar a autenticidade dos webhooks.
-          </p>
-        </div>
-      )}
-
-      {/* Erro */}
-      {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 flex items-center gap-2">
-          <XCircle className="w-4 h-4 flex-shrink-0" />
-          {error}
-        </div>
-      )}
-
-      {/* Ações */}
-      <div className="flex justify-end gap-2 pt-2">
-        <Button type="button" variant="outline" onClick={onCancel} disabled={isLoading}>
-          Cancelar
-        </Button>
-        <Button
-          type="button"
-          onClick={onSubmit}
-          disabled={isLoading}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
-        >
-          {isLoading && <RefreshCw className="w-4 h-4 animate-spin" />}
-          {submitLabel}
-        </Button>
-      </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
