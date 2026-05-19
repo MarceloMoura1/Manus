@@ -1375,7 +1375,7 @@ export function SettingsPage() {
 
   // ─── Aba: Conta ───────────────────────────────────────────────────────────
   const [editingName, setEditingName] = useState(false);
-  const [newName, setNewName] = useState(user?.user?.name || '');
+  const [newName, setNewName] = useState(session?.userName || '');
   const [editingPassword, setEditingPassword] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');

@@ -454,6 +454,7 @@ export const waMessages = mysqlTable("wa_messages", {
   clientId: varchar("client_id", { length: 80 }).notNull(),
   waMessageId: varchar("wa_message_id", { length: 120 }), // ID retornado pela Meta API
   senderType: mysqlEnum("sender_type", ["customer", "agent", "bot"]).notNull(),
+  agentName: varchar("agent_name", { length: 180 }), // Nome do agente que enviou a mensagem (se senderType === 'agent')
   messageType: mysqlEnum("message_type", ["text", "image", "audio", "video", "document", "template", "sticker", "location", "reaction"]).notNull().default("text"),
   content: text("content").notNull().default(""),
   mediaUrl: text("media_url"),
