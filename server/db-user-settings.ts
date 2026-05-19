@@ -2,7 +2,7 @@
  * Helpers para gerenciar configurações de usuário (notificações, atalhos)
  * Isolamento de tenant garantido em todas as operações
  */
-import { db } from "./_core/db";
+import { db } from "./db";
 import { megadeskUserSettings, megadeskUserShortcuts } from "../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
@@ -45,7 +45,7 @@ export async function getUserSettings(clientId: string, userId: string) {
     .from(megadeskUserSettings)
     .where(and(eq(megadeskUserSettings.clientId, clientId), eq(megadeskUserSettings.userId, userId)))
     .limit(1)
-    .then((rows) => rows[0]);
+    .then((rows: any[]) => rows[0]);
 }
 
 /**
@@ -144,7 +144,7 @@ export async function createUserShortcut(
     .from(megadeskUserShortcuts)
     .where(eq(megadeskUserShortcuts.id, id))
     .limit(1)
-    .then((rows) => rows[0]);
+    .then((rows: any[]) => rows[0]);
 }
 
 /**
@@ -180,7 +180,7 @@ export async function updateUserShortcut(
       )
     )
     .limit(1)
-    .then((rows) => rows[0]);
+    .then((rows: any[]) => rows[0]);
 }
 
 /**

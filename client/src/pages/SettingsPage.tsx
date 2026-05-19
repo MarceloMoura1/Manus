@@ -255,31 +255,53 @@ export function SettingsPage() {
               </CardHeader>
               <CardContent className="space-y-6">
                 {/* Ativar/Desativar Notificações */}
-                <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                <div className={`flex items-center justify-between p-4 border border-slate-200 rounded-lg transition-colors ${
+                  notificationSettings.notificationsEnabled
+                    ? 'bg-green-50 border-green-300'
+                    : 'bg-red-50 border-red-300'
+                }`}>
                   <div>
                     <p className="font-medium text-foreground">Notificações</p>
                     <p className="text-sm text-muted-foreground">Receber notificações da plataforma</p>
                   </div>
-                  <Switch
-                    checked={notificationSettings.notificationsEnabled}
-                    onCheckedChange={(checked) =>
-                      setNotificationSettings({ ...notificationSettings, notificationsEnabled: checked })
+                  <div className={`w-12 h-7 rounded-full transition-colors ${
+                    notificationSettings.notificationsEnabled
+                      ? 'bg-green-500'
+                      : 'bg-red-500'
+                  } flex items-center cursor-pointer`}
+                    onClick={() =>
+                      setNotificationSettings({ ...notificationSettings, notificationsEnabled: !notificationSettings.notificationsEnabled })
                     }
-                  />
+                  >
+                    <div className={`w-6 h-6 bg-white rounded-full transition-transform ${
+                      notificationSettings.notificationsEnabled ? 'translate-x-5' : 'translate-x-0'
+                    }`} />
+                  </div>
                 </div>
 
                 {/* Som de Notificações */}
-                <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                <div className={`flex items-center justify-between p-4 border border-slate-200 rounded-lg transition-colors ${
+                  notificationSettings.soundEnabled
+                    ? 'bg-green-50 border-green-300'
+                    : 'bg-red-50 border-red-300'
+                }`}>
                   <div>
                     <p className="font-medium text-foreground">Som de Notificações</p>
                     <p className="text-sm text-muted-foreground">Reproduzir som ao receber notificação</p>
                   </div>
-                  <Switch
-                    checked={notificationSettings.soundEnabled}
-                    onCheckedChange={(checked) =>
-                      setNotificationSettings({ ...notificationSettings, soundEnabled: checked })
+                  <div className={`w-12 h-7 rounded-full transition-colors ${
+                    notificationSettings.soundEnabled
+                      ? 'bg-green-500'
+                      : 'bg-red-500'
+                  } flex items-center cursor-pointer`}
+                    onClick={() =>
+                      setNotificationSettings({ ...notificationSettings, soundEnabled: !notificationSettings.soundEnabled })
                     }
-                  />
+                  >
+                    <div className={`w-6 h-6 bg-white rounded-full transition-transform ${
+                      notificationSettings.soundEnabled ? 'translate-x-5' : 'translate-x-0'
+                    }`} />
+                  </div>
                 </div>
 
                 {/* Volume de Notificações */}
@@ -319,17 +341,28 @@ export function SettingsPage() {
                 </div>
 
                 {/* Notificações Desktop */}
-                <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                <div className={`flex items-center justify-between p-4 border border-slate-200 rounded-lg transition-colors ${
+                  notificationSettings.desktopNotificationsEnabled
+                    ? 'bg-green-50 border-green-300'
+                    : 'bg-red-50 border-red-300'
+                }`}>
                   <div>
                     <p className="font-medium text-foreground">Notificações Desktop</p>
                     <p className="text-sm text-muted-foreground">Receber notificações na área de trabalho</p>
                   </div>
-                  <Switch
-                    checked={notificationSettings.desktopNotificationsEnabled}
-                    onCheckedChange={(checked) =>
-                      setNotificationSettings({ ...notificationSettings, desktopNotificationsEnabled: checked })
+                  <div className={`w-12 h-7 rounded-full transition-colors ${
+                    notificationSettings.desktopNotificationsEnabled
+                      ? 'bg-green-500'
+                      : 'bg-red-500'
+                  } flex items-center cursor-pointer`}
+                    onClick={() =>
+                      setNotificationSettings({ ...notificationSettings, desktopNotificationsEnabled: !notificationSettings.desktopNotificationsEnabled })
                     }
-                  />
+                  >
+                    <div className={`w-6 h-6 bg-white rounded-full transition-transform ${
+                      notificationSettings.desktopNotificationsEnabled ? 'translate-x-5' : 'translate-x-0'
+                    }`} />
+                  </div>
                 </div>
 
                 {/* Notificações por Tipo */}
@@ -342,35 +375,60 @@ export function SettingsPage() {
                       { key: 'iaNotificationsEnabled', label: 'IA' },
                       { key: 'erpNotificationsEnabled', label: 'ERP' },
                       { key: 'trackingNotificationsEnabled', label: 'Rastreamento' },
-                    ].map((item) => (
-                      <div key={item.key} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                        <p className="text-foreground">{item.label}</p>
-                        <Switch
-                          checked={notificationSettings[item.key as keyof typeof notificationSettings] as boolean}
-                          onCheckedChange={(checked) =>
-                            setNotificationSettings({
-                              ...notificationSettings,
-                              [item.key]: checked,
-                            })
-                          }
-                        />
-                      </div>
-                    ))}
+                    ].map((item) => {
+                      const isEnabled = notificationSettings[item.key as keyof typeof notificationSettings] as boolean;
+                      return (
+                        <div key={item.key} className={`flex items-center justify-between p-3 border border-slate-200 rounded-lg transition-colors ${
+                          isEnabled
+                            ? 'bg-green-50 border-green-300'
+                            : 'bg-red-50 border-red-300'
+                        }`}>
+                          <p className="text-foreground">{item.label}</p>
+                          <div className={`w-12 h-7 rounded-full transition-colors ${
+                            isEnabled
+                              ? 'bg-green-500'
+                              : 'bg-red-500'
+                          } flex items-center cursor-pointer`}
+                            onClick={() =>
+                              setNotificationSettings({
+                                ...notificationSettings,
+                                [item.key]: !isEnabled,
+                              })
+                            }
+                          >
+                            <div className={`w-6 h-6 bg-white rounded-full transition-transform ${
+                              isEnabled ? 'translate-x-5' : 'translate-x-0'
+                            }`} />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
                 {/* Mostrar Preview */}
-                <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                <div className={`flex items-center justify-between p-4 border border-slate-200 rounded-lg transition-colors ${
+                  notificationSettings.showMessagePreview
+                    ? 'bg-green-50 border-green-300'
+                    : 'bg-red-50 border-red-300'
+                }`}>
                   <div>
                     <p className="font-medium text-foreground">Mostrar Preview de Mensagem</p>
                     <p className="text-sm text-muted-foreground">Exibir conteúdo da mensagem na notificação</p>
                   </div>
-                  <Switch
-                    checked={notificationSettings.showMessagePreview}
-                    onCheckedChange={(checked) =>
-                      setNotificationSettings({ ...notificationSettings, showMessagePreview: checked })
+                  <div className={`w-12 h-7 rounded-full transition-colors ${
+                    notificationSettings.showMessagePreview
+                      ? 'bg-green-500'
+                      : 'bg-red-500'
+                  } flex items-center cursor-pointer`}
+                    onClick={() =>
+                      setNotificationSettings({ ...notificationSettings, showMessagePreview: !notificationSettings.showMessagePreview })
                     }
-                  />
+                  >
+                    <div className={`w-6 h-6 bg-white rounded-full transition-transform ${
+                      notificationSettings.showMessagePreview ? 'translate-x-5' : 'translate-x-0'
+                    }`} />
+                  </div>
                 </div>
               </CardContent>
             </Card>
