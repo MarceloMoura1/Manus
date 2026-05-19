@@ -117,16 +117,16 @@ export function WhatsAppConfigPage() {
       toast.success("Conta desativada.");
       refetch();
     },
-    onError: (e) => toast.error(e.message),
+    onError: (e: any) => toast.error(e?.message || 'Erro ao desativar conta'),
   });
 
-  const removeMut = trpc.whatsapp.removeAccount.useMutation({
+  const removeMut = trpc.whatsapp.deleteConfig.useMutation({
     onSuccess: () => {
       toast.success("Conta removida com sucesso.");
       setDeleteTarget(null);
       refetch();
     },
-    onError: (e) => toast.error(e.message),
+    onError: (e: any) => toast.error(e?.message || 'Erro ao desativar conta'),
   });
 
   // ─── Handlers ───────────────────────────────────────────────────────────────
