@@ -437,11 +437,17 @@ function ConversationsPage() {
     { id: 'closed', label: 'Fechadas', dot: 'bg-slate-400', count: conversations.filter(c => c.status === 'closed').length },
   ];
 
-  // Lista de atendentes únicos para o dropdown
+  // Buscar todos os usuários ativos do cliente
+  const { data: activeUsersData } = trpc.megadesk.getActiveUsers.useQuery(
+    { clientId },
+    { enabled: !!clientId }
+  );
+
+  // Lista de atendentes (todos os usuários ativos)
   const attendants = React.useMemo(() => {
-    const names = conversations.map(c => c.assignedTo).filter(Boolean);
-    return [...new Set(names)] as string[];
-  }, [conversations]);
+    if (!activeUsersData) return [];
+    return activeUsersData.map(u => u.name).filter(Boolean);
+  }, [activeUsersData]);
 
   // Modo Histórico: busca em TODAS as conversas (abertas + fechadas + bot), sem filtro de status
   const isHistoryMode = ownerFilter === 'history';

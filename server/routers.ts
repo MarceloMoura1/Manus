@@ -1164,6 +1164,30 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao encerrar conversa" });
         }
       }),
+    getActiveUsers: publicProcedure
+      .input(z.object({ clientId: z.string().min(1) }))
+      .query(async ({ input }) => {
+        try {
+          await hydrateSyncState();
+          const client = getReleasedClientOrThrow(input.clientId);
+          if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
+          
+          // Retornar todos os usuários ativos do cliente
+          const activeUsers = client.users
+            .filter(u => u.status === "active")
+            .map(u => ({
+              id: u.id,
+              name: u.name,
+              email: u.email,
+              role: u.role,
+            }));
+          
+          return activeUsers;
+        } catch (error) {
+          console.error("Erro ao buscar usuários ativos:", error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao buscar usuários ativos" });
+        }
+      }),
     updateCustomerInfo: publicProcedure
       .input(z.object({ customerId: z.string(), name: z.string().optional(), company: z.string().optional(), clientId: z.string().min(1) }))
       .mutation(async ({ input }) => {
