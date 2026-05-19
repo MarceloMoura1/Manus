@@ -1305,35 +1305,35 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Testar fluxo completo de acesso e preenchimento de formularios
 
 
-## Fase 129: Página "Configuração do Bot" (em progresso)
+## Fase 129: Página "Configuração do Bot" (concluída)
 
 ### Painel Esquerdo: Novo Roteiro
-- [ ] Criar tabela megadesk_bot_scripts no banco
-- [ ] Campo Nome do roteiro
-- [ ] Campo Descrição do roteiro
-- [ ] Campo System Prompt (instruções para o bot)
-- [ ] Campo Mensagem Inicial (boas-vindas)
-- [ ] Botão Criar para salvar novo roteiro
+- [x] Criar tabela megadesk_bot_scripts no banco
+- [x] Campo Nome do roteiro
+- [x] Campo Descrição do roteiro
+- [x] Campo System Prompt (instruções para o bot)
+- [x] Campo Mensagem Inicial (boas-vindas)
+- [x] Botão Criar para salvar novo roteiro
 
 ### Painel Central: Lista de Roteiros
-- [ ] Listar todos os roteiros salvos
-- [ ] Botão Ativar/Desativar para cada roteiro
-- [ ] Badge verde "Ativo" quando roteiro está ativado
-- [ ] Botão Deletar (ícone lixeira) para remover roteiro
-- [ ] Scroll vertical se houver muitos roteiros
+- [x] Listar todos os roteiros salvos
+- [x] Botão Ativar/Desativar para cada roteiro
+- [x] Badge verde "Ativo" quando roteiro está ativado
+- [x] Botão Deletar (ícone lixeira) para remover roteiro
+- [x] Scroll vertical se houver muitos roteiros
 
 ### Painel Direito: Teste do Roteiro
-- [ ] Chat em tempo real com Gemini IA
-- [ ] Integração com Gemini IA do sistema
-- [ ] Mensagens do usuário e bot em tempo real
-- [ ] Histórico de conversa durante a sessão
-- [ ] Input responsivo para enviar mensagens
-- [ ] Botão Enviar com ícone de avião
-- [ ] Indicador de digitação do bot
+- [x] Chat em tempo real com Gemini IA
+- [x] Integração com Gemini IA do sistema
+- [x] Mensagens do usuário e bot em tempo real
+- [x] Histórico de conversa durante a sessão
+- [x] Input responsivo para enviar mensagens
+- [x] Botão Enviar com ícone de avião
+- [x] Indicador de digitação do bot
 
 ### Integração
-- [ ] Criar procedures tRPC para CRUD de bot scripts
-- [ ] Criar página BotConfigPage com layout de 3 painéis
-- [ ] Adicionar rota /bot-config no App.tsx
-- [ ] Adicionar "Configuração do Bot" ao sidebar
-- [ ] Testar fluxo completo com Gemini IA
+- [x] Criar procedures tRPC para CRUD de bot scripts
+- [x] Criar página BotConfigPage com layout de 3 painéis
+- [x] Adicionar rota /bot-config no App.tsx
+- [x] Adicionar "Configuração do Bot" ao sidebar
+- [x] Testar fluxo completo com Gemini IA
