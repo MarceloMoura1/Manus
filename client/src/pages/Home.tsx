@@ -2934,7 +2934,7 @@ function Shell() {
         </header>
 
         {/* Content */}
-        <main className="flex-1 overflow-auto p-8">
+        <main className={`flex-1 flex flex-col ${active === 'conversations' ? 'overflow-hidden' : 'overflow-auto p-8'}`}>
           {active === "home" && <DashboardPage setActive={setActive} indicadores={indicadores} />}
           {active === "conversations" && <ConversationsPage />}
           {active === "tickets" && <TicketsPage />}
@@ -2961,7 +2961,6 @@ function Shell() {
             // Navegar para Conversas com novo chat aberto
             setActive('conversations');
           }} />}
-          {active === "conversations" && <ConversasPage />}
         </main>
       </div>
 
