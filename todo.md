@@ -1349,3 +1349,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Validar funcionalidade de editar roteiros - funcionando
 - [x] Validar funcionalidade de deletar roteiros - funcionando
 - [x] Validar funcionalidade de ativar/desativar - funcionando
+
+## Fase 131: Ajustes de Layout com Mudanças de Margin
+
+- [x] Aplicar mudanças de margin aos cards dos painéis
+- [x] Adicionar padding horizontal ao container principal
+- [x] Corrigir erros de múltiplos atributos style
+- [x] Testar layout responsivo com as novas mudanças
+- [x] Validar visibilidade de todos os painéis
