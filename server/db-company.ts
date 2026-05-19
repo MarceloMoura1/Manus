@@ -3,6 +3,7 @@
  */
 import { getDb } from "./db";
 import { v4 as uuidv4 } from "uuid";
+import { sql } from "drizzle-orm";
 
 interface CompanySettings {
   id: string;
@@ -24,9 +25,8 @@ interface CompanySettings {
  */
 export async function getCompanySettings(clientId: string): Promise<CompanySettings | null> {
   const db = getDb();
-  const result = await db.raw(
-    `SELECT * FROM megadesk_company_settings WHERE client_id = ?`,
-    [clientId]
+  const result = await db.execute(
+    sql`SELECT * FROM megadesk_company_settings WHERE client_id = ${clientId}`
   );
   
   if (!result || result.length === 0) return null;
@@ -60,49 +60,26 @@ export async function saveCompanySettings(
 
   if (existing) {
     // Atualizar
-    await db.raw(
-      `UPDATE megadesk_company_settings SET 
-        company_name = ?, 
-        logo_url = ?, 
-        primary_email = ?, 
-        primary_phone = ?, 
-        primary_whatsapp = ?, 
-        address = ?, 
-        business_hours_start = ?, 
-        business_hours_end = ?,
+    await db.execute(
+      sql`UPDATE megadesk_company_settings SET 
+        company_name = ${data.companyName}, 
+        logo_url = ${data.logoUrl}, 
+        primary_email = ${data.primaryEmail}, 
+        primary_phone = ${data.primaryPhone}, 
+        primary_whatsapp = ${data.primaryWhatsapp}, 
+        address = ${data.address}, 
+        business_hours_start = ${data.businessHoursStart}, 
+        business_hours_end = ${data.businessHoursEnd},
         updated_at = NOW()
-      WHERE client_id = ?`,
-      [
-        data.companyName,
-        data.logoUrl,
-        data.primaryEmail,
-        data.primaryPhone,
-        data.primaryWhatsapp,
-        data.address,
-        data.businessHoursStart,
-        data.businessHoursEnd,
-        clientId,
-      ]
+      WHERE client_id = ${clientId}`
     );
   } else {
     // Criar novo
     const id = uuidv4();
-    await db.raw(
-      `INSERT INTO megadesk_company_settings 
+    await db.execute(
+      sql`INSERT INTO megadesk_company_settings 
         (id, client_id, company_name, logo_url, primary_email, primary_phone, primary_whatsapp, address, business_hours_start, business_hours_end)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        clientId,
-        data.companyName,
-        data.logoUrl,
-        data.primaryEmail,
-        data.primaryPhone,
-        data.primaryWhatsapp,
-        data.address,
-        data.businessHoursStart,
-        data.businessHoursEnd,
-      ]
+      VALUES (${id}, ${clientId}, ${data.companyName}, ${data.logoUrl}, ${data.primaryEmail}, ${data.primaryPhone}, ${data.primaryWhatsapp}, ${data.address}, ${data.businessHoursStart}, ${data.businessHoursEnd})`
     );
   }
 
