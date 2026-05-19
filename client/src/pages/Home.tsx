@@ -53,6 +53,7 @@ import {
   Building2,
   Smartphone,
   Tag,
+  ChevronDown,
 } from "lucide-react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
@@ -333,6 +334,9 @@ function ConversationsPage() {
 
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState<'open' | 'bot' | 'closed'>('open');
+  const [ownerFilter, setOwnerFilter] = React.useState<'all' | 'mine' | 'specific'>('all');
+  const [attendantFilter, setAttendantFilter] = React.useState<string>('');
+  const [attendantDropdownOpen, setAttendantDropdownOpen] = React.useState(false);
   const [selectedConversation, setSelectedConversation] = React.useState<string | null>(null);
   const [conversations, setConversations] = React.useState<any[]>([]);
   const [messageInput, setMessageInput] = React.useState('');
@@ -427,13 +431,24 @@ function ConversationsPage() {
     { id: 'closed', label: 'Fechadas', dot: 'bg-slate-400', count: conversations.filter(c => c.status === 'closed').length },
   ];
 
+  // Lista de atendentes únicos para o dropdown
+  const attendants = React.useMemo(() => {
+    const names = conversations.map(c => c.assignedTo).filter(Boolean);
+    return [...new Set(names)] as string[];
+  }, [conversations]);
+
   const filteredConversations = conversations.filter(conv => {
     const matchesFilter = conv.status === selectedFilter;
     const matchesSearch = searchTerm === '' ||
       conv.phone?.includes(searchTerm) ||
       conv.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       conv.company?.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesFilter && matchesSearch;
+    const matchesOwner =
+      ownerFilter === 'all' ? true :
+      ownerFilter === 'mine' ? (conv.assignedTo === userName || conv.assignedTo === sessionData?.userId) :
+      ownerFilter === 'specific' ? (attendantFilter === '' || conv.assignedTo === attendantFilter) :
+      true;
+    return matchesFilter && matchesSearch && matchesOwner;
   });
 
   const selectedConv = conversations.find(c => c.id === selectedConversation);
@@ -462,8 +477,9 @@ function ConversationsPage() {
       {/* ─── Coluna Esquerda: Lista de Conversas ─── */}
       <div className="w-80 flex-shrink-0 flex flex-col border-r border-slate-100 bg-slate-50">
 
-        {/* Header */}
-        <div className="px-4 pt-5 pb-3 bg-white border-b border-slate-100">
+                {/* Header */}
+        <div className="px-4 pt-4 pb-3 bg-white border-b border-slate-100">
+          {/* Linha 1: Título + contagem */}
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center">
@@ -475,13 +491,57 @@ function ConversationsPage() {
               </div>
             </div>
           </div>
-
-          {/* Busca */}
+          {/* Linha 2: Filtros Todas / Minhas / Específico + Dropdown Atendente */}
+          <div className="flex items-center gap-2 mb-3">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+              {(['all', 'mine', 'specific'] as const).map((f, i) => (
+                <button
+                  key={f}
+                  onClick={() => { setOwnerFilter(f); if (f !== 'specific') setAttendantFilter(''); }}
+                  className={cn(
+                    'px-3 py-1.5 text-xs font-medium transition-all duration-150',
+                    i > 0 && 'border-l border-slate-200',
+                    ownerFilter === f ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                  )}
+                >
+                  {f === 'all' ? 'Todas' : f === 'mine' ? 'Minhas' : 'Específico'}
+                </button>
+              ))}
+            </div>
+            {/* Dropdown Filtrar por Atendente */}
+            <div className="relative flex-1">
+              <button
+                onClick={() => setAttendantDropdownOpen(o => !o)}
+                className="w-full flex items-center justify-between gap-1 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                <span className="truncate">{attendantFilter || 'Por Atendente...'}</span>
+                <ChevronDown className="w-3 h-3 flex-shrink-0 text-slate-400" />
+              </button>
+              {attendantDropdownOpen && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 overflow-hidden">
+                  <button
+                    onClick={() => { setAttendantFilter(''); setOwnerFilter('all'); setAttendantDropdownOpen(false); }}
+                    className="w-full text-left px-3 py-2 text-xs text-slate-600 hover:bg-slate-50"
+                  >Todos os atendentes</button>
+                  {attendants.length > 0 ? attendants.map(att => (
+                    <button
+                      key={att}
+                      onClick={() => { setAttendantFilter(att); setOwnerFilter('specific'); setAttendantDropdownOpen(false); }}
+                      className={cn('w-full text-left px-3 py-2 text-xs hover:bg-slate-50', attendantFilter === att ? 'text-blue-600 font-semibold' : 'text-slate-700')}
+                    >{att}</button>
+                  )) : (
+                    <p className="px-3 py-2 text-xs text-slate-400">Nenhum atendente</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          {/* Linha 3: Busca */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Buscar por nome, telefone..."
+              placeholder="Buscar por nome, empresa, telefone..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm transition-all"
