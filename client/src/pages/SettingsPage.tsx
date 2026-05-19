@@ -1514,16 +1514,16 @@ export function SettingsPage() {
         </div>
 
         {/* Layout: lista lateral + conteúdo */}
-        <div className="flex gap-6 items-start">
+        <div className="flex gap-4 items-start">
           {/* ─── Lista lateral ─────────────────────────────────────────── */}
-          <div className="w-56 flex-shrink-0">
+          <div className="w-80 flex-shrink-0">
             <nav className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
               {isAdmin && (
-                <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Administrador</p>
+                <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Administrador</p>
                 </div>
               )}
-              <ul className="py-1">
+              <ul className="py-2">
                 {tabs.map((tab, idx) => {
                   const Icon = tabIcons[tab.value] ?? Settings2;
                   const isActive = activeTab === tab.value;
@@ -1532,30 +1532,30 @@ export function SettingsPage() {
                   const showSeparator = idx > 0 && tab.adminOnly && !prevTab?.adminOnly;
                   return (
                     <React.Fragment key={tab.value}>
-                      {showSeparator && <li className="mx-3 my-1 border-t border-slate-100" />}
+                      {showSeparator && <li className="mx-4 my-2 border-t border-slate-100" />}
                       <li>
                         <button
                           onClick={() => setActiveTab(tab.value)}
-                          className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-all duration-150 group ${
+                          className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-all duration-150 group ${
                             isActive
-                              ? 'bg-blue-50 text-blue-700'
+                              ? 'bg-blue-50 text-blue-700 border-l-4 border-blue-500'
                               : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                           }`}
                         >
-                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors ${
+                          <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors ${
                             isActive ? 'bg-blue-100' : 'bg-slate-100 group-hover:bg-slate-200'
                           }`}>
-                            <Icon className={`w-3.5 h-3.5 ${
+                            <Icon className={`w-5 h-5 ${
                               isActive ? 'text-blue-600' : 'text-slate-500'
                             }`} />
                           </div>
                           <div className="min-w-0">
-                            <p className={`text-sm font-medium leading-tight truncate ${
+                            <p className={`text-base font-semibold leading-tight truncate ${
                               isActive ? 'text-blue-700' : 'text-slate-700'
                             }`}>{tab.label.replace(/^\p{Emoji}\s*/u, '')}</p>
-                            <p className="text-[10px] text-slate-400 truncate mt-0.5">{tabDescriptions[tab.value]}</p>
+                            <p className="text-xs text-slate-400 truncate mt-1">{tabDescriptions[tab.value]}</p>
                           </div>
-                          {isActive && <div className="ml-auto w-1 h-4 bg-blue-500 rounded-full flex-shrink-0" />}
+                          {isActive && <div className="ml-auto w-1.5 h-5 bg-blue-500 rounded-full flex-shrink-0" />}
                         </button>
                       </li>
                     </React.Fragment>
