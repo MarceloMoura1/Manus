@@ -1377,3 +1377,14 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Aumentar largura do "Teste do Roteiro" (2 colunas)
 - [x] Adicionar padding horizontal para acomodar as margins
 - [x] Validar que todos os painéis estão visíveis e funcionais
+
+
+## Fase 134: Ajustes Finais de Layout e Limpeza de Estilos
+
+- [x] Aplicar novos ajustes de margin do editor visual
+- [x] Remover estilos duplicados e conflitantes
+- [x] Manter apenas os valores finais dos ajustes
+- [x] "Novo Roteiro" com marginLeft: '-331px', marginRight: '203px', marginBottom: '7px'
+- [x] "Roteiros" com marginLeft: '-217px', marginRight: '168px', paddingLeft: '26px', paddingRight: '34px'
+- [x] "Teste do Roteiro" com marginLeft: '-183px', marginRight: '-317px'
+- [x] Validar que todos os painéis estão visíveis e funcionais
