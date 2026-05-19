@@ -465,9 +465,17 @@ function ConversationsPage() {
     if (hasDateFilter) {
       const d = convToDate(conv);
       if (!d) return false;
-      const convDate = d.toISOString().slice(0, 10); // YYYY-MM-DD
+      const convDate = d.toISOString().slice(0, 10);
       if (dateFrom && convDate < dateFrom) return false;
       if (dateTo && convDate > dateTo) return false;
+      // Dentro do periodo: aplica busca adicional
+      const q = searchTerm.toLowerCase();
+      if (searchTerm.trim() === '') return true;
+      return (
+        conv.name?.toLowerCase().includes(q) ||
+        conv.company?.toLowerCase().includes(q) ||
+        conv.phone?.includes(searchTerm)
+      );
     }
 
     if (isHistoryMode) {
