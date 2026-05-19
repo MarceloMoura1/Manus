@@ -54,6 +54,7 @@ import {
   Smartphone,
   Tag,
   ChevronDown,
+  Calendar,
 } from "lucide-react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
@@ -338,6 +339,10 @@ function ConversationsPage() {
   const [attendantFilter, setAttendantFilter] = React.useState<string>('');
   const [historySearch, setHistorySearch] = React.useState<string>('');
   const [attendantDropdownOpen, setAttendantDropdownOpen] = React.useState(false);
+  // Filtro por data
+  const [dateFilterOpen, setDateFilterOpen] = React.useState(false);
+  const [dateFrom, setDateFrom] = React.useState<string>('');
+  const [dateTo, setDateTo] = React.useState<string>('');
   const [selectedConversation, setSelectedConversation] = React.useState<string | null>(null);
   const [conversations, setConversations] = React.useState<any[]>([]);
   const [messageInput, setMessageInput] = React.useState('');
@@ -441,7 +446,30 @@ function ConversationsPage() {
   // Modo Histórico: busca em TODAS as conversas (abertas + fechadas + bot), sem filtro de status
   const isHistoryMode = ownerFilter === 'history';
 
+  // Helper: converte timestamp de conversa para Date
+  const convToDate = (conv: any): Date | null => {
+    if (!conv.timestamp) return null;
+    if (typeof conv.timestamp === 'number') return new Date(conv.timestamp);
+    if (typeof conv.timestamp === 'string') {
+      const d = new Date(conv.timestamp);
+      if (!isNaN(d.getTime())) return d;
+    }
+    return null;
+  };
+
+  // Verifica se o filtro por data está ativo
+  const hasDateFilter = dateFrom !== '' || dateTo !== '';
+
   const filteredConversations = conversations.filter(conv => {
+    // Filtro por data (aplica em todos os modos)
+    if (hasDateFilter) {
+      const d = convToDate(conv);
+      if (!d) return false;
+      const convDate = d.toISOString().slice(0, 10); // YYYY-MM-DD
+      if (dateFrom && convDate < dateFrom) return false;
+      if (dateTo && convDate > dateTo) return false;
+    }
+
     if (isHistoryMode) {
       // Histórico: ignora filtro de status, busca em tudo pelo termo de histórico
       if (historySearch.trim() === '') return true;
@@ -492,7 +520,7 @@ function ConversationsPage() {
 
                 {/* Header */}
         <div className="px-4 pt-4 pb-3 bg-white border-b border-slate-100">
-          {/* Linha 1: Título + contagem */}
+          {/* Linha 1: Título + contagem + botão data */}
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center">
@@ -503,7 +531,61 @@ function ConversationsPage() {
                 <p className="text-xs text-slate-500">{conversations.length} conversa{conversations.length !== 1 ? 's' : ''}</p>
               </div>
             </div>
+            {/* Botão filtro por data */}
+            <button
+              onClick={() => setDateFilterOpen(o => !o)}
+              className={cn(
+                'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all',
+                hasDateFilter
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+              )}
+              title="Filtrar por data"
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              {hasDateFilter ? 'Data ativa' : 'Data'}
+            </button>
           </div>
+
+          {/* Painel de filtro por data */}
+          {dateFilterOpen && (
+            <div className="mb-3 p-3 bg-indigo-50 border border-indigo-200 rounded-xl">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-indigo-700">Filtrar por período</p>
+                {hasDateFilter && (
+                  <button
+                    onClick={() => { setDateFrom(''); setDateTo(''); }}
+                    className="text-xs text-indigo-500 hover:text-indigo-700 underline"
+                  >Limpar</button>
+                )}
+              </div>
+              <div className="flex flex-col gap-2">
+                <div>
+                  <label className="text-xs text-indigo-600 font-medium mb-1 block">De</label>
+                  <input
+                    type="date"
+                    value={dateFrom}
+                    onChange={e => setDateFrom(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-indigo-200 bg-white text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-indigo-600 font-medium mb-1 block">Até</label>
+                  <input
+                    type="date"
+                    value={dateTo}
+                    onChange={e => setDateTo(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-indigo-200 bg-white text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  />
+                </div>
+              </div>
+              {hasDateFilter && (
+                <p className="text-xs text-indigo-500 mt-2">
+                  {filteredConversations.length} resultado{filteredConversations.length !== 1 ? 's' : ''} no período
+                </p>
+              )}
+            </div>
+          )}
           {/* Linha 2: Filtros Todas / Minhas / Histórico */}
           <div className="flex items-center gap-2 mb-2">
             <div className="flex rounded-lg border border-slate-200 overflow-hidden flex-1">
@@ -519,7 +601,7 @@ function ConversationsPage() {
                       : 'bg-white text-slate-600 hover:bg-slate-50'
                   )}
                 >
-                  {f === 'all' ? 'Todas' : f === 'mine' ? 'Minhas' : '🔎 Histórico'}
+                  {f === 'all' ? 'Todas' : f === 'mine' ? 'Minhas' : 'Histórico'}
                 </button>
               ))}
             </div>
@@ -528,8 +610,8 @@ function ConversationsPage() {
           {/* Linha 3a: Campo de busca do Histórico (aparece apenas no modo histórico) */}
           {ownerFilter === 'history' && (
             <div className="mb-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-              <p className="text-xs font-semibold text-amber-700 mb-2 flex items-center gap-1">
-                <span>🔍</span> Busca no histórico completo
+              <p className="text-xs font-semibold text-amber-700 mb-2">
+                Busca no histórico completo
               </p>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-amber-400" />
