@@ -11,7 +11,7 @@ import { registerIntegrationApi } from "../integrationApi";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
-import { addSseClient, startWhatsAppSession, disconnectWhatsApp, getSessionStatus } from "../whatsapp-baileys";
+import { addSseClient, startWhatsAppSession, disconnectWhatsApp, getSessionStatus, sendBaileysMessage, restoreExistingSessions } from "../whatsapp-baileys";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -134,6 +134,17 @@ async function startServer() {
     if (!clientId) return res.status(400).json({ error: "clientId required" });
     res.json(getSessionStatus(clientId));
   });
+
+  // POST /api/baileys/send — enviar mensagem via Baileys
+  app.post("/api/baileys/send", async (req, res) => {
+    const { clientId, conversationId, phone, text, agentName } = req.body;
+    if (!clientId || !conversationId || !phone || !text) {
+      return res.status(400).json({ error: "clientId, conversationId, phone e text são obrigatórios" });
+    }
+    const result = await sendBaileysMessage(clientId, conversationId, phone, text, agentName || "Atendente");
+    if (!result.ok) return res.status(500).json({ error: result.error });
+    res.json({ ok: true });
+  });
   // ────────────────────────────────────────────────────────────────────────────
 
   // tRPC API
@@ -160,6 +171,10 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    // Restaurar sessões Baileys existentes após o servidor iniciar
+    restoreExistingSessions().catch((err) =>
+      console.error("[Baileys] Erro ao restaurar sessões:", err)
+    );
   });
 }
 

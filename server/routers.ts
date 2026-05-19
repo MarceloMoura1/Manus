@@ -1119,22 +1119,29 @@ export const appRouter = router({
       .input(z.object({ clientId: z.string().min(1) }))
       .query(async ({ input }) => {
         try {
-          const client = getReleasedClientOrThrow(input.clientId);
-          if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
-          
-          // Ler diretamente do banco para incluir conversas do Baileys em tempo real
+          // Ler diretamente do banco — sem exigir accessReleased para não bloquear clientes Baileys
           const { getConversationsByClientId } = await import("./db");
-          const rows = await getConversationsByClientId(client.clientId);
-          return rows.map(c => ({
-            id: c.conversationId,
-            name: c.customerName,
-            phone: c.phone,
-            company: c.company ?? "",
-            status: c.status as "open" | "bot" | "closed",
-            lastMessage: c.lastMessage,
-            timestamp: c.updatedAt ? new Date(c.updatedAt).getTime() : new Date(c.createdAt ?? Date.now()).getTime(),
-            isUnread: c.status === "bot",
-          }));
+          const rows = await getConversationsByClientId(input.clientId);
+          return rows
+            .sort((a: any, b: any) => {
+              const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+              const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+              return tb - ta;
+            })
+            .map((c: any) => ({
+              id: c.conversationId,
+              name: c.customerName,
+              phone: c.phone,
+              company: c.company ?? "",
+              status: c.status as "open" | "bot" | "closed",
+              lastMessage: c.lastMessage,
+              timestamp: c.updatedAt ? new Date(c.updatedAt).getTime() : new Date(c.createdAt ?? Date.now()).getTime(),
+              isUnread: (c.unreadCount ?? 0) > 0 && c.lastMessageFrom === "customer",
+              unreadCount: c.unreadCount ?? 0,
+              assignedTo: c.assignedUserName ?? null,
+              assignedUserId: c.assignedUserId ?? null,
+              messagesJson: c.messagesJson ?? "[]",
+            }));
         } catch (error) {
           console.error("Erro ao buscar conversas:", error);
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao buscar conversas" });
@@ -1144,23 +1151,25 @@ export const appRouter = router({
       .input(z.object({ conversationId: z.string(), clientId: z.string().min(1) }))
       .mutation(async ({ input }) => {
         try {
-          const { updateConversationStatus } = await import("./db");
-          await hydrateSyncState();
-          const client = getReleasedClientOrThrow(input.clientId);
-          if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
-          
-          // Verifica que a conversa pertence ao cliente antes de encerrar
-          const conv = conversations.find(c => c.id === input.conversationId);
-          if (!conv) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
-          if (conv.clientId !== client.clientId) throw new TRPCError({ code: "FORBIDDEN", message: "Acesso negado: conversa não pertence a este cliente." });
-          
+          const { updateConversationStatus, getDb } = await import("./db");
+          const { megadeskDomainConversations } = await import("../drizzle/schema");
+          const { eq, and } = await import("drizzle-orm");
+          // Verificar ownership direto no banco (sem exigir accessReleased)
+          const rows = await getDb().select()
+            .from(megadeskDomainConversations)
+            .where(and(
+              eq(megadeskDomainConversations.conversationId, input.conversationId),
+              eq(megadeskDomainConversations.clientId, input.clientId)
+            ))
+            .limit(1);
+          if (!rows.length) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
           await updateConversationStatus(input.conversationId, "closed");
-          conv.status = "closed";
-          
-          audit("MegaDesk", `Conversa encerrada: ${input.conversationId}`, client.clientId);
-          await persistSyncState();
+          // Atualizar array em memória se existir
+          const memConv = conversations.find(c => c.id === input.conversationId && c.clientId === input.clientId);
+          if (memConv) memConv.status = "closed";
           return { ok: true };
         } catch (error) {
+          if (error instanceof TRPCError) throw error;
           console.error("Erro ao encerrar conversa:", error);
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao encerrar conversa" });
         }
@@ -1625,38 +1634,44 @@ export const appRouter = router({
         viewMode: z.enum(["all", "mine", "specific"]).optional(),
         assignedUserId: z.string().nullable().optional(),
       }))
-      .query(({ input }) => {
-        let clientConversations = conversations.filter((c) => c.clientId === input.clientId);
+      .query(async ({ input }) => {
+        // Ler diretamente do banco para incluir conversas do Baileys
+        const { getConversationsByClientId } = await import("./db");
+        let rows = await getConversationsByClientId(input.clientId);
         // Filtrar por modo de visualização
-        if (input.viewMode === "mine" && input.assignedUserId) {
-          clientConversations = clientConversations.filter((c) => c.assignedUserId === input.assignedUserId);
-        } else if (input.viewMode === "specific" && input.assignedUserId) {
-          clientConversations = clientConversations.filter((c) => c.assignedUserId === input.assignedUserId);
+        if ((input.viewMode === "mine" || input.viewMode === "specific") && input.assignedUserId) {
+          rows = rows.filter((r: any) => r.assignedUserId === input.assignedUserId);
         }
-        return clientConversations.map((c) => ({
-          id: c.id,
-          customerName: c.name,
-          customerPhone: c.phone,
-          companyName: c.company,
-          lastMessage: c.lastMessage,
-          lastMessageAt: c.createdAt ? new Date(c.createdAt) : new Date(),
-          unreadCount: c.unreadCount ?? 0,
-          status: (c.status === "closed" ? "closed" : c.status === "bot" ? "pending" : "open") as "open" | "pending" | "closed",
-          assignedUserId: c.assignedUserId ?? null,
-          assignedUserName: c.assignedUserName,
-          iaActive: c.iaActive ?? false,
-          lastMessageFrom: c.lastMessageFrom,
-          createdAt: c.createdAt,
+        // Ordenar por mais recente
+        rows.sort((a: any, b: any) => {
+          const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+          const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+          return tb - ta;
+        });
+        return rows.map((r: any) => ({
+          id: r.conversationId,
+          customerName: r.customerName,
+          customerPhone: r.phone,
+          companyName: r.company ?? "",
+          lastMessage: r.lastMessage ?? "",
+          lastMessageAt: r.updatedAt ? new Date(r.updatedAt) : new Date(r.createdAt),
+          unreadCount: r.unreadCount ?? 0,
+          status: (r.status === "closed" ? "closed" : r.status === "bot" ? "pending" : "open") as "open" | "pending" | "closed",
+          assignedUserId: r.assignedUserId ?? null,
+          assignedUserName: r.assignedUserName ?? undefined,
+          iaActive: r.iaActive ?? false,
+          lastMessageFrom: r.lastMessageFrom as "customer" | "agent" | "bot" | undefined,
+          createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
         }));
       }),
     close: publicProcedure
       .input(z.object({ conversationId: z.string(), clientId: z.string() }))
-      .mutation(({ input }) => {
+      .mutation(async ({ input }) => {
+        const { updateConversationStatus } = await import("./db");
+        await updateConversationStatus(input.conversationId, "closed");
+        // Também atualizar array em memória se existir
         const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === input.clientId);
-        if (!conv) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa nao encontrada" });
-        conv.status = "closed";
-        persistSyncState().catch(console.error);
-        // Emitir evento Socket.IO
+        if (conv) conv.status = "closed";
         try {
           const { getSocketIO } = require("../modules/whatsapp/socket/whatsapp.socket");
           const io = getSocketIO();
@@ -1666,30 +1681,31 @@ export const appRouter = router({
       }),
     assign: publicProcedure
       .input(z.object({ conversationId: z.string(), userId: z.string(), userName: z.string().optional(), clientId: z.string() }))
-      .mutation(({ input }) => {
+      .mutation(async ({ input }) => {
+        const { getDb } = await import("./db");
+        const { megadeskDomainConversations } = await import("../drizzle/schema");
+        const { eq, and } = await import("drizzle-orm");
+        await getDb().update(megadeskDomainConversations)
+          .set({ assignedUserId: input.userId, assignedUserName: input.userName ?? null, updatedAt: new Date() })
+          .where(and(eq(megadeskDomainConversations.conversationId, input.conversationId), eq(megadeskDomainConversations.clientId, input.clientId)));
+        // Também atualizar array em memória se existir
         const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === input.clientId);
-        if (!conv) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa nao encontrada" });
-        // Buscar nome do usuário se não foi passado
-        const client = clients.find((c) => c.clientId === input.clientId);
-        const user = client?.users.find((u) => u.id === input.userId);
-        conv.assignedUserId = input.userId;
-        conv.assignedUserName = input.userName ?? user?.name;
-        persistSyncState().catch(console.error);
-        // Emitir evento Socket.IO
+        if (conv) { conv.assignedUserId = input.userId; conv.assignedUserName = input.userName; }
         try {
           const { getSocketIO } = require("../modules/whatsapp/socket/whatsapp.socket");
           const io = getSocketIO();
-          if (io) io.to(`client:${input.clientId}`).emit("conversation:assigned", { conversationId: input.conversationId, assignedUserId: conv.assignedUserId, assignedUserName: conv.assignedUserName, clientId: input.clientId });
+          if (io) io.to(`client:${input.clientId}`).emit("conversation:assigned", { conversationId: input.conversationId, assignedUserId: input.userId, assignedUserName: input.userName, clientId: input.clientId });
         } catch {}
         return { ok: true };
       }),
     reopen: publicProcedure
       .input(z.object({ conversationId: z.string(), clientId: z.string() }))
-      .mutation(({ input }) => {
+      .mutation(async ({ input }) => {
+        const { updateConversationStatus } = await import("./db");
+        await updateConversationStatus(input.conversationId, "open");
+        // Também atualizar array em memória se existir
         const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === input.clientId);
-        if (!conv) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa nao encontrada" });
-        conv.status = "open";
-        persistSyncState().catch(console.error);
+        if (conv) conv.status = "open";
         try {
           const { getSocketIO } = require("../modules/whatsapp/socket/whatsapp.socket");
           const io = getSocketIO();

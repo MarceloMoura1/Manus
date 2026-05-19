@@ -828,16 +828,44 @@ function ConversationsPage() {
 
             {/* Área de Mensagens */}
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3" style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)' }}>
-              {/* Mensagem de exemplo */}
-              <div className="flex justify-start">
-                <div className="max-w-xs lg:max-w-md">
-                  <div className="bg-white rounded-2xl rounded-tl-sm px-4 py-2.5 shadow-sm border border-slate-100">
-                    <p className="text-sm text-slate-800">{selectedConv.lastMessage || 'Conversa iniciada'}</p>
-                    <p className="text-xs text-slate-400 mt-1 text-right">{formatTime(selectedConv.timestamp)}</p>
-                  </div>
-                  <p className="text-xs text-slate-400 mt-1 ml-1">{selectedConv.name}</p>
-                </div>
-              </div>
+              {(() => {
+                let msgs: any[] = [];
+                try { msgs = JSON.parse(selectedConv.messagesJson || '[]'); } catch { msgs = []; }
+                if (msgs.length === 0) {
+                  return (
+                    <div className="flex justify-start">
+                      <div className="max-w-xs lg:max-w-md">
+                        <div className="bg-white rounded-2xl rounded-tl-sm px-4 py-2.5 shadow-sm border border-slate-100">
+                          <p className="text-sm text-slate-800">{selectedConv.lastMessage || 'Conversa iniciada'}</p>
+                          <p className="text-xs text-slate-400 mt-1 text-right">{formatTime(selectedConv.timestamp)}</p>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1 ml-1">{selectedConv.name}</p>
+                      </div>
+                    </div>
+                  );
+                }
+                return msgs.map((msg: any, idx: number) => {
+                  const isAgent = msg.sender === 'agent' || msg.from === 'agent';
+                  const msgText = msg.text || msg.message || '';
+                  const msgTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+                  return (
+                    <div key={msg.id || idx} className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
+                      <div className="max-w-xs lg:max-w-md">
+                        <div className={`rounded-2xl px-4 py-2.5 shadow-sm ${
+                          isAgent
+                            ? 'bg-gradient-to-br from-blue-500 to-violet-600 text-white rounded-tr-sm'
+                            : 'bg-white border border-slate-100 text-slate-800 rounded-tl-sm'
+                        }`}>
+                          <p className="text-sm">{msgText}</p>
+                          <p className={`text-xs mt-1 text-right ${isAgent ? 'text-blue-100' : 'text-slate-400'}`}>{msgTime}</p>
+                        </div>
+                        {!isAgent && <p className="text-xs text-slate-400 mt-1 ml-1">{selectedConv.name}</p>}
+                        {isAgent && msg.agentName && <p className="text-xs text-slate-400 mt-1 mr-1 text-right">{msg.agentName}</p>}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
               <div ref={messagesEndRef} />
             </div>
 
@@ -850,12 +878,65 @@ function ConversationsPage() {
                     placeholder="Digite sua mensagem..."
                     value={messageInput}
                     onChange={(e) => setMessageInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (messageInput.trim()) { showToast('Mensagem enviada!'); setMessageInput(''); } } }}
+                    onKeyDown={async (e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        if (!messageInput.trim() || !selectedConv) return;
+                        const text = messageInput.trim();
+                        setMessageInput('');
+                        try {
+                          const res = await fetch('/api/baileys/send', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              clientId,
+                              conversationId: selectedConv.id,
+                              phone: selectedConv.phone,
+                              text,
+                              agentName: userName,
+                            }),
+                          });
+                          if (!res.ok) {
+                            const err = await res.json();
+                            showToast(err.error || 'Erro ao enviar mensagem', 'error');
+                          } else {
+                            showToast('Mensagem enviada!', 'success');
+                          }
+                        } catch {
+                          showToast('Erro ao enviar mensagem', 'error');
+                        }
+                      }
+                    }}
                     className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm transition-all pr-12"
                   />
                 </div>
                 <button
-                  onClick={() => { if (messageInput.trim()) { showToast('Mensagem enviada!'); setMessageInput(''); } }}
+                  onClick={async () => {
+                    if (!messageInput.trim() || !selectedConv) return;
+                    const text = messageInput.trim();
+                    setMessageInput('');
+                    try {
+                      const res = await fetch('/api/baileys/send', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          clientId,
+                          conversationId: selectedConv.id,
+                          phone: selectedConv.phone,
+                          text,
+                          agentName: userName,
+                        }),
+                      });
+                      if (!res.ok) {
+                        const err = await res.json();
+                        showToast(err.error || 'Erro ao enviar mensagem', 'error');
+                      } else {
+                        showToast('Mensagem enviada!', 'success');
+                      }
+                    } catch {
+                      showToast('Erro ao enviar mensagem', 'error');
+                    }
+                  }}
                   className="w-11 h-11 bg-gradient-to-br from-blue-500 to-violet-600 text-white rounded-2xl flex items-center justify-center hover:shadow-lg hover:scale-105 transition-all duration-200 flex-shrink-0"
                 >
                   <Send className="w-4 h-4" />

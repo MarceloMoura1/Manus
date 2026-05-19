@@ -339,7 +339,9 @@ async function handleIncomingMessage(
 
     await pool.execute(
       `UPDATE megadesk_domain_conversations
-       SET messages_json = ?, last_message = ?, time_label = ?, status = 'bot', updated_at = NOW()
+       SET messages_json = ?, last_message = ?, time_label = ?, status = 'bot',
+           last_message_from = 'customer', unread_count = COALESCE(unread_count, 0) + 1,
+           updated_at = NOW()
        WHERE conversation_id = ? AND client_id = ?`,
       [JSON.stringify(messages), text, nowLabel, existing.conversation_id, clientId]
     );
@@ -370,8 +372,9 @@ async function handleIncomingMessage(
     await pool.execute(
       `INSERT INTO megadesk_domain_conversations
          (conversation_id, client_id, customer_name, phone, company, status,
-          last_message, time_label, messages_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'bot', ?, ?, ?, NOW(), NOW())`,
+          last_message, time_label, messages_json, last_message_from, unread_count,
+          created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'bot', ?, ?, ?, 'customer', 1, NOW(), NOW())`,
       [
         conversationId,
         clientId,
@@ -385,5 +388,66 @@ async function handleIncomingMessage(
     );
 
     console.log(`[Baileys] Nova conversa criada: ${conversationId} para +${cleanPhone}`);
+  }
+}
+
+/**
+ * Envia uma mensagem de texto via Baileys para um número de telefone.
+ * Também salva a mensagem no banco de dados da conversa.
+ */
+export async function sendBaileysMessage(
+  clientId: string,
+  conversationId: string,
+  phone: string,
+  text: string,
+  agentName: string
+): Promise<{ ok: boolean; error?: string }> {
+  const session = sessions.get(clientId);
+  if (!session || session.status !== "connected" || !session.sock) {
+    return { ok: false, error: "WhatsApp não conectado para este cliente" };
+  }
+
+  try {
+    // Formatar JID do WhatsApp
+    const cleanPhone = phone.replace(/\D/g, "");
+    const jid = cleanPhone.includes("@") ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
+
+    // Enviar mensagem via Baileys
+    await session.sock.sendMessage(jid, { text });
+
+    // Salvar mensagem no banco
+    const pool = getPool();
+    const [rows] = await pool.execute(
+      `SELECT messages_json FROM megadesk_domain_conversations
+       WHERE conversation_id = ? AND client_id = ? LIMIT 1`,
+      [conversationId, clientId]
+    ) as any[];
+
+    if (rows && rows.length > 0) {
+      let messages: any[] = [];
+      try { messages = JSON.parse(rows[0].messages_json || "[]"); } catch { messages = []; }
+      messages.push({
+        id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        sender: "agent",
+        agentName,
+        text,
+        timestamp: new Date().toISOString(),
+        type: "text",
+      });
+      const nowLabel = new Date().toLocaleString("pt-BR");
+      await pool.execute(
+        `UPDATE megadesk_domain_conversations
+         SET messages_json = ?, last_message = ?, time_label = ?,
+             last_message_from = 'agent', updated_at = NOW()
+         WHERE conversation_id = ? AND client_id = ?`,
+        [JSON.stringify(messages), text, nowLabel, conversationId, clientId]
+      );
+    }
+
+    console.log(`[Baileys] Mensagem enviada para ${phone} (conversa ${conversationId})`);
+    return { ok: true };
+  } catch (err: any) {
+    console.error(`[Baileys] Erro ao enviar mensagem:`, err);
+    return { ok: false, error: err?.message || "Erro ao enviar mensagem" };
   }
 }
