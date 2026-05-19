@@ -1667,6 +1667,5 @@ export const appRouter = router({
         }));
       }),
   }),
-  whatsapp: whatsappRouter,
 });
 export type AppRouter = typeof appRouter;

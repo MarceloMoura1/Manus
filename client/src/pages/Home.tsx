@@ -9,6 +9,7 @@ import { ClientesPage } from "./ClientesPage";
 import { ConversasPage } from "./ConversasPage";
 import { WhatsAppConfigPage } from "./WhatsAppConfigPage";
 import { SettingsPage as SettingsPageComponent } from "./SettingsPage";
+import { AdminSettingsPage } from "./AdminSettingsPage";
 import { TimelineActivity } from "@/components/TimelineActivity";
 
 import { Button } from "@/components/ui/button";
@@ -126,7 +127,7 @@ const SESSION_DURATION_LONG = 30 * 24 * 60 * 60 * 1000; // 30 dias ("lembrar meu
 const REFRESH_THRESHOLD = 5 * 60 * 1000; // Renovar 5 minutos antes de expirar
 const REFRESH_INTERVAL = 10 * 60 * 1000; // Verificar renovação a cada 10 minutos
 
-type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "clients" | "whatsapp-config";
+type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "clients" | "whatsapp-config" | "admin-settings";
 
 type Ticket = {
   id: string;
@@ -2682,6 +2683,7 @@ function Shell() {
     { id: "clients" as RouteId, label: "Clientes", icon: Building2 },
     { id: "whatsapp-config" as RouteId, label: "WhatsApp", icon: Smartphone },
     { id: "settings" as RouteId, label: "Configurações", icon: Cog },
+    { id: "admin-settings" as RouteId, label: "Configurações Admin", icon: Cog },
     { id: "bot-config" as RouteId, label: "Configurar Bot", icon: Bot },
     { id: "ai-assistant" as RouteId, label: "Assistente IA", icon: Sparkles },
     { id: "help" as RouteId, label: "Ajuda", icon: AlertCircle },
@@ -2699,8 +2701,8 @@ function Shell() {
   });
 
   // Separar itens em seções
-  const mainNavItems = filteredNavItems.filter(item => !["settings", "bot-config", "ai-assistant", "help", "notifications"].includes(item.id));
-  const settingsNavItems = filteredNavItems.filter(item => ["settings", "bot-config", "ai-assistant", "help", "notifications", "whatsapp-config"].includes(item.id));
+  const mainNavItems = filteredNavItems.filter(item => !["settings", "admin-settings", "bot-config", "ai-assistant", "help", "notifications"].includes(item.id));
+  const settingsNavItems = filteredNavItems.filter(item => ["settings", "admin-settings", "bot-config", "ai-assistant", "help", "notifications", "whatsapp-config"].includes(item.id));
 
   return (
     <div className={`flex h-screen bg-slate-50 ${theme === 'dark' ? 'dark bg-slate-950' : ''}`}>
@@ -2879,6 +2881,7 @@ function Shell() {
           {active === "tracking" && <TrackingPage />}
           {active === "erp" && <ERPPage />}
           {active === "settings" && <SettingsPageComponent />}
+          {active === "admin-settings" && session.role === "admin" && <AdminSettingsPage clientId={session.clientId} />}
           {active === "bot-config" && <BotConfigPage />}
           {active === "whatsapp-config" && <WhatsAppConfigPage />}
           {active === "ai-assistant" && <AIAssistantPage />}

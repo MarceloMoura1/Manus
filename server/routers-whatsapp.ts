@@ -17,7 +17,7 @@ export const whatsappRouter = router({
   /**
    * Buscar configuração WhatsApp do cliente (admin)
    */
-  getConfig: adminProcedure.input(z.object({ clientId: z.string() })).query(async ({ input, ctx }) => {
+  getConfig: adminProcedure.input(z.object({ clientId: z.string() })).query(async ({ input }) => {
     await getReleasedClientOrThrow(input.clientId);
     const config = await getWhatsappConfig(input.clientId);
     
@@ -46,7 +46,8 @@ export const whatsappRouter = router({
         webhookUrl: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input: data }) => {
+      const input = data;
       await getReleasedClientOrThrow(input.clientId);
 
       const config = await saveWhatsappConfig(input.clientId, {
@@ -69,7 +70,8 @@ export const whatsappRouter = router({
    */
   testConnection: adminProcedure
     .input(z.object({ clientId: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input: data }) => {
+      const input = data;
       await getReleasedClientOrThrow(input.clientId);
       const config = await getWhatsappConfig(input.clientId);
 
