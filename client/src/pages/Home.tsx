@@ -475,7 +475,7 @@ function ConversationsPage() {
     <div className="flex h-full overflow-hidden rounded-2xl shadow-xl border border-slate-200 bg-white">
 
       {/* ─── Coluna Esquerda: Lista de Conversas ─── */}
-      <div className="w-80 flex-shrink-0 flex flex-col border-r border-slate-100 bg-slate-50">
+      <div className="w-[360px] flex-shrink-0 flex flex-col border-r border-slate-100 bg-slate-50">
 
                 {/* Header */}
         <div className="px-4 pt-4 pb-3 bg-white border-b border-slate-100">
@@ -491,15 +491,15 @@ function ConversationsPage() {
               </div>
             </div>
           </div>
-          {/* Linha 2: Filtros Todas / Minhas / Específico + Dropdown Atendente */}
-          <div className="flex items-center gap-2 mb-3">
-            <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+          {/* Linha 2: Filtros Todas / Minhas / Específico */}
+          <div className="flex items-center gap-2 mb-2">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden flex-1">
               {(['all', 'mine', 'specific'] as const).map((f, i) => (
                 <button
                   key={f}
                   onClick={() => { setOwnerFilter(f); if (f !== 'specific') setAttendantFilter(''); }}
                   className={cn(
-                    'px-3 py-1.5 text-xs font-medium transition-all duration-150',
+                    'flex-1 px-3 py-1.5 text-xs font-medium transition-all duration-150',
                     i > 0 && 'border-l border-slate-200',
                     ownerFilter === f ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
                   )}
@@ -508,33 +508,33 @@ function ConversationsPage() {
                 </button>
               ))}
             </div>
-            {/* Dropdown Filtrar por Atendente */}
-            <div className="relative flex-1">
-              <button
-                onClick={() => setAttendantDropdownOpen(o => !o)}
-                className="w-full flex items-center justify-between gap-1 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50 transition-colors"
-              >
-                <span className="truncate">{attendantFilter || 'Por Atendente...'}</span>
-                <ChevronDown className="w-3 h-3 flex-shrink-0 text-slate-400" />
-              </button>
-              {attendantDropdownOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 overflow-hidden">
+          </div>
+          {/* Linha 3: Dropdown Filtrar por Atendente */}
+          <div className="relative mb-3">
+            <button
+              onClick={() => setAttendantDropdownOpen(o => !o)}
+              className="w-full flex items-center justify-between gap-1 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50 transition-colors"
+            >
+              <span className="truncate">{attendantFilter || 'Filtrar por atendente...'}</span>
+              <ChevronDown className="w-3 h-3 flex-shrink-0 text-slate-400" />
+            </button>
+            {attendantDropdownOpen && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 overflow-hidden">
+                <button
+                  onClick={() => { setAttendantFilter(''); setOwnerFilter('all'); setAttendantDropdownOpen(false); }}
+                  className="w-full text-left px-3 py-2 text-xs text-slate-600 hover:bg-slate-50"
+                >Todos os atendentes</button>
+                {attendants.length > 0 ? attendants.map(att => (
                   <button
-                    onClick={() => { setAttendantFilter(''); setOwnerFilter('all'); setAttendantDropdownOpen(false); }}
-                    className="w-full text-left px-3 py-2 text-xs text-slate-600 hover:bg-slate-50"
-                  >Todos os atendentes</button>
-                  {attendants.length > 0 ? attendants.map(att => (
-                    <button
-                      key={att}
-                      onClick={() => { setAttendantFilter(att); setOwnerFilter('specific'); setAttendantDropdownOpen(false); }}
-                      className={cn('w-full text-left px-3 py-2 text-xs hover:bg-slate-50', attendantFilter === att ? 'text-blue-600 font-semibold' : 'text-slate-700')}
-                    >{att}</button>
-                  )) : (
-                    <p className="px-3 py-2 text-xs text-slate-400">Nenhum atendente</p>
-                  )}
-                </div>
-              )}
-            </div>
+                    key={att}
+                    onClick={() => { setAttendantFilter(att); setOwnerFilter('specific'); setAttendantDropdownOpen(false); }}
+                    className={cn('w-full text-left px-3 py-2 text-xs hover:bg-slate-50', attendantFilter === att ? 'text-blue-600 font-semibold' : 'text-slate-700')}
+                  >{att}</button>
+                )) : (
+                  <p className="px-3 py-2 text-xs text-slate-400">Nenhum atendente</p>
+                )}
+              </div>
+            )}
           </div>
           {/* Linha 3: Busca */}
           <div className="relative">
