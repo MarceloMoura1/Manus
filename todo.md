@@ -1388,3 +1388,12 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] "Roteiros" com marginLeft: '-217px', marginRight: '168px', paddingLeft: '26px', paddingRight: '34px'
 - [x] "Teste do Roteiro" com marginLeft: '-183px', marginRight: '-317px'
 - [x] Validar que todos os painéis estão visíveis e funcionais
+
+
+## Fase 135: Ajustes Finais de Posicionamento
+
+- [x] Aplicar ajustes finais de margin do editor visual
+- [x] "Novo Roteiro" com marginLeft: '-381px', marginRight: '235px'
+- [x] "Roteiros" com marginLeft: '-249px'
+- [x] Remover estilos duplicados
+- [x] Validar layout final

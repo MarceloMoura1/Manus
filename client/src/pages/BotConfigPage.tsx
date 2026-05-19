@@ -246,7 +246,7 @@ export function BotConfigPage() {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 px-40">
           {/* Painel Esquerdo: Novo Roteiro */}
           <div className="lg:col-span-1">
-            <Card className="p-6 bg-white shadow-sm border-slate-200" style={{marginLeft: '-331px', marginRight: '203px', marginBottom: '7px'}}>
+            <Card className="p-6 bg-white shadow-sm border-slate-200" style={{marginLeft: '-381px', marginRight: '235px', marginBottom: '7px'}}>
               <h2 className="text-xl font-bold text-slate-900 mb-6">Novo Roteiro</h2>
 
               <div className="space-y-4">
@@ -305,7 +305,7 @@ export function BotConfigPage() {
 
           {/* Painel Central: Roteiros */}
           <div className="lg:col-span-1">
-            <Card className="p-6 bg-white shadow-sm border-slate-200" style={{marginLeft: '-217px', marginRight: '168px', paddingLeft: '26px', paddingRight: '34px'}}>
+            <Card className="p-6 bg-white shadow-sm border-slate-200" style={{marginLeft: '-249px', marginRight: '168px', paddingLeft: '26px', paddingRight: '34px'}}>
               <h2 className="text-xl font-bold text-slate-900 mb-6">Roteiros</h2>
 
               <div className="space-y-4 max-h-96 overflow-y-auto">
