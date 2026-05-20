@@ -669,7 +669,7 @@ function ConversationsPage() {
                 )}
               >
                 <span className={cn('w-1.5 h-1.5 rounded-full', selectedFilter === filter.id ? 'bg-white' : filter.dot)} />
-                <span className={selectedFilter === filter.id && filter.id === 'open' ? 'px-1.5 py-0.5 border-2 border-black rounded' : ''}>
+                <span>
                   {filter.label}
                 </span>
                 <span className={cn(
