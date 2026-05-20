@@ -8,7 +8,6 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { BotConfigPage } from "./pages/BotConfigPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { WhatsAppBaileysPage } from "./pages/WhatsAppBaileysPage";
-import DebugLogsPage from "./pages/DebugLogsPage";
 import { AIAssistant } from "./components/AIAssistant";
 import { trpc } from "./lib/trpc";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -36,11 +35,6 @@ function isNotificationsRoute() {
 function isWhatsAppBaileysRoute() {
   const pathname = window.location.pathname.toLowerCase();
   return pathname === "/whatsapp" || pathname.startsWith("/whatsapp/");
-}
-
-function isDebugRoute() {
-  const pathname = window.location.pathname.toLowerCase();
-  return pathname === "/debug" || pathname.startsWith("/debug/");
 }
 
 export default function App() {
@@ -74,13 +68,13 @@ export default function App() {
   );
 
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
-  const platform = isAdminRoute() ? "megaadmin" : isSettingsRoute() || isBotConfigRoute() || isNotificationsRoute() || isWhatsAppBaileysRoute() || isDebugRoute() ? "megadesk" : "megadesk";
+  const platform = isAdminRoute() ? "megaadmin" : isSettingsRoute() || isBotConfigRoute() || isNotificationsRoute() || isWhatsAppBaileysRoute() ? "megadesk" : "megadesk";
 
   return (
     <ThemeProvider>
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
-          {isAdminRoute() ? <AdminPanel /> : isDebugRoute() ? <DebugLogsPage /> : isBotConfigRoute() ? <BotConfigPage /> : isNotificationsRoute() ? <NotificationsPage /> : isWhatsAppBaileysRoute() ? <WhatsAppBaileysPage /> : isSettingsRoute() ? <SettingsPage /> : <Home />}
+          {isAdminRoute() ? <AdminPanel /> : isBotConfigRoute() ? <BotConfigPage /> : isNotificationsRoute() ? <NotificationsPage /> : isWhatsAppBaileysRoute() ? <WhatsAppBaileysPage /> : isSettingsRoute() ? <SettingsPage /> : <Home />}
 
           <AIAssistant
             isOpen={isAssistantOpen}

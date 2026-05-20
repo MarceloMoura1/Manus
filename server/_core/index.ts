@@ -12,7 +12,6 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
 import { addSseClient, startWhatsAppSession, disconnectWhatsApp, getSessionStatus, sendBaileysMessage, restoreExistingSessions } from "../whatsapp-baileys";
-import { setupDebugRoutes, setupLogInterception } from "../debug-logs";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -36,10 +35,6 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
-  
-  // Configurar interceptação de logs
-  setupLogInterception();
-  
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -47,16 +42,10 @@ async function startServer() {
   registerOAuthRoutes(app);
   registerMetricWebhook(app);
   registerIntegrationApi(app);
-  
-  // Registrar rotas de debug
-  setupDebugRoutes(app);
 
   // WhatsApp Webhook endpoints (Meta)
   app.get("/api/webhooks/meta", handleWebhookVerify);
   app.post("/api/webhooks/meta", handleWebhookEvent);
-  
-  // Debug routes
-  console.log("[Server] Debug routes registered at /debug");
 
   // Inicializar Socket.IO para WhatsApp
   initWhatsAppSocket(server);
