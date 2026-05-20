@@ -431,7 +431,7 @@ function ConversationsPage() {
   const filters: Array<{ id: 'open' | 'bot' | 'closed'; label: string; dot: string; count: number }> = [
     { id: 'open', label: 'Abertas', dot: 'bg-emerald-500', count: conversations.filter(c => c.status === 'open').length },
     { id: 'bot', label: 'BOT', dot: 'bg-violet-500', count: conversations.filter(c => c.status === 'bot').length },
-    { id: 'closed', label: 'Fechadas', dot: 'bg-slate-400', count: conversations.filter(c => c.status === 'closed').length },
+    { id: 'closed', label: 'Fechadas', dot: 'bg-slate-400', count: 0 },
   ];
 
   // Buscar todos os usuários ativos do cliente
@@ -538,7 +538,7 @@ function ConversationsPage() {
             </div>
             <div>
               <h2 className="text-3xl font-bold text-slate-900 leading-tight" style={{textShadow: '0 2px 8px rgba(99,102,241,0.25), 0 1px 3px rgba(0,0,0,0.12)'}}>Conversas</h2>
-              <p className="text-xs text-slate-500">{conversations.length} conversa{conversations.length !== 1 ? 's' : ''}</p>
+
             </div>
           </div>
 
