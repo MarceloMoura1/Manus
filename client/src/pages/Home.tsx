@@ -363,7 +363,29 @@ function ConversationsPage() {
   const [closeConfirmOpen, setCloseConfirmOpen] = React.useState(false);
   const [reopenConfirmOpen, setReopenConfirmOpen] = React.useState(false);
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [waConnected, setWaConnected] = React.useState<boolean | null>(null); // null = verificando
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
+
+  // Verificar status do WhatsApp periodicamente
+  React.useEffect(() => {
+    if (!clientId) return;
+    const checkWaStatus = async () => {
+      try {
+        const res = await fetch(`/api/baileys/status?clientId=${encodeURIComponent(clientId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setWaConnected(data.status === 'connected');
+        } else {
+          setWaConnected(false);
+        }
+      } catch {
+        setWaConnected(false);
+      }
+    };
+    checkWaStatus();
+    const interval = setInterval(checkWaStatus, 10000); // verificar a cada 10s
+    return () => clearInterval(interval);
+  }, [clientId]);
 
   // Query para mensagens da conversa selecionada (lazy - só busca quando conversa é aberta)
   const { data: conversationMessages, refetch: refetchMessages } = trpc.megadesk.getConversationMessages.useQuery(
@@ -1041,17 +1063,26 @@ function ConversationsPage() {
 
             {/* Input de Mensagem */}
             <div className="px-6 py-4 bg-white border-t border-slate-100 flex-shrink-0">
+              {/* Indicador de status do WhatsApp */}
+              {waConnected === false && (
+                <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 text-xs text-red-700">
+                  <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0"></span>
+                  <span>WhatsApp desconectado. Vá em <strong>Configurações → WhatsApp</strong> para reconectar.</span>
+                </div>
+              )}
               <div className="flex items-center gap-3">
                 <div className="flex-1 relative">
                   <input
                     type="text"
-                    placeholder="Digite sua mensagem..."
+                    placeholder={waConnected === false ? 'WhatsApp desconectado...' : 'Digite sua mensagem...'}
                     value={messageInput}
+                    disabled={waConnected === false}
                     onChange={(e) => setMessageInput(e.target.value)}
                     onKeyDown={async (e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         if (!messageInput.trim() || !selectedConv) return;
+                        if (waConnected === false) { showToast('WhatsApp desconectado. Reconecte em Configurações.', 'error'); return; }
                         const text = messageInput.trim();
                         setMessageInput('');
                         try {
@@ -1071,18 +1102,24 @@ function ConversationsPage() {
                             showToast(err.error || 'Erro ao enviar mensagem', 'error');
                           } else {
                             showToast('Mensagem enviada!', 'success');
+                            refetchMessages();
                           }
                         } catch {
                           showToast('Erro ao enviar mensagem', 'error');
                         }
                       }
                     }}
-                    className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm transition-all pr-12"
+                    className={cn(
+                      'w-full px-4 py-3 rounded-2xl border bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm transition-all pr-12',
+                      waConnected === false ? 'border-red-200 bg-red-50 cursor-not-allowed opacity-60' : 'border-slate-200'
+                    )}
                   />
                 </div>
                 <button
+                  disabled={waConnected === false}
                   onClick={async () => {
                     if (!messageInput.trim() || !selectedConv) return;
+                    if (waConnected === false) { showToast('WhatsApp desconectado. Reconecte em Configurações.', 'error'); return; }
                     const text = messageInput.trim();
                     setMessageInput('');
                     try {
@@ -1102,17 +1139,29 @@ function ConversationsPage() {
                         showToast(err.error || 'Erro ao enviar mensagem', 'error');
                       } else {
                         showToast('Mensagem enviada!', 'success');
+                        refetchMessages();
                       }
                     } catch {
                       showToast('Erro ao enviar mensagem', 'error');
                     }
                   }}
-                  className="w-11 h-11 bg-gradient-to-br from-blue-500 to-violet-600 text-white rounded-2xl flex items-center justify-center hover:shadow-lg hover:scale-105 transition-all duration-200 flex-shrink-0"
+                  className={cn(
+                    'w-11 h-11 text-white rounded-2xl flex items-center justify-center transition-all duration-200 flex-shrink-0',
+                    waConnected === false
+                      ? 'bg-slate-300 cursor-not-allowed'
+                      : 'bg-gradient-to-br from-blue-500 to-violet-600 hover:shadow-lg hover:scale-105'
+                  )}
                 >
                   <Send className="w-4 h-4" />
                 </button>
               </div>
-              <p className="text-xs text-slate-400 mt-2 ml-1">Enviando como <span className="font-medium text-slate-600">{userName}</span></p>
+              <div className="flex items-center justify-between mt-2 ml-1">
+                <p className="text-xs text-slate-400">Enviando como <span className="font-medium text-slate-600">{userName}</span></p>
+                <div className="flex items-center gap-1.5">
+                  <span className={cn('w-2 h-2 rounded-full', waConnected === null ? 'bg-yellow-400' : waConnected ? 'bg-green-400' : 'bg-red-500')}></span>
+                  <span className="text-xs text-slate-400">{waConnected === null ? 'Verificando...' : waConnected ? 'WhatsApp conectado' : 'WhatsApp desconectado'}</span>
+                </div>
+              </div>
             </div>
           </>
         ) : (

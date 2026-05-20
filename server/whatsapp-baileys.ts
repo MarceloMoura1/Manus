@@ -761,7 +761,38 @@ export async function sendBaileysMessage(
 
   try {
     // Formatar JID do WhatsApp
-    const cleanPhone = phone.replace(/\D/g, "");
+    let cleanPhone = phone.replace(/\D/g, "");
+    
+    // Detectar se é um LID temporário (começa com 'lid' ou é um número muito longo > 15 dígitos sem formato de telefone)
+    const isLidTemp = phone.startsWith('lid') || (cleanPhone.length > 15 && !phone.includes('@'));
+    if (isLidTemp) {
+      // Tentar resolver o LID para número real via mapa em memória
+      const rawLid = cleanPhone.startsWith('lid') ? cleanPhone.slice(3) : cleanPhone;
+      const clientMap = lidToPhoneMap.get(clientId);
+      const resolved = clientMap?.get(rawLid);
+      if (resolved) {
+        cleanPhone = resolved.replace(/\D/g, "");
+        console.log(`[Baileys] LID ${rawLid} resolvido para ${cleanPhone} ao enviar mensagem`);
+      } else {
+        // Tentar buscar no banco de dados
+        const pool = getPool();
+        const [lidRows] = await pool.execute(
+          'SELECT phone_number FROM baileys_lid_mapping WHERE client_id = ? AND lid_id = ? LIMIT 1',
+          [clientId, rawLid]
+        ) as any[];
+        if (lidRows && lidRows.length > 0) {
+          cleanPhone = lidRows[0].phone_number.replace(/\D/g, "");
+          console.log(`[Baileys] LID ${rawLid} resolvido do banco para ${cleanPhone}`);
+          // Atualizar mapa em memória
+          if (!lidToPhoneMap.has(clientId)) lidToPhoneMap.set(clientId, new Map());
+          lidToPhoneMap.get(clientId)!.set(rawLid, cleanPhone);
+        } else {
+          console.error(`[Baileys] Não foi possível resolver LID ${rawLid} para envio — número desconhecido`);
+          return { ok: false, error: "Número do contato ainda não identificado. Aguarde o contato enviar uma mensagem primeiro para que o número seja resolvido." };
+        }
+      }
+    }
+    
     const jid = cleanPhone.includes("@") ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
 
     // Enviar mensagem via Baileys

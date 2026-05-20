@@ -1509,3 +1509,12 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Auto-selecionar filtro BOT quando não há conversas abertas
 - [x] Corrigir atualização de conversa com LID temporário quando mapeamento chegar
 - [x] Melhorar nome do cliente para LID temporário ('Contato Desconhecido' ao invés de '+lid...')
+
+## Fase 146: Corrigir Envio de Mensagens via WhatsApp
+- [x] Diagnosticar por que mensagens aparecem na tela mas não chegam no WhatsApp
+- [x] Identificar que LID temporário era enviado como JID inválido para o WhatsApp
+- [x] Corrigir sendBaileysMessage para resolver LID temporário antes de enviar (busca em memória e banco)
+- [x] Retornar erro claro quando LID não pode ser resolvido
+- [x] Adicionar indicador de status do WhatsApp na área de envio de mensagem
+- [x] Desabilitar campo de mensagem quando WhatsApp está desconectado
+- [x] Adicionar refetchMessages() após envio bem-sucedido para atualizar o chat imediatamente
