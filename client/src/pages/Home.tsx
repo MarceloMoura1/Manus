@@ -662,7 +662,9 @@ function ConversationsPage() {
                   'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all duration-200',
                   i > 0 && 'border-l border-slate-200',
                   selectedFilter === filter.id
-                    ? 'bg-blue-600 text-white'
+                    ? filter.id === 'open'
+                      ? 'bg-emerald-500 text-white border-2 border-black'
+                      : 'bg-blue-600 text-white'
                     : 'bg-white text-slate-600 hover:bg-slate-50'
                 )}
               >
