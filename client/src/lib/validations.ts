@@ -44,7 +44,13 @@ export const validations = {
    * Formata telefone com máscara
    */
   formatPhone: (phone: string): string => {
-    const cleaned = phone.replace(/\D/g, '');
+    let cleaned = phone.replace(/\D/g, '');
+    // Remover prefixo internacional 55 (Brasil) se presente
+    if (cleaned.length === 13 && cleaned.startsWith('55')) {
+      cleaned = cleaned.slice(2); // 55 + 11 dígitos
+    } else if (cleaned.length === 12 && cleaned.startsWith('55')) {
+      cleaned = cleaned.slice(2); // 55 + 10 dígitos
+    }
     if (cleaned.length === 11) {
       return cleaned.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
     }

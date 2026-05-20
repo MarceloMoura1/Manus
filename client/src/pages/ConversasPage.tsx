@@ -29,6 +29,7 @@ import {
 import { trpc } from "@/lib/trpc";
 import { useConversasSocket } from "@/hooks/useConversasSocket";
 import type { ConversaSocketItem } from "@/hooks/useConversasSocket";
+import { validations } from "@/lib/validations";
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
@@ -168,7 +169,7 @@ function ConversationCard({
               {conv.customerPhone && (
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-slate-400">📱</span>
-                  <span className="text-xs text-slate-500 font-mono">{conv.customerPhone}</span>
+                  <span className="text-xs text-slate-500 font-mono">{validations.formatPhone(conv.customerPhone)}</span>
                 </div>
               )}
             </div>

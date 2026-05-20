@@ -1468,3 +1468,9 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Tabela megadesk_company_settings criada no banco
 - [x] Router megadeskSettingsRouter criado e registrado no appRouter
 - [x] Zero erros TypeScript
+
+## Fase 143: Melhorias de UX WhatsApp
+
+- [x] Formatar telefone no padrão BR nos cards de conversa (ex: (41) 99548-4515)
+- [x] Adicionar botão "Limpar Sessão" na aba WhatsApp das Configurações
+- [x] Adicionar indicador de status do WhatsApp (ponto verde/vermelho) no item Conversas da sidebar

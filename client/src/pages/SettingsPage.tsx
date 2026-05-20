@@ -1769,6 +1769,30 @@ export function SettingsPage() {
                         : <><MessageSquare className="w-5 h-5 mr-2" />Gerar QR Code</>
                       }
                     </Button>
+                    {/* Botão Limpar Sessão - para resetar sessão corrompida */}
+                    <Button
+                      variant="outline"
+                      className="w-full border-orange-200 text-orange-600 hover:bg-orange-50 text-sm"
+                      onClick={async () => {
+                        const session = localStorage.getItem('megadesk_session_v1');
+                        if (!session) return;
+                        const { clientId } = JSON.parse(session);
+                        try {
+                          await fetch('/api/baileys/disconnect', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ clientId }),
+                          });
+                          setBaileysStatus('disconnected');
+                          setBaileysPhone(null);
+                          setBaileysConnectedAt(null);
+                          setQrDataUrl(null);
+                        } catch {}
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Limpar Sessão (resolver problemas de conexão)
+                    </Button>
                   </div>
                 )}
               </CardContent>

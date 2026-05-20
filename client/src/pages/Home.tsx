@@ -56,6 +56,8 @@ import {
   ChevronDown,
   Calendar,
   Filter,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
@@ -3018,6 +3020,7 @@ function Shell() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [indicadores, setIndicadores] = useState<any>(null);
   const [activeCrmClientId, setActiveCrmClientId] = useState<string | null>(null);
+  const [whatsappConnected, setWhatsappConnected] = useState(false);
 
   const loginMutation = trpc.megadesk.loginByEmail.useMutation();
 
@@ -3025,6 +3028,25 @@ function Shell() {
   useEffect(() => {
     localStorage.setItem(MEGADESK_ACTIVE_PAGE_KEY, active);
   }, [active]);
+
+  // Verificar status do WhatsApp periodicamente
+  useEffect(() => {
+    if (!session?.clientId) return;
+    const checkStatus = async () => {
+      try {
+        const res = await fetch(`/api/baileys/status?clientId=${encodeURIComponent(session.clientId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setWhatsappConnected(data.status === 'connected');
+        }
+      } catch {
+        setWhatsappConnected(false);
+      }
+    };
+    checkStatus();
+    const interval = setInterval(checkStatus, 30000); // checar a cada 30s
+    return () => clearInterval(interval);
+  }, [session?.clientId]);
 
   useEffect(() => {
     const storedSession = localStorage.getItem(MEGADESK_SESSION_KEY);
@@ -3149,6 +3171,16 @@ function Shell() {
                 {/* Indicador de notificacoes */}
                 {item.id === "notifications" && (
                   <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
+                )}
+                {/* Indicador de status do WhatsApp no item Conversas */}
+                {item.id === "conversations" && (
+                  <span
+                    className={cn(
+                      "absolute top-2 right-2 w-2.5 h-2.5 rounded-full border border-slate-900 transition-colors duration-500",
+                      whatsappConnected ? "bg-green-400" : "bg-red-500"
+                    )}
+                    title={whatsappConnected ? "WhatsApp conectado" : "WhatsApp desconectado"}
+                  />
                 )}
               </button>
             );
