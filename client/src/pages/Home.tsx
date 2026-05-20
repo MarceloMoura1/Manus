@@ -335,7 +335,7 @@ function ConversationsPage() {
   const userName: string = sessionData?.userName ?? 'Atendente';
 
   const [searchTerm, setSearchTerm] = React.useState('');
-  const [selectedFilter, setSelectedFilter] = React.useState<'open' | 'bot'>('open');
+  const [selectedFilter, setSelectedFilter] = React.useState<'open' | 'bot' | 'closed'>('open');
   const [ownerFilter, setOwnerFilter] = React.useState<'all' | 'mine' | 'history'>('all');
   const [attendantFilter, setAttendantFilter] = React.useState<string>('');
   const [historySearch, setHistorySearch] = React.useState<string>('');
@@ -428,9 +428,10 @@ function ConversationsPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [selectedConversation]);
 
-  const filters: Array<{ id: 'open' | 'bot'; label: string; dot: string; count: number }> = [
+  const filters: Array<{ id: 'open' | 'bot' | 'closed'; label: string; dot: string; count: number }> = [
     { id: 'open', label: 'Abertas', dot: 'bg-emerald-500', count: conversations.filter(c => c.status === 'open').length },
     { id: 'bot', label: 'BOT', dot: 'bg-violet-500', count: conversations.filter(c => c.status === 'bot').length },
+    { id: 'closed', label: 'Fechadas', dot: 'bg-slate-400', count: 0 },
   ];
 
   // Buscar todos os usuários ativos do cliente
@@ -670,24 +671,34 @@ function ConversationsPage() {
           )}
         </div>
 
-        {/* Botões Todas / Minhas */}
+        {/* Botões Todas / Minhas / Fechadas */}
         <div className="px-3 py-2 bg-white border-b border-slate-100">
           <div className="flex rounded-lg border border-slate-200 overflow-hidden">
-            {(['all', 'mine'] as const).map((f, i) => (
-              <button
-                key={f}
-                onClick={() => { setOwnerFilter(f); setAttendantFilter(''); }}
-                className={cn(
-                  'flex-1 px-3 py-1.5 text-xs font-medium transition-all duration-150',
-                  i > 0 && 'border-l border-slate-200',
-                  ownerFilter === f
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-white text-slate-600 hover:bg-slate-50'
-                )}
-              >
-                {f === 'all' ? 'Todas' : 'Minhas'}
-              </button>
-            ))}
+            {(['all', 'mine', 'closed'] as const).map((f, i) => {
+              const isClosedFilter = f === 'closed';
+              return (
+                <button
+                  key={f}
+                  onClick={() => { 
+                    if (isClosedFilter) {
+                      setSelectedFilter('closed');
+                    } else {
+                      setOwnerFilter(f as 'all' | 'mine');
+                      setAttendantFilter('');
+                    }
+                  }}
+                  className={cn(
+                    'flex-1 px-3 py-1.5 text-xs font-medium transition-all duration-150',
+                    i > 0 && 'border-l border-slate-200',
+                    isClosedFilter
+                      ? selectedFilter === 'closed' ? 'bg-amber-500 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                      : ownerFilter === f ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                  )}
+                >
+                  {f === 'all' ? 'Todas' : f === 'mine' ? 'Minhas' : 'Fechadas'}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -712,10 +723,12 @@ function ConversationsPage() {
                 <span>
                   {filter.label}
                 </span>
-                <span className={cn(
-                  'text-xs font-bold',
-                  selectedFilter === filter.id ? 'text-blue-100' : 'text-slate-400'
-                )}>{filter.count}</span>
+                {filter.id !== 'closed' && (
+                  <span className={cn(
+                    'text-xs font-bold',
+                    selectedFilter === filter.id ? 'text-blue-100' : 'text-slate-400'
+                  )}>{filter.count}</span>
+                )}
               </button>
             ))}
           </div>
