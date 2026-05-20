@@ -37,6 +37,35 @@ interface SessionInfo {
 // Mapa de sessões ativas por clientId
 const sessions = new Map<string, SessionInfo>();
 
+// Mapa global de LID -> número de telefone real por clientId
+// Exemplo: { "cliente-005": { "63346606899236": "5541995484515" } }
+const lidToPhoneMap = new Map<string, Map<string, string>>();
+
+/**
+ * Resolve um JID que pode ser um LID para o número de telefone real.
+ * Se for um número normal, retorna direto. Se for LID, tenta resolver via mapa.
+ */
+function resolvePhoneFromJid(clientId: string, jid: string): string {
+  // Extrair a parte antes do @
+  const rawId = jid.split("@")[0].split(":")[0];
+  const server = jid.split("@")[1] || "";
+  
+  // Se for um LID (@lid), tentar resolver para número real
+  if (server === "lid" || jid.endsWith("@lid")) {
+    const clientMap = lidToPhoneMap.get(clientId);
+    const resolved = clientMap?.get(rawId);
+    if (resolved) {
+      return resolved.replace(/\D/g, "");
+    }
+    // LID não resolvido ainda — retornar vazio para ignorar mensagem
+    console.warn(`[Baileys] LID não resolvido: ${rawId} para cliente ${clientId}`);
+    return "";
+  }
+  
+  // Número normal — retornar apenas dígitos
+  return rawId.replace(/\D/g, "");
+}
+
 function getSessionDir(clientId: string): string {
   return path.join(SESSIONS_DIR, clientId.replace(/[^a-zA-Z0-9-_]/g, "_"));
 }
@@ -133,6 +162,34 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
 
     sock.ev.on("creds.update", saveCreds);
 
+    // Escutar evento de mapeamento LID -> número de telefone real
+    // Emitido pelo Baileys quando recebe pnForLidChatAction do servidor do WhatsApp
+    sock.ev.on("lid-mapping.update" as any, ({ lid, pn }: { lid: string; pn: string }) => {
+      const lidId = lid.split("@")[0].split(":")[0];
+      const pnId = pn.split("@")[0].split(":")[0].replace(/\D/g, "");
+      if (lidId && pnId) {
+        if (!lidToPhoneMap.has(clientId)) {
+          lidToPhoneMap.set(clientId, new Map());
+        }
+        lidToPhoneMap.get(clientId)!.set(lidId, pnId);
+        console.log(`[Baileys] LID mapeado: ${lidId} -> ${pnId} (cliente: ${clientId})`);
+        
+        // Atualizar conversas existentes que usam o LID como número
+        const pool = getPool();
+        pool.execute(
+          `UPDATE megadesk_domain_conversations SET phone = ? WHERE client_id = ? AND phone = ?`,
+          [pnId, clientId, lidId]
+        ).then(([result]: any) => {
+          const affected = result?.affectedRows || 0;
+          if (affected > 0) {
+            console.log(`[Baileys] Corrigidos ${affected} registros: LID ${lidId} -> ${pnId}`);
+          }
+        }).catch((err: any) => {
+          console.error(`[Baileys] Erro ao atualizar LID no banco:`, err);
+        });
+      }
+    });
+
     sock.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
@@ -216,15 +273,16 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
         const isGroup = from.endsWith("@g.us");
         if (isGroup) continue;
 
-        // Extrair número de telefone corretamente do JID
-        // Formatos possíveis:
-        //   "5511987654321@s.whatsapp.net"         -> número normal
-        //   "5511987654321:0@s.whatsapp.net"       -> multi-device
-        //   "5511987654321:12345@s.whatsapp.net"   -> multi-device com ID
-        //   "5511987654321@c.us"                   -> formato antigo
-        const jid = from.split("@")[0]; // Pegar apenas a parte antes do @
-        // Remover sufixo de device (:N) se existir
-        const phone = jid.includes(":") ? jid.split(":")[0] : jid;
+        // Resolver número de telefone: suporta JIDs normais e LIDs (multi-device)
+        // LIDs são IDs internos do WhatsApp (ex: 63346606899236@lid) que precisam
+        // ser mapeados para o número real via evento lid-mapping.update
+        const phone = resolvePhoneFromJid(clientId, from);
+        
+        // Se o número não foi resolvido (LID desconhecido), ignorar mensagem por enquanto
+        if (!phone) {
+          console.warn(`[Baileys] Mensagem ignorada - LID não resolvido: ${from}`);
+          continue;
+        }
         
         const pushName = msg.pushName || null; // Nome do contato no WhatsApp
         
