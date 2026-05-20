@@ -672,10 +672,12 @@ function ConversationsPage() {
                 <span>
                   {filter.label}
                 </span>
-                <span className={cn(
-                  'text-xs font-bold',
-                  selectedFilter === filter.id ? 'text-blue-100' : 'text-slate-400'
-                )}>{filter.count}</span>
+                {filter.id !== 'closed' && (
+                  <span className={cn(
+                    'text-xs font-bold',
+                    selectedFilter === filter.id ? 'text-blue-100' : 'text-slate-400'
+                  )}>{filter.count}</span>
+                )}
               </button>
             ))}
           </div>
