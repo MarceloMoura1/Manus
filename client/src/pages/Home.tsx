@@ -537,7 +537,7 @@ function ConversationsPage() {
                 <MessageCircle className="w-9 h-9 text-white" />
               </div>
               <div>
-                <h2 className="text-3xl font-bold text-slate-900 leading-tight">Conversas</h2>
+                <h2 className="text-3xl font-bold text-slate-900 leading-tight" style={{textShadow: '0 2px 8px rgba(99,102,241,0.25), 0 1px 3px rgba(0,0,0,0.12)'}}>Conversas</h2>
                 <p className="text-xs text-slate-500">{conversations.length} conversa{conversations.length !== 1 ? 's' : ''}</p>
               </div>
             </div>
