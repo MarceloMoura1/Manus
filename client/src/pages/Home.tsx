@@ -631,21 +631,24 @@ function ConversationsPage() {
         </div>
 
         {/* Botões Todas / Minhas / Histórico */}
-        <div className="flex gap-2 px-3 py-2 bg-white border-b border-slate-100">
-          {(['all', 'mine', 'history'] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => { setOwnerFilter(f); setAttendantFilter(''); if (f !== 'history') setHistorySearch(''); }}
-              className={cn(
-                'flex-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-all duration-150',
-                ownerFilter === f
-                  ? f === 'history' ? 'bg-amber-500 text-white shadow-sm' : 'bg-blue-600 text-white shadow-sm'
-                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-              )}
-            >
-              {f === 'all' ? 'Todas' : f === 'mine' ? 'Minhas' : 'Histórico'}
-            </button>
-          ))}
+        <div className="px-3 py-2 bg-white border-b border-slate-100">
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+            {(['all', 'mine', 'history'] as const).map((f, i) => (
+              <button
+                key={f}
+                onClick={() => { setOwnerFilter(f); setAttendantFilter(''); if (f !== 'history') setHistorySearch(''); }}
+                className={cn(
+                  'flex-1 px-3 py-1.5 text-xs font-medium transition-all duration-150',
+                  i > 0 && 'border-l border-slate-200',
+                  ownerFilter === f
+                    ? f === 'history' ? 'bg-amber-500 text-white' : 'bg-blue-600 text-white'
+                    : 'bg-white text-slate-600 hover:bg-slate-50'
+                )}
+              >
+                {f === 'all' ? 'Todas' : f === 'mine' ? 'Minhas' : 'Histórico'}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Filtros */}
