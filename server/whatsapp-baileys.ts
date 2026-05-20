@@ -147,9 +147,10 @@ function resolvePhoneFromJid(clientId: string, jid: string): string {
     if (resolved) {
       return resolved.replace(/\D/g, "");
     }
-    // LID não resolvido ainda — retornar vazio para ignorar mensagem
-    console.warn(`[Baileys] LID não resolvido: ${rawId} para cliente ${clientId}`);
-    return "";
+    // LID não resolvido ainda — usar o próprio LID como identificador temporário
+    // A conversa será criada e o número atualizado quando o mapeamento chegar
+    console.warn(`[Baileys] LID não resolvido: ${rawId} para cliente ${clientId} — usando LID como número temporário`);
+    return `lid${rawId}`; // prefixo 'lid' para identificar como temporário
   }
   
   // Número normal — retornar apenas dígitos
@@ -302,10 +303,12 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
           console.error(`[Baileys] Erro ao persistir LID no banco:`, err);
         });
         
-        // Atualizar conversas existentes que usam o LID como número
+        // Atualizar conversas existentes que usam o LID como número temporário
+        // O número temporário é salvo com prefixo 'lid' (ex: lid63346606899236)
+        const tempPhone = `lid${lidId}`;
         pool.execute(
-          `UPDATE megadesk_domain_conversations SET phone = ? WHERE client_id = ? AND phone = ?`,
-          [pnId, clientId, lidId]
+          `UPDATE megadesk_domain_conversations SET phone = ?, customer_name = CASE WHEN customer_name = ? THEN ? ELSE customer_name END WHERE client_id = ? AND (phone = ? OR phone = ?)`,
+          [pnId, tempPhone, `+${pnId}`, clientId, tempPhone, lidId]
         ).then(([result]: any) => {
           const affected = result?.affectedRows || 0;
           if (affected > 0) {
@@ -413,9 +416,9 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
         // ser mapeados para o número real via evento lid-mapping.update
         const phone = resolvePhoneFromJid(clientId, from);
         
-        // Se o número não foi resolvido (LID desconhecido), ignorar mensagem por enquanto
+        // Se por algum motivo o phone ficou vazio, ignorar
         if (!phone) {
-          console.warn(`[Baileys] Mensagem ignorada - LID não resolvido: ${from}`);
+          console.warn(`[Baileys] Mensagem ignorada - número não resolvido: ${from}`);
           continue;
         }
         
@@ -666,10 +669,13 @@ async function handleIncomingMessage(
       [clientId, cleanPhone]
     ) as any[];
 
+    // Definir nome do cliente: prioridade: cadastro > pushName > número
+    // Se o número é um LID temporário, usar pushName ou 'Contato Desconhecido'
+    const isLidTemp = cleanPhone.startsWith('lid');
     const customerName =
       customerRows && customerRows.length > 0
         ? customerRows[0].name
-        : pushName || `+${cleanPhone}`; // Usa pushName do WhatsApp se disponível
+        : pushName || (isLidTemp ? 'Contato Desconhecido' : `+${cleanPhone}`);
     const company =
       customerRows && customerRows.length > 0
         ? customerRows[0].company || ""

@@ -437,6 +437,13 @@ function ConversationsPage() {
   React.useEffect(() => {
     if (conversationsData) {
       setConversations(conversationsData);
+      // Auto-selecionar filtro: se não há conversas abertas mas há conversas bot,
+      // mudar para aba BOT automaticamente (conversas do WhatsApp entram como bot)
+      const hasOpen = conversationsData.some((c: any) => c.status === 'open');
+      const hasBot = conversationsData.some((c: any) => c.status === 'bot');
+      if (!hasOpen && hasBot) {
+        setSelectedFilter('bot');
+      }
     }
   }, [conversationsData]);
 
@@ -454,34 +461,39 @@ function ConversationsPage() {
       socket.emit('wa:join_client', clientId);
     });
     // Nova conversa criada pelo Baileys
+    // Usa os mesmos campos que a API getConversations retorna (id, name, etc.)
     socket.on('conversation:new', (data: { conversation: any }) => {
       const c = data.conversation;
       setConversations(prev => {
-        const exists = prev.find(x => x.conversationId === c.id);
+        const exists = prev.find(x => x.id === c.id);
         if (exists) return prev;
         return [{
-          conversationId: c.id,
-          customerName: c.name,
+          id: c.id,
+          name: c.name,
           phone: c.phone,
-          company: c.company,
+          company: c.company ?? '',
           lastMessage: c.lastMessage,
           status: c.status || 'bot',
           unreadCount: c.unreadCount || 1,
+          isUnread: true,
           lastMessageFrom: c.lastMessageFrom || 'customer',
-          timestamp: c.createdAt,
+          timestamp: c.createdAt ? new Date(c.createdAt).getTime() : Date.now(),
+          assignedTo: null,
+          assignedUserId: null,
         }, ...prev];
       });
     });
     // Conversa atualizada (nova mensagem)
     socket.on('conversation:updated', (data: any) => {
       setConversations(prev => prev.map(conv => {
-        if (conv.conversationId === data.conversationId) {
+        if (conv.id === data.conversationId) {
           return {
             ...conv,
             lastMessage: data.lastMessage,
             lastMessageFrom: data.lastMessageFrom,
             status: data.status || conv.status,
             unreadCount: data.unreadCount ?? conv.unreadCount,
+            isUnread: data.lastMessageFrom === 'customer',
           };
         }
         return conv;

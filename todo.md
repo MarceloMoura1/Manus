@@ -1500,3 +1500,12 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Adicionar botão de Atendimento Ativo no cabeçalho da conversa (preenche número automaticamente)
 - [x] Implementar passagem de número de telefone para ActiveAttendancePage via localStorage
 - [x] Adicionar listener megadesk-navigate no MegaDeskApp para navegação interna
+
+## Fase 145: Corrigir Criação de Conversas via Baileys
+- [x] Diagnosticar por que mensagens recebidas não criam conversa na página 'conversas'
+- [x] Identificar que LID não resolvido causava mensagens ignoradas
+- [x] Corrigir resolvePhoneFromJid para usar LID como número temporário (não mais ignorar mensagens)
+- [x] Corrigir inconsistência de campos no listener Socket.IO (conversationId vs id)
+- [x] Auto-selecionar filtro BOT quando não há conversas abertas
+- [x] Corrigir atualização de conversa com LID temporário quando mapeamento chegar
+- [x] Melhorar nome do cliente para LID temporário ('Contato Desconhecido' ao invés de '+lid...')
