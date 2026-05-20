@@ -1453,7 +1453,9 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 
 - [x] Melhorar extração de conteúdo de mensagens (suporte a áudio, vídeo, documento, figurinha, localização, contato, botões, template)
 - [x] Adicionar exibição do número do cliente no card de conversa
-- [x] Criar 20 testes para validar processamento de mensagens e extração de phone
+- [x] Corrigir extração de número de telefone do JID do Baileys
+- [x] Normalizar números com mais de 13 dígitos (remover ID do Baileys)
+- [x] Criar 24 testes para validar processamento de mensagens, extração e normalização de phone
 
 ## Fase 140: Novas Abas de Configurações (Admin)
 

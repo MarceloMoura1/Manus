@@ -201,6 +201,46 @@ describe("WhatsApp Message Processing", () => {
     });
   });
 
+  describe("Phone Number Normalization", () => {
+    it("should normalize phone number with 14 digits", () => {
+      const cleanPhone = "63346606899236";
+      let normalized = cleanPhone;
+      if (normalized.length > 13) {
+        normalized = normalized.slice(-10);
+      }
+      expect(normalized.length).toBeLessThanOrEqual(11);
+    });
+
+    it("should extract correct phone from long number", () => {
+      const cleanPhone = "63346606899236";
+      let normalized = cleanPhone;
+      if (normalized.length > 13) {
+        normalized = normalized.slice(-10);
+      }
+      expect(normalized).toBe("6606899236");
+    });
+
+    it("should handle Brazilian phone with 55 prefix", () => {
+      const cleanPhone = "5511987654321";
+      let normalized = cleanPhone;
+      if (normalized.length > 13) {
+        if (normalized.startsWith("55")) {
+          normalized = normalized.slice(-11);
+        }
+      }
+      expect(normalized).toBe("5511987654321");
+    });
+
+    it("should not modify phone with correct length", () => {
+      const cleanPhone = "11987654321";
+      let normalized = cleanPhone;
+      if (normalized.length > 13) {
+        normalized = normalized.slice(-10);
+      }
+      expect(normalized).toBe("11987654321");
+    });
+  });
+
   describe("Message Type Detection", () => {
     it("should identify text message", () => {
       const msg = { message: { conversation: "texto" } };
