@@ -663,13 +663,15 @@ function ConversationsPage() {
                   i > 0 && 'border-l border-slate-200',
                   selectedFilter === filter.id
                     ? filter.id === 'open'
-                      ? 'bg-emerald-500 text-white border-2 border-black'
+                      ? 'bg-emerald-500 text-white'
                       : 'bg-blue-600 text-white'
                     : 'bg-white text-slate-600 hover:bg-slate-50'
                 )}
               >
                 <span className={cn('w-1.5 h-1.5 rounded-full', selectedFilter === filter.id ? 'bg-white' : filter.dot)} />
-                {filter.label}
+                <span className={selectedFilter === filter.id && filter.id === 'open' ? 'px-1.5 py-0.5 border-2 border-black rounded' : ''}>
+                  {filter.label}
+                </span>
                 <span className={cn(
                   'text-xs font-bold',
                   selectedFilter === filter.id ? 'text-blue-100' : 'text-slate-400'
