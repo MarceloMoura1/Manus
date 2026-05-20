@@ -483,6 +483,9 @@ function ConversationsPage() {
 
     if (isHistoryMode) {
       // Histórico: ignora filtro de status, busca em tudo pelo termo de histórico
+      // Filtro por atendente (se selecionado)
+      if (attendantFilter && conv.assignedTo !== attendantFilter) return false;
+      
       if (historySearch.trim() === '') return true;
       const q = historySearch.toLowerCase();
       return (
@@ -612,6 +615,44 @@ function ConversationsPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Filtro por Atendente (apenas no modo Histórico) */}
+              {isHistoryMode && attendants.length > 0 && (
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Atendentes</label>
+                  <div className="relative">
+                    <button
+                      onClick={() => setAttendantDropdownOpen(!attendantDropdownOpen)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 text-left flex items-center justify-between hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    >
+                      <span>{attendantFilter ? attendantFilter : 'Selecione um atendente'}</span>
+                      <ChevronDown className={cn('w-4 h-4 transition-transform', attendantDropdownOpen && 'rotate-180')} />
+                    </button>
+                    {attendantDropdownOpen && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
+                        <button
+                          onClick={() => { setAttendantFilter(''); setAttendantDropdownOpen(false); }}
+                          className="w-full px-3 py-2 text-xs text-left hover:bg-slate-100 text-slate-700"
+                        >
+                          Todos os atendentes
+                        </button>
+                        {attendants.map(att => (
+                          <button
+                            key={att}
+                            onClick={() => { setAttendantFilter(att); setAttendantDropdownOpen(false); }}
+                            className={cn(
+                              'w-full px-3 py-2 text-xs text-left hover:bg-slate-100',
+                              attendantFilter === att ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-700'
+                            )}
+                          >
+                            {att}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Limpar filtros */}
               {(hasDateFilter || searchTerm || historySearch || attendantFilter) && (
