@@ -163,10 +163,19 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
 
         if (isLoggedOut || isConflict) {
           // Deslogado explicitamente pelo usuário OU conflito de sessão
-          // NÃO apagar arquivos automaticamente — deixar o usuário decidir
-          console.log(`[Baileys] Sessão encerrada (${isLoggedOut ? 'logout' : 'conflito'}). Reconecte via QR Code.`);
-          // Remover sock para evitar uso de socket morto
+          // Limpar arquivos de sessão para que novo QR code seja gerado
+          console.log(`[Baileys] Sessão encerrada (${isLoggedOut ? 'logout' : 'conflito'}). Limpando sessão...`);
           session.sock = undefined;
+          // Apagar arquivos de sessão corrompida para permitir novo QR code
+          try {
+            const sessionDir = getSessionDir(clientId);
+            if (fs.existsSync(sessionDir)) {
+              fs.rmSync(sessionDir, { recursive: true, force: true });
+              console.log(`[Baileys] Arquivos de sessão removidos para ${clientId}`);
+            }
+          } catch (e) {
+            console.error(`[Baileys] Erro ao limpar sessão:`, e);
+          }
         } else {
           // Queda de conexão temporária — reconectar após 5 segundos
           console.log(`[Baileys] Conexão perdida (código: ${statusCode}). Reconectando em 5s...`);
