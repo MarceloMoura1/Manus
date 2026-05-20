@@ -9,6 +9,8 @@ import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  initAuthCreds,
+  BufferJSON,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import QRCode from "qrcode";
@@ -17,10 +19,97 @@ import fs from "fs";
 import pino from "pino";
 import { getPool } from "./db";
 
-// Diretório para armazenar sessões
+// Diretório para armazenar sessões (fallback local)
 const SESSIONS_DIR = path.join(process.cwd(), ".baileys-sessions");
 if (!fs.existsSync(SESSIONS_DIR)) {
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+}
+
+/**
+ * Implementação de useDbAuthState: persiste credenciais Baileys no banco MySQL
+ * Isso garante que as sessões sobrevivem a reinicializações do servidor e deploys
+ */
+async function useDbAuthState(clientId: string) {
+  const pool = getPool();
+
+  // Garante que a tabela existe
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS baileys_auth_state (
+      client_id VARCHAR(255) NOT NULL,
+      auth_key VARCHAR(255) NOT NULL,
+      auth_value LONGTEXT NOT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (client_id, auth_key)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  // Carrega todas as chaves de auth do banco
+  const [rows] = await pool.execute(
+    'SELECT auth_key, auth_value FROM baileys_auth_state WHERE client_id = ?',
+    [clientId]
+  ) as any[];
+
+  const authData: Record<string, any> = {};
+  for (const row of rows) {
+    try {
+      authData[row.auth_key] = JSON.parse(row.auth_value, BufferJSON.reviver);
+    } catch {
+      // ignorar chaves corrompidas
+    }
+  }
+
+  // Inicializar credenciais se não existirem
+  const creds = authData['creds'] || initAuthCreds();
+
+  // Implementação de SignalKeyStore que persiste no banco
+  const keys: any = {
+    get: async (type: string, ids: string[]) => {
+      const data: Record<string, any> = {};
+      for (const id of ids) {
+        const key = `key_${type}_${id}`;
+        if (authData[key]) {
+          data[id] = authData[key];
+        }
+      }
+      return data;
+    },
+    set: async (data: Record<string, Record<string, any>>) => {
+      const updates: [string, string, string][] = [];
+      for (const [type, typeData] of Object.entries(data)) {
+        for (const [id, value] of Object.entries(typeData)) {
+          const key = `key_${type}_${id}`;
+          const valueStr = JSON.stringify(value, BufferJSON.replacer);
+          authData[key] = value;
+          updates.push([clientId, key, valueStr]);
+        }
+      }
+      if (updates.length > 0) {
+        for (const [cid, k, v] of updates) {
+          await pool.execute(
+            'INSERT INTO baileys_auth_state (client_id, auth_key, auth_value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE auth_value = VALUES(auth_value)',
+            [cid, k, v]
+          );
+        }
+      }
+    },
+  };
+
+  const state = { creds, keys };
+
+  const saveCreds = async () => {
+    const credsStr = JSON.stringify(creds, BufferJSON.replacer);
+    authData['creds'] = creds;
+    await pool.execute(
+      'INSERT INTO baileys_auth_state (client_id, auth_key, auth_value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE auth_value = VALUES(auth_value)',
+      [clientId, 'creds', credsStr]
+    );
+  };
+
+  const clearAuth = async () => {
+    await pool.execute('DELETE FROM baileys_auth_state WHERE client_id = ?', [clientId]);
+  };
+
+  return { state, saveCreds, clearAuth };
 }
 
 type SessionStatus = "disconnected" | "connecting" | "qr_ready" | "connected";
@@ -141,8 +230,19 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
   broadcast(clientId, "status", { status: "connecting" });
 
   try {
-    const sessionDir = getSessionDir(clientId);
-    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+    // Usar banco de dados para persistir credenciais (sobrevive a restarts e deploys)
+    let authState: Awaited<ReturnType<typeof useDbAuthState>>;
+    try {
+      authState = await useDbAuthState(clientId);
+      console.log(`[Baileys] Usando auth state do banco de dados para ${clientId}`);
+    } catch (dbErr) {
+      // Fallback para sistema de arquivos se banco não estiver disponível
+      console.warn(`[Baileys] Banco indisponível, usando auth state de arquivo para ${clientId}:`, dbErr);
+      const sessionDir = getSessionDir(clientId);
+      const fileAuth = await useMultiFileAuthState(sessionDir);
+      authState = { state: fileAuth.state, saveCreds: fileAuth.saveCreds, clearAuth: async () => {} };
+    }
+    const { state, saveCreds, clearAuth } = authState;
     const { version } = await fetchLatestBaileysVersion();
 
     const logger = pino({ level: "silent" });
@@ -220,10 +320,18 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
 
         if (isLoggedOut || isConflict) {
           // Deslogado explicitamente pelo usuário OU conflito de sessão
-          // Limpar arquivos de sessão para que novo QR code seja gerado
+          // Limpar credenciais do banco E arquivos locais para que novo QR code seja gerado
           console.log(`[Baileys] Sessão encerrada (${isLoggedOut ? 'logout' : 'conflito'}). Limpando sessão...`);
           session.sock = undefined;
-          // Apagar arquivos de sessão corrompida para permitir novo QR code
+          // Apagar credenciais do banco
+          try {
+            const pool = getPool();
+            await pool.execute('DELETE FROM baileys_auth_state WHERE client_id = ?', [clientId]);
+            console.log(`[Baileys] Credenciais do banco removidas para ${clientId}`);
+          } catch (e) {
+            console.error(`[Baileys] Erro ao limpar credenciais do banco:`, e);
+          }
+          // Apagar arquivos de sessão locais (fallback)
           try {
             const sessionDir = getSessionDir(clientId);
             if (fs.existsSync(sessionDir)) {
@@ -231,7 +339,7 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
               console.log(`[Baileys] Arquivos de sessão removidos para ${clientId}`);
             }
           } catch (e) {
-            console.error(`[Baileys] Erro ao limpar sessão:`, e);
+            console.error(`[Baileys] Erro ao limpar arquivos de sessão:`, e);
           }
         } else {
           // Queda de conexão temporária — reconectar após 5 segundos
@@ -288,43 +396,52 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
         
         // Extrair conteúdo da mensagem com suporte a múltiplos tipos
         let text = "[mídia]";
+        let msgType: string = "text";
+        let mediaFileName: string | undefined;
         if (msg.message.conversation) {
           text = msg.message.conversation;
+          msgType = "text";
         } else if (msg.message.extendedTextMessage?.text) {
           text = msg.message.extendedTextMessage.text;
-        } else if (msg.message.imageMessage?.caption) {
-          text = msg.message.imageMessage.caption;
-        } else if (msg.message.videoMessage?.caption) {
-          text = msg.message.videoMessage.caption;
-        } else if (msg.message.documentMessage?.caption) {
-          text = msg.message.documentMessage.caption;
+          msgType = "text";
+        } else if (msg.message.imageMessage) {
+          text = msg.message.imageMessage.caption || "[imagem]";
+          msgType = "image";
+        } else if (msg.message.videoMessage) {
+          text = msg.message.videoMessage.caption || "[vídeo]";
+          msgType = "video";
         } else if (msg.message.audioMessage) {
           text = "[áudio]";
-        } else if (msg.message.imageMessage) {
-          text = "[imagem]";
-        } else if (msg.message.videoMessage) {
-          text = "[vídeo]";
+          msgType = "audio";
         } else if (msg.message.documentMessage) {
-          text = `[documento: ${msg.message.documentMessage.fileName || 'arquivo'}]`;
+          mediaFileName = msg.message.documentMessage.fileName || 'arquivo';
+          text = `[documento: ${mediaFileName}]`;
+          msgType = "document";
         } else if (msg.message.stickerMessage) {
           text = "[figurinha]";
+          msgType = "sticker";
         } else if (msg.message.locationMessage) {
           text = "[localização]";
+          msgType = "location";
         } else if (msg.message.contactMessage) {
           text = "[contato compartilhado]";
+          msgType = "contact";
         } else if (msg.message.listMessage) {
           text = "[lista]";
+          msgType = "list";
         } else if (msg.message.buttonsMessage) {
           text = msg.message.buttonsMessage.contentText || "[mensagem com botões]";
+          msgType = "buttons";
         } else if (msg.message.templateMessage) {
           text = "[template]";
+          msgType = "template";
         }
 
         const timestamp = Number(msg.messageTimestamp) * 1000;
         const now = new Date(timestamp);
 
         try {
-          await handleIncomingMessage(clientId, phone, text, now, pushName);
+          await handleIncomingMessage(clientId, phone, text, now, pushName, msgType, mediaFileName);
         } catch (err) {
           console.error("[Baileys] Erro ao persistir mensagem:", err);
         }
@@ -362,7 +479,15 @@ export async function disconnectWhatsApp(clientId: string): Promise<void> {
     }
   }
 
-  // Limpar sessão salva
+  // Limpar credenciais do banco
+  try {
+    const pool = getPool();
+    await pool.execute('DELETE FROM baileys_auth_state WHERE client_id = ?', [clientId]);
+    console.log(`[Baileys] Credenciais do banco removidas para ${clientId} (disconnect)`);
+  } catch (e) {
+    console.error(`[Baileys] Erro ao limpar credenciais do banco:`, e);
+  }
+  // Limpar sessão salva em arquivo (fallback)
   const sessionDir = getSessionDir(clientId);
   if (fs.existsSync(sessionDir)) {
     fs.rmSync(sessionDir, { recursive: true, force: true });
@@ -391,6 +516,30 @@ export function getSessionStatus(clientId: string): {
 
 // Restaurar sessões já autenticadas ao iniciar o servidor
 export async function restoreExistingSessions(): Promise<void> {
+  const restoredClients = new Set<string>();
+
+  // 1. Restaurar sessões do banco de dados (principal)
+  try {
+    const pool = getPool();
+    const [rows] = await pool.execute(
+      'SELECT DISTINCT client_id FROM baileys_auth_state WHERE auth_key = ?',
+      ['creds']
+    ) as any[];
+    for (const row of rows) {
+      const clientId = row.client_id;
+      console.log(`[Baileys] Restaurando sessão do banco para: ${clientId}`);
+      try {
+        await startWhatsAppSession(clientId);
+        restoredClients.add(clientId);
+      } catch (err) {
+        console.error(`[Baileys] Falha ao restaurar sessão ${clientId} do banco:`, err);
+      }
+    }
+  } catch (err) {
+    console.warn('[Baileys] Banco indisponível para restaurar sessões, tentando arquivos locais:', err);
+  }
+
+  // 2. Restaurar sessões de arquivos locais (fallback para clientes não restaurados do banco)
   if (!fs.existsSync(SESSIONS_DIR)) return;
   const dirs = fs.readdirSync(SESSIONS_DIR);
   for (const dir of dirs) {
@@ -398,11 +547,12 @@ export async function restoreExistingSessions(): Promise<void> {
     const credsFile = path.join(sessionDir, "creds.json");
     if (fs.existsSync(credsFile)) {
       const clientId = dir; // nome do diretório = clientId sanitizado
-      console.log(`[Baileys] Restaurando sessão para: ${clientId}`);
+      if (restoredClients.has(clientId)) continue; // já restaurado do banco
+      console.log(`[Baileys] Restaurando sessão de arquivo para: ${clientId}`);
       try {
         await startWhatsAppSession(clientId);
       } catch (err) {
-        console.error(`[Baileys] Falha ao restaurar sessão ${clientId}:`, err);
+        console.error(`[Baileys] Falha ao restaurar sessão ${clientId} de arquivo:`, err);
       }
     }
   }
@@ -417,7 +567,9 @@ async function handleIncomingMessage(
   phone: string,
   text: string,
   timestamp: Date,
-  pushName?: string | null
+  pushName?: string | null,
+  msgType?: string,
+  mediaFileName?: string
 ): Promise<void> {
   const pool = getPool();
 
@@ -435,13 +587,14 @@ async function handleIncomingMessage(
   ) as any[];
 
   const nowLabel = timestamp.toLocaleString("pt-BR");
-  const messageEntry = {
+  const messageEntry: any = {
     id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
     sender: "customer",
     text,
     timestamp: timestamp.toISOString(),
-    type: "text",
+    type: msgType || "text",
   };
+  if (mediaFileName) messageEntry.fileName = mediaFileName;
 
   if (existingRows && existingRows.length > 0) {
     // 2a. Conversa já existe — adicionar mensagem e atualizar last_message

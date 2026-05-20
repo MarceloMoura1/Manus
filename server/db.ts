@@ -71,8 +71,26 @@ export async function upsertUser(input: UpsertUserInput) {
 
 // Customer/Client Helpers
 export async function getConversationsByClientId(clientId: string) {
+  // Seleciona apenas os campos necessários para a lista (sem messagesJson para evitar [Max Depth])
   const rows = await getDb()
-    .select()
+    .select({
+      conversationId: megadeskDomainConversations.conversationId,
+      clientId: megadeskDomainConversations.clientId,
+      crmClientId: megadeskDomainConversations.crmClientId,
+      customerName: megadeskDomainConversations.customerName,
+      phone: megadeskDomainConversations.phone,
+      company: megadeskDomainConversations.company,
+      status: megadeskDomainConversations.status,
+      assignedUserId: megadeskDomainConversations.assignedUserId,
+      assignedUserName: megadeskDomainConversations.assignedUserName,
+      unreadCount: megadeskDomainConversations.unreadCount,
+      iaActive: megadeskDomainConversations.iaActive,
+      lastMessageFrom: megadeskDomainConversations.lastMessageFrom,
+      lastMessage: megadeskDomainConversations.lastMessage,
+      timeLabel: megadeskDomainConversations.timeLabel,
+      createdAt: megadeskDomainConversations.createdAt,
+      updatedAt: megadeskDomainConversations.updatedAt,
+    })
     .from(megadeskDomainConversations)
     .where(eq(megadeskDomainConversations.clientId, clientId));
   return rows;
@@ -392,7 +410,9 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
         if (row.password_hash) passwordHashMap.set(row.user_id, row.password_hash);
       }
 
-      await connection.execute("DELETE FROM megadesk_domain_conversations");
+      // PRESERVAR conversas do Baileys (prefixo 'conv-baileys-') — elas são gerenciadas diretamente pelo Baileys
+      // Deletar apenas conversas legadas (sem prefixo 'conv-baileys-')
+      await connection.execute("DELETE FROM megadesk_domain_conversations WHERE conversation_id NOT LIKE 'conv-baileys-%'");
       await connection.execute("DELETE FROM megadesk_domain_tickets");
       await connection.execute("DELETE FROM megadesk_domain_bot_scripts");
       await connection.execute("DELETE FROM megadesk_domain_operational_records");
@@ -430,6 +450,9 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
         }
       }
       for (const conversation of state.conversations) {
+        // Pular conversas do Baileys (prefixo 'conv-baileys-') — elas são gerenciadas diretamente pelo Baileys
+        // e não devem ser sobrescritas pelo estado em memória (que pode estar desatualizado)
+        if (conversation.id && String(conversation.id).startsWith('conv-baileys-')) continue;
         await connection.execute("INSERT INTO megadesk_domain_conversations (conversation_id, client_id, customer_name, phone, company, status, last_message, time_label, messages_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE customer_name=VALUES(customer_name), phone=VALUES(phone), company=VALUES(company), status=VALUES(status), last_message=VALUES(last_message), time_label=VALUES(time_label), messages_json=VALUES(messages_json)", [conversation.id, conversation.clientId, conversation.name, conversation.phone, conversation.company, conversation.status, conversation.lastMessage, conversation.time, JSON.stringify(conversation.messages ?? [])]);
       }
       // Tickets/Chamados são criados via createTicket, não via saveMegaDeskStructuredState

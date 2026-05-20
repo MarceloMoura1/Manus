@@ -1474,3 +1474,29 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Formatar telefone no padrão BR nos cards de conversa (ex: (41) 99548-4515)
 - [x] Adicionar botão "Limpar Sessão" na aba WhatsApp das Configurações
 - [x] Adicionar indicador de status do WhatsApp (ponto verde/vermelho) no item Conversas da sidebar
+
+## Fase 144: Diagnóstico Completo e Correções Definitivas
+
+- [ ] Diagnóstico completo do fluxo Baileys → banco → frontend
+- [ ] Corrigir estabilidade do Baileys (QR code, reconexão automática, limpeza de sessão corrompida)
+- [ ] Corrigir salvamento de mensagens no banco de dados (texto, imagem, áudio, documento)
+- [ ] Corrigir exibição de imagens e áudios nas conversas
+- [ ] Corrigir extração automática do número do cliente (LID → número real)
+- [ ] Garantir que novas mensagens aparecem em tempo real na lista de conversas
+- [ ] Testes completos de todo o fluxo
+
+## Fase 45: Diagnóstico e Correção de Conversas, Mídias e Desconexão
+- [x] Diagnosticar por que conversas não aparecem na lista (status: closed)
+- [x] Corrigir saveMegaDeskStructuredState para preservar conversas do Baileys (não apagar com DELETE)
+- [x] Corrigir INSERT de conversas para não sobrescrever conversas do Baileys
+- [x] Corrigir filtro "Fechadas" no frontend (tipo ownerFilter incluindo 'closed')
+- [x] Ocultar filtros de status (Abertas/BOT) quando modo Fechadas está ativo
+- [x] Melhorar renderização de mensagens para exibir ícones de mídia (áudio, imagem, vídeo, documento)
+- [x] Melhorar extração de tipo de mensagem no Baileys (salvar tipo correto)
+- [x] Criar tabela baileys_auth_state para persistência de credenciais no banco de dados
+- [x] Implementar useDbAuthState para salvar credenciais Baileys no banco (evitar perda ao reiniciar)
+- [x] Atualizar restoreExistingSessions para restaurar sessões do banco de dados
+- [x] Atualizar disconnectWhatsApp para limpar credenciais do banco
+- [x] Adicionar botão de Atendimento Ativo no cabeçalho da conversa (preenche número automaticamente)
+- [x] Implementar passagem de número de telefone para ActiveAttendancePage via localStorage
+- [x] Adicionar listener megadesk-navigate no MegaDeskApp para navegação interna

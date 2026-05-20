@@ -58,6 +58,13 @@ import {
   Filter,
   Wifi,
   WifiOff,
+  Image,
+  Video,
+  Mic,
+  FileText,
+  Smile,
+  MapPin as MapPinIcon,
+  Phone as PhoneIcon,
 } from "lucide-react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
@@ -338,7 +345,7 @@ function ConversationsPage() {
 
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState<'open' | 'bot'>('open');
-  const [ownerFilter, setOwnerFilter] = React.useState<'all' | 'mine' | 'history'>('all');
+  const [ownerFilter, setOwnerFilter] = React.useState<'all' | 'mine' | 'history' | 'closed'>('all');
   const [attendantFilter, setAttendantFilter] = React.useState<string>('');
   const [historySearch, setHistorySearch] = React.useState<string>('');
   const [attendantDropdownOpen, setAttendantDropdownOpen] = React.useState(false);
@@ -501,6 +508,15 @@ function ConversationsPage() {
         conv.phone?.includes(historySearch)
       );
     }
+    // Modo Fechadas: mostrar apenas conversas fechadas
+    if (ownerFilter === 'closed') {
+      const matchesSearch = searchTerm === '' ||
+        conv.phone?.includes(searchTerm) ||
+        conv.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        conv.company?.toLowerCase().includes(searchTerm.toLowerCase());
+      return conv.status === 'closed' && matchesSearch;
+    }
+
     const matchesFilter = conv.status === selectedFilter;
     const matchesSearch = searchTerm === '' ||
       conv.phone?.includes(searchTerm) ||
@@ -685,7 +701,7 @@ function ConversationsPage() {
               <button
                 key={f}
                 onClick={() => { 
-                  setOwnerFilter(f as 'all' | 'mine' | 'history');
+                  setOwnerFilter(f as 'all' | 'mine' | 'history' | 'closed');
                   setAttendantFilter('');
                 }}
                 className={cn(
@@ -700,8 +716,8 @@ function ConversationsPage() {
           </div>
         </div>
 
-        {/* Filtros */}
-        <div className="px-3 py-2 bg-white border-b border-slate-100">
+        {/* Filtros - ocultar quando modo Fechadas está ativo */}
+        {ownerFilter !== 'closed' && <div className="px-3 py-2 bg-white border-b border-slate-100">
           <div className="flex rounded-lg border border-slate-200 overflow-hidden">
             {filters.map((filter, i) => (
               <button
@@ -727,8 +743,9 @@ function ConversationsPage() {
                 )}>{filter.count}</span>
               </button>
             ))}
+
           </div>
-        </div>
+        </div>}
 
         {/* Lista */}
         <div className="flex-1 overflow-y-auto">
@@ -820,6 +837,17 @@ function ConversationsPage() {
               </div>
               <div className="flex items-center gap-2">
                 <button
+                  onClick={() => {
+                    // Salvar o número no localStorage e navegar para Atendimento Ativo
+                    localStorage.setItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE', selectedConv.phone || '');
+                    window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'active-attendance' } }));
+                  }}
+                  className="p-2 hover:bg-slate-100 rounded-xl transition-colors text-slate-500 hover:text-slate-700"
+                  title="Abrir Atendimento Ativo"
+                >
+                  <PhoneCall className="w-4 h-4" />
+                </button>
+                <button
                   onClick={() => { setEditName(selectedConv.name); setEditCompany(selectedConv.company || ''); setEditModalOpen(true); }}
                   className="p-2 hover:bg-slate-100 rounded-xl transition-colors text-slate-500 hover:text-slate-700"
                   title="Editar cliente"
@@ -861,6 +889,69 @@ function ConversationsPage() {
                   const isAgent = msg.sender === 'agent' || msg.from === 'agent';
                   const msgText = msg.text || msg.message || '';
                   const msgTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+                  const msgType = msg.type || 'text';
+                  
+                  // Renderização de mídia
+                  const renderContent = () => {
+                    if (msgType === 'image') {
+                      return (
+                        <div className="flex items-center gap-2">
+                          <Image className="w-4 h-4 flex-shrink-0" />
+                          <span className="text-sm">{msgText !== '[imagem]' ? msgText : 'Imagem'}</span>
+                        </div>
+                      );
+                    }
+                    if (msgType === 'audio') {
+                      return (
+                        <div className="flex items-center gap-2">
+                          <Mic className="w-4 h-4 flex-shrink-0" />
+                          <span className="text-sm">Mensagem de áudio</span>
+                        </div>
+                      );
+                    }
+                    if (msgType === 'video') {
+                      return (
+                        <div className="flex items-center gap-2">
+                          <Video className="w-4 h-4 flex-shrink-0" />
+                          <span className="text-sm">{msgText !== '[vídeo]' ? msgText : 'Vídeo'}</span>
+                        </div>
+                      );
+                    }
+                    if (msgType === 'document') {
+                      return (
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 flex-shrink-0" />
+                          <span className="text-sm">{msg.fileName || 'Documento'}</span>
+                        </div>
+                      );
+                    }
+                    if (msgType === 'sticker') {
+                      return (
+                        <div className="flex items-center gap-2">
+                          <Smile className="w-4 h-4 flex-shrink-0" />
+                          <span className="text-sm">Figurinha</span>
+                        </div>
+                      );
+                    }
+                    if (msgType === 'location') {
+                      return (
+                        <div className="flex items-center gap-2">
+                          <MapPinIcon className="w-4 h-4 flex-shrink-0" />
+                          <span className="text-sm">Localização</span>
+                        </div>
+                      );
+                    }
+                    if (msgType === 'contact') {
+                      return (
+                        <div className="flex items-center gap-2">
+                          <PhoneIcon className="w-4 h-4 flex-shrink-0" />
+                          <span className="text-sm">Contato compartilhado</span>
+                        </div>
+                      );
+                    }
+                    return <p className="text-sm">{msgText}</p>;
+                  };
+                  
                   return (
                     <div key={msg.id || idx} className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
                       <div className="max-w-xs lg:max-w-md">
@@ -869,7 +960,7 @@ function ConversationsPage() {
                             ? 'bg-gradient-to-br from-blue-500 to-violet-600 text-white rounded-tr-sm'
                             : 'bg-white border border-slate-100 text-slate-800 rounded-tl-sm'
                         }`}>
-                          <p className="text-sm">{msgText}</p>
+                          {renderContent()}
                           <p className={`text-xs mt-1 text-right ${isAgent ? 'text-blue-100' : 'text-slate-400'}`}>{msgTime}</p>
                         </div>
                         {!isAgent && <p className="text-xs text-slate-400 mt-1 ml-1">{selectedConv.name}</p>}
@@ -3025,6 +3116,7 @@ function Shell() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [indicadores, setIndicadores] = useState<any>(null);
   const [activeCrmClientId, setActiveCrmClientId] = useState<string | null>(null);
+  const [activeAttendancePhone, setActiveAttendancePhone] = useState<string>('');
   const [whatsappConnected, setWhatsappConnected] = useState(false);
 
   const loginMutation = trpc.megadesk.loginByEmail.useMutation();
@@ -3033,6 +3125,24 @@ function Shell() {
   useEffect(() => {
     localStorage.setItem(MEGADESK_ACTIVE_PAGE_KEY, active);
   }, [active]);
+
+  // Escutar evento de navegação interna (ex: Atendimento Ativo com número preenchido)
+  useEffect(() => {
+    const handleNavigate = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.route) {
+        // Verificar se há número de telefone para preencher
+        const phone = localStorage.getItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
+        if (phone) {
+          setActiveAttendancePhone(phone);
+          localStorage.removeItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
+        }
+        setActive(detail.route as RouteId);
+      }
+    };
+    window.addEventListener('megadesk-navigate', handleNavigate);
+    return () => window.removeEventListener('megadesk-navigate', handleNavigate);
+  }, []);
 
   // Verificar status do WhatsApp periodicamente
   useEffect(() => {
@@ -3295,7 +3405,7 @@ function Shell() {
           {active === "whatsapp-config" && <WhatsAppConfigPage />}
           {active === "ai-assistant" && <AIAssistantPage />}
           {active === "notifications" && <NotificationsPage />}
-          {active === "active-attendance" && <ActiveAttendancePage onNavigate={(nav) => {
+          {active === "active-attendance" && <ActiveAttendancePage initialPhone={activeAttendancePhone} onNavigate={(nav) => {
             if (typeof nav === 'string') {
               setActive(nav as RouteId);
             } else if (nav && typeof nav === 'object') {

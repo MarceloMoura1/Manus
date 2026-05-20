@@ -1,12 +1,12 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Phone, User, Building2, CheckCircle, AlertCircle, Loader2, ArrowRight, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
 
-export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any) => void }) {
-  const [phoneNumber, setPhoneNumber] = useState('');
+export function ActiveAttendancePage({ onNavigate, initialPhone }: { onNavigate?: (route: any) => void; initialPhone?: string }) {
+  const [phoneNumber, setPhoneNumber] = useState(initialPhone || '');
   const [customerData, setCustomerData] = useState<any>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [showNewCustomerForm, setShowNewCustomerForm] = useState(false);
@@ -20,6 +20,17 @@ export function ActiveAttendancePage({ onNavigate }: { onNavigate?: (route: any)
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [createdChamadoNumber, setCreatedChamadoNumber] = useState<number | null>(null);
   const [createdChamadoId, setCreatedChamadoId] = useState<string | null>(null);
+
+  // Ler número de telefone do localStorage quando a página é montada (passado por navegação interna)
+  useEffect(() => {
+    if (!initialPhone) {
+      const storedPhone = localStorage.getItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
+      if (storedPhone) {
+        setPhoneNumber(storedPhone);
+        localStorage.removeItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
+      }
+    }
+  }, []);
 
   // Obter clientId da sessão do usuário logado
   const session = useMemo(() => {
