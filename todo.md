@@ -1477,13 +1477,13 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 
 ## Fase 144: Diagnóstico Completo e Correções Definitivas
 
-- [ ] Diagnóstico completo do fluxo Baileys → banco → frontend
-- [ ] Corrigir estabilidade do Baileys (QR code, reconexão automática, limpeza de sessão corrompida)
-- [ ] Corrigir salvamento de mensagens no banco de dados (texto, imagem, áudio, documento)
-- [ ] Corrigir exibição de imagens e áudios nas conversas
-- [ ] Corrigir extração automática do número do cliente (LID → número real)
-- [ ] Garantir que novas mensagens aparecem em tempo real na lista de conversas
-- [ ] Testes completos de todo o fluxo
+- [x] Diagnóstico completo do fluxo Baileys → banco → frontend
+- [x] Corrigir estabilidade do Baileys (QR code, reconexão automática, limpeza de sessão corrompida)
+- [x] Corrigir salvamento de mensagens no banco de dados (texto, imagem, áudio, documento)
+- [x] Corrigir exibição de imagens e áudios nas conversas
+- [x] Corrigir extração automática do número do cliente (LID → número real)
+- [x] Garantir que novas mensagens aparecem em tempo real na lista de conversas
+- [x] Testes completos de todo o fluxo
 
 ## Fase 45: Diagnóstico e Correção de Conversas, Mídias e Desconexão
 - [x] Diagnosticar por que conversas não aparecem na lista (status: closed)

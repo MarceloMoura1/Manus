@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { io } from "socket.io-client";
 import { navigateToPlatform } from "@/lib/platformRouting";
 import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -438,6 +439,59 @@ function ConversationsPage() {
       setConversations(conversationsData);
     }
   }, [conversationsData]);
+
+  // Socket.IO para atualizações em tempo real de conversas
+  React.useEffect(() => {
+    if (!clientId) return;
+    const socket = io(window.location.origin, {
+      path: '/api/ws/whatsapp',
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+    });
+    socket.on('connect', () => {
+      socket.emit('wa:join_client', clientId);
+    });
+    // Nova conversa criada pelo Baileys
+    socket.on('conversation:new', (data: { conversation: any }) => {
+      const c = data.conversation;
+      setConversations(prev => {
+        const exists = prev.find(x => x.conversationId === c.id);
+        if (exists) return prev;
+        return [{
+          conversationId: c.id,
+          customerName: c.name,
+          phone: c.phone,
+          company: c.company,
+          lastMessage: c.lastMessage,
+          status: c.status || 'bot',
+          unreadCount: c.unreadCount || 1,
+          lastMessageFrom: c.lastMessageFrom || 'customer',
+          timestamp: c.createdAt,
+        }, ...prev];
+      });
+    });
+    // Conversa atualizada (nova mensagem)
+    socket.on('conversation:updated', (data: any) => {
+      setConversations(prev => prev.map(conv => {
+        if (conv.conversationId === data.conversationId) {
+          return {
+            ...conv,
+            lastMessage: data.lastMessage,
+            lastMessageFrom: data.lastMessageFrom,
+            status: data.status || conv.status,
+            unreadCount: data.unreadCount ?? conv.unreadCount,
+          };
+        }
+        return conv;
+      }));
+    });
+    return () => {
+      socket.emit('wa:leave_client', clientId);
+      socket.disconnect();
+    };
+  }, [clientId]);
 
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

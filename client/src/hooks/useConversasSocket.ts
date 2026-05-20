@@ -52,7 +52,7 @@ export function useConversasSocket({
         lastMessage: c.lastMessage,
         lastMessageAt: c.createdAt ? new Date(c.createdAt) : new Date(),
         unreadCount: c.unreadCount ?? 1,
-        status: "open",
+        status: (c.status as "open" | "pending" | "closed") ?? "open",
         assignedUserId: c.assignedUserId ?? null,
         assignedUserName: c.assignedUserName,
         iaActive: c.iaActive ?? false,

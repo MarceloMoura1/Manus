@@ -18,6 +18,7 @@ import path from "path";
 import fs from "fs";
 import pino from "pino";
 import { getPool } from "./db";
+import { getSocketIO } from "./modules/whatsapp/socket/whatsapp.socket";
 
 // Diretório para armazenar sessões (fallback local)
 const SESSIONS_DIR = path.join(process.cwd(), ".baileys-sessions");
@@ -262,6 +263,24 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
 
     sock.ev.on("creds.update", saveCreds);
 
+    // Restaurar mapeamento LID do banco ao iniciar sessão
+    try {
+      const pool = getPool();
+      const [lidRows] = await pool.execute(
+        'SELECT lid_id, phone_number FROM baileys_lid_mapping WHERE client_id = ?',
+        [clientId]
+      ) as any[];
+      if (lidRows.length > 0) {
+        if (!lidToPhoneMap.has(clientId)) lidToPhoneMap.set(clientId, new Map());
+        for (const row of lidRows) {
+          lidToPhoneMap.get(clientId)!.set(row.lid_id, row.phone_number);
+        }
+        console.log(`[Baileys] Restaurados ${lidRows.length} mapeamentos LID do banco para ${clientId}`);
+      }
+    } catch (err) {
+      console.warn('[Baileys] Erro ao restaurar mapeamentos LID:', err);
+    }
+
     // Escutar evento de mapeamento LID -> número de telefone real
     // Emitido pelo Baileys quando recebe pnForLidChatAction do servidor do WhatsApp
     sock.ev.on("lid-mapping.update" as any, ({ lid, pn }: { lid: string; pn: string }) => {
@@ -274,8 +293,16 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
         lidToPhoneMap.get(clientId)!.set(lidId, pnId);
         console.log(`[Baileys] LID mapeado: ${lidId} -> ${pnId} (cliente: ${clientId})`);
         
-        // Atualizar conversas existentes que usam o LID como número
+        // Persistir mapeamento LID no banco
         const pool = getPool();
+        pool.execute(
+          `INSERT INTO baileys_lid_mapping (client_id, lid_id, phone_number) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE phone_number = VALUES(phone_number)`,
+          [clientId, lidId, pnId]
+        ).catch((err: any) => {
+          console.error(`[Baileys] Erro ao persistir LID no banco:`, err);
+        });
+        
+        // Atualizar conversas existentes que usam o LID como número
         pool.execute(
           `UPDATE megadesk_domain_conversations SET phone = ? WHERE client_id = ? AND phone = ?`,
           [pnId, clientId, lidId]
@@ -615,6 +642,19 @@ async function handleIncomingMessage(
     );
 
     console.log(`[Baileys] Mensagem adicionada à conversa existente ${existing.conversation_id}`);
+    
+    // Emitir evento Socket.IO para atualizar frontend em tempo real
+    const ioServer = getSocketIO();
+    if (ioServer) {
+      ioServer.to(`client:${clientId}`).emit("conversation:updated", {
+        conversationId: existing.conversation_id,
+        lastMessage: text,
+        lastMessageFrom: "customer",
+        status: "bot",
+        unreadCount: (existing.unread_count || 0) + 1,
+        newMessage: messageEntry,
+      });
+    }
   } else {
     // 2b. Nova conversa — criar com status "bot"
     const conversationId = `conv-baileys-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
@@ -656,6 +696,24 @@ async function handleIncomingMessage(
     );
 
     console.log(`[Baileys] Nova conversa criada: ${conversationId} para +${cleanPhone}`);
+    
+    // Emitir evento Socket.IO para que o frontend adicione a nova conversa em tempo real
+    const ioServer = getSocketIO();
+    if (ioServer) {
+      ioServer.to(`client:${clientId}`).emit("conversation:new", {
+        conversation: {
+          id: conversationId,
+          name: customerName,
+          phone: cleanPhone,
+          company,
+          lastMessage: text,
+          status: "bot",
+          unreadCount: 1,
+          lastMessageFrom: "customer",
+          createdAt: new Date().toISOString(),
+        },
+      });
+    }
   }
 }
 
