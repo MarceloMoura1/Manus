@@ -1449,6 +1449,12 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Integrar status personalizados na página de Chamados (filtros e cards dinâmicos)
 - [x] Garantir isolamento multi-tenant em todas as novas procedures
 
+## Fase 141: Correções de Processamento de Mensagens WhatsApp
+
+- [x] Melhorar extração de conteúdo de mensagens (suporte a áudio, vídeo, documento, figurinha, localização, contato, botões, template)
+- [x] Adicionar exibição do número do cliente no card de conversa
+- [x] Criar 20 testes para validar processamento de mensagens e extração de phone
+
 ## Fase 140: Novas Abas de Configurações (Admin)
 
 - [x] Aba Geral: campos de dados da empresa (nome, logo, email, telefone, WhatsApp, endereço, horário)

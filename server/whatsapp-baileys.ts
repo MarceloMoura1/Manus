@@ -209,12 +209,40 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
 
         const phone = from.replace("@s.whatsapp.net", "").replace(":.*", "").split(":")[0];
         const pushName = msg.pushName || null; // Nome do contato no WhatsApp
-        const text =
-          msg.message.conversation ||
-          msg.message.extendedTextMessage?.text ||
-          msg.message.imageMessage?.caption ||
-          msg.message.videoMessage?.caption ||
-          "[mídia]";
+        
+        // Extrair conteúdo da mensagem com suporte a múltiplos tipos
+        let text = "[mídia]";
+        if (msg.message.conversation) {
+          text = msg.message.conversation;
+        } else if (msg.message.extendedTextMessage?.text) {
+          text = msg.message.extendedTextMessage.text;
+        } else if (msg.message.imageMessage?.caption) {
+          text = msg.message.imageMessage.caption;
+        } else if (msg.message.videoMessage?.caption) {
+          text = msg.message.videoMessage.caption;
+        } else if (msg.message.documentMessage?.caption) {
+          text = msg.message.documentMessage.caption;
+        } else if (msg.message.audioMessage) {
+          text = "[áudio]";
+        } else if (msg.message.imageMessage) {
+          text = "[imagem]";
+        } else if (msg.message.videoMessage) {
+          text = "[vídeo]";
+        } else if (msg.message.documentMessage) {
+          text = `[documento: ${msg.message.documentMessage.fileName || 'arquivo'}]`;
+        } else if (msg.message.stickerMessage) {
+          text = "[figurinha]";
+        } else if (msg.message.locationMessage) {
+          text = "[localização]";
+        } else if (msg.message.contactMessage) {
+          text = "[contato compartilhado]";
+        } else if (msg.message.listMessage) {
+          text = "[lista]";
+        } else if (msg.message.buttonsMessage) {
+          text = msg.message.buttonsMessage.contentText || "[mensagem com botões]";
+        } else if (msg.message.templateMessage) {
+          text = "[template]";
+        }
 
         const timestamp = Number(msg.messageTimestamp) * 1000;
         const now = new Date(timestamp);

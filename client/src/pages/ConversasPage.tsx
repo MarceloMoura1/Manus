@@ -158,12 +158,20 @@ function ConversationCard({
                 </span>
               )}
             </div>
-            {conv.companyName && (
-              <div className="flex items-center gap-1 mt-0.5">
-                <Building2 className="w-3 h-3 text-slate-400 flex-shrink-0" />
-                <span className="text-xs text-slate-500 truncate">{conv.companyName}</span>
-              </div>
-            )}
+            <div className="space-y-0.5 mt-0.5">
+              {conv.companyName && (
+                <div className="flex items-center gap-1">
+                  <Building2 className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                  <span className="text-xs text-slate-500 truncate">{conv.companyName}</span>
+                </div>
+              )}
+              {conv.customerPhone && (
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-slate-400">📱</span>
+                  <span className="text-xs text-slate-500 font-mono">{conv.customerPhone}</span>
+                </div>
+              )}
+            </div>
           </div>
           <span className="text-xs text-slate-400 flex-shrink-0">
             {formatDate(conv.lastMessageAt)}
