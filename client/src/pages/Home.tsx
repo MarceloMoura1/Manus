@@ -533,11 +533,11 @@ function ConversationsPage() {
           {/* Linha 1: Título + contagem + botão data */}
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center shadow-md">
-                <MessageCircle className="w-6 h-6 text-white" />
+              <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center shadow-lg">
+                <MessageCircle className="w-9 h-9 text-white" />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-slate-900 leading-tight">Conversas</h2>
+                <h2 className="text-3xl font-bold text-slate-900 leading-tight">Conversas</h2>
                 <p className="text-xs text-slate-500">{conversations.length} conversa{conversations.length !== 1 ? 's' : ''}</p>
               </div>
             </div>
