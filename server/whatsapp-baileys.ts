@@ -215,10 +215,15 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
           phone = phone.split(":")[0];
         }
         
-        // Debug: logar o número antes de processar
-        console.log(`[Baileys] Raw phone from JID: ${phone}, from: ${from}`);
-        
         const pushName = msg.pushName || null; // Nome do contato no WhatsApp
+        const participant = msg.key.participant || null; // Para mensagens em grupo
+        
+        // Debug: logar o número antes de processar
+        console.log(`[Baileys] Full message key:`, JSON.stringify(msg.key, null, 2));
+        console.log(`[Baileys] Raw phone from JID: ${phone}, from: ${from}`);
+        console.log(`[Baileys] Push name: ${pushName}`);
+        console.log(`[Baileys] Message timestamp: ${msg.messageTimestamp}`);
+        console.log(`[Baileys] Message keys: ${Object.keys(msg.message).join(", ")}`);
         
         // Extrair conteúdo da mensagem com suporte a múltiplos tipos
         let text = "[mídia]";
