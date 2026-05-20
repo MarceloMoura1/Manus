@@ -208,15 +208,14 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
         if (isGroup) continue;
 
         // Extrair número de telefone corretamente do JID
-        // Formato: "5511987654321@s.whatsapp.net" ou "5511987654321:0@s.whatsapp.net"
-        let phone = from.replace("@s.whatsapp.net", "").replace(/@c\.us$/, "");
-        // Se houver ":", pegar apenas a parte antes dele
-        if (phone.includes(":")) {
-          phone = phone.split(":")[0];
-        }
-        
-        // Debug: logar o número antes de processar
-        console.log(`[Baileys] Raw phone from JID: ${phone}, from: ${from}`);
+        // Formatos possíveis:
+        //   "5511987654321@s.whatsapp.net"         -> número normal
+        //   "5511987654321:0@s.whatsapp.net"       -> multi-device
+        //   "5511987654321:12345@s.whatsapp.net"   -> multi-device com ID
+        //   "5511987654321@c.us"                   -> formato antigo
+        const jid = from.split("@")[0]; // Pegar apenas a parte antes do @
+        // Remover sufixo de device (:N) se existir
+        const phone = jid.includes(":") ? jid.split(":")[0] : jid;
         
         const pushName = msg.pushName || null; // Nome do contato no WhatsApp
         
@@ -356,22 +355,8 @@ async function handleIncomingMessage(
   const pool = getPool();
 
   // Formatar o número de telefone (remover caracteres não numéricos)
-  let cleanPhone = phone.replace(/\D/g, "");
-  
-  // Debug: logar o número após limpeza
-  console.log(`[Baileys] Cleaned phone: ${cleanPhone}, original: ${phone}`);
-  
-  // Normalizar: se o número for muito longo (mais de 13 dígitos), pode ter ID do Baileys
-  if (cleanPhone.length > 13) {
-    console.log(`[Baileys] Phone number too long (${cleanPhone.length} digits): ${cleanPhone}`);
-    // Padrão Brasil: 55 + 2 dígitos de área + 8-9 dígitos = 11-12 dígitos total
-    if (cleanPhone.startsWith("55")) {
-      cleanPhone = cleanPhone.slice(-11);
-    } else {
-      cleanPhone = cleanPhone.slice(-10);
-    }
-    console.log(`[Baileys] Normalized phone: ${cleanPhone}`);
-  }
+  // O JID já foi extraído corretamente antes de chegar aqui
+  const cleanPhone = phone.replace(/\D/g, "");
 
   // 1. Buscar conversa existente para esse telefone + clientId com status != closed
   const [existingRows] = await pool.execute(
