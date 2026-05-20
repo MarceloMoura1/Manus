@@ -1430,24 +1430,24 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 ## Fase 140: Novas Abas de Configurações (Admin Only)
 
 ### Schema e Backend
-- [ ] Criar tabela megadesk_company_settings (nome, logo, email, telefone, whatsapp, endereço, horário)
-- [ ] Criar tabela megadesk_ticket_statuses (status personalizados por cliente)
-- [ ] Verificar se tabela de usuários já tem campos necessários para equipe
-- [ ] Criar procedures tRPC: company.getSettings, company.saveSettings
-- [ ] Criar procedures tRPC: ticketStatuses.list, ticketStatuses.create, ticketStatuses.update, ticketStatuses.delete
-- [ ] Criar procedures tRPC: team.listUsers, team.addUser, team.removeUser, team.updatePermissions, team.resetPassword
-- [ ] Criar procedures tRPC: backup.exportData, backup.getBackupList
+- [x] Criar tabela megadesk_company_settings (nome, logo, email, telefone, whatsapp, endereço, horário)
+- [x] Criar tabela megadesk_ticket_statuses (status personalizados por cliente)
+- [x] Verificar se tabela de usuários já tem campos necessários para equipe
+- [x] Criar procedures tRPC: company.getSettings, company.saveSettings
+- [x] Criar procedures tRPC: ticketStatuses.list, ticketStatuses.create, ticketStatuses.update, ticketStatuses.delete
+- [x] Criar procedures tRPC: team.listUsers, team.addUser, team.removeUser, team.updatePermissions, team.resetPassword
+- [x] Criar procedures tRPC: backup.exportData, backup.getBackupList
 
 ### Frontend - SettingsPage.tsx
-- [ ] Adicionar controle de acesso ADMIN para abas Geral, Chamados, Equipe, Backup
-- [ ] Implementar Aba Geral (dados da empresa com logo upload)
-- [ ] Implementar Aba Chamados (status personalizados com CRUD)
-- [ ] Implementar Aba Equipe (gerenciamento de usuários com permissões)
-- [ ] Implementar Aba Backup (exportação e restauração)
+- [x] Adicionar controle de acesso ADMIN para abas Geral, Chamados, Equipe, Backup
+- [x] Implementar Aba Geral (dados da empresa com logo upload)
+- [x] Implementar Aba Chamados (status personalizados com CRUD)
+- [x] Implementar Aba Equipe (gerenciamento de usuários com permissões)
+- [x] Implementar Aba Backup (exportação e restauração)
 
 ### Integração
-- [ ] Integrar status personalizados na página de Chamados (filtros e cards dinâmicos)
-- [ ] Garantir isolamento multi-tenant em todas as novas procedures
+- [x] Integrar status personalizados na página de Chamados (filtros e cards dinâmicos)
+- [x] Garantir isolamento multi-tenant em todas as novas procedures
 
 ## Fase 140: Novas Abas de Configurações (Admin)
 
