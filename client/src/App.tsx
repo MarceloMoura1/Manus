@@ -7,6 +7,7 @@ import AdminPanel from "./pages/AdminPanel";
 import { SettingsPage } from "./pages/SettingsPage";
 import { BotConfigPage } from "./pages/BotConfigPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
+import { WhatsAppBaileysPage } from "./pages/WhatsAppBaileysPage";
 import { AIAssistant } from "./components/AIAssistant";
 import { trpc } from "./lib/trpc";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -29,6 +30,11 @@ function isBotConfigRoute() {
 function isNotificationsRoute() {
   const pathname = window.location.pathname.toLowerCase();
   return pathname === "/notifications" || pathname.startsWith("/notifications/");
+}
+
+function isWhatsAppBaileysRoute() {
+  const pathname = window.location.pathname.toLowerCase();
+  return pathname === "/whatsapp" || pathname.startsWith("/whatsapp/");
 }
 
 export default function App() {
@@ -62,13 +68,13 @@ export default function App() {
   );
 
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
-  const platform = isAdminRoute() ? "megaadmin" : isSettingsRoute() || isBotConfigRoute() || isNotificationsRoute() ? "megadesk" : "megadesk";
+  const platform = isAdminRoute() ? "megaadmin" : isSettingsRoute() || isBotConfigRoute() || isNotificationsRoute() || isWhatsAppBaileysRoute() ? "megadesk" : "megadesk";
 
   return (
     <ThemeProvider>
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
-          {isAdminRoute() ? <AdminPanel /> : isBotConfigRoute() ? <BotConfigPage /> : isNotificationsRoute() ? <NotificationsPage /> : isSettingsRoute() ? <SettingsPage /> : <Home />}
+          {isAdminRoute() ? <AdminPanel /> : isBotConfigRoute() ? <BotConfigPage /> : isNotificationsRoute() ? <NotificationsPage /> : isWhatsAppBaileysRoute() ? <WhatsAppBaileysPage /> : isSettingsRoute() ? <SettingsPage /> : <Home />}
 
           <AIAssistant
             isOpen={isAssistantOpen}
