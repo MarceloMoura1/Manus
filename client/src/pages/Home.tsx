@@ -527,7 +527,7 @@ function ConversationsPage() {
     <div className="flex h-full overflow-hidden rounded-2xl shadow-xl border border-slate-200 bg-white">
 
       {/* ─── Coluna Esquerda: Lista de Conversas ─── */}
-      <div className="w-[360px] flex-shrink-0 flex flex-col border-r border-slate-100 bg-slate-50">
+      <div className="w-[420px] flex-shrink-0 flex flex-col border-r border-slate-100 bg-slate-50">
 
                 {/* Header */}
         <div className="px-4 pt-4 pb-3 bg-white border-b border-slate-100">
