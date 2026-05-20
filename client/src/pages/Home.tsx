@@ -357,6 +357,12 @@ function ConversationsPage() {
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
 
+  // Query para mensagens da conversa selecionada (lazy - só busca quando conversa é aberta)
+  const { data: conversationMessages, refetch: refetchMessages } = trpc.megadesk.getConversationMessages.useQuery(
+    { conversationId: selectedConversation ?? '', clientId },
+    { enabled: !!selectedConversation && !!clientId, refetchInterval: 3000 }
+  );
+
   // Mutations tRPC
   const closeConversationMutation = trpc.megadesk.closeConversation.useMutation();
   const updateCustomerMutation = trpc.megadesk.updateCustomerInfo.useMutation();
@@ -837,8 +843,7 @@ function ConversationsPage() {
             {/* Área de Mensagens */}
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3" style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)' }}>
               {(() => {
-                let msgs: any[] = [];
-                try { msgs = JSON.parse(selectedConv.messagesJson || '[]'); } catch { msgs = []; }
+                const msgs: any[] = Array.isArray(conversationMessages) ? conversationMessages : [];
                 if (msgs.length === 0) {
                   return (
                     <div className="flex justify-start">

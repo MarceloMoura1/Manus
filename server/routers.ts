@@ -1140,11 +1140,36 @@ export const appRouter = router({
               unreadCount: c.unreadCount ?? 0,
               assignedTo: c.assignedUserName ?? null,
               assignedUserId: c.assignedUserId ?? null,
-              messagesJson: c.messagesJson ?? "[]",
             }));
         } catch (error) {
           console.error("Erro ao buscar conversas:", error);
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao buscar conversas" });
+        }
+      }),
+    getConversationMessages: publicProcedure
+      .input(z.object({ conversationId: z.string(), clientId: z.string().min(1) }))
+      .query(async ({ input }) => {
+        try {
+          const { getDb } = await import("./db");
+          const { megadeskDomainConversations } = await import("../drizzle/schema");
+          const { eq, and } = await import("drizzle-orm");
+          const rows = await getDb().select({ messagesJson: megadeskDomainConversations.messagesJson })
+            .from(megadeskDomainConversations)
+            .where(and(
+              eq(megadeskDomainConversations.conversationId, input.conversationId),
+              eq(megadeskDomainConversations.clientId, input.clientId)
+            ))
+            .limit(1);
+          if (!rows.length) return [];
+          try {
+            const msgs = JSON.parse(rows[0].messagesJson ?? "[]");
+            return Array.isArray(msgs) ? msgs : [];
+          } catch {
+            return [];
+          }
+        } catch (error) {
+          console.error("Erro ao buscar mensagens:", error);
+          return [];
         }
       }),
     closeConversation: publicProcedure
