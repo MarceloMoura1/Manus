@@ -3226,8 +3226,8 @@ function Shell() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <header className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between">
+        {/* Header — oculto na rota conversations pois ela tem header próprio */}
+        <header className={`bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between${active === 'conversations' ? ' hidden' : ''}`}>
           <div>
             <h1 className="text-2xl font-bold text-slate-900">{navItems.find(i => i.id === active)?.label || 'MegaDesk'}</h1>
             <p className="text-sm text-slate-600">{session.company} • {session.userName}</p>
