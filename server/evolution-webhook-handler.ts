@@ -1,10 +1,16 @@
 /**
  * Evolution Webhook Handler
  * Processa eventos recebidos da Evolution API (mensagens, status, etc.)
+ * Sincroniza automaticamente com banco de dados via db-evolution-sync
  */
 
-import { getPool } from "./db";
-import { loadMegaDeskStructuredState, saveMegaDeskStructuredState } from "./db";
+import {
+  syncEvolutionMessage,
+  syncMessageStatus,
+  syncConnectionStatus,
+  EvolutionMessagePayload,
+} from "./db-evolution-sync";
+import { getAllSessions } from "./evolution-manager";
 
 export interface EvolutionWebhookPayload {
   event: string;
@@ -21,13 +27,48 @@ export interface EvolutionWebhookPayload {
         text: string;
       };
       imageMessage?: {
+        url?: string;
         caption?: string;
+      };
+      audioMessage?: {
+        url?: string;
+      };
+      videoMessage?: {
+        url?: string;
+        caption?: string;
+      };
+      documentMessage?: {
+        url?: string;
+        fileName?: string;
       };
     };
     status?: string;
     phoneNumber?: string;
     connectionStatus?: string;
+    pushName?: string;
+    timestamp?: number;
   };
+}
+
+/**
+ * Mapear instanceId da Evolution para clientId do MegaDesk
+ * TODO: Implementar mapeamento real em banco de dados
+ */
+async function getClientIdFromInstance(instanceId: string): Promise<string | null> {
+  try {
+    // Por enquanto, usar mapeamento em memória do evolutionManager
+    // No futuro, isso será armazenado em banco de dados
+    const sessions = getAllSessions();
+    for (const [clientId, session] of Object.entries(sessions)) {
+      if (session.instanceId === instanceId) {
+        return clientId;
+      }
+    }
+    return null;
+  } catch (err) {
+    console.error(`[Evolution Webhook] Erro ao mapear instanceId para clientId:`, err);
+    return null;
+  }
 }
 
 /**
@@ -35,168 +76,74 @@ export interface EvolutionWebhookPayload {
  */
 export async function handleIncomingMessage(payload: EvolutionWebhookPayload): Promise<void> {
   try {
-    console.log(`[Evolution Webhook] Mensagem recebida:`, {
-      event: payload.event,
-      instance: payload.instance,
-      remoteJid: payload.data.key?.remoteJid,
+    const { instance, data } = payload;
+    const { key, message, pushName, timestamp } = data;
+
+    if (!key) {
+      console.warn(`[Evolution Webhook] key nao encontrada`);
+      return;
+    }
+
+    // Obter clientId a partir do instanceId
+    const clientId = await getClientIdFromInstance(instance);
+    if (!clientId) {
+      console.warn(`[Evolution Webhook] Nao foi possivel mapear instanceId para clientId: ${instance}`);
+      return;
+    }
+
+    // Construir payload de mensagem para sincronização
+    const syncPayload: EvolutionMessagePayload = {
+      instanceId: instance,
+      data: {
+        key,
+        message,
+        pushName,
+        timestamp,
+      },
+    };
+
+    // Sincronizar mensagem com banco de dados
+    const { conversationId, messageId } = await syncEvolutionMessage(clientId, syncPayload);
+
+    console.log(`[Evolution Webhook] Mensagem sincronizada:`, {
+      conversationId,
+      messageId,
+      clientId,
+      phoneNumber: key.remoteJid,
     });
-
-    // Extrair informações da mensagem
-    const remoteJid = payload.data.key?.remoteJid;
-    if (!remoteJid) {
-      console.warn(`[Evolution Webhook] remoteJid não encontrado`);
-      return;
-    }
-
-    // Extrair número de telefone do JID
-    const phoneNumber = remoteJid.split("@")[0];
-    if (!phoneNumber) {
-      console.warn(`[Evolution Webhook] Não foi possível extrair número do JID: ${remoteJid}`);
-      return;
-    }
-
-    // Extrair texto da mensagem
-    let messageText = "";
-    if (payload.data.message?.conversation) {
-      messageText = payload.data.message.conversation;
-    } else if (payload.data.message?.extendedTextMessage?.text) {
-      messageText = payload.data.message.extendedTextMessage.text;
-    } else if (payload.data.message?.imageMessage?.caption) {
-      messageText = `[Imagem] ${payload.data.message.imageMessage.caption}`;
-    } else {
-      messageText = "[Mensagem sem texto]";
-    }
-
-    console.log(`[Evolution Webhook] Processando mensagem de ${phoneNumber}: "${messageText.substring(0, 50)}..."`);
-
-    // Buscar ou criar conversa
-    const pool = getPool();
-    const connection = await pool.getConnection();
-
-    try {
-      // TODO: Buscar clientId da instância (Evolution API)
-      // Por enquanto, usar um clientId padrão para teste
-      const clientId = "cliente-001"; // FIXME: Obter do mapeamento de instância
-
-      // Buscar conversa existente
-      const [conversations] = await connection.execute(
-        `SELECT conversation_id, client_id FROM megadesk_domain_conversations 
-         WHERE phone = ? AND client_id = ? AND status != 'closed'
-         LIMIT 1`,
-        [phoneNumber, clientId]
-      );
-
-      let conversationId: string;
-
-      if (Array.isArray(conversations) && conversations.length > 0) {
-        // Conversa existente
-        conversationId = (conversations[0] as any).conversation_id;
-        console.log(`[Evolution Webhook] Conversa existente: ${conversationId}`);
-      } else {
-        // Criar nova conversa
-        conversationId = `conv-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-
-        await connection.execute(
-          `INSERT INTO megadesk_domain_conversations 
-           (conversation_id, client_id, customer_name, phone, company, status, assigned_user_id, assigned_user_name, last_message, last_message_from, time_label, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-          [
-            conversationId,
-            clientId,
-            `Contato ${phoneNumber}`,
-            phoneNumber,
-            "N/A",
-            "open",
-            null,
-            "Bot",
-            messageText.substring(0, 100),
-            "customer",
-            new Date().toLocaleTimeString("pt-BR"),
-          ]
-        );
-
-        console.log(`[Evolution Webhook] Nova conversa criada: ${conversationId}`);
-      }
-
-      // Salvar mensagem
-      const messageId = `msg-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-
-      await connection.execute(
-        `INSERT INTO megadesk_domain_conversations_messages 
-         (message_id, conversation_id, sender, message, timestamp, status)
-         VALUES (?, ?, ?, ?, NOW(), ?)`,
-        [messageId, conversationId, "customer", messageText, "received"]
-      );
-
-      console.log(`[Evolution Webhook] Mensagem salva: ${messageId}`);
-
-      // Atualizar última mensagem da conversa
-      await connection.execute(
-        `UPDATE megadesk_domain_conversations 
-         SET last_message = ?, last_message_from = ?, time_label = ?, updated_at = NOW()
-         WHERE conversation_id = ?`,
-        [
-          messageText.substring(0, 100),
-          "customer",
-          new Date().toLocaleTimeString("pt-BR"),
-          conversationId,
-        ]
-      );
-
-      console.log(`[Evolution Webhook] Conversa atualizada: ${conversationId}`);
-    } finally {
-      connection.release();
-    }
   } catch (err: any) {
     console.error(`[Evolution Webhook] Erro ao processar mensagem:`, err);
   }
 }
 
 /**
- * Processar webhook de status de conexão
+ * Processar webhook de status de conexao
  */
 export async function handleConnectionStatus(payload: EvolutionWebhookPayload): Promise<void> {
   try {
-    console.log(`[Evolution Webhook] Status de conexão:`, {
-      instance: payload.instance,
-      status: payload.data.connectionStatus,
-      phoneNumber: payload.data.phoneNumber,
-    });
+    const { instance, data } = payload;
+    const { connectionStatus, phoneNumber } = data;
 
-    const pool = getPool();
-    const connection = await pool.getConnection();
-
-    try {
-      // Atualizar status da instância no banco
-      // TODO: Mapear instance para clientId
-      const clientId = "cliente-001"; // FIXME: Obter do mapeamento
-
-      if (payload.data.connectionStatus === "open" && payload.data.phoneNumber) {
-        // Conexão estabelecida
-        await connection.execute(
-          `UPDATE megadesk_whatsapp_config 
-           SET status = 'connected', phone_number = ?, updated_at = NOW()
-           WHERE instance_id = ?`,
-          [payload.data.phoneNumber, payload.instance]
-        );
-
-        console.log(`[Evolution Webhook] Conexão estabelecida: ${payload.data.phoneNumber}`);
-      } else if (payload.data.connectionStatus === "closed") {
-        // Conexão fechada
-        await connection.execute(
-          `UPDATE megadesk_whatsapp_config 
-           SET status = 'disconnected', updated_at = NOW()
-           WHERE instance_id = ?`,
-          [payload.instance]
-        );
-
-        console.log(`[Evolution Webhook] Conexão fechada`);
-      }
-    } finally {
-      connection.release();
+    // Obter clientId a partir do instanceId
+    const clientId = await getClientIdFromInstance(instance);
+    if (!clientId) {
+      console.warn(`[Evolution Webhook] Nao foi possivel mapear instanceId para clientId: ${instance}`);
+      return;
     }
+
+    const connected = connectionStatus === "open";
+
+    // Sincronizar status de conexao
+    await syncConnectionStatus(clientId, instance, connected, phoneNumber);
+
+    console.log(`[Evolution Webhook] Status de conexao sincronizado:`, {
+      instance,
+      clientId,
+      connected,
+      phoneNumber,
+    });
   } catch (err: any) {
-    console.error(`[Evolution Webhook] Erro ao processar status:`, err);
+    console.error(`[Evolution Webhook] Erro ao processar status de conexao:`, err);
   }
 }
 
@@ -205,62 +152,64 @@ export async function handleConnectionStatus(payload: EvolutionWebhookPayload): 
  */
 export async function handleMessageStatus(payload: EvolutionWebhookPayload): Promise<void> {
   try {
-    console.log(`[Evolution Webhook] Status de mensagem:`, {
-      messageId: payload.data.key?.id,
-      status: payload.data.status,
-    });
+    const { instance, data } = payload;
+    const { key, status } = data;
 
-    const pool = getPool();
-    const connection = await pool.getConnection();
-
-    try {
-      // Atualizar status da mensagem
-      const messageId = payload.data.key?.id;
-      if (!messageId) return;
-
-      // Mapear status da Evolution para status do MegaDesk
-      let status = "sent";
-      if (payload.data.status === "DELIVERY_ACK") {
-        status = "delivered";
-      } else if (payload.data.status === "READ") {
-        status = "read";
-      } else if (payload.data.status === "ERROR") {
-        status = "failed";
-      }
-
-      await connection.execute(
-        `UPDATE megadesk_domain_conversations_messages 
-         SET status = ?, updated_at = NOW()
-         WHERE message_id = ?`,
-        [status, messageId]
-      );
-
-      console.log(`[Evolution Webhook] Status da mensagem atualizado: ${messageId} -> ${status}`);
-    } finally {
-      connection.release();
+    if (!key) {
+      console.warn(`[Evolution Webhook] key nao encontrada`);
+      return;
     }
+
+    // Obter clientId a partir do instanceId
+    const clientId = await getClientIdFromInstance(instance);
+    if (!clientId) {
+      console.warn(`[Evolution Webhook] Nao foi possivel mapear instanceId para clientId: ${instance}`);
+      return;
+    }
+
+    // Mapear status da Evolution para status do MegaDesk
+    let msgStatus: "sent" | "delivered" | "read" | "failed" = "sent";
+    if (status === "DELIVERY_ACK") {
+      msgStatus = "delivered";
+    } else if (status === "READ") {
+      msgStatus = "read";
+    } else if (status === "ERROR") {
+      msgStatus = "failed";
+    }
+
+    // Sincronizar status de mensagem
+    await syncMessageStatus(clientId, key.id, msgStatus);
+
+    console.log(`[Evolution Webhook] Status de mensagem sincronizado:`, {
+      messageId: key.id,
+      status: msgStatus,
+      clientId,
+    });
   } catch (err: any) {
     console.error(`[Evolution Webhook] Erro ao processar status de mensagem:`, err);
   }
 }
 
 /**
- * Processar webhook genérico
+ * Processar webhook generico
  */
 export async function handleEvolutionWebhook(payload: EvolutionWebhookPayload): Promise<void> {
   try {
-    console.log(`[Evolution Webhook] Recebido evento:`, payload.event);
+    console.log(`[Evolution Webhook] Evento recebido:`, {
+      event: payload.event,
+      instance: payload.instance,
+    });
 
     switch (payload.event) {
       case "messages.upsert":
-        // Mensagem recebida
+        // Mensagem recebida (ignorar mensagens enviadas por nos)
         if (!payload.data.key?.fromMe) {
           await handleIncomingMessage(payload);
         }
         break;
 
       case "connection.update":
-        // Status de conexão alterado
+        // Status de conexao alterado
         await handleConnectionStatus(payload);
         break;
 
@@ -270,7 +219,7 @@ export async function handleEvolutionWebhook(payload: EvolutionWebhookPayload): 
         break;
 
       default:
-        console.log(`[Evolution Webhook] Evento não tratado: ${payload.event}`);
+        console.log(`[Evolution Webhook] Evento nao tratado: ${payload.event}`);
     }
   } catch (err: any) {
     console.error(`[Evolution Webhook] Erro ao processar webhook:`, err);
