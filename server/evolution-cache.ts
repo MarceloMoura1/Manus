@@ -260,4 +260,59 @@ export function cacheConversation(
 }
 
 /**
- * Obter conversa em cache\n */\nexport function getCachedConversation(clientId: string, conversationId: string) {\n  const key = `conv:${clientId}:${conversationId}`;\n  return conversationCache.get(key);\n}\n\n/**\n * Verificar rate limit\n */\nexport function checkRateLimit(clientId: string): {\n  allowed: boolean;\n  remaining: number;\n  resetIn: number;\n} {\n  const limiter = getClientRateLimiter(clientId);\n  const allowed = limiter.isAllowed(clientId);\n  const remaining = limiter.getRemainingRequests(clientId);\n  const resetIn = limiter.getResetTime(clientId);\n\n  return { allowed, remaining, resetIn };\n}\n\n/**\n * Limpar todos os caches\n */\nexport function clearAllCaches() {\n  sessionCache.clear();\n  configCache.clear();\n  conversationCache.clear();\n  clientRateLimiters.clear();\n}\n\n/**\n * Obter estatísticas de cache\n */\nexport function getCacheStats() {\n  return {\n    sessions: sessionCache[\"cache\"].size,\n    configs: configCache[\"cache\"].size,\n    conversations: conversationCache[\"cache\"].size,\n    rateLimiters: clientRateLimiters.size,\n  };\n}\n\n/**\n * Inicializar limpeza periódica de cache\n */\nexport function initializeCacheCleanup(intervalMs: number = 5 * 60 * 1000) {\n  setInterval(() => {\n    sessionCache.cleanup();\n    configCache.cleanup();\n    conversationCache.cleanup();\n    console.log(\"[Cache] Limpeza periódica executada\");\n  }, intervalMs);\n}\n
+ * Obter conversa em cache
+ */
+export function getCachedConversation(clientId: string, conversationId: string) {
+  const key = `conv:${clientId}:${conversationId}`;
+  return conversationCache.get(key);
+}
+
+/**
+ * Verificar rate limit
+ */
+export function checkRateLimit(clientId: string): {
+  allowed: boolean;
+  remaining: number;
+  resetIn: number;
+} {
+  const limiter = getClientRateLimiter(clientId);
+  const allowed = limiter.isAllowed(clientId);
+  const remaining = limiter.getRemainingRequests(clientId);
+  const resetIn = limiter.getResetTime(clientId);
+
+  return { allowed, remaining, resetIn };
+}
+
+/**
+ * Limpar todos os caches
+ */
+export function clearAllCaches() {
+  sessionCache.clear();
+  configCache.clear();
+  conversationCache.clear();
+  clientRateLimiters.clear();
+}
+
+/**
+ * Obter estatísticas de cache
+ */
+export function getCacheStats() {
+  return {
+    sessions: sessionCache["cache"].size,
+    configs: configCache["cache"].size,
+    conversations: conversationCache["cache"].size,
+    rateLimiters: clientRateLimiters.size,
+  };
+}
+
+/**
+ * Inicializar limpeza periódica de cache
+ */
+export function initializeCacheCleanup(intervalMs: number = 5 * 60 * 1000) {
+  setInterval(() => {
+    sessionCache.cleanup();
+    configCache.cleanup();
+    conversationCache.cleanup();
+    console.log("[Cache] Limpeza periódica executada");
+  }, intervalMs);
+}

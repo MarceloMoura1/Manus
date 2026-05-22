@@ -160,10 +160,8 @@ async function retryMessage(
     const adapter = getEvolutionAdapter();
     const result = await adapter.sendMessage(
       clientId,
-      message.conversationId,
       message.phoneNumber,
-      message.messageText,
-      message.agentName || "System"
+      message.messageText
     );
 
     const responseTime = Date.now() - startTime;

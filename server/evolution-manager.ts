@@ -247,14 +247,22 @@ export async function sendWhatsAppMessage(
 
     // Salvar mensagem no banco
     try {
-      await db.query(
-        `INSERT INTO megadesk_domain_conversations_messages 
-         (conversation_id, sender, message, timestamp, status)
-         VALUES (?, ?, ?, NOW(), ?)`,
-        [conversationId, agentName, text, "sent"]
-      );
+      const pool = getPool();
+      const connection = await pool.getConnection();
+      try {
+        await connection.execute(
+          `INSERT INTO megadesk_domain_conversations_messages 
+           (conversation_id, sender, message, timestamp, status)
+           VALUES (?, ?, ?, NOW(), ?)`,
+          [conversationId, agentName, text, "sent"]
+        );
+      } catch (dbErr: any) {
+        console.warn(`[Evolution Manager] Erro ao salvar mensagem no banco:`, dbErr);
+      } finally {
+        connection.release();
+      }
     } catch (dbErr: any) {
-      console.warn(`[Evolution Manager] Erro ao salvar mensagem no banco:`, dbErr);
+      console.warn(`[Evolution Manager] Erro ao conectar ao banco:`, dbErr);
     }
 
     return {
