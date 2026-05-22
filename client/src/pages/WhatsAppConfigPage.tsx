@@ -34,6 +34,111 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+/**
+ * Componente para exibir QR Code da Evolution API
+ */
+function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [qrCodeData, setQrCodeData] = React.useState<{ code: string; base64: string } | null>(null);
+
+  // Query para obter QR Code
+  const { data: qrCode, isLoading, refetch } = trpc.evolution.getQRCode.useQuery(
+    { clientId },
+    { enabled: !!clientId, refetchInterval: 5000 }
+  );
+
+  // Mutation para iniciar sessao
+  const startSessionMut = trpc.evolution.startSession.useMutation({
+    onSuccess: (data: any) => {
+      toast.success("Sessao iniciada! Escaneie o QR Code com seu WhatsApp.");
+      setQrCodeData(data);
+    },
+    onError: (e: any) => toast.error(e?.message || "Erro ao iniciar sessao"),
+  });
+
+  // Mutation para desconectar
+  const disconnectMut = trpc.evolution.disconnect.useMutation({
+    onSuccess: () => {
+      toast.success("WhatsApp desconectado com sucesso!");
+      setQrCodeData(null);
+      refetch();
+    },
+    onError: (e: any) => toast.error(e?.message || "Erro ao desconectar"),
+  });
+
+  const handleStartSession = async () => {
+    setRefreshing(true);
+    try {
+      await startSessionMut.mutateAsync({ clientId });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const displayQR = qrCodeData?.base64 || qrCode?.base64;
+
+  return (
+    <div className="space-y-4">
+      {isLoading || refreshing ? (
+        <div className="flex items-center justify-center py-12 text-slate-400">
+          <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Carregando QR Code...
+        </div>
+      ) : displayQR ? (
+        <div className="flex flex-col items-center gap-4">
+          <div className="bg-white p-4 rounded-lg border border-slate-200">
+            <img
+              src={`data:image/png;base64,${displayQR}`}
+              alt="QR Code"
+              className="w-64 h-64 object-contain"
+            />
+          </div>
+          <p className="text-sm text-slate-600 text-center max-w-xs">
+            Abra o WhatsApp no seu telefone e escaneie este codigo para conectar.
+          </p>
+          <div className="flex gap-2">
+            <Button
+              onClick={handleStartSession}
+              disabled={startSessionMut.isPending || refreshing}
+              variant="outline"
+              size="sm"
+              className="gap-1"
+            >
+              <RefreshCw className="w-3 h-3" /> Atualizar QR Code
+            </Button>
+            <Button
+              onClick={() => disconnectMut.mutate({ clientId })}
+              disabled={disconnectMut.isPending}
+              variant="outline"
+              size="sm"
+              className="gap-1 text-red-600 border-red-200 hover:bg-red-50"
+            >
+              <XCircle className="w-3 h-3" /> Desconectar
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center py-12 gap-4">
+          <div className="w-20 h-20 rounded-full bg-blue-50 flex items-center justify-center">
+            <Smartphone className="w-10 h-10 text-blue-600" />
+          </div>
+          <div className="text-center">
+            <p className="font-medium text-slate-900">WhatsApp nao conectado</p>
+            <p className="text-sm text-slate-500 mt-1">Clique abaixo para gerar um QR Code</p>
+          </div>
+          <Button
+            onClick={handleStartSession}
+            disabled={startSessionMut.isPending}
+            className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            <Plus className="w-4 h-4" />
+            {startSessionMut.isPending ? "Gerando..." : "Conectar WhatsApp"}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function WhatsAppConfigPage() {
   const session = JSON.parse(localStorage.getItem("megadesk_session_v1") || "{}");
   const clientId: string = session?.clientId ?? "";
@@ -283,6 +388,23 @@ export function WhatsAppConfigPage() {
           </div>
         </div>
       )}
+
+      {/* ─── Evolution API Section ─────────────────────────────────────────── */}
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+              <Smartphone className="w-5 h-5 text-blue-600" />
+              Evolution API (WhatsApp Direto)
+            </h2>
+            <p className="text-sm text-slate-500 mt-1">
+              Conecte seu WhatsApp diretamente via Evolution API. Escaneie o QR Code com seu telefone.
+            </p>
+          </div>
+        </div>
+
+        <EvolutionQRCodeSection clientId={clientId} />
+      </div>
 
       {/* ─── Modal ─────────────────────────────────────────────────────────── */}
       <Dialog open={showModal} onOpenChange={(o) => { if (!o) { setShowModal(false); setFormError(null); } }}>
