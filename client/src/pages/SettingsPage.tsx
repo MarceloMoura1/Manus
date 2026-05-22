@@ -15,9 +15,113 @@ import {
   Trash2, Plus, Edit2, Lock, Bell, MessageSquare, Wifi, Check, AlertCircle, Loader2,
   Building2, Phone, Mail, MapPin, Clock, Image, Users, Shield, Key, UserPlus,
   UserX, Download, Upload, Database, RefreshCw, Settings2, Tag, Palette, ChevronRight,
-  Eye, EyeOff, Save, X, AlertTriangle, CheckCircle2, Info
+  Eye, EyeOff, Save, X, AlertTriangle, CheckCircle2, Info, Smartphone as SmartphoneIcon, XCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
+import React from 'react';
+
+// ─── Componente: EvolutionQRCodeSection ────────────────────────────────────
+function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [qrCodeData, setQrCodeData] = React.useState<{ code: string; base64: string } | null>(null);
+
+  // Query para obter QR Code
+  const { data: qrCode, isLoading, refetch } = trpc.evolution.getQRCode.useQuery(
+    { clientId },
+    { enabled: !!clientId, refetchInterval: 5000 }
+  );
+
+  // Mutation para iniciar sessao
+  const startSessionMut = trpc.evolution.startSession.useMutation({
+    onSuccess: (data: any) => {
+      toast.success("Sessao iniciada! Escaneie o QR Code com seu WhatsApp.");
+      setQrCodeData(data);
+    },
+    onError: (e: any) => toast.error(e?.message || "Erro ao iniciar sessao"),
+  });
+
+  // Mutation para desconectar
+  const disconnectMut = trpc.evolution.disconnect.useMutation({
+    onSuccess: () => {
+      toast.success("WhatsApp desconectado com sucesso!");
+      setQrCodeData(null);
+      refetch();
+    },
+    onError: (e: any) => toast.error(e?.message || "Erro ao desconectar"),
+  });
+
+  const handleStartSession = async () => {
+    setRefreshing(true);
+    try {
+      await startSessionMut.mutateAsync({ clientId });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const displayQR = qrCodeData?.base64 || qrCode?.base64;
+
+  return (
+    <div className="space-y-4">
+      {isLoading || refreshing ? (
+        <div className="flex items-center justify-center py-12 text-slate-400">
+          <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Carregando QR Code...
+        </div>
+      ) : displayQR ? (
+        <div className="flex flex-col items-center gap-4">
+          <div className="bg-white p-4 rounded-lg border border-slate-200">
+            <img
+              src={`data:image/png;base64,${displayQR}`}
+              alt="QR Code"
+              className="w-64 h-64 object-contain"
+            />
+          </div>
+          <p className="text-sm text-slate-600 text-center max-w-xs">
+            Abra o WhatsApp no seu telefone e escaneie este codigo para conectar.
+          </p>
+          <div className="flex gap-2">
+            <Button
+              onClick={handleStartSession}
+              disabled={startSessionMut.isPending || refreshing}
+              variant="outline"
+              size="sm"
+              className="gap-1"
+            >
+              <RefreshCw className="w-3 h-3" /> Atualizar QR Code
+            </Button>
+            <Button
+              onClick={() => disconnectMut.mutate({ clientId })}
+              disabled={disconnectMut.isPending}
+              variant="outline"
+              size="sm"
+              className="gap-1 text-red-600 border-red-200 hover:bg-red-50"
+            >
+              <XCircle className="w-3 h-3" /> Desconectar
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center py-12 gap-4">
+          <div className="w-20 h-20 rounded-full bg-blue-50 flex items-center justify-center">
+            <SmartphoneIcon className="w-10 h-10 text-blue-600" />
+          </div>
+          <div className="text-center">
+            <p className="font-medium text-slate-900">WhatsApp nao conectado</p>
+            <p className="text-sm text-slate-500 mt-1">Clique abaixo para gerar um QR Code</p>
+          </div>
+          <Button
+            onClick={handleStartSession}
+            disabled={startSessionMut.isPending}
+            className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            <Plus className="w-4 h-4" />
+            {startSessionMut.isPending ? "Gerando..." : "Conectar WhatsApp"}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Session helper ──────────────────────────────────────────────────────────
 const MEGADESK_SESSION_KEY = 'megadesk_session_v1';
@@ -1337,137 +1441,7 @@ export function SettingsPage() {
 
   const [activeTab, setActiveTab] = useState(isAdmin ? 'whatsapp' : 'account');
 
-  // ─── Aba: WhatsApp ────────────────────────────────────────────────────────
-  const [phoneNumberId, setPhoneNumberId] = useState('');
-  const [businessAccountId, setBusinessAccountId] = useState('');
-  const [accessToken, setAccessToken] = useState('');
-  const [webhookVerifyToken, setWebhookVerifyToken] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [testingConnection, setTestingConnection] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'testing'>('disconnected');
-  const [webhookStatus, setWebhookStatus] = useState<'active' | 'inactive' | 'testing'>('inactive');
-  const [credentialsStatus, setCredentialsStatus] = useState<'valid' | 'invalid' | 'checking'>('invalid');
-  const [showAccessToken, setShowAccessToken] = useState(false);
-  const [showWebhookToken, setShowWebhookToken] = useState(false);
-
-  // ─── QR Code Baileys ──────────────────────────────────────────────────────
-  type BaileysStatus = 'disconnected' | 'connecting' | 'qr_ready' | 'connected';
-  const [baileysStatus, setBaileysStatus] = useState<BaileysStatus>('disconnected');
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [baileysPhone, setBaileysPhone] = useState<string | null>(null);
-  const [baileysConnectedAt, setBaileysConnectedAt] = useState<number | null>(null);
-  const [isStartingSession, setIsStartingSession] = useState(false);
-  const sseRef = useRef<EventSource | null>(null);
-
-  // Conectar ao SSE stream para receber atualizações em tempo real
-  const connectSse = useCallback(() => {
-    if (!clientId) return;
-    if (sseRef.current) { sseRef.current.close(); }
-    const es = new EventSource(`/api/baileys/qr-stream?clientId=${encodeURIComponent(clientId)}`);
-    sseRef.current = es;
-    es.onmessage = (e) => {
-      try {
-        const { event, data } = JSON.parse(e.data);
-        if (event === 'status' || event === 'qr') {
-          if (data.status) setBaileysStatus(data.status as BaileysStatus);
-          if (data.qrDataUrl) setQrDataUrl(data.qrDataUrl);
-          else if (data.status === 'connected') setQrDataUrl(null);
-          if (data.phoneNumber) setBaileysPhone(data.phoneNumber);
-          if (data.connectedAt) setBaileysConnectedAt(data.connectedAt);
-        }
-      } catch { /* ignorar */ }
-    };
-    es.onerror = () => { /* reconectar automaticamente */ };
-  }, [clientId]);
-
-  useEffect(() => {
-    if (activeTab === 'whatsapp' && clientId) {
-      connectSse();
-      // Verificar status atual
-      fetch(`/api/baileys/status?clientId=${encodeURIComponent(clientId)}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.status) setBaileysStatus(data.status as BaileysStatus);
-          if (data.phoneNumber) setBaileysPhone(data.phoneNumber);
-          if (data.connectedAt) setBaileysConnectedAt(data.connectedAt);
-        })
-        .catch(() => {});
-    }
-    return () => { sseRef.current?.close(); };
-  }, [activeTab, clientId, connectSse]);
-
-  const handleGenerateQr = async () => {
-    if (!clientId) { toast.error('Sessão inválida'); return; }
-    setIsStartingSession(true);
-    setQrDataUrl(null);
-    try {
-      const res = await fetch('/api/baileys/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId }),
-      });
-      if (!res.ok) throw new Error('Falha ao iniciar sessão');
-      toast.success('Aguardando QR Code...');
-      connectSse();
-    } catch (err: any) {
-      toast.error(err?.message || 'Erro ao gerar QR Code');
-    } finally {
-      setIsStartingSession(false);
-    }
-  };
-
-  const handleDisconnectBaileys = async () => {
-    if (!clientId) return;
-    try {
-      await fetch('/api/baileys/disconnect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId }),
-      });
-      setBaileysStatus('disconnected');
-      setQrDataUrl(null);
-      setBaileysPhone(null);
-      setBaileysConnectedAt(null);
-      toast.success('WhatsApp desconectado!');
-    } catch {
-      toast.error('Erro ao desconectar');
-    }
-  };
-
-  const validateCredentials = useCallback(() => {
-    const allValid =
-      /^\d{10,}$/.test(phoneNumberId) &&
-      /^\d{10,}$/.test(businessAccountId) &&
-      accessToken.length >= 20 &&
-      webhookVerifyToken.length >= 8 &&
-      /^\+?\d{10,}$/.test(phoneNumber.replace(/[\s-]/g, ''));
-    setCredentialsStatus(allValid ? 'valid' : 'invalid');
-    setWebhookStatus(allValid ? 'active' : 'inactive');
-  }, [phoneNumberId, businessAccountId, accessToken, webhookVerifyToken, phoneNumber]);
-
-  useEffect(() => { validateCredentials(); }, [validateCredentials]);
-
-  const testConnection = async () => {
-    setTestingConnection(true);
-    setConnectionStatus('testing');
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    if (credentialsStatus === 'valid') {
-      setConnectionStatus('connected');
-      toast.success('Conexão com WhatsApp estabelecida!');
-    } else {
-      setConnectionStatus('disconnected');
-      toast.error('Falha ao conectar. Verifique as credenciais.');
-    }
-    setTestingConnection(false);
-  };
-
-  const generateSecureToken = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let token = '';
-    for (let i = 0; i < 32; i++) token += chars.charAt(Math.floor(Math.random() * chars.length));
-    setWebhookVerifyToken(token);
-    toast.success('Token gerado!');
-  };
+  // ─── Aba: WhatsApp (Evolution API) ──────────────────────────────────────────
 
   // ─── Aba: Conta ───────────────────────────────────────────────────────────
   const [editingName, setEditingName] = useState(false);
@@ -1654,147 +1628,20 @@ export function SettingsPage() {
 
           {/* ─── Aba: WhatsApp ───────────────────────────────────────────── */}
           {activeTab === 'whatsapp' && <div className="space-y-6">
-
-            {/* Card principal: status + QR Code */}
             <Card className="bg-white border-2 border-green-100">
               <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-green-500 flex items-center justify-center">
-                      <MessageSquare className="w-5 h-5 text-white" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-lg">WhatsApp — Conexão via QR Code</CardTitle>
-                      <CardDescription>Escaneie o QR Code com seu celular para conectar</CardDescription>
-                    </div>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-green-500 flex items-center justify-center">
+                    <MessageSquare className="w-5 h-5 text-white" />
                   </div>
-                  {/* Badge de status */}
-                  {baileysStatus === 'connected' && (
-                    <Badge className="bg-green-100 text-green-700 border-green-200 gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> Conectado
-                    </Badge>
-                  )}
-                  {baileysStatus === 'connecting' && (
-                    <Badge className="bg-blue-100 text-blue-700 border-blue-200 gap-1">
-                      <Loader2 className="w-3 h-3 animate-spin" /> Conectando...
-                    </Badge>
-                  )}
-                  {baileysStatus === 'qr_ready' && (
-                    <Badge className="bg-amber-100 text-amber-700 border-amber-200 gap-1">
-                      <AlertCircle className="w-3 h-3" /> Aguardando escaneamento
-                    </Badge>
-                  )}
-                  {baileysStatus === 'disconnected' && (
-                    <Badge className="bg-red-100 text-red-700 border-red-200 gap-1">
-                      <X className="w-3 h-3" /> Desconectado
-                    </Badge>
-                  )}
+                  <div>
+                    <CardTitle className="text-lg">WhatsApp — Conexão via QR Code</CardTitle>
+                    <CardDescription>Escaneie o QR Code com seu celular para conectar</CardDescription>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
-                {/* Estado: conectado */}
-                {baileysStatus === 'connected' && (
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-4 p-4 bg-green-50 rounded-xl border border-green-200">
-                      <CheckCircle2 className="w-8 h-8 text-green-600 flex-shrink-0" />
-                      <div>
-                        <p className="font-semibold text-green-800">WhatsApp conectado com sucesso!</p>
-                        {baileysPhone && <p className="text-sm text-green-700">Número: +{baileysPhone}</p>}
-                        {baileysConnectedAt && <p className="text-xs text-green-600">Conectado em: {new Date(baileysConnectedAt).toLocaleString()}</p>}
-                      </div>
-                    </div>
-                    <Button
-                      variant="outline"
-                      className="w-full border-red-200 text-red-600 hover:bg-red-50"
-                      onClick={handleDisconnectBaileys}
-                    >
-                      <X className="w-4 h-4 mr-2" />
-                      Desconectar WhatsApp
-                    </Button>
-                  </div>
-                )}
-
-                {/* Estado: QR pronto para escanear */}
-                {baileysStatus === 'qr_ready' && qrDataUrl && (
-                  <div className="space-y-4">
-                    <div className="flex flex-col items-center gap-4 p-6 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300">
-                      <img src={qrDataUrl} alt="QR Code WhatsApp" className="w-64 h-64 rounded-lg shadow-md" />
-                      <div className="text-center">
-                        <p className="font-semibold text-slate-800">Escaneie com o WhatsApp do seu celular</p>
-                        <p className="text-sm text-slate-500 mt-1">Abra o WhatsApp &rarr; Dispositivos Vinculados &rarr; Vincular um dispositivo</p>
-                      </div>
-                    </div>
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={handleGenerateQr}
-                      disabled={isStartingSession}
-                    >
-                      <RefreshCw className="w-4 h-4 mr-2" />
-                      Gerar novo QR Code
-                    </Button>
-                  </div>
-                )}
-
-                {/* Estado: conectando (aguardando QR) */}
-                {baileysStatus === 'connecting' && (
-                  <div className="flex flex-col items-center gap-4 p-8 bg-blue-50 rounded-xl border border-blue-200">
-                    <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
-                    <div className="text-center">
-                      <p className="font-semibold text-blue-800">Gerando QR Code...</p>
-                      <p className="text-sm text-blue-600">Aguarde alguns segundos</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Estado: desconectado */}
-                {baileysStatus === 'disconnected' && (
-                  <div className="space-y-4">
-                    <div className="flex flex-col items-center gap-4 p-8 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200">
-                      <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center">
-                        <MessageSquare className="w-8 h-8 text-slate-400" />
-                      </div>
-                      <div className="text-center">
-                        <p className="font-semibold text-slate-700">WhatsApp não conectado</p>
-                        <p className="text-sm text-slate-500">Clique no botão abaixo para gerar o QR Code</p>
-                      </div>
-                    </div>
-                    <Button
-                      className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 text-base"
-                      onClick={handleGenerateQr}
-                      disabled={isStartingSession}
-                    >
-                      {isStartingSession
-                        ? <><Loader2 className="w-5 h-5 mr-2 animate-spin" />Iniciando...</>
-                        : <><MessageSquare className="w-5 h-5 mr-2" />Gerar QR Code</>
-                      }
-                    </Button>
-                    {/* Botão Limpar Sessão - para resetar sessão corrompida */}
-                    <Button
-                      variant="outline"
-                      className="w-full border-orange-200 text-orange-600 hover:bg-orange-50 text-sm"
-                      onClick={async () => {
-                        const session = localStorage.getItem('megadesk_session_v1');
-                        if (!session) return;
-                        const { clientId } = JSON.parse(session);
-                        try {
-                          await fetch('/api/baileys/disconnect', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ clientId }),
-                          });
-                          setBaileysStatus('disconnected');
-                          setBaileysPhone(null);
-                          setBaileysConnectedAt(null);
-                          setQrDataUrl(null);
-                        } catch {}
-                      }}
-                    >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      Limpar Sessão (resolver problemas de conexão)
-                    </Button>
-                  </div>
-                )}
+                <EvolutionQRCodeSection clientId={clientId} />
               </CardContent>
             </Card>
 
@@ -1805,12 +1652,11 @@ export function SettingsPage() {
                   <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
                   <div className="text-sm text-amber-800">
                     <p className="font-semibold mb-1">Importante</p>
-                    <p>Esta conexão usa o WhatsApp Web. O celular precisa estar com internet ativa. O QR Code expira em 60 segundos — se não conseguir escanear a tempo, clique em "Gerar novo QR Code".</p>
+                    <p>O celular precisa estar com internet ativa. O QR Code expira em 60 segundos — se não conseguir escanear a tempo, clique em "Atualizar QR Code".</p>
                   </div>
                 </div>
               </CardContent>
             </Card>
-
           </div>}
 
           {/* ─── Aba: Conta ──────────────────────────────────────────── */}
