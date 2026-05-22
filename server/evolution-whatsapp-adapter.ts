@@ -353,21 +353,10 @@ export class EvolutionWhatsAppAdapter {
   }
 
   /**
-   * Listar todas as sessoes
+   * Listar todas as sessões
    */
   listSessions(): Map<string, EvolutionSessionInfo> {
     return this.sessions;
-  }
-
-  /**
-   * Obter todas as sessoes como objeto
-   */
-  getAllSessions(): Record<string, EvolutionSessionInfo> {
-    const result: Record<string, EvolutionSessionInfo> = {};
-    for (const [clientId, session] of this.sessions.entries()) {
-      result[clientId] = session;
-    }
-    return result;
   }
 
   /**

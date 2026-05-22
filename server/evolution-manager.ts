@@ -339,22 +339,6 @@ export async function disconnectWhatsApp(clientId: string): Promise<{
 }
 
 /**
- * Obter todas as sessoes ativas
- */
-export function getAllSessions(): Record<string, any> {
-  try {
-    if (!evolutionAdapter) {
-      throw new Error("Evolution Adapter nao inicializado");
-    }
-
-    return evolutionAdapter.getAllSessions();
-  } catch (err: any) {
-    console.error(`[Evolution Manager] Erro ao obter sessoes:`, err);
-    return {};
-  }
-}
-
-/**
  * Configurar webhook para receber mensagens
  */
 export async function configureWebhook(clientId: string, webhookUrl: string): Promise<{

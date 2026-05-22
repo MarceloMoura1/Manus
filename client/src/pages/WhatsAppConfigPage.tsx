@@ -52,7 +52,6 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
     onSuccess: (data: any) => {
       toast.success("Sessao iniciada! Escaneie o QR Code com seu WhatsApp.");
       setQrCodeData(data);
-      refetch();
     },
     onError: (e: any) => toast.error(e?.message || "Erro ao iniciar sessao"),
   });
@@ -76,7 +75,7 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
     }
   };
 
-  const displayQR = qrCodeData?.qrCode || qrCode?.qrCode;
+  const displayQR = qrCodeData?.base64 || qrCode?.base64;
 
   return (
     <div className="space-y-4">
