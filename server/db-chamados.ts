@@ -13,9 +13,7 @@ import { getDb } from './db';
 const db = getDb();
 import {
   megadeskDomainChamados,
-  megadeskDomainChamadoActivities,
   megadeskDomainChamadoSequence,
-  megadeskDomainChamadoAttachments,
 } from '../drizzle/schema';
 import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
