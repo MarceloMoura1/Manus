@@ -13,9 +13,10 @@ import { getDb } from './db';
 const db = getDb();
 import {
   megadeskDomainChamados,
+  megadeskDomainChamadoActivities,
   megadeskDomainChamadoSequence,
+  megadeskDomainChamadoAttachments,
 } from '../drizzle/schema';
-// TODO: Implementar tabelas megadeskDomainChamadoActivities e megadeskDomainChamadoAttachments
 import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 
