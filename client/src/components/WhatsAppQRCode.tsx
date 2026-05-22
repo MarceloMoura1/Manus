@@ -243,7 +243,7 @@ export function WhatsAppQRCode({ clientId }: WhatsAppQRCodeProps) {
             <div className="space-y-4">
               <div className="flex flex-col items-center gap-4 p-6 bg-white rounded-xl border-2 border-dashed border-slate-300">
                 <img
-                  src={qrCode}
+                  src={`data:image/png;base64,${qrCode}`}
                   alt="QR Code WhatsApp"
                   className="w-64 h-64 rounded-lg shadow-md"
                 />
