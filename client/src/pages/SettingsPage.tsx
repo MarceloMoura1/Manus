@@ -1344,9 +1344,23 @@ function TabBackup({ clientId, userRole }: { clientId: string; userRole: string 
 export function SettingsPage() {
   const { user } = useAuth();
   const [session, setSession] = useState(() => getMegaDeskSession());
-  const clientId = session?.clientId ?? '';
+  const [clientId, setClientId] = useState(session?.clientId ?? '');
   const userRole = session?.userRole ?? 'admin';
   const isAdmin = true;
+
+  const loadClientId = useCallback(async () => {
+    if (clientId) return;
+    if (user?.email) {
+      try {
+        const sessionData = await trpc.megadesk.getCurrentSession.query({ userEmail: user.email });
+        setClientId(sessionData.clientId);
+        setSession(sessionData);
+      } catch (error) {
+        console.error('Erro ao carregar clientId:', error);
+        toast.error('Erro ao carregar dados da sessão');
+      }
+    }
+  }, [clientId, user?.email]);
 
   const [activeTab, setActiveTab] = useState(isAdmin ? 'whatsapp' : 'account');
 
@@ -1564,7 +1578,7 @@ export function SettingsPage() {
 
           {/* ─── Aba: WhatsApp ───────────────────────────────────────────── */}
           {activeTab === 'whatsapp' && <div className="space-y-6">
-            <WhatsAppQRCode clientId={clientId} />
+            <WhatsAppQRCode clientId={clientId} onNeedClientId={loadClientId} />
           </div>}
 
           {/* ─── Aba: Conta ──────────────────────────────────────────── */}

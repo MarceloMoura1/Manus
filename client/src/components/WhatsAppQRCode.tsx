@@ -7,9 +7,10 @@ import { toast } from 'sonner';
 
 interface WhatsAppQRCodeProps {
   clientId: string;
+  onNeedClientId?: () => Promise<void>;
 }
 
-export function WhatsAppQRCode({ clientId }: WhatsAppQRCodeProps) {
+export function WhatsAppQRCode({ clientId, onNeedClientId }: WhatsAppQRCodeProps) {
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState<string | null>(null);
@@ -20,7 +21,10 @@ export function WhatsAppQRCode({ clientId }: WhatsAppQRCodeProps) {
   const fetchQRCode = useCallback(async () => {
     console.log('[WhatsAppQRCode] fetchQRCode called with clientId:', clientId);
     if (!clientId) {
-      console.warn('[WhatsAppQRCode] clientId is empty!');
+      console.warn('[WhatsAppQRCode] clientId is empty, calling onNeedClientId');
+      if (onNeedClientId) {
+        await onNeedClientId();
+      }
       return;
     }
 
