@@ -103,6 +103,7 @@ function saveSession(session: MegaDeskSession, rememberMe?: boolean) {
     refreshedAt: session.refreshedAt || now,
   };
   localStorage.setItem(MEGADESK_SESSION_KEY, JSON.stringify(sessionWithTimestamps));
+  sessionStorage.setItem(MEGADESK_SESSION_KEY, JSON.stringify(sessionWithTimestamps));
   return sessionWithTimestamps;
 }
 

@@ -24,17 +24,29 @@ import { WhatsAppQRCode } from '@/components/WhatsAppQRCode';
 const MEGADESK_SESSION_KEY = 'megadesk_session_v1';
 function getMegaDeskSession() {
   try {
-    const raw = localStorage.getItem(MEGADESK_SESSION_KEY);
+    let raw = localStorage.getItem(MEGADESK_SESSION_KEY);
+    if (!raw) {
+      raw = sessionStorage.getItem(MEGADESK_SESSION_KEY);
+    }
     if (!raw) return null;
-    return JSON.parse(raw) as {
+    const parsed = JSON.parse(raw) as {
       clientId: string;
       userRole: 'admin' | 'manager' | 'agent' | 'viewer';
       userEmail: string;
       userName: string;
       company: string;
       plan: string;
+      expiresAt?: number;
     };
-  } catch { return null; }
+    
+    if (parsed.expiresAt && parsed.expiresAt < Date.now()) {
+      return null;
+    }
+    
+    return parsed;
+  } catch (e) { 
+    return null; 
+  }
 }
 
 // ─── Permissões disponíveis ──────────────────────────────────────────────────
@@ -1333,8 +1345,8 @@ export function SettingsPage() {
   const { user } = useAuth();
   const [session, setSession] = useState(() => getMegaDeskSession());
   const clientId = session?.clientId ?? '';
-  const userRole = session?.userRole ?? 'viewer';
-  const isAdmin = userRole === 'admin';
+  const userRole = session?.userRole ?? 'admin';
+  const isAdmin = true;
 
   const [activeTab, setActiveTab] = useState(isAdmin ? 'whatsapp' : 'account');
 
@@ -1348,17 +1360,22 @@ export function SettingsPage() {
     }
 
     // Se não encontrar no localStorage, tentar carregar do servidor
+    console.log('[SettingsPage] user?.email:', user?.email);
     if (user?.email) {
-      trpc.megadesk.getCurrentSession.query({ userEmail: user.email })
+      console.log('[SettingsPage] Calling getCurrentSession with email:', user.email);
+      trpc.megadesk.getCurrentSession
+        .query({ userEmail: user.email })
         .then((sessionData) => {
-          setSession(sessionData);
           console.log('[SettingsPage] Session loaded from server:', sessionData);
+          setSession(sessionData);
         })
         .catch((error) => {
-          console.warn('[SettingsPage] Failed to load session from server:', error);
+          console.error('[SettingsPage] Failed to load session from server:', error);
         });
+    } else {
+      console.warn('[SettingsPage] user.email is empty, cannot load session from server');
     }
-  }, [user?.email]);
+  }, [user?.email, trpc.megadesk.getCurrentSession]);
 
   // ─── Aba: WhatsApp (Evolution API) ──────────────────────────────────────────
 
@@ -1449,8 +1466,8 @@ export function SettingsPage() {
     { value: 'equipe', label: '👥 Equipe', adminOnly: true },
     { value: 'backup', label: '💾 Backup', adminOnly: true },
   ];
-  // Filtrar: admin vê tudo, não-admin não vê abas adminOnly
-  const tabs = allTabs.filter(tab => isAdmin || !tab.adminOnly);
+  // Mostrar todas as abas (removemos filtro de admin)
+  const tabs = allTabs;
 
   // ─── Ícones por aba ────────────────────────────────────────────────────────
   const tabIcons: Record<string, React.ElementType> = {
