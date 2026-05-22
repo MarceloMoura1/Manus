@@ -313,6 +313,17 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
           const affected = result?.affectedRows || 0;
           if (affected > 0) {
             console.log(`[Baileys] Corrigidos ${affected} registros: LID ${lidId} -> ${pnId}`);
+            
+            // Emitir evento Socket.IO para notificar o frontend sobre a resolução do LID
+            const ioServer = getSocketIO();
+            if (ioServer) {
+              ioServer.to(`client:${clientId}`).emit('lid-resolved', {
+                oldPhone: tempPhone,
+                newPhone: pnId,
+                lidId,
+              });
+              console.log(`[Baileys] Evento 'lid-resolved' emitido para cliente ${clientId}`);
+            }
           }
         }).catch((err: any) => {
           console.error(`[Baileys] Erro ao atualizar LID no banco:`, err);

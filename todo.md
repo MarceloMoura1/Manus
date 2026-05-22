@@ -1518,3 +1518,11 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Adicionar indicador de status do WhatsApp na área de envio de mensagem
 - [x] Desabilitar campo de mensagem quando WhatsApp está desconectado
 - [x] Adicionar refetchMessages() após envio bem-sucedido para atualizar o chat imediatamente
+
+## Fase 147: Resolver LID e Notificar Frontend
+- [x] Emitir evento Socket.IO 'lid-resolved' quando LID for mapeado
+- [x] Adicionar listener 'lid-resolved' no frontend para atualizar phone da conversa
+- [x] Atualizar conversa selecionada quando LID for resolvido
+- [x] Criar testes para resolução de LID (10 testes passando)
+- [x] Criar testes para envio de mensagem com LID (15 testes passando)
+- [x] Validar que mensagens agora podem ser enviadas após LID ser resolvido

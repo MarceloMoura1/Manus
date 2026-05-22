@@ -521,6 +521,20 @@ function ConversationsPage() {
         return conv;
       }));
     });
+    // LID foi resolvido para numero real
+    socket.on('lid-resolved', (data: { oldPhone: string; newPhone: string; lidId: string }) => {
+      console.log(`[Socket.IO] LID resolvido: ${data.oldPhone} -> ${data.newPhone}`);
+      setConversations(prev => prev.map(conv => {
+        if (conv.phone === data.oldPhone) {
+          return { ...conv, phone: data.newPhone };
+        }
+        return conv;
+      }));
+      // Se a conversa selecionada tem o LID antigo, atualizar tambem
+      if (selectedConv?.phone === data.oldPhone) {
+        setSelectedConv(prev => prev ? { ...prev, phone: data.newPhone } : null);
+      }
+    });
     return () => {
       socket.emit('wa:leave_client', clientId);
       socket.disconnect();
