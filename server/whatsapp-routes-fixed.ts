@@ -5,6 +5,7 @@
 
 import { Express } from "express";
 import axios from "axios";
+import QRCode from "qrcode";
 
 // Armazenar sessões em memória
 const sessions = new Map<string, { 
@@ -59,7 +60,7 @@ export function registerWhatsAppRoutes(app: Express): void {
           `${EVOLUTION_API_URL}/instance/create`,
           {
             instanceName,
-            integration: "WHATSAPP-BAILEYS", // IMPORTANTE: usar 'integration' em minúsculas!
+            integration: "WHATSAPP-BAILEYS",
             qrcode: true,
           },
           {
@@ -93,7 +94,6 @@ export function registerWhatsAppRoutes(app: Express): void {
         
         try {
           // Tentar obter QR Code via rota específica
-          // A rota /instance/connect/{instanceName} retorna JSON com o QR Code em base64
           const qrResponse = await axios.get(
             `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
             {
@@ -106,35 +106,32 @@ export function registerWhatsAppRoutes(app: Express): void {
 
           console.log(`[WhatsApp Routes] Resposta QR:`, JSON.stringify(qrResponse.data).substring(0, 100));
 
-          // Verificar diferentes formatos de resposta
-          let qrData = qrResponse.data?.qrCode || qrResponse.data?.qr || qrResponse.data?.code;
+          // O Evolution API retorna um código de pareamento em vez de uma imagem
+          const pairingCode = qrResponse.data?.code || qrResponse.data?.pairingCode;
           
-          // Se a resposta for um objeto com 'base64' ou similar
-          if (!qrData && typeof qrResponse.data === 'object') {
-            // Procurar por qualquer campo que pareça conter dados base64
-            for (const [key, value] of Object.entries(qrResponse.data)) {
-              if (typeof value === 'string' && value.startsWith('data:image')) {
-                qrData = value;
-                break;
-              }
-            }
-          }
-
-          if (qrData) {
-            // Se já for data URL, usar como está
-            if (qrData.startsWith('data:')) {
-              qrBase64 = qrData;
-            } else {
-              // Caso contrário, assumir que é base64 puro
-              qrBase64 = `data:image/png;base64,${qrData}`;
+          if (pairingCode) {
+            // Converter o código de pareamento para QR Code
+            console.log(`[WhatsApp Routes] Gerando QR Code a partir do código: ${pairingCode.substring(0, 20)}...`);
+            try {
+              qrBase64 = await QRCode.toDataURL(pairingCode, {
+                errorCorrectionLevel: 'H',
+                type: 'image/png',
+                quality: 0.95,
+                margin: 1,
+                width: 300,
+              });
+              console.log(`[WhatsApp Routes] QR Code gerado com sucesso`);
+            } catch (qrGenError: any) {
+              console.error(`[WhatsApp Routes] Erro ao gerar QR Code:`, qrGenError.message);
+              throw new Error("Erro ao gerar QR Code a partir do código de pareamento");
             }
           } else {
-            throw new Error("QR Code não encontrado na resposta: " + JSON.stringify(qrResponse.data).substring(0, 200));
+            throw new Error("Código de pareamento não encontrado na resposta: " + JSON.stringify(qrResponse.data).substring(0, 200));
           }
         } catch (qrError: any) {
           console.warn(`[WhatsApp Routes] Erro ao obter QR Code:`, qrError.message);
           
-          // Tentar rota alternativa com responseType image
+          // Tentar rota alternativa
           try {
             const altQrResponse = await axios.get(
               `${EVOLUTION_API_URL}/instance/connect/qr-code/${instanceName}`,
@@ -342,7 +339,7 @@ export function registerWhatsAppRoutes(app: Express): void {
           `${EVOLUTION_API_URL}/instance/create`,
           {
             instanceName,
-            integration: "WHATSAPP-BAILEYS", // IMPORTANTE: usar 'integration' em minúsculas!
+            integration: "WHATSAPP-BAILEYS",
             qrcode: true,
           },
           {
@@ -368,16 +365,28 @@ export function registerWhatsAppRoutes(app: Express): void {
         
         try {
           const qrResponse = await axios.get(
-            `${EVOLUTION_API_URL}/instance/${instanceId}/connect/qr-code/image`,
+            `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
             {
               headers: {
                 apikey: token,
               },
-              responseType: "arraybuffer",
               timeout: 30000,
             }
           );
-          qrBase64 = Buffer.from(qrResponse.data).toString("base64");
+
+          const pairingCode = qrResponse.data?.code || qrResponse.data?.pairingCode;
+          
+          if (pairingCode) {
+            qrBase64 = await QRCode.toDataURL(pairingCode, {
+              errorCorrectionLevel: 'H',
+              type: 'image/png',
+              quality: 0.95,
+              margin: 1,
+              width: 300,
+            });
+          } else {
+            throw new Error("Código de pareamento não encontrado");
+          }
         } catch (qrError: any) {
           const altQrResponse = await axios.get(
             `${EVOLUTION_API_URL}/instance/${instanceId}/qrcode`,
