@@ -152,6 +152,7 @@ async function useDbAuthState(clientId: string) {
       // ignorar chaves corrompidas
     }
   }
+  
 
   // Inicializar credenciais se não existirem
   const creds = authData['creds'] || initAuthCreds();
