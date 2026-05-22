@@ -417,6 +417,11 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
               });
               console.log(`[Baileys] Evento 'lid-resolved' emitido para cliente ${clientId}`);
             }
+            
+            // Reprocessar mensagens que estavam na fila aguardando este LID
+            reprocessQueuedMessages(clientId, lidId, pnId).catch((err: any) => {
+              console.error(`[Baileys] Erro ao reprocessar fila para LID ${lidId}:`, err);
+            });
           }
         }).catch((err: any) => {
           console.error(`[Baileys] Erro ao atualizar LID no banco:`, err);

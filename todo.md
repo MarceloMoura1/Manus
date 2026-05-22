@@ -1530,7 +1530,7 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 ## Fase 148: Fila de Reprocessamento para LIDs Não Resolvidos
 - [x] Criar tabela baileys_pending_messages para armazenar mensagens com LID não resolvido
 - [x] Implementar função para armazenar mensagem em fila quando LID não está resolvido
-- [ ] Implementar reprocessamento automático quando lid-mapping.update chegar
+- [x] Implementar reprocessamento automático quando lid-mapping.update chegar
 - [x] Testar fila com múltiplas mensagens pendentes
 - [x] Adicionar logs detalhados de reprocessamento
 
@@ -1539,7 +1539,7 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Emitir evento Socket.IO quando LID está sendo resolvido
 - [x] Mostrar spinner/indicador no card da conversa enquanto sincroniza
 - [x] Atualizar indicador quando sincronização for concluída
-- [ ] Testar indicador em múltiplas conversas simultâneas
+- [x] Testar indicador em múltiplas conversas simultâneas
 
 ## Fase 150: Feedback Visual de Falha de Envio
 - [x] Capturar erros de envio no frontend
