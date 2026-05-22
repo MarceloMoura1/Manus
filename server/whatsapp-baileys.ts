@@ -239,12 +239,15 @@ function resolvePhoneFromJid(clientId: string, jid: string): string {
     const clientMap = lidToPhoneMap.get(clientId);
     const resolved = clientMap?.get(rawId);
     if (resolved) {
+      console.log(`[Baileys] LID ${rawId} resolvido do mapa em memória para ${resolved}`);
       return resolved.replace(/\D/g, "");
     }
-    // LID não resolvido ainda — usar o próprio LID como identificador temporário
-    // A conversa será criada e o número atualizado quando o mapeamento chegar
-    console.warn(`[Baileys] LID não resolvido: ${rawId} para cliente ${clientId} — usando LID como número temporário`);
-    return `lid${rawId}`; // prefixo 'lid' para identificar como temporário
+    
+    // LID não resolvido ainda
+    // IMPORTANTE: Não usar LID como número temporário, pois isso cria conversas duplicadas
+    // Retornar string vazia para que a mensagem seja ignorada até o LID ser resolvido
+    console.warn(`[Baileys] LID não resolvido: ${rawId} para cliente ${clientId} — mensagem será ignorada até resolução`);
+    return ""; // Retornar vazio para ignorar a mensagem
   }
   
   // Número normal — retornar apenas dígitos
@@ -893,8 +896,16 @@ export async function sendBaileysMessage(
   }
 
   try {
-    // Formatar JID do WhatsApp
+    // Formatar JID do WhatsApp - REMOVER TODOS OS CARACTERES NÃO-NUMÉRICOS
     let cleanPhone = phone.replace(/\D/g, "");
+    
+    console.log(`[Baileys] Enviando para: phone='${phone}' -> cleanPhone='${cleanPhone}' (length=${cleanPhone.length})`);
+    
+    // Se o número não começar com 55 (código Brasil), adicionar
+    if (!cleanPhone.startsWith('55') && cleanPhone.length === 11) {
+      cleanPhone = '55' + cleanPhone;
+      console.log(`[Baileys] Adicionado código de país: ${cleanPhone}`);
+    }
     
     // Detectar se é um LID temporário (começa com 'lid' ou é um número muito longo > 15 dígitos sem formato de telefone)
     const isLidTemp = phone.startsWith('lid') || (cleanPhone.length > 15 && !phone.includes('@'));
@@ -927,9 +938,29 @@ export async function sendBaileysMessage(
     }
     
     const jid = cleanPhone.includes("@") ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
+    
+    console.log(`[Baileys] JID construído: ${jid}`);
+    console.log(`[Baileys] Session status: ${session.status}`);
+    console.log(`[Baileys] Session sock existe: ${!!session.sock}`);
+    console.log(`[Baileys] Enviando mensagem: "${text}" para JID: ${jid}`);
 
     // Enviar mensagem via Baileys
-    await session.sock.sendMessage(jid, { text });
+    const sendResult = await session.sock.sendMessage(jid, { text });
+    console.log(`[Baileys] Resultado do envio:`, JSON.stringify(sendResult, null, 2));
+    
+    // Verificar se o status é PENDING (significa que a chave de criptografia não foi recebida)
+    if (sendResult?.status === 1) { // 1 = PENDING no Baileys
+      console.warn(`[Baileys] Mensagem com status PENDING - armazenando para reenvio automático`);
+      // Armazenar na fila de reenvio automático
+      await saveFailedMessage(
+        clientId,
+        conversationId,
+        phone,
+        text,
+        'pending_encryption_key',
+        'Aguardando chave de criptografia do contato'
+      );
+    }
 
     // Salvar mensagem no banco
     const pool = getPool();
