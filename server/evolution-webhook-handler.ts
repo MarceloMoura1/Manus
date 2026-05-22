@@ -96,21 +96,25 @@ export async function handleIncomingMessage(payload: EvolutionWebhookPayload): P
       instanceId: instance,
       data: {
         key,
-        message,
+        message: message as any, // Type assertion para compatibilidade
         pushName,
         timestamp,
       },
     };
 
     // Sincronizar mensagem com banco de dados
-    const { conversationId, messageId } = await syncEvolutionMessage(clientId, syncPayload);
+    try {
+      const { conversationId, messageId } = await syncEvolutionMessage(clientId, syncPayload);
 
-    console.log(`[Evolution Webhook] Mensagem sincronizada:`, {
-      conversationId,
-      messageId,
-      clientId,
-      phoneNumber: key.remoteJid,
-    });
+      console.log(`[Evolution Webhook] Mensagem sincronizada:`, {
+        conversationId,
+        messageId,
+        clientId,
+        phoneNumber: key.remoteJid,
+      });
+    } catch (err: any) {
+      console.error(`[Evolution Webhook] Erro ao sincronizar mensagem:`, err);
+    }
   } catch (err: any) {
     console.error(`[Evolution Webhook] Erro ao processar mensagem:`, err);
   }

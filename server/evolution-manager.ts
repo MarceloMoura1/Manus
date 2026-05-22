@@ -73,10 +73,13 @@ export async function restoreExistingSessions(): Promise<void> {
     const connection = await pool.getConnection();
     let whatsappConfigs: any[] = [];
     try {
+      // Apenas buscar configs que existem (não filtrar por status)
       const [rows] = await connection.execute(
-        `SELECT * FROM megadesk_whatsapp_config WHERE status = 'active'`
+        `SELECT * FROM megadesk_whatsapp_config LIMIT 100`
       );
       whatsappConfigs = rows as any[];
+    } catch (err: any) {
+      console.warn(`[Evolution Manager] Erro ao buscar configurações WhatsApp:`, err.message);
     } finally {
       connection.release();
     }

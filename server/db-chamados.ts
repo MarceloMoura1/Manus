@@ -13,11 +13,10 @@ import { getDb } from './db';
 const db = getDb();
 import {
   megadeskDomainChamados,
-  megadeskDomainChamadoActivities,
-  megadeskDomainChamadoSequence,
-  megadeskDomainChamadoAttachments,
 } from '../drizzle/schema';
 import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
+
+// TODO: Implementar tabelas de atividades, sequência e anexos de chamados
 import { v4 as uuidv4 } from 'uuid';
 
 export type ChamadoWithActivities = {

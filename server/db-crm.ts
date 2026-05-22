@@ -4,7 +4,7 @@
  */
 import { drizzle } from "drizzle-orm/mysql2";
 import { eq, and, like, or, desc } from "drizzle-orm";
-import { megadeskCrmClients } from "../drizzle/schema";
+// TODO: Implementar tabela megadeskCrmClients no schema
 import { getPool } from "./db";
 import { randomUUID } from "crypto";
 
