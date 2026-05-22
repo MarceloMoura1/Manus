@@ -1,8 +1,8 @@
 import { router, publicProcedure, protectedProcedure, megadeskProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { getDb } from "./db";
-import { megadeskNotifications } from "../drizzle/schema";
 import { eq, and, desc } from "drizzle-orm";
+// TODO: Implementar tabela megadeskNotifications no schema
 import { v4 as uuidv4 } from "uuid";
 import { TRPCError } from "@trpc/server";
 
