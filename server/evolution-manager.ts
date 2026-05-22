@@ -74,7 +74,7 @@ export async function restoreExistingSessions(): Promise<void> {
     let whatsappConfigs: any[] = [];
     try {
       const [rows] = await connection.execute(
-        `SELECT * FROM megadesk_whatsapp_config WHERE status = 'active'`
+        `SELECT * FROM megadesk_whatsapp_config WHERE connectionStatus = 1`
       );
       whatsappConfigs = rows as any[];
     } finally {
