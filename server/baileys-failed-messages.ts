@@ -39,12 +39,13 @@ export async function getFailedMessagesPending(
   limit: number = 50
 ): Promise<any[]> {
   try {
+    const limitNum = parseInt(String(limit), 10);
     const [rows]: any = await getPool().execute(
       `SELECT * FROM baileys_failed_messages 
        WHERE client_id = ? AND status IN ('pending', 'retrying') 
        ORDER BY created_at ASC 
-       LIMIT ?`,
-      [clientId, limit]
+       LIMIT ${limitNum}`,
+      [clientId]
     );
 
     return rows || [];

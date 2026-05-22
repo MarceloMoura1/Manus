@@ -424,26 +424,6 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
     session.sock = sock;
 
     sock.ev.on("creds.update", saveCreds);
-    
-    // Salvar chaves de criptografia E2E quando forem atualizadas
-    sock.ev.on("keys.set", async (update) => {
-      try {
-        const pool = getPool();
-        for (const [type, keys] of Object.entries(update)) {
-          for (const [id, key] of Object.entries(keys as any)) {
-            const keyName = `key_${type}_${id}`;
-            const keyValue = JSON.stringify(key, BufferJSON.replacer);
-            await pool.execute(
-              'INSERT INTO baileys_auth_state (client_id, auth_key, auth_value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE auth_value = VALUES(auth_value)',
-              [clientId, keyName, keyValue]
-            );
-          }
-        }
-        console.log(`[Baileys] Chaves de criptografia salvas para ${clientId}`);
-      } catch (err) {
-        console.error(`[Baileys] Erro ao salvar chaves de criptografia:`, err);
-      }
-    });
 
     // Restaurar mapeamento LID do banco ao iniciar sessão
     try {
@@ -675,6 +655,12 @@ async function mergeConversationsWhenLidResolved(
           status: "connected",
           phoneNumber,
           connectedAt: session.connectedAt,
+        });
+        
+        // Reenviar mensagens falhadas quando reconectar
+        const { retryFailedMessagesOnReconnect } = await import("./baileys-auto-retry");
+        retryFailedMessagesOnReconnect(clientId).catch(err => {
+          console.error(`[Baileys] Erro ao reenviar mensagens falhadas:`, err);
         });
       }
     });
