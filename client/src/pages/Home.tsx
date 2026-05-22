@@ -530,10 +530,6 @@ function ConversationsPage() {
         }
         return conv;
       }));
-      // Se a conversa selecionada tem o LID antigo, atualizar tambem
-      if (selectedConv?.phone === data.oldPhone) {
-        setSelectedConv(prev => prev ? { ...prev, phone: data.newPhone } : null);
-      }
     });
     return () => {
       socket.emit('wa:leave_client', clientId);
