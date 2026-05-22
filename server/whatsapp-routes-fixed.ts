@@ -87,31 +87,36 @@ export function registerWhatsAppRoutes(app: Express): void {
         }
 
         // Obter QR Code
-        console.log(`[WhatsApp Routes] Obtendo QR Code para: ${instanceId}`);
+        console.log(`[WhatsApp Routes] Obtendo QR Code para: ${instanceName}`);
         
         let qrBase64: string;
         
         try {
-          // Tentar obter QR Code via rota específica
+          // Tentar obter QR Code via rota específica (usar instanceName, não instanceId)
           const qrResponse = await axios.get(
-            `${EVOLUTION_API_URL}/instance/${instanceId}/connect/qr-code/image`,
+            `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
             {
               headers: {
                 apikey: token,
               },
-              responseType: "arraybuffer",
               timeout: 30000,
             }
           );
 
-          qrBase64 = Buffer.from(qrResponse.data).toString("base64");
+          // A resposta é JSON com campo qrCode
+          const qrData = qrResponse.data?.qrCode;
+          if (qrData) {
+            qrBase64 = qrData;
+          } else {
+            throw new Error("QR Code não encontrado na resposta");
+          }
         } catch (qrError: any) {
           console.warn(`[WhatsApp Routes] Erro ao obter QR Code via /connect/qr-code/image:`, qrError.message);
           
           // Tentar rota alternativa
           try {
             const altQrResponse = await axios.get(
-              `${EVOLUTION_API_URL}/instance/${instanceId}/qrcode`,
+              `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
               {
                 headers: {
                   apikey: token,
@@ -359,11 +364,14 @@ export function registerWhatsAppRoutes(app: Express): void {
               headers: {
                 apikey: token,
               },
-              responseType: "arraybuffer",
-              timeout: 30000,
             }
           );
-          qrBase64 = Buffer.from(altQrResponse.data).toString("base64");
+          const qrData = altQrResponse.data?.qrCode;
+          if (qrData) {
+            qrBase64 = qrData;
+          } else {
+            throw new Error("QR Code não encontrado na resposta");
+          }
         }
 
         sessions.set(clientId, {
