@@ -11,6 +11,7 @@ import { registerIntegrationApi } from "../integrationApi";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
+import { registerWhatsAppRoutes } from "../whatsapp-routes";
 
 
 
@@ -43,6 +44,7 @@ async function startServer() {
   registerOAuthRoutes(app);
   registerMetricWebhook(app);
   registerIntegrationApi(app);
+  registerWhatsAppRoutes(app);
 
 
 

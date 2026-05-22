@@ -15,113 +15,10 @@ import {
   Trash2, Plus, Edit2, Lock, Bell, MessageSquare, Wifi, Check, AlertCircle, Loader2,
   Building2, Phone, Mail, MapPin, Clock, Image, Users, Shield, Key, UserPlus,
   UserX, Download, Upload, Database, RefreshCw, Settings2, Tag, Palette, ChevronRight,
-  Eye, EyeOff, Save, X, AlertTriangle, CheckCircle2, Info, Smartphone as SmartphoneIcon, XCircle
+  Eye, EyeOff, Save, X, AlertTriangle, CheckCircle2, Info
 } from 'lucide-react';
 import { toast } from 'sonner';
-import React from 'react';
-
-// ─── Componente: EvolutionQRCodeSection ────────────────────────────────────
-function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
-  const [refreshing, setRefreshing] = React.useState(false);
-  const [qrCodeData, setQrCodeData] = React.useState<{ code: string; base64: string } | null>(null);
-
-  // Query para obter QR Code
-  const { data: qrCode, isLoading, refetch } = trpc.evolution.getQRCode.useQuery(
-    { clientId },
-    { enabled: !!clientId, refetchInterval: 5000 }
-  );
-
-  // Mutation para iniciar sessao
-  const startSessionMut = trpc.evolution.startSession.useMutation({
-    onSuccess: (data: any) => {
-      toast.success("Sessao iniciada! Escaneie o QR Code com seu WhatsApp.");
-      setQrCodeData(data);
-    },
-    onError: (e: any) => toast.error(e?.message || "Erro ao iniciar sessao"),
-  });
-
-  // Mutation para desconectar
-  const disconnectMut = trpc.evolution.disconnect.useMutation({
-    onSuccess: () => {
-      toast.success("WhatsApp desconectado com sucesso!");
-      setQrCodeData(null);
-      refetch();
-    },
-    onError: (e: any) => toast.error(e?.message || "Erro ao desconectar"),
-  });
-
-  const handleStartSession = async () => {
-    setRefreshing(true);
-    try {
-      await startSessionMut.mutateAsync({ clientId });
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  const displayQR = qrCodeData?.base64 || qrCode?.base64;
-
-  return (
-    <div className="space-y-4">
-      {isLoading || refreshing ? (
-        <div className="flex items-center justify-center py-12 text-slate-400">
-          <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Carregando QR Code...
-        </div>
-      ) : displayQR ? (
-        <div className="flex flex-col items-center gap-4">
-          <div className="bg-white p-4 rounded-lg border border-slate-200">
-            <img
-              src={`data:image/png;base64,${displayQR}`}
-              alt="QR Code"
-              className="w-64 h-64 object-contain"
-            />
-          </div>
-          <p className="text-sm text-slate-600 text-center max-w-xs">
-            Abra o WhatsApp no seu telefone e escaneie este codigo para conectar.
-          </p>
-          <div className="flex gap-2">
-            <Button
-              onClick={handleStartSession}
-              disabled={startSessionMut.isPending || refreshing}
-              variant="outline"
-              size="sm"
-              className="gap-1"
-            >
-              <RefreshCw className="w-3 h-3" /> Atualizar QR Code
-            </Button>
-            <Button
-              onClick={() => disconnectMut.mutate({ clientId })}
-              disabled={disconnectMut.isPending}
-              variant="outline"
-              size="sm"
-              className="gap-1 text-red-600 border-red-200 hover:bg-red-50"
-            >
-              <XCircle className="w-3 h-3" /> Desconectar
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center justify-center py-12 gap-4">
-          <div className="w-20 h-20 rounded-full bg-blue-50 flex items-center justify-center">
-            <SmartphoneIcon className="w-10 h-10 text-blue-600" />
-          </div>
-          <div className="text-center">
-            <p className="font-medium text-slate-900">WhatsApp nao conectado</p>
-            <p className="text-sm text-slate-500 mt-1">Clique abaixo para gerar um QR Code</p>
-          </div>
-          <Button
-            onClick={handleStartSession}
-            disabled={startSessionMut.isPending}
-            className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-          >
-            <Plus className="w-4 h-4" />
-            {startSessionMut.isPending ? "Gerando..." : "Conectar WhatsApp"}
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
+import { WhatsAppQRCode } from '@/components/WhatsAppQRCode';
 
 // ─── Session helper ──────────────────────────────────────────────────────────
 const MEGADESK_SESSION_KEY = 'megadesk_session_v1';
@@ -1628,35 +1525,7 @@ export function SettingsPage() {
 
           {/* ─── Aba: WhatsApp ───────────────────────────────────────────── */}
           {activeTab === 'whatsapp' && <div className="space-y-6">
-            <Card className="bg-white border-2 border-green-100">
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-green-500 flex items-center justify-center">
-                    <MessageSquare className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">WhatsApp — Conexão via QR Code</CardTitle>
-                    <CardDescription>Escaneie o QR Code com seu celular para conectar</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <EvolutionQRCodeSection clientId={clientId} />
-              </CardContent>
-            </Card>
-
-            {/* Aviso sobre uso */}
-            <Card className="bg-amber-50 border-amber-200">
-              <CardContent className="pt-5 pb-5">
-                <div className="flex gap-3">
-                  <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                  <div className="text-sm text-amber-800">
-                    <p className="font-semibold mb-1">Importante</p>
-                    <p>O celular precisa estar com internet ativa. O QR Code expira em 60 segundos — se não conseguir escanear a tempo, clique em "Atualizar QR Code".</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <WhatsAppQRCode clientId={clientId} />
           </div>}
 
           {/* ─── Aba: Conta ──────────────────────────────────────────── */}
