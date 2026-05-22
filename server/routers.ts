@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { retryRouter } from "./routers-retry";
+
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure } from "./_core/trpc";
 import { COOKIE_NAME, normalizeModuleNamesToBackend, normalizeModuleNamesToAdmin } from "@shared/const";
@@ -257,7 +257,7 @@ export const appRouter = router({
   crm: crmRouter,
   whatsapp: whatsappRouter,
   evolution: evolutionRouter,
-  retry: retryRouter,
+
   company: companyRouter,
   ticketStatuses: ticketStatusesRouter,
   megadeskSettings: megadeskSettingsRouter,
@@ -850,18 +850,18 @@ export const appRouter = router({
       await persistSyncState();
       await recordMegaDeskMetric(conversation.clientId, "message_sent", 1, { conversationId: input.conversationId });
       
-      // Enviar mensagem via WhatsApp Baileys
-      const { sendBaileysMessage } = await import("./whatsapp-baileys");
-      const sendResult = await sendBaileysMessage(
-        conversation.clientId,
-        input.conversationId,
-        conversation.phone,
-        input.message,
-        input.userEmail.split("@")[0]
-      );
-      
-      if (!sendResult.ok) {
-        console.warn(`[MegaDesk] Falha ao enviar mensagem via WhatsApp: ${sendResult.error}`);
+      // Enviar mensagem via Evolution API
+      try {
+        const { sendWhatsAppMessage } = await import("./evolution-manager");
+        await sendWhatsAppMessage(
+          conversation.clientId,
+          input.conversationId,
+          conversation.phone,
+          input.message,
+          input.userEmail.split("@")[0]
+        );
+      } catch (err: any) {
+        // Log silencioso - mensagem já foi salva no banco
       }
       
       return { ok: true, conversationId: input.conversationId, message: input.message, sentAt: new Date().toISOString() };

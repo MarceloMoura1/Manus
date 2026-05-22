@@ -64,8 +64,6 @@ describe("SQL statements no db.ts", () => {
     }
 
     if (violations.length > 0) {
-      console.error("Blocos com múltiplos statements encontrados:");
-      violations.forEach((v, i) => console.error(`  ${i + 1}. ${v}...`));
     }
 
     expect(violations).toHaveLength(0);

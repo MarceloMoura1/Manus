@@ -19,19 +19,15 @@ describe("Evolution API Integration", () => {
 
   beforeAll(async () => {
     clientId = `test-client-${Date.now()}`;
-    console.log(`\n[Test] Inicializando testes com clientId: ${clientId}`);
 
     // Inicializar Evolution Manager
     try {
       await initEvolutionManager();
-      console.log("[Test] Evolution Manager inicializado");
     } catch (err) {
-      console.warn("[Test] Evolution Manager já estava inicializado");
     }
   });
 
   afterAll(async () => {
-    console.log("[Test] Finalizando testes");
   });
 
   describe("Session Management", () => {
@@ -42,7 +38,6 @@ describe("Evolution API Integration", () => {
       expect(result.instanceId).toBeDefined();
       expect(result.token).toBeDefined();
 
-      console.log("[Test] Sessão criada com sucesso:", {
         instanceId: result.instanceId,
         token: result.token?.substring(0, 20) + "...",
       });
@@ -55,7 +50,6 @@ describe("Evolution API Integration", () => {
       expect(result.qrCode).toBeDefined();
       expect(result.qrCode?.length).toBeGreaterThan(0);
 
-      console.log("[Test] QR Code obtido com sucesso (comprimento:", result.qrCode?.length, ")");
     });
 
     it("should get session status", async () => {
@@ -65,7 +59,6 @@ describe("Evolution API Integration", () => {
       expect(status.instanceId).toBeDefined();
       expect(status.connected).toBeDefined();
 
-      console.log("[Test] Status da sessão:", status);
     });
   });
 
@@ -84,9 +77,7 @@ describe("Evolution API Integration", () => {
       expect(result.ok !== undefined).toBe(true);
 
       if (result.ok) {
-        console.log("[Test] Mensagem enviada com sucesso:", result.messageId);
       } else {
-        console.log("[Test] Erro esperado ao enviar (sessão não conectada):", result.error);
       }
     });
 
@@ -102,7 +93,6 @@ describe("Evolution API Integration", () => {
 
       // Deve falhar com número inválido
       expect(result.ok).toBe(false);
-      console.log("[Test] Validação de número funcionando:", result.error);
     });
   });
 
@@ -125,7 +115,6 @@ describe("Evolution API Integration", () => {
 
       // Não deve lançar exceção
       await expect(handleEvolutionWebhook(payload)).resolves.not.toThrow();
-      console.log("[Test] Webhook de mensagem processado com sucesso");
     });
 
     it("should handle connection status webhook", async () => {
@@ -140,7 +129,6 @@ describe("Evolution API Integration", () => {
 
       // Não deve lançar exceção
       await expect(handleEvolutionWebhook(payload)).resolves.not.toThrow();
-      console.log("[Test] Webhook de conexão processado com sucesso");
     });
 
     it("should handle message status webhook", async () => {
@@ -159,7 +147,6 @@ describe("Evolution API Integration", () => {
 
       // Não deve lançar exceção
       await expect(handleEvolutionWebhook(payload)).resolves.not.toThrow();
-      console.log("[Test] Webhook de status processado com sucesso");
     });
 
     it("should handle unknown webhook events gracefully", async () => {
@@ -171,7 +158,6 @@ describe("Evolution API Integration", () => {
 
       // Não deve lançar exceção
       await expect(handleEvolutionWebhook(payload)).resolves.not.toThrow();
-      console.log("[Test] Evento desconhecido tratado corretamente");
     });
   });
 
@@ -182,7 +168,6 @@ describe("Evolution API Integration", () => {
       expect(result).toBeDefined();
       expect(result.ok !== undefined).toBe(true);
 
-      console.log("[Test] Desconexão:", result.ok ? "sucesso" : "erro: " + result.error);
     });
   });
 
@@ -191,7 +176,6 @@ describe("Evolution API Integration", () => {
       const status = getWhatsAppStatus("invalid-client-id");
 
       expect(status.connected).toBe(false);
-      console.log("[Test] Erro de clientId tratado corretamente");
     });
 
     it("should handle missing phone number", async () => {
@@ -204,7 +188,6 @@ describe("Evolution API Integration", () => {
       );
 
       expect(result.ok).toBe(false);
-      console.log("[Test] Erro de número vazio tratado corretamente");
     });
 
     it("should handle missing message text", async () => {
@@ -217,7 +200,6 @@ describe("Evolution API Integration", () => {
       );
 
       expect(result.ok).toBe(false);
-      console.log("[Test] Erro de mensagem vazia tratado corretamente");
     });
   });
 });
@@ -231,7 +213,6 @@ describe("Evolution API Comparison with Baileys", () => {
     const baileysValidation = false; // Baileys não valida
 
     expect(evolutionValidation).toBe(true);
-    console.log("[Test] Evolution API tem melhor validação que Baileys");
   });
 
   it("should handle E2E encryption keys automatically", () => {
@@ -242,7 +223,6 @@ describe("Evolution API Comparison with Baileys", () => {
     const baileysE2E = "manual"; // Problemas com PENDING
 
     expect(evolutionE2E).toBe("automatic");
-    console.log("[Test] Evolution API gerencia chaves E2E automaticamente");
   });
 
   it("should support multiple clients simultaneously", async () => {
@@ -254,6 +234,5 @@ describe("Evolution API Comparison with Baileys", () => {
     expect(results.length).toBe(3);
     expect(results.every((r) => r.ok || r.error)).toBe(true);
 
-    console.log("[Test] Evolution API suporta múltiplos clientes simultaneamente");
   });
 });

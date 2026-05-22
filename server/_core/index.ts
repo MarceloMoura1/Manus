@@ -11,7 +11,7 @@ import { registerIntegrationApi } from "../integrationApi";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
-import { addSseClient, startWhatsAppSession, disconnectWhatsApp, getSessionStatus, sendBaileysMessage, restoreExistingSessions } from "../whatsapp-baileys";
+
 import { initEvolutionManager } from "../evolution-manager";
 import { initializeQueueProcessor } from "../evolution-queue-processor";
 
@@ -160,115 +160,6 @@ async function startServer() {
   });
 
   // ─── Baileys WhatsApp QR Code (SSE) ───────────────────────────────────────
-  // GET /api/baileys/qr-stream?clientId=xxx — SSE stream de status/QR
-  app.get("/api/baileys/qr-stream", (req, res) => {
-    const clientId = String(req.query.clientId || "");
-    if (!clientId) return res.status(400).json({ error: "clientId required" });
-
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders();
-
-    const send = (data: string) => res.write(data);
-    const cleanup = addSseClient(clientId, send);
-
-    req.on("close", cleanup);
-  });
-
-  // POST /api/baileys/start — iniciar sessão e gerar QR
-  app.post("/api/baileys/start", async (req, res) => {
-    const { clientId } = req.body;
-    if (!clientId) return res.status(400).json({ error: "clientId required" });
-    try {
-      await startWhatsAppSession(clientId);
-      res.json({ ok: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Erro ao iniciar sessão" });
-    }
-  });
-
-  // POST /api/baileys/disconnect — desconectar sessão
-  app.post("/api/baileys/disconnect", async (req, res) => {
-    const { clientId } = req.body;
-    if (!clientId) return res.status(400).json({ error: "clientId required" });
-    try {
-      await disconnectWhatsApp(clientId);
-      res.json({ ok: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Erro ao desconectar" });
-    }
-  });
-
-  // GET /api/baileys/status?clientId=xxx — status atual
-  app.get("/api/baileys/status", (req, res) => {
-    const clientId = String(req.query.clientId || "");
-    if (!clientId) return res.status(400).json({ error: "clientId required" });
-    res.json(getSessionStatus(clientId));
-  });
-
-  // POST /api/test-baileys-send — ENDPOINT DE TESTE ISOLADO
-  app.post("/api/test-baileys-send", async (req, res) => {
-    const { clientId, phoneNumber, message } = req.body;
-    
-    console.log(`\n${"=".repeat(80)}`);
-    console.log(`[TEST] INICIANDO TESTE DE ENVIO`);
-    console.log(`${"=".repeat(80)}`);
-    console.log(`[TEST] clientId: ${clientId}`);
-    console.log(`[TEST] phoneNumber: ${phoneNumber}`);
-    console.log(`[TEST] message: ${message}`);
-    console.log(`${"=".repeat(80)}\n`);
-    
-    if (!clientId || !phoneNumber || !message) {
-      return res.status(400).json({
-        ok: false,
-        error: "Parâmetros obrigatórios: clientId, phoneNumber, message",
-      });
-    }
-    
-    try {
-      const testConversationId = `test-${Date.now()}`;
-      console.log(`[TEST] Chamando sendBaileysMessage...`);
-      const result = await sendBaileysMessage(
-        clientId,
-        testConversationId,
-        phoneNumber,
-        message,
-        "TEST_AGENT"
-      );
-      
-      console.log(`[TEST] Resultado:`, result);
-      console.log(`${"=".repeat(80)}\n`);
-      
-      return res.json({
-        ok: result.ok,
-        error: result.error,
-        timestamp: new Date().toISOString(),
-        test: { clientId, phoneNumber, message },
-      });
-    } catch (err: any) {
-      console.error(`[TEST] ERRO:`, err);
-      console.log(`${"=".repeat(80)}\n`);
-      return res.status(500).json({
-        ok: false,
-        error: err?.message || "Erro desconhecido",
-        stack: err?.stack?.substring(0, 1000),
-        timestamp: new Date().toISOString(),
-      });
-    }
-  });
-
-  // POST /api/baileys/send — enviar mensagem via Baileys
-  app.post("/api/baileys/send", async (req, res) => {
-    const { clientId, conversationId, phone, text, agentName } = req.body;
-    if (!clientId || !conversationId || !phone || !text) {
-      return res.status(400).json({ error: "clientId, conversationId, phone e text são obrigatórios" });
-    }
-    const result = await sendBaileysMessage(clientId, conversationId, phone, text, agentName || "Atendente");
-    if (!result.ok) return res.status(500).json({ error: result.error });
-    res.json({ ok: true });
-  });
   // ────────────────────────────────────────────────────────────────────────────
 
   // tRPC API
@@ -295,10 +186,7 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
-    // Restaurar sessões Baileys existentes após o servidor iniciar
-    restoreExistingSessions().catch((err) =>
-      console.error("[Baileys] Erro ao restaurar sessões:", err)
-    );
+
   });
 }
 

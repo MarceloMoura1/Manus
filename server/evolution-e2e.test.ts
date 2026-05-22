@@ -15,11 +15,11 @@ describe("Evolution API - End-to-End Tests", () => {
   let token: string;
 
   beforeAll(async () => {
-    console.log("🚀 Iniciando testes E2E da Evolution API");
+    // Setup
   });
 
   afterAll(async () => {
-    console.log("✅ Testes E2E concluídos");
+    // Cleanup
   });
 
   describe("Session Management", () => {
@@ -34,7 +34,7 @@ describe("Evolution API - End-to-End Tests", () => {
       instanceId = result.instanceId!;
       token = result.token!;
 
-      console.log(`✅ Sessão criada: ${instanceId}`);
+
     });
 
     it("deve obter QR Code para conexão", async () => {
@@ -45,7 +45,7 @@ describe("Evolution API - End-to-End Tests", () => {
       expect(result.qrCode).toBeDefined();
       expect(result.qrCode!.length).toBeGreaterThan(0);
 
-      console.log(`✅ QR Code obtido (${result.qrCode!.length} caracteres)`);
+
     });
 
     it("deve obter status da sessão", async () => {
@@ -58,7 +58,7 @@ describe("Evolution API - End-to-End Tests", () => {
         result.status
       );
 
-      console.log(`✅ Status obtido: ${result.status}`);
+
     });
   });
 
@@ -79,7 +79,7 @@ describe("Evolution API - End-to-End Tests", () => {
         expect(result.error).toBeDefined();
       }
 
-      console.log("✅ Validação de números funcionando");
+
     });
 
     it("deve enviar mensagem com número válido", async () => {
@@ -95,7 +95,7 @@ describe("Evolution API - End-to-End Tests", () => {
       expect(result.ok).toBe(true);
       expect(result.messageId).toBeDefined();
 
-      console.log(`✅ Mensagem enviada: ${result.messageId}`);
+
     });
 
     it("deve enviar múltiplas mensagens", async () => {
@@ -123,7 +123,7 @@ describe("Evolution API - End-to-End Tests", () => {
         expect(result.messageId).toBeDefined();
       });
 
-      console.log(`✅ ${results.length} mensagens enviadas com sucesso`);
+
     });
   });
 
@@ -145,7 +145,7 @@ describe("Evolution API - End-to-End Tests", () => {
         expect(result.instanceId).toBeDefined();
       });
 
-      console.log(`✅ ${results.length} clientes gerenciados simultaneamente`);
+
     });
 
     it("deve isolar dados entre clientes", async () => {
@@ -168,7 +168,7 @@ describe("Evolution API - End-to-End Tests", () => {
       // Verificar que cliente 2 não vê dados do cliente 1
       expect(result1.ok).toBe(true);
 
-      console.log("✅ Isolamento de dados entre clientes validado");
+
     });
   });
 
@@ -179,7 +179,7 @@ describe("Evolution API - End-to-End Tests", () => {
       expect(result.ok).toBe(false);
       expect(result.error).toBeDefined();
 
-      console.log(`✅ Erro retornado para cliente inválido: ${result.error}`);
+
     });
 
     it("deve retornar erro para sessão não existente", async () => {
@@ -188,9 +188,7 @@ describe("Evolution API - End-to-End Tests", () => {
       expect(result.ok).toBe(false);
       expect(result.error).toBeDefined();
 
-      console.log(
-        `✅ Erro retornado para sessão não existente: ${result.error}`
-      );
+
     });
 
     it("deve retornar erro para número sem WhatsApp", async () => {
@@ -205,9 +203,7 @@ describe("Evolution API - End-to-End Tests", () => {
       // Pode retornar sucesso ou erro dependendo da validação
       expect(result).toBeDefined();
 
-      console.log(
-        `✅ Resposta para número sem WhatsApp: ${result.ok ? "enviado" : "erro"}`
-      );
+
     });
   });
 
@@ -226,7 +222,7 @@ describe("Evolution API - End-to-End Tests", () => {
       const status = await evolutionManager.getStatus(clientId);
       expect(status.ok).toBe(true);
 
-      console.log("✅ Sessão sincronizada com banco de dados");
+
     });
   });
 
@@ -249,7 +245,7 @@ describe("Evolution API - End-to-End Tests", () => {
 
       expect(webhookResult.ok).toBe(true);
 
-      console.log("✅ Webhook configurado automaticamente");
+
     });
   });
 
@@ -270,7 +266,7 @@ describe("Evolution API - End-to-End Tests", () => {
       expect(result.ok).toBe(true);
       expect(duration).toBeLessThan(2000);
 
-      console.log(`✅ Mensagem enviada em ${duration}ms`);
+
     });
 
     it("deve criar sessão em menos de 1 segundo", async () => {
@@ -285,7 +281,7 @@ describe("Evolution API - End-to-End Tests", () => {
       expect(result.ok).toBe(true);
       expect(duration).toBeLessThan(1000);
 
-      console.log(`✅ Sessão criada em ${duration}ms`);
+
     });
 
     it("deve obter QR Code em menos de 500ms", async () => {
@@ -298,7 +294,7 @@ describe("Evolution API - End-to-End Tests", () => {
       expect(result.ok).toBe(true);
       expect(duration).toBeLessThan(500);
 
-      console.log(`✅ QR Code obtido em ${duration}ms`);
+
     });
   });
 
@@ -314,7 +310,7 @@ describe("Evolution API - End-to-End Tests", () => {
       const disconnectResult = await evolutionManager.disconnect(clientId);
       expect(disconnectResult.ok).toBe(true);
 
-      console.log("✅ Sessão desconectada corretamente");
+
     });
   });
 
@@ -338,7 +334,7 @@ describe("Evolution API - End-to-End Tests", () => {
       const successRate = (successes / attempts) * 100;
       expect(successRate).toBeGreaterThanOrEqual(95);
 
-      console.log(`✅ Taxa de sucesso: ${successRate.toFixed(1)}%`);
+
     });
 
     it("deve ter melhor performance que Baileys", async () => {
@@ -363,7 +359,7 @@ describe("Evolution API - End-to-End Tests", () => {
       // Evolution API deve ser mais rápida que Baileys (média < 500ms)
       expect(avgTime).toBeLessThan(500);
 
-      console.log(`✅ Tempo médio por mensagem: ${avgTime.toFixed(0)}ms`);
+
     });
   });
 });

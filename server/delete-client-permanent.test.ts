@@ -16,7 +16,6 @@ const mockDb: Record<string, any> = {};
 
 const mockDeleteClientFromDb = vi.fn(async (clientId: string) => {
   delete mockDb[clientId];
-  console.log(`[Mock DB] Cliente ${clientId} deletado`);
 });
 
 const mockSaveMegaDeskStructuredState = vi.fn(async (state: any) => {
