@@ -36,12 +36,14 @@ export const evolutionFailedMessages = mysqlTable(
     agentName: varchar("agent_name", { length: 255 }),
 
     // Status de reprocessamento
-    status: mysqlEnum("status", [
-      "pending",
-      "retrying",
-      "sent",
-      "failed_permanent",
-    ])
+    status: mysqlEnum("status", {
+      enum: [
+        "pending",
+        "retrying",
+        "sent",
+        "failed_permanent",
+      ],
+    })
       .notNull()
       .default("pending"),
     retryCount: int("retry_count").notNull().default(0),
@@ -88,7 +90,9 @@ export const evolutionRetryHistory = mysqlTable(
 
     // Informações da tentativa
     retryNumber: int("retry_number").notNull(),
-    status: mysqlEnum("status", ["success", "failed"])
+    status: mysqlEnum("status", {
+      enum: ["success", "failed"],
+    })
       .notNull()
       .default("failed"),
     error: text("error"),
