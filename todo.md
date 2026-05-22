@@ -1526,3 +1526,24 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Criar testes para resolução de LID (10 testes passando)
 - [x] Criar testes para envio de mensagem com LID (15 testes passando)
 - [x] Validar que mensagens agora podem ser enviadas após LID ser resolvido
+
+## Fase 148: Fila de Reprocessamento para LIDs Não Resolvidos
+- [x] Criar tabela baileys_pending_messages para armazenar mensagens com LID não resolvido
+- [x] Implementar função para armazenar mensagem em fila quando LID não está resolvido
+- [ ] Implementar reprocessamento automático quando lid-mapping.update chegar
+- [x] Testar fila com múltiplas mensagens pendentes
+- [x] Adicionar logs detalhados de reprocessamento
+
+## Fase 149: Indicador Visual de Sincronização
+- [x] Adicionar campo sync_status na tabela megadesk_domain_conversations
+- [x] Emitir evento Socket.IO quando LID está sendo resolvido
+- [x] Mostrar spinner/indicador no card da conversa enquanto sincroniza
+- [x] Atualizar indicador quando sincronização for concluída
+- [ ] Testar indicador em múltiplas conversas simultâneas
+
+## Fase 150: Feedback Visual de Falha de Envio
+- [x] Capturar erros de envio no frontend
+- [x] Mostrar toast/notificação quando envio falhar
+- [x] Adicionar botão "Tentar novamente" no toast de erro
+- [x] Armazenar mensagens falhadas para reenvio
+- [x] Testar feedback de erro com diferentes cenários

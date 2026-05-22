@@ -51,6 +51,7 @@ type ConversationItem = {
   iaActive: boolean;
   lastMessageFrom?: "customer" | "agent" | "bot";
   createdAt?: string;
+  syncStatus?: "synced" | "syncing" | "sync_failed";
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -174,9 +175,22 @@ function ConversationCard({
               )}
             </div>
           </div>
-          <span className="text-xs text-slate-400 flex-shrink-0">
-            {formatDate(conv.lastMessageAt)}
-          </span>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {conv.syncStatus === 'syncing' && (
+              <div className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded-lg">
+                <div className="w-3 h-3 rounded-full border-2 border-amber-600 border-t-transparent animate-spin" />
+                <span>Sincronizando...</span>
+              </div>
+            )}
+            {conv.syncStatus === 'sync_failed' && (
+              <div className="flex items-center gap-1 text-xs text-red-600 bg-red-50 px-2 py-1 rounded-lg">
+                <span>⚠️ Erro na sincronização</span>
+              </div>
+            )}
+            <span className="text-xs text-slate-400">
+              {formatDate(conv.lastMessageAt)}
+            </span>
+          </div>
         </div>
 
         {/* Última mensagem */}

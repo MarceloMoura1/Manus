@@ -20,6 +20,99 @@ import pino from "pino";
 import { getPool } from "./db";
 import { getSocketIO } from "./modules/whatsapp/socket/whatsapp.socket";
 
+/**
+ * Armazena uma mensagem na fila de reprocessamento quando o LID nao esta resolvido
+ */
+export async function addMessageToQueue(
+  clientId: string,
+  lidId: string,
+  text: string,
+  timestamp: Date,
+  pushName?: string | null,
+  msgType?: string,
+  mediaFileName?: string
+): Promise<void> {
+  const pool = getPool();
+  try {
+    await pool.execute(
+      `INSERT INTO baileys_pending_messages
+       (client_id, lid_id, text, push_name, msg_type, media_file_name, timestamp, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+      [clientId, lidId, text, pushName || null, msgType || 'text', mediaFileName || null, timestamp.getTime()]
+    );
+    console.log(`[Baileys] Mensagem adicionada a fila: LID=${lidId}, clientId=${clientId}`);
+  } catch (err) {
+    console.error(`[Baileys] Erro ao adicionar mensagem a fila:`, err);
+  }
+}
+
+/**
+ * Reprocessa mensagens da fila quando um LID e resolvido
+ */
+export async function reprocessQueuedMessages(
+  clientId: string,
+  lidId: string,
+  resolvedPhone: string
+): Promise<void> {
+  const pool = getPool();
+  try {
+    // Buscar mensagens pendentes para este LID
+    const [rows] = await pool.execute(
+      `SELECT id, text, push_name, msg_type, media_file_name, timestamp
+       FROM baileys_pending_messages
+       WHERE client_id = ? AND lid_id = ? AND status = 'pending'
+       ORDER BY created_at ASC`,
+      [clientId, lidId]
+    ) as any[];
+
+    if (!rows || rows.length === 0) {
+      console.log(`[Baileys] Nenhuma mensagem na fila para LID ${lidId}`);
+      return;
+    }
+
+    console.log(`[Baileys] Reprocessando ${rows.length} mensagens para LID ${lidId}`);
+
+    for (const row of rows) {
+      try {
+        // Marcar como processando
+        await pool.execute(
+          `UPDATE baileys_pending_messages SET status = 'processing' WHERE id = ?`,
+          [row.id]
+        );
+
+        // Reprocessar a mensagem com o numero resolvido
+        const timestamp = new Date(row.timestamp);
+        await handleIncomingMessage(
+          clientId,
+          resolvedPhone,
+          row.text,
+          timestamp,
+          row.push_name,
+          row.msg_type,
+          row.media_file_name
+        );
+
+        // Marcar como concluida
+        await pool.execute(
+          `UPDATE baileys_pending_messages SET status = 'completed' WHERE id = ?`,
+          [row.id]
+        );
+
+        console.log(`[Baileys] Mensagem reprocessada com sucesso: ID=${row.id}`);
+      } catch (err) {
+        console.error(`[Baileys] Erro ao reprocessar mensagem ${row.id}:`, err);
+        // Incrementar retry_count
+        await pool.execute(
+          `UPDATE baileys_pending_messages SET retry_count = retry_count + 1, status = 'failed' WHERE id = ?`,
+          [row.id]
+        );
+      }
+    }
+  } catch (err) {
+    console.error(`[Baileys] Erro ao reprocessar fila:`, err);
+  }
+}
+
 // Diretório para armazenar sessões (fallback local)
 const SESSIONS_DIR = path.join(process.cwd(), ".baileys-sessions");
 if (!fs.existsSync(SESSIONS_DIR)) {
@@ -427,9 +520,32 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
         // ser mapeados para o número real via evento lid-mapping.update
         const phone = resolvePhoneFromJid(clientId, from);
         
-        // Se por algum motivo o phone ficou vazio, ignorar
+        // Se o phone ficou vazio, significa que eh um LID nao resolvido
+        // Armazenar na fila para reprocessar quando o mapeamento chegar
         if (!phone) {
-          console.warn(`[Baileys] Mensagem ignorada - número não resolvido: ${from}`);
+          console.warn(`[Baileys] LID nao resolvido: ${from} - armazenando na fila`);
+          
+          // Extrair o LID do JID
+          const lidMatch = from.match(/(\d+)@lid/);
+          if (lidMatch) {
+            const lidId = lidMatch[1];
+            const pushName = msg.pushName || null;
+            let text = '[midia]';
+            let msgType = 'text';
+            let mediaFileName: string | undefined;
+            
+            if (msg.message.conversation) {
+              text = msg.message.conversation;
+            } else if (msg.message.extendedTextMessage?.text) {
+              text = msg.message.extendedTextMessage.text;
+            }
+            
+            const timestamp = Number(msg.messageTimestamp) * 1000;
+            const now = new Date(timestamp);
+            
+            // Adicionar a fila
+            await addMessageToQueue(clientId, lidId, text, now, pushName, msgType, mediaFileName);
+          }
           continue;
         }
         
