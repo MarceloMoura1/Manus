@@ -96,7 +96,7 @@ export class EvolutionAPIClient {
   async createInstance(instanceName: string): Promise<EvolutionInstance> {
     try {
       console.log(`[Evolution] Criando instância: ${instanceName}`);
-      const response = await this.client.post("/instances", {
+      const response = await this.client.post("/instance/create", {
         instanceName,
       });
       console.log(`[Evolution] Instância criada: ${response.data.instanceId}`);
