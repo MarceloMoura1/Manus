@@ -229,13 +229,57 @@ const lidToPhoneMap = new Map<string, Map<string, string>>();
  * Resolve um JID que pode ser um LID para o número de telefone real.
  * Se for um número normal, retorna direto. Se for LID, tenta resolver via mapa.
  */
-function resolvePhoneFromJid(clientId: string, jid: string): string {
+/**
+ * Tenta resolver o número real de um contato usando a API do Baileys
+ * Busca na lista de contatos ou no histórico de mensagens
+ */
+async function resolveRealPhoneFromBaileys(
+  sock: any,
+  lidId: string
+): Promise<string | null> {
+  try {
+    // Tentar buscar nos contatos
+    const contacts = await sock.store?.contacts;
+    if (contacts) {
+      for (const [jid, contact] of Object.entries(contacts)) {
+        const contactId = (jid as string).split("@")[0];
+        if (contactId === lidId) {
+          const phone = contactId.replace(/\D/g, "");
+          console.log(`[Baileys] Número real encontrado nos contatos: ${lidId} -> ${phone}`);
+          return phone;
+        }
+      }
+    }
+    
+    // Tentar buscar no histórico de chats
+    const chats = await sock.store?.chats;
+    if (chats) {
+      for (const chat of chats) {
+        if (chat.id && chat.id.includes(lidId)) {
+          const phone = chat.id.split("@")[0].replace(/\D/g, "");
+          console.log(`[Baileys] Número real encontrado no histórico: ${lidId} -> ${phone}`);
+          return phone;
+        }
+      }
+    }
+    
+    console.warn(`[Baileys] Não foi possível resolver o número real para LID ${lidId}`);
+    return null;
+  } catch (err) {
+    console.error(`[Baileys] Erro ao resolver número real:`, err);
+    return null;
+  }
+}
+
+
+async function resolvePhoneFromJid(clientId: string, jid: string): Promise<string> {
   // Extrair a parte antes do @
   const rawId = jid.split("@")[0].split(":")[0];
   const server = jid.split("@")[1] || "";
   
   // Se for um LID (@lid), tentar resolver para número real
   if (server === "lid" || jid.endsWith("@lid")) {
+    // 1. Tentar mapa em memória
     const clientMap = lidToPhoneMap.get(clientId);
     const resolved = clientMap?.get(rawId);
     if (resolved) {
@@ -243,11 +287,31 @@ function resolvePhoneFromJid(clientId: string, jid: string): string {
       return resolved.replace(/\D/g, "");
     }
     
-    // LID não resolvido ainda
-    // IMPORTANTE: Não usar LID como número temporário, pois isso cria conversas duplicadas
-    // Retornar string vazia para que a mensagem seja ignorada até o LID ser resolvido
-    console.warn(`[Baileys] LID não resolvido: ${rawId} para cliente ${clientId} — mensagem será ignorada até resolução`);
-    return ""; // Retornar vazio para ignorar a mensagem
+    // 2. Tentar banco de dados
+    try {
+      const pool = getPool();
+      const [rows] = await pool.execute(
+        `SELECT phone_number FROM baileys_lid_mapping WHERE client_id = ? AND lid_id = ? LIMIT 1`,
+        [clientId, rawId]
+      ) as any[];
+      if (rows && rows.length > 0) {
+        const dbPhone = rows[0].phone_number.replace(/\D/g, "");
+        console.log(`[Baileys] LID ${rawId} resolvido do banco para ${dbPhone}`);
+        // Atualizar mapa em memória para futuras consultas
+        if (!lidToPhoneMap.has(clientId)) {
+          lidToPhoneMap.set(clientId, new Map());
+        }
+        lidToPhoneMap.get(clientId)!.set(rawId, dbPhone);
+        return dbPhone;
+      }
+    } catch (err) {
+      console.error(`[Baileys] Erro ao consultar banco para LID ${rawId}:`, err);
+    }
+    
+    // LID não resolvido ainda — usar o próprio LID como identificador temporário
+    // A conversa será criada e o número atualizado quando o mapeamento chegar
+    console.warn(`[Baileys] LID não resolvido: ${rawId} para cliente ${clientId} — usando LID como número temporário`);
+    return `lid${rawId}`; // prefixo 'lid' para identificar como temporário
   }
   
   // Número normal — retornar apenas dígitos
@@ -360,6 +424,26 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
     session.sock = sock;
 
     sock.ev.on("creds.update", saveCreds);
+    
+    // Salvar chaves de criptografia E2E quando forem atualizadas
+    sock.ev.on("keys.set", async (update) => {
+      try {
+        const pool = getPool();
+        for (const [type, keys] of Object.entries(update)) {
+          for (const [id, key] of Object.entries(keys as any)) {
+            const keyName = `key_${type}_${id}`;
+            const keyValue = JSON.stringify(key, BufferJSON.replacer);
+            await pool.execute(
+              'INSERT INTO baileys_auth_state (client_id, auth_key, auth_value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE auth_value = VALUES(auth_value)',
+              [clientId, keyName, keyValue]
+            );
+          }
+        }
+        console.log(`[Baileys] Chaves de criptografia salvas para ${clientId}`);
+      } catch (err) {
+        console.error(`[Baileys] Erro ao salvar chaves de criptografia:`, err);
+      }
+    });
 
     // Restaurar mapeamento LID do banco ao iniciar sessão
     try {
@@ -381,6 +465,83 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
 
     // Escutar evento de mapeamento LID -> número de telefone real
     // Emitido pelo Baileys quando recebe pnForLidChatAction do servidor do WhatsApp
+/**
+ * Mescla conversas duplicadas quando um LID é resolvido
+ * Combina mensagens da conversa com LID temporário para a conversa com número real
+ */
+async function mergeConversationsWhenLidResolved(
+  clientId: string,
+  lidId: string,
+  resolvedPhone: string
+): Promise<void> {
+  const pool = getPool();
+  try {
+    const tempPhone = `lid${lidId}`;
+    
+    // Buscar conversa com LID temporário
+    const [lidConvs] = await pool.execute(
+      `SELECT conversation_id, messages_json FROM megadesk_domain_conversations
+       WHERE client_id = ? AND phone = ? LIMIT 1`,
+      [clientId, tempPhone]
+    ) as any[];
+    
+    if (!lidConvs || lidConvs.length === 0) {
+      console.log(`[Baileys] Nenhuma conversa com LID temporário encontrada para ${tempPhone}`);
+      return;
+    }
+    
+    const lidConv = lidConvs[0];
+    const lidMessages = JSON.parse(lidConv.messages_json || "[]");
+    
+    // Buscar conversa com número real
+    const [realConvs] = await pool.execute(
+      `SELECT conversation_id, messages_json FROM megadesk_domain_conversations
+       WHERE client_id = ? AND phone = ? LIMIT 1`,
+      [clientId, resolvedPhone]
+    ) as any[];
+    
+    if (!realConvs || realConvs.length === 0) {
+      // Não existe conversa com número real, apenas renomear a com LID
+      console.log(`[Baileys] Nenhuma conversa com número real encontrada, apenas renomeando LID`);
+      return;
+    }
+    
+    const realConv = realConvs[0];
+    const realMessages = JSON.parse(realConv.messages_json || "[]");
+    
+    // Mesclar mensagens (ordenar por timestamp)
+    const mergedMessages = [...realMessages, ...lidMessages].sort((a, b) => {
+      const timeA = new Date(a.timestamp).getTime();
+      const timeB = new Date(b.timestamp).getTime();
+      return timeA - timeB;
+    });
+    
+    // Atualizar conversa com número real com mensagens mescladas
+    await pool.execute(
+      `UPDATE megadesk_domain_conversations 
+       SET messages_json = ?, updated_at = NOW()
+       WHERE conversation_id = ? AND client_id = ?`,
+      [JSON.stringify(mergedMessages), realConv.conversation_id, clientId]
+    );
+    
+    console.log(`[Baileys] Conversas mescladas: ${lidConv.conversation_id} -> ${realConv.conversation_id}`);
+    console.log(`[Baileys] Total de mensagens mescladas: ${mergedMessages.length}`);
+    
+    // Deletar conversa duplicada com LID
+    await pool.execute(
+      `DELETE FROM megadesk_domain_conversations 
+       WHERE conversation_id = ? AND client_id = ?`,
+      [lidConv.conversation_id, clientId]
+    );
+    
+    console.log(`[Baileys] Conversa duplicada deletada: ${lidConv.conversation_id}`);
+    
+  } catch (err) {
+    console.error(`[Baileys] Erro ao mesclar conversas:`, err);
+  }
+}
+
+
     sock.ev.on("lid-mapping.update" as any, ({ lid, pn }: { lid: string; pn: string }) => {
       const lidId = lid.split("@")[0].split(":")[0];
       const pnId = pn.split("@")[0].split(":")[0].replace(/\D/g, "");
@@ -421,6 +582,11 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
               });
               console.log(`[Baileys] Evento 'lid-resolved' emitido para cliente ${clientId}`);
             }
+            
+            // Mesclar conversas duplicadas
+            mergeConversationsWhenLidResolved(clientId, lidId, pnId).catch((err: any) => {
+              console.error(`[Baileys] Erro ao mesclar conversas para LID ${lidId}:`, err);
+            });
             
             // Reprocessar mensagens que estavam na fila aguardando este LID
             reprocessQueuedMessages(clientId, lidId, pnId).catch((err: any) => {
@@ -527,35 +693,43 @@ export async function startWhatsAppSession(clientId: string): Promise<void> {
         // Resolver número de telefone: suporta JIDs normais e LIDs (multi-device)
         // LIDs são IDs internos do WhatsApp (ex: 63346606899236@lid) que precisam
         // ser mapeados para o número real via evento lid-mapping.update
-        const phone = resolvePhoneFromJid(clientId, from);
+        let phone = await resolvePhoneFromJid(clientId, from);
+        
+        // Se o phone é um LID temporário, tentar resolver o número real
+        if (phone && phone.startsWith('lid')) {
+          const lidId = phone.substring(3); // remover prefixo 'lid'
+          const realPhone = await resolveRealPhoneFromBaileys(sock, lidId);
+          if (realPhone) {
+            phone = realPhone;
+            // Atualizar o mapa de LID
+            if (!lidToPhoneMap.has(clientId)) {
+              lidToPhoneMap.set(clientId, new Map());
+            }
+            lidToPhoneMap.get(clientId)!.set(lidId, realPhone);
+            console.log(`[Baileys] LID resolvido dinamicamente: ${lidId} -> ${realPhone}`);
+          }
+        }
         
         // Se o phone ficou vazio, significa que eh um LID nao resolvido
-        // Armazenar na fila para reprocessar quando o mapeamento chegar
+        // Aceitar a mensagem com o LID temporário e processar normalmente
+        // Quando o LID for resolvido, as conversas serão mescladas
         if (!phone) {
-          console.warn(`[Baileys] LID nao resolvido: ${from} - armazenando na fila`);
-          
-          // Extrair o LID do JID
-          const lidMatch = from.match(/(\d+)@lid/);
-          if (lidMatch) {
-            const lidId = lidMatch[1];
-            const pushName = msg.pushName || null;
-            let text = '[midia]';
-            let msgType = 'text';
-            let mediaFileName: string | undefined;
-            
-            if (msg.message.conversation) {
-              text = msg.message.conversation;
-            } else if (msg.message.extendedTextMessage?.text) {
-              text = msg.message.extendedTextMessage.text;
-            }
-            
-            const timestamp = Number(msg.messageTimestamp) * 1000;
-            const now = new Date(timestamp);
-            
-            // Adicionar a fila
-            await addMessageToQueue(clientId, lidId, text, now, pushName, msgType, mediaFileName);
-          }
+          console.warn(`[Baileys] Não foi possível extrair o número - ignorando mensagem`);
           continue;
+        }
+        
+        // Se é um LID temporário, aceitar e processar normalmente
+        if (phone.startsWith('lid')) {
+          console.log(`[Baileys] Aceitando mensagem com LID temporário: ${phone}`);
+          
+          // Tentar encontrar uma conversa similar para mesclar
+          const lidId = phone.substring(3); // remover prefixo 'lid'
+          const similarConvId = await findSimilarConversationForLid(clientId, lidId);
+          if (similarConvId) {
+            console.log(`[Baileys] Conversa similar encontrada, usando: ${similarConvId}`);
+            // Usar a conversa similar em vez de criar uma nova
+            // Isso será feito no código de criação de conversa abaixo
+          }
         }
         
         const pushName = msg.pushName || null; // Nome do contato no WhatsApp
@@ -728,6 +902,46 @@ export async function restoreExistingSessions(): Promise<void> {
  * Processa mensagem recebida: cria ou atualiza a conversa no banco com status "bot"
  * Garante isolamento por clientId e que a conversa aparece na página de Conversas
  */
+/**
+ * Busca uma conversa com número similar para mesclar com conversa de LID
+ * Tenta encontrar uma conversa com o mesmo contato mas número real
+ */
+async function findSimilarConversationForLid(
+  clientId: string,
+  lidId: string
+): Promise<string | null> {
+  const pool = getPool();
+  try {
+    // Buscar todas as conversas do cliente que não são LID
+    const [convs] = await pool.execute(
+      `SELECT conversation_id, phone FROM megadesk_domain_conversations
+       WHERE client_id = ? AND phone NOT LIKE 'lid%' AND phone NOT LIKE '%@%'
+       ORDER BY updated_at DESC LIMIT 10`,
+      [clientId]
+    ) as any[];
+    
+    if (!convs || convs.length === 0) {
+      return null;
+    }
+    
+    // Procurar por padrões similares
+    // Se há apenas uma conversa com número real, provavelmente é a mesma pessoa
+    if (convs.length === 1) {
+      const phone = convs[0].phone;
+      console.log(`[Baileys] Encontrada conversa similar para LID ${lidId}: ${phone}`);
+      return convs[0].conversation_id;
+    }
+    
+    // Se há múltiplas, retornar a mais recente
+    console.log(`[Baileys] Múltiplas conversas encontradas, usando a mais recente`);
+    return convs[0].conversation_id;
+  } catch (err) {
+    console.error(`[Baileys] Erro ao buscar conversa similar:`, err);
+    return null;
+  }
+}
+
+
 async function handleIncomingMessage(
   clientId: string,
   phone: string,
@@ -744,13 +958,32 @@ async function handleIncomingMessage(
   const cleanPhone = phone.replace(/\D/g, "");
 
   // 1. Buscar conversa existente para esse telefone + clientId com status != closed
-  const [existingRows] = await pool.execute(
+  let [existingRows] = await pool.execute(
     `SELECT conversation_id, messages_json, customer_name, company
      FROM megadesk_domain_conversations
      WHERE client_id = ? AND phone = ? AND status != 'closed'
      ORDER BY created_at DESC LIMIT 1`,
     [clientId, cleanPhone]
   ) as any[];
+  
+  // Se não encontrou e é um LID temporário, tentar encontrar conversa similar
+  if ((!existingRows || existingRows.length === 0) && cleanPhone.startsWith('lid')) {
+    const lidId = cleanPhone.substring(3);
+    const similarConvId = await findSimilarConversationForLid(clientId, lidId);
+    if (similarConvId) {
+      console.log(`[Baileys] Usando conversa similar para LID: ${similarConvId}`);
+      // Buscar a conversa similar
+      const [similarRows] = await pool.execute(
+        `SELECT conversation_id, messages_json, customer_name, company
+         FROM megadesk_domain_conversations
+         WHERE conversation_id = ? AND client_id = ?`,
+        [similarConvId, clientId]
+      ) as any[];
+      if (similarRows && similarRows.length > 0) {
+        existingRows = similarRows;
+      }
+    }
+  }
 
   const nowLabel = timestamp.toLocaleString("pt-BR");
   const messageEntry: any = {
@@ -901,10 +1134,16 @@ export async function sendBaileysMessage(
     
     console.log(`[Baileys] Enviando para: phone='${phone}' -> cleanPhone='${cleanPhone}' (length=${cleanPhone.length})`);
     
-    // Se o número não começar com 55 (código Brasil), adicionar
-    if (!cleanPhone.startsWith('55') && cleanPhone.length === 11) {
+    // Se o número tem 11 dígitos e não começa com 55, adicionar código de país
+    // Números brasileiros têm 11 dígitos (2 DDD + 9 + 4 dígitos)
+    if (cleanPhone.length === 11 && !cleanPhone.startsWith('55')) {
       cleanPhone = '55' + cleanPhone;
       console.log(`[Baileys] Adicionado código de país: ${cleanPhone}`);
+    }
+    
+    // Se o número já tem 12+ dígitos, assume que já tem o código de país
+    if (cleanPhone.length >= 12) {
+      console.log(`[Baileys] Número já contém código de país: ${cleanPhone}`);
     }
     
     // Detectar se é um LID temporário (começa com 'lid' ou é um número muito longo > 15 dígitos sem formato de telefone)

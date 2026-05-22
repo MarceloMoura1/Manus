@@ -847,6 +847,21 @@ export const appRouter = router({
       audit("MegaDesk", "Mensagem enviada e sincronizada", conversation.clientId);
       await persistSyncState();
       await recordMegaDeskMetric(conversation.clientId, "message_sent", 1, { conversationId: input.conversationId });
+      
+      // Enviar mensagem via WhatsApp Baileys
+      const { sendBaileysMessage } = await import("./whatsapp-baileys");
+      const sendResult = await sendBaileysMessage(
+        conversation.clientId,
+        input.conversationId,
+        conversation.phone,
+        input.message,
+        input.userEmail.split("@")[0]
+      );
+      
+      if (!sendResult.ok) {
+        console.warn(`[MegaDesk] Falha ao enviar mensagem via WhatsApp: ${sendResult.error}`);
+      }
+      
       return { ok: true, conversationId: input.conversationId, message: input.message, sentAt: new Date().toISOString() };
     }),
     updateTicketStatus: publicProcedure.input(z.object({ ticketId: z.string(), status: z.enum(["open", "in_progress", "waiting", "closed"]), userEmail: z.string().email() })).mutation(async ({ input }) => {
