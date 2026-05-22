@@ -5,8 +5,7 @@ import { router, publicProcedure, adminProcedure } from "./_core/trpc";
 import { COOKIE_NAME, normalizeModuleNamesToBackend, normalizeModuleNamesToAdmin } from "@shared/const";
 import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool, createMegaDeskBackup, listMegaDeskBackups, getMegaDeskBackupInfo, applyMegaDeskBackup, deleteClientFromDb } from "./db";
 import bcrypt from "bcryptjs";
-import { megadeskDomainClientUsers } from "../drizzle/schema";
-// TODO: Implementar tabela adminCredentials no schema
+import { adminCredentials, megadeskDomainClientUsers } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { SignJWT } from "jose";
 import { MEGAADMIN_COOKIE } from "./_core/context";
@@ -317,7 +316,7 @@ export const appRouter = router({
         name: adminCredentials.name,
         active: adminCredentials.active,
         createdAt: adminCredentials.createdAt,
-      }).from(adminCredentials);
+      }).from(adminCredentials).orderBy(adminCredentials.id);
       return { admins: rows };
     }),
     createAdmin: adminProcedure
@@ -327,15 +326,12 @@ export const appRouter = router({
         password: z.string().min(6),
       }))
       .mutation(async ({ input }) => {
-        // TODO: Filtrar por clientId também
         const existing = await getDb().select({ id: adminCredentials.id }).from(adminCredentials).where(eq(adminCredentials.email, input.email.toLowerCase().trim())).limit(1);
         if (existing.length > 0) {
           throw new TRPCError({ code: "CONFLICT", message: "Já existe um administrador com este e-mail." });
         }
         const passwordHash = await bcrypt.hash(input.password, 12);
-        // TODO: Obter clientId do contexto (por enquanto usar um padrão)
         await getDb().insert(adminCredentials).values({
-          clientId: "default-client", // TODO: Passar via input ou contexto
           email: input.email.toLowerCase().trim(),
           name: input.name.trim(),
           passwordHash,

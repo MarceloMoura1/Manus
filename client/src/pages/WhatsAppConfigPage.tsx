@@ -76,7 +76,7 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
     }
   };
 
-  const displayQR = qrCodeData?.code || qrCode?.qrCode;
+  const displayQR = qrCodeData?.qrCode || qrCode?.qrCode;
 
   return (
     <div className="space-y-4">

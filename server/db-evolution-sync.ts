@@ -4,9 +4,8 @@
  */
 
 import { getDb } from "./db";
-import { waConversations, waMessages } from "../drizzle/schema";
+import { waConversations, waMessages } from "@/drizzle/schema";
 import { eq, and } from "drizzle-orm";
-
 import { v4 as uuidv4 } from "uuid";
 
 export interface EvolutionMessagePayload {

@@ -3,7 +3,7 @@
  * Isolamento de tenant garantido em todas as operações
  */
 import { getDb } from "./db";
-// TODO: Implementar tabelas megadeskUserSettings e megadeskUserShortcuts no schema
+import { megadeskUserSettings, megadeskUserShortcuts } from "../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 
