@@ -13,6 +13,7 @@ import { serveStatic, setupVite } from "./vite";
 import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
 import { addSseClient, startWhatsAppSession, disconnectWhatsApp, getSessionStatus, sendBaileysMessage, restoreExistingSessions } from "../whatsapp-baileys";
 import { initEvolutionManager } from "../evolution-manager";
+import { initializeQueueProcessor } from "../evolution-queue-processor";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -50,6 +51,14 @@ async function startServer() {
     console.log("[Evolution Manager] Inicializado com sucesso");
   } catch (err: any) {
     console.error("[Evolution Manager] Erro ao inicializar:", err);
+  }
+
+  // Inicializar processador de fila de reprocessamento
+  try {
+    initializeQueueProcessor();
+    console.log("[Evolution Queue] Processador de fila inicializado");
+  } catch (err: any) {
+    console.error("[Evolution Queue] Erro ao inicializar processador:", err);
   }
 
   // WhatsApp Webhook endpoints (Meta)
