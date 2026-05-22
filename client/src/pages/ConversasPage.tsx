@@ -393,6 +393,16 @@ export function ConversasPage() {
   // Estado local das conversas (para atualizações em tempo real)
   const [localConversations, setLocalConversations] = useState<ConversationItem[]>([]);
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+
+  // Carregar conversa selecionada do localStorage quando a página é montada
+  useEffect(() => {
+    const conversationId = localStorage.getItem('MEGADESK_SELECTED_CONVERSATION_ID');
+    if (conversationId) {
+      setSelectedConversation(conversationId);
+      localStorage.removeItem('MEGADESK_SELECTED_CONVERSATION_ID');
+    }
+  }, []);
 
   // ─── Busca de usuários ──────────────────────────────────────────────────────
   const { data: usersData } = trpc.users.list.useQuery(

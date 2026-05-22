@@ -136,6 +136,11 @@ export function ActiveAttendancePage({ onNavigate, initialPhone }: { onNavigate?
         crmClientId: customerData.crmClientId || undefined,
       });
 
+      // Armazenar o ID da conversa criada no localStorage para abrir automaticamente
+      if (result.conversationId) {
+        localStorage.setItem('MEGADESK_SELECTED_CONVERSATION_ID', result.conversationId);
+      }
+
       setSuccessMessage(`Conversa iniciada com ${customerData.name}! Redirecionando...`);
       // Redirecionar para a página de Conversas após 1.2s
       setTimeout(() => {
