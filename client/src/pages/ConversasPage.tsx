@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useConversasSocket } from "@/hooks/useConversasSocket";
+import { FailedMessagesRetry } from "@/components/FailedMessagesRetry";
 import type { ConversaSocketItem } from "@/hooks/useConversasSocket";
 import { validations } from "@/lib/validations";
 
@@ -633,7 +634,9 @@ export function ConversasPage() {
                   : `${localConversations.length} conversa${localConversations.length !== 1 ? "s" : ""}`}
               </p>
             </div>
-            <button
+            <div className="flex items-center gap-2">
+              <FailedMessagesRetry />
+              <button
               type="button"
               onClick={() => refetch()}
               className="p-2 rounded-lg hover:bg-slate-100 transition-colors text-slate-500 hover:text-slate-700"
@@ -641,6 +644,7 @@ export function ConversasPage() {
             >
               <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
             </button>
+            </div>
           </div>
 
           {/* Filtros de visualização */}

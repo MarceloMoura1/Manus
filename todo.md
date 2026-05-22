@@ -1547,3 +1547,20 @@ SELECT COUNT(*) FROM megadesk_domain_chamado_activities;
 - [x] Adicionar botão "Tentar novamente" no toast de erro
 - [x] Armazenar mensagens falhadas para reenvio
 - [x] Testar feedback de erro com diferentes cenários
+
+
+## Fase 151: Botão de Reenvio Manual
+- [ ] Criar tabela baileys_failed_messages para armazenar mensagens falhadas
+- [ ] Implementar função para salvar mensagem falhada no banco
+- [ ] Criar botão "Reenviar Fila" na interface do chat
+- [ ] Implementar lógica para reenviar todas as mensagens da fila
+- [ ] Mostrar toast com resultado do reenvio (sucesso/falha)
+- [ ] Testar reenvio manual com múltiplas mensagens
+
+## Fase 152: Persistência e Reenvio Automático
+- [ ] Salvar mensagens falhadas persistentemente no banco
+- [ ] Implementar listener para evento connection.update
+- [ ] Reenviar automaticamente mensagens falhadas ao reconectar
+- [ ] Atualizar status de mensagens após reenvio bem-sucedido
+- [ ] Remover mensagens falhadas após reenvio bem-sucedido
+- [ ] Testar reenvio automático após desconexão/reconexão

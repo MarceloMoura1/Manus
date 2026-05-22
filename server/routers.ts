@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { retryRouter } from "./routers-retry";
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure } from "./_core/trpc";
 import { COOKIE_NAME, normalizeModuleNamesToBackend, normalizeModuleNamesToAdmin } from "@shared/const";
@@ -254,6 +255,7 @@ export const appRouter = router({
   chamados: chamadosRouter,
   crm: crmRouter,
   whatsapp: whatsappRouter,
+  retry: retryRouter,
   company: companyRouter,
   ticketStatuses: ticketStatusesRouter,
   megadeskSettings: megadeskSettingsRouter,

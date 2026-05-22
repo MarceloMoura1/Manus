@@ -594,6 +594,28 @@ export type InsertMegadeskUserShortcut = typeof megadeskUserShortcuts.$inferInse
 export type MegadeskWhatsappConfig = typeof megadeskWhatsappConfig.$inferSelect;
 export type InsertMegadeskWhatsappConfig = typeof megadeskWhatsappConfig.$inferInsert;
 
+// ─── Baileys Failed Messages (Persistência de Mensagens Falhadas) ─────────────
+export const baileysFailedMessages = mysqlTable("baileys_failed_messages", {
+  id: varchar("id", { length: 80 }).primaryKey(), // UUID
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  conversationId: varchar("conversation_id", { length: 80 }).notNull(),
+  phone: varchar("phone", { length: 50 }).notNull(),
+  messageText: text("message_text").notNull(),
+  errorType: varchar("error_type", { length: 50 }),
+  errorMessage: text("error_message"),
+  retryCount: int("retry_count").notNull().default(0),
+  maxRetries: int("max_retries").notNull().default(10),
+  status: mysqlEnum("status", ["pending", "retrying", "completed", "failed"]).notNull().default("pending"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  lastRetryAt: timestamp("last_retry_at"),
+  completedAt: timestamp("completed_at"),
+}, (t) => ({
+  clientIdx: index("idx_bfm_client").on(t.clientId),
+  convIdx: index("idx_bfm_conv").on(t.conversationId),
+  statusIdx: index("idx_bfm_status").on(t.status),
+  createdAtIdx: index("idx_bfm_created").on(t.createdAt),
+}));
+
 // ─── WhatsApp Module Types ─────────────────────────────────────────────────────
 export type WaAccount = typeof waAccounts.$inferSelect;
 export type InsertWaAccount = typeof waAccounts.$inferInsert;
@@ -603,3 +625,5 @@ export type WaMessage = typeof waMessages.$inferSelect;
 export type InsertWaMessage = typeof waMessages.$inferInsert;
 export type MegadeskNotification = typeof megadeskNotifications.$inferSelect;
 export type InsertMegadeskNotification = typeof megadeskNotifications.$inferInsert;
+export type BaileysFailedMessage = typeof baileysFailedMessages.$inferSelect;
+export type InsertBaileysFailedMessage = typeof baileysFailedMessages.$inferInsert;

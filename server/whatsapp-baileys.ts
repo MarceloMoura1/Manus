@@ -18,6 +18,7 @@ import path from "path";
 import fs from "fs";
 import pino from "pino";
 import { getPool } from "./db";
+import { saveFailedMessage } from "./baileys-failed-messages";
 import { getSocketIO } from "./modules/whatsapp/socket/whatsapp.socket";
 
 /**
@@ -963,6 +964,22 @@ export async function sendBaileysMessage(
     return { ok: true };
   } catch (err: any) {
     console.error(`[Baileys] Erro ao enviar mensagem:`, err);
+    
+    // Salvar mensagem falhada para reenvio posterior
+    try {
+      await saveFailedMessage(
+        clientId,
+        conversationId,
+        phone,
+        text,
+        err?.name || 'send_error',
+        err?.message || 'Erro desconhecido ao enviar mensagem'
+      );
+      console.log(`[Baileys] Mensagem falhada armazenada para reenvio posterior`);
+    } catch (saveErr: any) {
+      console.error(`[Baileys] Erro ao salvar mensagem falhada:`, saveErr);
+    }
+    
     return { ok: false, error: err?.message || "Erro ao enviar mensagem" };
   }
 }
