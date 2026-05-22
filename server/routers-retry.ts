@@ -1,5 +1,4 @@
 import { router, protectedProcedure } from "./_core/trpc";
-import type { Context } from "./_core/trpc";
 import { z } from "zod";
 import { getFailedMessagesPending, countPendingFailedMessages } from "./baileys-failed-messages";
 import { sendBaileysMessage } from "./whatsapp-baileys";
