@@ -193,12 +193,14 @@ async function useDbAuthState(clientId: string) {
   const state = { creds, keys };
 
   const saveCreds = async () => {
+    console.log(`[Baileys] Salvando credenciais para ${clientId}...`);
     const credsStr = JSON.stringify(creds, BufferJSON.replacer);
     authData['creds'] = creds;
     await pool.execute(
       'INSERT INTO baileys_auth_state (client_id, auth_key, auth_value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE auth_value = VALUES(auth_value)',
       [clientId, 'creds', credsStr]
     );
+    console.log(`[Baileys] Credenciais salvas com sucesso para ${clientId}`);
   };
 
   const clearAuth = async () => {
@@ -652,6 +654,13 @@ async function mergeConversationsWhenLidResolved(
         session.qrDataUrl = undefined;
         session.connectedAt = Date.now();
         console.log(`[Baileys] ✅ Conectado! Número: +${phoneNumber}, clientId: ${clientId}`);
+        
+        // Forçar salvamento de credenciais quando conectado
+        try {
+          await saveCreds();
+        } catch (err) {
+          console.error(`[Baileys] Erro ao salvar credenciais após conexão:`, err);
+        }
         broadcast(clientId, "status", {
           status: "connected",
           phoneNumber,
@@ -668,6 +677,8 @@ async function mergeConversationsWhenLidResolved(
 
     // Receber mensagens e persistir no banco
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
+      // Salvar credenciais quando mensagens são recebidas (chaves são atualizadas)
+      try { await saveCreds(); } catch (e) { console.error(`[Baileys] Erro ao salvar creds em messages.upsert:`, e); }
       if (type !== "notify") return;
       for (const msg of messages) {
         if (!msg.message) continue;
@@ -1093,26 +1104,30 @@ export async function sendBaileysMessage(
   // Tentar encontrar sessão pelo clientId original ou sanitizado
   const sanitizedId = clientId.replace(/[^a-zA-Z0-9-_]/g, "_");
   
-  // Função auxiliar: sessão válida = tem sock e status é connected ou connecting (pode estar reconectando)
-  const isUsable = (s: SessionInfo | undefined): boolean => !!(s?.sock && (s.status === "connected" || s.status === "connecting"));
+  // Função auxiliar: sessão válida = tem sock, está CONECTADA e tem user autenticado
+  const isUsable = (s: SessionInfo | undefined): boolean => !!(s?.sock && s.status === "connected" && s.sock.user?.id);
   
   let session = sessions.get(clientId);
   if (!isUsable(session)) {
     session = sessions.get(sanitizedId);
   }
   if (!isUsable(session)) {
-    // Fallback: buscar qualquer sessão com sock ativo
-    for (const [key, s] of sessions.entries()) {
-      if (s.sock && (s.status === "connected" || s.status === "connecting")) {
-        session = s;
-        console.log(`[Baileys] Usando sessão fallback: ${key} para clientId: ${clientId}`);
-        break;
-      }
-    }
+    // Não usar fallback - sessão específica não encontrada
+    console.error(`[Baileys] Nenhuma sessão válida encontrada para clientId: ${clientId}`);
   }
   if (!session?.sock) {
-    console.error(`[Baileys] Sessão não encontrada para clientId: ${clientId} (sanitized: ${sanitizedId}). Sessões ativas: ${[...sessions.entries()].map(([k,v]) => k+':'+v.status).join(", ")}`);
-    return { ok: false, error: "WhatsApp não conectado para este cliente" };
+    console.error(`[Baileys] Socket não inicializado para clientId: ${clientId}`);
+    return { ok: false, error: "Socket não inicializado" };
+  }
+  
+  if (session.status !== "connected") {
+    console.error(`[Baileys] Sessão não conectada para clientId: ${clientId}, status: ${session.status}`);
+    return { ok: false, error: `Sessão não conectada: ${session.status}` };
+  }
+  
+  if (!session.sock.user?.id) {
+    console.error(`[Baileys] Socket não autenticado para clientId: ${clientId}, user.id vazio`);
+    return { ok: false, error: "Socket não autenticado (user.id vazio)" };
   }
 
   try {
@@ -1134,10 +1149,11 @@ export async function sendBaileysMessage(
     }
     
     // Detectar se é um LID temporário (começa com 'lid' ou é um número muito longo > 15 dígitos sem formato de telefone)
-    const isLidTemp = phone.startsWith('lid') || (cleanPhone.length > 15 && !phone.includes('@'));
+    // Detectar se é um LID temporário: LIDs têm 14 dígitos, números reais têm 12-13 dígitos com código de país
+    const isLidTemp = phone.startsWith('lid') || (cleanPhone.length === 14 && !phone.includes('@'));
     if (isLidTemp) {
       // Tentar resolver o LID para número real via mapa em memória
-      const rawLid = cleanPhone.startsWith('lid') ? cleanPhone.slice(3) : cleanPhone;
+      const rawLid = phone.startsWith('lid') ? phone.slice(3) : cleanPhone;
       const clientMap = lidToPhoneMap.get(clientId);
       const resolved = clientMap?.get(rawLid);
       if (resolved) {
@@ -1170,12 +1186,38 @@ export async function sendBaileysMessage(
     console.log(`[Baileys] Session sock existe: ${!!session.sock}`);
     console.log(`[Baileys] Enviando mensagem: "${text}" para JID: ${jid}`);
 
+    // Validar se número existe no WhatsApp ANTES de enviar
+    console.log(`[Baileys] Validando número no WhatsApp: ${jid}`);
+    try {
+      const validNumbers = await session.sock.onWhatsApp(jid);
+      if (!validNumbers || validNumbers.length === 0) {
+        console.error(`[Baileys] Número não possui WhatsApp ativo: ${jid}`);
+        return { ok: false, error: "Número não possui WhatsApp ativo" };
+      }
+      console.log(`[Baileys] Número validado no WhatsApp: ${jid}`);
+    } catch (validateErr: any) {
+      console.error(`[Baileys] Erro ao validar número no WhatsApp:`, validateErr?.message);
+      return { ok: false, error: "Erro ao validar número no WhatsApp" };
+    }
+    
     // Enviar mensagem via Baileys
-    const sendResult = await session.sock.sendMessage(jid, { text });
-    console.log(`[Baileys] Resultado do envio:`, JSON.stringify(sendResult, null, 2));
+    console.log(`[Baileys] PRÉ-ENVIO: JID=${jid}, sock.user=${session.sock.user?.id}, status=${session.status}`);
+    let sendResult;
+    try {
+      sendResult = await session.sock.sendMessage(jid, { text });
+      console.log(`[Baileys] PÓS-ENVIO: status=${sendResult?.status}, messageId=${sendResult?.key?.id}`);
+    } catch (sendErr: any) {
+      console.error(`[Baileys] ERRO CRÍTICO NO SENDMESSAGE:`, {
+        message: sendErr?.message,
+        code: sendErr?.code,
+        stack: sendErr?.stack?.substring(0, 500),
+      });
+      throw sendErr;
+    }
     
     // Verificar se o status é PENDING (significa que a chave de criptografia não foi recebida)
-    if (sendResult?.status === 1) { // 1 = PENDING no Baileys
+    // Status pode ser string "PENDING" ou número 1
+    if (sendResult?.status === 1 || (sendResult?.status as any) === "PENDING") {
       console.warn(`[Baileys] Mensagem com status PENDING - armazenando para reenvio automático`);
       // Armazenar na fila de reenvio automático
       await saveFailedMessage(

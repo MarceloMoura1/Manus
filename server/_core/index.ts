@@ -12,6 +12,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
 import { addSseClient, startWhatsAppSession, disconnectWhatsApp, getSessionStatus, sendBaileysMessage, restoreExistingSessions } from "../whatsapp-baileys";
+import { initEvolutionManager } from "../evolution-manager";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -43,12 +44,75 @@ async function startServer() {
   registerMetricWebhook(app);
   registerIntegrationApi(app);
 
+  // Inicializar Evolution API
+  try {
+    await initEvolutionManager();
+    console.log("[Evolution Manager] Inicializado com sucesso");
+  } catch (err: any) {
+    console.error("[Evolution Manager] Erro ao inicializar:", err);
+  }
+
   // WhatsApp Webhook endpoints (Meta)
   app.get("/api/webhooks/meta", handleWebhookVerify);
   app.post("/api/webhooks/meta", handleWebhookEvent);
 
+  // Evolution API Webhook endpoint
+  app.post("/api/webhooks/evolution", async (req, res) => {
+    try {
+      const { handleEvolutionWebhook } = await import("../evolution-webhook-handler");
+      const payload = req.body;
+
+      console.log(`[Evolution Webhook] Recebido webhook:`, {
+        event: payload.event,
+        instance: payload.instance,
+      });
+
+      // Processar webhook de forma assincrona (nao bloquear resposta)
+      handleEvolutionWebhook(payload).catch((err) => {
+        console.error(`[Evolution Webhook] Erro ao processar:`, err);
+      });
+
+      // Responder imediatamente
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error(`[Evolution Webhook] Erro:`, err);
+      res.status(500).json({ error: err?.message || "Erro ao processar webhook" });
+    }
+  });
+
   // Inicializar Socket.IO para WhatsApp
   initWhatsAppSocket(server);
+
+  // Configurar webhooks da Evolution API apos inicializacao
+  setTimeout(async () => {
+    try {
+      const { getEvolutionAdapter } = await import("../evolution-manager");
+      const adapter = getEvolutionAdapter();
+      const sessions = adapter.listSessions();
+
+      if (sessions.size > 0) {
+        console.log(`[Evolution] Configurando webhooks para ${sessions.size} sessao(oes)...`);
+
+        // Obter URL base do servidor
+        const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
+        const host = process.env.SERVER_HOST || "localhost";
+        const port = process.env.PORT || "3000";
+        const webhookUrl = `${protocol}://${host}:${port}/api/webhooks/evolution`;
+
+        for (const [clientId, session] of sessions) {
+          try {
+            const { configureWebhook } = await import("../evolution-manager");
+            await configureWebhook(clientId, webhookUrl);
+            console.log(`[Evolution] Webhook configurado para ${clientId}`);
+          } catch (err: any) {
+            console.error(`[Evolution] Erro ao configurar webhook para ${clientId}:`, err);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error(`[Evolution] Erro ao configurar webhooks:`, err);
+    }
+  }, 5000); // Aguardar 5 segundos apos inicializacao
   // Backup scheduled handler
   app.post("/api/scheduled/backup", async (req, res) => {
     try {
@@ -133,6 +197,57 @@ async function startServer() {
     const clientId = String(req.query.clientId || "");
     if (!clientId) return res.status(400).json({ error: "clientId required" });
     res.json(getSessionStatus(clientId));
+  });
+
+  // POST /api/test-baileys-send — ENDPOINT DE TESTE ISOLADO
+  app.post("/api/test-baileys-send", async (req, res) => {
+    const { clientId, phoneNumber, message } = req.body;
+    
+    console.log(`\n${"=".repeat(80)}`);
+    console.log(`[TEST] INICIANDO TESTE DE ENVIO`);
+    console.log(`${"=".repeat(80)}`);
+    console.log(`[TEST] clientId: ${clientId}`);
+    console.log(`[TEST] phoneNumber: ${phoneNumber}`);
+    console.log(`[TEST] message: ${message}`);
+    console.log(`${"=".repeat(80)}\n`);
+    
+    if (!clientId || !phoneNumber || !message) {
+      return res.status(400).json({
+        ok: false,
+        error: "Parâmetros obrigatórios: clientId, phoneNumber, message",
+      });
+    }
+    
+    try {
+      const testConversationId = `test-${Date.now()}`;
+      console.log(`[TEST] Chamando sendBaileysMessage...`);
+      const result = await sendBaileysMessage(
+        clientId,
+        testConversationId,
+        phoneNumber,
+        message,
+        "TEST_AGENT"
+      );
+      
+      console.log(`[TEST] Resultado:`, result);
+      console.log(`${"=".repeat(80)}\n`);
+      
+      return res.json({
+        ok: result.ok,
+        error: result.error,
+        timestamp: new Date().toISOString(),
+        test: { clientId, phoneNumber, message },
+      });
+    } catch (err: any) {
+      console.error(`[TEST] ERRO:`, err);
+      console.log(`${"=".repeat(80)}\n`);
+      return res.status(500).json({
+        ok: false,
+        error: err?.message || "Erro desconhecido",
+        stack: err?.stack?.substring(0, 1000),
+        timestamp: new Date().toISOString(),
+      });
+    }
   });
 
   // POST /api/baileys/send — enviar mensagem via Baileys
