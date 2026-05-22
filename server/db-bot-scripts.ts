@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { getDb } from "./db";
-import { megadeskBotScripts } from "../drizzle/schema";
+
 import { eq, and } from "drizzle-orm";
 
 export async function createBotScript(clientId: string, data: {

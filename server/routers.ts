@@ -372,7 +372,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "BAD_REQUEST", message: "Você não pode excluir sua própria conta." });
         }
         // Garante que sempre haja pelo menos 1 admin ativo
-        const allAdmins = await getDb().select({ id: adminCredentials.id }).from(adminCredentials).where(eq(adminCredentials.active, true));
+        const allAdmins = await getDb().select({ id: adminCredentials.id }).from(adminCredentials).where(eq(adminCredentials.active, 1));
         if (allAdmins.length <= 1) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Deve existir pelo menos um administrador ativo." });
         }

@@ -58,7 +58,7 @@ export async function syncClientDataToDb(clientData: {
           address: clientData.address || '',
           businessHours: clientData.businessHours || '',
           logoUrl: clientData.logoUrl || '',
-          updatedAt: new Date(),
+          updatedAt: new Date().toISOString(),
         })
         .where(eq(megadeskCompanySettings.clientId, clientData.clientId));
     } else {
@@ -73,8 +73,8 @@ export async function syncClientDataToDb(clientData: {
         address: clientData.address || '',
         businessHours: clientData.businessHours || '',
         logoUrl: clientData.logoUrl || '',
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       });
     }
 
@@ -138,7 +138,7 @@ export async function syncTeamUsersToDb(clientId: string, users: Array<{
             role: user.role,
             status: user.status,
             permissionsJson,
-            updatedAt: new Date(),
+            updatedAt: new Date().toISOString(),
           })
           .where(
             and(
@@ -158,8 +158,8 @@ export async function syncTeamUsersToDb(clientId: string, users: Array<{
           status: user.status,
           permissionsJson,
           passwordHash: null, // Será definido pelo usuário depois
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
         });
         console.log(`[SYNC] Usuário criado: ${user.email} (${clientId})`);
       }
