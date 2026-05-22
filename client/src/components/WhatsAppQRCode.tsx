@@ -18,7 +18,11 @@ export function WhatsAppQRCode({ clientId }: WhatsAppQRCodeProps) {
 
   // Buscar QR Code
   const fetchQRCode = useCallback(async () => {
-    if (!clientId) return;
+    console.log('[WhatsAppQRCode] fetchQRCode called with clientId:', clientId);
+    if (!clientId) {
+      console.warn('[WhatsAppQRCode] clientId is empty!');
+      return;
+    }
 
     setLoading(true);
     try {
@@ -49,8 +53,12 @@ export function WhatsAppQRCode({ clientId }: WhatsAppQRCodeProps) {
 
   // Verificar status ao carregar
   useEffect(() => {
+    console.log('[WhatsAppQRCode] useEffect called with clientId:', clientId);
     const checkStatus = async () => {
-      if (!clientId) return;
+      if (!clientId) {
+        console.warn('[WhatsAppQRCode] clientId is empty in useEffect!');
+        return;
+      }
 
       try {
         const response = await fetch(`/api/whatsapp/status?clientId=${encodeURIComponent(clientId)}`);

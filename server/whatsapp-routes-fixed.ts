@@ -92,7 +92,8 @@ export function registerWhatsAppRoutes(app: Express): void {
         let qrBase64: string;
         
         try {
-          // Tentar obter QR Code via rota específica (usar instanceName, não instanceId)
+          // Tentar obter QR Code via rota específica
+          // A rota /instance/connect/{instanceName} retorna JSON com o QR Code em base64
           const qrResponse = await axios.get(
             `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
             {
@@ -103,20 +104,40 @@ export function registerWhatsAppRoutes(app: Express): void {
             }
           );
 
-          // A resposta é JSON com campo qrCode
-          const qrData = qrResponse.data?.qrCode;
+          console.log(`[WhatsApp Routes] Resposta QR:`, JSON.stringify(qrResponse.data).substring(0, 100));
+
+          // Verificar diferentes formatos de resposta
+          let qrData = qrResponse.data?.qrCode || qrResponse.data?.qr || qrResponse.data?.code;
+          
+          // Se a resposta for um objeto com 'base64' ou similar
+          if (!qrData && typeof qrResponse.data === 'object') {
+            // Procurar por qualquer campo que pareça conter dados base64
+            for (const [key, value] of Object.entries(qrResponse.data)) {
+              if (typeof value === 'string' && value.startsWith('data:image')) {
+                qrData = value;
+                break;
+              }
+            }
+          }
+
           if (qrData) {
-            qrBase64 = qrData;
+            // Se já for data URL, usar como está
+            if (qrData.startsWith('data:')) {
+              qrBase64 = qrData;
+            } else {
+              // Caso contrário, assumir que é base64 puro
+              qrBase64 = `data:image/png;base64,${qrData}`;
+            }
           } else {
-            throw new Error("QR Code não encontrado na resposta");
+            throw new Error("QR Code não encontrado na resposta: " + JSON.stringify(qrResponse.data).substring(0, 200));
           }
         } catch (qrError: any) {
-          console.warn(`[WhatsApp Routes] Erro ao obter QR Code via /connect/qr-code/image:`, qrError.message);
+          console.warn(`[WhatsApp Routes] Erro ao obter QR Code:`, qrError.message);
           
-          // Tentar rota alternativa
+          // Tentar rota alternativa com responseType image
           try {
             const altQrResponse = await axios.get(
-              `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
+              `${EVOLUTION_API_URL}/instance/connect/qr-code/${instanceName}`,
               {
                 headers: {
                   apikey: token,
@@ -125,7 +146,7 @@ export function registerWhatsAppRoutes(app: Express): void {
                 timeout: 30000,
               }
             );
-            qrBase64 = Buffer.from(altQrResponse.data).toString("base64");
+            qrBase64 = `data:image/png;base64,${Buffer.from(altQrResponse.data).toString("base64")}`;
           } catch (altQrError: any) {
             console.error(`[WhatsApp Routes] Erro ao obter QR Code via rota alternativa:`, altQrError.message);
             return res.status(500).json({

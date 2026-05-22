@@ -1331,12 +1331,34 @@ function TabBackup({ clientId, userRole }: { clientId: string; userRole: string 
 // ════════════════════════════════════════════════════════════════════════════
 export function SettingsPage() {
   const { user } = useAuth();
-  const session = getMegaDeskSession();
+  const [session, setSession] = useState(() => getMegaDeskSession());
   const clientId = session?.clientId ?? '';
   const userRole = session?.userRole ?? 'viewer';
   const isAdmin = userRole === 'admin';
 
   const [activeTab, setActiveTab] = useState(isAdmin ? 'whatsapp' : 'account');
+
+  // Carregar sessão do localStorage ou do servidor
+  useEffect(() => {
+    const loadedSession = getMegaDeskSession();
+    if (loadedSession) {
+      setSession(loadedSession);
+      console.log('[SettingsPage] Session loaded from localStorage:', loadedSession);
+      return;
+    }
+
+    // Se não encontrar no localStorage, tentar carregar do servidor
+    if (user?.email) {
+      trpc.megadesk.getCurrentSession.query({ userEmail: user.email })
+        .then((sessionData) => {
+          setSession(sessionData);
+          console.log('[SettingsPage] Session loaded from server:', sessionData);
+        })
+        .catch((error) => {
+          console.warn('[SettingsPage] Failed to load session from server:', error);
+        });
+    }
+  }, [user?.email]);
 
   // ─── Aba: WhatsApp (Evolution API) ──────────────────────────────────────────
 
