@@ -1350,67 +1350,81 @@ export function SettingsPage() {
   const [showAccessToken, setShowAccessToken] = useState(false);
   const [showWebhookToken, setShowWebhookToken] = useState(false);
 
-  // ─── QR Code Baileys ──────────────────────────────────────────────────────
-  type BaileysStatus = 'disconnected' | 'connecting' | 'qr_ready' | 'connected';
-  const [baileysStatus, setBaileysStatus] = useState<BaileysStatus>('disconnected');
+  // ─── QR Code Evolution API ──────────────────────────────────────────────────────
+  type EvolutionStatus = 'disconnected' | 'connecting' | 'connected';
+  const [evolutionStatus, setEvolutionStatus] = useState<EvolutionStatus>('disconnected');
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [baileysPhone, setBaileysPhone] = useState<string | null>(null);
-  const [baileysConnectedAt, setBaileysConnectedAt] = useState<number | null>(null);
+  const [evolutionPhone, setEvolutionPhone] = useState<string | null>(null);
   const [isStartingSession, setIsStartingSession] = useState(false);
-  const sseRef = useRef<EventSource | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Conectar ao SSE stream para receber atualizações em tempo real
-  const connectSse = useCallback(() => {
-    if (!clientId) return;
-    if (sseRef.current) { sseRef.current.close(); }
-    const es = new EventSource(`/api/baileys/qr-stream?clientId=${encodeURIComponent(clientId)}`);
-    sseRef.current = es;
-    es.onmessage = (e) => {
-      try {
-        const { event, data } = JSON.parse(e.data);
-        if (event === 'status' || event === 'qr') {
-          if (data.status) setBaileysStatus(data.status as BaileysStatus);
-          if (data.qrDataUrl) setQrDataUrl(data.qrDataUrl);
-          else if (data.status === 'connected') setQrDataUrl(null);
-          if (data.phoneNumber) setBaileysPhone(data.phoneNumber);
-          if (data.connectedAt) setBaileysConnectedAt(data.connectedAt);
-        }
-      } catch { /* ignorar */ }
-    };
-    es.onerror = () => { /* reconectar automaticamente */ };
-  }, [clientId]);
+  // tRPC mutations e queries para Evolution API
+  const connectMut = trpc.evolution.connect.useMutation({
+    onSuccess: (data) => {
+      if (data.qrCode) {
+        setQrDataUrl(data.qrCode);
+        setEvolutionStatus('connecting');
+        toast.success('QR Code gerado! Escaneie com seu WhatsApp.');
+        // Começar a fazer polling do status
+        startStatusPolling();
+      } else if (data.status === 'connected') {
+        setEvolutionStatus('connected');
+        setEvolutionPhone(data.phoneNumber);
+        toast.success('WhatsApp conectado!');
+      }
+    },
+    onError: (err) => {
+      toast.error(err.message || 'Erro ao conectar');
+      setIsStartingSession(false);
+    },
+  });
+
+  const disconnectMut = trpc.evolution.disconnect.useMutation({
+    onSuccess: () => {
+      setEvolutionStatus('disconnected');
+      setQrDataUrl(null);
+      setEvolutionPhone(null);
+      toast.success('WhatsApp desconectado!');
+    },
+    onError: (err) => {
+      toast.error(err.message || 'Erro ao desconectar');
+    },
+  });
+
+  const getStatusQuery = trpc.evolution.getStatus.useQuery(
+    { clientId: clientId || '' },
+    { enabled: !!clientId && evolutionStatus === 'connecting', refetchInterval: 3000 }
+  );
+
+  // Fazer polling do status
+  const startStatusPolling = useCallback(() => {
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    // O useQuery já faz o polling automaticamente
+  }, []);
 
   useEffect(() => {
     if (activeTab === 'whatsapp' && clientId) {
-      connectSse();
-      // Verificar status atual
-      fetch(`/api/baileys/status?clientId=${encodeURIComponent(clientId)}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.status) setBaileysStatus(data.status as BaileysStatus);
-          if (data.phoneNumber) setBaileysPhone(data.phoneNumber);
-          if (data.connectedAt) setBaileysConnectedAt(data.connectedAt);
-        })
-        .catch(() => {});
+      // Verificar status atual ao abrir a aba
+      getStatusQuery.refetch();
     }
-    return () => { sseRef.current?.close(); };
-  }, [activeTab, clientId, connectSse]);
+  }, [activeTab, clientId]);
+
+  // Atualizar status quando a query retornar dados
+  useEffect(() => {
+    if (getStatusQuery.data) {
+      setEvolutionStatus(getStatusQuery.data.status as EvolutionStatus);
+      if (getStatusQuery.data.phoneNumber) {
+        setEvolutionPhone(getStatusQuery.data.phoneNumber);
+      }
+    }
+  }, [getStatusQuery.data]);
 
   const handleGenerateQr = async () => {
     if (!clientId) { toast.error('Sessão inválida'); return; }
     setIsStartingSession(true);
     setQrDataUrl(null);
     try {
-      const res = await fetch('/api/baileys/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId }),
-      });
-      if (!res.ok) throw new Error('Falha ao iniciar sessão');
-      toast.success('Aguardando QR Code...');
-      connectSse();
-    } catch (err: any) {
-      toast.error(err?.message || 'Erro ao gerar QR Code');
+      await connectMut.mutateAsync({ clientId });
     } finally {
       setIsStartingSession(false);
     }
@@ -1419,15 +1433,7 @@ export function SettingsPage() {
   const handleDisconnectBaileys = async () => {
     if (!clientId) return;
     try {
-      await fetch('/api/baileys/disconnect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId }),
-      });
-      setBaileysStatus('disconnected');
-      setQrDataUrl(null);
-      setBaileysPhone(null);
-      setBaileysConnectedAt(null);
+      await disconnectMut.mutateAsync({ clientId });
       toast.success('WhatsApp desconectado!');
     } catch {
       toast.error('Erro ao desconectar');
@@ -1669,22 +1675,17 @@ export function SettingsPage() {
                     </div>
                   </div>
                   {/* Badge de status */}
-                  {baileysStatus === 'connected' && (
+                  {evolutionStatus === 'connected' && (
                     <Badge className="bg-green-100 text-green-700 border-green-200 gap-1">
                       <CheckCircle2 className="w-3 h-3" /> Conectado
                     </Badge>
                   )}
-                  {baileysStatus === 'connecting' && (
+                  {evolutionStatus === 'connecting' && (
                     <Badge className="bg-blue-100 text-blue-700 border-blue-200 gap-1">
                       <Loader2 className="w-3 h-3 animate-spin" /> Conectando...
                     </Badge>
                   )}
-                  {baileysStatus === 'qr_ready' && (
-                    <Badge className="bg-amber-100 text-amber-700 border-amber-200 gap-1">
-                      <AlertCircle className="w-3 h-3" /> Aguardando escaneamento
-                    </Badge>
-                  )}
-                  {baileysStatus === 'disconnected' && (
+                  {evolutionStatus === 'disconnected' && (
                     <Badge className="bg-red-100 text-red-700 border-red-200 gap-1">
                       <X className="w-3 h-3" /> Desconectado
                     </Badge>
@@ -1693,14 +1694,13 @@ export function SettingsPage() {
               </CardHeader>
               <CardContent>
                 {/* Estado: conectado */}
-                {baileysStatus === 'connected' && (
+                {evolutionStatus === 'connected' && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-4 p-4 bg-green-50 rounded-xl border border-green-200">
                       <CheckCircle2 className="w-8 h-8 text-green-600 flex-shrink-0" />
                       <div>
                         <p className="font-semibold text-green-800">WhatsApp conectado com sucesso!</p>
-                        {baileysPhone && <p className="text-sm text-green-700">Número: +{baileysPhone}</p>}
-                        {baileysConnectedAt && <p className="text-xs text-green-600">Conectado em: {new Date(baileysConnectedAt).toLocaleString()}</p>}
+                        {evolutionPhone && <p className="text-sm text-green-700">Número: +{evolutionPhone}</p>}
                       </div>
                     </div>
                     <Button
@@ -1715,7 +1715,7 @@ export function SettingsPage() {
                 )}
 
                 {/* Estado: QR pronto para escanear */}
-                {baileysStatus === 'qr_ready' && qrDataUrl && (
+                {evolutionStatus === 'connecting' && qrDataUrl && (
                   <div className="space-y-4">
                     <div className="flex flex-col items-center gap-4 p-6 bg-slate-50 rounded-xl border-2 border-dashed border-slate-300">
                       <img src={qrDataUrl} alt="QR Code WhatsApp" className="w-64 h-64 rounded-lg shadow-md" />
@@ -1736,8 +1736,8 @@ export function SettingsPage() {
                   </div>
                 )}
 
-                {/* Estado: conectando (aguardando QR) */}
-                {baileysStatus === 'connecting' && (
+                {/* Estado: conectando (aguardando QR) - sem QR ainda */}
+                {evolutionStatus === 'connecting' && !qrDataUrl && (
                   <div className="flex flex-col items-center gap-4 p-8 bg-blue-50 rounded-xl border border-blue-200">
                     <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
                     <div className="text-center">
@@ -1748,7 +1748,7 @@ export function SettingsPage() {
                 )}
 
                 {/* Estado: desconectado */}
-                {baileysStatus === 'disconnected' && (
+                {evolutionStatus === 'disconnected' && (
                   <div className="space-y-4">
                     <div className="flex flex-col items-center gap-4 p-8 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200">
                       <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center">

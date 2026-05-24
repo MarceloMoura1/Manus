@@ -11,6 +11,7 @@ import { registerIntegrationApi } from "../integrationApi";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
+import { handleEvolutionWebhook, ensureSessionTable } from "../evolution";
 
 
 
@@ -49,6 +50,12 @@ async function startServer() {
   // WhatsApp Webhook endpoints (Meta)
   app.get("/api/webhooks/meta", handleWebhookVerify);
   app.post("/api/webhooks/meta", handleWebhookEvent);
+
+  // Evolution API Webhook endpoint
+  app.post("/webhook/evolution", handleEvolutionWebhook);
+
+  // Garantir que a tabela de sessões Evolution existe
+  await ensureSessionTable().catch(err => console.warn("[Evolution] Aviso ao criar tabela:", err));
 
 
 

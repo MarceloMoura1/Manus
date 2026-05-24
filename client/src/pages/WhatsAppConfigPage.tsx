@@ -41,20 +41,24 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
   const [refreshing, setRefreshing] = React.useState(false);
   const [qrCodeData, setQrCodeData] = React.useState<{ code: string; base64: string } | null>(null);
 
-  // Query para obter QR Code
-  const { data: qrCode, isLoading, refetch } = trpc.evolution.getQRCode.useQuery(
-    { clientId },
-    { enabled: !!clientId, refetchInterval: 5000 }
-  );
-
-  // Mutation para iniciar sessao
-  const startSessionMut = trpc.evolution.startSession.useMutation({
+  // Mutation para conectar e obter QR Code
+  const connectMut = trpc.evolution.connect.useMutation({
     onSuccess: (data: any) => {
-      toast.success("Sessao iniciada! Escaneie o QR Code com seu WhatsApp.");
-      setQrCodeData(data);
+      if (data.qrCode) {
+        toast.success("QR Code gerado! Escaneie com seu WhatsApp.");
+        setQrCodeData(data);
+      } else {
+        toast.info("WhatsApp já está conectado.");
+      }
     },
-    onError: (e: any) => toast.error(e?.message || "Erro ao iniciar sessao"),
+    onError: (e: any) => toast.error(e?.message || "Erro ao conectar"),
   });
+
+  // Query para obter status
+  const { data: status, isLoading, refetch } = trpc.evolution.getStatus.useQuery(
+    { clientId },
+    { enabled: !!clientId, refetchInterval: 3000 }
+  );
 
   // Mutation para desconectar
   const disconnectMut = trpc.evolution.disconnect.useMutation({
@@ -66,16 +70,36 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
     onError: (e: any) => toast.error(e?.message || "Erro ao desconectar"),
   });
 
+  // Mutation para obter novo QR Code
+  const getQRCodeMut = trpc.evolution.getQRCode.useMutation({
+    onSuccess: (data: any) => {
+      if (data.qrCode) {
+        setQrCodeData({ base64: data.qrCode });
+        toast.success("Novo QR Code gerado!");
+      }
+    },
+    onError: (e: any) => toast.error(e?.message || "Erro ao gerar QR Code"),
+  });
+
   const handleStartSession = async () => {
     setRefreshing(true);
     try {
-      await startSessionMut.mutateAsync({ clientId });
+      await connectMut.mutateAsync({ clientId });
     } finally {
       setRefreshing(false);
     }
   };
 
-  const displayQR = qrCodeData?.base64 || qrCode?.base64;
+  const handleRefreshQR = async () => {
+    setRefreshing(true);
+    try {
+      await getQRCodeMut.mutateAsync({ clientId });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const displayQR = qrCodeData?.base64 || status?.qrCode;
 
   return (
     <div className="space-y-4">
@@ -87,7 +111,7 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
         <div className="flex flex-col items-center gap-4">
           <div className="bg-white p-4 rounded-lg border border-slate-200">
             <img
-              src={`data:image/png;base64,${displayQR}`}
+              src={displayQR.startsWith('data:') ? displayQR : `data:image/png;base64,${displayQR}`}
               alt="QR Code"
               className="w-64 h-64 object-contain"
             />
@@ -97,8 +121,8 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
           </p>
           <div className="flex gap-2">
             <Button
-              onClick={handleStartSession}
-              disabled={startSessionMut.isPending || refreshing}
+              onClick={handleRefreshQR}
+              disabled={getQRCodeMut.isPending || refreshing}
               variant="outline"
               size="sm"
               className="gap-1"
@@ -127,11 +151,11 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
           </div>
           <Button
             onClick={handleStartSession}
-            disabled={startSessionMut.isPending}
+            disabled={connectMut.isPending}
             className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
           >
             <Plus className="w-4 h-4" />
-            {startSessionMut.isPending ? "Gerando..." : "Conectar WhatsApp"}
+            {connectMut.isPending ? "Gerando..." : "Conectar WhatsApp"}
           </Button>
         </div>
       )}
