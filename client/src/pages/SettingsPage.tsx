@@ -1361,6 +1361,7 @@ export function SettingsPage() {
   // tRPC mutations e queries para Evolution API
   const connectMut = trpc.evolution.connect.useMutation({
     onSuccess: (data) => {
+      setIsStartingSession(false);
       if (data.qrCode) {
         setQrDataUrl(data.qrCode);
         setEvolutionStatus('connecting');
@@ -1374,8 +1375,8 @@ export function SettingsPage() {
       }
     },
     onError: (err) => {
-      toast.error(err.message || 'Erro ao conectar');
       setIsStartingSession(false);
+      toast.error(err.message || 'Erro ao conectar');
     },
   });
 
@@ -1425,6 +1426,8 @@ export function SettingsPage() {
     setQrDataUrl(null);
     try {
       await connectMut.mutateAsync({ clientId });
+    } catch (err: any) {
+      // Erro já é tratado pelo onError da mutation
     } finally {
       setIsStartingSession(false);
     }
@@ -1737,7 +1740,7 @@ export function SettingsPage() {
                 )}
 
                 {/* Estado: conectando (aguardando QR) - sem QR ainda */}
-                {evolutionStatus === 'connecting' && !qrDataUrl && (
+                {(evolutionStatus === 'connecting' && !qrDataUrl) || isStartingSession ? (
                   <div className="flex flex-col items-center gap-4 p-8 bg-blue-50 rounded-xl border border-blue-200">
                     <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
                     <div className="text-center">
@@ -1745,7 +1748,7 @@ export function SettingsPage() {
                       <p className="text-sm text-blue-600">Aguarde alguns segundos</p>
                     </div>
                   </div>
-                )}
+                ) : null}
 
                 {/* Estado: desconectado */}
                 {evolutionStatus === 'disconnected' && (

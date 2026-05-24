@@ -29,8 +29,8 @@ import {
 } from "./session-store";
 
 // Tempo máximo de espera pelo QR Code (polling interno no connect)
-const QR_POLL_MAX_MS    = 15_000;
-const QR_POLL_INTERVAL  = 1_500;
+const QR_POLL_MAX_MS    = 30_000;  // Aumentado de 15s para 30s
+const QR_POLL_INTERVAL  = 1_000;   // Reduzido de 1.5s para 1s para resposta mais rápida
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -97,12 +97,13 @@ export const evolutionRouter = router({
         };
       }
 
-      // 2. Cria instância na Evolution API (idempotente)
+      // 2. Tenta criar instância na Evolution API (idempotente)
       try {
         await evoCreateInstance(instanceName);
       } catch (err: any) {
-        // "instance already exists" não é erro
-        if (!err.message?.toLowerCase().includes("already")) {
+        // "instance already exists" ou "Invalid integration" nao sao erros
+        const msg = err.message?.toLowerCase() || "";
+        if (!msg.includes("already") && !msg.includes("invalid integration")) {
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
             message: `Erro ao criar instância: ${err.message}`,
@@ -113,13 +114,24 @@ export const evolutionRouter = router({
       // 3. Persiste sessão como "connecting"
       await upsertSession(clientId, instanceName, "connecting");
 
-      // 4. Configura webhook
-      await setupWebhook(instanceName);
+      // 4. Configura webhook (nao eh critico)
+      await setupWebhook(instanceName).catch(() => {});
 
-      // 5. Aguarda QR Code ficar disponível
-      const qr = await waitForQRCode(instanceName);
+      // 5. Obtém QR Code imediatamente (a instância já deve existir)
+      const qr = await evoGetQRCode(instanceName).catch(() => null);
+      
+      if (qr?.base64) {
+        return {
+          ok: true,
+          status: "connecting" as const,
+          phoneNumber: null,
+          qrCode: qr.base64,
+        };
+      }
 
-      if (!qr) {
+      // Se nao conseguir imediatamente, fazer polling
+      const qrPolled = await waitForQRCode(instanceName);
+      if (!qrPolled) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message:
@@ -131,7 +143,7 @@ export const evolutionRouter = router({
         ok: true,
         status: "connecting" as const,
         phoneNumber: null,
-        qrCode: qr.base64,
+        qrCode: qrPolled.base64,
       };
     }),
 

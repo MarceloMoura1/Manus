@@ -70,16 +70,11 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
     onError: (e: any) => toast.error(e?.message || "Erro ao desconectar"),
   });
 
-  // Mutation para obter novo QR Code
-  const getQRCodeMut = trpc.evolution.getQRCode.useMutation({
-    onSuccess: (data: any) => {
-      if (data.qrCode) {
-        setQrCodeData({ base64: data.qrCode });
-        toast.success("Novo QR Code gerado!");
-      }
-    },
-    onError: (e: any) => toast.error(e?.message || "Erro ao gerar QR Code"),
-  });
+  // Query para obter novo QR Code
+  const getQRCodeQuery = trpc.evolution.getQRCode.useQuery(
+    { clientId },
+    { enabled: false } // Só executa quando chamado manualmente
+  );
 
   const handleStartSession = async () => {
     setRefreshing(true);
@@ -93,7 +88,13 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
   const handleRefreshQR = async () => {
     setRefreshing(true);
     try {
-      await getQRCodeMut.mutateAsync({ clientId });
+      const data = await getQRCodeQuery.refetch();
+      if (data.data?.qrCode) {
+        setQrCodeData({ base64: data.data.qrCode });
+        toast.success("Novo QR Code gerado!");
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Erro ao gerar QR Code");
     } finally {
       setRefreshing(false);
     }
@@ -122,7 +123,7 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
           <div className="flex gap-2">
             <Button
               onClick={handleRefreshQR}
-              disabled={getQRCodeMut.isPending || refreshing}
+              disabled={getQRCodeQuery.isFetching || refreshing}
               variant="outline"
               size="sm"
               className="gap-1"
