@@ -11,7 +11,6 @@ import { registerIntegrationApi } from "../integrationApi";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
-import { registerWhatsAppRoutes } from "../whatsapp-routes-fixed";
 
 
 
@@ -44,48 +43,14 @@ async function startServer() {
   registerOAuthRoutes(app);
   registerMetricWebhook(app);
   registerIntegrationApi(app);
-  registerWhatsAppRoutes(app);
 
 
-
-  // Evolution API Webhook endpoint
-  app.post("/api/webhooks/evolution", async (req, res) => {
-    try {
-      const { handleEvolutionWebhook } = await import("../evolution-webhook-handler");
-      const payload = req.body;
-
-      console.log(`[Evolution Webhook] Recebido webhook:`, {
-        event: payload.event,
-        instance: payload.instance,
-      });
-
-      // Processar webhook de forma assincrona (nao bloquear resposta)
-      handleEvolutionWebhook(payload).catch((err) => {
-        console.error(`[Evolution Webhook] Erro ao processar:`, err);
-      });
-
-      // Responder imediatamente
-      res.json({ ok: true });
-    } catch (err: any) {
-      console.error(`[Evolution Webhook] Erro:`, err);
-      res.status(500).json({ error: err?.message || "Erro ao processar webhook" });
-    }
-  });
 
   // WhatsApp Webhook endpoints (Meta)
   app.get("/api/webhooks/meta", handleWebhookVerify);
   app.post("/api/webhooks/meta", handleWebhookEvent);
 
 
-
-  // Inicializar Evolution API
-  try {
-    const { initEvolutionManager } = await import("../evolution-manager");
-    await initEvolutionManager();
-    console.log("[Evolution Manager] Inicializado com sucesso");
-  } catch (err: any) {
-    console.error("[Evolution Manager] Erro ao inicializar:", err);
-  }
 
   // Inicializar Socket.IO para WhatsApp
   initWhatsAppSocket(server);

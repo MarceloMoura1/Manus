@@ -1371,52 +1371,6 @@ export const appRouter = router({
           message: "E-mail não encontrado. Verifique se você foi cadastrado pelo administrador.",
         });
       }),
-    getCurrentSession: publicProcedure
-      .input(z.object({ userEmail: z.string().email() }))
-      .query(async ({ input }) => {
-        await hydrateSyncState();
-        const email = input.userEmail.trim().toLowerCase();
-
-        // Busca o usuário em todos os clientes
-        for (const client of clients) {
-          const user = client.users.find((u) => u.email.toLowerCase() === email);
-          if (!user) continue;
-
-          // Verifica se o usuário está ativo
-          if (user.status !== "active") {
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: "Seu acesso está bloqueado.",
-            });
-          }
-
-          // Verifica se o cliente tem acesso liberado
-          if (!client.accessReleased || client.status !== "active") {
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: "Sua empresa não tem acesso liberado na plataforma.",
-            });
-          }
-
-          const permissions = resolveUserPermissions(user, client.modules);
-          return {
-            userEmail: user.email,
-            userName: user.name,
-            userRole: user.role,
-            permissions,
-            clientId: client.clientId,
-            company: client.company,
-            plan: client.plan,
-            modules: client.modules,
-          };
-        }
-
-        // E-mail não encontrado
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Usuário não encontrado.",
-        });
-      }),
     refreshSession: publicProcedure
       .input(z.object({ userEmail: z.string().email() }))
       .mutation(async ({ input }) => {
