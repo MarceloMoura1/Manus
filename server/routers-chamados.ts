@@ -93,13 +93,13 @@ export const chamadosRouter = router({
         // Rate limiting
         checkRateLimit(clientId);
 
-        console.log('[DEBUG] Listing chamados for clientId:', clientId, 'status:', input.status);
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Listing chamados for clientId:', clientId, 'status:', input.status);
         
         const [chamados, total] = await Promise.all([
           listChamados(clientId, input.status, input.limit, input.offset),
           countChamados(clientId, input.status),
         ]);
-        console.log('[DEBUG] Found chamados:', chamados.length, 'total:', total);
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Found chamados:', chamados.length, 'total:', total);
         
         return { 
           chamados, 
@@ -142,7 +142,7 @@ export const chamadosRouter = router({
 
         checkRateLimit(clientId);
 
-        console.log('[DEBUG] Getting chamado detail:', input.chamadoId, 'for clientId:', clientId);
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Getting chamado detail:', input.chamadoId, 'for clientId:', clientId);
         
         const chamado = await getChamadoWithActivities(input.chamadoId, clientId);
         
@@ -198,7 +198,7 @@ export const chamadosRouter = router({
 
         checkRateLimit(clientId);
 
-        console.log('[DEBUG] Creating chamado with clientId:', clientId, 'input:', {
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Creating chamado with clientId:', clientId, 'input:', {
           customerName: input.customerName,
           company: input.company,
           title: input.title,
@@ -278,7 +278,7 @@ export const chamadosRouter = router({
 
         checkRateLimit(clientId);
 
-        console.log('[DEBUG] Updating chamado:', input.chamadoId, 'for clientId:', clientId);
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Updating chamado:', input.chamadoId, 'for clientId:', clientId);
         
         const { chamadoId, ...updates } = input;
         
@@ -336,7 +336,7 @@ export const chamadosRouter = router({
 
         checkRateLimit(clientId);
 
-        console.log('[DEBUG] Adding activity to chamado:', input.chamadoId);
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Adding activity to chamado:', input.chamadoId);
 
         await addActivityToChamado(
           input.chamadoId,
@@ -397,7 +397,7 @@ export const chamadosRouter = router({
 
         checkRateLimit(clientId);
 
-        console.log('[DEBUG] Editing activity:', input.activityId, 'in chamado:', input.chamadoId);
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Editing activity:', input.activityId, 'in chamado:', input.chamadoId);
 
         await editActivity(
           input.activityId,
@@ -452,7 +452,7 @@ export const chamadosRouter = router({
 
         checkRateLimit(clientId);
 
-        console.log('[DEBUG] Getting collaborators for chamado:', input.chamadoId);
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Getting collaborators for chamado:', input.chamadoId);
 
         const collaborators = await getCollaborators(input.chamadoId, clientId);
         
@@ -490,7 +490,7 @@ export const chamadosRouter = router({
 
         checkRateLimit(clientId);
 
-        console.log('[DEBUG] Updating collaborators for chamado:', input.chamadoId);
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Updating collaborators for chamado:', input.chamadoId);
 
         await updateCollaborators(input.chamadoId, clientId, input.collaborators);
 

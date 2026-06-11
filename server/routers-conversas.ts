@@ -79,10 +79,10 @@ export const conversasRouter = router({
 
         checkRateLimit(clientId);
 
-        console.log('[DEBUG] Listing conversas for clientId:', clientId, 'status:', input.status);
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Listing conversas for clientId:', clientId, 'status:', input.status);
         
         const conversas = await listConversations(clientId, input.status, input.limit, input.offset);
-        console.log('[DEBUG] Found conversas:', conversas.length);
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Found conversas:', conversas.length);
         
         return { 
           conversas, 
@@ -124,7 +124,7 @@ export const conversasRouter = router({
 
         checkRateLimit(clientId);
 
-        console.log('[DEBUG] Getting conversa detail:', input.conversationId, 'for clientId:', clientId);
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Getting conversa detail:', input.conversationId, 'for clientId:', clientId);
         
         const conversa = await getConversationWithMessages(input.conversationId, clientId);
         
@@ -174,7 +174,7 @@ export const conversasRouter = router({
 
         checkRateLimit(clientId);
 
-        console.log('[DEBUG] Creating conversa with clientId:', clientId, 'input:', {
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Creating conversa with clientId:', clientId, 'input:', {
           customerName: input.customerName,
           phone: input.phone,
           company: input.company,
@@ -241,7 +241,7 @@ export const conversasRouter = router({
 
         checkRateLimit(clientId);
 
-        console.log('[DEBUG] Updating conversa status:', input.conversationId, 'to:', input.status);
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Updating conversa status:', input.conversationId, 'to:', input.status);
         
         await updateConversation(input.conversationId, clientId, { status: input.status });
         
@@ -296,7 +296,7 @@ export const conversasRouter = router({
 
         checkRateLimit(clientId);
 
-        console.log('[DEBUG] Adding message to conversa:', input.conversationId);
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Adding message to conversa:', input.conversationId);
 
         await addMessageToConversation(
           input.conversationId,
@@ -354,7 +354,7 @@ export const conversasRouter = router({
 
         checkRateLimit(clientId);
 
-        console.log('[DEBUG] Searching conversa by phone:', input.phone);
+        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Searching conversa by phone:', input.phone);
         
         const conversa = await searchConversationByPhone(clientId, input.phone);
         
