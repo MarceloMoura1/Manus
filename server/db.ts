@@ -195,11 +195,11 @@ async function ensureStructuredTables() {
   // Migrações de colunas: cada ALTER TABLE em sua própria chamada execute()
   // (MySQL2 não permite múltiplos statements em uma única execute())
   const migrations = [
-    "ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS email VARCHAR(255)",
-    "ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS cnpj VARCHAR(20)",
-    "ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS max_users INT NOT NULL DEFAULT 5",
-    "ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS status_type ENUM('active','test') NOT NULL DEFAULT 'test'",
-    "ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS integrations_json LONGTEXT NOT NULL",
+    "ALTER TABLE megadesk_domain_clients ADD COLUMN email VARCHAR(255)",
+    "ALTER TABLE megadesk_domain_clients ADD COLUMN cnpj VARCHAR(20)",
+    "ALTER TABLE megadesk_domain_clients ADD COLUMN max_users INT NOT NULL DEFAULT 5",
+    "ALTER TABLE megadesk_domain_clients ADD COLUMN status_type ENUM('active','test') NOT NULL DEFAULT 'test'",
+    "ALTER TABLE megadesk_domain_clients ADD COLUMN integrations_json LONGTEXT NOT NULL",
   ];
   for (const migration of migrations) {
     try {
@@ -224,7 +224,7 @@ async function ensureStructuredTables() {
   )`);
   // Migração: adicionar password_hash se não existir (tabelas já criadas anteriormente)
   try {
-    await pool.execute("ALTER TABLE megadesk_domain_client_users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)");
+    await pool.execute("ALTER TABLE megadesk_domain_client_users ADD COLUMN password_hash VARCHAR(255)");
   } catch (err: any) {
     if (err?.code !== 'ER_DUP_FIELDNAME') throw err;
   }
