@@ -94,7 +94,6 @@ async function startServer() {
       console.error("[Backup Handler] Erro:", error);
       res.status(500).json({ 
         error: error?.message || "Erro desconhecido",
-        stack: error?.stack,
         timestamp: new Date().toISOString()
       });
     }

@@ -485,14 +485,13 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
           `[MegaDesk CRITICAL] ${orphans.length} usuário(s) ativo(s) sem passwordHash após save:`,
           orphans.map((r: any) => `${r.email} (${r.client_id})`).join(", ")
         );
-        // Auto-corrigir: definir senha padrão para usuários sem hash
-        const defaultHash = await import("bcryptjs").then((m) => m.hash("123456", 12));
+        // Auto-corrigir: bloquear usuários sem hash (devem redefinir senha)
         for (const orphan of orphans) {
           await connection.execute(
-            "UPDATE megadesk_domain_client_users SET password_hash = ? WHERE user_id = ? AND (password_hash IS NULL OR password_hash = '')",
-            [defaultHash, orphan.user_id]
+            "UPDATE megadesk_domain_client_users SET status = 'blocked' WHERE user_id = ? AND (password_hash IS NULL OR password_hash = '')",
+            [orphan.user_id]
           );
-          console.warn(`[MegaDesk] Senha padrão restaurada automaticamente para: ${orphan.email}`);
+          console.warn(`[MegaDesk] Usuário bloqueado por ausência de senha - admin deve redefinir: ${orphan.email}`);
         }
       }
     } catch (error) {

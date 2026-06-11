@@ -24,14 +24,14 @@ async function tryMegaAdminSession(req: CreateExpressContextOptions["req"]): Pro
       }
     }
     if (!raw) {
-      console.log('[DEBUG] No MegaAdmin token found in cookie or Authorization header');
+      process.env.NODE_ENV === 'development' && console.log('[DEBUG] No MegaAdmin token found in cookie or Authorization header');
       return null;
     }
     const secret = new TextEncoder().encode(process.env.JWT_SECRET ?? (() => { throw new Error("JWT_SECRET não configurado. Defina no .env"); })());
     const { payload } = await jwtVerify(raw, secret);
-    console.log('[DEBUG] MegaAdmin JWT verified:', { type: payload.type, role: payload.role, sub: payload.sub });
+    process.env.NODE_ENV === 'development' && console.log('[DEBUG] MegaAdmin JWT verified:', { type: payload.type, role: payload.role, sub: payload.sub });
     if (payload.type !== "megaadmin" || payload.role !== "admin") {
-      console.log('[DEBUG] Token is not megaadmin admin type');
+      process.env.NODE_ENV === 'development' && console.log('[DEBUG] Token is not megaadmin admin type');
       return null;
     }
     // Construct a synthetic User object that satisfies adminProcedure checks
@@ -47,7 +47,7 @@ async function tryMegaAdminSession(req: CreateExpressContextOptions["req"]): Pro
       lastSignedIn: new Date(),
     } as User;
   } catch (err) {
-    console.log('[DEBUG] MegaAdmin session error:', err instanceof Error ? err.message : String(err));
+    process.env.NODE_ENV === 'development' && console.log('[DEBUG] MegaAdmin session error:', err instanceof Error ? err.message : String(err));
     return null;
   }
 }

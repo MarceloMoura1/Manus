@@ -37,6 +37,16 @@ interface EvolutionWebhookPayload {
 // ─── Handler principal ───────────────────────────────────────────────────────
 
 export async function handleEvolutionWebhook(req: Request, res: Response): Promise<void> {
+  // Validar API key da Evolution (quando configurada)
+  const expectedKey = process.env.EVOLUTION_API_KEY;
+  if (expectedKey) {
+    const receivedKey = req.headers["apikey"] as string || req.headers["x-api-key"] as string;
+    if (!receivedKey || receivedKey !== expectedKey) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+  }
+
   // Responde 200 imediatamente para não bloquear a Evolution API
   res.status(200).json({ ok: true });
 
