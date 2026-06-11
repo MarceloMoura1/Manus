@@ -1781,10 +1781,11 @@ export function SettingsPage() {
                         if (!session) return;
                         const { clientId } = JSON.parse(session);
                         try {
-                          await fetch('/api/baileys/disconnect', {
+                          // Desconectar via tRPC Evolution API
+                          await fetch(`/api/trpc/evolution.disconnect`, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ clientId }),
+                            headers: { 'Content-Type': 'application/json', 'x-tenant-id': clientId },
+                            body: JSON.stringify({ json: { clientId } }),
                           });
                           setEvolutionStatus('disconnected');
                           setEvolutionPhone(null);

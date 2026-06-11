@@ -371,7 +371,7 @@ function ConversationsPage() {
     if (!clientId) return;
     const checkWaStatus = async () => {
       try {
-        const res = await fetch(`/api/baileys/status?clientId=${encodeURIComponent(clientId)}`);
+        const res = await fetch(`/api/trpc/evolution.getStatus?input=${encodeURIComponent(JSON.stringify({ json: { clientId } }))}`);
         if (res.ok) {
           const data = await res.json();
           setWaConnected(data.status === 'connected');
@@ -1096,20 +1096,13 @@ function ConversationsPage() {
                         const text = messageInput.trim();
                         setMessageInput('');
                         try {
-                          const res = await fetch('/api/baileys/send', {
+                          const res = await fetch('/api/trpc/megadesk.sendMessage', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              clientId,
-                              conversationId: selectedConv.id,
-                              phone: selectedConv.phone,
-                              text,
-                              agentName: userName,
-                            }),
+                            headers: { 'Content-Type': 'application/json', 'x-tenant-id': clientId },
+                            body: JSON.stringify({ json: { conversationId: selectedConv.id, message: text, userEmail: userName || 'agente@megadesk.local' } }),
                           });
                           if (!res.ok) {
-                            const err = await res.json();
-                            showToast(err.error || 'Erro ao enviar mensagem', 'error');
+                            showToast('Erro ao enviar mensagem', 'error');
                           } else {
                             showToast('Mensagem enviada!', 'success');
                             refetchMessages();
@@ -1133,20 +1126,13 @@ function ConversationsPage() {
                     const text = messageInput.trim();
                     setMessageInput('');
                     try {
-                      const res = await fetch('/api/baileys/send', {
+                      const res = await fetch('/api/trpc/megadesk.sendMessage', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          clientId,
-                          conversationId: selectedConv.id,
-                          phone: selectedConv.phone,
-                          text,
-                          agentName: userName,
-                        }),
+                        headers: { 'Content-Type': 'application/json', 'x-tenant-id': clientId },
+                        body: JSON.stringify({ json: { conversationId: selectedConv.id, message: text, userEmail: userName || 'agente@megadesk.local' } }),
                       });
                       if (!res.ok) {
-                        const err = await res.json();
-                        showToast(err.error || 'Erro ao enviar mensagem', 'error');
+                        showToast('Erro ao enviar mensagem', 'error');
                       } else {
                         showToast('Mensagem enviada!', 'success');
                         refetchMessages();
@@ -3274,7 +3260,7 @@ function Shell() {
     if (!session?.clientId) return;
     const checkStatus = async () => {
       try {
-        const res = await fetch(`/api/baileys/status?clientId=${encodeURIComponent(session.clientId)}`);
+        const res = await fetch(`/api/trpc/evolution.getStatus?input=${encodeURIComponent(JSON.stringify({ json: { clientId: session.clientId } }))}`);
         if (res.ok) {
           const data = await res.json();
           setWhatsappConnected(data.status === 'connected');
