@@ -7,17 +7,34 @@ dist/
 build/
 *.dist
 
-# Environment variables
+# Environment variables — NUNCA commitar
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 
-# IDE and editor files
+# Configurações de plataforma com segredos — NUNCA commitar
+.project-config.json
+.manus-logs/
+
+# Logs
+logs/
+*.log
+
+# IDE e editor
 .vscode/
 .idea/
 *.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
+*.tmp
+*.temp
 *.swo
 *~
 

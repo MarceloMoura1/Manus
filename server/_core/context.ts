@@ -27,7 +27,7 @@ async function tryMegaAdminSession(req: CreateExpressContextOptions["req"]): Pro
       console.log('[DEBUG] No MegaAdmin token found in cookie or Authorization header');
       return null;
     }
-    const secret = new TextEncoder().encode(process.env.JWT_SECRET ?? "fallback");
+    const secret = new TextEncoder().encode(process.env.JWT_SECRET ?? (() => { throw new Error("JWT_SECRET não configurado. Defina no .env"); })());
     const { payload } = await jwtVerify(raw, secret);
     console.log('[DEBUG] MegaAdmin JWT verified:', { type: payload.type, role: payload.role, sub: payload.sub });
     if (payload.type !== "megaadmin" || payload.role !== "admin") {

@@ -285,7 +285,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "UNAUTHORIZED", message: "E-mail ou senha incorretos." });
         }
         // Gerar JWT próprio do MegaAdmin
-        const secret = new TextEncoder().encode(process.env.JWT_SECRET ?? "fallback");
+        const secret = new TextEncoder().encode(process.env.JWT_SECRET ?? (() => { throw new Error("JWT_SECRET não configurado. Defina no .env"); })());
         const token = await new SignJWT({ sub: cred.email, name: cred.name, role: "admin", type: "megaadmin" })
           .setProtectedHeader({ alg: "HS256" })
           .setIssuedAt()
@@ -422,7 +422,7 @@ export const appRouter = router({
       const clientId = `cliente-${String(idNumber).padStart(3, "0")}`;
       const token = `mdsk_live_${clientId}_${Math.random().toString(16).slice(2, 10)}`;
       // Gerar hash de senha padrão para o usuário inicial
-      const defaultPasswordHash = await bcrypt.hash("123456", 12);
+      const defaultPasswordHash = await bcrypt.hash(Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12), 12) // Senha aleatória - usuário deve trocar no primeiro acesso;
       const client: MegaClient = {
         id: `client-${String(idNumber).padStart(3, "0")}`,
         clientId,
@@ -608,7 +608,7 @@ export const appRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: `Limite de usuários atingido (${client.maxUsers}). Aumente o limite nos dados do cliente.` });
       }
       // Gerar hash de senha padrão (123456) para sincronização com MegaDesk
-      const defaultPasswordHash = await bcrypt.hash("123456", 12);
+      const defaultPasswordHash = await bcrypt.hash(Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12), 12) // Senha aleatória - usuário deve trocar no primeiro acesso;
       const user = { id: `user-${Date.now()}`, name: input.name, email: input.email, role: input.role, status: client.accessReleased ? "active" as const : "blocked" as const, permissions: rolePermissions(input.role), passwordHash: defaultPasswordHash };
       client.users.push(user);
       audit("MegaAdmin", `Usuário criado: ${input.email}`, client.clientId);

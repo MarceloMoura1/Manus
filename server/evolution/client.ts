@@ -5,7 +5,7 @@
  */
 
 const EVOLUTION_BASE_URL = process.env.EVOLUTION_API_URL || "http://localhost:8081";
-const EVOLUTION_API_KEY  = process.env.EVOLUTION_API_KEY  || "evolution_api_key_123456";
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || "";
 
 const DEFAULT_HEADERS = {
   "Content-Type": "application/json",
