@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { getDb } from "./db";
-
+import { megadeskDomainBotScripts as megadeskBotScripts } from "../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 
 export async function createBotScript(clientId: string, data: {
@@ -9,24 +9,25 @@ export async function createBotScript(clientId: string, data: {
   systemPrompt: string;
   initialMessage?: string;
 }) {
-  const db = await getDb();
+  const db = getDb();
   const scriptId = randomUUID();
   
-  await db.insert(megadeskBotScripts).values({
+  await (db.insert(megadeskBotScripts) as any).values({// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     scriptId,
     clientId,
     name: data.name,
-    description: data.description,
-    systemPrompt: data.systemPrompt,
+    description: data.systemPrompt || data.description || "",
+    // systemPrompt mapeado para description (campo não existe na tabela)
     initialMessage: data.initialMessage,
-    isActive: false,
+    active: 0,
   });
 
   return scriptId;
 }
 
 export async function getBotScripts(clientId: string) {
-  const db = await getDb();
+  const db = getDb();
   const scripts = await db
     .select()
     .from(megadeskBotScripts)
@@ -36,7 +37,7 @@ export async function getBotScripts(clientId: string) {
 }
 
 export async function getBotScript(clientId: string, scriptId: string) {
-  const db = await getDb();
+  const db = getDb();
   const script = await db
     .select()
     .from(megadeskBotScripts)
@@ -62,13 +63,13 @@ export async function updateBotScript(
     isActive?: boolean;
   }
 ) {
-  const db = await getDb();
+  const db = getDb();
   
   await db
     .update(megadeskBotScripts)
     .set({
       ...data,
-      updatedAt: new Date(),
+      updatedAt: new Date().toISOString().slice(0, 19).replace("T", " "),
     })
     .where(
       and(
@@ -79,7 +80,7 @@ export async function updateBotScript(
 }
 
 export async function deleteBotScript(clientId: string, scriptId: string) {
-  const db = await getDb();
+  const db = getDb();
   
   await db
     .delete(megadeskBotScripts)
@@ -92,18 +93,18 @@ export async function deleteBotScript(clientId: string, scriptId: string) {
 }
 
 export async function activateBotScript(clientId: string, scriptId: string) {
-  const db = await getDb();
+  const db = getDb();
   
   // Desativar todos os outros scripts do cliente
   await db
     .update(megadeskBotScripts)
-    .set({ isActive: false })
+    .set({ active: 0 })
     .where(eq(megadeskBotScripts.clientId, clientId));
 
   // Ativar o script selecionado
   await db
     .update(megadeskBotScripts)
-    .set({ isActive: true, updatedAt: new Date() })
+    .set({ active: 1, updatedAt: new Date().toISOString().slice(0, 19).replace("T", " ") })
     .where(
       and(
         eq(megadeskBotScripts.clientId, clientId),
@@ -113,11 +114,11 @@ export async function activateBotScript(clientId: string, scriptId: string) {
 }
 
 export async function deactivateBotScript(clientId: string, scriptId: string) {
-  const db = await getDb();
+  const db = getDb();
   
   await db
     .update(megadeskBotScripts)
-    .set({ isActive: false, updatedAt: new Date() })
+    .set({ active: 0, updatedAt: new Date().toISOString().slice(0, 19).replace("T", " ") })
     .where(
       and(
         eq(megadeskBotScripts.clientId, clientId),
@@ -127,14 +128,14 @@ export async function deactivateBotScript(clientId: string, scriptId: string) {
 }
 
 export async function getActiveBotScript(clientId: string) {
-  const db = await getDb();
+  const db = getDb();
   const script = await db
     .select()
     .from(megadeskBotScripts)
     .where(
       and(
         eq(megadeskBotScripts.clientId, clientId),
-        eq(megadeskBotScripts.isActive, true)
+        eq(megadeskBotScripts.active, 1)
       )
     )
     .limit(1);

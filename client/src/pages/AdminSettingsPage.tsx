@@ -64,12 +64,12 @@ export function AdminSettingsPage({ clientId }: AdminSettingsPageProps) {
 
   // Form state
   const [formData, setFormData] = useState({
-    phoneNumberId: whatsappConfig?.phoneNumberId || "",
-    businessAccountId: whatsappConfig?.businessAccountId || "",
+    phoneNumberId: whatsappConfig?.phoneNumberId ?? "",
+    businessAccountId: whatsappConfig?.businessAccountId ?? "",
     accessToken: "",
-    webhookVerifyToken: whatsappConfig?.webhookVerifyToken || "",
-    phoneNumber: whatsappConfig?.phoneNumber || "",
-    webhookUrl: whatsappConfig?.webhookUrl || "",
+    webhookVerifyToken: whatsappConfig?.webhookVerifyToken ?? "",
+    phoneNumber: whatsappConfig?.phoneNumber ?? "",
+    webhookUrl: (whatsappConfig as any)?.webhookUrl ?? "",
   });
 
   // Update form when config loads
@@ -77,11 +77,11 @@ export function AdminSettingsPage({ clientId }: AdminSettingsPageProps) {
     if (whatsappConfig) {
       setFormData((prev) => ({
         ...prev,
-        phoneNumberId: whatsappConfig.phoneNumberId,
-        businessAccountId: whatsappConfig.businessAccountId,
-        webhookVerifyToken: whatsappConfig.webhookVerifyToken,
-        phoneNumber: whatsappConfig.phoneNumber || "",
-        webhookUrl: whatsappConfig.webhookUrl || "",
+        phoneNumberId: whatsappConfig.phoneNumberId ?? "",
+        businessAccountId: whatsappConfig.businessAccountId ?? "",
+        webhookVerifyToken: whatsappConfig.webhookVerifyToken ?? "",
+        phoneNumber: whatsappConfig.phoneNumber ?? "",
+        webhookUrl: (whatsappConfig as any).webhookUrl ?? "",
       }));
     }
   }, [whatsappConfig]);

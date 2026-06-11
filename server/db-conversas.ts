@@ -31,8 +31,8 @@ export type ConversationWithMessages = {
     text: string;
     time: string;
   }>;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: Date | string;
+  updatedAt: Date | string;
 };
 
 // Constantes de validação
@@ -169,8 +169,8 @@ export async function createConversation(
       lastMessage: sanitizedLastMessage,
       timeLabel,
       messagesJson,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
     });
 
     console.log(`[SUCCESS] Conversa criada com sucesso (ID: ${conversationId})`);
@@ -185,8 +185,8 @@ export async function createConversation(
       lastMessage: sanitizedLastMessage,
       timeLabel,
       messages: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
     };
   });
 }
@@ -332,7 +332,7 @@ export async function updateConversation(
     updateData.messagesJson = updates.messagesJson;
   }
 
-  updateData.updatedAt = new Date();
+  updateData.updatedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
   return retryWithBackoff(async () => {
     console.log(`[LOG] Atualizando conversa ${conversationId} para cliente ${clientId}`);
@@ -409,7 +409,7 @@ export async function addMessageToConversation(
       .set({
         messagesJson: JSON.stringify(messages),
         lastMessage: sanitizedText,
-        updatedAt: new Date(),
+        updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
       })
       .where(eq(megadeskDomainConversations.conversationId, conversationId));
 

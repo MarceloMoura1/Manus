@@ -1786,9 +1786,8 @@ export function SettingsPage() {
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ clientId }),
                           });
-                          setBaileysStatus('disconnected');
-                          setBaileysPhone(null);
-                          setBaileysConnectedAt(null);
+                          setEvolutionStatus('disconnected');
+                          setEvolutionPhone(null);
                           setQrDataUrl(null);
                         } catch {}
                       }}

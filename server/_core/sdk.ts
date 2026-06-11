@@ -4,7 +4,7 @@ import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
-import type { User } from "../../drizzle/schema";
+import type { User } from "./types";
 import * as db from "../db";
 import { ENV } from "./env";
 import type {
@@ -306,7 +306,13 @@ class SDKServer {
       lastSignedIn: signedInAt,
     });
 
-    return user;
+    // Cast para AuthenticatedUser (User com campos de Date mapeados do Drizzle)
+    return {
+      ...user,
+      createdAt: user.createdAt ? new Date(user.createdAt) : new Date(),
+      updatedAt: user.updatedAt ? new Date(user.updatedAt) : new Date(),
+      lastSignedIn: user.lastSignedIn ? new Date(user.lastSignedIn) : new Date(),
+    } as AuthenticatedUser;
   }
 }
 

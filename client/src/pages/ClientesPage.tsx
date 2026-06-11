@@ -986,7 +986,7 @@ export function ClientesPage({ initialSelectedId, onNavigate }: { initialSelecte
     onError(err) { toast.error(err.message); },
   });
 
-  const clients: CrmClient[] = (data?.clients ?? []) as CrmClient[];
+  const clients: CrmClient[] = (data?.clients ?? []) as unknown as CrmClient[];
 
   // Sem filtro de status, mostrar todos os clientes
   const filteredClients = useMemo(() => {

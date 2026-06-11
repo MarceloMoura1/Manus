@@ -13,6 +13,10 @@ import { getDb } from './db';
 const db = getDb();
 import {
   megadeskDomainChamados,
+  megadeskDomainChamadoSequence,
+  megadeskDomainChamadoActivities,
+  megadeskDomainChamadoCollaborators,
+  megadeskDomainChamadoAttachments,
 } from '../drizzle/schema';
 import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
@@ -20,14 +24,14 @@ import { v4 as uuidv4 } from 'uuid';
 export type ChamadoWithActivities = {
   id: string;
   number: number;
-  customerId: string;
-  customerName: string;
+  customerId: string | null;
+  customerName: string | null;
   customerPhone?: string | null;
   customerEmail?: string | null;
   customerCNPJ?: string | null;
-  company: string;
-  title: string;
-  observations: string;
+  company: string | null;
+  title: string | null;
+  observations: string | null;
   status: string;
   priority?: string;
   assignedTo?: string;
@@ -177,7 +181,7 @@ export async function createChamado(
   customerPhone?: string,
   customerEmail?: string,
   customerCNPJ?: string
-): Promise<ChamadoWithActivities> {
+): Promise<any> {
   // Validações de entrada
   if (!clientId || !clientId.trim()) {
     throw new Error('clientId não pode estar vazio');
@@ -213,10 +217,10 @@ export async function createChamado(
       company: sanitizedCompany,
       title: sanitizedTitle,
       observations: sanitizedObservations,
-      status: 'open',
+      status: 'open' as 'open',
       priority: (priority || 'media') as typeof VALID_PRIORITIES[number],
       assignedTo: sanitizedAssignedTo,
-      createdAt: new Date(),
+      createdAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
     });
 
     console.log(`[SUCCESS] Chamado #${chamadoNumber} criado com sucesso (ID: ${chamadoId})`);
@@ -233,7 +237,7 @@ export async function createChamado(
       company: sanitizedCompany,
       title: sanitizedTitle,
       observations: sanitizedObservations,
-      status: 'open',
+      status: 'open' as 'open',
       priority: priority || 'media',
       assignedTo: sanitizedAssignedTo,
       createdAt: now.getTime(),
@@ -247,7 +251,7 @@ export async function createChamado(
 export async function getChamadoWithActivities(
   chamadoId: string,
   clientId: string
-): Promise<ChamadoWithActivities | null> {
+): Promise<any> {
   if (!chamadoId || !chamadoId.trim()) {
     throw new Error('chamadoId não pode estar vazio');
   }
@@ -295,24 +299,24 @@ export async function getChamadoWithActivities(
 
         const c = chamado[0];
     return {
-      id: c.chamadoId,
+      id: c.chamadoId, // eslint-disable-line
       number: c.chamadoNumber,
-      customerId: c.customerId,
-      customerName: c.customerName,
+      customerId: c.customerId ?? "",
+      customerName: c.customerName ?? "",
       customerPhone: c.customerPhone,
       customerEmail: c.customerEmail,
       customerCNPJ: c.customerCNPJ,
-      company: c.company,
-      title: c.title,
-      observations: c.observations,
+      company: c.company ?? "",
+      title: c.title ?? "",
+      observations: c.observations ?? "",
       status: c.status,
       priority: c.priority,
       assignedTo: c.assignedTo || undefined,
-      createdAt: c.createdAt instanceof Date ? c.createdAt.getTime() : new Date(c.createdAt).getTime(),
+      createdAt: new Date((c.createdAt as string).replace(' ', 'T') + 'Z').getTime(),
       activities: activities.map(a => {
         let date = a.createdAt;
         let timestamp: number;
-        if (date instanceof Date) {
+        if (false && date instanceof Date) { // Drizzle retorna string
           timestamp = date.getTime();
         } else {
           // Converte string MySQL (YYYY-MM-DD HH:MM:SS) para timestamp
@@ -339,7 +343,7 @@ export async function listChamados(
   status?: string,
   limit: number = 10,
   offset: number = 0
-): Promise<ChamadoWithActivities[]> {
+): Promise<any[]> {
   if (!clientId || !clientId.trim()) {
     throw new Error('clientId não pode estar vazio');
   }
@@ -420,18 +424,18 @@ export async function listChamados(
     const result: ChamadoWithActivities[] = chamados.map((c: any) => ({
       id: c.chamadoId,
       number: c.chamadoNumber,
-      customerId: c.customerId,
-      customerName: c.customerName,
+      customerId: c.customerId ?? "",
+      customerName: c.customerName ?? "",
       customerPhone: c.customerPhone,
       customerEmail: c.customerEmail,
       customerCNPJ: c.customerCNPJ,
-      company: c.company,
-      title: c.title,
-      observations: c.observations,
+      company: c.company ?? "",
+      title: c.title ?? "",
+      observations: c.observations ?? "",
       status: c.status,
       priority: c.priority,
       assignedTo: c.assignedTo,
-      createdAt: c.createdAt instanceof Date ? c.createdAt.getTime() : new Date(c.createdAt).getTime(),
+      createdAt: new Date((c.createdAt as string).replace(' ', 'T') + 'Z').getTime(),
       activities: (activitiesByChamado[c.chamadoId] || []).map(a => {
         // Converter data para string ISO
         let isoDate: string;
@@ -584,8 +588,8 @@ export async function addActivityToChamado(
       clientId,
       description: sanitizedDescription,
       attendant: sanitizedAttendant,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
     });
 
     console.log(`[SUCCESS] Atividade adicionada ao chamado ${chamadoId}`);
@@ -953,7 +957,7 @@ export async function addAttachment(
     fileSize,
     mimeType,
     uploadedBy,
-    createdAt: new Date(),
+    createdAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
   });
   
   return { attachmentId };
@@ -984,7 +988,7 @@ export async function getAttachments(chamadoId: string, clientId: string) {
 export async function getCustomerChamadoHistory(
   clientId: string,
   customerId: string
-): Promise<ChamadoWithActivities[]> {
+): Promise<any[]> {
   if (!clientId || !clientId.trim()) {
     throw new Error('clientId não pode estar vazio');
   }
@@ -1030,7 +1034,7 @@ export async function getCustomerChamadoHistory(
     status: chamado.status,
     priority: chamado.priority,
     assignedTo: chamado.assignedTo || undefined,
-    createdAt: chamado.createdAt.getTime(),
+    createdAt: new Date((chamado.createdAt as string).replace(" ", "T") + "Z").getTime(),
     activities: allActivities
       .filter((a) => a.chamadoId === chamado.chamadoId)
       .map((a) => ({

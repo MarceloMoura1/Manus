@@ -48,7 +48,7 @@ export async function saveWhatsappConfig(clientId: string, data: {
         webhookVerifyToken: data.webhookVerifyToken,
         phoneNumber: data.phoneNumber,
         webhookUrl: data.webhookUrl,
-        updatedAt: new Date(),
+        updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
       })
       .where(eq(megadeskWhatsappConfig.clientId, clientId));
 
@@ -57,7 +57,7 @@ export async function saveWhatsappConfig(clientId: string, data: {
     // Criar novo
     const id = uuidv4();
     await db.insert(megadeskWhatsappConfig).values({
-      id,
+      configId: id,
       clientId,
       phoneNumberId: data.phoneNumberId,
       businessAccountId: data.businessAccountId,
@@ -65,8 +65,7 @@ export async function saveWhatsappConfig(clientId: string, data: {
       webhookVerifyToken: data.webhookVerifyToken,
       phoneNumber: data.phoneNumber,
       webhookUrl: data.webhookUrl,
-      isConnected: false,
-      webhookStatus: "pending",
+      connectionStatus: 0,
     });
 
     return await getWhatsappConfig(clientId);
@@ -81,8 +80,8 @@ export async function updateConnectionStatus(clientId: string, isConnected: bool
   await db
     .update(megadeskWhatsappConfig)
     .set({
-      isConnected,
-      updatedAt: new Date(),
+      connectionStatus: isConnected ? 1 : 0,
+      updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
     })
     .where(eq(megadeskWhatsappConfig.clientId, clientId));
 
@@ -100,9 +99,8 @@ export async function updateWebhookStatus(
   await db
     .update(megadeskWhatsappConfig)
     .set({
-      webhookStatus: status,
-      lastWebhookTest: new Date(),
-      updatedAt: new Date(),
+      // webhookStatus removido — não existe no schema atual
+      updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
     })
     .where(eq(megadeskWhatsappConfig.clientId, clientId));
 

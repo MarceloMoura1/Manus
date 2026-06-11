@@ -24,7 +24,7 @@ interface TenantInfo {
   databaseName: string;
   company: string;
   status: string;
-  accessReleased: boolean;
+  accessReleased: number;
 }
 
 /**
@@ -59,7 +59,7 @@ export async function createNewTenant(input: CreateTenantInput): Promise<TenantI
       maxUsers: input.maxUsers || 5,
       statusType: "test",
       status: "setup",
-      accessReleased: false,
+      accessReleased: 0,
       apiToken,
       modulesJson: JSON.stringify([]),
       integrationsJson: JSON.stringify({}),
@@ -72,7 +72,7 @@ export async function createNewTenant(input: CreateTenantInput): Promise<TenantI
       databaseName,
       company: input.company,
       status: "setup",
-      accessReleased: false,
+      accessReleased: 0,
     };
   } catch (error) {
     console.error("❌ Erro ao criar tenant:", error);
@@ -92,7 +92,7 @@ export async function releaseTenantAccess(clientId: string): Promise<void> {
       .update(megadeskDomainClients)
       .set({
         status: "active",
-        accessReleased: true,
+        accessReleased: 1,
         statusType: "test",
       })
       .where(eq(megadeskDomainClients.clientId, clientId));
@@ -116,7 +116,7 @@ export async function pauseTenantAccess(clientId: string): Promise<void> {
       .update(megadeskDomainClients)
       .set({
         status: "paused",
-        accessReleased: false,
+        accessReleased: 0,
       })
       .where(eq(megadeskDomainClients.clientId, clientId));
 

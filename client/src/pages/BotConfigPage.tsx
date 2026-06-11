@@ -15,11 +15,12 @@ interface BotScript {
   clientId: string;
   name: string;
   description: string | null;
-  systemPrompt: string;
+  systemPrompt?: string; // mapeado para description no backend
   initialMessage: string | null;
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
+  active: number; // tinyint: 0 = inativo, 1 = ativo
+  isActive?: boolean; // alias legacy
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface ChatMessage {
@@ -367,7 +368,7 @@ export function BotConfigPage() {
                           onClick={(e) => {
                             e.stopPropagation();
                             setEditingScriptId(script.scriptId);
-                            setEditingPrompt(script.systemPrompt);
+                            setEditingPrompt(script.systemPrompt ?? script.description ?? "");
                           }}
                           className="text-blue-600 hover:bg-blue-50 p-1.5 h-auto"
                         >

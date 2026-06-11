@@ -843,31 +843,62 @@ export const megadeskDomainBotScripts = mysqlTable("megadesk_domain_bot_scripts"
 ]);
 
 export const megadeskDomainChamadoSequence = mysqlTable("megadesk_domain_chamado_sequence", {
-	clientId: varchar({ length: 80 }).notNull(),
+	clientId: varchar({ length: 80 }).primaryKey().notNull(),
 	nextChamadoNumber: int().default(1).notNull(),
-	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	createdAt: timestamp({ mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 });
 
 export const megadeskDomainChamados = mysqlTable("megadesk_domain_chamados", {
-	chamadoId: varchar({ length: 80 }).notNull(),
+	chamadoId: varchar({ length: 80 }).primaryKey().notNull(),
 	clientId: varchar({ length: 80 }).notNull(),
 	chamadoNumber: int().notNull(),
 	customerId: varchar({ length: 80 }),
 	customerName: varchar({ length: 255 }),
+	customerPhone: varchar("customer_phone", { length: 40 }),
+	customerEmail: varchar("customer_email", { length: 255 }),
+	customerCNPJ: varchar("customer_cnpj", { length: 20 }),
 	company: varchar({ length: 255 }),
 	title: varchar({ length: 255 }),
 	observations: text(),
 	status: mysqlEnum(['open','in_progress','waiting','closed']).default('open'),
 	priority: mysqlEnum(['baixa','media','alta','critica']).default('media'),
 	assignedTo: varchar({ length: 80 }),
-	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	createdAt: timestamp({ mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 },
 (table) => [
 	index("idx_mdc_client").on(table.clientId),
 	index("idx_mdc_status").on(table.status),
 	index("uq_chamado_number").on(table.clientId, table.chamadoNumber),
+]);
+
+export const megadeskDomainChamadoActivities = mysqlTable("megadesk_domain_chamado_activities", {
+	activityId: varchar("activity_id", { length: 80 }).primaryKey().notNull(),
+	chamadoId: varchar("chamado_id", { length: 80 }).notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	description: text().notNull(),
+	attendant: varchar({ length: 180 }).notNull(),
+	actionType: mysqlEnum("action_type", ['register','edit','close','forward','note','attachment']).default('note').notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+},
+(table) => [
+	index("idx_mdca_chamado").on(table.chamadoId),
+	index("idx_mdca_client").on(table.clientId),
+]);
+
+export const megadeskDomainChamadoCollaborators = mysqlTable("megadesk_domain_chamado_collaborators", {
+	collaboratorId: varchar("collaborator_id", { length: 80 }).primaryKey().notNull(),
+	chamadoId: varchar("chamado_id", { length: 80 }).notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	userId: varchar("user_id", { length: 80 }).notNull(),
+	userName: varchar("user_name", { length: 180 }).notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
+},
+(table) => [
+	index("idx_mdcc_chamado").on(table.chamadoId),
+	index("idx_mdcc_client").on(table.clientId),
 ]);
 
 export const megadeskDomainClientUsers = mysqlTable("megadesk_domain_client_users", {
@@ -989,15 +1020,16 @@ export const megadeskDomainTickets = mysqlTable("megadesk_domain_tickets", {
 ]);
 
 export const megadeskWhatsappConfig = mysqlTable("megadesk_whatsapp_config", {
-	configId: varchar({ length: 80 }).notNull(),
+	configId: varchar({ length: 80 }).primaryKey().notNull(),
 	clientId: varchar({ length: 80 }).notNull(),
 	phoneNumberId: varchar({ length: 255 }),
 	businessAccountId: varchar({ length: 255 }),
 	accessToken: varchar({ length: 500 }),
 	webhookVerifyToken: varchar({ length: 255 }),
 	phoneNumber: varchar({ length: 20 }),
+	webhookUrl: varchar({ length: 500 }),
 	connectionStatus: tinyint().default(0),
-	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	createdAt: timestamp({ mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 },
 (table) => [
@@ -1005,16 +1037,19 @@ export const megadeskWhatsappConfig = mysqlTable("megadesk_whatsapp_config", {
 ]);
 
 export const users = mysqlTable("users", {
-	id: varchar({ length: 80 }).notNull(),
-	email: varchar({ length: 255 }).notNull(),
-	name: varchar({ length: 255 }).notNull(),
-	passwordHash: varchar("password_hash", { length: 255 }),
+	id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+	openId: varchar("open_id", { length: 255 }).notNull(),
+	name: varchar({ length: 255 }).default("Usuário MegaDesk").notNull(),
+	email: varchar({ length: 255 }),
+	loginMethod: varchar("login_method", { length: 64 }),
 	role: mysqlEnum(['admin','user']).default('user').notNull(),
-	createdAt: timestamp("created_at", { mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	lastSignedIn: timestamp("last_signed_in", { mode: 'string' }),
 },
 (table) => [
-	index("email").on(table.email),
+	index("users_open_id_unique").on(table.openId),
+	index("users_email").on(table.email),
 ]);
 
 export const waAccounts = mysqlTable("wa_accounts", {
@@ -1084,4 +1119,102 @@ export const adminCredentials = mysqlTable("admin_credentials", {
 	index("idx_admin_email").on(table.email),
 	// Garantir que cada cliente tem apenas um admin por email
 	// UNIQUE KEY `uq_admin_client_email` (`client_id`, `email`)
+]);
+
+// ─── Tabelas adicionais (Chamados, CRM) ──────────────────────────────────────
+
+export const megadeskDomainChamadoAttachments = mysqlTable("megadesk_domain_chamado_attachments", {
+	attachmentId: varchar("attachment_id", { length: 80 }).primaryKey().notNull(),
+	chamadoId: varchar("chamado_id", { length: 80 }).notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	fileName: varchar("file_name", { length: 255 }).notNull(),
+	fileUrl: text("file_url").notNull(),
+	fileSize: int("file_size"),
+	mimeType: varchar("mime_type", { length: 100 }),
+	uploadedBy: varchar("uploaded_by", { length: 180 }).notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
+},
+(table) => [
+	index("idx_mdca_att_chamado").on(table.chamadoId),
+	index("idx_mdca_att_client").on(table.clientId),
+]);
+
+export const megadeskCrmClients = mysqlTable("megadesk_crm_clients", {
+	crmClientId: varchar("crm_client_id", { length: 80 }).primaryKey().notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	companyName: varchar("company_name", { length: 255 }).notNull(),
+	responsibleName: varchar("responsible_name", { length: 180 }).default("").notNull(),
+	cpfCnpj: varchar("cpf_cnpj", { length: 20 }).default("").notNull(),
+	phone: varchar({ length: 40 }).default("").notNull(),
+	whatsapp: varchar({ length: 40 }).default("").notNull(),
+	email: varchar({ length: 255 }).default("").notNull(),
+	address: varchar({ length: 255 }).default("").notNull(),
+	city: varchar({ length: 120 }).default("").notNull(),
+	state: varchar({ length: 2 }).default("").notNull(),
+	cep: varchar({ length: 10 }).default("").notNull(),
+	status: mysqlEnum(['lead','ativo','inativo','cancelado','inadimplente']).default('lead').notNull(),
+	origin: mysqlEnum(['whatsapp','instagram','facebook','site','indicacao','outro']).default('outro').notNull(),
+	internalResponsible: varchar("internal_responsible", { length: 180 }).default("").notNull(),
+	tags: text().default("").notNull(),
+	observations: text().default("").notNull(),
+	contactsJson: text("contacts_json"),
+	lastInteractionAt: timestamp("last_interaction_at", { mode: 'string' }),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+},
+(table) => [
+	index("idx_mcc_client").on(table.clientId),
+	index("idx_mcc_status").on(table.status),
+	index("idx_mcc_company").on(table.companyName),
+	index("idx_mcc_phone").on(table.phone),
+]);
+
+export const megaadminCredentials = mysqlTable("megaadmin_credentials", {
+	id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+	email: varchar({ length: 255 }).notNull(),
+	name: varchar({ length: 255 }).default("Administrador").notNull(),
+	passwordHash: varchar("password_hash", { length: 255 }).notNull(),
+	active: tinyint().default(1).notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+},
+(table) => [
+	index("megaadmin_email").on(table.email),
+]);
+
+// ─── User Settings e Shortcuts ───────────────────────────────────────────────
+
+export const megadeskUserSettings = mysqlTable("megadesk_user_settings", {
+	id: varchar({ length: 80 }).primaryKey().notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	userId: varchar("user_id", { length: 80 }).notNull(),
+	notificationsEnabled: tinyint("notifications_enabled").default(1).notNull(),
+	soundEnabled: tinyint("sound_enabled").default(1).notNull(),
+	soundVolume: int("sound_volume").default(70).notNull(),
+	muteUntil: timestamp("mute_until", { mode: 'string' }),
+	desktopNotificationsEnabled: tinyint("desktop_notifications_enabled").default(1).notNull(),
+	whatsappNotificationsEnabled: tinyint("whatsapp_notifications_enabled").default(1).notNull(),
+	ticketsNotificationsEnabled: tinyint("tickets_notifications_enabled").default(1).notNull(),
+	iaNotificationsEnabled: tinyint("ia_notifications_enabled").default(1).notNull(),
+	showMessagePreview: tinyint("show_message_preview").default(1).notNull(),
+	autoResponseEnabled: tinyint("auto_response_enabled").default(0).notNull(),
+	autoResponseMessage: text("auto_response_message"),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+},
+(table) => [
+	index("idx_mus_client_user").on(table.clientId, table.userId),
+]);
+
+export const megadeskUserShortcuts = mysqlTable("megadesk_user_shortcuts", {
+	id: varchar({ length: 80 }).primaryKey().notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	userId: varchar("user_id", { length: 80 }).notNull(),
+	shortcutKey: varchar("shortcut_key", { length: 50 }).notNull(),
+	shortcutMessage: text("shortcut_message").notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+},
+(table) => [
+	index("idx_mush_client_user").on(table.clientId, table.userId),
 ]);

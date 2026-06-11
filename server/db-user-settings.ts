@@ -25,21 +25,21 @@ export async function getUserSettings(clientId: string, userId: string) {
 
   // Criar configurações padrão
   const id = uuidv4();
-  await db.insert(megadeskUserSettings).values({
+  await (db.insert(megadeskUserSettings) as any).values({
     id,
     clientId,
     userId,
-    notificationsEnabled: true,
-    soundEnabled: true,
+    notificationsEnabled: 1,
+    soundEnabled: 1,
     soundVolume: 70,
-    desktopNotificationsEnabled: true,
-    whatsappNotificationsEnabled: true,
-    ticketsNotificationsEnabled: true,
-    iaNotificationsEnabled: true,
-    erpNotificationsEnabled: true,
-    trackingNotificationsEnabled: true,
-    showMessagePreview: true,
-    autoResponseEnabled: false,
+    desktopNotificationsEnabled: 1,
+    whatsappNotificationsEnabled: 1,
+    ticketsNotificationsEnabled: 1,
+    iaNotificationsEnabled: 1,
+    erpNotificationsEnabled: 1,
+    trackingNotificationsEnabled: 1,
+    showMessagePreview: 1,
+    autoResponseEnabled: 0,
   });
 
   return await db
@@ -57,22 +57,22 @@ export async function updateUserNotificationSettings(
   clientId: string,
   userId: string,
   updates: Partial<{
-    notificationsEnabled: boolean;
-    soundEnabled: boolean;
+    notificationsEnabled: number | undefined; // tinyint
+    soundEnabled: number | undefined; // tinyint
     soundVolume: number;
     muteUntil: Date | null;
-    desktopNotificationsEnabled: boolean;
-    whatsappNotificationsEnabled: boolean;
-    ticketsNotificationsEnabled: boolean;
-    iaNotificationsEnabled: boolean;
-    erpNotificationsEnabled: boolean;
-    trackingNotificationsEnabled: boolean;
-    showMessagePreview: boolean;
+    desktopNotificationsEnabled: number | undefined; // tinyint
+    whatsappNotificationsEnabled: number | undefined; // tinyint
+    ticketsNotificationsEnabled: number | undefined; // tinyint
+    iaNotificationsEnabled: number | undefined; // tinyint
+    erpNotificationsEnabled: number | undefined; // tinyint
+    trackingNotificationsEnabled: number | undefined; // tinyint
+    showMessagePreview: number | undefined; // tinyint
   }>
 ) {
   await db
     .update(megadeskUserSettings)
-    .set(updates)
+    .set(updates as any)
     .where(and(eq(megadeskUserSettings.clientId, clientId), eq(megadeskUserSettings.userId, userId)));
 
   return await getUserSettings(clientId, userId);
@@ -85,13 +85,13 @@ export async function updateUserAttendanceSettings(
   clientId: string,
   userId: string,
   updates: Partial<{
-    autoResponseEnabled: boolean;
+    autoResponseEnabled: number | undefined; // tinyint
     autoResponseMessage: string | null;
   }>
 ) {
   await db
     .update(megadeskUserSettings)
-    .set(updates)
+    .set(updates as any)
     .where(and(eq(megadeskUserSettings.clientId, clientId), eq(megadeskUserSettings.userId, userId)));
 
   return await getUserSettings(clientId, userId);
@@ -101,7 +101,8 @@ export async function updateUserAttendanceSettings(
  * Silenciar notificações por tempo determinado
  */
 export async function muteNotifications(clientId: string, userId: string, minutes: number) {
-  const muteUntil = new Date(Date.now() + minutes * 60 * 1000);
+  const muteUntil = new Date(Date.now() + minutes * 60 * 1000)
+    .toISOString().slice(0, 19).replace('T', ' ');
 
   await db
     .update(megadeskUserSettings)

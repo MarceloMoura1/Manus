@@ -39,14 +39,14 @@ import { toast } from "sonner";
  */
 function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
   const [refreshing, setRefreshing] = React.useState(false);
-  const [qrCodeData, setQrCodeData] = React.useState<{ code: string; base64: string } | null>(null);
+  const [qrCodeData, setQrCodeData] = React.useState<{ code?: string; base64: string } | null>(null);
 
   // Mutation para conectar e obter QR Code
   const connectMut = trpc.evolution.connect.useMutation({
     onSuccess: (data: any) => {
       if (data.qrCode) {
         toast.success("QR Code gerado! Escaneie com seu WhatsApp.");
-        setQrCodeData(data);
+        setQrCodeData({ base64: data.qrCode, code: data.code });
       } else {
         toast.info("WhatsApp já está conectado.");
       }
@@ -100,7 +100,7 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
     }
   };
 
-  const displayQR = qrCodeData?.base64 || status?.qrCode;
+  const displayQR = qrCodeData?.base64 || (status as any)?.qrCode;
 
   return (
     <div className="space-y-4">
