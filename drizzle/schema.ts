@@ -974,7 +974,7 @@ export const megadeskDomainCustomers = mysqlTable("megadesk_domain_customers", {
 ]);
 
 export const megadeskDomainMetrics = mysqlTable("megadesk_domain_metrics", {
-	metricId: bigint("metric_id", { mode: "number" }).autoincrement().notNull(),
+	metricId: bigint("metric_id", { mode: "number" }).autoincrement().primaryKey().notNull(),
 	clientId: varchar("client_id", { length: 80 }).notNull(),
 	metricType: varchar("metric_type", { length: 80 }).notNull(),
 	amount: int().default(1).notNull(),
