@@ -5,7 +5,7 @@ import { router, publicProcedure, adminProcedure } from "./_core/trpc";
 import { COOKIE_NAME, normalizeModuleNamesToBackend, normalizeModuleNamesToAdmin } from "@shared/const";
 import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool, createMegaDeskBackup, listMegaDeskBackups, getMegaDeskBackupInfo, applyMegaDeskBackup, deleteClientFromDb } from "./db";
 import bcrypt from "bcryptjs";
-import { adminCredentials, megadeskDomainClientUsers } from "../drizzle/schema";
+import { megaadminCredentials, megadeskDomainClientUsers } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { SignJWT } from "jose";
 import { MEGAADMIN_COOKIE } from "./_core/context";
@@ -278,7 +278,7 @@ export const appRouter = router({
     loginAdmin: publicProcedure
       .input(z.object({ email: z.string().email(), password: z.string().min(1) }))
       .mutation(async ({ input, ctx }) => {
-        const rows = await getDb().select().from(adminCredentials).where(eq(adminCredentials.email, input.email.toLowerCase().trim())).limit(1);
+        const rows = await getDb().select().from(megaadminCredentials).where(eq(megaadminCredentials.email, input.email.toLowerCase().trim())).limit(1);
         const cred = rows[0];
         if (!cred || !cred.active) {
           throw new TRPCError({ code: "UNAUTHORIZED", message: "E-mail ou senha incorretos." });
@@ -314,12 +314,12 @@ export const appRouter = router({
     // ─── Gestão de Administradores ──────────────────────────────────────────
     listAdmins: adminProcedure.query(async () => {
       const rows = await getDb().select({
-        id: adminCredentials.id,
-        email: adminCredentials.email,
-        name: adminCredentials.name,
-        active: adminCredentials.active,
-        createdAt: adminCredentials.createdAt,
-      }).from(adminCredentials).orderBy(adminCredentials.id);
+        id: megaadminCredentials.id,
+        email: megaadminCredentials.email,
+        name: megaadminCredentials.name,
+        active: megaadminCredentials.active,
+        createdAt: megaadminCredentials.createdAt,
+      }).from(megaadminCredentials).orderBy(megaadminCredentials.id);
       return { admins: rows };
     }),
     createAdmin: adminProcedure
@@ -329,16 +329,16 @@ export const appRouter = router({
         password: z.string().min(6),
       }))
       .mutation(async ({ input }) => {
-        const existing = await getDb().select({ id: adminCredentials.id }).from(adminCredentials).where(eq(adminCredentials.email, input.email.toLowerCase().trim())).limit(1);
+        const existing = await getDb().select({ id: megaadminCredentials.id }).from(megaadminCredentials).where(eq(megaadminCredentials.email, input.email.toLowerCase().trim())).limit(1);
         if (existing.length > 0) {
           throw new TRPCError({ code: "CONFLICT", message: "Já existe um administrador com este e-mail." });
         }
         const passwordHash = await bcrypt.hash(input.password, 12);
-        await getDb().insert(adminCredentials).values({
+        await getDb().insert(megaadminCredentials).values({
           email: input.email.toLowerCase().trim(),
           name: input.name.trim(),
           passwordHash,
-          active: true,
+          active: 1,
         });
         return { ok: true };
       }),
@@ -350,36 +350,36 @@ export const appRouter = router({
         active: z.boolean().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        const rows = await getDb().select().from(adminCredentials).where(eq(adminCredentials.id, input.id)).limit(1);
+        const rows = await getDb().select().from(megaadminCredentials).where(eq(megaadminCredentials.id, input.id)).limit(1);
         if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Administrador não encontrado." });
         // Não permite desativar o próprio usuário logado
         if (input.active === false && rows[0].email === ctx.user.email) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Você não pode desativar sua própria conta." });
         }
-        const updates: Partial<typeof adminCredentials.$inferInsert> = {};
+        const updates: Partial<typeof megaadminCredentials.$inferInsert> = {};
         if (input.name) updates.name = input.name.trim();
         if (input.password) updates.passwordHash = await bcrypt.hash(input.password, 12);
-        if (input.active !== undefined) updates.active = input.active;
+        if (input.active !== undefined) updates.active = input.active ? 1 : 0;
         if (Object.keys(updates).length > 0) {
-          await getDb().update(adminCredentials).set(updates).where(eq(adminCredentials.id, input.id));
+          await getDb().update(megaadminCredentials).set(updates).where(eq(megaadminCredentials.id, input.id));
         }
         return { ok: true };
       }),
     deleteAdmin: adminProcedure
       .input(z.object({ id: z.number().int().positive() }))
       .mutation(async ({ input, ctx }) => {
-        const rows = await getDb().select().from(adminCredentials).where(eq(adminCredentials.id, input.id)).limit(1);
+        const rows = await getDb().select().from(megaadminCredentials).where(eq(megaadminCredentials.id, input.id)).limit(1);
         if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Administrador não encontrado." });
         // Não permite excluir o próprio usuário logado
         if (rows[0].email === ctx.user.email) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Você não pode excluir sua própria conta." });
         }
         // Garante que sempre haja pelo menos 1 admin ativo
-        const allAdmins = await getDb().select({ id: adminCredentials.id }).from(adminCredentials).where(eq(adminCredentials.active, 1));
+        const allAdmins = await getDb().select({ id: megaadminCredentials.id }).from(megaadminCredentials).where(eq(megaadminCredentials.active, 1));
         if (allAdmins.length <= 1) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Deve existir pelo menos um administrador ativo." });
         }
-        await getDb().delete(adminCredentials).where(eq(adminCredentials.id, input.id));
+        await getDb().delete(megaadminCredentials).where(eq(megaadminCredentials.id, input.id));
         return { ok: true };
       }),
     summary: adminProcedure.query(async () => {
@@ -1733,7 +1733,7 @@ export const appRouter = router({
         const { megadeskDomainConversations } = await import("../drizzle/schema");
         const { eq, and } = await import("drizzle-orm");
         await getDb().update(megadeskDomainConversations)
-          .set({ assignedUserId: input.userId, assignedUserName: input.userName ?? null, updatedAt: new Date() })
+          .set({ assignedUserId: input.userId, assignedUserName: input.userName ?? null, updatedAt: new Date().toISOString().slice(0,19).replace('T',' ') })
           .where(and(eq(megadeskDomainConversations.conversationId, input.conversationId), eq(megadeskDomainConversations.clientId, input.clientId)));
         // Também atualizar array em memória se existir
         const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === input.clientId);

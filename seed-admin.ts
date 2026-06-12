@@ -1,59 +1,59 @@
 /**
  * seed-admin.ts
- * Cria o administrador mestre do MegaDesk.
+ * Cria o administrador mestre do MegaDesk (MegaAdmin).
+ * Tabela: megaadmin_credentials
  *
  * Uso:
- *   ADMIN_EMAIL=seu@email.com ADMIN_PASSWORD=suaSenha npx tsx seed-admin.ts
+ *   npx tsx seed-admin.ts
  */
 import mysql from "mysql2/promise";
 import { drizzle } from "drizzle-orm/mysql2";
 import { megaadminCredentials } from "./drizzle/schema";
+import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 
+const EMAIL    = process.env.ADMIN_EMAIL    ?? "marcelo.mouraadmpro@gmail.com";
+const PASSWORD = process.env.ADMIN_PASSWORD ?? "MegaDesk@123";
+const NAME     = process.env.ADMIN_NAME     ?? "Marcelo Moura";
+
 async function seedAdmin() {
-  const dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) {
-    console.error("❌ DATABASE_URL não configurada. Defina no .env");
+  if (!process.env.DATABASE_URL) {
+    console.error("❌ DATABASE_URL não definida. Configure o .env");
     process.exit(1);
   }
 
-  const email = process.env.ADMIN_EMAIL || process.argv[2];
-  const password = process.env.ADMIN_PASSWORD || process.argv[3];
-  const name = process.env.ADMIN_NAME || "Administrador";
-
-  if (!email || !password) {
-    console.error("❌ Informe email e senha:");
-    console.error("   ADMIN_EMAIL=eu@email.com ADMIN_PASSWORD=MinhaSenha npx tsx seed-admin.ts");
-    process.exit(1);
-  }
-
-  if (password.length < 8) {
-    console.error("❌ A senha deve ter pelo menos 8 caracteres.");
-    process.exit(1);
-  }
+  const pool = mysql.createPool(process.env.DATABASE_URL);
+  const db = drizzle(pool);
 
   try {
-    const pool = mysql.createPool(dbUrl);
-    const db = drizzle(pool);
-    const passwordHash = await bcrypt.hash(password, 12);
+    const existing = await db.select({ id: megaadminCredentials.id })
+      .from(megaadminCredentials)
+      .where(eq(megaadminCredentials.email, EMAIL.toLowerCase().trim()))
+      .limit(1);
 
-    await db.insert(megaadminCredentials).values({
-      email: email.toLowerCase().trim(),
-      name: name.trim(),
-      passwordHash,
-      active: true,
-    });
+    const passwordHash = await bcrypt.hash(PASSWORD, 12);
 
-    console.log("✅ Admin criado com sucesso!");
-    console.log(`   Email: ${email}`);
-    console.log(`   Acesse: /admin`);
-    await pool.end();
-  } catch (error: any) {
-    if (error?.code === "ER_DUP_ENTRY") {
-      console.error("❌ Já existe um admin com esse email.");
+    if (existing.length > 0) {
+      await db.update(megaadminCredentials)
+        .set({ passwordHash, name: NAME.trim(), active: 1 })
+        .where(eq(megaadminCredentials.email, EMAIL.toLowerCase().trim()));
+      console.log("✅ Admin atualizado!");
     } else {
-      console.error("❌ Erro:", error.message);
+      await (db.insert(megaadminCredentials) as any).values({
+        email: EMAIL.toLowerCase().trim(),
+        name: NAME.trim(),
+        passwordHash,
+        active: 1,
+      });
+      console.log("✅ Admin criado!");
     }
+
+    console.log(`   Email: ${EMAIL}`);
+    console.log(`   Senha: ${PASSWORD}`);
+    console.log(`   URL:   http://localhost:3000/admin`);
+    await pool.end();
+  } catch (err: any) {
+    console.error("❌ Erro:", err.message);
     process.exit(1);
   }
 }
