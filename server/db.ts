@@ -50,8 +50,8 @@ export async function getUserByOpenId(openId: string) {
 }
 
 export async function upsertUser(input: UpsertUserInput) {
-  const now = new Date();
-  await getDb().insert(users).values({
+  const now = new Date().toISOString().slice(0,19).replace('T',' ');
+  await (getDb().insert(users) as any).values({
     openId: input.openId,
     name: input.name ?? "Usuário MegaDesk",
     email: input.email ?? null,
@@ -113,7 +113,7 @@ export async function createCustomer(input: {
   company: string;
   email?: string;
 }) {
-  await getDb().insert(megadeskDomainCustomers).values({
+  await (getDb().insert(megadeskDomainCustomers) as any).values({
     customerId: input.customerId,
     clientId: input.clientId,
     name: input.name,
@@ -150,8 +150,8 @@ export async function createConversation(input: {
   lastMessage?: string;
   messages?: any[];
 }) {
-  const now = new Date();
-  await getDb().insert(megadeskDomainConversations).values({
+  const now = new Date().toISOString().slice(0,19).replace('T',' ');
+  await (getDb().insert(megadeskDomainConversations) as any).values({
     conversationId: input.conversationId,
     clientId: input.clientId,
     crmClientId: input.crmClientId ?? null,
@@ -160,7 +160,7 @@ export async function createConversation(input: {
     company: input.company,
     status: "open",
     lastMessage: input.lastMessage ?? "Conversa iniciada",
-    timeLabel: now.toLocaleString("pt-BR"),
+    timeLabel: new Date().toLocaleString("pt-BR"),  // now is string, use new Date()
     messagesJson: JSON.stringify(input.messages ?? []),
   });
   return input;
@@ -560,7 +560,7 @@ export async function readMegaDeskTenantObservability(clientId: string) {
 }
 
 export async function updateConversationStatus(conversationId: string, status: "open" | "bot" | "closed") {
-  const now = new Date();
+  const now = new Date().toISOString().slice(0,19).replace('T',' ');
   await getDb().update(megadeskDomainConversations)
     .set({ status, updatedAt: now })
     .where(eq(megadeskDomainConversations.conversationId, conversationId));
@@ -572,7 +572,7 @@ export async function updateCustomer(input: {
   name?: string;
   company?: string;
 }) {
-  const now = new Date();
+  const now = new Date().toISOString().slice(0,19).replace('T',' ');
   const updates: any = { updatedAt: now };
   if (input.name) updates.name = input.name;
   if (input.company) updates.company = input.company;
@@ -723,12 +723,13 @@ export async function cleanupOldBackups(retentionDays = 30) {
   if (!process.env.DATABASE_URL) return 0;
   try {
     await ensureStructuredTables();
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+    const cutoffDateObj = new Date();
+    cutoffDateObj.setDate(cutoffDateObj.getDate() - retentionDays);
+    const cutoffDate = cutoffDateObj.toISOString().split('T')[0];
     
     const [result] = await getPool().execute(
       `DELETE FROM megadesk_domain_backups WHERE backup_date < ?`,
-      [cutoffDate.toISOString().split('T')[0]]
+      [cutoffDate]
     );
     
     const deletedCount = (result as any).affectedRows || 0;
