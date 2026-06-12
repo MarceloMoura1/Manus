@@ -3,6 +3,7 @@ import { io } from "socket.io-client";
 import { navigateToPlatform } from "@/lib/platformRouting";
 import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/contexts/ThemeContext";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { validateNewChamado, ValidationError } from "@/lib/validations";
 import { ActiveAttendancePage } from "./ActiveAttendance";
@@ -3505,13 +3506,14 @@ function Shell() {
 
         {/* Content */}
         <main className={`flex-1 flex flex-col ${active === 'conversations' ? 'overflow-hidden' : 'overflow-auto p-8'}`}>
+          <ErrorBoundary key={active}>
           {active === "home" && <DashboardPage setActive={setActive} indicadores={indicadores} />}
           {active === "conversations" && <ConversationsPage />}
           {active === "tickets" && <TicketsPage />}
           {active === "tracking" && <TrackingPage />}
           {active === "erp" && <ERPPage />}
           {active === "settings" && <SettingsPageComponent />}
-          {active === "admin-settings" && session.role === "admin" && <AdminSettingsPage clientId={session.clientId} />}
+          {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
           {active === "bot-config" && <BotConfigPage />}
           {active === "whatsapp-config" && <WhatsAppConfigPage />}
           {active === "ai-assistant" && <AIAssistantPage />}
@@ -3531,6 +3533,7 @@ function Shell() {
             // Navegar para Conversas com novo chat aberto
             setActive('conversations');
           }} />}
+          </ErrorBoundary>
         </main>
       </div>
 

@@ -9,7 +9,9 @@ type UseAuthOptions = {
 };
 
 export function useAuth(options?: UseAuthOptions) {
-  const { redirectOnUnauthenticated = false, redirectPath = getLoginUrl() } =
+  // getLoginUrl() só é chamado quando redirectOnUnauthenticated=true,
+  // evitando crash em páginas que não precisam de redirect OAuth
+  const { redirectOnUnauthenticated = false, redirectPath = redirectOnUnauthenticated ? getLoginUrl() : "/" } =
     options ?? {};
   const utils = trpc.useUtils();
 

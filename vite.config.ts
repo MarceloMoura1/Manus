@@ -171,13 +171,20 @@ export default defineConfig({
   server: {
     host: true,
     allowedHosts: [
+      // Domínios MegaDesk
+      ".megadesk.online",
+      "app.megadesk.online",
+      "admin.megadesk.online",
+      "api.megadesk.online",
+      // Dev local
+      "localhost",
+      "127.0.0.1",
+      // Manus (compatibilidade)
       ".manuspre.computer",
       ".manus.computer",
       ".manus-asia.computer",
       ".manuscomputer.ai",
       ".manusvm.computer",
-      "localhost",
-      "127.0.0.1",
     ],
     fs: {
       strict: true,

@@ -13,23 +13,27 @@ import { serveStatic, setupVite } from "./vite";
 import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
 import { handleEvolutionWebhook, ensureSessionTable } from "../evolution";
 
-
+// ─── Domínios permitidos (CORS) ───────────────────────────────────────────────
+const ALLOWED_ORIGINS = [
+  "https://app.megadesk.online",
+  "https://admin.megadesk.online",
+  "https://api.megadesk.online",
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://127.0.0.1:3000",
+];
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
-    const server = net.createServer();
-    server.listen(port, () => {
-      server.close(() => resolve(true));
-    });
-    server.on("error", () => resolve(false));
+    const s = net.createServer();
+    s.listen(port, () => { s.close(() => resolve(true)); });
+    s.on("error", () => resolve(false));
   });
 }
 
-async function findAvailablePort(startPort: number = 3000): Promise<number> {
+async function findAvailablePort(startPort = 3000): Promise<number> {
   for (let port = startPort; port < startPort + 20; port++) {
-    if (await isPortAvailable(port)) {
-      return port;
-    }
+    if (await isPortAvailable(port)) return port;
   }
   throw new Error(`No available port found starting from ${startPort}`);
 }
@@ -37,33 +41,62 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
-  // Configure body parser with larger size limit for file uploads
+
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+  // ─── CORS ─────────────────────────────────────────────────────────────────
+  app.use((req, res, next) => {
+    const origin = req.headers.origin ?? "";
+    if (ALLOWED_ORIGINS.includes(origin) || !origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin || "*");
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,PATCH,OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers",
+        "Content-Type,Authorization,x-tenant-id,x-user-role,x-trpc-source,Cookie");
+      res.setHeader("Access-Control-Expose-Headers", "Set-Cookie");
+    }
+    if (req.method === "OPTIONS") return res.status(204).end();
+    next();
+  });
+
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   registerMetricWebhook(app);
   registerIntegrationApi(app);
 
-
-
-  // WhatsApp Webhook endpoints (Meta)
+  // ─── Webhooks ─────────────────────────────────────────────────────────────
+  // Meta WhatsApp Business API
   app.get("/api/webhooks/meta", handleWebhookVerify);
   app.post("/api/webhooks/meta", handleWebhookEvent);
 
-  // Evolution API Webhook endpoint
+  // Evolution API (QR Code / Baileys)
   app.post("/webhook/evolution", handleEvolutionWebhook);
+  // Evolution com webhookByEvents=true envia para sub-paths
+  app.post("/webhook/evolution/:event", (req, res) => {
+    const eventSlug = req.params.event.toUpperCase().replace(/-/g, "_");
+    req.body = { ...req.body, event: req.body.event ?? eventSlug };
+    return handleEvolutionWebhook(req, res);
+  });
 
-  // Garantir que a tabela de sessões Evolution existe
-  await ensureSessionTable().catch(err => console.warn("[Evolution] Aviso ao criar tabela:", err));
+  // Endpoint diagnóstico de erros frontend
+  app.post("/api/client-error", (req, res) => {
+    const { message, stack, page } = req.body ?? {};
+    if (process.env.NODE_ENV !== "production") {
+      console.error(`[CLIENT ERROR] ${page}\n${message}\n${stack?.slice(0, 600)}`);
+    }
+    res.json({ received: true });
+  });
 
+  // Garantir tabela de sessões Evolution
+  await ensureSessionTable().catch(err =>
+    console.warn("[Evolution] Aviso ao criar tabela:", err?.message ?? err)
+  );
 
-
-  // Inicializar Socket.IO para WhatsApp
+  // ─── Socket.IO (WhatsApp em tempo real) ───────────────────────────────────
   initWhatsAppSocket(server);
 
-
-  // Backup scheduled handler
+  // ─── Backup agendado ──────────────────────────────────────────────────────
   app.post("/api/scheduled/backup", async (req, res) => {
     try {
       const sdk = await import("./sdk").then(m => m.sdk);
@@ -71,62 +104,39 @@ async function startServer() {
       if (!user.isCron || !user.taskUid) {
         return res.status(403).json({ error: "cron-only" });
       }
-      
       const { loadMegaDeskStructuredState, createMegaDeskBackup, cleanupOldBackups } = await import("../db");
       const defaultState = { clients: [], conversations: [], tickets: [], botScripts: [], operationalRecords: [], auditLogs: [] };
       const state = await loadMegaDeskStructuredState(defaultState);
-      
-      if (!state) {
-        return res.status(500).json({ error: "Falha ao carregar estado", taskUid: user.taskUid });
-      }
-      
-      // Criar backup
+      if (!state) return res.status(500).json({ error: "Falha ao carregar estado" });
       const backupId = await createMegaDeskBackup(state);
-      if (!backupId) {
-        return res.status(500).json({ error: "Falha ao criar backup", taskUid: user.taskUid });
-      }
-      
-      // Limpar backups antigos (30 dias)
+      if (!backupId) return res.status(500).json({ error: "Falha ao criar backup" });
       await cleanupOldBackups(30);
-      
-      res.json({ ok: true, backupId, message: "Backup automático criado com sucesso" });
+      res.json({ ok: true, backupId });
     } catch (error: any) {
-      console.error("[Backup Handler] Erro:", error);
-      res.status(500).json({ 
-        error: error?.message || "Erro desconhecido",
-        timestamp: new Date().toISOString()
-      });
+      console.error("[Backup Handler] Erro:", error?.message);
+      res.status(500).json({ error: error?.message ?? "Erro desconhecido" });
     }
   });
 
-  // ─── Baileys WhatsApp QR Code (SSE) ───────────────────────────────────────
-  // ────────────────────────────────────────────────────────────────────────────
+  // ─── tRPC ─────────────────────────────────────────────────────────────────
+  app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext }));
 
-  // tRPC API
-  app.use(
-    "/api/trpc",
-    createExpressMiddleware({
-      router: appRouter,
-      createContext,
-    })
-  );
-  // development mode uses Vite, production mode uses static files
+  // ─── Frontend ─────────────────────────────────────────────────────────────
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
   } else {
     serveStatic(app);
   }
 
-  const preferredPort = parseInt(process.env.PORT || "3000");
+  const preferredPort = parseInt(process.env.PORT ?? "3000");
   const port = await findAvailablePort(preferredPort);
-
   if (port !== preferredPort) {
-    console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
+    console.log(`Port ${preferredPort} busy, using ${port}`);
   }
 
   server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
-
+    console.log(`\nMegaDesk rodando em http://localhost:${port}`);
+    console.log(`Admin:  http://localhost:${port}/admin\n`);
   });
 }
 

@@ -1,9 +1,9 @@
-import { cn } from "@/lib/utils";
-import { AlertTriangle, RotateCcw } from "lucide-react";
+import { AlertTriangle, RotateCcw, ArrowLeft } from "lucide-react";
 import { Component, ReactNode } from "react";
 
 interface Props {
   children: ReactNode;
+  fallback?: ReactNode;
 }
 
 interface State {
@@ -21,35 +21,61 @@ class ErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
+  componentDidCatch(error: Error) {
+    // Enviar ao servidor para diagnóstico
+    fetch("/api/client-error", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: error.message,
+        stack: error.stack?.slice(0, 800),
+        page: window.location.pathname,
+      }),
+    }).catch(() => {});
+  }
+
   render() {
     if (this.state.hasError) {
+      if (this.props.fallback) return this.props.fallback;
+
       return (
-        <div className="flex items-center justify-center min-h-screen p-8 bg-background">
-          <div className="flex flex-col items-center w-full max-w-2xl p-8">
-            <AlertTriangle
-              size={48}
-              className="text-destructive mb-6 flex-shrink-0"
-            />
-
-            <h2 className="text-xl mb-4">An unexpected error occurred.</h2>
-
-            <div className="p-4 w-full rounded bg-muted overflow-auto mb-6">
-              <pre className="text-sm text-muted-foreground whitespace-break-spaces">
-                {this.state.error?.stack}
-              </pre>
+        <div className="flex items-center justify-center min-h-[400px] p-8">
+          <div className="flex flex-col items-center w-full max-w-lg p-6 bg-white rounded-2xl border border-red-100 shadow-sm">
+            <div className="w-12 h-12 rounded-xl bg-red-50 flex items-center justify-center mb-4">
+              <AlertTriangle className="w-6 h-6 text-red-500" />
             </div>
-
-            <button
-              onClick={() => window.location.reload()}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg",
-                "bg-primary text-primary-foreground",
-                "hover:opacity-90 cursor-pointer"
-              )}
-            >
-              <RotateCcw size={16} />
-              Reload Page
-            </button>
+            <h2 className="text-base font-semibold text-slate-900 mb-1">
+              Erro ao carregar esta seção
+            </h2>
+            <p className="text-sm text-slate-500 text-center mb-4">
+              Ocorreu um erro inesperado. Clique em "Recarregar" para tentar novamente.
+            </p>
+            {process.env.NODE_ENV === "development" && (
+              <details className="w-full mb-4">
+                <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-600">
+                  Detalhes técnicos
+                </summary>
+                <pre className="mt-2 p-3 bg-slate-50 rounded-lg text-xs text-slate-600 whitespace-pre-wrap break-words max-h-32 overflow-auto">
+                  {this.state.error?.message}
+                </pre>
+              </details>
+            )}
+            <div className="flex gap-2 w-full">
+              <button
+                onClick={() => this.setState({ hasError: false, error: null })}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm font-medium hover:bg-slate-200 transition"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Voltar
+              </button>
+              <button
+                onClick={() => window.location.reload()}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Recarregar
+              </button>
+            </div>
           </div>
         </div>
       );

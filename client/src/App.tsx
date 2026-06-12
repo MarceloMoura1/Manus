@@ -11,8 +11,17 @@ import { WhatsAppBaileysPage } from "./pages/WhatsAppBaileysPage";
 import { AIAssistant } from "./components/AIAssistant";
 import { trpc } from "./lib/trpc";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import ErrorBoundary from "./components/ErrorBoundary";
+
+// URL da API: produção usa subdomínio dedicado, local usa relativo
+const hostname = typeof window !== "undefined" ? window.location.hostname : "localhost";
+const IS_PROD = hostname.endsWith("megadesk.online");
+const TRPC_URL = IS_PROD ? "https://api.megadesk.online/api/trpc" : "/api/trpc";
+// admin.megadesk.online sempre renderiza AdminPanel
+const IS_ADMIN_SUBDOMAIN = hostname === "admin.megadesk.online";
 
 function isAdminRoute() {
+  if (IS_ADMIN_SUBDOMAIN) return true;
   const pathname = window.location.pathname.toLowerCase();
   return pathname === "/admin" || pathname.startsWith("/admin/");
 }
@@ -43,7 +52,7 @@ export default function App() {
     trpc.createClient({
       links: [
         httpBatchLink({
-          url: "/api/trpc",
+          url: TRPC_URL,
           transformer: superjson,
           headers() {
             // Forward local session token for megaadmin procedures if present
@@ -74,7 +83,9 @@ export default function App() {
     <ThemeProvider>
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
-          {isAdminRoute() ? <AdminPanel /> : isBotConfigRoute() ? <BotConfigPage /> : isNotificationsRoute() ? <NotificationsPage /> : isWhatsAppBaileysRoute() ? <WhatsAppBaileysPage /> : isSettingsRoute() ? <SettingsPage /> : <Home />}
+          <ErrorBoundary>
+            {isAdminRoute() ? <AdminPanel /> : isBotConfigRoute() ? <BotConfigPage /> : isNotificationsRoute() ? <NotificationsPage /> : isWhatsAppBaileysRoute() ? <WhatsAppBaileysPage /> : isSettingsRoute() ? <SettingsPage /> : <Home />}
+          </ErrorBoundary>
 
           <AIAssistant
             isOpen={isAssistantOpen}
