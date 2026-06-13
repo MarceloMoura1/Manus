@@ -1356,9 +1356,8 @@ export function SettingsPage() {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [evolutionPhone, setEvolutionPhone] = useState<string | null>(null);
   const [isStartingSession, setIsStartingSession] = useState(false);
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // tRPC mutations e queries para Evolution API
+  // ─── tRPC: Conexão (cria instância + retorna QR) ──────────────────────────
   const connectMut = trpc.evolution.connect.useMutation({
     onSuccess: (data) => {
       setIsStartingSession(false);
@@ -1366,20 +1365,25 @@ export function SettingsPage() {
         setQrDataUrl(data.qrCode);
         setEvolutionStatus('connecting');
         toast.success('QR Code gerado! Escaneie com seu WhatsApp.');
-        // Começar a fazer polling do status
-        startStatusPolling();
       } else if (data.status === 'connected') {
         setEvolutionStatus('connected');
-        setEvolutionPhone(data.phoneNumber);
-        toast.success('WhatsApp conectado!');
+        setEvolutionPhone(data.phoneNumber ?? null);
+        toast.success('WhatsApp já está conectado!');
       }
     },
     onError: (err) => {
       setIsStartingSession(false);
-      toast.error(err.message || 'Erro ao conectar');
+      toast.error(err.message || 'Erro ao conectar. Verifique se a Evolution API está rodando.');
     },
   });
 
+  // ─── tRPC: Buscar QR Code atual (sem recriar instância) ───────────────────
+  const getQRCodeQuery = trpc.evolution.getQRCode.useQuery(
+    { clientId: clientId || '' },
+    { enabled: false } // Só executa manualmente
+  );
+
+  // ─── tRPC: Desconectar ────────────────────────────────────────────────────
   const disconnectMut = trpc.evolution.disconnect.useMutation({
     onSuccess: () => {
       setEvolutionStatus('disconnected');
@@ -1392,7 +1396,8 @@ export function SettingsPage() {
     },
   });
 
-  // Polling ativo quando conectando; verificação única quando desconectado (para detectar sessão existente)
+  // ─── tRPC: Polling de status ──────────────────────────────────────────────
+  // Polling de 3s durante 'connecting'; verificação única nos demais estados
   const getStatusQuery = trpc.evolution.getStatus.useQuery(
     { clientId: clientId || '' },
     {
@@ -1402,12 +1407,6 @@ export function SettingsPage() {
     }
   );
 
-  // Fazer polling do status
-  const startStatusPolling = useCallback(() => {
-    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    // O useQuery já faz o polling automaticamente
-  }, []);
-
   // Verificar status ao abrir a aba WhatsApp
   useEffect(() => {
     if (activeTab === 'whatsapp' && clientId) {
@@ -1415,37 +1414,56 @@ export function SettingsPage() {
     }
   }, [activeTab, clientId]);
 
-  // Atualizar status quando a query retornar dados
+  // Sincronizar estado local com o que o backend retorna
   useEffect(() => {
-    if (getStatusQuery.data) {
-      setEvolutionStatus(getStatusQuery.data.status as EvolutionStatus);
-      if (getStatusQuery.data.phoneNumber) {
-        setEvolutionPhone(getStatusQuery.data.phoneNumber);
-      }
+    if (!getStatusQuery.data) return;
+    const { status, phoneNumber } = getStatusQuery.data;
+    setEvolutionStatus(status as EvolutionStatus);
+    if (phoneNumber) setEvolutionPhone(phoneNumber);
+
+    // Se estava em 'connecting' e QR sumiu (usuário scaneou em outro device?),
+    // buscar QR atual para mostrar no UI
+    if (status === 'connecting' && !qrDataUrl) {
+      getQRCodeQuery.refetch().then((res) => {
+        if (res.data?.qrCode) setQrDataUrl(res.data.qrCode);
+      });
     }
   }, [getStatusQuery.data]);
 
+  // ─── Handlers ─────────────────────────────────────────────────────────────
+
+  /** Cria/reconecta instância e exibe QR Code */
   const handleGenerateQr = async () => {
     if (!clientId) { toast.error('Sessão inválida'); return; }
     setIsStartingSession(true);
     setQrDataUrl(null);
-    try {
-      await connectMut.mutateAsync({ clientId });
-    } catch (err: any) {
-      // Erro já é tratado pelo onError da mutation
-    } finally {
-      setIsStartingSession(false);
-    }
+    await connectMut.mutateAsync({ clientId }).catch(() => {});
+    setIsStartingSession(false);
   };
 
+  /** Busca novo QR Code sem recriar instância (para o botão "Atualizar QR") */
+  const handleRefreshQr = async () => {
+    if (!clientId) return;
+    setIsStartingSession(true);
+    const res = await getQRCodeQuery.refetch();
+    if (res.data?.qrCode) {
+      setQrDataUrl(res.data.qrCode);
+      setEvolutionStatus('connecting');
+      toast.success('QR Code atualizado!');
+    } else if (res.data?.status === 'connected') {
+      setEvolutionStatus('connected');
+      toast.success('WhatsApp já está conectado!');
+    } else {
+      // Instância não existe ainda — precisa de connect
+      await handleGenerateQr();
+    }
+    setIsStartingSession(false);
+  };
+
+  /** Desconecta o WhatsApp */
   const handleDisconnectBaileys = async () => {
     if (!clientId) return;
-    try {
-      await disconnectMut.mutateAsync({ clientId });
-      toast.success('WhatsApp desconectado!');
-    } catch {
-      toast.error('Erro ao desconectar');
-    }
+    await disconnectMut.mutateAsync({ clientId }).catch(() => {});
   };
 
   const validateCredentials = useCallback(() => {
@@ -1735,11 +1753,11 @@ export function SettingsPage() {
                     <Button
                       variant="outline"
                       className="w-full"
-                      onClick={handleGenerateQr}
+                      onClick={handleRefreshQr}
                       disabled={isStartingSession}
                     >
                       <RefreshCw className="w-4 h-4 mr-2" />
-                      Gerar novo QR Code
+                      Atualizar QR Code
                     </Button>
                   </div>
                 )}

@@ -205,17 +205,36 @@ export const evolutionRouter = router({
       // Primeiro consulta o banco (mais rápido)
       const session = await getSession(clientId);
 
-      // Se o banco diz "connected", confiar sem chamar a Evolution
+      // Se banco diz "connected", confirmar ao vivo na Evolution a cada 2 min
+      // (evita estado fantasma quando o celular desconecta sem disparar webhook)
       if (session?.status === "connected") {
-        return {
-          ok: true,
-          status: "connected" as const,
-          phoneNumber: session.phoneNumber ?? null,
-          instanceName,
-        };
+        const staleSec = session.connectedAt
+          ? Math.floor((Date.now() - new Date(session.connectedAt).getTime()) / 1000)
+          : 0;
+        const needsLiveCheck = staleSec > 120; // revalida a cada 2 minutos
+
+        if (!needsLiveCheck) {
+          return {
+            ok: true,
+            status: "connected" as const,
+            phoneNumber: session.phoneNumber ?? null,
+            instanceName,
+          };
+        }
+
+        // Revalidação ao vivo
+        const liveStatus = await evoGetStatus(instanceName).catch(() => "connected" as const);
+        if (liveStatus !== "connected") {
+          console.log(`[Evolution] ${clientId} sessão caiu — DB dizia connected, Evolution diz ${liveStatus}`);
+          await upsertSession(clientId, instanceName, liveStatus);
+          return { ok: true, status: liveStatus, phoneNumber: session.phoneNumber ?? null, instanceName };
+        }
+        // Atualiza connected_at para resetar o timer
+        await upsertSession(clientId, instanceName, "connected", session.phoneNumber);
+        return { ok: true, status: "connected" as const, phoneNumber: session.phoneNumber ?? null, instanceName };
       }
 
-      // Se não há sessão ou está "connecting", verifica ao vivo na Evolution API
+      // Sem sessão ou status "connecting"/"disconnected" → verifica ao vivo
       const liveStatus = await evoGetStatus(instanceName);
 
       // Sincroniza banco se houve mudança

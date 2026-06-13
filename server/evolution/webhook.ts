@@ -87,12 +87,16 @@ async function handleConnectionUpdate(
   data: Record<string, any>
 ): Promise<void> {
   const state: string = data?.state || data?.connection || "";
-  const phoneNumber: string = data?.wuid?.replace(/@s\.whatsapp\.net$/, "") || null;
+  const phoneNumber: string | null = data?.wuid?.replace(/@s\.whatsapp\.net$/, "") || null;
 
+  // "open"       → conectado
+  // "connecting" → aguardando QR / reconectando
+  // "close"      → DESCONECTADO (não "connecting"!)
+  // demais       → desconectado
   let status: "disconnected" | "connecting" | "connected";
-  if (state === "open")  status = "connected";
-  else if (state === "connecting" || state === "close") status = "connecting";
-  else status = "disconnected";
+  if (state === "open")        status = "connected";
+  else if (state === "connecting") status = "connecting";
+  else                         status = "disconnected"; // close, logout, conflict, etc.
 
   await upsertSession(clientId, instanceName, status, phoneNumber);
 
