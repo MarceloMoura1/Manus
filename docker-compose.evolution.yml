@@ -1,37 +1,62 @@
 # ============================================================
-# Evolution API — Docker Compose (apenas Evolution API)
+# Evolution API + MySQL próprio — Docker Compose
 # ============================================================
-# Uso:
-#   docker compose -f docker-compose.evolution.yml up -d
-#   docker compose -f docker-compose.evolution.yml down
-#   docker compose -f docker-compose.evolution.yml logs -f
+# O MegaDesk continua usando o MySQL LOCAL (megadesk_main).
+# A Evolution API usa um banco MySQL SEPARADO dentro do Docker.
+# Nenhuma dependência do MySQL local ou da senha root.
+# ============================================================
 #
-# O MegaDesk continua rodando normalmente via CMD local.
+# Subir:  docker compose -f docker-compose.evolution.yml up -d
+# Parar:  docker compose -f docker-compose.evolution.yml down
+# Logs:   docker compose -f docker-compose.evolution.yml logs -f
 # ============================================================
 
 services:
+
+  # ── Banco de dados exclusivo da Evolution API ─────────────
+  evolution-db:
+    image: mysql:8.0
+    container_name: megadesk-evolution-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: EvolutionRoot123
+      MYSQL_DATABASE:      evolution_api
+      MYSQL_USER:          evolution
+      MYSQL_PASSWORD:      Evolution123
+    volumes:
+      - evolution_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uevolution", "-pEvolution123"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ── Evolution API ─────────────────────────────────────────
   evolution-api:
     image: atendai/evolution-api:latest
     container_name: megadesk-evolution
     restart: unless-stopped
     ports:
       - "8080:8080"
+    depends_on:
+      evolution-db:
+        condition: service_healthy
 
     environment:
-      # ── Servidor ──────────────────────────────────────────
+      # ── Servidor ────────────────────────────────────────
       SERVER_PORT: "8080"
       SERVER_URL: "http://localhost:8080"
       SERVER_DISABLE_MANAGER: "false"
 
-      # ── Autenticação ──────────────────────────────────────
+      # ── Autenticação ────────────────────────────────────
       AUTHENTICATION_TYPE: "apikey"
       AUTHENTICATION_API_KEY: "megadesk-evolution-key"
       AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
 
-      # ── Banco de dados (MySQL do MegaDesk) ────────────────
-      # host.docker.internal = IP do Windows host visto de dentro do container
+      # ── Banco exclusivo da Evolution (dentro do Docker) ─
       DATABASE_PROVIDER: "mysql"
-      DATABASE_CONNECTION_URI: "mysql://megadesk:MegaDesk123@host.docker.internal:3306/megadesk_main"
+      DATABASE_CONNECTION_URI: "mysql://evolution:Evolution123@evolution-db:3306/evolution_api"
       DATABASE_SAVE_DATA_INSTANCE: "true"
       DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
       DATABASE_SAVE_MESSAGE_UPDATE: "true"
@@ -39,40 +64,33 @@ services:
       DATABASE_SAVE_DATA_CHATS: "true"
       DATABASE_SAVE_DATA_HISTORIC: "true"
       DATABASE_SAVE_DATA_LABELS: "true"
+      DATABASE_DELETE_MESSAGE: "false"
 
-      # ── Cache (sem Redis — usa cache local) ───────────────
+      # ── Cache local (sem Redis) ─────────────────────────
       CACHE_REDIS_ENABLED: "false"
       CACHE_LOCAL_ENABLED: "true"
       CACHE_LOCAL_TTL: "86400"
 
-      # ── Webhook (aponta para MegaDesk no Windows host) ────
-      # IMPORTANTE: dentro do container, o MegaDesk é acessado via host.docker.internal
-      # Não use localhost aqui — funciona apenas no Windows host, não no container
-      WEBHOOK_GLOBAL_ENABLED: "false"   # webhooks são configurados por instância
+      # ── Sessão persistente ──────────────────────────────
+      DEL_INSTANCE: "false"
 
-      # ── QR Code ───────────────────────────────────────────
+      # ── QR Code ─────────────────────────────────────────
       QRCODE_LIMIT: "30"
       QRCODE_COLOR: "#25D366"
 
-      # ── Logs ──────────────────────────────────────────────
+      # ── Logs ────────────────────────────────────────────
       LOG_LEVEL: "ERROR,WARN,INFO"
       LOG_COLOR: "true"
       LOG_BAILEYS: "error"
 
-      # ── Sessão persistente ────────────────────────────────
-      # DEL_INSTANCE: false → instância permanece após restart
-      DEL_INSTANCE: "false"
-
-    # Necessário no Windows/Mac para que host.docker.internal funcione
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-    # Volume para persistir dados de sessão WhatsApp (chaves, tokens)
+    # Volume para sessões WhatsApp (mantém conectado após restart)
     volumes:
       - evolution_instances:/evolution/instances
       - evolution_store:/evolution/store
 
 volumes:
+  evolution_db_data:
+    name: megadesk_evolution_db
   evolution_instances:
     name: megadesk_evolution_instances
   evolution_store:
