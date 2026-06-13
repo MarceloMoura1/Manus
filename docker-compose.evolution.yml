@@ -34,9 +34,9 @@ services:
 
   # ── Evolution API ─────────────────────────────────────────
   evolution-api:
-    # v2.4.0: corrige bug wavoipToken MySQL + schema fixes
-    # Imagem movida de atendai/ para evoapicloud/
-    image: evoapicloud/evolution-api:2.4.0-rc2
+    # v2.3.7: estável, sem licença, com fix do wavoipToken MySQL
+    # Não usar atendai/latest (v2.2.3 tem bug wavoipToken)
+    image: evoapicloud/evolution-api:v2.3.7
     container_name: megadesk-evolution
     restart: unless-stopped
     ports:
