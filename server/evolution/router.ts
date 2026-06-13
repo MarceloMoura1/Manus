@@ -105,18 +105,20 @@ export const evolutionRouter = router({
         };
       }
 
-      // 2. Tenta criar instância na Evolution API (idempotente)
+      // 2. Tenta criar instância (idempotente) — a resposta já pode incluir QR Code
+      let qrFromCreate: string | null = null;
       try {
-        await evoCreateInstance(instanceName);
-        console.log(`[Evolution] Instância criada/verificada: ${instanceName}`);
+        const createResult = await evoCreateInstance(instanceName);
+        qrFromCreate = createResult.qrBase64; // QR Code pode vir direto na criação
+        console.log(`[Evolution] Instância criada: ${instanceName}${qrFromCreate ? " (QR incluso)" : ""}`);
       } catch (err: any) {
-        // "instance already exists" ou "Invalid integration" nao sao erros
         const msg = err.message?.toLowerCase() || "";
-        if (!msg.includes("already") && !msg.includes("invalid integration")) {
+        // "already exists" / "Invalid integration" não são erros fatais
+        if (!msg.includes("already") && !msg.includes("invalid integration") && !msg.includes("exists")) {
           console.error(`[Evolution] Erro ao criar instância:`, err.message);
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
-            message: `Erro ao criar instância: ${err.message}`,
+            message: `Erro ao criar instância Evolution: ${err.message}`,
           });
         }
         console.log(`[Evolution] Instância já existia: ${instanceName}`);
@@ -125,17 +127,27 @@ export const evolutionRouter = router({
       // 3. Persiste sessão como "connecting"
       await upsertSession(clientId, instanceName, "connecting");
 
-      // 4. Configura webhook (nao eh critico)
+      // 4. Configura webhook (não é crítico)
       await setupWebhook(instanceName).catch(() => {});
 
-      // 5. Obtém QR Code imediatamente (a instância já deve existir)
+      // 5. Retornar QR Code — primeiro o da criação, depois busca via GET
+      if (qrFromCreate) {
+        return {
+          ok: true,
+          status: "connecting" as const,
+          phoneNumber: null,
+          qrCode: qrFromCreate,
+        };
+      }
+
+      // 5b. Buscar QR via GET /instance/connect/:name
       const qr = await evoGetQRCode(instanceName).catch((e) => {
-        console.warn("[Evolution] Erro ao buscar QR imediato:", e?.message);
+        console.warn("[Evolution] Erro ao buscar QR via GET:", e?.message);
         return null;
       });
 
       if (qr?.base64) {
-        console.log(`[Evolution] QR Code obtido imediatamente para ${instanceName}`);
+        console.log(`[Evolution] QR Code obtido via GET /instance/connect`);
         return {
           ok: true,
           status: "connecting" as const,
@@ -144,20 +156,19 @@ export const evolutionRouter = router({
         };
       }
 
-      // Se nao conseguir imediatamente, fazer polling por até 30s
-      console.log(`[Evolution] QR não disponível ainda, aguardando...`);
+      // 5c. Polling — aguarda até 30s pela geração do QR
+      console.log(`[Evolution] QR não disponível ainda, iniciando polling...`);
       const qrPolled = await waitForQRCode(instanceName);
       if (!qrPolled) {
         console.error(`[Evolution] QR Code não gerado em ${QR_POLL_MAX_MS}ms para ${instanceName}`);
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message:
-            "QR Code não foi gerado. Verifique se a Evolution API está rodando em " +
-            (process.env.EVOLUTION_API_URL || "http://localhost:8080") +
-            " e tente novamente.",
+            "QR Code não foi gerado pela Evolution API. " +
+            `Verifique se ela está rodando em ${process.env.EVOLUTION_API_URL || "http://localhost:8080"} ` +
+            "e tente novamente.",
         });
       }
-      console.log(`[Evolution] QR Code obtido via polling para ${instanceName}`);
 
       return {
         ok: true,
@@ -177,17 +188,23 @@ export const evolutionRouter = router({
       const { clientId } = input;
       const instanceName = instanceNameFor(clientId);
 
-      // Se já estiver conectado, não faz sentido gerar QR
-      const session = await getSession(clientId);
-      if (session?.status === "connected") {
+      // Verifica status ao vivo na Evolution (não depende do banco)
+      const liveStatus = await evoGetStatus(instanceName).catch(() => "disconnected" as const);
+
+      if (liveStatus === "connected") {
+        await upsertSession(clientId, instanceName, "connected");
         return { ok: true, status: "connected" as const, qrCode: null };
       }
 
-      const qr = await evoGetQRCode(instanceName).catch(() => null);
+      // Busca QR Code atual
+      const qr = await evoGetQRCode(instanceName).catch((e) => {
+        console.warn(`[Evolution] getQRCode falhou para ${instanceName}:`, e?.message);
+        return null;
+      });
 
       return {
         ok: true,
-        status: "connecting" as const,
+        status: liveStatus as "connecting" | "disconnected",
         qrCode: qr?.base64 ?? null,
       };
     }),
