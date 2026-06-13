@@ -1,0 +1,79 @@
+# ============================================================
+# Evolution API — Docker Compose (apenas Evolution API)
+# ============================================================
+# Uso:
+#   docker compose -f docker-compose.evolution.yml up -d
+#   docker compose -f docker-compose.evolution.yml down
+#   docker compose -f docker-compose.evolution.yml logs -f
+#
+# O MegaDesk continua rodando normalmente via CMD local.
+# ============================================================
+
+services:
+  evolution-api:
+    image: atendai/evolution-api:latest
+    container_name: megadesk-evolution
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+
+    environment:
+      # ── Servidor ──────────────────────────────────────────
+      SERVER_PORT: "8080"
+      SERVER_URL: "http://localhost:8080"
+      SERVER_DISABLE_MANAGER: "false"
+
+      # ── Autenticação ──────────────────────────────────────
+      AUTHENTICATION_TYPE: "apikey"
+      AUTHENTICATION_API_KEY: "megadesk-evolution-key"
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+
+      # ── Banco de dados (MySQL do MegaDesk) ────────────────
+      # host.docker.internal = IP do Windows host visto de dentro do container
+      DATABASE_PROVIDER: "mysql"
+      DATABASE_CONNECTION_URI: "mysql://megadesk:MegaDesk123@host.docker.internal:3306/megadesk_main"
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+      DATABASE_SAVE_DATA_HISTORIC: "true"
+      DATABASE_SAVE_DATA_LABELS: "true"
+
+      # ── Cache (sem Redis — usa cache local) ───────────────
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
+      CACHE_LOCAL_TTL: "86400"
+
+      # ── Webhook (aponta para MegaDesk no Windows host) ────
+      # IMPORTANTE: dentro do container, o MegaDesk é acessado via host.docker.internal
+      # Não use localhost aqui — funciona apenas no Windows host, não no container
+      WEBHOOK_GLOBAL_ENABLED: "false"   # webhooks são configurados por instância
+
+      # ── QR Code ───────────────────────────────────────────
+      QRCODE_LIMIT: "30"
+      QRCODE_COLOR: "#25D366"
+
+      # ── Logs ──────────────────────────────────────────────
+      LOG_LEVEL: "ERROR,WARN,INFO"
+      LOG_COLOR: "true"
+      LOG_BAILEYS: "error"
+
+      # ── Sessão persistente ────────────────────────────────
+      # DEL_INSTANCE: false → instância permanece após restart
+      DEL_INSTANCE: "false"
+
+    # Necessário no Windows/Mac para que host.docker.internal funcione
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    # Volume para persistir dados de sessão WhatsApp (chaves, tokens)
+    volumes:
+      - evolution_instances:/evolution/instances
+      - evolution_store:/evolution/store
+
+volumes:
+  evolution_instances:
+    name: megadesk_evolution_instances
+  evolution_store:
+    name: megadesk_evolution_store
