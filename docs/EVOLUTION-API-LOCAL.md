@@ -37,15 +37,35 @@ set WEBHOOK_BASE_URL=http://host.docker.internal:3000
 
 ---
 
+## Imagem utilizada
+
+**`evoapicloud/evolution-api:2.4.0`** — versão estável com correções MySQL:
+- Fix do bug `wavoipToken` (migration fora de ordem)
+- Fix de defaults inválidos para `createdAt` no MySQL
+- Fix de tipos boolean/integer no MySQL
+- Migrações executadas automaticamente no startup
+
+> ⚠️ **Não use `atendai/evolution-api:latest`** — essa imagem tem o bug do `wavoipToken` e schema Prisma incompatível com MySQL.
+
+---
+
 ## Comandos
 
-### Parar containers antigos (se existirem)
+### PRIMEIRA VEZ ou após erro de migration — Limpar e subir do zero
 ```cmd
-docker compose -f docker-compose.evolution.yml down
+:: Parar e remover containers E volumes (limpa banco corrompido)
+docker compose -f docker-compose.evolution.yml down -v
+
+:: Subir tudo limpo
+docker compose -f docker-compose.evolution.yml up -d
 ```
 
-### Subir tudo
+> O `-v` remove os volumes e o banco MySQL da Evolution.
+> Na primeira vez ou após erro, use sempre `down -v` antes de `up -d`.
+
+### Uso normal (mantém dados e sessão)
 ```cmd
+docker compose -f docker-compose.evolution.yml down
 docker compose -f docker-compose.evolution.yml up -d
 ```
 
