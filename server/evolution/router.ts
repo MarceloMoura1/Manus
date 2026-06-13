@@ -53,10 +53,13 @@ async function waitForQRCode(
 
 /** Configura o webhook da instância apontando para o backend MegaDesk. */
 async function setupWebhook(instanceName: string): Promise<void> {
-  const baseUrl =
+  // Prioridade: WEBHOOK_BASE_URL (produção) > APP_URL > localhost:3000
+  const baseUrl = (
+    process.env.WEBHOOK_BASE_URL ||
     process.env.APP_BASE_URL ||
-    process.env.VITE_API_URL ||
-    "http://localhost:5000";
+    process.env.APP_URL ||
+    "http://localhost:3000"
+  ).replace(/\/$/, "");
 
   const webhookUrl = `${baseUrl}/webhook/evolution`;
 
@@ -86,13 +89,18 @@ export const evolutionRouter = router({
       const { clientId } = input;
       const instanceName = instanceNameFor(clientId);
 
-      // 1. Verifica se já está conectado
-      const existing = await getSession(clientId);
-      if (existing?.status === "connected") {
+      console.log(`[Evolution] connect → clientId=${clientId}, instance=${instanceName}`);
+
+      // 1. Verifica status ao vivo na Evolution (não só no banco)
+      const liveStatus = await evoGetStatus(instanceName).catch(() => "disconnected" as const);
+      if (liveStatus === "connected") {
+        const existing = await getSession(clientId);
+        await upsertSession(clientId, instanceName, "connected", existing?.phoneNumber);
+        console.log(`[Evolution] Já conectado: ${instanceName}`);
         return {
           ok: true,
           status: "connected" as const,
-          phoneNumber: existing.phoneNumber,
+          phoneNumber: existing?.phoneNumber ?? null,
           qrCode: null,
         };
       }
@@ -100,15 +108,18 @@ export const evolutionRouter = router({
       // 2. Tenta criar instância na Evolution API (idempotente)
       try {
         await evoCreateInstance(instanceName);
+        console.log(`[Evolution] Instância criada/verificada: ${instanceName}`);
       } catch (err: any) {
         // "instance already exists" ou "Invalid integration" nao sao erros
         const msg = err.message?.toLowerCase() || "";
         if (!msg.includes("already") && !msg.includes("invalid integration")) {
+          console.error(`[Evolution] Erro ao criar instância:`, err.message);
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
             message: `Erro ao criar instância: ${err.message}`,
           });
         }
+        console.log(`[Evolution] Instância já existia: ${instanceName}`);
       }
 
       // 3. Persiste sessão como "connecting"
@@ -118,9 +129,13 @@ export const evolutionRouter = router({
       await setupWebhook(instanceName).catch(() => {});
 
       // 5. Obtém QR Code imediatamente (a instância já deve existir)
-      const qr = await evoGetQRCode(instanceName).catch(() => null);
-      
+      const qr = await evoGetQRCode(instanceName).catch((e) => {
+        console.warn("[Evolution] Erro ao buscar QR imediato:", e?.message);
+        return null;
+      });
+
       if (qr?.base64) {
+        console.log(`[Evolution] QR Code obtido imediatamente para ${instanceName}`);
         return {
           ok: true,
           status: "connecting" as const,
@@ -129,15 +144,20 @@ export const evolutionRouter = router({
         };
       }
 
-      // Se nao conseguir imediatamente, fazer polling
+      // Se nao conseguir imediatamente, fazer polling por até 30s
+      console.log(`[Evolution] QR não disponível ainda, aguardando...`);
       const qrPolled = await waitForQRCode(instanceName);
       if (!qrPolled) {
+        console.error(`[Evolution] QR Code não gerado em ${QR_POLL_MAX_MS}ms para ${instanceName}`);
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message:
-            "QR Code não foi gerado a tempo. Verifique se a Evolution API está rodando e tente novamente.",
+            "QR Code não foi gerado. Verifique se a Evolution API está rodando em " +
+            (process.env.EVOLUTION_API_URL || "http://localhost:8080") +
+            " e tente novamente.",
         });
       }
+      console.log(`[Evolution] QR Code obtido via polling para ${instanceName}`);
 
       return {
         ok: true,

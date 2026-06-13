@@ -1392,9 +1392,14 @@ export function SettingsPage() {
     },
   });
 
+  // Polling ativo quando conectando; verificação única quando desconectado (para detectar sessão existente)
   const getStatusQuery = trpc.evolution.getStatus.useQuery(
     { clientId: clientId || '' },
-    { enabled: !!clientId && evolutionStatus === 'connecting', refetchInterval: 3000 }
+    {
+      enabled: !!clientId,
+      refetchInterval: evolutionStatus === 'connecting' ? 3000 : false,
+      refetchOnWindowFocus: false,
+    }
   );
 
   // Fazer polling do status
@@ -1403,9 +1408,9 @@ export function SettingsPage() {
     // O useQuery já faz o polling automaticamente
   }, []);
 
+  // Verificar status ao abrir a aba WhatsApp
   useEffect(() => {
     if (activeTab === 'whatsapp' && clientId) {
-      // Verificar status atual ao abrir a aba
       getStatusQuery.refetch();
     }
   }, [activeTab, clientId]);

@@ -149,8 +149,9 @@ export async function createConversation(input: {
   company: string;
   lastMessage?: string;
   messages?: any[];
+  /** Status inicial: 'bot' para mensagens WhatsApp, 'open' para atendimentos internos */
+  status?: "open" | "bot" | "closed";
 }) {
-  const now = new Date().toISOString().slice(0,19).replace('T',' ');
   await (getDb().insert(megadeskDomainConversations) as any).values({
     conversationId: input.conversationId,
     clientId: input.clientId,
@@ -158,9 +159,9 @@ export async function createConversation(input: {
     customerName: input.customerName,
     phone: input.phone,
     company: input.company,
-    status: "open",
+    status: input.status ?? "bot",  // padrão BOT: primeiro atendimento é sempre automático
     lastMessage: input.lastMessage ?? "Conversa iniciada",
-    timeLabel: new Date().toLocaleString("pt-BR"),  // now is string, use new Date()
+    timeLabel: new Date().toLocaleString("pt-BR"),
     messagesJson: JSON.stringify(input.messages ?? []),
   });
   return input;

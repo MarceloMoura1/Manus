@@ -217,15 +217,14 @@ async function saveIncomingMessage(
       try { messages = JSON.parse(conv.messages_json || "[]"); } catch { messages = []; }
       messages.push(newMsg);
 
-      // Atualiza mensagens e incrementa unreadCount via SQL direto
+      // Atualiza mensagens — mantém status atual (bot ou open), não sobrescreve
       await pool.execute(
         `UPDATE megadesk_domain_conversations
-         SET messages_json    = ?,
-             last_message     = ?,
+         SET messages_json     = ?,
+             last_message      = ?,
              last_message_from = 'customer',
              unread_count      = unread_count + 1,
-             status           = 'open',
-             updated_at       = NOW()
+             updated_at        = NOW()
          WHERE conversation_id = ? AND client_id = ?`,
         [JSON.stringify(messages), text.substring(0, 255), convId, clientId]
       );
@@ -257,10 +256,12 @@ async function saveIncomingMessage(
         messages: [newMsg],
       });
 
-      // Atualiza campos extras que createConversation pode não definir
+      // Garante status BOT (primeiro atendimento automático) e campos extras
       await pool.execute(
         `UPDATE megadesk_domain_conversations
-         SET last_message_from = 'customer', unread_count = 1
+         SET last_message_from = 'customer',
+             unread_count = 1,
+             status = 'bot'
          WHERE conversation_id = ? AND client_id = ?`,
         [conversationId, clientId]
       );
@@ -272,7 +273,7 @@ async function saveIncomingMessage(
           name:         customerName,
           phone,
           company:      "",
-          status:       "open",
+          status:       "bot",
           lastMessage:  text.substring(0, 255),
           unreadCount:  1,
           lastMessageFrom: "customer",

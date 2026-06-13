@@ -4,7 +4,7 @@
  * Docs: https://docs.evoapicloud.com
  */
 
-const EVOLUTION_BASE_URL = process.env.EVOLUTION_API_URL || "http://localhost:8081";
+const EVOLUTION_BASE_URL = (process.env.EVOLUTION_API_URL || "http://localhost:8080").replace(/\/$/, "");
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || "";
 
 const DEFAULT_HEADERS = {
