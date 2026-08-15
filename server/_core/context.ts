@@ -12,6 +12,8 @@ export type TrpcContext = {
   tenantId?: string; // clientId para isolamento multitenante
   userRole?: string; // role do usuário no tenant
   userEmail?: string; // identidade da sessão MegaDesk para revalidação autoritativa
+  operationalUserId?: string;
+  operationalUserRole?: string;
 };
 
 async function tryMegaAdminSession(req: CreateExpressContextOptions["req"]): Promise<User | null> {
@@ -118,5 +120,7 @@ export async function createContext(
     tenantId,
     userRole,
     userEmail,
+    operationalUserId: undefined,
+    operationalUserRole: undefined,
   };
 }

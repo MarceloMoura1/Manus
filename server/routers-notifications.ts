@@ -1,6 +1,7 @@
-import { router, publicProcedure, protectedProcedure, megadeskProcedure } from "./_core/trpc";
+import { router, megadeskProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { getDb } from "./db";
+import { megadeskNotifications } from "../drizzle/schema";
 
 import { eq, and, desc } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
@@ -22,10 +23,13 @@ export const notificationsRouter = router({
     .query(async ({ input, ctx }) => {
       try {
         const dbInstance = getDb();
+        const userId = ctx.operationalUserId;
+        if (!userId) throw new TRPCError({ code: "UNAUTHORIZED", message: "Identidade operacional ausente" });
         
         // Filter by clientId only (notifications are already scoped to client)
         const whereConditions = [
           eq(megadeskNotifications.clientId, input.clientId),
+          eq(megadeskNotifications.userId, userId),
         ];
         
         if (input.unreadOnly) {
@@ -45,6 +49,7 @@ export const notificationsRouter = router({
         // Get total count
         const countConditions = [
           eq(megadeskNotifications.clientId, input.clientId),
+          eq(megadeskNotifications.userId, userId),
         ];
         
         if (input.unreadOnly) {
@@ -60,11 +65,16 @@ export const notificationsRouter = router({
         const total = countResult.length;
 
         return {
-          notifications,
+          notifications: notifications.map((notification) => ({
+            ...notification,
+            createdAt: new Date(notification.createdAt),
+            readAt: notification.readAt ? new Date(notification.readAt) : null,
+          })),
           total,
-          unreadCount: notifications.filter((n: any) => !n.isRead).length,
+          unreadCount: notifications.filter((notification) => !notification.isRead).length,
         };
       } catch (error) {
+        if (error instanceof TRPCError) throw error;
         console.error("Error fetching notifications:", error);
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
@@ -84,7 +94,8 @@ export const notificationsRouter = router({
     .mutation(async ({ input, ctx }) => {
       try {
         const dbInstance = getDb();
-        const userIdStr = String(ctx.user?.id || "");
+        const userIdStr = ctx.operationalUserId;
+        if (!userIdStr) throw new TRPCError({ code: "UNAUTHORIZED", message: "Identidade operacional ausente" });
         
         // Verify notification belongs to user
         const notification = await dbInstance
@@ -109,12 +120,17 @@ export const notificationsRouter = router({
           .update(megadeskNotifications)
           .set({
             isRead: true,
-            readAt: new Date(),
+            readAt: new Date().toISOString().slice(0, 19).replace("T", " "),
           })
-          .where(eq(megadeskNotifications.notificationId, input.notificationId));
+          .where(and(
+            eq(megadeskNotifications.notificationId, input.notificationId),
+            eq(megadeskNotifications.clientId, input.clientId),
+            eq(megadeskNotifications.userId, userIdStr),
+          ));
 
         return { success: true };
       } catch (error) {
+        if (error instanceof TRPCError) throw error;
         console.error("Error marking notification as read:", error);
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
@@ -134,7 +150,8 @@ export const notificationsRouter = router({
     .mutation(async ({ input, ctx }) => {
       try {
         const dbInstance = getDb();
-        const userIdStr = String(ctx.user?.id || "");
+        const userIdStr = ctx.operationalUserId;
+        if (!userIdStr) throw new TRPCError({ code: "UNAUTHORIZED", message: "Identidade operacional ausente" });
         
         // Verify notification belongs to user
         const notification = await dbInstance
@@ -157,10 +174,15 @@ export const notificationsRouter = router({
 
         await dbInstance
           .delete(megadeskNotifications)
-          .where(eq(megadeskNotifications.notificationId, input.notificationId));
+          .where(and(
+            eq(megadeskNotifications.notificationId, input.notificationId),
+            eq(megadeskNotifications.clientId, input.clientId),
+            eq(megadeskNotifications.userId, userIdStr),
+          ));
 
         return { success: true };
       } catch (error) {
+        if (error instanceof TRPCError) throw error;
         console.error("Error deleting notification:", error);
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
@@ -179,7 +201,8 @@ export const notificationsRouter = router({
     .mutation(async ({ input, ctx }) => {
       try {
         const dbInstance = getDb();
-        const userIdStr = String(ctx.user?.id || "");
+        const userIdStr = ctx.operationalUserId;
+        if (!userIdStr) throw new TRPCError({ code: "UNAUTHORIZED", message: "Identidade operacional ausente" });
         
         const updateConditions = [
           eq(megadeskNotifications.clientId, input.clientId),
@@ -191,12 +214,13 @@ export const notificationsRouter = router({
           .update(megadeskNotifications)
           .set({
             isRead: true,
-            readAt: new Date(),
+            readAt: new Date().toISOString().slice(0, 19).replace("T", " "),
           })
           .where(and(...updateConditions));
 
         return { success: true };
       } catch (error) {
+        if (error instanceof TRPCError) throw error;
         console.error("Error marking all notifications as read:", error);
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
@@ -220,7 +244,8 @@ export const notificationsRouter = router({
       try {
         const dbInstance = getDb();
         const notificationId = uuidv4();
-        const userIdStr = String(ctx.user?.id || "");
+        const userIdStr = ctx.operationalUserId;
+        if (!userIdStr) throw new TRPCError({ code: "UNAUTHORIZED", message: "Identidade operacional ausente" });
 
         await dbInstance.insert(megadeskNotifications).values({
           notificationId,
@@ -229,13 +254,14 @@ export const notificationsRouter = router({
           title: input.title,
           message: input.message,
           type: input.type,
-          actionUrl: input.actionUrl,
+          actionUrl: input.actionUrl ?? null,
           isRead: false,
-          createdAt: new Date(),
+          createdAt: new Date().toISOString().slice(0, 19).replace("T", " "),
         });
 
         return { notificationId, success: true };
       } catch (error) {
+        if (error instanceof TRPCError) throw error;
         console.error("Error creating notification:", error);
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",

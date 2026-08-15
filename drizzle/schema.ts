@@ -1,4 +1,4 @@
-import { mysqlTable, mysqlSchema, AnyMySqlColumn, index, foreignKey, varchar, json, timestamp, int, mysqlEnum, text, datetime, longtext, date, bigint, tinyint } from "drizzle-orm/mysql-core"
+import { mysqlTable, mysqlSchema, AnyMySqlColumn, index, foreignKey, varchar, json, timestamp, int, mysqlEnum, text, datetime, longtext, date, bigint, tinyint, boolean } from "drizzle-orm/mysql-core"
 import { sql } from "drizzle-orm"
 
 export const evolutionFailedMessages = mysqlTable("evolution_failed_messages", {
@@ -366,58 +366,86 @@ export const users = mysqlTable("users", {
 ]);
 
 export const waAccounts = mysqlTable("wa_accounts", {
-	accountId: varchar({ length: 80 }).notNull(),
-	clientId: varchar({ length: 80 }).notNull(),
-	instanceId: varchar({ length: 255 }).notNull(),
-	token: varchar({ length: 500 }),
-	phoneNumber: varchar({ length: 20 }),
-	connectionStatus: mysqlEnum(['connected','disconnected','qr_code_pending']).default('disconnected'),
-	createdAt: timestamp({ mode: 'string' }).defaultNow().notNull(),
-	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	id: varchar({ length: 80 }).primaryKey().notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	displayName: varchar("display_name", { length: 180 }).default("").notNull(),
+	phoneNumberId: varchar("phone_number_id", { length: 80 }).notNull(),
+	businessAccountId: varchar("business_account_id", { length: 80 }).notNull(),
+	accessToken: text("access_token").notNull(),
+	webhookVerifyToken: varchar("webhook_verify_token", { length: 120 }).notNull(),
+	status: mysqlEnum(['active','inactive','error']).default('inactive').notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 },
 (table) => [
-	index("idx_wa_client").on(table.clientId),
-	index("idx_wa_instance").on(table.instanceId),
+	index("idx_wa_accounts_client").on(table.clientId),
+	index("idx_wa_accounts_phone").on(table.phoneNumberId),
 ]);
 
 export const waConversations = mysqlTable("wa_conversations", {
-	conversationId: varchar({ length: 80 }).primaryKey().notNull(),
-	clientId: varchar({ length: 80 }).notNull(),
-	accountId: varchar("accountId", { length: 80 }),
-	phoneNumber: varchar({ length: 20 }).notNull(),
-	customerPhone: varchar("customerPhone", { length: 20 }),
-	customerName: varchar({ length: 255 }),
-	lastMessage: text(),
-	lastMessageAt: timestamp("lastMessageAt", { mode: 'string' }),
-	lastMessageTime: timestamp({ mode: 'string' }),
-	unreadCount: int().default(0),
-	status: mysqlEnum(['open','closed']).default('open'),
-	assignedTo: varchar({ length: 80 }),
-	createdAt: timestamp({ mode: 'string' }).defaultNow().notNull(),
-	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	id: varchar({ length: 80 }).primaryKey().notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	accountId: varchar("account_id", { length: 80 }).notNull(),
+	customerName: varchar("customer_name", { length: 180 }).default("").notNull(),
+	customerPhone: varchar("customer_phone", { length: 40 }).notNull(),
+	lastMessage: text("last_message").default("").notNull(),
+	lastMessageAt: timestamp("last_message_at", { mode: 'string' }).defaultNow().notNull(),
+	unreadCount: int("unread_count").default(0).notNull(),
+	status: mysqlEnum(['open','pending','closed']).default('open').notNull(),
+	assignedUserId: varchar("assigned_user_id", { length: 80 }),
+	crmClientId: varchar("crm_client_id", { length: 80 }),
+	metadataJson: text("metadata_json").default("{}").notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 },
 (table) => [
-	index("idx_wa_client").on(table.clientId),
-	index("idx_wa_phone").on(table.phoneNumber),
-	index("idx_wa_status").on(table.status),
+	index("idx_wa_conv_client").on(table.clientId),
+	index("idx_wa_conv_account").on(table.accountId),
+	index("idx_wa_conv_phone").on(table.customerPhone),
+	index("idx_wa_conv_status").on(table.status),
+	index("idx_wa_conv_last_msg").on(table.lastMessageAt),
 ]);
 
 export const waMessages = mysqlTable("wa_messages", {
-	messageId: varchar({ length: 80 }).notNull(),
-	conversationId: varchar({ length: 80 }).notNull(),
-	clientId: varchar({ length: 80 }).notNull(),
-	sender: varchar({ length: 20 }),
-	message: text(),
-	messageType: mysqlEnum(['text','image','audio','video','document']).default('text'),
-	mediaUrl: text(),
-	status: mysqlEnum(['sent','delivered','read','failed','pending']).default('pending'),
-	createdAt: timestamp({ mode: 'string' }).defaultNow().notNull(),
-	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	id: varchar({ length: 80 }).primaryKey().notNull(),
+	conversationId: varchar("conversation_id", { length: 80 }).notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	waMessageId: varchar("wa_message_id", { length: 120 }),
+	senderType: mysqlEnum(['customer','agent','bot']).notNull(),
+	messageType: mysqlEnum(['text','image','audio','video','document','template','sticker','location','reaction']).default('text').notNull(),
+	content: text().default("").notNull(),
+	mediaUrl: text("media_url"),
+	mediaId: varchar("media_id", { length: 120 }),
+	caption: text(),
+	status: mysqlEnum(['pending','sent','delivered','read','failed']).default('pending').notNull(),
+	errorMessage: text("error_message"),
+	metadataJson: text("metadata_json").default("{}").notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
 },
 (table) => [
-	index("idx_wm_conversation").on(table.conversationId),
-	index("idx_wm_client").on(table.clientId),
-	index("idx_wm_status").on(table.status),
+	index("idx_wa_msg_conv").on(table.conversationId),
+	index("idx_wa_msg_client").on(table.clientId),
+	index("idx_wa_msg_wa_id").on(table.waMessageId),
+	index("idx_wa_msg_created").on(table.createdAt),
+]);
+
+export const megadeskNotifications = mysqlTable("megadesk_notifications", {
+	notificationId: varchar("notification_id", { length: 80 }).primaryKey().notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	userId: varchar("user_id", { length: 80 }).notNull(),
+	title: varchar({ length: 255 }).notNull(),
+	message: text().notNull(),
+	type: mysqlEnum(['info','success','warning','error','system']).default('info').notNull(),
+	isRead: boolean("is_read").default(false).notNull(),
+	actionUrl: varchar("action_url", { length: 500 }),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
+	readAt: timestamp("read_at", { mode: 'string' }),
+}, (table) => [
+	index("idx_mn_client").on(table.clientId),
+	index("idx_mn_user").on(table.userId),
+	index("idx_mn_client_user").on(table.clientId, table.userId),
+	index("idx_mn_is_read").on(table.isRead),
+	index("idx_mn_created_at").on(table.createdAt),
 ]);
 
 export const adminCredentials = mysqlTable("admin_credentials", {

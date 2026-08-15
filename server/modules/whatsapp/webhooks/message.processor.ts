@@ -5,7 +5,6 @@
  */
 import { findOrCreateConversation, updateConversationLastMessage } from "../repositories/conversation.repo";
 import { createMessage, updateMessageStatus, getMessageByWaId } from "../repositories/message.repo";
-import { getWaAccountByPhoneNumberId } from "../repositories/whatsapp.repo";
 import { getMediaUrl } from "../meta/graph-api";
 import { emitNewMessage, emitMessageStatus, emitNewConversation, emitConversationUpdated } from "../socket/whatsapp.socket";
 import type {
@@ -13,25 +12,19 @@ import type {
   MetaWebhookContact,
   MetaWebhookStatus,
   WaMessageType,
+  WaAccountRecord,
 } from "../types";
 
 /**
  * Processa uma mensagem recebida do webhook Meta.
  */
 export async function processIncomingMessage(
-  phoneNumberId: string,
+  account: WaAccountRecord,
   message: MetaWebhookMessage,
   contact: MetaWebhookContact | undefined
 ): Promise<void> {
-  // 1. Buscar a conta WhatsApp pelo phoneNumberId
-  const account = await getWaAccountByPhoneNumberId(phoneNumberId);
-  if (!account) {
-    console.warn(`[WA Webhook] Conta não encontrada para phoneNumberId: ${phoneNumberId}`);
-    return;
-  }
-
-  // 2. Verificar duplicidade (idempotência)
-  const existing = await getMessageByWaId(message.id);
+  // A conta e o tenant foram resolvidos autoritativamente pelo handler.
+  const existing = await getMessageByWaId(account.clientId, message.id);
   if (existing) {
     console.log(`[WA Webhook] Mensagem duplicada ignorada: ${message.id}`);
     return;
@@ -151,10 +144,9 @@ export async function processIncomingMessage(
 /**
  * Processa atualizações de status de mensagem (sent, delivered, read, failed).
  */
-export async function processMessageStatus(status: MetaWebhookStatus): Promise<void> {
-  const waStatus = status.status as "sent" | "delivered" | "read" | "failed";
-
-  await updateMessageStatus(status.id, waStatus);
+export async function processMessageStatus(clientId: string, status: MetaWebhookStatus): Promise<void> {
+  const waStatus = status.status;
+  await updateMessageStatus(clientId, status.id, waStatus);
 
   // Emitir atualização de status via socket
   emitMessageStatus(status.id, waStatus);

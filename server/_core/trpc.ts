@@ -50,12 +50,19 @@ const requireTenant = t.middleware(async opts => {
       throw new TRPCError({ code: "FORBIDDEN", message: "Acesso operacional indisponível." });
     }
   }
-  if (process.env.NODE_ENV === "test") return next({ ctx: { ...ctx, tenantId, userEmail: ctx.userEmail ?? "test@example.invalid" } });
+  if (process.env.NODE_ENV === "test") return next({ ctx: {
+    ...ctx,
+    tenantId,
+    userEmail: ctx.userEmail ?? "test@example.invalid",
+    operationalUserId: ctx.operationalUserId ?? "test-operational-user",
+    operationalUserRole: ctx.operationalUserRole ?? "admin",
+  } });
   const userEmail = ctx.userEmail;
   if (!userEmail) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão MegaDesk inválida. Faça login novamente." });
-  try { await validateOperationalAccess({ clientId: tenantId, userEmail }); }
+  let access: Awaited<ReturnType<typeof validateOperationalAccess>>;
+  try { access = await validateOperationalAccess({ clientId: tenantId, userEmail }); }
   catch { throw new TRPCError({ code: "FORBIDDEN", message: "Acesso operacional indisponível." }); }
-  return next({ ctx: { ...ctx, tenantId, userEmail } });
+  return next({ ctx: { ...ctx, tenantId, userEmail, operationalUserId: access.userId, operationalUserRole: access.role } });
 });
 export const megadeskProcedure = t.procedure.use(requireTenant);
 

@@ -54,7 +54,7 @@ export async function sendText(input: SendTextMessageInput) {
 
     const waMessageId = result.messages?.[0]?.id;
     if (waMessageId) {
-      await updateMessageWaId(message.id, waMessageId, "sent");
+      await updateMessageWaId(input.clientId, message.id, waMessageId, "sent");
     }
 
     // Atualizar última mensagem
@@ -69,7 +69,7 @@ export async function sendText(input: SendTextMessageInput) {
     return { success: true, messageId: message.id, waMessageId };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : "Erro desconhecido";
-    await markMessageFailed(message.id, errMsg);
+    await markMessageFailed(input.clientId, message.id, errMsg);
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Falha ao enviar mensagem: ${errMsg}` });
   }
 }
@@ -116,7 +116,7 @@ export async function sendMedia(input: SendMediaMessageInput & { conversationId:
     }
 
     const waMessageId = result.messages?.[0]?.id;
-    if (waMessageId) await updateMessageWaId(message.id, waMessageId, "sent");
+    if (waMessageId) await updateMessageWaId(input.clientId, message.id, waMessageId, "sent");
 
     await updateConversationLastMessage(conversation.id, input.clientId, content, false);
 
@@ -128,7 +128,7 @@ export async function sendMedia(input: SendMediaMessageInput & { conversationId:
     return { success: true, messageId: message.id, waMessageId };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : "Erro desconhecido";
-    await markMessageFailed(message.id, errMsg);
+    await markMessageFailed(input.clientId, message.id, errMsg);
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Falha ao enviar mídia: ${errMsg}` });
   }
 }
@@ -163,14 +163,14 @@ export async function sendTemplate(input: SendTemplateMessageInput & { conversat
     );
 
     const waMessageId = result.messages?.[0]?.id;
-    if (waMessageId) await updateMessageWaId(message.id, waMessageId, "sent");
+    if (waMessageId) await updateMessageWaId(input.clientId, message.id, waMessageId, "sent");
 
     await updateConversationLastMessage(conversation.id, input.clientId, content, false);
 
     return { success: true, messageId: message.id, waMessageId };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : "Erro desconhecido";
-    await markMessageFailed(message.id, errMsg);
+    await markMessageFailed(input.clientId, message.id, errMsg);
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Falha ao enviar template: ${errMsg}` });
   }
 }

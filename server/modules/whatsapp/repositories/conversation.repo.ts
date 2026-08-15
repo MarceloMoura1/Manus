@@ -8,8 +8,33 @@ import { waConversations } from "../../../../drizzle/schema";
 import { eq, and, desc, like, or, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import type { WaConversationRecord, WaConversationStatus } from "../types";
+import { parseDatabaseTimestamp } from "./timestamp";
 
 const db = getDb();
+type ConversationRow = typeof waConversations.$inferSelect;
+
+function toConversationRecord(row: ConversationRow): WaConversationRecord {
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    accountId: row.accountId,
+    customerName: row.customerName,
+    customerPhone: row.customerPhone,
+    lastMessage: row.lastMessage,
+    lastMessageAt: parseDatabaseTimestamp(row.lastMessageAt, "wa_conversations.last_message_at"),
+    unreadCount: row.unreadCount,
+    status: row.status,
+    assignedUserId: row.assignedUserId,
+    crmClientId: row.crmClientId,
+    metadataJson: row.metadataJson,
+    createdAt: parseDatabaseTimestamp(row.createdAt, "wa_conversations.created_at"),
+    updatedAt: parseDatabaseTimestamp(row.updatedAt, "wa_conversations.updated_at"),
+  };
+}
+
+function databaseTimestamp(): string {
+  return new Date().toISOString().slice(0, 19).replace("T", " ");
+}
 
 export async function findOrCreateConversation(
   clientId: string,
@@ -32,13 +57,12 @@ export async function findOrCreateConversation(
     .limit(1);
 
   if (existing) {
-    return { conversation: existing as unknown as WaConversationRecord, isNew: false };
+    return { conversation: toConversationRecord(existing), isNew: false };
   }
 
   // Criar nova conversa
   const id = randomUUID();
-    // conversationId é o campo PK (alias id)
-  await (db.insert(waConversations) as any).values({
+  await db.insert(waConversations).values({
     id,
     clientId,
     accountId,
@@ -46,15 +70,16 @@ export async function findOrCreateConversation(
     customerName,
     status: "open",
     unreadCount: 0,
-    lastMessageAt: new Date().toISOString().slice(0,19).replace("T"," "),
+    lastMessageAt: databaseTimestamp(),
   });
 
   const [created] = await db
     .select()
     .from(waConversations)
-    .where(and(eq(waConversations.conversationId, id), eq(waConversations.clientId, clientId)));
+    .where(and(eq(waConversations.id, id), eq(waConversations.clientId, clientId)));
 
-  return { conversation: created as unknown as WaConversationRecord, isNew: true };
+  if (!created) throw new Error("Conversa recém-criada não foi encontrada.");
+  return { conversation: toConversationRecord(created), isNew: true };
 }
 
 export async function listConversations(
@@ -71,17 +96,16 @@ export async function listConversations(
 
   const conditions = [eq(waConversations.clientId, clientId)];
   if (accountId) conditions.push(eq(waConversations.accountId, accountId));
-  if (status) conditions.push(eq(waConversations.status, status as 'open' | 'closed'));
+  if (status) conditions.push(eq(waConversations.status, status));
   if (search) {
-    conditions.push(
-      or(
+    const searchCondition = or(
         like(waConversations.customerName, `%${search}%`),
         like(waConversations.customerPhone, `%${search}%`)
-      )!
-    );
+      );
+    if (searchCondition) conditions.push(searchCondition);
   }
 
-  const rows = await (db as any)
+  const rows = await db
     .select()
     .from(waConversations)
     .where(and(...conditions))
@@ -89,15 +113,15 @@ export async function listConversations(
     .limit(limit)
     .offset(offset);
 
-  return rows as unknown as WaConversationRecord[];
+  return rows.map(toConversationRecord);
 }
 
 export async function getConversationById(id: string, clientId: string): Promise<WaConversationRecord | null> {
   const [row] = await db
     .select()
     .from(waConversations)
-    .where(and(eq(waConversations.conversationId, id), eq(waConversations.clientId, clientId)));
-  return (row as unknown as WaConversationRecord) ?? null;
+    .where(and(eq(waConversations.id, id), eq(waConversations.clientId, clientId)));
+  return row ? toConversationRecord(row) : null;
 }
 
 export async function updateConversationLastMessage(
@@ -106,20 +130,20 @@ export async function updateConversationLastMessage(
   lastMessage: string,
   incrementUnread = false
 ): Promise<void> {
-  await (db.update(waConversations) as any)
+  await db.update(waConversations)
     .set({
       lastMessage,
-      lastMessageAt: new Date().toISOString().slice(0,19).replace("T"," "),
+      lastMessageAt: databaseTimestamp(),
       ...(incrementUnread ? { unreadCount: sql`${waConversations.unreadCount} + 1` } : {}),
-      updatedAt: new Date().toISOString().slice(0,19).replace('T',' '),
+      updatedAt: databaseTimestamp(),
     })
-    .where(and(eq(waConversations.conversationId, id), eq(waConversations.clientId, clientId)));
+    .where(and(eq(waConversations.id, id), eq(waConversations.clientId, clientId)));
 }
 
 export async function markConversationRead(id: string, clientId: string): Promise<void> {
-  await (db.update(waConversations) as any)
-    .set({ unreadCount: 0, updatedAt: new Date().toISOString().slice(0,19).replace('T',' ') })
-    .where(and(eq(waConversations.conversationId, id), eq(waConversations.clientId, clientId)));
+  await db.update(waConversations)
+    .set({ unreadCount: 0, updatedAt: databaseTimestamp() })
+    .where(and(eq(waConversations.id, id), eq(waConversations.clientId, clientId)));
 }
 
 export async function updateConversationStatus(
@@ -127,9 +151,9 @@ export async function updateConversationStatus(
   clientId: string,
   status: WaConversationStatus
 ): Promise<void> {
-  await (db.update(waConversations) as any)
-    .set({ status: status as 'open' | 'closed', updatedAt: new Date().toISOString().slice(0,19).replace('T',' ') })
-    .where(and(eq(waConversations.conversationId, id), eq(waConversations.clientId, clientId)));
+  await db.update(waConversations)
+    .set({ status, updatedAt: databaseTimestamp() })
+    .where(and(eq(waConversations.id, id), eq(waConversations.clientId, clientId)));
 }
 
 export async function updateConversation(
@@ -142,7 +166,7 @@ export async function updateConversation(
     crmClientId: string | null;
   }>
 ): Promise<void> {
-  await (db.update(waConversations) as any)
-    .set({ ...data, updatedAt: new Date().toISOString().slice(0,19).replace('T',' ') })
-    .where(and(eq(waConversations.conversationId, id), eq(waConversations.clientId, clientId)));
+  await db.update(waConversations)
+    .set({ ...data, updatedAt: databaseTimestamp() })
+    .where(and(eq(waConversations.id, id), eq(waConversations.clientId, clientId)));
 }

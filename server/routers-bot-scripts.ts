@@ -17,6 +17,14 @@ import {
 import { TRPCError } from "@trpc/server";
 import { invokeLLM } from "./_core/llm";
 
+function rejectUnsafePromptExecution(): void {
+  throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Execução bloqueada até a separação segura do prompt" });
+}
+
+function redactPotentialLegacyPrompt<T extends { description: string }>(script: T) {
+  return { ...script, description: null };
+}
+
 export const botScriptsRouter = router({
   /**
    * Listar todos os scripts de bot de um cliente
@@ -28,7 +36,7 @@ export const botScriptsRouter = router({
       if (input.clientId !== ctx.tenantId) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Acesso negado" });
       }
-      return getBotScripts(input.clientId);
+      return (await getBotScripts(input.clientId)).map(redactPotentialLegacyPrompt);
     }),
 
   /**
@@ -44,7 +52,7 @@ export const botScriptsRouter = router({
           message: "Bot script not found",
         });
       }
-      return script;
+      return redactPotentialLegacyPrompt(script);
     }),
 
   /**
@@ -61,6 +69,7 @@ export const botScriptsRouter = router({
       })
     )
     .mutation(async ({ input }) => {
+      if (input.systemPrompt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Armazenamento seguro do prompt ainda não está disponível" });
       const scriptId = await createBotScript(input.clientId, {
         name: input.name,
         description: input.description,
@@ -85,6 +94,7 @@ export const botScriptsRouter = router({
       })
     )
     .mutation(async ({ input }) => {
+      if (input.systemPrompt !== undefined) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Armazenamento seguro do prompt ainda não está disponível" });
       const script = await getBotScript(input.clientId, input.scriptId);
       if (!script) {
         throw new TRPCError({
@@ -163,7 +173,8 @@ export const botScriptsRouter = router({
   getActive: megadeskProcedure
     .input(z.object({ clientId: z.string() }))
     .query(async ({ input }) => {
-      return getActiveBotScript(input.clientId);
+      const script = await getActiveBotScript(input.clientId);
+      return script ? redactPotentialLegacyPrompt(script) : undefined;
     }),
 
   testScript: megadeskProcedure
@@ -183,6 +194,7 @@ export const botScriptsRouter = router({
       })
     )
     .mutation(async ({ input }) => {
+      rejectUnsafePromptExecution();
       const script = await getBotScript(input.clientId, input.scriptId);
       if (!script) {
         throw new TRPCError({
@@ -197,7 +209,7 @@ export const botScriptsRouter = router({
       }> = [
         {
           role: "system",
-          content: script.systemPrompt,
+          content: script.description,
         },
       ];
 

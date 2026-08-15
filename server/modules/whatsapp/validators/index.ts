@@ -104,3 +104,70 @@ export const webhookVerifySchema = z.object({
   "hub.verify_token": z.string().min(1),
   "hub.challenge": z.string().min(1),
 });
+
+const webhookMessageTypeSchema = z.enum([
+  "text", "image", "audio", "video", "document", "template", "sticker", "location", "reaction",
+]);
+
+const webhookErrorSchema = z.object({
+  code: z.number(),
+  title: z.string(),
+  message: z.string().optional(),
+  error_data: z.object({ details: z.string() }).optional(),
+});
+
+const webhookMessageSchema = z.object({
+  from: z.string().min(1),
+  id: z.string().min(1),
+  timestamp: z.string().min(1),
+  type: webhookMessageTypeSchema,
+  text: z.object({ body: z.string() }).optional(),
+  image: z.object({ id: z.string(), mime_type: z.string(), sha256: z.string(), caption: z.string().optional() }).optional(),
+  audio: z.object({ id: z.string(), mime_type: z.string() }).optional(),
+  video: z.object({ id: z.string(), mime_type: z.string(), sha256: z.string(), caption: z.string().optional() }).optional(),
+  document: z.object({ id: z.string(), filename: z.string(), mime_type: z.string(), sha256: z.string(), caption: z.string().optional() }).optional(),
+  sticker: z.object({ id: z.string(), mime_type: z.string(), sha256: z.string(), animated: z.boolean() }).optional(),
+  location: z.object({ latitude: z.number(), longitude: z.number(), name: z.string().optional(), address: z.string().optional() }).optional(),
+  reaction: z.object({ message_id: z.string(), emoji: z.string() }).optional(),
+  template: z.object({}).passthrough().optional(),
+  context: z.object({ from: z.string(), id: z.string() }).optional(),
+}).superRefine((message, ctx) => {
+  const requiredField: Record<typeof message.type, keyof typeof message> = {
+    text: "text", image: "image", audio: "audio", video: "video", document: "document",
+    template: "template", sticker: "sticker", location: "location", reaction: "reaction",
+  };
+  if (!message[requiredField[message.type]]) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Campo obrigatório ausente para mensagem ${message.type}` });
+  }
+});
+
+const webhookStatusSchema = z.object({
+  id: z.string().min(1),
+  recipient_id: z.string(),
+  status: z.enum(["sent", "delivered", "read", "failed"]),
+  timestamp: z.string(),
+  errors: z.array(webhookErrorSchema).optional(),
+});
+
+export const metaWebhookEnvelopeSchema = z.object({
+  object: z.string().min(1),
+  entry: z.array(z.unknown()),
+});
+
+export const metaWebhookPayloadSchema = z.object({
+  object: z.literal("whatsapp_business_account"),
+  entry: z.array(z.object({
+    id: z.string(),
+    changes: z.array(z.object({
+      field: z.string(),
+      value: z.object({
+        messaging_product: z.string(),
+        metadata: z.object({ display_phone_number: z.string(), phone_number_id: z.string().min(1) }),
+        contacts: z.array(z.object({ profile: z.object({ name: z.string() }), wa_id: z.string() })).optional(),
+        messages: z.array(webhookMessageSchema).optional(),
+        statuses: z.array(webhookStatusSchema).optional(),
+        errors: z.array(webhookErrorSchema).optional(),
+      }),
+    })),
+  })),
+});

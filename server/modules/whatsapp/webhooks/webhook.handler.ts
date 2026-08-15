@@ -7,31 +7,30 @@ import type { Request, Response } from "express";
 import { validateWebhookSignature, validateVerifyToken } from "../meta/webhook-validator";
 import { getWaAccountByPhoneNumberId } from "../repositories/whatsapp.repo";
 import { processIncomingMessage, processMessageStatus } from "./message.processor";
-import type { MetaWebhookPayload } from "../types";
+import { metaWebhookEnvelopeSchema, metaWebhookPayloadSchema, webhookVerifySchema } from "../validators";
 
 // App Secret da Meta — deve ser configurado via variável de ambiente
-const META_APP_SECRET = process.env.META_APP_SECRET ?? "";
+export interface WebhookRequest extends Request { rawBody?: Buffer }
 
 /**
  * GET /api/webhooks/meta
  * Verificação do webhook pela Meta (challenge).
  */
 export async function handleWebhookVerify(req: Request, res: Response): Promise<void> {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"] as string;
-  const challenge = req.query["hub.challenge"] as string;
-
-  if (mode !== "subscribe") {
+  const verification = webhookVerifySchema.safeParse(req.query);
+  if (!verification.success) {
     res.status(403).json({ error: "Invalid mode" });
     return;
   }
+  const token = verification.data["hub.verify_token"];
+  const challenge = verification.data["hub.challenge"];
 
   // Buscar a conta pelo verify_token (cada conta tem seu próprio token)
   // Isso permite múltiplos números no mesmo webhook endpoint
   const account = await findAccountByVerifyToken(token);
 
   if (!account) {
-    console.warn(`[WA Webhook] Verify token não encontrado: ${token}`);
+    console.warn("[WA Webhook] Verify token não encontrado.");
     res.status(403).json({ error: "Invalid verify token" });
     return;
   }
@@ -44,28 +43,41 @@ export async function handleWebhookVerify(req: Request, res: Response): Promise<
  * POST /api/webhooks/meta
  * Recebe eventos de mensagem e status da Meta.
  */
-export async function handleWebhookEvent(req: Request, res: Response): Promise<void> {
+export async function handleWebhookEvent(req: WebhookRequest, res: Response): Promise<void> {
+  const appSecret = process.env.META_APP_SECRET;
+  if (!appSecret) {
+    res.status(503).json({ error: "Webhook unavailable" });
+    return;
+  }
   // Validar assinatura HMAC (segurança)
-  if (META_APP_SECRET) {
-    const signature = req.headers["x-hub-signature-256"] as string ?? "";
-    const rawBody = (req as Request & { rawBody?: Buffer }).rawBody ?? Buffer.from(JSON.stringify(req.body));
+  {
+    const signatureHeader = req.headers["x-hub-signature-256"];
+    const signature = typeof signatureHeader === "string" ? signatureHeader : "";
+    const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body));
 
-    if (!validateWebhookSignature(rawBody, signature, META_APP_SECRET)) {
+    if (!validateWebhookSignature(rawBody, signature, appSecret)) {
       console.warn("[WA Webhook] Assinatura inválida — requisição rejeitada");
       res.status(401).json({ error: "Invalid signature" });
       return;
     }
   }
 
-  // Responder 200 imediatamente para a Meta (evitar timeout/retry)
-  res.status(200).json({ status: "ok" });
-
-  // Processar de forma assíncrona
-  const payload = req.body as MetaWebhookPayload;
-
-  if (payload.object !== "whatsapp_business_account") {
+  const envelope = metaWebhookEnvelopeSchema.safeParse(req.body);
+  if (!envelope.success) {
+    res.status(400).json({ error: "Invalid webhook envelope" });
     return;
   }
+  if (envelope.data.object !== "whatsapp_business_account") {
+    res.status(200).json({ status: "ignored" });
+    return;
+  }
+  const parsedPayload = metaWebhookPayloadSchema.safeParse(req.body);
+  if (!parsedPayload.success) {
+    res.status(400).json({ error: "Invalid webhook payload" });
+    return;
+  }
+  const payload = parsedPayload.data;
+  res.status(200).json({ status: "accepted" });
 
   for (const entry of payload.entry ?? []) {
     for (const change of entry.changes ?? []) {
@@ -75,19 +87,30 @@ export async function handleWebhookEvent(req: Request, res: Response): Promise<v
       const phoneNumberId = value.metadata?.phone_number_id;
 
       if (!phoneNumberId) continue;
+      let account;
+      try {
+        account = await getWaAccountByPhoneNumberId(phoneNumberId);
+      } catch {
+        console.warn("[WA Webhook] Conta não pôde ser resolvida com segurança.");
+        continue;
+      }
+      if (!account) {
+        console.warn("[WA Webhook] Conta não pôde ser resolvida com segurança.");
+        continue;
+      }
 
       // Processar mensagens recebidas
       for (const message of value.messages ?? []) {
         const contact = value.contacts?.find((c) => c.wa_id === message.from);
-        processIncomingMessage(phoneNumberId, message, contact).catch((err) => {
-          console.error("[WA Webhook] Erro ao processar mensagem:", err);
+        processIncomingMessage(account, message, contact).catch(() => {
+          console.error("[WA Webhook] Erro ao processar mensagem.");
         });
       }
 
       // Processar atualizações de status
       for (const status of value.statuses ?? []) {
-        processMessageStatus(status).catch((err) => {
-          console.error("[WA Webhook] Erro ao processar status:", err);
+        processMessageStatus(account.clientId, status).catch(() => {
+          console.error("[WA Webhook] Erro ao processar status.");
         });
       }
     }

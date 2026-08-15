@@ -8,8 +8,29 @@ import { waMessages } from "../../../../drizzle/schema";
 import { eq, and, desc, lt } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import type { WaMessageRecord, WaSenderType, WaMessageType, WaMessageStatus } from "../types";
+import { parseDatabaseTimestamp } from "./timestamp";
 
 const db = getDb();
+type MessageRow = typeof waMessages.$inferSelect;
+
+function toMessageRecord(row: MessageRow): WaMessageRecord {
+  return {
+    id: row.id,
+    conversationId: row.conversationId,
+    clientId: row.clientId,
+    waMessageId: row.waMessageId,
+    senderType: row.senderType,
+    messageType: row.messageType,
+    content: row.content,
+    mediaUrl: row.mediaUrl,
+    mediaId: row.mediaId,
+    caption: row.caption,
+    status: row.status,
+    errorMessage: row.errorMessage,
+    metadataJson: row.metadataJson,
+    createdAt: parseDatabaseTimestamp(row.createdAt, "wa_messages.created_at"),
+  };
+}
 
 export interface CreateMessageInput {
   conversationId: string;
@@ -46,7 +67,8 @@ export async function createMessage(input: CreateMessageInput): Promise<WaMessag
     .from(waMessages)
     .where(and(eq(waMessages.id, id), eq(waMessages.clientId, input.clientId)));
 
-  return row as WaMessageRecord;
+  if (!row) throw new Error("Mensagem recém-criada não foi encontrada.");
+  return toMessageRecord(row);
 }
 
 export async function listMessages(
@@ -66,10 +88,13 @@ export async function listMessages(
     const [cursor] = await db
       .select({ createdAt: waMessages.createdAt })
       .from(waMessages)
-      .where(eq(waMessages.id, before));
-    if (cursor) {
-      conditions.push(lt(waMessages.createdAt, cursor.createdAt));
-    }
+      .where(and(
+        eq(waMessages.id, before),
+        eq(waMessages.clientId, clientId),
+        eq(waMessages.conversationId, conversationId),
+      ));
+    if (!cursor) throw new Error("MESSAGE_CURSOR_OUT_OF_SCOPE");
+    conditions.push(lt(waMessages.createdAt, cursor.createdAt));
   }
 
   const rows = await db
@@ -80,20 +105,22 @@ export async function listMessages(
     .limit(limit);
 
   // Retornar em ordem cronológica (mais antigas primeiro)
-  return (rows as WaMessageRecord[]).reverse();
+  return rows.map(toMessageRecord).reverse();
 }
 
 export async function updateMessageStatus(
+  clientId: string,
   waMessageId: string,
   status: WaMessageStatus
 ): Promise<void> {
   await db
     .update(waMessages)
     .set({ status })
-    .where(eq(waMessages.waMessageId, waMessageId));
+    .where(and(eq(waMessages.clientId, clientId), eq(waMessages.waMessageId, waMessageId)));
 }
 
 export async function updateMessageWaId(
+  clientId: string,
   id: string,
   waMessageId: string,
   status: WaMessageStatus = "sent"
@@ -101,20 +128,26 @@ export async function updateMessageWaId(
   await db
     .update(waMessages)
     .set({ waMessageId, status })
-    .where(eq(waMessages.id, id));
+    .where(and(eq(waMessages.clientId, clientId), eq(waMessages.id, id)));
 }
 
-export async function getMessageByWaId(waMessageId: string): Promise<WaMessageRecord | null> {
+export async function getMessageById(clientId: string, id: string): Promise<WaMessageRecord | null> {
+  const [row] = await db.select().from(waMessages)
+    .where(and(eq(waMessages.clientId, clientId), eq(waMessages.id, id)));
+  return row ? toMessageRecord(row) : null;
+}
+
+export async function getMessageByWaId(clientId: string, waMessageId: string): Promise<WaMessageRecord | null> {
   const [row] = await db
     .select()
     .from(waMessages)
-    .where(eq(waMessages.waMessageId, waMessageId));
-  return (row as WaMessageRecord) ?? null;
+    .where(and(eq(waMessages.clientId, clientId), eq(waMessages.waMessageId, waMessageId)));
+  return row ? toMessageRecord(row) : null;
 }
 
-export async function markMessageFailed(id: string, errorMessage: string): Promise<void> {
+export async function markMessageFailed(clientId: string, id: string, errorMessage: string): Promise<void> {
   await db
     .update(waMessages)
     .set({ status: "failed", errorMessage })
-    .where(eq(waMessages.id, id));
+    .where(and(eq(waMessages.clientId, clientId), eq(waMessages.id, id)));
 }

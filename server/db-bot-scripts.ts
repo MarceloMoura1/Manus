@@ -9,17 +9,16 @@ export async function createBotScript(clientId: string, data: {
   systemPrompt: string;
   initialMessage?: string;
 }) {
+  if (data.systemPrompt) throw new Error("SYSTEM_PROMPT_STORAGE_UNAVAILABLE");
   const db = getDb();
   const scriptId = randomUUID();
   
-  await (db.insert(megadeskBotScripts) as any).values({// eslint-disable-next-line @typescript-eslint/no-explicit-any
-
+  await db.insert(megadeskBotScripts).values({
     scriptId,
     clientId,
     name: data.name,
-    description: data.systemPrompt || data.description || "",
-    // systemPrompt mapeado para description (campo não existe na tabela)
-    initialMessage: data.initialMessage,
+    description: data.description || "",
+    initialMessage: data.initialMessage ?? "",
     active: 0,
   });
 
@@ -64,13 +63,18 @@ export async function updateBotScript(
   }
 ) {
   const db = getDb();
-  
+  const updates: Partial<typeof megadeskBotScripts.$inferInsert> = {
+    updatedAt: new Date().toISOString().slice(0, 19).replace("T", " "),
+  };
+  if (data.name !== undefined) updates.name = data.name;
+  if (data.systemPrompt !== undefined) throw new Error("SYSTEM_PROMPT_STORAGE_UNAVAILABLE");
+  if (data.description !== undefined) updates.description = data.description;
+  if (data.initialMessage !== undefined) updates.initialMessage = data.initialMessage;
+  if (data.isActive !== undefined) updates.active = data.isActive ? 1 : 0;
+
   await db
     .update(megadeskBotScripts)
-    .set({
-      ...data,
-      updatedAt: new Date().toISOString().slice(0, 19).replace("T", " "),
-    })
+    .set(updates)
     .where(
       and(
         eq(megadeskBotScripts.clientId, clientId),
