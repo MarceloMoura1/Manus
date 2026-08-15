@@ -11,6 +11,7 @@ export type TrpcContext = {
   user: User | null;
   tenantId?: string; // clientId para isolamento multitenante
   userRole?: string; // role do usuário no tenant
+  userEmail?: string; // identidade da sessão MegaDesk para revalidação autoritativa
 };
 
 async function tryMegaAdminSession(req: CreateExpressContextOptions["req"]): Promise<User | null> {
@@ -58,6 +59,7 @@ export async function createContext(
   let user: User | null = null;
   let tenantId: string | undefined;
   let userRole: string | undefined;
+  let userEmail: string | undefined;
 
   // 1. Try Manus OAuth session
   try {
@@ -98,6 +100,8 @@ export async function createContext(
     if (typeof roleData === "string") {
       userRole = roleData;
     }
+    const emailData = opts.req.headers?.["x-user-email"];
+    if (typeof emailData === "string") userEmail = emailData.trim().toLowerCase();
 
     // For test user, use test client ID
     if (!tenantId && user?.openId === 'test-user-dev') {
@@ -113,5 +117,6 @@ export async function createContext(
     user,
     tenantId,
     userRole,
+    userEmail,
   };
 }

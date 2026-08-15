@@ -1,11 +1,21 @@
 # AGENTS.md
 
-## Cursor Cloud specific instructions
+## Ambiente e comandos
 
-This repository (`MarceloMoura1/Manus`) is currently an empty scaffold with only a `README.md`. There is no application code, no dependency files, no build system, and no services to run.
+- Use Node.js 22 e pnpm 10.18.0.
+- Instale com `pnpm install --frozen-lockfile`.
+- Verificação de tipos: `pnpm check`.
+- Testes: `pnpm test` (ou `pnpm vitest run <arquivo>` para um conjunto específico).
+- Build: `pnpm run build`.
+- Desenvolvimento: `pnpm dev` em shells POSIX. Os scripts `dev` e `start` usam a sintaxe POSIX de `NODE_ENV`; no Windows CMD/PowerShell, defina `NODE_ENV` antes e execute o comando subjacente, ou use um shell compatível.
 
-When source code and dependencies are added, update this section with:
-- How to install dependencies (e.g. `npm install`, `pip install -r requirements.txt`)
-- How to run the application in development mode
-- How to run linting and tests
-- Any non-obvious startup caveats
+## Arquitetura resumida
+
+O MegaDesk é uma aplicação TypeScript com frontend React/Vite, backend Express/tRPC e persistência MySQL/Drizzle. O banco principal mantém o cadastro e o controle de acesso dos tenants; cada tenant pode ter banco físico isolado. A Evolution API e seu MySQL são serviços Docker separados configurados por `docker-compose.evolution.yml`.
+
+## Segurança operacional
+
+- Nunca abra, imprima ou versione arquivos `.env` reais; use `.env.example` apenas como catálogo.
+- Não execute migrations, seeds, dumps ou restaurações sem autorização explícita.
+- Não inicie, remova ou recrie containers e volumes durante verificações. Nunca use `docker compose down -v` em dados existentes.
+- A ação administrativa comum de remoção coloca o tenant em quarentena (`paused`, acesso bloqueado) e preserva dados e banco físico. Exclusão física permanece bloqueada até existir autorização operacional e evidência verificável de backup.

@@ -98,16 +98,12 @@ describe("SQL statements no db.ts", () => {
     expect(hasMultipleStatements("DELETE FROM t WHERE id = ?")).toBe(false);
   });
 
-  it("deleteClientFromDb deve usar execute() separados para cada DELETE", () => {
-    // Verifica que a função usa dois execute() separados
+  it("deleteClientFromDb deve permanecer fail-closed e sem DELETE", () => {
     const deleteFunc = dbContent.substring(
       dbContent.indexOf("export async function deleteClientFromDb"),
-      dbContent.indexOf("export async function deleteClientFromDb") + 1000
+      dbContent.indexOf("export async function deleteClientFromDb") + 300
     );
-    expect(deleteFunc).toContain("DELETE FROM megadesk_domain_client_users WHERE client_id = ?");
-    expect(deleteFunc).toContain("DELETE FROM megadesk_domain_clients WHERE client_id = ?");
-    // Não deve ter os dois DELETEs em uma única execute()
-    const combinedDelete = "DELETE FROM megadesk_domain_client_users WHERE client_id = ?; DELETE FROM megadesk_domain_clients";
-    expect(deleteFunc).not.toContain(combinedDelete);
+    expect(deleteFunc).toContain("Exclusão física de tenant bloqueada");
+    expect(deleteFunc).not.toContain("DELETE FROM");
   });
 });

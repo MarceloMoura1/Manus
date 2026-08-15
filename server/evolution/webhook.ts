@@ -9,6 +9,7 @@
 import type { Request, Response } from "express";
 import { upsertSession, instanceNameFor } from "./session-store";
 import { getPool, getDb, searchCustomerByPhone, createCustomer, createConversation } from "../db";
+import { getEvolutionConfig } from "./config";
 
 // Socket.IO — importado dinamicamente para evitar dependência circular
 async function emitToClient(clientId: string, event: string, data: unknown) {
@@ -38,13 +39,17 @@ interface EvolutionWebhookPayload {
 
 export async function handleEvolutionWebhook(req: Request, res: Response): Promise<void> {
   // Validar API key da Evolution (quando configurada)
-  const expectedKey = process.env.EVOLUTION_API_KEY;
-  if (expectedKey) {
-    const receivedKey = req.headers["apikey"] as string || req.headers["x-api-key"] as string;
-    if (!receivedKey || receivedKey !== expectedKey) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
+  let expectedKey: string;
+  try {
+    expectedKey = getEvolutionConfig().apiKey;
+  } catch {
+    res.status(503).json({ error: "Evolution webhook is not configured" });
+    return;
+  }
+  const receivedKey = req.headers["apikey"] as string || req.headers["x-api-key"] as string;
+  if (!receivedKey || receivedKey !== expectedKey) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
   }
 
   // Responde 200 imediatamente para não bloquear a Evolution API

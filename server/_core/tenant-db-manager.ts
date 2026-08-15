@@ -326,51 +326,7 @@ export async function listTenantDatabases(): Promise<string[]> {
   }
 }
 
-/**
- * Deleta banco de dados de um tenant (com cuidado!)
- */
-export async function deleteTenantDatabase(databaseName: string): Promise<void> {
-  try {
-    const mainDbUrl = process.env.DATABASE_URL;
-    if (!mainDbUrl) throw new Error("DATABASE_URL não configurada");
-
-    const credentials = parseDatabaseUrl(mainDbUrl);
-    const adminPool = mysql.createPool({
-      host: credentials.host,
-      port: credentials.port,
-      user: credentials.user,
-      password: credentials.password,
-      waitForConnections: true,
-      connectionLimit: 1,
-      queueLimit: 0,
-    });
-
-    const connection = await adminPool.getConnection();
-
-    try {
-      await connection.query(`DROP DATABASE IF EXISTS \`${databaseName}\``);
-      console.log(`✅ Banco de dados deletado: ${databaseName}`);
-
-      // Remove do cache
-      const keysToDelete: string[] = [];
-      tenantConnections.forEach((conn, clientId) => {
-        if (conn.config.databaseName === databaseName) {
-          keysToDelete.push(clientId);
-        }
-      });
-      for (const clientId of keysToDelete) {
-        const conn = tenantConnections.get(clientId);
-        if (conn) {
-          await conn.pool.end();
-          tenantConnections.delete(clientId);
-        }
-      }
-    } finally {
-      await connection.release();
-      await adminPool.end();
-    }
-  } catch (error) {
-    console.error("❌ Erro ao deletar banco de dados:", error);
-    throw error;
-  }
+/** Exclusão física permanece indisponível até existir evidência verificável de backup. */
+export async function deleteTenantDatabase(_databaseName: string): Promise<never> {
+  throw new Error("Exclusão física de tenant bloqueada: exige autorização operacional e evidência de backup válidas.");
 }

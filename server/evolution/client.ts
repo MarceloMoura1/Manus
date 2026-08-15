@@ -13,13 +13,12 @@
  *   POST /webhook/set/:name        → configura webhook
  */
 
-const EVOLUTION_BASE_URL = (process.env.EVOLUTION_API_URL || "http://localhost:8080").replace(/\/$/, "");
-const EVOLUTION_API_KEY  = process.env.EVOLUTION_API_KEY || "";
+import { getEvolutionConfig } from "./config";
 
 function buildHeaders() {
   return {
     "Content-Type": "application/json",
-    apikey: EVOLUTION_API_KEY,
+    apikey: getEvolutionConfig().apiKey,
   };
 }
 
@@ -28,10 +27,10 @@ async function request<T = any>(
   path: string,
   body?: Record<string, unknown>
 ): Promise<T> {
-  const url = `${EVOLUTION_BASE_URL}${path}`;
+  const url = `${getEvolutionConfig().apiUrl}${path}`;
 
   if (process.env.NODE_ENV !== "production") {
-    console.log(`[Evolution] ${method} ${url}`);
+    console.log(`[Evolution] ${method} ${path}`);
   }
 
   const res = await fetch(url, {
@@ -233,7 +232,7 @@ export async function evoSetWebhook(instanceName: string, webhookUrl: string): P
     url: webhookUrl,
     byEvents: false,
     base64: false,
-    headers: { apikey: EVOLUTION_API_KEY },
+    headers: { apikey: getEvolutionConfig().apiKey },
     events: [
       "MESSAGES_UPSERT",
       "MESSAGES_UPDATE",

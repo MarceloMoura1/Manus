@@ -413,26 +413,7 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
 
       // PRESERVAR conversas do Baileys (prefixo 'conv-baileys-') — elas são gerenciadas diretamente pelo Baileys
       // Deletar apenas conversas legadas (sem prefixo 'conv-baileys-')
-      await connection.execute("DELETE FROM megadesk_domain_conversations WHERE conversation_id NOT LIKE 'conv-baileys-%'");
-      await connection.execute("DELETE FROM megadesk_domain_tickets");
-      await connection.execute("DELETE FROM megadesk_domain_bot_scripts");
-      await connection.execute("DELETE FROM megadesk_domain_operational_records");
-      await connection.execute("DELETE FROM megadesk_domain_audit_logs");
-      await connection.execute("DELETE FROM megadesk_domain_metrics");
-      // IMPORTANTE: Deletar clientes que foram removidos em memória (evita que reapareçam após reiniciar)
-      // Primeiro, obter lista de client_ids que ainda existem em memória
-      const clientIdsToKeep = state.clients.map((c) => c.clientId);
-      if (clientIdsToKeep.length > 0) {
-        // Deletar usuários de clientes que não existem mais
-        const placeholders = clientIdsToKeep.map(() => "?").join(",");
-        await connection.execute(`DELETE FROM megadesk_domain_client_users WHERE client_id NOT IN (${placeholders})`, clientIdsToKeep);
-        // Deletar clientes que não existem mais
-        await connection.execute(`DELETE FROM megadesk_domain_clients WHERE client_id NOT IN (${placeholders})`, clientIdsToKeep);
-      } else {
-        // Se não há clientes em memória, deletar todos
-        await connection.execute("DELETE FROM megadesk_domain_client_users");
-        await connection.execute("DELETE FROM megadesk_domain_clients");
-      }
+      // Sincronização normal é somente upsert. Ausência em memória nunca implica exclusão.
 
       for (const client of state.clients) {
         await connection.execute("INSERT INTO megadesk_domain_clients (client_id, internal_id, tenant_database_name, company, contact, email, phone, cnpj, plan, max_users, status, status_type, access_released, api_token, modules_json, integrations_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE company=VALUES(company), contact=VALUES(contact), email=VALUES(email), phone=VALUES(phone), cnpj=VALUES(cnpj), plan=VALUES(plan), max_users=VALUES(max_users), status=VALUES(status), status_type=VALUES(status_type), access_released=VALUES(access_released), api_token=VALUES(api_token), modules_json=VALUES(modules_json), integrations_json=VALUES(integrations_json)", [client.clientId, client.id, client.tenantDatabaseName, client.company, client.contact, client.email || "", client.phone, client.cnpj || "", client.plan, client.maxUsers || 5, client.status, client.statusType || "test", client.accessReleased ? 1 : 0, client.apiToken, JSON.stringify(client.modules ?? []), JSON.stringify(client.integrations ?? {})]);
@@ -460,14 +441,13 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
       // Pular inserção de tickets aqui para evitar conflito com tabela megadesk_domain_chamados
       for (const script of state.botScripts) {
         const scriptClientId = script.clientId ?? state.clients[0]?.clientId ?? "cliente-demo-001";
-        await connection.execute("INSERT INTO megadesk_domain_bot_scripts (script_id, client_id, name, description, initial_message, active) VALUES (?, ?, ?, ?, ?, ?)", [script.id, scriptClientId, script.name, script.description, script.initialMessage, script.active ? 1 : 0]);
+        await connection.execute("INSERT INTO megadesk_domain_bot_scripts (script_id, client_id, name, description, initial_message, active) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE client_id=VALUES(client_id), name=VALUES(name), description=VALUES(description), initial_message=VALUES(initial_message), active=VALUES(active)", [script.id, scriptClientId, script.name, script.description, script.initialMessage, script.active ? 1 : 0]);
       }
       for (const record of state.operationalRecords) {
-        await connection.execute("INSERT INTO megadesk_domain_operational_records (record_id, client_id, tenant_database_name, record_type, owner_phone, title, status, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [record.id, record.clientId, record.tenantDatabaseName, record.type, record.ownerPhone, record.title, record.status, JSON.stringify(record.payload ?? {})]);
+        await connection.execute("INSERT INTO megadesk_domain_operational_records (record_id, client_id, tenant_database_name, record_type, owner_phone, title, status, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), status=VALUES(status), payload_json=VALUES(payload_json)", [record.id, record.clientId, record.tenantDatabaseName, record.type, record.ownerPhone, record.title, record.status, JSON.stringify(record.payload ?? {})]);
       }
-      for (let index = 0; index < state.auditLogs.length; index += 1) {
-        const audit = state.auditLogs[index];
-        await connection.execute("INSERT INTO megadesk_domain_audit_logs (audit_id, platform, action, client_id, success) VALUES (?, ?, ?, ?, ?)", [`${audit.id}-${index}`, audit.platform, audit.action, audit.clientId ?? null, audit.success ? 1 : 0]);
+      for (const audit of state.auditLogs) {
+        await connection.execute("INSERT INTO megadesk_domain_audit_logs (audit_id, platform, action, client_id, success) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE action=VALUES(action), success=VALUES(success)", [audit.id, audit.platform, audit.action, audit.clientId ?? null, audit.success ? 1 : 0]);
       }
       for (const client of state.clients) {
         await connection.execute("INSERT INTO megadesk_domain_metrics (client_id, metric_type, amount, source, metadata_json) VALUES (?, ?, ?, ?, ?)", [client.clientId, "conversations", state.conversations.filter((conversation) => conversation.clientId === client.clientId).length, "sync", JSON.stringify({ tenantDatabaseName: client.tenantDatabaseName })]);
@@ -776,40 +756,7 @@ export async function getMegaDeskBackupInfo(backupId: string) {
   }
 }
 
-/**
- * Deletar cliente diretamente do banco de dados de forma garantida.
- * Esta função deve ser chamada ANTES de remover o cliente da memória,
- * garantindo que mesmo que persistSyncState() falhe, o cliente já foi
- * removido do banco e não reaparecerá após reinicialização do servidor.
- */
-export async function deleteClientFromDb(clientId: string): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
-  try {
-    await ensureStructuredTables();
-    const pool = getPool();
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      // Deletar usuários do cliente primeiro (FK constraint)
-      await connection.execute(
-        "DELETE FROM megadesk_domain_client_users WHERE client_id = ?",
-        [clientId]
-      );
-      // Deletar o cliente
-      await connection.execute(
-        "DELETE FROM megadesk_domain_clients WHERE client_id = ?",
-        [clientId]
-      );
-      await connection.commit();
-      console.log(`[MegaDesk] Cliente ${clientId} deletado do banco com sucesso.`);
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
-  } catch (error) {
-    console.error(`[MegaDesk] Erro ao deletar cliente ${clientId} do banco:`, error);
-    throw error; // Propagar erro para que a procedure possa tratar
-  }
+/** Exclusão física do registro principal está bloqueada pelo servidor. */
+export async function deleteClientFromDb(_clientId: string): Promise<never> {
+  throw new Error("Exclusão física de tenant bloqueada: use a quarentena recuperável.");
 }

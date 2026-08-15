@@ -5,7 +5,7 @@
  * REGRA 8: clientId sempre vem da sessão MegaDesk.
  */
 import { z } from "zod";
-import { router, publicProcedure } from "./_core/trpc";
+import { router, megadeskProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import {
   listCrmClients,
@@ -43,7 +43,7 @@ const crmClientInputSchema = z.object({
 
 export const crmRouter = router({
   // Listar clientes CRM do tenant
-  list: publicProcedure
+  list: megadeskProcedure
     .input(z.object({
       clientId: z.string().min(1),
       search: z.string().optional(),
@@ -54,7 +54,7 @@ export const crmRouter = router({
     }),
 
   // Buscar cliente CRM por ID
-  getById: publicProcedure
+  getById: megadeskProcedure
     .input(z.object({
       clientId: z.string().min(1),
       crmClientId: z.string().min(1),
@@ -68,7 +68,7 @@ export const crmRouter = router({
     }),
 
   // Criar novo cliente CRM
-  create: publicProcedure
+  create: megadeskProcedure
     .input(z.object({
       clientId: z.string().min(1),
       data: crmClientInputSchema,
@@ -79,7 +79,7 @@ export const crmRouter = router({
     }),
 
   // Atualizar cliente CRM com registro de histórico na timeline
-  update: publicProcedure
+  update: megadeskProcedure
     .input(z.object({
       clientId: z.string().min(1),
       crmClientId: z.string().min(1),
@@ -98,7 +98,7 @@ export const crmRouter = router({
     }),
 
   // Excluir cliente CRM
-  delete: publicProcedure
+  delete: megadeskProcedure
     .input(z.object({
       clientId: z.string().min(1),
       crmClientId: z.string().min(1),
@@ -109,7 +109,7 @@ export const crmRouter = router({
     }),
 
   // Buscar chamados vinculados ao cliente CRM pelo nome/empresa
-  getChamados: publicProcedure
+  getChamados: megadeskProcedure
     .input(z.object({
       clientId: z.string().min(1),
       crmClientId: z.string().min(1),
@@ -158,7 +158,7 @@ export const crmRouter = router({
     }),
 
   // Buscar conversas vinculadas ao cliente CRM pelo telefone/empresa
-  getConversas: publicProcedure
+  getConversas: megadeskProcedure
     .input(z.object({
       clientId: z.string().min(1),
       crmClientId: z.string().min(1),
@@ -226,7 +226,7 @@ export const crmRouter = router({
     }),
 
   // Buscar timeline do cliente CRM
-  getTimeline: publicProcedure
+  getTimeline: megadeskProcedure
     .input(z.object({
       clientId: z.string().min(1),
       crmClientId: z.string().min(1),
@@ -237,7 +237,7 @@ export const crmRouter = router({
     }),
 
   // Adicionar entrada manual na timeline
-  addTimelineEntry: publicProcedure
+  addTimelineEntry: megadeskProcedure
     .input(z.object({
       clientId: z.string().min(1),
       crmClientId: z.string().min(1),
@@ -255,7 +255,7 @@ export const crmRouter = router({
     }),
 
   // Importar clientes em massa via CSV (array de objetos já parseados)
-  importCsv: publicProcedure
+  importCsv: megadeskProcedure
     .input(z.object({
       clientId: z.string().min(1),
       rows: z.array(z.object({

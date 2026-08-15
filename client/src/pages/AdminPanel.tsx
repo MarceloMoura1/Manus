@@ -73,7 +73,7 @@ function EmptyState({ text }: { text: string }) {
 function DeleteClientButton({ client, onSuccess }: { client: any; onSuccess: () => void }) {
   const deleteClientMutation = trpc.megaadmin.deleteClient.useMutation({
     onSuccess() {
-      toast.success(`Cliente ${client.company} foi excluído com sucesso.`);
+      toast.success(`Cliente ${client.company} foi colocado em quarentena.`);
       onSuccess();
     },
     onError(err: any) {
@@ -84,14 +84,15 @@ function DeleteClientButton({ client, onSuccess }: { client: any; onSuccess: () 
   return (
     <button
       onClick={() => {
-        if (confirm(`Tem certeza que deseja excluir o cliente "${client.company}"? Esta ação não pode ser desfeita.`)) {
-          deleteClientMutation.mutate({ clientId: client.clientId });
+        const reason = prompt('Motivo: non_payment, customer_request, policy_violation, contract_termination, security ou controlled_other')?.trim();
+        if (["non_payment", "customer_request", "policy_violation", "contract_termination", "security", "controlled_other"].includes(reason ?? "")) {
+          deleteClientMutation.mutate({ clientId: client.clientId, reason: reason as any });
         }
       }}
       disabled={deleteClientMutation.isPending}
       className="rounded-xl border border-red-500/30 px-3 py-1.5 text-xs text-red-300 hover:border-red-400/60 hover:bg-red-500/10 transition disabled:opacity-50 disabled:cursor-not-allowed"
     >
-      {deleteClientMutation.isPending ? "Excluindo..." : "Excluir"}
+      {deleteClientMutation.isPending ? "Desativando..." : "Desativar"}
     </button>
   );
 }
@@ -551,8 +552,16 @@ function ClientDetail({ client, onClose, onRefresh }: { client: any; onClose: ()
     }
   }, [editingUser]);
 
-  const updateAccess = trpc.megaadmin.updateClientAccess.useMutation({
-    onSuccess() { toast.success("Acesso atualizado."); onRefresh(); },
+  const updateAccess = trpc.megaadmin.reactivateClient.useMutation({
+    onSuccess() { toast.success("Tenant reativado; usuários permanecem bloqueados."); onRefresh(); },
+    onError(err) { toast.error(err.message); },
+  });
+  const releaseAccess = trpc.megaadmin.releaseClientAccess.useMutation({
+    onSuccess() { toast.success("Acesso empresarial liberado; usuários permanecem bloqueados."); onRefresh(); },
+    onError(err) { toast.error(err.message); },
+  });
+  const quarantineAccess = trpc.megaadmin.deleteClient.useMutation({
+    onSuccess() { toast.success("Tenant colocado em quarentena."); onRefresh(); },
     onError(err) { toast.error(err.message); },
   });
 
@@ -679,15 +688,22 @@ function ClientDetail({ client, onClose, onRefresh }: { client: any; onClose: ()
           <h4 className="mb-3 text-sm font-semibold text-white">Controle de acesso</h4>
           <div className="flex flex-wrap gap-3">
             <button
-              onClick={() => updateAccess.mutate({ clientId: client.clientId, status: "active", accessReleased: true })}
-              disabled={isActive || updateAccess.isPending}
+              onClick={() => updateAccess.mutate({ clientId: client.clientId })}
+              disabled={client.status === "active" || updateAccess.isPending}
               className="rounded-2xl bg-emerald-400/10 px-4 py-2 text-sm text-emerald-200 ring-1 ring-emerald-400/30 disabled:opacity-40 hover:bg-emerald-400/20"
             >
-              Liberar acesso
+              Reativar tenant
             </button>
             <button
-              onClick={() => updateAccess.mutate({ clientId: client.clientId, status: "paused", accessReleased: false })}
-              disabled={!isActive || updateAccess.isPending}
+              onClick={() => releaseAccess.mutate({ clientId: client.clientId })}
+              disabled={client.status !== "active" || client.accessReleased || releaseAccess.isPending}
+              className="rounded-2xl bg-blue-400/10 px-4 py-2 text-sm text-blue-200 ring-1 ring-blue-400/30 disabled:opacity-40 hover:bg-blue-400/20"
+            >
+              Liberar empresa
+            </button>
+            <button
+              onClick={() => quarantineAccess.mutate({ clientId: client.clientId, reason: "controlled_other" })}
+              disabled={client.status !== "active" || quarantineAccess.isPending}
               className="rounded-2xl bg-red-400/10 px-4 py-2 text-sm text-red-200 ring-1 ring-red-400/30 disabled:opacity-40 hover:bg-red-400/20"
             >
               Bloquear acesso

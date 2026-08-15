@@ -67,6 +67,7 @@ export default function App() {
                 if (parsed?.clientId) headers["x-tenant-id"] = parsed.clientId;
                 if (parsed?.userRole) headers["x-user-role"] = parsed.userRole;
                 else if (parsed?.role) headers["x-user-role"] = parsed.role;
+                if (parsed?.userEmail) headers["x-user-email"] = parsed.userEmail;
               }
             } catch { /* ignore */ }
             return headers;

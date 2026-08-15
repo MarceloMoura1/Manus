@@ -71,12 +71,13 @@ describe("MegaDesk UI structure", () => {
     // AdminPanel tem as funcionalidades administrativas
     expect(adminPanelSource).toContain("MegaAdmin");
     expect(adminPanelSource).toContain("Cadastrar novo cliente");
-    expect(adminPanelSource).toContain("Liberar acesso");
-    expect(adminPanelSource).toContain("Bloquear acesso");
+    expect(adminPanelSource).toContain("Liberar empresa");
+    expect(adminPanelSource).toContain("colocado em quarentena");
     expect(adminPanelSource).toContain("Rotacionar token");
     expect(adminPanelSource).toContain("Remover");
     expect(adminPanelSource).toContain("megaadmin.createClient");
-    expect(adminPanelSource).toContain("megaadmin.updateClientAccess");
+    expect(adminPanelSource).toContain("megaadmin.reactivateClient");
+    expect(adminPanelSource).toContain("megaadmin.releaseClientAccess");
     expect(adminPanelSource).toContain("megaadmin.summary");
 
     // MegaDesk menciona o MegaAdmin como plataforma separada

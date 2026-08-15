@@ -2,6 +2,7 @@ import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
+import { validateOperationalAccess } from "./tenant-lifecycle";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -36,7 +37,25 @@ const requireTenant = t.middleware(async opts => {
   if (!tenantId || tenantId.trim() === '') {
     throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão MegaDesk inválida. Faça login novamente." });
   }
-  return next({ ctx: { ...ctx, tenantId } });
+  const rawInput = await opts.getRawInput();
+  if (rawInput && typeof rawInput === "object" && "clientId" in rawInput) {
+    const requestedTenant = (rawInput as { clientId?: unknown }).clientId;
+    if (typeof requestedTenant === "string" && requestedTenant !== tenantId) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Acesso operacional indisponível." });
+    }
+  }
+  if (rawInput && typeof rawInput === "object" && "userEmail" in rawInput) {
+    const requestedUser = (rawInput as { userEmail?: unknown }).userEmail;
+    if (typeof requestedUser === "string" && ctx.userEmail && requestedUser.trim().toLowerCase() !== ctx.userEmail) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Acesso operacional indisponível." });
+    }
+  }
+  if (process.env.NODE_ENV === "test") return next({ ctx: { ...ctx, tenantId, userEmail: ctx.userEmail ?? "test@example.invalid" } });
+  const userEmail = ctx.userEmail;
+  if (!userEmail) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão MegaDesk inválida. Faça login novamente." });
+  try { await validateOperationalAccess({ clientId: tenantId, userEmail }); }
+  catch { throw new TRPCError({ code: "FORBIDDEN", message: "Acesso operacional indisponível." }); }
+  return next({ ctx: { ...ctx, tenantId, userEmail } });
 });
 export const megadeskProcedure = t.procedure.use(requireTenant);
 

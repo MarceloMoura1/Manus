@@ -19,14 +19,14 @@ services:
     container_name: megadesk-evolution-db
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: EvolutionRoot123
-      MYSQL_DATABASE:      evolution_api
-      MYSQL_USER:          evolution
-      MYSQL_PASSWORD:      Evolution123
+      MYSQL_ROOT_PASSWORD: ${EVOLUTION_MYSQL_ROOT_PASSWORD:?EVOLUTION_MYSQL_ROOT_PASSWORD is required}
+      MYSQL_DATABASE:      ${EVOLUTION_MYSQL_DATABASE:?EVOLUTION_MYSQL_DATABASE is required}
+      MYSQL_USER:          ${EVOLUTION_MYSQL_USER:?EVOLUTION_MYSQL_USER is required}
+      MYSQL_PASSWORD:      ${EVOLUTION_MYSQL_PASSWORD:?EVOLUTION_MYSQL_PASSWORD is required}
     volumes:
       - evolution_db_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uevolution", "-pEvolution123"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -53,12 +53,12 @@ services:
 
       # ── Autenticação ────────────────────────────────────
       AUTHENTICATION_TYPE: "apikey"
-      AUTHENTICATION_API_KEY: "megadesk-evolution-key"
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?EVOLUTION_API_KEY is required}
       AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
 
       # ── Banco exclusivo da Evolution (dentro do Docker) ─
       DATABASE_PROVIDER: "mysql"
-      DATABASE_CONNECTION_URI: "mysql://evolution:Evolution123@evolution-db:3306/evolution_api"
+      DATABASE_CONNECTION_URI: mysql://${EVOLUTION_MYSQL_USER:?EVOLUTION_MYSQL_USER is required}:${EVOLUTION_MYSQL_PASSWORD:?EVOLUTION_MYSQL_PASSWORD is required}@evolution-db:3306/${EVOLUTION_MYSQL_DATABASE:?EVOLUTION_MYSQL_DATABASE is required}
       DATABASE_SAVE_DATA_INSTANCE: "true"
       DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
       DATABASE_SAVE_MESSAGE_UPDATE: "true"

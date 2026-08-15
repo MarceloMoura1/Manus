@@ -9,7 +9,7 @@
  * - Isolamento de tenant garantido
  */
 
-import { router, protectedProcedure } from "./_core/trpc";
+import { router, megadeskProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import {
@@ -58,7 +58,7 @@ export const conversasRouter = router({
   /**
    * Listar conversas do usuário autenticado
    */
-  list: protectedProcedure
+  list: megadeskProcedure
     .input(
       z.object({
         status: z.enum(["open", "bot", "closed"]).optional(),
@@ -68,7 +68,7 @@ export const conversasRouter = router({
     )
     .query(async ({ input, ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId;
         
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
@@ -105,7 +105,7 @@ export const conversasRouter = router({
   /**
    * Obter detalhes de uma conversa
    */
-  getDetail: protectedProcedure
+  getDetail: megadeskProcedure
     .input(
       z.object({
         conversationId: ConversationIdSchema,
@@ -113,7 +113,7 @@ export const conversasRouter = router({
     )
     .query(async ({ input, ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId;
         
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
@@ -151,7 +151,7 @@ export const conversasRouter = router({
   /**
    * Criar nova conversa
    */
-  create: protectedProcedure
+  create: megadeskProcedure
     .input(
       z.object({
         customerName: StringFieldSchema,
@@ -163,7 +163,7 @@ export const conversasRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId;
         
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
@@ -221,7 +221,7 @@ export const conversasRouter = router({
   /**
    * Atualizar status da conversa
    */
-  updateStatus: protectedProcedure
+  updateStatus: megadeskProcedure
     .input(
       z.object({
         conversationId: ConversationIdSchema,
@@ -230,7 +230,7 @@ export const conversasRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId;
         
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
@@ -275,7 +275,7 @@ export const conversasRouter = router({
   /**
    * Adicionar mensagem a uma conversa
    */
-  addMessage: protectedProcedure
+  addMessage: megadeskProcedure
     .input(
       z.object({
         conversationId: ConversationIdSchema,
@@ -285,7 +285,7 @@ export const conversasRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId;
         
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
@@ -335,7 +335,7 @@ export const conversasRouter = router({
   /**
    * Buscar conversa por telefone
    */
-  searchByPhone: protectedProcedure
+  searchByPhone: megadeskProcedure
     .input(
       z.object({
         phone: PhoneSchema,
@@ -343,7 +343,7 @@ export const conversasRouter = router({
     )
     .query(async ({ input, ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId;
         
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
@@ -377,10 +377,10 @@ export const conversasRouter = router({
   /**
    * Health check
    */
-  healthCheck: protectedProcedure
+  healthCheck: megadeskProcedure
     .query(async ({ ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user.id);
+        const clientId = ctx.tenantId;
         
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({

@@ -4,7 +4,7 @@
  * Integrado ao router principal em server/routers.ts
  */
 import { z } from "zod";
-import { router, publicProcedure as megadeskProcedure } from "../../_core/trpc";
+import { router, megadeskProcedure } from "../../_core/trpc";
 import {
   listConversationsSchema,
   getConversationSchema,

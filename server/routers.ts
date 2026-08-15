@@ -1,16 +1,17 @@
 import { z } from "zod";
 
 import { TRPCError } from "@trpc/server";
-import { router, publicProcedure, adminProcedure } from "./_core/trpc";
+import { router, publicProcedure, adminProcedure, megadeskProcedure } from "./_core/trpc";
 import { COOKIE_NAME, normalizeModuleNamesToBackend, normalizeModuleNamesToAdmin } from "@shared/const";
-import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool, createMegaDeskBackup, listMegaDeskBackups, getMegaDeskBackupInfo, applyMegaDeskBackup, deleteClientFromDb } from "./db";
+import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool, createMegaDeskBackup, listMegaDeskBackups, getMegaDeskBackupInfo, applyMegaDeskBackup } from "./db";
 import bcrypt from "bcryptjs";
 import { megaadminCredentials, megadeskDomainClientUsers } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { SignJWT } from "jose";
 import { MEGAADMIN_COOKIE } from "./_core/context";
 import { getSessionCookieOptions } from "./_core/cookies";
-import { createNewTenant, releaseTenantAccess, pauseTenantAccess, getTenantInfo, deleteTenant, listAllTenants } from "./_core/tenant-operations";
+import { createNewTenant, getTenantInfo, listAllTenants } from "./_core/tenant-operations";
+import { quarantineTenant, reactivateTenant, releaseTenantOperationalAccess, TENANT_QUARANTINE_REASONS } from "./_core/tenant-lifecycle";
 import { chamadosRouter } from "./routers-chamados";
 import { crmRouter } from "./routers-crm";
 import { whatsappRouter as whatsappModuleRouter } from "./modules/whatsapp/whatsapp.router";
@@ -593,16 +594,20 @@ export const appRouter = router({
       await persistSyncState();
       return { ok: true, message: `Senha redefinida para ${user.name}.` };
     }),
-    updateClientAccess: adminProcedure.input(z.object({ clientId: z.string(), status: z.enum(["active", "setup", "paused"]), accessReleased: z.boolean() })).mutation(async ({ input }) => {
+    updateClientAccess: adminProcedure.mutation(() => { throw new TRPCError({ code: "METHOD_NOT_SUPPORTED", message: "Use as operações explícitas de lifecycle." }); }),
+    reactivateClient: adminProcedure.input(z.object({ clientId: z.string() })).mutation(async ({ input, ctx }) => {
       await hydrateSyncState();
-      const client = getClientOrThrow(input.clientId);
-      client.status = input.status;
-      client.accessReleased = input.accessReleased;
-      client.users = client.users.map((user) => ({ ...user, status: input.accessReleased ? "active" : "blocked" }));
-      audit("MegaAdmin", `Acesso ${input.accessReleased ? "liberado" : "bloqueado"}`, client.clientId);
-      await persistSyncState();
-      await recordMegaDeskMetric(client.clientId, input.accessReleased ? "access_released" : "access_blocked", 1, { platform: "MegaAdmin", status: input.status });
-      return { ok: true, client: sanitizeClient(client) };
+      await reactivateTenant({ clientId: input.clientId, operatorId: `admin:${ctx.user.id}` });
+      try { const client = getClientOrThrow(input.clientId); client.status = "active"; client.accessReleased = false; }
+      catch { syncStateHydrated = false; clients.splice(0, clients.length); }
+      return { ok: true, action: "reactivated" as const };
+    }),
+    releaseClientAccess: adminProcedure.input(z.object({ clientId: z.string() })).mutation(async ({ input, ctx }) => {
+      await hydrateSyncState();
+      await releaseTenantOperationalAccess({ clientId: input.clientId, operatorId: `admin:${ctx.user.id}` });
+      try { getClientOrThrow(input.clientId).accessReleased = true; }
+      catch { syncStateHydrated = false; clients.splice(0, clients.length); }
+      return { ok: true, action: "access_released" as const };
     }),
     addClientUser: adminProcedure.input(z.object({ clientId: z.string(), name: z.string().min(2), email: z.string().email(), role: z.enum(["admin", "manager", "agent", "viewer"]).default("agent") })).mutation(async ({ input }) => {
       await hydrateSyncState();
@@ -737,31 +742,25 @@ export const appRouter = router({
       return { ok: true, user: { ...user, permissions: resolvedPermissions } };
     }),
     deleteClient: adminProcedure
-      .input(z.object({ clientId: z.string() }))
-      .mutation(async ({ input }) => {
+      .input(z.object({ clientId: z.string(), reason: z.enum(TENANT_QUARANTINE_REASONS) }))
+      .mutation(async ({ input, ctx }) => {
         await hydrateSyncState();
         const clientIndex = clients.findIndex((c) => c.clientId === input.clientId);
         if (clientIndex === -1) {
           throw new TRPCError({ code: "NOT_FOUND", message: "Cliente não encontrado." });
         }
         const client = clients[clientIndex];
-        // Não permite excluir cliente com usuários ativos
-        const activeUsers = client.users.filter((u) => u.status === "active");
-        if (activeUsers.length > 0) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: `Não é possível excluir cliente com ${activeUsers.length} usuário(s) ativo(s). Desative todos os usuários primeiro.`,
-          });
+        const operator = `admin:${ctx.user.id}`;
+        await quarantineTenant({ clientId: input.clientId, operatorId: operator, reason: input.reason });
+        try {
+          client.status = "paused";
+          client.accessReleased = false;
+          client.users = client.users.map((user) => ({ ...user, status: "blocked" as const }));
+        } catch {
+          syncStateHydrated = false;
+          clients.splice(0, clients.length);
         }
-        // PASSO 1: Deletar diretamente do banco ANTES de remover da memória
-        // Isso garante que mesmo se persistSyncState() falhar, o cliente não reaparecerá
-        await deleteClientFromDb(input.clientId);
-        // PASSO 2: Remover da memória
-        clients.splice(clientIndex, 1);
-        audit("MegaAdmin", `Cliente ${client.company} (${input.clientId}) excluído`, undefined);
-        // PASSO 3: Sincronizar estado completo (conversas, tickets, etc.)
-        await persistSyncState();
-        return { ok: true, message: `Cliente ${client.company} foi excluído com sucesso.` };
+        return { ok: true, action: "quarantine" as const, message: `Cliente ${client.company} foi desativado e colocado em quarentena.` };
       }),
     // Backup Management
     createBackup: adminProcedure.mutation(async () => {
@@ -789,7 +788,7 @@ export const appRouter = router({
     }),
   }),
   megadesk: router({
-    overview: publicProcedure.input(z.object({ clientId: z.string().optional(), userEmail: z.string().email() })).query(async ({ input }) => {
+    overview: megadeskProcedure.input(z.object({ clientId: z.string().optional(), userEmail: z.string().email() })).query(async ({ input }) => {
       await hydrateSyncState();
       const client = getReleasedClientOrThrow(input.clientId);
       // Busca o usuário ativo — sem exigir nenhuma permissão específica, apenas que esteja ativo
@@ -839,10 +838,11 @@ export const appRouter = router({
       await persistSyncState();
       return { ok: true, clientId: input.clientId, tenantDatabaseName: client.tenantDatabaseName, modules: client.modules, user: { email: user.email, role: user.role, permissions: user.permissions }, tokenHint: tokenHint(input.token), message: "Token validado no backend sincronizado MegaAdmin → MegaDesk para este cliente." };
     }),
-    sendMessage: publicProcedure.input(z.object({ conversationId: z.string(), message: z.string().min(1), userEmail: z.string().email() })).mutation(async ({ input }) => {
+    sendMessage: megadeskProcedure.input(z.object({ conversationId: z.string(), message: z.string().min(1), userEmail: z.string().email() })).mutation(async ({ input, ctx }) => {
       await hydrateSyncState();
       const conversation = conversations.find((item) => item.id === input.conversationId);
       if (!conversation) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
+      if (conversation.clientId !== ctx.tenantId) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
       const client = getReleasedClientOrThrow(conversation.clientId, "Atendimento WhatsApp");
       assertClientUserPermission(client, "send_messages", input.userEmail);
       const time = nowLabel();
@@ -869,10 +869,11 @@ export const appRouter = router({
       
       return { ok: true, conversationId: input.conversationId, message: input.message, sentAt: new Date().toISOString() };
     }),
-    updateTicketStatus: publicProcedure.input(z.object({ ticketId: z.string(), status: z.enum(["open", "in_progress", "waiting", "closed"]), userEmail: z.string().email() })).mutation(async ({ input }) => {
+    updateTicketStatus: megadeskProcedure.input(z.object({ ticketId: z.string(), status: z.enum(["open", "in_progress", "waiting", "closed"]), userEmail: z.string().email() })).mutation(async ({ input, ctx }) => {
       await hydrateSyncState();
       const ticket = tickets.find((item) => item.id === input.ticketId);
       if (!ticket) throw new TRPCError({ code: "NOT_FOUND", message: "Chamado não encontrado." });
+      if (ticket.clientId !== ctx.tenantId) throw new TRPCError({ code: "NOT_FOUND", message: "Chamado não encontrado." });
       const client = getReleasedClientOrThrow(ticket.clientId, "Chamados");
       assertClientUserPermission(client, "manage_tickets", input.userEmail);
       ticket.status = input.status;
@@ -881,7 +882,7 @@ export const appRouter = router({
       await recordMegaDeskMetric(ticket.clientId, "ticket_status_updated", 1, { ticketId: input.ticketId, status: input.status });
       return { ok: true, ticketId: input.ticketId, status: input.status, updatedAt: new Date().toISOString() };
     }),
-    saveBotScript: publicProcedure.input(z.object({ clientId: z.string().optional(), name: z.string().min(2), initialMessage: z.string().min(3), userEmail: z.string().email() })).mutation(async ({ input }) => {
+    saveBotScript: megadeskProcedure.input(z.object({ clientId: z.string().optional(), name: z.string().min(2), initialMessage: z.string().min(3), userEmail: z.string().email() })).mutation(async ({ input }) => {
       await hydrateSyncState();
       const client = getReleasedClientOrThrow(input.clientId, "Bot de triagem");
       assertClientUserPermission(client, "manage_bot", input.userEmail);
@@ -891,7 +892,7 @@ export const appRouter = router({
       await persistSyncState();
       return { ok: true, script };
     }),
-    tenantObservability: publicProcedure.input(z.object({ clientId: z.string().optional(), userEmail: z.string().email() })).query(async ({ input }) => {
+    tenantObservability: megadeskProcedure.input(z.object({ clientId: z.string().optional(), userEmail: z.string().email() })).query(async ({ input }) => {
       await hydrateSyncState();
       const client = getReleasedClientOrThrow(input.clientId);
       // Verifica apenas que o usuário existe e está ativo
@@ -910,7 +911,7 @@ export const appRouter = router({
      *   3. O cliente do usuário tem accessReleased=true e status="active".
      * Retorna dados da sessão que são armazenados no localStorage do browser.
      */
-    searchCustomerByCompany: publicProcedure
+    searchCustomerByCompany: megadeskProcedure
       .input(z.object({ company: z.string().min(1), clientId: z.string().min(1) }))
       .query(async ({ input }) => {
         try {
@@ -944,7 +945,7 @@ export const appRouter = router({
           return [];
         }
       }),
-    searchCustomer: publicProcedure
+    searchCustomer: megadeskProcedure
       .input(z.object({ phone: z.string().min(1), clientId: z.string().min(1) }))
       .mutation(async ({ input }) => {
         try {
@@ -1002,7 +1003,7 @@ export const appRouter = router({
           return { found: false };
         }
       }),
-    createCustomer: publicProcedure
+    createCustomer: megadeskProcedure
       .input(z.object({ phone: z.string().min(1), name: z.string().min(1), company: z.string().min(1), clientId: z.string().min(1) }))
       .mutation(async ({ input }) => {
         try {
@@ -1041,7 +1042,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao criar cliente" });
         }
       }),
-    createTicket: publicProcedure
+    createTicket: megadeskProcedure
       .input(z.object({ customerId: z.string(), phone: z.string(), title: z.string().min(1), observation: z.string().optional(), company: z.string(), customer: z.string(), clientId: z.string().min(1) }))
       .mutation(async ({ input }) => {
         try {
@@ -1071,7 +1072,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Erro ao criar chamado: ${errorMessage}` });
         }
       }),
-    createConversation: publicProcedure
+    createConversation: megadeskProcedure
       .input(z.object({ customerId: z.string(), customerName: z.string(), phone: z.string(), company: z.string(), clientId: z.string().min(1), fromCrm: z.boolean().optional(), crmClientId: z.string().optional() }))
       .mutation(async ({ input }) => {
         try {
@@ -1137,7 +1138,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao criar conversa" });
         }
       }),
-    getConversations: publicProcedure
+    getConversations: megadeskProcedure
       .input(z.object({ clientId: z.string().min(1) }))
       .query(async ({ input }) => {
         try {
@@ -1168,7 +1169,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao buscar conversas" });
         }
       }),
-    getConversationMessages: publicProcedure
+    getConversationMessages: megadeskProcedure
       .input(z.object({ conversationId: z.string(), clientId: z.string().min(1) }))
       .query(async ({ input }) => {
         try {
@@ -1194,7 +1195,7 @@ export const appRouter = router({
           return [];
         }
       }),
-    closeConversation: publicProcedure
+    closeConversation: megadeskProcedure
       .input(z.object({ conversationId: z.string(), clientId: z.string().min(1) }))
       .mutation(async ({ input }) => {
         try {
@@ -1221,7 +1222,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao encerrar conversa" });
         }
       }),
-    getActiveUsers: publicProcedure
+    getActiveUsers: megadeskProcedure
       .input(z.object({ clientId: z.string().min(1) }))
       .query(async ({ input }) => {
         try {
@@ -1245,7 +1246,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao buscar usuários ativos" });
         }
       }),
-    updateCustomerInfo: publicProcedure
+    updateCustomerInfo: megadeskProcedure
       .input(z.object({ customerId: z.string(), name: z.string().optional(), company: z.string().optional(), clientId: z.string().min(1) }))
       .mutation(async ({ input }) => {
         try {
@@ -1279,7 +1280,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao atualizar cliente" });
         }
       }),
-    getClientUsers: publicProcedure
+    getClientUsers: megadeskProcedure
       .input(z.object({ clientId: z.string().optional() }))
       .query(async ({ input }) => {
         await hydrateSyncState();
@@ -1374,7 +1375,7 @@ export const appRouter = router({
           message: "E-mail não encontrado. Verifique se você foi cadastrado pelo administrador.",
         });
       }),
-    refreshSession: publicProcedure
+    refreshSession: megadeskProcedure
       .input(z.object({ userEmail: z.string().email() }))
       .mutation(async ({ input }) => {
         await hydrateSyncState();
@@ -1456,7 +1457,7 @@ export const appRouter = router({
       }),
 
     // ── Chat IA por cliente (usa token Gemini do cliente, histórico no banco) ──
-    clientChat: publicProcedure
+    clientChat: megadeskProcedure
       .input(z.object({
         clientId: z.string().min(1),
         userId: z.string().min(1),
@@ -1480,7 +1481,7 @@ export const appRouter = router({
       }),
 
     // ── Carrega histórico de conversa do usuário ──
-    getHistory: publicProcedure
+    getHistory: megadeskProcedure
       .input(z.object({
         clientId: z.string().min(1),
         userId: z.string().min(1),
@@ -1492,7 +1493,7 @@ export const appRouter = router({
       }),
 
     // ── Limpa histórico de conversa do usuário ──
-    clearHistory: publicProcedure
+    clearHistory: megadeskProcedure
       .input(z.object({
         clientId: z.string().min(1),
         userId: z.string().min(1),
@@ -1507,7 +1508,7 @@ export const appRouter = router({
       }),
 
         // ── Verifica se o cliente tem token Gemini configurado ──
-    checkGeminiConfig: publicProcedure
+    checkGeminiConfig: megadeskProcedure
       .input(z.object({ clientId: z.string().min(1) }))
       .query(async ({ input }) => {
         const { getClientGeminiToken } = await import("./gemini-client");
@@ -1521,7 +1522,7 @@ export const appRouter = router({
   // ════════════════════════════════════════════════════════════════════════════════
   tokenUsage: router({
     // Registra uso de tokens após uma conversa com IA
-    record: publicProcedure
+    record: megadeskProcedure
       .input(z.object({
         clientId: z.string().min(1),
         userEmail: z.string().default(""),
@@ -1675,7 +1676,7 @@ export const appRouter = router({
       }),
   }),
   conversations: router({
-    list: publicProcedure
+    list: megadeskProcedure
       .input(z.object({
         clientId: z.string(),
         viewMode: z.enum(["all", "mine", "specific"]).optional(),
@@ -1711,7 +1712,7 @@ export const appRouter = router({
           createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
         }));
       }),
-    close: publicProcedure
+    close: megadeskProcedure
       .input(z.object({ conversationId: z.string(), clientId: z.string() }))
       .mutation(async ({ input }) => {
         const { updateConversationStatus } = await import("./db");
@@ -1726,7 +1727,7 @@ export const appRouter = router({
         } catch {}
         return { ok: true };
       }),
-    assign: publicProcedure
+    assign: megadeskProcedure
       .input(z.object({ conversationId: z.string(), userId: z.string(), userName: z.string().optional(), clientId: z.string() }))
       .mutation(async ({ input }) => {
         const { getDb } = await import("./db");
@@ -1745,7 +1746,7 @@ export const appRouter = router({
         } catch {}
         return { ok: true };
       }),
-    reopen: publicProcedure
+    reopen: megadeskProcedure
       .input(z.object({ conversationId: z.string(), clientId: z.string() }))
       .mutation(async ({ input }) => {
         const { updateConversationStatus } = await import("./db");

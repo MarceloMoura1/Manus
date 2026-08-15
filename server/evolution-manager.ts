@@ -6,6 +6,7 @@
 import { EvolutionAPIClient, initEvolutionAPI } from "./evolution-api-client";
 import { EvolutionWhatsAppAdapter } from "./evolution-whatsapp-adapter";
 import { getPool } from "./db";
+import { getEvolutionConfig } from "./evolution/config";
 
 let evolutionClient: EvolutionAPIClient | null = null;
 let evolutionAdapter: EvolutionWhatsAppAdapter | null = null;
@@ -15,10 +16,9 @@ let evolutionAdapter: EvolutionWhatsAppAdapter | null = null;
  */
 export async function initEvolutionManager(): Promise<void> {
   try {
-    const baseUrl = process.env.EVOLUTION_API_URL || "http://localhost:8081";
-    const apiKey = process.env.EVOLUTION_API_KEY || "evolution-api-key";
+    const { apiUrl: baseUrl, apiKey } = getEvolutionConfig();
 
-    console.log(`[Evolution Manager] Inicializando com URL: ${baseUrl}`);
+    console.log(`[Evolution Manager] Inicializando configuração validada`);
 
     evolutionClient = initEvolutionAPI({
       baseUrl,

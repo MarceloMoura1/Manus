@@ -1802,12 +1802,12 @@ export function SettingsPage() {
                       onClick={async () => {
                         const session = localStorage.getItem('megadesk_session_v1');
                         if (!session) return;
-                        const { clientId } = JSON.parse(session);
+                        const { clientId, userEmail } = JSON.parse(session);
                         try {
                           // Desconectar via tRPC Evolution API
                           await fetch(`/api/trpc/evolution.disconnect`, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'x-tenant-id': clientId },
+                            headers: { 'Content-Type': 'application/json', 'x-tenant-id': clientId, 'x-user-email': userEmail ?? '' },
                             body: JSON.stringify({ json: { clientId } }),
                           });
                           setEvolutionStatus('disconnected');

@@ -1099,7 +1099,7 @@ function ConversationsPage() {
                         try {
                           const res = await fetch('/api/trpc/megadesk.sendMessage', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'x-tenant-id': clientId },
+                            headers: { 'Content-Type': 'application/json', 'x-tenant-id': clientId, 'x-user-email': sessionData?.userEmail ?? '' },
                             body: JSON.stringify({ json: { conversationId: selectedConv.id, message: text, userEmail: userName || 'agente@megadesk.local' } }),
                           });
                           if (!res.ok) {
@@ -1129,7 +1129,7 @@ function ConversationsPage() {
                     try {
                       const res = await fetch('/api/trpc/megadesk.sendMessage', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'x-tenant-id': clientId },
+                        headers: { 'Content-Type': 'application/json', 'x-tenant-id': clientId, 'x-user-email': sessionData?.userEmail ?? '' },
                         body: JSON.stringify({ json: { conversationId: selectedConv.id, message: text, userEmail: userName || 'agente@megadesk.local' } }),
                       });
                       if (!res.ok) {

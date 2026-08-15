@@ -12,7 +12,7 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, publicProcedure, protectedProcedure } from "../_core/trpc";
+import { router, megadeskProcedure } from "../_core/trpc";
 import {
   evoCreateInstance,
   evoGetQRCode,
@@ -27,6 +27,7 @@ import {
   deleteSession,
   instanceNameFor,
 } from "./session-store";
+import { getEvolutionSafeOrigin } from "./config";
 
 // Tempo máximo de espera pelo QR Code (polling interno no connect)
 const QR_POLL_MAX_MS    = 30_000;  // Aumentado de 15s para 30s
@@ -83,7 +84,7 @@ export const evolutionRouter = router({
    * O frontend renderiza a imagem e aguarda o usuário escanear.
    * Após escanear, a Evolution dispara CONNECTION_UPDATE via webhook.
    */
-  connect: publicProcedure
+  connect: megadeskProcedure
     .input(z.object({ clientId: z.string().min(1) }))
     .mutation(async ({ input }) => {
       const { clientId } = input;
@@ -165,7 +166,7 @@ export const evolutionRouter = router({
           code: "INTERNAL_SERVER_ERROR",
           message:
             "QR Code não foi gerado pela Evolution API. " +
-            `Verifique se ela está rodando em ${process.env.EVOLUTION_API_URL || "http://localhost:8080"} ` +
+            `Verifique se ela está disponível na origem configurada (${getEvolutionSafeOrigin()}) ` +
             "e tente novamente.",
         });
       }
@@ -182,7 +183,7 @@ export const evolutionRouter = router({
    * Retorna o QR Code atual para uma instância já criada.
    * Usado pelo botão "Gerar novo QR Code" quando o anterior expirou.
    */
-  getQRCode: publicProcedure
+  getQRCode: megadeskProcedure
     .input(z.object({ clientId: z.string().min(1) }))
     .query(async ({ input }) => {
       const { clientId } = input;
@@ -213,7 +214,7 @@ export const evolutionRouter = router({
    * Retorna o status atual da conexão WhatsApp do cliente.
    * O frontend faz polling nesta procedure a cada 3–5 segundos enquanto status = "connecting".
    */
-  getStatus: publicProcedure
+  getStatus: megadeskProcedure
     .input(z.object({ clientId: z.string().min(1) }))
     .query(async ({ input }) => {
       const { clientId } = input;
@@ -273,7 +274,7 @@ export const evolutionRouter = router({
    * Desconecta o WhatsApp (logout) e limpa a sessão no banco.
    * NÃO deleta a instância na Evolution — apenas desconecta.
    */
-  disconnect: publicProcedure
+  disconnect: megadeskProcedure
     .input(z.object({ clientId: z.string().min(1) }))
     .mutation(async ({ input }) => {
       const { clientId } = input;
@@ -295,7 +296,7 @@ export const evolutionRouter = router({
    * Envia mensagem de texto para um número via WhatsApp.
    * Usado internamente por outros routers (conversas, atendimento, etc.).
    */
-  sendMessage: publicProcedure
+  sendMessage: megadeskProcedure
     .input(
       z.object({
         clientId:    z.string().min(1),

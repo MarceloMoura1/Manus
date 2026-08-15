@@ -26,7 +26,11 @@ Configure no CMD **antes** de subir o MegaDesk:
 
 ```cmd
 set EVOLUTION_API_URL=http://localhost:8080
-set EVOLUTION_API_KEY=megadesk-evolution-key
+set EVOLUTION_API_KEY=<valor-forte-gerado-localmente>
+set EVOLUTION_MYSQL_ROOT_PASSWORD=<valor-forte-gerado-localmente>
+set EVOLUTION_MYSQL_DATABASE=evolution_api
+set EVOLUTION_MYSQL_USER=evolution
+set EVOLUTION_MYSQL_PASSWORD=<valor-forte-gerado-localmente>
 set WEBHOOK_BASE_URL=http://host.docker.internal:3000
 ```
 
@@ -39,7 +43,7 @@ set WEBHOOK_BASE_URL=http://host.docker.internal:3000
 
 ## Imagem utilizada
 
-**`evoapicloud/evolution-api:2.4.0`** — versão estável com correções MySQL:
+**`evoapicloud/evolution-api:v2.3.7`** — imagem fixada atualmente no Compose:
 - Fix do bug `wavoipToken` (migration fora de ordem)
 - Fix de defaults inválidos para `createdAt` no MySQL
 - Fix de tipos boolean/integer no MySQL
@@ -51,17 +55,9 @@ set WEBHOOK_BASE_URL=http://host.docker.internal:3000
 
 ## Comandos
 
-### PRIMEIRA VEZ ou após erro de migration — Limpar e subir do zero
-```cmd
-:: Parar e remover containers E volumes (limpa banco corrompido)
-docker compose -f docker-compose.evolution.yml down -v
+### Validação segura da configuração
 
-:: Subir tudo limpo
-docker compose -f docker-compose.evolution.yml up -d
-```
-
-> O `-v` remove os volumes e o banco MySQL da Evolution.
-> Na primeira vez ou após erro, use sempre `down -v` antes de `up -d`.
+O Compose falha antes de qualquer operação se uma variável obrigatória estiver ausente. Use `docker compose -f docker-compose.evolution.yml config --quiet` para validação sintática depois de definir valores locais. Esse comando não inicia serviços.
 
 ### Uso normal (mantém dados e sessão)
 ```cmd
@@ -101,7 +97,7 @@ Resposta esperada:
 
 ### Testar com API Key
 ```cmd
-curl http://localhost:8080/instance/fetchInstances -H "apikey: megadesk-evolution-key"
+curl http://localhost:8080/instance/fetchInstances -H "apikey: <valor-local>"
 ```
 
 Resposta: `[]` (lista vazia na primeira vez — normal).
@@ -137,11 +133,15 @@ curl http://localhost:8080
 
 :: 4. Configurar ENVs do MegaDesk
 set EVOLUTION_API_URL=http://localhost:8080
-set EVOLUTION_API_KEY=megadesk-evolution-key
+set EVOLUTION_API_KEY=<valor-forte-gerado-localmente>
+set EVOLUTION_MYSQL_ROOT_PASSWORD=<valor-forte-gerado-localmente>
+set EVOLUTION_MYSQL_DATABASE=evolution_api
+set EVOLUTION_MYSQL_USER=evolution
+set EVOLUTION_MYSQL_PASSWORD=<valor-forte-gerado-localmente>
 set WEBHOOK_BASE_URL=http://host.docker.internal:3000
 set NODE_ENV=development
-set DATABASE_URL=mysql://megadesk:MegaDesk123@localhost:3306/megadesk_main
-set JWT_SECRET=9fK28xPqLmN7vR4tYwE1zBcH6sJdQ3uA8nMxK5pRtV2gF9cW
+set DATABASE_URL=<url-local-do-banco-megadesk>
+set JWT_SECRET=<valor-forte-gerado-localmente>
 
 :: 5. Subir MegaDesk
 pnpm tsx watch server/_core/index.ts
@@ -178,13 +178,9 @@ docker compose -f docker-compose.evolution.yml down
 
 ---
 
-## Remover tudo (apaga sessão e banco)
+## Proteção de dados
 
-```cmd
-docker compose -f docker-compose.evolution.yml down -v
-```
-
-> ⚠️ `-v` remove os volumes. Use só para começar do zero.
+Não use comandos que removam volumes. Os volumes contêm banco e sessões persistentes e só podem ser descartados em um procedimento destrutivo separado e explicitamente autorizado.
 
 ---
 
@@ -196,3 +192,7 @@ docker compose -f docker-compose.evolution.yml down -v
 | `evolution_api` | MySQL Docker (evolution-db) | Evolution API |
 
 **Os dois bancos são completamente independentes.**
+
+## Rotação obrigatória
+
+Credenciais que já estiveram versionadas devem ser consideradas comprometidas. Gere e aplique manualmente novos valores para a API key e para as contas MySQL da Evolution; esta configuração não realiza a rotação automaticamente. Não reutilize valores antigos.

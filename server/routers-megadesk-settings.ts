@@ -3,7 +3,7 @@
  * Abas: Geral, Chamados (status), Equipe, Backup
  */
 import { z } from "zod";
-import { router, publicProcedure } from "./_core/trpc";
+import { router, megadeskProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { getPool } from "./db";
 import { randomUUID } from "crypto";
@@ -45,7 +45,7 @@ export const megadeskSettingsRouter = router({
   /**
    * Buscar configurações da empresa do cliente
    */
-  getCompanySettings: publicProcedure
+  getCompanySettings: megadeskProcedure
     .input(
       z.object({
         clientId: z.string().min(1),
@@ -96,7 +96,7 @@ export const megadeskSettingsRouter = router({
   /**
    * Salvar configurações da empresa
    */
-  saveCompanySettings: publicProcedure
+  saveCompanySettings: megadeskProcedure
     .input(
       z.object({
         clientId: z.string().min(1),
@@ -173,7 +173,7 @@ export const megadeskSettingsRouter = router({
   /**
    * Listar status personalizados do cliente
    */
-  listTicketStatuses: publicProcedure
+  listTicketStatuses: megadeskProcedure
     .input(z.object({ clientId: z.string().min(1), userRole: z.string() }))
     .query(async ({ input }) => {
       requireClientAdmin(input.userRole);
@@ -195,7 +195,7 @@ export const megadeskSettingsRouter = router({
   /**
    * Criar status personalizado
    */
-  createTicketStatus: publicProcedure
+  createTicketStatus: megadeskProcedure
     .input(
       z.object({
         clientId: z.string().min(1),
@@ -219,7 +219,7 @@ export const megadeskSettingsRouter = router({
   /**
    * Atualizar status personalizado
    */
-  updateTicketStatus: publicProcedure
+  updateTicketStatus: megadeskProcedure
     .input(
       z.object({
         clientId: z.string().min(1),
@@ -250,7 +250,7 @@ export const megadeskSettingsRouter = router({
   /**
    * Deletar status personalizado
    */
-  deleteTicketStatus: publicProcedure
+  deleteTicketStatus: megadeskProcedure
     .input(
       z.object({
         clientId: z.string().min(1),
@@ -275,7 +275,7 @@ export const megadeskSettingsRouter = router({
   /**
    * Listar usuários do cliente (com permissões detalhadas)
    */
-  listTeamUsers: publicProcedure
+  listTeamUsers: megadeskProcedure
     .input(
       z.object({
         clientId: z.string().min(1),
@@ -296,7 +296,7 @@ export const megadeskSettingsRouter = router({
   /**
    * Adicionar usuário à equipe
    */
-  addTeamUser: publicProcedure
+  addTeamUser: megadeskProcedure
     .input(
       z.object({
         clientId: z.string().min(1),
@@ -369,7 +369,7 @@ export const megadeskSettingsRouter = router({
   /**
    * Remover usuário da equipe
    */
-  removeTeamUser: publicProcedure
+  removeTeamUser: megadeskProcedure
     .input(
       z.object({
         clientId: z.string().min(1),
@@ -402,7 +402,7 @@ export const megadeskSettingsRouter = router({
   /**
    * Atualizar permissões de um usuário
    */
-  updateTeamUserPermissions: publicProcedure
+  updateTeamUserPermissions: megadeskProcedure
     .input(
       z.object({
         clientId: z.string().min(1),
@@ -445,7 +445,7 @@ export const megadeskSettingsRouter = router({
   /**
    * Redefinir senha de um usuário
    */
-  resetTeamUserPassword: publicProcedure
+  resetTeamUserPassword: megadeskProcedure
     .input(
       z.object({
         clientId: z.string().min(1),
@@ -479,7 +479,7 @@ export const megadeskSettingsRouter = router({
   /**
    * Obter informações do cliente (para exibir limite de usuários)
    */
-  getClientInfo: publicProcedure
+  getClientInfo: megadeskProcedure
     .input(z.object({ clientId: z.string().min(1), userRole: z.string() }))
     .query(async ({ input }) => {
       requireClientAdmin(input.userRole);
@@ -500,7 +500,7 @@ export const megadeskSettingsRouter = router({
   /**
    * Exportar dados do cliente (JSON)
    */
-  exportClientData: publicProcedure
+  exportClientData: megadeskProcedure
     .input(
       z.object({
         clientId: z.string().min(1),
@@ -558,7 +558,7 @@ export const megadeskSettingsRouter = router({
   /**
    * Obter estatísticas de dados para a aba de backup
    */
-  getDataStats: publicProcedure
+  getDataStats: megadeskProcedure
     .input(z.object({ clientId: z.string().min(1), userRole: z.string() }))
     .query(async ({ input }) => {
       requireClientAdmin(input.userRole);

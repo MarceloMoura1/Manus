@@ -1089,8 +1089,16 @@ function ApisTab({ client, onRefresh }: { client: any; onRefresh: () => void }) 
 function AcessoTab({ client, onRefresh }: { client: any; onRefresh: () => void }) {
   const isActive = client.status === "active" && client.accessReleased;
 
-  const updateAccess = trpc.megaadmin.updateClientAccess.useMutation({
-    onSuccess() { toast.success("Acesso atualizado."); onRefresh(); },
+  const reactivate = trpc.megaadmin.reactivateClient.useMutation({
+    onSuccess() { toast.success("Tenant reativado; liberação operacional continua pendente."); onRefresh(); },
+    onError(err) { toast.error(err.message); },
+  });
+  const releaseAccess = trpc.megaadmin.releaseClientAccess.useMutation({
+    onSuccess() { toast.success("Acesso operacional liberado."); onRefresh(); },
+    onError(err) { toast.error(err.message); },
+  });
+  const quarantine = trpc.megaadmin.deleteClient.useMutation({
+    onSuccess() { toast.success("Tenant colocado em quarentena."); onRefresh(); },
     onError(err) { toast.error(err.message); },
   });
   const rotateToken = trpc.megaadmin.rotateToken.useMutation({
@@ -1123,25 +1131,32 @@ function AcessoTab({ client, onRefresh }: { client: any; onRefresh: () => void }
       {/* Ações de acesso */}
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-2xl border border-white/10 bg-white/[.02] p-5">
-          <h4 className="text-sm font-semibold text-white mb-1">Liberar acesso</h4>
-          <p className="text-xs text-slate-400 mb-4">Ativa o cliente e libera o acesso à plataforma MegaDesk.</p>
+          <h4 className="text-sm font-semibold text-white mb-1">Reativar tenant</h4>
+          <p className="text-xs text-slate-400 mb-4">Reativa o cadastro sem desbloquear usuários nem liberar acesso automaticamente.</p>
           <button
-            onClick={() => updateAccess.mutate({ clientId: client.clientId, status: "active", accessReleased: true })}
-            disabled={isActive || updateAccess.isPending}
+            onClick={() => reactivate.mutate({ clientId: client.clientId })}
+            disabled={client.status === "active" || reactivate.isPending}
             className="w-full rounded-2xl bg-emerald-400 px-4 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-50"
           >
-            {updateAccess.isPending ? "Atualizando..." : "Liberar acesso"}
+            {reactivate.isPending ? "Atualizando..." : "Reativar tenant"}
+          </button>
+          <button
+            onClick={() => releaseAccess.mutate({ clientId: client.clientId })}
+            disabled={client.status !== "active" || client.accessReleased || releaseAccess.isPending}
+            className="mt-2 w-full rounded-2xl border border-emerald-400/30 px-4 py-2.5 text-sm font-semibold text-emerald-300 disabled:opacity-50"
+          >
+            {releaseAccess.isPending ? "Atualizando..." : "Liberar acesso operacional"}
           </button>
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/[.02] p-5">
-          <h4 className="text-sm font-semibold text-white mb-1">Bloquear acesso</h4>
-          <p className="text-xs text-slate-400 mb-4">Bloqueia o cliente e todos os seus usuários imediatamente.</p>
+          <h4 className="text-sm font-semibold text-white mb-1">Colocar em quarentena</h4>
+          <p className="text-xs text-slate-400 mb-4">Bloqueia o tenant e seus usuários, preservando todos os dados e o banco físico.</p>
           <button
-            onClick={() => updateAccess.mutate({ clientId: client.clientId, status: "paused", accessReleased: false })}
-            disabled={!isActive || updateAccess.isPending}
+            onClick={() => quarantine.mutate({ clientId: client.clientId, reason: "controlled_other" })}
+            disabled={client.status !== "active" || quarantine.isPending}
             className="w-full rounded-2xl border border-red-400/30 bg-red-400/10 px-4 py-2.5 text-sm font-semibold text-red-300 disabled:opacity-50"
           >
-            {updateAccess.isPending ? "Atualizando..." : "Bloquear acesso"}
+            {quarantine.isPending ? "Atualizando..." : "Colocar em quarentena"}
           </button>
         </div>
       </div>

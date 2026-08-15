@@ -3,7 +3,7 @@
  * Funções para gerenciar tenants (criar, atualizar, deletar)
  */
 
-import { createTenantDatabase, generateTenantDatabaseName, deleteTenantDatabase } from "./tenant-db-manager";
+import { createTenantDatabase, generateTenantDatabaseName } from "./tenant-db-manager";
 import { getDb } from "../db";
 import { megadeskDomainClients } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
@@ -84,47 +84,16 @@ export async function createNewTenant(input: CreateTenantInput): Promise<TenantI
  * Libera acesso de um tenant
  */
 export async function releaseTenantAccess(clientId: string): Promise<void> {
-  try {
-    const db = getDb();
-    if (!db) throw new Error("Database não disponível");
-
-    await db
-      .update(megadeskDomainClients)
-      .set({
-        status: "active",
-        accessReleased: 1,
-        statusType: "test",
-      })
-      .where(eq(megadeskDomainClients.clientId, clientId));
-
-    console.log(`✅ Acesso liberado para tenant: ${clientId}`);
-  } catch (error) {
-    console.error("❌ Erro ao liberar acesso:", error);
-    throw error;
-  }
+  void clientId;
+  throw new Error("Fluxo legado bloqueado: use releaseTenantOperationalAccess no serviço de lifecycle.");
 }
 
 /**
  * Pausa acesso de um tenant
  */
 export async function pauseTenantAccess(clientId: string): Promise<void> {
-  try {
-    const db = getDb();
-    if (!db) throw new Error("Database não disponível");
-
-    await db
-      .update(megadeskDomainClients)
-      .set({
-        status: "paused",
-        accessReleased: 0,
-      })
-      .where(eq(megadeskDomainClients.clientId, clientId));
-
-    console.log(`⏸️ Acesso pausado para tenant: ${clientId}`);
-  } catch (error) {
-    console.error("❌ Erro ao pausar acesso:", error);
-    throw error;
-  }
+  void clientId;
+  throw new Error("Fluxo legado bloqueado: use quarantineTenant no serviço de lifecycle.");
 }
 
 /**
@@ -159,28 +128,11 @@ export async function getTenantInfo(clientId: string): Promise<TenantInfo | null
 }
 
 /**
- * Deleta um tenant e seu banco de dados
+ * Coloca um tenant em quarentena recuperável, preservando registro e banco físico.
  */
 export async function deleteTenant(clientId: string): Promise<void> {
-  try {
-    const db = getDb();
-    if (!db) throw new Error("Database não disponível");
-
-    // Obtém informações do tenant
-    const tenantInfo = await getTenantInfo(clientId);
-    if (!tenantInfo) throw new Error("Tenant não encontrado");
-
-    // Deleta banco de dados
-    await deleteTenantDatabase(tenantInfo.databaseName);
-
-    // Remove registro da tabela de controle
-    await db.delete(megadeskDomainClients).where(eq(megadeskDomainClients.clientId, clientId));
-
-    console.log(`✅ Tenant deletado: ${clientId}`);
-  } catch (error) {
-    console.error("❌ Erro ao deletar tenant:", error);
-    throw error;
-  }
+  void clientId;
+  throw new Error("Fluxo legado bloqueado: use o serviço único de tenant lifecycle.");
 }
 
 /**
