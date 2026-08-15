@@ -1,15 +1,3 @@
-import { defineConfig } from "drizzle-kit";
-
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  throw new Error("DATABASE_URL is required to run drizzle commands");
-}
-
-export default defineConfig({
-  schema: ["./drizzle/schema.ts", "./drizzle/schema-evolution-queue.ts"],
-  out: "./drizzle",
-  dialect: "mysql",
-  dbCredentials: {
-    url: connectionString,
-  },
-});
+// Safe default for tools that discover drizzle.config.ts automatically.
+// Operational commands use the explicit main/tenant config files.
+export { default } from "./drizzle.main.config";

@@ -61,7 +61,8 @@ describe.runIf(isTestDatabaseEnabled())('Persistência de Chamados [database int
       });
       expect(chamado.number).toBeGreaterThan(0);
       expect(chamado.id).toBeTruthy();
-      expect(chamado.createdAt).toBeInstanceOf(Date);
+      expect(chamado.createdAt).toBeTypeOf('number');
+      expect(chamado.createdAt).toBeGreaterThan(0);
     });
 
     it('deve ter atividades vazias ao criar', async () => {
@@ -221,8 +222,8 @@ describe.runIf(isTestDatabaseEnabled())('Persistência de Chamados [database int
 
       if (chamado && chamado.activities.length > 1) {
         for (let i = 0; i < chamado.activities.length - 1; i++) {
-          expect(chamado.activities[i].date.getTime()).toBeGreaterThanOrEqual(
-            chamado.activities[i + 1].date.getTime()
+          expect(chamado.activities[i].date).toBeGreaterThanOrEqual(
+            chamado.activities[i + 1].date
           );
         }
       }
@@ -266,13 +267,13 @@ describe.runIf(isTestDatabaseEnabled())('Persistência de Chamados [database int
     it('deve ter timestamps válidos', async () => {
       const chamado = await getChamadoWithActivities(createdChamadoId, testClientId);
 
-      expect(chamado?.createdAt).toBeInstanceOf(Date);
-      expect(chamado?.createdAt?.getTime()).toBeGreaterThan(0);
+      expect(chamado?.createdAt).toBeTypeOf('number');
+      expect(chamado?.createdAt).toBeGreaterThan(0);
 
       if (chamado?.activities.length) {
         for (const activity of chamado.activities) {
-          expect(activity.date).toBeInstanceOf(Date);
-          expect(activity.date.getTime()).toBeGreaterThan(0);
+          expect(activity.date).toBeTypeOf('number');
+          expect(activity.date).toBeGreaterThan(0);
         }
       }
     });

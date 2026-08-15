@@ -8,6 +8,7 @@ import { megadeskCrmClients } from "../drizzle/schema";
 
 import { getPool } from "./db";
 import { randomUUID } from "crypto";
+import { normalizeDigits, normalizeEmail } from "./_core/provisioning-guards";
 
 type Database = ReturnType<typeof drizzle>;
 
@@ -96,10 +97,10 @@ export async function createCrmClient(clientId: string, input: CrmClientInput) {
     clientId,
     companyName: input.companyName,
     responsibleName: input.responsibleName ?? "",
-    cpfCnpj: input.cpfCnpj ?? "",
-    phone: input.phone ?? "",
+    cpfCnpj: input.cpfCnpj ? normalizeDigits(input.cpfCnpj) : null,
+    phone: input.phone ? normalizeDigits(input.phone) : null,
     whatsapp: input.whatsapp ?? "",
-    email: input.email ?? "",
+    email: input.email ? normalizeEmail(input.email) : null,
     address: input.address ?? "",
     city: input.city ?? "",
     state: input.state ?? "",

@@ -74,7 +74,7 @@ export async function restoreExistingSessions(): Promise<void> {
     let whatsappConfigs: any[] = [];
     try {
       const [rows] = await connection.execute(
-        `SELECT * FROM megadesk_whatsapp_config WHERE status = 'active'`
+        `SELECT clientId, phoneNumberId, accessToken, phoneNumber FROM megadesk_whatsapp_config WHERE connectionStatus = 1`
       );
       whatsappConfigs = rows as any[];
     } finally {
@@ -83,7 +83,10 @@ export async function restoreExistingSessions(): Promise<void> {
 
     for (const config of whatsappConfigs) {
       try {
-        const { client_id, instance_id, token, phone_number } = config;
+        const client_id = config.clientId;
+        const instance_id = config.phoneNumberId;
+        const token = config.accessToken;
+        const phone_number = config.phoneNumber;
 
         console.log(`[Evolution Manager] Restaurando sessão: ${instance_id}`);
 
@@ -132,10 +135,11 @@ export async function createWhatsAppSession(clientId: string): Promise<{
     const connection = await pool.getConnection();
     try {
       await connection.execute(
-        `INSERT INTO megadesk_whatsapp_config (client_id, instance_id, token, status, created_at)
-         VALUES (?, ?, ?, 'active', NOW())
-         ON DUPLICATE KEY UPDATE token = VALUES(token), status = 'active'`,
-        [clientId, session.instanceId, session.token]
+        `INSERT INTO megadesk_whatsapp_config
+           (configId, clientId, phoneNumberId, accessToken, connectionStatus, createdAt)
+         VALUES (?, ?, ?, ?, 1, NOW())
+         ON DUPLICATE KEY UPDATE phoneNumberId = VALUES(phoneNumberId), accessToken = VALUES(accessToken), connectionStatus = 1`,
+        [`whatsapp-${clientId}`, clientId, session.instanceId, session.token]
       );
     } finally {
       connection.release();
@@ -250,11 +254,12 @@ export async function sendWhatsAppMessage(
       const pool = getPool();
       const connection = await pool.getConnection();
       try {
+        const messageId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         await connection.execute(
           `INSERT INTO megadesk_domain_conversations_messages 
-           (conversation_id, sender, message, timestamp, status)
-           VALUES (?, ?, ?, NOW(), ?)`,
-          [conversationId, agentName, text, "sent"]
+           (message_id, conversation_id, sender, message, timestamp, status)
+           VALUES (?, ?, ?, ?, NOW(), ?)`,
+          [messageId, conversationId, agentName, text, "sent"]
         );
       } catch (dbErr: any) {
         console.warn(`[Evolution Manager] Erro ao salvar mensagem no banco:`, dbErr);

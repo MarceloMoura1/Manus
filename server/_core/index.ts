@@ -89,9 +89,7 @@ async function startServer() {
   });
 
   // Garantir tabela de sessões Evolution
-  await ensureSessionTable().catch(err =>
-    console.warn("[Evolution] Aviso ao criar tabela:", err?.message ?? err)
-  );
+  await ensureSessionTable();
 
   // ─── Socket.IO (WhatsApp em tempo real) ───────────────────────────────────
   initWhatsAppSocket(server);

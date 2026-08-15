@@ -49,7 +49,8 @@ copy .env.example .env
 ### 5. Instalar e iniciar
 ```cmd
 pnpm install
-pnpm db:push
+pnpm db:validate
+pnpm db:migrate:main
 ADMIN_EMAIL=seu@email.com ADMIN_PASSWORD=SuaSenha123 node seed-admin.mjs
 pnpm dev
 ```
@@ -96,10 +97,15 @@ nano .env  # Configure DATABASE_URL e JWT_SECRET
 ### 4. Instalar e iniciar
 ```bash
 pnpm install
-pnpm db:push
+pnpm db:validate
+pnpm db:migrate:main
 ADMIN_EMAIL=seu@email.com ADMIN_PASSWORD=SuaSenha123 node seed-admin.mjs
 pnpm dev
 ```
+
+## Login multi-tenant
+
+O login da MegaDesk exige o identificador público da empresa (`clientId`) junto com e-mail e senha. Esse identificador é emitido pelo provisionamento e deve ser entregue ao administrador do tenant. E-mail isolado não resolve tenant e não há fallback que selecione o primeiro cadastro encontrado.
 
 ## Variáveis de ambiente obrigatórias
 

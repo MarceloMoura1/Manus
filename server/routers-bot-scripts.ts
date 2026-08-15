@@ -17,12 +17,16 @@ import {
 import { TRPCError } from "@trpc/server";
 import { invokeLLM } from "./_core/llm";
 
-function rejectUnsafePromptExecution(): void {
-  throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Execução bloqueada até a separação segura do prompt" });
+function assertOwnTenant(requestedClientId: string, tenantId: string | undefined): void {
+  if (!tenantId || requestedClientId !== tenantId) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Acesso negado" });
+  }
 }
 
-function redactPotentialLegacyPrompt<T extends { description: string }>(script: T) {
-  return { ...script, description: null };
+function assertPromptManager(role: string | undefined): void {
+  if (role !== "admin" && role !== "manager") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Permissão insuficiente para gerenciar instruções do bot" });
+  }
 }
 
 export const botScriptsRouter = router({
@@ -33,10 +37,8 @@ export const botScriptsRouter = router({
     .input(z.object({ clientId: z.string() }))
     .query(async ({ input, ctx }) => {
       // Validar que clientId pertence ao tenant
-      if (input.clientId !== ctx.tenantId) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Acesso negado" });
-      }
-      return (await getBotScripts(input.clientId)).map(redactPotentialLegacyPrompt);
+      assertOwnTenant(input.clientId, ctx.tenantId);
+      return getBotScripts(input.clientId);
     }),
 
   /**
@@ -44,7 +46,9 @@ export const botScriptsRouter = router({
    */
   get: megadeskProcedure
     .input(z.object({ clientId: z.string(), scriptId: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      assertOwnTenant(input.clientId, ctx.tenantId);
+      assertPromptManager(ctx.operationalUserRole);
       const script = await getBotScript(input.clientId, input.scriptId);
       if (!script) {
         throw new TRPCError({
@@ -52,7 +56,7 @@ export const botScriptsRouter = router({
           message: "Bot script not found",
         });
       }
-      return redactPotentialLegacyPrompt(script);
+      return script;
     }),
 
   /**
@@ -68,8 +72,9 @@ export const botScriptsRouter = router({
         initialMessage: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
-      if (input.systemPrompt) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Armazenamento seguro do prompt ainda não está disponível" });
+    .mutation(async ({ input, ctx }) => {
+      assertOwnTenant(input.clientId, ctx.tenantId);
+      assertPromptManager(ctx.operationalUserRole);
       const scriptId = await createBotScript(input.clientId, {
         name: input.name,
         description: input.description,
@@ -93,8 +98,9 @@ export const botScriptsRouter = router({
         initialMessage: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
-      if (input.systemPrompt !== undefined) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Armazenamento seguro do prompt ainda não está disponível" });
+    .mutation(async ({ input, ctx }) => {
+      assertOwnTenant(input.clientId, ctx.tenantId);
+      assertPromptManager(ctx.operationalUserRole);
       const script = await getBotScript(input.clientId, input.scriptId);
       if (!script) {
         throw new TRPCError({
@@ -118,7 +124,9 @@ export const botScriptsRouter = router({
    */
   delete: megadeskProcedure
     .input(z.object({ clientId: z.string(), scriptId: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      assertOwnTenant(input.clientId, ctx.tenantId);
+      assertPromptManager(ctx.operationalUserRole);
       const script = await getBotScript(input.clientId, input.scriptId);
       if (!script) {
         throw new TRPCError({
@@ -136,7 +144,9 @@ export const botScriptsRouter = router({
    */
   activate: megadeskProcedure
     .input(z.object({ clientId: z.string(), scriptId: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      assertOwnTenant(input.clientId, ctx.tenantId);
+      assertPromptManager(ctx.operationalUserRole);
       const script = await getBotScript(input.clientId, input.scriptId);
       if (!script) {
         throw new TRPCError({
@@ -154,7 +164,9 @@ export const botScriptsRouter = router({
    */
   deactivate: megadeskProcedure
     .input(z.object({ clientId: z.string(), scriptId: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      assertOwnTenant(input.clientId, ctx.tenantId);
+      assertPromptManager(ctx.operationalUserRole);
       const script = await getBotScript(input.clientId, input.scriptId);
       if (!script) {
         throw new TRPCError({
@@ -172,9 +184,10 @@ export const botScriptsRouter = router({
    */
   getActive: megadeskProcedure
     .input(z.object({ clientId: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      assertOwnTenant(input.clientId, ctx.tenantId);
       const script = await getActiveBotScript(input.clientId);
-      return script ? redactPotentialLegacyPrompt(script) : undefined;
+      return script;
     }),
 
   testScript: megadeskProcedure
@@ -193,8 +206,8 @@ export const botScriptsRouter = router({
           .optional(),
       })
     )
-    .mutation(async ({ input }) => {
-      rejectUnsafePromptExecution();
+    .mutation(async ({ input, ctx }) => {
+      assertOwnTenant(input.clientId, ctx.tenantId);
       const script = await getBotScript(input.clientId, input.scriptId);
       if (!script) {
         throw new TRPCError({
@@ -209,7 +222,7 @@ export const botScriptsRouter = router({
       }> = [
         {
           role: "system",
-          content: script.description,
+          content: script.systemPrompt,
         },
       ];
 
@@ -236,8 +249,8 @@ export const botScriptsRouter = router({
           success: true,
           botResponse,
         };
-      } catch (error) {
-        console.error("Erro ao chamar Gemini IA:", error);
+      } catch {
+        console.error("Erro ao chamar Gemini IA; detalhes sensíveis omitidos.");
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: "Erro ao gerar resposta do bot",

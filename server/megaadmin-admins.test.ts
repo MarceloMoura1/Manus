@@ -34,14 +34,8 @@ describe("megaadmin.listAdmins", () => {
     const result = await adminCaller.megaadmin.listAdmins();
     expect(result).toHaveProperty("admins");
     expect(Array.isArray(result.admins)).toBe(true);
-    // Deve ter pelo menos o admin inicial (Marcelo Moura)
-    expect(result.admins.length).toBeGreaterThan(0);
-    const first = result.admins[0];
-    expect(first).toHaveProperty("id");
-    expect(first).toHaveProperty("email");
-    expect(first).toHaveProperty("name");
-    expect(first).toHaveProperty("active");
-    expect(first).toHaveProperty("createdAt");
+    // Instalação limpa não cria credencial administrativa implicitamente.
+    expect(result.admins).toHaveLength(0);
   });
 
   it("bloqueia acesso para usuário comum", async () => {

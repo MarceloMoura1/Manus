@@ -20,7 +20,9 @@ FLUSH PRIVILEGES;
 ## Aplicar schema
 
 ```bash
-pnpm db:push
+pnpm db:validate
+# Após autorização explícita e configuração no processo:
+pnpm db:migrate:main
 ```
 
 ## Tabelas principais
@@ -76,11 +78,13 @@ pnpm db:push
 
 ## Migrações
 
-As migrações ficam em `drizzle/` e são gerenciadas pelo Drizzle Kit.
+As migrations canônicas ficam em `drizzle/main-migrations/` e
+`drizzle/tenant-migrations/`. Consulte `docs/MIGRATIONS.md`.
 
 ```bash
-# Gerar nova migração após alterar o schema
-pnpm db:push
+# Gerar SQL local sem aplicar
+pnpm db:generate:main
+pnpm db:generate:tenant
 
 # Ver estado atual do banco
 npx drizzle-kit studio
@@ -88,8 +92,8 @@ npx drizzle-kit studio
 
 ### Pasta migrations-backup/
 
-Contém arquivos SQL **legados e duplicados** que foram removidos do fluxo principal.
-Não aplicar esses arquivos. Servem apenas como referência histórica.
+Os SQLs antigos diretamente em `drizzle/`, `drizzle/meta/`, `drizzle/migrations/`
+e `migrations-backup/` são somente auditoria e não podem ser aplicados.
 
 ## Backup manual
 

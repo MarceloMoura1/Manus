@@ -19,7 +19,7 @@
  * ─────────────────────────────────────────────────────────
  */
 
-import { getPool } from "../db";
+import { getPool, verifyMainSchema } from "../db";
 
 export interface EvolutionSession {
   clientId: string;
@@ -37,20 +37,7 @@ export function instanceNameFor(clientId: string): string {
 
 /** Garante que a tabela existe (idempotente). */
 export async function ensureSessionTable(): Promise<void> {
-  const pool = getPool();
-  await pool.execute(`
-    CREATE TABLE IF NOT EXISTS \`megadesk_evolution_sessions\` (
-      \`client_id\`     VARCHAR(80)  NOT NULL,
-      \`instance_name\` VARCHAR(120) NOT NULL,
-      \`status\`        ENUM('disconnected','connecting','connected') NOT NULL DEFAULT 'disconnected',
-      \`phone_number\`  VARCHAR(30)  DEFAULT NULL,
-      \`connected_at\`  TIMESTAMP    DEFAULT NULL,
-      \`created_at\`    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      \`updated_at\`    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      PRIMARY KEY (\`client_id\`),
-      UNIQUE KEY \`uq_evo_instance\` (\`instance_name\`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-  `);
+  await verifyMainSchema(getPool());
 }
 
 /** Busca a sessão de um cliente. Retorna null se não existir. */

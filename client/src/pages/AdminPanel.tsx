@@ -484,6 +484,7 @@ const defaultNewClient: NewClientForm = { company: "", contact: "", email: "", p
 
 function ClientWizard({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [form, setForm] = useState<NewClientForm>(defaultNewClient);
+  const idempotencyKey = useRef(crypto.randomUUID());
   const create = trpc.megaadmin.createClient.useMutation({
     onSuccess() {
       toast.success("Cliente cadastrado! Redirecionando para a área de clientes...");
@@ -522,7 +523,7 @@ function ClientWizard({ onClose, onCreated }: { onClose: () => void; onCreated: 
             Cancelar
           </button>
           <button
-            onClick={() => create.mutate(form)}
+            onClick={() => create.mutate({ ...form, idempotencyKey: idempotencyKey.current })}
             disabled={!form.company || !form.contact || !form.email || !form.phone || create.isPending}
             className="rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-400 px-5 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
           >

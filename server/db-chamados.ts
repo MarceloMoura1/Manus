@@ -193,11 +193,11 @@ export async function createChamado(
   validatePriority(priority);
 
   // Sanitizar strings
-  const sanitizedCustomerName = sanitizeString(customerName);
-  const sanitizedCompany = sanitizeString(company);
-  const sanitizedTitle = sanitizeString(title);
+  const sanitizedCustomerName = sanitizeString(customerName, 180);
+  const sanitizedCompany = sanitizeString(company, 255);
+  const sanitizedTitle = sanitizeString(title, 255);
   const sanitizedObservations = sanitizeString(observations, MAX_OBSERVATIONS_LENGTH);
-  const sanitizedAssignedTo = assignedTo ? sanitizeString(assignedTo) : undefined;
+  const sanitizedAssignedTo = assignedTo ? sanitizeString(assignedTo, 180) : undefined;
 
   return retryWithBackoff(async () => {
     const chamadoNumber = await getNextChamadoNumber(clientId);
@@ -361,13 +361,12 @@ export async function listChamados(
   }
 
   return retryWithBackoff(async () => {
-    let query: any = db
-      .select()
-      .from(megadeskDomainChamados)
-      .where(eq(megadeskDomainChamados.clientId, clientId));
-
+    let query;
     if (status && status !== 'total') {
-      query = query.where(eq(megadeskDomainChamados.status, status as typeof VALID_STATUSES[number]));
+      query = db.select().from(megadeskDomainChamados).where(and(
+        eq(megadeskDomainChamados.clientId, clientId),
+        eq(megadeskDomainChamados.status, status as typeof VALID_STATUSES[number]),
+      ));
     } else if (status === 'total') {
       // Excluir fechados
       query = db
@@ -379,7 +378,7 @@ export async function listChamados(
             ne(megadeskDomainChamados.status, 'closed' as typeof VALID_STATUSES[number])
           )
         );
-    }
+    } else query = db.select().from(megadeskDomainChamados).where(eq(megadeskDomainChamados.clientId, clientId));
 
     const chamados = await query.limit(limit).offset(offset);
 

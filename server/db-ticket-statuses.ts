@@ -1,9 +1,10 @@
 /**
  * Helpers para gerenciar status personalizados de chamados por cliente
  */
-import { sql } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "./db";
 import { randomUUID } from "crypto";
+import { megadeskTicketStatuses } from "../drizzle/schema";
 
 export interface TicketStatus {
   statusId: string;
@@ -12,31 +13,17 @@ export interface TicketStatus {
   color: string;
   order: number;
   isDefault: boolean;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /**
  * Listar todos os status de um cliente
  */
 export async function getTicketStatuses(clientId: string): Promise<TicketStatus[]> {
-  const db = getDb();
-  const result = await db.execute(
-    sql`SELECT * FROM megadesk_ticket_statuses WHERE client_id = ${clientId} ORDER BY \`order\` ASC`
-  );
-
-  if (!result || (Array.isArray(result) && (result as any[]).length === 0)) return [];
-
-  return (result as any[]).map((row: any) => ({
-    statusId: row.status_id,
-    clientId: row.client_id,
-    name: row.name,
-    color: row.color,
-    order: row.order,
-    isDefault: row.is_default,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  }));
+  return getDb().select().from(megadeskTicketStatuses)
+    .where(eq(megadeskTicketStatuses.clientId, clientId))
+    .orderBy(asc(megadeskTicketStatuses.order));
 }
 
 /**
@@ -51,26 +38,13 @@ export async function createTicketStatus(
   const db = getDb();
   const statusId = randomUUID();
 
-  await db.execute(
-    sql`INSERT INTO megadesk_ticket_statuses (status_id, client_id, name, color, \`order\`, is_default)
-        VALUES (${statusId}, ${clientId}, ${name}, ${color}, ${order}, false)`
-  );
-
-  const result = await db.execute(
-    sql`SELECT * FROM megadesk_ticket_statuses WHERE status_id = ${statusId}`
-  );
-
-  const row = (result as any[])[0];
-  return {
-    statusId: row.status_id,
-    clientId: row.client_id,
-    name: row.name,
-    color: row.color,
-    order: row.order,
-    isDefault: row.is_default,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
+  await db.insert(megadeskTicketStatuses).values({ statusId, clientId, name, color, order, isDefault: false });
+  const rows = await db.select().from(megadeskTicketStatuses).where(and(
+    eq(megadeskTicketStatuses.statusId, statusId),
+    eq(megadeskTicketStatuses.clientId, clientId),
+  )).limit(1);
+  if (!rows[0]) throw new Error("TICKET_STATUS_CREATE_FAILED");
+  return rows[0];
 }
 
 /**
@@ -83,49 +57,19 @@ export async function updateTicketStatus(
 ): Promise<TicketStatus> {
   const db = getDb();
 
-  const setClauses: string[] = [];
-  const values: any[] = [];
-
-  if (updates.name !== undefined) {
-    setClauses.push("name = ?");
-    values.push(updates.name);
-  }
-  if (updates.color !== undefined) {
-    setClauses.push("color = ?");
-    values.push(updates.color);
-  }
-  if (updates.order !== undefined) {
-    setClauses.push("`order` = ?");
-    values.push(updates.order);
-  }
-
-  if (setClauses.length === 0) {
+  if (Object.keys(updates).length === 0) {
     throw new Error("Nenhum campo para atualizar");
   }
-
-  values.push(statusId);
-  values.push(clientId);
-
-  const query = `UPDATE megadesk_ticket_statuses SET ${setClauses.join(", ")} WHERE status_id = ? AND client_id = ?`;
-  // Execute raw SQL query
-  const pool = (db as any)._.client;
-  await (pool as any).execute(query, values);
-
-  const result = await db.execute(
-    sql`SELECT * FROM megadesk_ticket_statuses WHERE status_id = ${statusId}`
-  );
-
-  const row = (result as any[])[0];
-  return {
-    statusId: row.status_id,
-    clientId: row.client_id,
-    name: row.name,
-    color: row.color,
-    order: row.order,
-    isDefault: row.is_default,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
+  await db.update(megadeskTicketStatuses).set(updates).where(and(
+    eq(megadeskTicketStatuses.statusId, statusId),
+    eq(megadeskTicketStatuses.clientId, clientId),
+  ));
+  const rows = await db.select().from(megadeskTicketStatuses).where(and(
+    eq(megadeskTicketStatuses.statusId, statusId),
+    eq(megadeskTicketStatuses.clientId, clientId),
+  )).limit(1);
+  if (!rows[0]) throw new Error("TICKET_STATUS_NOT_FOUND");
+  return rows[0];
 }
 
 /**
@@ -133,9 +77,10 @@ export async function updateTicketStatus(
  */
 export async function deleteTicketStatus(clientId: string, statusId: string): Promise<void> {
   const db = getDb();
-  await db.execute(
-    sql`DELETE FROM megadesk_ticket_statuses WHERE status_id = ${statusId} AND client_id = ${clientId}`
-  );
+  await db.delete(megadeskTicketStatuses).where(and(
+    eq(megadeskTicketStatuses.statusId, statusId),
+    eq(megadeskTicketStatuses.clientId, clientId),
+  ));
 }
 
 /**

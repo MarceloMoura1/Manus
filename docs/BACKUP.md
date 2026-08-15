@@ -54,7 +54,7 @@ mysql -u megadesk -pSUASENHA megadesk_main < backup_20240101_030000.sql
 ## Backup antes de atualizações
 
 Sempre faça backup antes de:
-- `pnpm db:push`
+- `pnpm db:migrate:main` (com o gate explícito descrito em `docs/MIGRATIONS.md`)
 - Atualizações de código
 - Mudanças no schema
 

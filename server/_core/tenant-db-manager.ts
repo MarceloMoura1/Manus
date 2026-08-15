@@ -6,6 +6,7 @@
 import mysql from "mysql2/promise";
 import { drizzle } from "drizzle-orm/mysql2";
 import { sql } from "drizzle-orm";
+import { validateTenantDatabaseName } from "./canonical-migrations";
 
 interface TenantDatabaseConfig {
   clientId: string;
@@ -54,46 +55,8 @@ function parseDatabaseUrl(url: string) {
  * Cria um novo banco de dados para um tenant
  */
 export async function createTenantDatabase(clientId: string): Promise<string> {
-  try {
-    const mainDbUrl = process.env.DATABASE_URL;
-    if (!mainDbUrl) throw new Error("DATABASE_URL não configurada");
-
-    const credentials = parseDatabaseUrl(mainDbUrl);
-    const databaseName = generateTenantDatabaseName(clientId);
-
-    // Conecta ao servidor MySQL (sem banco específico)
-    const adminPool = mysql.createPool({
-      host: credentials.host,
-      port: credentials.port,
-      user: credentials.user,
-      password: credentials.password,
-      waitForConnections: true,
-      connectionLimit: 1,
-      queueLimit: 0,
-    });
-
-    const connection = await adminPool.getConnection();
-
-    try {
-      // Cria o banco de dados
-      await connection.query(
-        `CREATE DATABASE IF NOT EXISTS \`${databaseName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
-      );
-
-      console.log(`✅ Banco de dados criado: ${databaseName}`);
-
-      // Executa o schema no novo banco
-      await initializeTenantSchema(databaseName, credentials);
-
-      return databaseName;
-    } finally {
-      await connection.release();
-      await adminPool.end();
-    }
-  } catch (error) {
-    console.error("❌ Erro ao criar banco de dados do tenant:", error);
-    throw error;
-  }
+  validateTenantDatabaseName(generateTenantDatabaseName(clientId));
+  throw new Error("TENANT_PHYSICAL_ISOLATION_NOT_OPERATIONAL: o runtime atual persiste dados tenant-aware exclusivamente no banco main.");
 }
 
 /**
@@ -103,6 +66,7 @@ async function initializeTenantSchema(
   databaseName: string,
   credentials: ReturnType<typeof parseDatabaseUrl>
 ): Promise<void> {
+  throw new Error("LEGACY_TENANT_DDL_DISABLED: use as migrations canônicas de tenant.");
   const pool = mysql.createPool({
     host: credentials.host,
     port: credentials.port,

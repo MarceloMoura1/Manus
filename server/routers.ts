@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure, megadeskProcedure } from "./_core/trpc";
@@ -6,7 +7,7 @@ import { COOKIE_NAME, normalizeModuleNamesToBackend, normalizeModuleNamesToAdmin
 import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool, createMegaDeskBackup, listMegaDeskBackups, getMegaDeskBackupInfo, applyMegaDeskBackup } from "./db";
 import bcrypt from "bcryptjs";
 import { megaadminCredentials, megadeskDomainClientUsers } from "../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { SignJWT } from "jose";
 import { MEGAADMIN_COOKIE } from "./_core/context";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -23,10 +24,14 @@ import { notificationsRouter } from "./routers-notifications";
 import { megadeskSettingsRouter } from "./routers-megadesk-settings";
 import { evolutionRouter } from "./routers-evolution";
 import { conversasRouter } from "./routers-conversas";
+import { enforceAdministrativeRateLimit, normalizeDigits, normalizeEmail, runIdempotent } from "./_core/provisioning-guards";
+import { provisionClientAtomically } from "./_core/client-provisioning";
+import { normalizeCompanyIdentifier, resolveTenantLogin } from "./_core/tenant-login";
+import { runPostCommitBestEffort } from "./_core/post-commit";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
-type ClientStatus = "active" | "setup" | "paused";
+type ClientStatus = "provisioning" | "active" | "setup" | "failed" | "paused";
 type OperationalRecordType = "conversation" | "ticket" | "tracking" | "erp";
 
 type ClientIntegrations = {
@@ -424,55 +429,34 @@ export const appRouter = router({
       phone: z.string().min(8),
       cnpj: z.string().default(""),
       plan: z.string().min(2),
-      maxUsers: z.number().int().min(1).default(5),
+      maxUsers: z.number().int().min(1).max(25).default(5),
       statusType: z.enum(["active", "test"]).default("test"),
-    })).mutation(async ({ input }) => {
-      await hydrateSyncState();
-      const idNumber = clients.length + 1;
-      const clientId = `cliente-${String(idNumber).padStart(3, "0")}`;
-      const token = `mdsk_live_${clientId}_${Math.random().toString(16).slice(2, 10)}`;
-      // Gerar hash de senha padrão para o usuário inicial
-      const defaultPasswordHash = await bcrypt.hash(Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12), 12) // Senha aleatória - usuário deve trocar no primeiro acesso;
-      const client: MegaClient = {
-        id: `client-${String(idNumber).padStart(3, "0")}`,
-        clientId,
-        tenantDatabaseName: `tenant_${clientId.replaceAll("-", "_")}`,
-        company: input.company,
-        contact: input.contact,
-        email: input.email,
-        phone: input.phone,
-        cnpj: input.cnpj,
-        plan: input.plan,
-        maxUsers: input.maxUsers,
-        statusType: input.statusType,
-        status: input.statusType === "active" ? "active" : "setup",
-        accessReleased: input.statusType === "active",
-        apiToken: token,
-        modules: [],
-        integrations: {},
-        users: [{ id: `user-${Date.now()}`, name: input.contact, email: input.email, role: "admin", status: input.statusType === "active" ? "active" : "blocked", permissions: rolePermissions("admin"), passwordHash: defaultPasswordHash }],
-      };
-      clients.push(client);
-      audit("MegaAdmin", "Cliente criado e aguardando liberação", client.clientId);
-      await persistSyncState();
-      
-      // Sincronizar usuário inicial para a tabela megadeskDomainClientUsers
-      const initialUser = client.users[0];
-      const connection = await getPool().getConnection();
-      try {
-        await connection.execute(
-          "INSERT INTO megadesk_domain_client_users (user_id, client_id, name, email, role, status, permissions_json, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-          [initialUser.id, client.clientId, initialUser.name, initialUser.email.toLowerCase().trim(), initialUser.role, initialUser.status, JSON.stringify(initialUser.permissions ?? []), initialUser.passwordHash]
-        );
-      } catch (err: any) {
-        // Se o usuário já existe, apenas atualizar
-        if (err.code !== "ER_DUP_ENTRY") throw err;
-      } finally {
-        connection.release();
-      }
-      
-      await recordMegaDeskMetric(client.clientId, "client_created", 1, { platform: "MegaAdmin" });
-      return { ok: true, client: sanitizeClient(client), integrationToken: token };
+      idempotencyKey: z.string().trim().min(16).max(120),
+    })).mutation(async ({ input, ctx }) => {
+      if (process.env.NODE_ENV !== "test") enforceAdministrativeRateLimit(String(ctx.user.id));
+      const normalizedInput = { ...input, email: normalizeEmail(input.email), cnpj: normalizeDigits(input.cnpj) };
+      return runIdempotent(`explicit:${input.idempotencyKey}`, async () => {
+        const defaultPasswordHash = await bcrypt.hash(`${randomUUID()}${randomUUID()}`, 12);
+        const result = await provisionClientAtomically(getPool(), {
+          ...normalizedInput,
+          passwordHash: defaultPasswordHash,
+          permissions: rolePermissions("admin"),
+          actorId: String(ctx.user.id),
+        });
+        const client: MegaClient = { ...result.client, integrations: result.client.integrations as ClientIntegrations };
+        await runPostCommitBestEffort([
+          () => {
+            const cachedIndex = clients.findIndex((item) => item.clientId === client.clientId);
+            if (cachedIndex >= 0) clients[cachedIndex] = client;
+            else clients.push(client);
+          },
+          ...(!result.replay ? [
+            () => audit("MegaAdmin", "Cliente criado e aguardando liberação", client.clientId),
+            () => recordMegaDeskMetric(client.clientId, "client_created", 1, { platform: "MegaAdmin" }),
+          ] : []),
+        ]);
+        return { ok: true, client: sanitizeClient(client), integrationToken: client.apiToken, idempotentReplay: result.replay };
+	  });
     }),
     updateClientInfo: adminProcedure.input(z.object({
       clientId: z.string(),
@@ -596,6 +580,7 @@ export const appRouter = router({
           connection.release();
         }
       }
+      user.passwordHash = passwordHash;
       audit("MegaAdmin", `Senha redefinida para usuário: ${user.email}`, client.clientId);
       await persistSyncState();
       return { ok: true, message: `Senha redefinida para ${user.name}.` };
@@ -1304,138 +1289,72 @@ export const appRouter = router({
         return activeUsers;
       }),
     loginByEmail: publicProcedure
-      .input(z.object({ email: z.string().email(), password: z.string().min(1) }))
+      .input(z.object({ companyId: z.string().trim().toLowerCase().min(3).max(80), email: z.string().trim().toLowerCase().email(), password: z.string().min(1) }))
       .mutation(async ({ input }) => {
         await hydrateSyncState();
         const email = input.email.trim().toLowerCase();
-
-        // Busca o usuário em todos os clientes
-        for (const client of clients) {
-          const user = client.users.find((u) => u.email.toLowerCase() === email);
-          if (!user) continue;
-
-          // Usuário encontrado — verifica se está ativo
-          if (user.status !== "active") {
-            audit("MegaDesk", `Login negado: usuário bloqueado (${email})`, client.clientId, false);
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: "Seu acesso está bloqueado. Entre em contato com o administrador.",
-            });
-          }
-
-          // Verifica se o cliente tem acesso liberado
-          if (!client.accessReleased || client.status !== "active") {
-            audit("MegaDesk", `Login negado: cliente sem acesso liberado (${email})`, client.clientId, false);
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: "Sua empresa ainda não tem acesso liberado na plataforma. Aguarde a ativação pelo administrador.",
-            });
-          }
-
-          // Verifica a senha no banco de dados
-          const credRows = await getDb()
-            .select({ passwordHash: megadeskDomainClientUsers.passwordHash })
-            .from(megadeskDomainClientUsers)
-            .where(eq(megadeskDomainClientUsers.userId, user.id))
-            .limit(1);
-          const cred = credRows[0];
-          if (!cred || !cred.passwordHash) {
-            audit("MegaDesk", `Login negado: senha não configurada (${email})`, client.clientId, false);
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: "Senha de acesso não configurada. Solicite ao administrador que defina sua senha.",
-            });
-          }
-          const valid = await bcrypt.compare(input.password, cred.passwordHash);
-          if (!valid) {
-            audit("MegaDesk", `Login negado: senha incorreta (${email})`, client.clientId, false);
-            throw new TRPCError({
-              code: "UNAUTHORIZED",
-              message: "Senha incorreta. Tente novamente ou solicite a redefinição ao administrador.",
-            });
-          }
-
-          const permissions = resolveUserPermissions(user, client.modules);
-          audit("MegaDesk", `Login realizado: ${email}`, client.clientId);
-          await persistSyncState();
-
-          return {
-            ok: true,
-            session: {
-              userEmail: user.email,
-              userName: user.name,
-              userRole: user.role,
-              permissions,
-              clientId: client.clientId,
-              company: client.company,
-              plan: client.plan,
-              modules: client.modules,
-            },
-          };
+        const companyId = normalizeCompanyIdentifier(input.companyId);
+        const resolved = resolveTenantLogin(clients, companyId, email);
+        const invalidLogin = () => new TRPCError({ code: "UNAUTHORIZED", message: "Empresa, e-mail ou senha inválidos." });
+        if (!resolved) {
+          audit("MegaDesk", "Login negado por identidade ou estado inválido", undefined, false);
+          throw invalidLogin();
         }
-
-        // E-mail não encontrado em nenhum cliente
-        audit("MegaDesk", `Login negado: e-mail não cadastrado (${email})`, undefined, false);
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "E-mail não encontrado. Verifique se você foi cadastrado pelo administrador.",
-        });
+        const { tenant: client, user } = resolved;
+        const credRows = await getDb()
+          .select({ passwordHash: megadeskDomainClientUsers.passwordHash })
+          .from(megadeskDomainClientUsers)
+          .where(and(eq(megadeskDomainClientUsers.userId, user.id), eq(megadeskDomainClientUsers.clientId, client.clientId)))
+          .limit(1);
+        const cred = credRows[0];
+        if (!cred?.passwordHash || !(await bcrypt.compare(input.password, cred.passwordHash))) {
+          audit("MegaDesk", "Login negado por credencial inválida", client.clientId, false);
+          throw invalidLogin();
+        }
+        const permissions = resolveUserPermissions(user, client.modules);
+        audit("MegaDesk", "Login realizado", client.clientId);
+        await persistSyncState();
+        return {
+          ok: true,
+          session: {
+            userEmail: user.email,
+            userName: user.name,
+            userRole: user.role,
+            permissions,
+            clientId: client.clientId,
+            company: client.company,
+            plan: client.plan,
+            modules: client.modules,
+          },
+        };
       }),
     refreshSession: megadeskProcedure
       .input(z.object({ userEmail: z.string().email() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         await hydrateSyncState();
         const email = input.userEmail.trim().toLowerCase();
-
-        // Busca o usuário em todos os clientes
-        for (const client of clients) {
-          const user = client.users.find((u) => u.email.toLowerCase() === email);
-          if (!user) continue;
-
-          // Verifica se o usuário ainda está ativo
-          if (user.status !== "active") {
-            audit("MegaDesk", `Refresh negado: usuário bloqueado (${email})`, client.clientId, false);
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: "Seu acesso está bloqueado. Entre em contato com o administrador.",
-            });
-          }
-
-          // Verifica se o cliente ainda tem acesso liberado
-          if (!client.accessReleased || client.status !== "active") {
-            audit("MegaDesk", `Refresh negado: cliente sem acesso liberado (${email})`, client.clientId, false);
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: "Sua empresa ainda não tem acesso liberado na plataforma.",
-            });
-          }
-
-          // Renova a sessão com permissões atualizadas (respeitando módulos do cliente)
-          const permissions = resolveUserPermissions(user, client.modules);
-          audit("MegaDesk", `Sessão renovada: ${email}`, client.clientId);
-          await persistSyncState();
-
-          return {
-            ok: true,
-            session: {
-              userEmail: user.email,
-              userName: user.name,
-              userRole: user.role,
-              permissions,
-              clientId: client.clientId,
-              company: client.company,
-              plan: client.plan,
-              modules: client.modules,
-            },
-          };
+        const client = clients.find((item) => item.clientId === ctx.tenantId);
+        const user = client?.users.find((item) => item.email.trim().toLowerCase() === email);
+        if (!client || !user || user.status !== "active" || !client.accessReleased || client.status !== "active") {
+          audit("MegaDesk", "Refresh negado por identidade ou estado inválido", ctx.tenantId, false);
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão expirada. Faça login novamente." });
         }
-
-        // E-mail não encontrado
-        audit("MegaDesk", `Refresh negado: e-mail não encontrado (${email})`, undefined, false);
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Sessão expirada. Faça login novamente.",
-        });
+        const permissions = resolveUserPermissions(user, client.modules);
+        audit("MegaDesk", "Sessão renovada", client.clientId);
+        await persistSyncState();
+        return {
+          ok: true,
+          session: {
+            userEmail: user.email,
+            userName: user.name,
+            userRole: user.role,
+            permissions,
+            clientId: client.clientId,
+            company: client.company,
+            plan: client.plan,
+            modules: client.modules,
+          },
+        };
       }),
   }),
   assistant: router({

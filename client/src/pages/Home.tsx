@@ -3555,6 +3555,7 @@ const Sun = (props: any) => (
 );
 
 function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) => void }) {
+  const [companyId, setCompanyId] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -3575,8 +3576,8 @@ function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) =>
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
-    if (!email.trim() || !password.trim()) return;
-    loginMutation.mutate({ email: email.trim(), password });
+    if (!companyId.trim() || !email.trim() || !password.trim()) return;
+    loginMutation.mutate({ companyId: companyId.trim(), email: email.trim(), password });
   }
 
   function handleForgot() {
@@ -3658,6 +3659,17 @@ function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) =>
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
+              <label className="mb-2 block text-sm font-bold text-slate-700">Identificador da empresa</label>
+              <input
+                type="text"
+                value={companyId}
+                onChange={(e) => { setCompanyId(e.target.value); setError(""); }}
+                placeholder="cliente-..."
+                autoComplete="organization"
+                className="h-13 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+              />
+            </div>
+            <div>
               <label className="mb-2 block text-sm font-bold text-slate-700">E-mail</label>
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -3731,7 +3743,7 @@ function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) =>
 
             <button
               type="submit"
-              disabled={loginMutation.isPending || !email.trim() || !password.trim()}
+              disabled={loginMutation.isPending || !companyId.trim() || !email.trim() || !password.trim()}
               className="login-anim-btn group flex h-13 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700 hover:shadow-blue-300 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
             >
               {loginMutation.isPending ? (

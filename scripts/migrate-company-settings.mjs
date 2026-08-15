@@ -1,5 +1,7 @@
 import mysql from "mysql2/promise";
 
+throw new Error("LEGACY_MIGRATION_SCRIPT_DISABLED: use pnpm db:migrate:main.");
+
 const url = process.env.DATABASE_URL;
 if (!url) {
   console.error("DATABASE_URL não configurada");

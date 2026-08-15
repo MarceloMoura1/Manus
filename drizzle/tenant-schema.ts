@@ -43,6 +43,7 @@ export const tenantBotScripts = mysqlTable("bot_scripts", {
   id: varchar("id", { length: 80 }).primaryKey(),
   name: varchar("name", { length: 180 }).notNull(),
   description: text("description").notNull(),
+  systemPrompt: text("system_prompt").notNull(),
   initialMessage: text("initial_message").notNull(),
   active: boolean("active").notNull().default(false),
   trainingData: text("training_data"), // JSON com dados de treinamento

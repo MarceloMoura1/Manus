@@ -9,7 +9,6 @@ export async function createBotScript(clientId: string, data: {
   systemPrompt: string;
   initialMessage?: string;
 }) {
-  if (data.systemPrompt) throw new Error("SYSTEM_PROMPT_STORAGE_UNAVAILABLE");
   const db = getDb();
   const scriptId = randomUUID();
   
@@ -18,6 +17,7 @@ export async function createBotScript(clientId: string, data: {
     clientId,
     name: data.name,
     description: data.description || "",
+    systemPrompt: data.systemPrompt,
     initialMessage: data.initialMessage ?? "",
     active: 0,
   });
@@ -28,7 +28,16 @@ export async function createBotScript(clientId: string, data: {
 export async function getBotScripts(clientId: string) {
   const db = getDb();
   const scripts = await db
-    .select()
+    .select({
+      scriptId: megadeskBotScripts.scriptId,
+      clientId: megadeskBotScripts.clientId,
+      name: megadeskBotScripts.name,
+      description: megadeskBotScripts.description,
+      initialMessage: megadeskBotScripts.initialMessage,
+      active: megadeskBotScripts.active,
+      createdAt: megadeskBotScripts.createdAt,
+      updatedAt: megadeskBotScripts.updatedAt,
+    })
     .from(megadeskBotScripts)
     .where(eq(megadeskBotScripts.clientId, clientId));
 
@@ -67,7 +76,7 @@ export async function updateBotScript(
     updatedAt: new Date().toISOString().slice(0, 19).replace("T", " "),
   };
   if (data.name !== undefined) updates.name = data.name;
-  if (data.systemPrompt !== undefined) throw new Error("SYSTEM_PROMPT_STORAGE_UNAVAILABLE");
+  if (data.systemPrompt !== undefined) updates.systemPrompt = data.systemPrompt;
   if (data.description !== undefined) updates.description = data.description;
   if (data.initialMessage !== undefined) updates.initialMessage = data.initialMessage;
   if (data.isActive !== undefined) updates.active = data.isActive ? 1 : 0;

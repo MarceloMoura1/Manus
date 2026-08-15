@@ -8,6 +8,7 @@
 - Testes: `pnpm test` (ou `pnpm vitest run <arquivo>` para um conjunto específico).
 - Build: `pnpm run build`.
 - Desenvolvimento: `pnpm dev` em shells POSIX. Os scripts `dev` e `start` usam a sintaxe POSIX de `NODE_ENV`; no Windows CMD/PowerShell, defina `NODE_ENV` antes e execute o comando subjacente, ou use um shell compatível.
+- Arquitetura e comandos de migrations: `docs/MIGRATIONS.md`. Nunca execute a cadeia histórica diretamente em `drizzle/`.
 
 ## Arquitetura resumida
 

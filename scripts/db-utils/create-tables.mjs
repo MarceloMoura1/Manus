@@ -4,6 +4,8 @@
 
 import mysql from 'mysql2/promise';
 
+throw new Error("LEGACY_MIGRATION_SCRIPT_DISABLED: use pnpm db:migrate:main.");
+
 const config = {
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',

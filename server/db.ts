@@ -27,11 +27,75 @@ let cachedDb: Database | null = null;
 let cachedPool: mysql.Pool | null = null;
 export let inMemoryState: MegaDeskStructuredState | null = null;
 
+export const REQUIRED_MAIN_TABLES = [
+  "admin_credentials", "evolution_failed_messages", "evolution_queue_config",
+  "evolution_queue_metrics", "evolution_retry_history", "megaadmin_credentials",
+  "megadesk_company_settings", "megadesk_crm_clients", "megadesk_domain_audit_logs",
+  "megadesk_domain_backups", "megadesk_domain_bot_scripts", "megadesk_domain_chamado_activities",
+  "megadesk_domain_chamado_attachments", "megadesk_domain_chamado_collaborators",
+  "megadesk_domain_chamado_sequence", "megadesk_domain_chamados",
+  "megadesk_domain_client_users", "megadesk_domain_clients", "megadesk_domain_conversations",
+  "megadesk_domain_customers", "megadesk_domain_metrics", "megadesk_domain_operational_records",
+  "megadesk_domain_tickets", "megadesk_notifications", "megadesk_user_settings",
+  "megadesk_user_shortcuts", "megadesk_whatsapp_config", "users", "wa_accounts",
+  "wa_conversations", "wa_messages",
+	"megadesk_ticket_statuses", "megadesk_crm_timeline", "megadesk_domain_conversations_messages",
+	"megadesk_evolution_sessions", "megadesk_domain_ia_conversations",
+	"megadesk_domain_ia_conversation_history", "megadesk_ia_token_usage",
+	"megadesk_tenant_provisioning_requests",
+] as const;
+
+export const REQUIRED_MAIN_COLUMNS = {
+	megadesk_domain_clients: ["client_id", "tenant_database_name", "status", "access_released"],
+	megadesk_domain_client_users: ["user_id", "client_id", "email", "status"],
+	megadesk_domain_bot_scripts: ["script_id", "client_id", "description", "system_prompt"],
+	megadesk_whatsapp_config: ["configId", "clientId", "phoneNumberId", "accessToken", "connectionStatus"],
+	megadesk_evolution_sessions: ["client_id", "instance_name", "status"],
+	megadesk_domain_conversations_messages: ["message_id", "conversation_id", "status"],
+	megadesk_ia_token_usage: ["id", "client_id", "created_at"],
+	megadesk_tenant_provisioning_requests: ["idempotency_key", "payload_hash", "client_id"],
+} as const;
+
+export async function verifyMainSchema(pool: Pick<mysql.Pool, "execute"> = getPool()): Promise<void> {
+  const [rows] = await pool.execute(
+    "SELECT TABLE_NAME AS tableName FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()"
+  );
+  const present = new Set((rows as Array<{ tableName: string }>).map((row) => row.tableName));
+  const missing = REQUIRED_MAIN_TABLES.filter((table) => !present.has(table));
+  if (missing.length > 0) {
+    throw new Error(`SCHEMA_MAIN_NOT_READY: execute as migrations canônicas; tabelas ausentes: ${missing.join(", ")}`);
+  }
+	const [columnRows] = await pool.execute(
+		"SELECT TABLE_NAME AS tableName, COLUMN_NAME AS columnName FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()"
+	);
+	const presentColumns = new Set((columnRows as Array<{ tableName: string; columnName: string }>).map((row) => `${row.tableName}.${row.columnName}`));
+	const missingColumns = Object.entries(REQUIRED_MAIN_COLUMNS).flatMap(([table, columns]) =>
+		columns.filter((column) => !presentColumns.has(`${table}.${column}`)).map((column) => `${table}.${column}`)
+	);
+	if (missingColumns.length > 0) {
+		throw new Error(`SCHEMA_MAIN_NOT_READY: execute as migrations canônicas; colunas ausentes: ${missingColumns.join(", ")}`);
+	}
+}
+
 function getConfiguredDatabaseUrl(): string {
   if (process.env.RUN_DATABASE_INTEGRATION === "1") return getTestDatabaseUrl();
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL não configurada.");
   return url;
+}
+
+function hasConfiguredDatabase(): boolean {
+  return process.env.RUN_DATABASE_INTEGRATION === "1" || Boolean(process.env.DATABASE_URL);
+}
+
+function hasExplicitInMemoryStorage(): boolean {
+  return process.env.NODE_ENV === "test" && process.env.MEGADESK_STORAGE_MODE === "memory";
+}
+
+function assertStorageConfigured(): void {
+  if (!hasConfiguredDatabase() && !hasExplicitInMemoryStorage()) {
+    throw new Error("MEGADESK_STORAGE_NOT_CONFIGURED: configure DATABASE_URL ou, exclusivamente em testes, MEGADESK_STORAGE_MODE=memory.");
+  }
 }
 
 export function getDb(): Database {
@@ -175,7 +239,16 @@ function cloneState(state: MegaDeskStructuredState): MegaDeskStructuredState {
   return structuredClone(state);
 }
 
+export async function cacheStateAfterSuccessfulPersistence(state: MegaDeskStructuredState, persist: () => Promise<void>): Promise<void> {
+  await persist();
+  inMemoryState = cloneState(state);
+}
+
 async function ensureStructuredTables() {
+  await verifyMainSchema();
+  return;
+  // Código histórico abaixo é deliberadamente inalcançável e será removido
+  // depois que a baseline canônica for validada em um MySQL descartável.
   const pool = getPool();
   await pool.execute(`CREATE TABLE IF NOT EXISTS megadesk_domain_clients (
     client_id VARCHAR(80) PRIMARY KEY,
@@ -343,19 +416,15 @@ async function countClients(pool: mysql.Pool) {
 }
 
 export async function seedMegaDeskStructuredState(defaultState: MegaDeskStructuredState) {
-  try {
-    await ensureStructuredTables();
-    const pool = getPool();
-    if (await countClients(pool) > 0) return;
-    await saveMegaDeskStructuredState(defaultState);
-  } catch (error) {
-    if (!inMemoryState) inMemoryState = cloneState(defaultState);
-    console.warn("[MegaDesk Sync] Banco indisponível; usando fallback em memória para testes/desenvolvimento.", error);
-  }
+  await verifyMainSchema();
+  const pool = getPool();
+  if (await countClients(pool) > 0) return;
+  await saveMegaDeskStructuredState(defaultState);
 }
 
 export async function loadMegaDeskStructuredState(defaultState: MegaDeskStructuredState): Promise<MegaDeskStructuredState> {
-  if (!process.env.DATABASE_URL) {
+  if (!hasConfiguredDatabase()) {
+    assertStorageConfigured();
     if (!inMemoryState) inMemoryState = cloneState(defaultState);
     return inMemoryState;
   }
@@ -390,20 +459,17 @@ export async function loadMegaDeskStructuredState(defaultState: MegaDeskStructur
     inMemoryState = loadedState;
     return loadedState;
   } catch (error) {
-    console.warn("[MegaDesk Sync] Falha ao carregar persistência estruturada; tentando usar fallback em memória.", error);
-    // SE HOUVER ERRO, RETORNAR ESTADO EM MEMÓRIA (QUE FOI SINCRONIZADO ANTERIORMENTE)
-    if (inMemoryState) return inMemoryState;
-    // ÚLTIMO RECURSO: USAR ESTADO PADRÃO
-    inMemoryState = cloneState(defaultState);
-    return inMemoryState;
+    throw error;
   }
 }
 
 export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState): Promise<void> {
-  inMemoryState = state;
-  if (!process.env.DATABASE_URL) return;
-  try {
-    await ensureStructuredTables();
+  if (!hasConfiguredDatabase()) {
+    assertStorageConfigured();
+    inMemoryState = cloneState(state);
+    return;
+  }
+  await verifyMainSchema();
     const pool = getPool();
     const connection = await pool.getConnection();
     try {
@@ -420,7 +486,7 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
       // Sincronização normal é somente upsert. Ausência em memória nunca implica exclusão.
 
       for (const client of state.clients) {
-        await connection.execute("INSERT INTO megadesk_domain_clients (client_id, internal_id, tenant_database_name, company, contact, email, phone, cnpj, plan, max_users, status, status_type, access_released, api_token, modules_json, integrations_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE company=VALUES(company), contact=VALUES(contact), email=VALUES(email), phone=VALUES(phone), cnpj=VALUES(cnpj), plan=VALUES(plan), max_users=VALUES(max_users), status=VALUES(status), status_type=VALUES(status_type), access_released=VALUES(access_released), api_token=VALUES(api_token), modules_json=VALUES(modules_json), integrations_json=VALUES(integrations_json)", [client.clientId, client.id, client.tenantDatabaseName, client.company, client.contact, client.email || "", client.phone, client.cnpj || "", client.plan, client.maxUsers || 5, client.status, client.statusType || "test", client.accessReleased ? 1 : 0, client.apiToken, JSON.stringify(client.modules ?? []), JSON.stringify(client.integrations ?? {})]);
+        await connection.execute("INSERT INTO megadesk_domain_clients (client_id, internal_id, tenant_database_name, company, contact, email, phone, cnpj, plan, max_users, status, status_type, access_released, api_token, modules_json, integrations_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE company=VALUES(company), contact=VALUES(contact), email=VALUES(email), phone=VALUES(phone), cnpj=VALUES(cnpj), plan=VALUES(plan), max_users=VALUES(max_users), status=VALUES(status), status_type=VALUES(status_type), access_released=VALUES(access_released), api_token=VALUES(api_token), modules_json=VALUES(modules_json), integrations_json=VALUES(integrations_json)", [client.clientId, client.id, client.tenantDatabaseName, client.company, client.contact, client.email || null, client.phone, client.cnpj || null, client.plan, client.maxUsers || 5, client.status, client.statusType || "test", client.accessReleased ? 1 : 0, client.apiToken, JSON.stringify(client.modules ?? []), JSON.stringify(client.integrations ?? {})]);
         for (const user of client.users ?? []) {
           // CAMADA 1: Prioridade do hash: (1) hash em memória, (2) hash salvo no banco, (3) null
           // Isso garante que um restart do servidor nunca apague o hash existente no banco
@@ -445,7 +511,10 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
       // Pular inserção de tickets aqui para evitar conflito com tabela megadesk_domain_chamados
       for (const script of state.botScripts) {
         const scriptClientId = script.clientId ?? state.clients[0]?.clientId ?? "cliente-demo-001";
-        await connection.execute("INSERT INTO megadesk_domain_bot_scripts (script_id, client_id, name, description, initial_message, active) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE client_id=VALUES(client_id), name=VALUES(name), description=VALUES(description), initial_message=VALUES(initial_message), active=VALUES(active)", [script.id, scriptClientId, script.name, script.description, script.initialMessage, script.active ? 1 : 0]);
+		if (typeof script.systemPrompt !== "string" || !script.systemPrompt.trim()) {
+			throw new Error("SYSTEM_PROMPT_REQUIRED: use o repositório canônico de bot scripts.");
+		}
+        await connection.execute("INSERT INTO megadesk_domain_bot_scripts (script_id, client_id, name, description, system_prompt, initial_message, active) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE client_id=VALUES(client_id), name=VALUES(name), description=VALUES(description), system_prompt=VALUES(system_prompt), initial_message=VALUES(initial_message), active=VALUES(active)", [script.id, scriptClientId, script.name, script.description, script.systemPrompt, script.initialMessage, script.active ? 1 : 0]);
       }
       for (const record of state.operationalRecords) {
         await connection.execute("INSERT INTO megadesk_domain_operational_records (record_id, client_id, tenant_database_name, record_type, owner_phone, title, status, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), status=VALUES(status), payload_json=VALUES(payload_json)", [record.id, record.clientId, record.tenantDatabaseName, record.type, record.ownerPhone, record.title, record.status, JSON.stringify(record.payload ?? {})]);
@@ -457,18 +526,15 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
         await connection.execute("INSERT INTO megadesk_domain_metrics (client_id, metric_type, amount, source, metadata_json) VALUES (?, ?, ?, ?, ?)", [client.clientId, "conversations", state.conversations.filter((conversation) => conversation.clientId === client.clientId).length, "sync", JSON.stringify({ tenantDatabaseName: client.tenantDatabaseName })]);
         await connection.execute("INSERT INTO megadesk_domain_metrics (client_id, metric_type, amount, source, metadata_json) VALUES (?, ?, ?, ?, ?)", [client.clientId, "tickets", state.tickets.filter((ticket) => ticket.clientId === client.clientId).length, "sync", JSON.stringify({ tenantDatabaseName: client.tenantDatabaseName })]);
       }
-      await connection.commit();
-
-      // CAMADA 3: Verificação de integridade pós-save
+      // CAMADA 3: Verificação de integridade antes do commit
       // Detecta usuários ativos sem hash e loga alerta para investigação imediata
       const [orphanRows] = await connection.execute(
-        "SELECT user_id, email, client_id FROM megadesk_domain_client_users WHERE (password_hash IS NULL OR password_hash = '') AND status = 'active' LIMIT 10"
+        "SELECT user_id FROM megadesk_domain_client_users WHERE (password_hash IS NULL OR password_hash = '') AND status = 'active' LIMIT 10"
       );
       const orphans = orphanRows as any[];
       if (orphans.length > 0) {
         console.error(
-          `[MegaDesk CRITICAL] ${orphans.length} usuário(s) ativo(s) sem passwordHash após save:`,
-          orphans.map((r: any) => `${r.email} (${r.client_id})`).join(", ")
+          `[MegaDesk CRITICAL] ${orphans.length} usuário(s) ativo(s) sem passwordHash após save.`
         );
         // Auto-corrigir: bloquear usuários sem hash (devem redefinir senha)
         for (const orphan of orphans) {
@@ -476,22 +542,20 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
             "UPDATE megadesk_domain_client_users SET status = 'blocked' WHERE user_id = ? AND (password_hash IS NULL OR password_hash = '')",
             [orphan.user_id]
           );
-          console.warn(`[MegaDesk] Usuário bloqueado por ausência de senha - admin deve redefinir: ${orphan.email}`);
+          console.warn("[MegaDesk] Usuário bloqueado por ausência de senha; redefinição administrativa necessária.");
         }
       }
+      await cacheStateAfterSuccessfulPersistence(state, () => connection.commit());
     } catch (error) {
       await connection.rollback();
       throw error;
     } finally {
       connection.release();
     }
-  } catch (error) {
-    console.warn("[MegaDesk Sync] Não foi possível persistir tabelas estruturadas; mantendo cache em memória.", error);
-  }
 }
 
 export async function recordMegaDeskMetric(clientId: string, metricType: string, amount = 1, metadata: Record<string, unknown> = {}, source = "runtime") {
-  if (!process.env.DATABASE_URL) return;
+  if (!hasConfiguredDatabase()) return;
   try {
     await ensureStructuredTables();
     await getPool().execute("INSERT INTO megadesk_domain_metrics (client_id, metric_type, amount, source, metadata_json) VALUES (?, ?, ?, ?, ?)", [clientId, metricType, amount, source, JSON.stringify(metadata)]);
@@ -501,7 +565,7 @@ export async function recordMegaDeskMetric(clientId: string, metricType: string,
 }
 
 export async function validateMegaDeskClientToken(clientId: string, apiToken: string) {
-  if (!process.env.DATABASE_URL) return null;
+  if (!hasConfiguredDatabase()) return null;
   try {
     await ensureStructuredTables();
     const [rows] = await getPool().execute(
@@ -518,7 +582,7 @@ export async function validateMegaDeskClientToken(clientId: string, apiToken: st
 }
 
 export async function readMegaDeskTenantObservability(clientId: string) {
-  if (!process.env.DATABASE_URL) return { metrics: [], auditLogs: [], botScripts: [] };
+  if (!hasConfiguredDatabase()) return { metrics: [], auditLogs: [], botScripts: [] };
   try {
     await ensureStructuredTables();
     const [metricRows] = await getPool().execute(
@@ -575,7 +639,7 @@ export async function updateCustomer(input: {
  * Criar backup automático de todos os dados de clientes
  */
 export async function createMegaDeskBackup(state: MegaDeskStructuredState) {
-  if (!process.env.DATABASE_URL) return null;
+  if (!hasConfiguredDatabase()) return null;
   try {
     await ensureStructuredTables();
     const pool = getPool();
@@ -623,7 +687,7 @@ export async function createMegaDeskBackup(state: MegaDeskStructuredState) {
  * Listar backups disponíveis
  */
 export async function listMegaDeskBackups(limit = 30) {
-  if (!process.env.DATABASE_URL) return [];
+  if (!hasConfiguredDatabase()) return [];
   try {
     await ensureStructuredTables();
     const [rows] = await getPool().execute(
@@ -652,7 +716,7 @@ export async function listMegaDeskBackups(limit = 30) {
  * Recuperar dados de um backup específico
  */
 export async function restoreMegaDeskBackup(backupId: string): Promise<MegaDeskStructuredState | null> {
-  if (!process.env.DATABASE_URL) return null;
+  if (!hasConfiguredDatabase()) return null;
   try {
     await ensureStructuredTables();
     const [rows] = await getPool().execute(
@@ -705,7 +769,7 @@ export async function applyMegaDeskBackup(backupId: string) {
  * Limpar backups antigos (retenção de 30 dias por padrão)
  */
 export async function cleanupOldBackups(retentionDays = 30) {
-  if (!process.env.DATABASE_URL) return 0;
+  if (!hasConfiguredDatabase()) return 0;
   try {
     await ensureStructuredTables();
     const cutoffDateObj = new Date();
@@ -730,7 +794,7 @@ export async function cleanupOldBackups(retentionDays = 30) {
  * Obter informações de um backup específico
  */
 export async function getMegaDeskBackupInfo(backupId: string) {
-  if (!process.env.DATABASE_URL) return null;
+  if (!hasConfiguredDatabase()) return null;
   try {
     await ensureStructuredTables();
     const [rows] = await getPool().execute(

@@ -1,8 +1,7 @@
-import { mysqlTable, mysqlSchema, AnyMySqlColumn, index, foreignKey, varchar, json, timestamp, int, mysqlEnum, text, datetime, longtext, date, bigint, tinyint, boolean } from "drizzle-orm/mysql-core"
-import { sql } from "drizzle-orm"
+import { mysqlTable, index, uniqueIndex, varchar, timestamp, int, mysqlEnum, text, longtext, date, bigint, tinyint, boolean } from "drizzle-orm/mysql-core"
 
 export const evolutionFailedMessages = mysqlTable("evolution_failed_messages", {
-	failedMessageId: varchar("failed_message_id", { length: 255 }).notNull(),
+	failedMessageId: varchar("failed_message_id", { length: 255 }).primaryKey().notNull(),
 	clientId: varchar("client_id", { length: 255 }).notNull(),
 	conversationId: varchar("conversation_id", { length: 255 }).notNull(),
 	messageId: varchar("message_id", { length: 255 }),
@@ -14,10 +13,10 @@ export const evolutionFailedMessages = mysqlTable("evolution_failed_messages", {
 	maxRetries: int("max_retries").default(3).notNull(),
 	lastError: text("last_error"),
 	errorCode: varchar("error_code", { length: 50 }),
-	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
-	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
-	nextRetryAt: timestamp("next_retry_at", { mode: 'string' }),
-	sentAt: timestamp("sent_at", { mode: 'string' }),
+	createdAt: timestamp("created_at").defaultNow().notNull(),
+	updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+	nextRetryAt: timestamp("next_retry_at"),
+	sentAt: timestamp("sent_at"),
 },
 (table) => [
 	index("evolution_failed_messages_client_id_idx").on(table.clientId),
@@ -27,7 +26,7 @@ export const evolutionFailedMessages = mysqlTable("evolution_failed_messages", {
 ]);
 
 export const evolutionQueueConfig = mysqlTable("evolution_queue_config", {
-	configId: varchar("config_id", { length: 255 }).notNull(),
+	configId: varchar("config_id", { length: 255 }).primaryKey().notNull(),
 	clientId: varchar("client_id", { length: 255 }).notNull(),
 	maxRetries: int("max_retries").default(3).notNull(),
 	retryDelayMs: int("retry_delay_ms").default(1000).notNull(),
@@ -36,18 +35,18 @@ export const evolutionQueueConfig = mysqlTable("evolution_queue_config", {
 	autoRetryEnabled: int("auto_retry_enabled").default(1).notNull(),
 	cleanupAfterDaysSuccess: int("cleanup_after_days_success").default(7).notNull(),
 	cleanupAfterDaysFailed: int("cleanup_after_days_failed").default(30).notNull(),
-	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
-	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdAt: timestamp("created_at").defaultNow().notNull(),
+	updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 },
 (table) => [
-	index("evolution_queue_config_client_id_unique").on(table.clientId),
+	uniqueIndex("evolution_queue_config_client_id_unique").on(table.clientId),
 	index("evolution_queue_config_client_id_idx").on(table.clientId),
 ]);
 
 export const evolutionQueueMetrics = mysqlTable("evolution_queue_metrics", {
-	metricsId: varchar("metrics_id", { length: 255 }).notNull(),
+	metricsId: varchar("metrics_id", { length: 255 }).primaryKey().notNull(),
 	clientId: varchar("client_id", { length: 255 }).notNull(),
-	date: timestamp({ mode: 'string' }).notNull(),
+	date: timestamp().notNull(),
 	totalFailed: int("total_failed").default(0).notNull(),
 	totalRetried: int("total_retried").default(0).notNull(),
 	totalSucceeded: int("total_succeeded").default(0).notNull(),
@@ -55,8 +54,8 @@ export const evolutionQueueMetrics = mysqlTable("evolution_queue_metrics", {
 	avgRetryCount: int("avg_retry_count").default(0).notNull(),
 	avgResponseTimeMs: int("avg_response_time_ms").default(0).notNull(),
 	successRate: int("success_rate").default(0).notNull(),
-	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
-	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdAt: timestamp("created_at").defaultNow().notNull(),
+	updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 },
 (table) => [
 	index("evolution_queue_metrics_client_id_idx").on(table.clientId),
@@ -65,14 +64,14 @@ export const evolutionQueueMetrics = mysqlTable("evolution_queue_metrics", {
 ]);
 
 export const evolutionRetryHistory = mysqlTable("evolution_retry_history", {
-	retryHistoryId: varchar("retry_history_id", { length: 255 }).notNull(),
+	retryHistoryId: varchar("retry_history_id", { length: 255 }).primaryKey().notNull(),
 	failedMessageId: varchar("failed_message_id", { length: 255 }).notNull(),
 	clientId: varchar("client_id", { length: 255 }).notNull(),
 	retryNumber: int("retry_number").notNull(),
 	status: mysqlEnum(['success','failed']).default('failed').notNull(),
 	error: text(),
 	errorCode: varchar("error_code", { length: 50 }),
-	attemptedAt: timestamp("attempted_at", { mode: 'string' }).defaultNow().notNull(),
+	attemptedAt: timestamp("attempted_at").defaultNow().notNull(),
 	responseTime: int("response_time"),
 },
 (table) => [
@@ -82,7 +81,7 @@ export const evolutionRetryHistory = mysqlTable("evolution_retry_history", {
 ]);
 
 export const megadeskCompanySettings = mysqlTable("megadesk_company_settings", {
-	settingId: varchar("setting_id", { length: 80 }).notNull(),
+	settingId: varchar("setting_id", { length: 80 }).primaryKey().notNull(),
 	clientId: varchar("client_id", { length: 80 }).notNull(),
 	companyName: varchar("company_name", { length: 255 }),
 	logoUrl: text("logo_url"),
@@ -95,11 +94,11 @@ export const megadeskCompanySettings = mysqlTable("megadesk_company_settings", {
 	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 },
 (table) => [
-	index("uq_client_settings").on(table.clientId),
+	uniqueIndex("uq_client_settings").on(table.clientId),
 ]);
 
 export const megadeskDomainAuditLogs = mysqlTable("megadesk_domain_audit_logs", {
-	auditId: varchar("audit_id", { length: 100 }).notNull(),
+	auditId: varchar("audit_id", { length: 100 }).primaryKey().notNull(),
 	platform: mysqlEnum(['MegaAdmin','MegaDesk']).notNull(),
 	action: varchar({ length: 255 }).notNull(),
 	clientId: varchar("client_id", { length: 80 }),
@@ -111,7 +110,7 @@ export const megadeskDomainAuditLogs = mysqlTable("megadesk_domain_audit_logs", 
 ]);
 
 export const megadeskDomainBackups = mysqlTable("megadesk_domain_backups", {
-	backupId: varchar("backup_id", { length: 80 }).notNull(),
+	backupId: varchar("backup_id", { length: 80 }).primaryKey().notNull(),
 	// you can use { mode: 'date' }, if you want to have Date as type for this column
 	backupDate: date("backup_date", { mode: 'string' }).notNull(),
 	backupTimestamp: timestamp("backup_timestamp", { mode: 'string' }).defaultNow().notNull(),
@@ -135,10 +134,11 @@ export const megadeskDomainBackups = mysqlTable("megadesk_domain_backups", {
 ]);
 
 export const megadeskDomainBotScripts = mysqlTable("megadesk_domain_bot_scripts", {
-	scriptId: varchar("script_id", { length: 80 }).notNull(),
+	scriptId: varchar("script_id", { length: 80 }).primaryKey().notNull(),
 	clientId: varchar("client_id", { length: 80 }).notNull(),
 	name: varchar({ length: 180 }).notNull(),
 	description: text().notNull(),
+	systemPrompt: text("system_prompt").notNull(),
 	initialMessage: text("initial_message").notNull(),
 	active: tinyint().default(0).notNull(),
 	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
@@ -176,7 +176,7 @@ export const megadeskDomainChamados = mysqlTable("megadesk_domain_chamados", {
 (table) => [
 	index("idx_mdc_client").on(table.clientId),
 	index("idx_mdc_status").on(table.status),
-	index("uq_chamado_number").on(table.clientId, table.chamadoNumber),
+	uniqueIndex("uq_chamado_number").on(table.clientId, table.chamadoNumber),
 ]);
 
 export const megadeskDomainChamadoActivities = mysqlTable("megadesk_domain_chamado_activities", {
@@ -208,7 +208,7 @@ export const megadeskDomainChamadoCollaborators = mysqlTable("megadesk_domain_ch
 ]);
 
 export const megadeskDomainClientUsers = mysqlTable("megadesk_domain_client_users", {
-	userId: varchar("user_id", { length: 80 }).notNull(),
+	userId: varchar("user_id", { length: 80 }).primaryKey().notNull(),
 	clientId: varchar("client_id", { length: 80 }).notNull(),
 	name: varchar({ length: 180 }).notNull(),
 	email: varchar({ length: 255 }).notNull(),
@@ -221,10 +221,11 @@ export const megadeskDomainClientUsers = mysqlTable("megadesk_domain_client_user
 },
 (table) => [
 	index("idx_mdu_client").on(table.clientId),
+	uniqueIndex("uq_mdu_client_email").on(table.clientId, table.email),
 ]);
 
 export const megadeskDomainClients = mysqlTable("megadesk_domain_clients", {
-	clientId: varchar("client_id", { length: 80 }).notNull(),
+	clientId: varchar("client_id", { length: 80 }).primaryKey().notNull(),
 	internalId: varchar("internal_id", { length: 80 }).notNull(),
 	tenantDatabaseName: varchar("tenant_database_name", { length: 120 }).notNull(),
 	company: varchar({ length: 255 }).notNull(),
@@ -234,7 +235,7 @@ export const megadeskDomainClients = mysqlTable("megadesk_domain_clients", {
 	cnpj: varchar({ length: 20 }),
 	plan: varchar({ length: 120 }).notNull(),
 	maxUsers: int("max_users").default(5).notNull(),
-	status: mysqlEnum(['active','setup','paused']).default('setup').notNull(),
+	status: mysqlEnum(['provisioning','active','setup','failed','paused']).default('provisioning').notNull(),
 	statusType: mysqlEnum("status_type", ['active','test']).default('test').notNull(),
 	accessReleased: tinyint("access_released").default(0).notNull(),
 	apiToken: varchar("api_token", { length: 255 }).notNull(),
@@ -244,7 +245,9 @@ export const megadeskDomainClients = mysqlTable("megadesk_domain_clients", {
 	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 },
 (table) => [
-	index("tenant_database_name").on(table.tenantDatabaseName),
+	uniqueIndex("tenant_database_name").on(table.tenantDatabaseName),
+	uniqueIndex("uq_mdc_company_email").on(table.email),
+	uniqueIndex("uq_mdc_company_document").on(table.cnpj),
 ]);
 
 export const megadeskDomainConversations = mysqlTable("megadesk_domain_conversations", {
@@ -272,7 +275,7 @@ export const megadeskDomainConversations = mysqlTable("megadesk_domain_conversat
 ]);
 
 export const megadeskDomainCustomers = mysqlTable("megadesk_domain_customers", {
-	customerId: varchar({ length: 80 }).notNull(),
+	customerId: varchar({ length: 80 }).primaryKey().notNull(),
 	clientId: varchar({ length: 80 }).notNull(),
 	name: varchar({ length: 255 }).notNull(),
 	phone: varchar({ length: 20 }),
@@ -284,6 +287,8 @@ export const megadeskDomainCustomers = mysqlTable("megadesk_domain_customers", {
 (table) => [
 	index("idx_mdc_client").on(table.clientId),
 	index("idx_mdc_phone").on(table.phone),
+	uniqueIndex("uq_mdc_tenant_phone").on(table.clientId, table.phone),
+	uniqueIndex("uq_mdc_tenant_email").on(table.clientId, table.email),
 ]);
 
 export const megadeskDomainMetrics = mysqlTable("megadesk_domain_metrics", {
@@ -300,7 +305,7 @@ export const megadeskDomainMetrics = mysqlTable("megadesk_domain_metrics", {
 ]);
 
 export const megadeskDomainOperationalRecords = mysqlTable("megadesk_domain_operational_records", {
-	recordId: varchar("record_id", { length: 80 }).notNull(),
+	recordId: varchar("record_id", { length: 80 }).primaryKey().notNull(),
 	clientId: varchar("client_id", { length: 80 }).notNull(),
 	tenantDatabaseName: varchar("tenant_database_name", { length: 120 }).notNull(),
 	recordType: mysqlEnum("record_type", ['conversation','ticket','tracking','erp']).notNull(),
@@ -316,7 +321,7 @@ export const megadeskDomainOperationalRecords = mysqlTable("megadesk_domain_oper
 ]);
 
 export const megadeskDomainTickets = mysqlTable("megadesk_domain_tickets", {
-	ticketId: varchar("ticket_id", { length: 80 }).notNull(),
+	ticketId: varchar("ticket_id", { length: 80 }).primaryKey().notNull(),
 	clientId: varchar("client_id", { length: 80 }).notNull(),
 	company: varchar({ length: 255 }).notNull(),
 	customer: varchar({ length: 180 }).notNull(),
@@ -346,7 +351,7 @@ export const megadeskWhatsappConfig = mysqlTable("megadesk_whatsapp_config", {
 	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 },
 (table) => [
-	index("uq_client_whatsapp").on(table.clientId),
+	uniqueIndex("uq_client_whatsapp").on(table.clientId),
 ]);
 
 export const users = mysqlTable("users", {
@@ -361,7 +366,7 @@ export const users = mysqlTable("users", {
 	lastSignedIn: timestamp("last_signed_in", { mode: 'string' }),
 },
 (table) => [
-	index("users_open_id_unique").on(table.openId),
+	uniqueIndex("users_open_id_unique").on(table.openId),
 	index("users_email").on(table.email),
 ]);
 
@@ -380,6 +385,113 @@ export const waAccounts = mysqlTable("wa_accounts", {
 (table) => [
 	index("idx_wa_accounts_client").on(table.clientId),
 	index("idx_wa_accounts_phone").on(table.phoneNumberId),
+]);
+
+export const megadeskTenantProvisioningRequests = mysqlTable("megadesk_tenant_provisioning_requests", {
+	idempotencyKey: varchar("idempotency_key", { length: 120 }).primaryKey().notNull(),
+	payloadHash: varchar("payload_hash", { length: 64 }).notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_mtpr_client").on(table.clientId),
+]);
+
+export const megadeskTicketStatuses = mysqlTable("megadesk_ticket_statuses", {
+	statusId: varchar("status_id", { length: 80 }).primaryKey().notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	name: varchar({ length: 120 }).notNull(),
+	color: varchar({ length: 7 }).default("#3b82f6").notNull(),
+	order: int().default(0).notNull(),
+	isDefault: boolean("is_default").default(false).notNull(),
+	createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+	index("idx_mts_client").on(table.clientId),
+	uniqueIndex("uq_mts_client_name").on(table.clientId, table.name),
+]);
+
+export const megadeskCrmTimeline = mysqlTable("megadesk_crm_timeline", {
+	timelineId: varchar("timeline_id", { length: 80 }).primaryKey().notNull(),
+	crmClientId: varchar("crm_client_id", { length: 80 }).notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	entryType: varchar("entry_type", { length: 80 }).notNull(),
+	description: text().notNull(),
+	author: varchar({ length: 180 }).notNull(),
+	createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_mct_tenant_client").on(table.clientId, table.crmClientId),
+]);
+
+export const megadeskConversationMessages = mysqlTable("megadesk_domain_conversations_messages", {
+	messageId: varchar("message_id", { length: 100 }).primaryKey().notNull(),
+	conversationId: varchar("conversation_id", { length: 80 }).notNull(),
+	sender: varchar({ length: 180 }).notNull(),
+	message: text().notNull(),
+	timestamp: timestamp({ mode: "string" }).defaultNow().notNull(),
+	status: varchar({ length: 40 }).notNull(),
+	updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+	index("idx_mdcm_conversation").on(table.conversationId),
+]);
+
+export const megadeskEvolutionSessions = mysqlTable("megadesk_evolution_sessions", {
+	clientId: varchar("client_id", { length: 80 }).primaryKey().notNull(),
+	instanceName: varchar("instance_name", { length: 120 }).notNull(),
+	status: mysqlEnum(["disconnected", "connecting", "connected"]).default("disconnected").notNull(),
+	phoneNumber: varchar("phone_number", { length: 30 }),
+	connectedAt: timestamp("connected_at", { mode: "date" }),
+	createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+	uniqueIndex("uq_evo_instance").on(table.instanceName),
+]);
+
+export const megadeskIaConversationHistory = mysqlTable("megadesk_domain_ia_conversation_history", {
+	historyId: varchar("history_id", { length: 80 }).primaryKey().notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	userId: varchar("user_id", { length: 80 }).notNull(),
+	messagesJson: text("messages_json").notNull(),
+	contextJson: text("context_json").default("{}").notNull(),
+	createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+	index("idx_mdich_client").on(table.clientId),
+	index("idx_mdich_user").on(table.userId),
+	uniqueIndex("uq_mdich_user_client").on(table.userId, table.clientId),
+]);
+
+export const megadeskIaConversations = mysqlTable("megadesk_domain_ia_conversations", {
+	conversationId: varchar("conversation_id", { length: 80 }).primaryKey().notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	userId: varchar("user_id", { length: 80 }).notNull(),
+	userMessage: text("user_message").notNull(),
+	iaResponse: text("ia_response").notNull(),
+	tokensUsed: int("tokens_used").default(0).notNull(),
+	tipo: mysqlEnum(["consulta", "relatorio", "acao", "analise"]).default("consulta").notNull(),
+	status: mysqlEnum(["sucesso", "erro", "pendente"]).default("sucesso").notNull(),
+	errorMessage: text("error_message"),
+	metadataJson: text("metadata_json").default("{}").notNull(),
+	createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_mdic_client").on(table.clientId),
+	index("idx_mdic_user").on(table.userId),
+	index("idx_mdic_created_at").on(table.createdAt),
+]);
+
+export const megadeskIaTokenUsage = mysqlTable("megadesk_ia_token_usage", {
+	id: varchar({ length: 100 }).primaryKey().notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	userEmail: varchar("user_email", { length: 255 }).notNull(),
+	conversationId: varchar("conversation_id", { length: 100 }).notNull(),
+	promptTokens: int("prompt_tokens").default(0).notNull(),
+	completionTokens: int("completion_tokens").default(0).notNull(),
+	totalTokens: int("total_tokens").default(0).notNull(),
+	model: varchar({ length: 120 }).notNull(),
+	functionCallsCount: int("function_calls_count").default(0).notNull(),
+	createdAt: bigint("created_at", { mode: "number" }).notNull(),
+}, (table) => [
+	index("idx_mitu_client_created").on(table.clientId, table.createdAt),
+	index("idx_mitu_client_user").on(table.clientId, table.userEmail),
 ]);
 
 export const waConversations = mysqlTable("wa_conversations", {
@@ -427,6 +539,7 @@ export const waMessages = mysqlTable("wa_messages", {
 	index("idx_wa_msg_client").on(table.clientId),
 	index("idx_wa_msg_wa_id").on(table.waMessageId),
 	index("idx_wa_msg_created").on(table.createdAt),
+	uniqueIndex("uq_wa_msg_client_external").on(table.clientId, table.waMessageId),
 ]);
 
 export const megadeskNotifications = mysqlTable("megadesk_notifications", {
@@ -461,8 +574,7 @@ export const adminCredentials = mysqlTable("admin_credentials", {
 (table) => [
 	index("idx_admin_client").on(table.clientId),
 	index("idx_admin_email").on(table.email),
-	// Garantir que cada cliente tem apenas um admin por email
-	// UNIQUE KEY `uq_admin_client_email` (`client_id`, `email`)
+	uniqueIndex("uq_admin_client_email").on(table.clientId, table.email),
 ]);
 
 // ─── Tabelas adicionais (Chamados, CRM) ──────────────────────────────────────
@@ -488,10 +600,10 @@ export const megadeskCrmClients = mysqlTable("megadesk_crm_clients", {
 	clientId: varchar("client_id", { length: 80 }).notNull(),
 	companyName: varchar("company_name", { length: 255 }).notNull(),
 	responsibleName: varchar("responsible_name", { length: 180 }).default("").notNull(),
-	cpfCnpj: varchar("cpf_cnpj", { length: 20 }).default("").notNull(),
-	phone: varchar({ length: 40 }).default("").notNull(),
+	cpfCnpj: varchar("cpf_cnpj", { length: 20 }),
+	phone: varchar({ length: 40 }),
 	whatsapp: varchar({ length: 40 }).default("").notNull(),
-	email: varchar({ length: 255 }).default("").notNull(),
+	email: varchar({ length: 255 }),
 	address: varchar({ length: 255 }).default("").notNull(),
 	city: varchar({ length: 120 }).default("").notNull(),
 	state: varchar({ length: 2 }).default("").notNull(),
@@ -511,6 +623,9 @@ export const megadeskCrmClients = mysqlTable("megadesk_crm_clients", {
 	index("idx_mcc_status").on(table.status),
 	index("idx_mcc_company").on(table.companyName),
 	index("idx_mcc_phone").on(table.phone),
+	uniqueIndex("uq_mcc_tenant_document").on(table.clientId, table.cpfCnpj),
+	uniqueIndex("uq_mcc_tenant_phone").on(table.clientId, table.phone),
+	uniqueIndex("uq_mcc_tenant_email").on(table.clientId, table.email),
 ]);
 
 export const megaadminCredentials = mysqlTable("megaadmin_credentials", {
@@ -523,7 +638,7 @@ export const megaadminCredentials = mysqlTable("megaadmin_credentials", {
 	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 },
 (table) => [
-	index("megaadmin_email").on(table.email),
+	uniqueIndex("megaadmin_email").on(table.email),
 ]);
 
 // ─── User Settings e Shortcuts ───────────────────────────────────────────────
@@ -547,7 +662,7 @@ export const megadeskUserSettings = mysqlTable("megadesk_user_settings", {
 	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 },
 (table) => [
-	index("idx_mus_client_user").on(table.clientId, table.userId),
+	uniqueIndex("idx_mus_client_user").on(table.clientId, table.userId),
 ]);
 
 export const megadeskUserShortcuts = mysqlTable("megadesk_user_shortcuts", {
@@ -561,4 +676,5 @@ export const megadeskUserShortcuts = mysqlTable("megadesk_user_shortcuts", {
 },
 (table) => [
 	index("idx_mush_client_user").on(table.clientId, table.userId),
+	uniqueIndex("uq_mush_client_user_key").on(table.clientId, table.userId, table.shortcutKey),
 ]);

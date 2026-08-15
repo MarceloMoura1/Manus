@@ -69,7 +69,8 @@ WEBHOOK_BASE_URL=https://api.megadesk.online
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm db:push
+pnpm db:validate
+pnpm db:migrate:main
 ADMIN_EMAIL=seu@email.com ADMIN_PASSWORD=SuaSenha node seed-admin.mjs
 ```
 
@@ -169,7 +170,7 @@ pm2 save
 - [ ] `pnpm test` passando
 - [ ] `.env` configurado (sem valores padrão)
 - [ ] MySQL rodando e banco criado
-- [ ] `pnpm db:push` executado
+- [ ] `pnpm db:migrate:main` executado com autorização explícita
 - [ ] Admin criado com `seed-admin.mjs`
 - [ ] PM2 rodando (`pm2 status`)
 - [ ] Cloudflare Tunnel ativo

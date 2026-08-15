@@ -175,8 +175,8 @@ export async function handleConnectionStatus(payload: EvolutionWebhookPayload): 
         // Conexão estabelecida
         await connection.execute(
           `UPDATE megadesk_whatsapp_config 
-           SET status = 'connected', phone_number = ?, updated_at = NOW()
-           WHERE instance_id = ?`,
+           SET connectionStatus = 1, phoneNumber = ?, updatedAt = NOW()
+           WHERE phoneNumberId = ?`,
           [payload.data.phoneNumber, payload.instance]
         );
 
@@ -185,8 +185,8 @@ export async function handleConnectionStatus(payload: EvolutionWebhookPayload): 
         // Conexão fechada
         await connection.execute(
           `UPDATE megadesk_whatsapp_config 
-           SET status = 'disconnected', updated_at = NOW()
-           WHERE instance_id = ?`,
+           SET connectionStatus = 0, updatedAt = NOW()
+           WHERE phoneNumberId = ?`,
           [payload.instance]
         );
 

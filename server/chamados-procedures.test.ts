@@ -2,29 +2,36 @@
  * Testes Vitest para procedures tRPC de chamados
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { chamadosRouter } from './routers-chamados';
 import { createCallerFactory } from './_core/trpc';
 import { isTestDatabaseEnabled } from './test-integration-gates';
 
 // Mock do contexto
-const mockContext = {
+const createCaller = createCallerFactory(chamadosRouter);
+const callerFor = (tenantId: string) => createCaller({
   user: { id: 'test-user', name: 'Test User', role: 'user' },
+  tenantId,
+  userEmail: 'test@example.invalid',
+  operationalUserId: 'test-user',
+  operationalUserRole: 'admin',
   req: {} as any,
   res: {} as any,
-};
+});
+
+describe('Chamados Router tenant middleware', () => {
+  it('deve rejeitar quando o tenant autenticado difere do input', async () => {
+    await expect(callerFor('client-1').list({
+      clientId: 'client-2',
+      status: 'total',
+    })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+});
 
 describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]', () => {
-  let caller: any;
-
-  beforeAll(() => {
-    const createCaller = createCallerFactory(chamadosRouter);
-    caller = createCaller(mockContext);
-  });
-
   describe('list', () => {
     it('deve retornar lista vazia inicialmente', async () => {
-      const result = await caller.list({
+      const result = await callerFor('test-client').list({
         clientId: 'test-client',
         status: 'total',
       });
@@ -35,7 +42,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
     });
 
     it('deve filtrar por status', async () => {
-      const result = await caller.list({
+      const result = await callerFor('test-client').list({
         clientId: 'test-client',
         status: 'open',
       });
@@ -45,7 +52,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
     });
 
     it('deve respeitar limite de registros', async () => {
-      const result = await caller.list({
+      const result = await callerFor('test-client').list({
         clientId: 'test-client',
         status: 'total',
         limit: 10,
@@ -57,7 +64,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
 
   describe('create', () => {
     it('deve criar novo chamado com dados válidos', async () => {
-      const result = await caller.create({
+      const result = await callerFor('test-client').create({
         clientId: 'test-client',
         customerId: 'cust-123',
         customerName: 'João Silva',
@@ -77,7 +84,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
     });
 
     it('deve gerar números sequenciais para chamados', async () => {
-      const chamado1 = await caller.create({
+      const chamado1 = await callerFor('test-client-seq').create({
         clientId: 'test-client-seq',
         customerId: 'cust-1',
         customerName: 'Cliente 1',
@@ -87,7 +94,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
         priority: 'media',
       });
 
-      const chamado2 = await caller.create({
+      const chamado2 = await callerFor('test-client-seq').create({
         clientId: 'test-client-seq',
         customerId: 'cust-2',
         customerName: 'Cliente 2',
@@ -101,7 +108,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
     });
 
     it('deve usar prioridade padrão "media" se não informada', async () => {
-      const result = await caller.create({
+      const result = await callerFor('test-client').create({
         clientId: 'test-client',
         customerId: 'cust-123',
         customerName: 'João Silva',
@@ -117,7 +124,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
   describe('update', () => {
     it('deve atualizar status do chamado', async () => {
       // Criar um chamado primeiro
-      const created = await caller.create({
+      const created = await callerFor('test-client-update').create({
         clientId: 'test-client-update',
         customerId: 'cust-123',
         customerName: 'João Silva',
@@ -128,7 +135,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
       });
 
       // Atualizar status
-      const updated = await caller.update({
+      const updated = await callerFor('test-client-update').update({
         chamadoId: created.chamado.id,
         clientId: 'test-client-update',
         status: 'in_progress',
@@ -138,7 +145,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
     });
 
     it('deve atualizar atendente responsável', async () => {
-      const created = await caller.create({
+      const created = await callerFor('test-client-attendant').create({
         clientId: 'test-client-attendant',
         customerId: 'cust-123',
         customerName: 'João Silva',
@@ -148,7 +155,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
         priority: 'media',
       });
 
-      const updated = await caller.update({
+      const updated = await callerFor('test-client-attendant').update({
         chamadoId: created.chamado.id,
         clientId: 'test-client-attendant',
         assignedTo: 'Marcelo Moura',
@@ -158,7 +165,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
     });
 
     it('deve atualizar título e observações', async () => {
-      const created = await caller.create({
+      const created = await callerFor('test-client-edit').create({
         clientId: 'test-client-edit',
         customerId: 'cust-123',
         customerName: 'João Silva',
@@ -168,7 +175,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
         priority: 'media',
       });
 
-      const updated = await caller.update({
+      const updated = await callerFor('test-client-edit').update({
         chamadoId: created.chamado.id,
         clientId: 'test-client-edit',
         title: 'Título Atualizado',
@@ -182,7 +189,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
 
   describe('addActivity', () => {
     it('deve adicionar atividade a um chamado', async () => {
-      const created = await caller.create({
+      const created = await callerFor('test-client-activity').create({
         clientId: 'test-client-activity',
         customerId: 'cust-123',
         customerName: 'João Silva',
@@ -192,7 +199,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
         priority: 'media',
       });
 
-      const withActivity = await caller.addActivity({
+      const withActivity = await callerFor('test-client-activity').addActivity({
         chamadoId: created.chamado.id,
         clientId: 'test-client-activity',
         description: 'Cliente solicitou informações',
@@ -205,7 +212,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
     });
 
     it('deve rejeitar atividade vazia', async () => {
-      const created = await caller.create({
+      const created = await callerFor('test-client-empty-activity').create({
         clientId: 'test-client-empty-activity',
         customerId: 'cust-123',
         customerName: 'João Silva',
@@ -216,7 +223,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
       });
 
       expect(
-        caller.addActivity({
+        callerFor('test-client-empty-activity').addActivity({
           chamadoId: created.chamado.id,
           clientId: 'test-client-empty-activity',
           description: '   ',
@@ -226,7 +233,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
     });
 
     it('deve manter ordem cronológica das atividades', async () => {
-      const created = await caller.create({
+      const created = await callerFor('test-client-chrono').create({
         clientId: 'test-client-chrono',
         customerId: 'cust-123',
         customerName: 'João Silva',
@@ -236,14 +243,14 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
         priority: 'media',
       });
 
-      const withActivity1 = await caller.addActivity({
+      const withActivity1 = await callerFor('test-client-chrono').addActivity({
         chamadoId: created.chamado.id,
         clientId: 'test-client-chrono',
         description: 'Primeira atividade',
         attendant: 'Bot IA',
       });
 
-      const withActivity2 = await caller.addActivity({
+      const withActivity2 = await callerFor('test-client-chrono').addActivity({
         chamadoId: created.chamado.id,
         clientId: 'test-client-chrono',
         description: 'Segunda atividade',
@@ -259,7 +266,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
 
   describe('editActivity', () => {
     it('deve editar descrição de atividade existente', async () => {
-      const created = await caller.create({
+      const created = await callerFor('test-client-edit-activity').create({
         clientId: 'test-client-edit-activity',
         customerId: 'cust-123',
         customerName: 'João Silva',
@@ -269,7 +276,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
         priority: 'media',
       });
 
-      const withActivity = await caller.addActivity({
+      const withActivity = await callerFor('test-client-edit-activity').addActivity({
         chamadoId: created.chamado.id,
         clientId: 'test-client-edit-activity',
         description: 'Descrição Original',
@@ -278,7 +285,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
 
       const activityId = withActivity.chamado.activities[0].id;
 
-      const edited = await caller.editActivity({
+      const edited = await callerFor('test-client-edit-activity').editActivity({
         activityId,
         chamadoId: created.chamado.id,
         clientId: 'test-client-edit-activity',
@@ -289,7 +296,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
     });
 
     it('deve rejeitar edição com descrição vazia', async () => {
-      const created = await caller.create({
+      const created = await callerFor('test-client-edit-empty').create({
         clientId: 'test-client-edit-empty',
         customerId: 'cust-123',
         customerName: 'João Silva',
@@ -299,7 +306,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
         priority: 'media',
       });
 
-      const withActivity = await caller.addActivity({
+      const withActivity = await callerFor('test-client-edit-empty').addActivity({
         chamadoId: created.chamado.id,
         clientId: 'test-client-edit-empty',
         description: 'Descrição Original',
@@ -309,7 +316,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
       const activityId = withActivity.chamado.activities[0].id;
 
       expect(
-        caller.editActivity({
+        callerFor('test-client-edit-empty').editActivity({
           activityId,
           chamadoId: created.chamado.id,
           clientId: 'test-client-edit-empty',
@@ -321,7 +328,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
 
   describe('getDetail', () => {
     it('deve retornar detalhes completos do chamado', async () => {
-      const created = await caller.create({
+      const created = await callerFor('test-client-detail').create({
         clientId: 'test-client-detail',
         customerId: 'cust-123',
         customerName: 'João Silva',
@@ -332,7 +339,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
         assignedTo: 'Marcelo',
       });
 
-      const detail = await caller.getDetail({
+      const detail = await callerFor('test-client-detail').getDetail({
         chamadoId: created.chamado.id,
         clientId: 'test-client-detail',
       });
@@ -346,7 +353,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
 
     it('deve retornar null para chamado inexistente', async () => {
       expect(
-        caller.getDetail({
+        callerFor('test-client-notfound').getDetail({
           chamadoId: 'inexistente-123',
           clientId: 'test-client-notfound',
         })
@@ -357,7 +364,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
   describe('Isolamento por Cliente', () => {
     it('deve isolar chamados de clientes diferentes', async () => {
       // Criar chamado para cliente 1
-      const chamado1 = await caller.create({
+      const chamado1 = await callerFor('client-1').create({
         clientId: 'client-1',
         customerId: 'cust-1',
         customerName: 'Cliente 1',
@@ -368,7 +375,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
       });
 
       // Criar chamado para cliente 2
-      const chamado2 = await caller.create({
+      const chamado2 = await callerFor('client-2').create({
         clientId: 'client-2',
         customerId: 'cust-2',
         customerName: 'Cliente 2',
@@ -379,13 +386,13 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
       });
 
       // Listar chamados do cliente 1
-      const list1 = await caller.list({
+      const list1 = await callerFor('client-1').list({
         clientId: 'client-1',
         status: 'total',
       });
 
       // Listar chamados do cliente 2
-      const list2 = await caller.list({
+      const list2 = await callerFor('client-2').list({
         clientId: 'client-2',
         status: 'total',
       });
@@ -402,7 +409,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
   describe('Filtro Total', () => {
     it('deve excluir chamados fechados no filtro total', async () => {
       // Criar chamado aberto
-      const aberto = await caller.create({
+      const aberto = await callerFor('test-client-filter').create({
         clientId: 'test-client-filter',
         customerId: 'cust-1',
         customerName: 'Cliente 1',
@@ -413,7 +420,7 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
       });
 
       // Criar chamado e fechar
-      const fechado = await caller.create({
+      const fechado = await callerFor('test-client-filter').create({
         clientId: 'test-client-filter',
         customerId: 'cust-2',
         customerName: 'Cliente 2',
@@ -423,14 +430,14 @@ describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]'
         priority: 'media',
       });
 
-      await caller.update({
+      await callerFor('test-client-filter').update({
         chamadoId: fechado.chamado.id,
         clientId: 'test-client-filter',
         status: 'closed',
       });
 
       // Listar com filtro total
-      const total = await caller.list({
+      const total = await callerFor('test-client-filter').list({
         clientId: 'test-client-filter',
         status: 'total',
       });

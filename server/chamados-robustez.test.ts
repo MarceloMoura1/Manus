@@ -17,7 +17,7 @@ import { isTestDatabaseEnabled } from './test-integration-gates';
 const databaseIntegration = describe.runIf(isTestDatabaseEnabled());
 
 databaseIntegration('Robustez - Validações de Input [database integration]', () => {
-  const testClientId = `test-client-${Date.now()}`;
+  const testClientId = `test-client-validation-${Date.now()}`;
 
   it('deve rejeitar customerName vazio', async () => {
     expect(async () => {
@@ -66,7 +66,7 @@ databaseIntegration('Robustez - Validações de Input [database integration]', (
   it('deve rejeitar description vazia em addActivityToChamado', async () => {
     expect(async () => {
       await addActivityToChamado('chamado-id', testClientId, '', 'attendant');
-    }).rejects.toThrow('description não pode estar vazia');
+    }).rejects.toThrow('description não pode estar vazio');
   });
 
   it('deve rejeitar attendant vazio em addActivityToChamado', async () => {
@@ -77,7 +77,7 @@ databaseIntegration('Robustez - Validações de Input [database integration]', (
 });
 
 databaseIntegration('Robustez - Sanitização de Strings [database integration]', () => {
-  const testClientId = `test-client-${Date.now()}`;
+  const testClientId = `test-client-sanitize-${Date.now()}`;
 
   it('deve sanitizar strings com caracteres de controle', async () => {
     const chamado = await createChamado(
@@ -140,7 +140,7 @@ databaseIntegration('Robustez - Sanitização de Strings [database integration]'
 });
 
 databaseIntegration('Robustez - Validação de Status e Prioridade [database integration]', () => {
-  const testClientId = `test-client-${Date.now()}`;
+  const testClientId = `test-client-status-${Date.now()}`;
 
   it('deve aceitar status válidos', async () => {
     const validStatuses = ['open', 'in_progress', 'waiting', 'closed'];
@@ -313,7 +313,7 @@ databaseIntegration('Robustez - Atividades [database integration]', () => {
   it('deve rejeitar edição de atividade com description vazia', async () => {
     expect(async () => {
       await editActivity('activity-id', 'chamado-id', testClientId, '');
-    }).rejects.toThrow('description não pode estar vazia');
+    }).rejects.toThrow('description não pode estar vazio');
   });
 
   it('deve rejeitar edição de atividade de outro cliente', async () => {

@@ -14,6 +14,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    env: { MEGADESK_STORAGE_MODE: "memory" },
     include: ["server/**/*.test.ts", "server/**/*.spec.ts"],
   },
 });

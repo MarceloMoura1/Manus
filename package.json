@@ -13,7 +13,12 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "playwright test --debug",
-    "db:push": "drizzle-kit generate && drizzle-kit migrate"
+    "db:generate:main": "drizzle-kit generate --config=drizzle.main.config.ts",
+    "db:check:main": "tsx scripts/canonical-migrations.ts check-main",
+    "db:migrate:main": "tsx scripts/canonical-migrations.ts apply-main",
+    "db:generate:tenant": "drizzle-kit generate --config=drizzle.tenant.config.ts",
+    "db:check:tenant": "tsx scripts/canonical-migrations.ts check-tenant",
+    "db:validate": "pnpm db:check:main && pnpm db:check:tenant"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.693.0",
