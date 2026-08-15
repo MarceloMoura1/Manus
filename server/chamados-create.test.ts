@@ -137,6 +137,9 @@ describe("chamados.create — abertura de chamados", () => {
       "Suporte técnico urgente",
       "",
       "alta",
+      undefined,
+      undefined,
+      undefined,
       undefined
     );
   });

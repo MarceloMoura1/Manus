@@ -3,14 +3,14 @@
  * Operações de banco para mensagens WhatsApp.
  * Todas as queries filtram por clientId (isolamento multiempresa).
  */
-import { getDb } from "../../../db";
+import { getLazyDb } from "../../../db";
 import { waMessages } from "../../../../drizzle/schema";
 import { eq, and, desc, lt } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import type { WaMessageRecord, WaSenderType, WaMessageType, WaMessageStatus } from "../types";
 import { parseDatabaseTimestamp } from "./timestamp";
 
-const db = getDb();
+const db = getLazyDb();
 type MessageRow = typeof waMessages.$inferSelect;
 
 function toMessageRecord(row: MessageRow): WaMessageRecord {

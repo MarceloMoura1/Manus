@@ -2,8 +2,9 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { getDb } from "./db";
 import { megadeskNotifications } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
+import { isTestDatabaseEnabled } from "./test-integration-gates";
 
-describe("Notifications Router", () => {
+describe.runIf(isTestDatabaseEnabled())("Notifications Router [database integration]", () => {
   const testClientId = "test-client-123";
   const testUserId = "test-user-456";
 

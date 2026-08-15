@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
+import { isTestDatabaseEnabled } from "./test-integration-gates";
+import { MEGAADMIN_COOKIE, type TrpcContext } from "./_core/context";
+const integrationIt = it.runIf(isTestDatabaseEnabled());
+const integrationDescribe = describe.runIf(isTestDatabaseEnabled());
 
 const mockReq = { headers: {}, cookies: {} } as any;
 const mockRes = { cookie: () => {}, clearCookie: () => {} } as any;
@@ -13,7 +17,7 @@ describe("MegaDesk platform", () => {
     await expect(userCaller.megaadmin.createClient({ company: "Cliente Bloqueado", contact: "Teste", phone: "551199998888", plan: "Teste" })).rejects.toThrow();
   });
 
-  it("sincroniza alterações do MegaAdmin para a MegaDesk no mesmo backend", async () => {
+  integrationIt("sincroniza alterações do MegaAdmin para a MegaDesk no mesmo backend", async () => {
     const created = await adminCaller.megaadmin.createClient({ company: "Cliente Sincronizado", contact: "Patricia Silva", email: "patricia@clientesincronizado.com", phone: "551188887777", plan: "WhatsApp Premium" });
     expect(created.integrationToken).toMatch(/^mdsk_live_/);
 
@@ -61,7 +65,7 @@ describe("MegaDesk platform", () => {
   }, 30_000);
 });
 
-describe("MegaDesk login por e-mail", () => {
+integrationDescribe("MegaDesk login por e-mail", () => {
   it("autentica usuário ativo com e-mail e senha cadastrados e retorna sessão", async () => {
     // Cria cliente — usuário inicial tem status=blocked
     const created = await adminCaller.megaadmin.createClient({ company: "Empresa Login Test", contact: "Operador Login", email: "operador@logintest.com", phone: "551199990001", plan: "Teste" });
@@ -113,7 +117,7 @@ describe("MegaDesk login por e-mail", () => {
 });
 
 describe("MegaAdmin login próprio", () => {
-  it("autentica com e-mail e senha corretos e retorna ok", async () => {
+  integrationIt("autentica com e-mail e senha corretos e retorna ok", async () => {
     // Usa publicCaller pois loginAdmin é publicProcedure
     const result = await publicCaller.megaadmin.loginAdmin({
       email: "marcelo.mouraadmpro@gmail.com",
@@ -124,7 +128,7 @@ describe("MegaAdmin login próprio", () => {
     expect(result.email).toBe("marcelo.mouraadmpro@gmail.com");
   });
 
-  it("rejeita e-mail inexistente", async () => {
+  integrationIt("rejeita e-mail inexistente", async () => {
     await expect(
       publicCaller.megaadmin.loginAdmin({
         email: "naoexiste@exemplo.com",
@@ -133,7 +137,7 @@ describe("MegaAdmin login próprio", () => {
     ).rejects.toThrow();
   });
 
-  it("rejeita senha incorreta", async () => {
+  integrationIt("rejeita senha incorreta", async () => {
     await expect(
       publicCaller.megaadmin.loginAdmin({
         email: "marcelo.mouraadmpro@gmail.com",
@@ -142,8 +146,22 @@ describe("MegaAdmin login próprio", () => {
     ).rejects.toThrow();
   });
 
-  it("logoutAdmin limpa a sessão e retorna ok", async () => {
-    const result = await publicCaller.megaadmin.logoutAdmin();
+  it.each([
+    { protocol: "http", headers: {}, secure: false },
+    { protocol: "https", headers: {}, secure: true },
+    { protocol: "http", headers: { "x-forwarded-proto": "https" }, secure: true },
+  ])("logoutAdmin limpa somente o cookie administrativo em $protocol", async ({ protocol, headers, secure }) => {
+    const cleared: Array<{ name: string; options: Record<string, unknown> }> = [];
+    const caller = appRouter.createCaller({
+      req: { protocol, headers } as TrpcContext["req"],
+      res: { clearCookie: (name: string, options: Record<string, unknown>) => cleared.push({ name, options }) } as TrpcContext["res"],
+      user: null,
+    });
+    const result = await caller.megaadmin.logoutAdmin();
     expect(result.ok).toBe(true);
+    expect(cleared).toEqual([{
+      name: MEGAADMIN_COOKIE,
+      options: { httpOnly: true, path: "/", sameSite: "none", secure, maxAge: -1 },
+    }]);
   });
 });

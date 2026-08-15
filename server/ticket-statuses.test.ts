@@ -6,10 +6,11 @@ import {
   deleteTicketStatus,
   getOrCreateDefaultStatuses,
 } from "./db-ticket-statuses";
+import { isTestDatabaseEnabled } from "./test-integration-gates";
 
 const TEST_CLIENT_ID = "test-client-123";
 
-describe("Ticket Statuses", () => {
+describe.runIf(isTestDatabaseEnabled())("Ticket Statuses [database integration]", () => {
   beforeAll(async () => {
     // Limpar dados de teste antes de começar
     const statuses = await getTicketStatuses(TEST_CLIENT_ID);

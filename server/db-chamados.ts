@@ -9,8 +9,8 @@
  * - Índices otimizados no banco
  */
 
-import { getDb } from './db';
-const db = getDb();
+import { getDb, getLazyDb } from './db';
+const db = getLazyDb();
 import {
   megadeskDomainChamados,
   megadeskDomainChamadoSequence,

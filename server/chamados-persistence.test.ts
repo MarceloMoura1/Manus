@@ -13,8 +13,9 @@ import {
   editActivity,
   getNextChamadoNumber,
 } from './db-chamados';
+import { isTestDatabaseEnabled } from './test-integration-gates';
 
-describe('Persistência de Chamados', () => {
+describe.runIf(isTestDatabaseEnabled())('Persistência de Chamados [database integration]', () => {
   const testClientId = `test-client-${Date.now()}`;
   let createdChamadoId: string;
 

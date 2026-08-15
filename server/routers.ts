@@ -271,7 +271,10 @@ export const appRouter = router({
     me: publicProcedure.query(({ ctx }) => ({ user: ctx.user })),
     logout: publicProcedure.mutation(({ ctx }) => {
       // Limpar o cookie de sessão para encerrar a sessão administrativa
-      ctx.res.clearCookie(COOKIE_NAME, { path: "/" });
+      ctx.res.clearCookie(COOKIE_NAME, {
+        ...getSessionCookieOptions(ctx.req),
+        maxAge: -1,
+      });
       return { ok: true };
     }),
   }),
@@ -301,7 +304,10 @@ export const appRouter = router({
         return { ok: true, name: cred.name, email: cred.email, token };
       }),
     logoutAdmin: publicProcedure.mutation(({ ctx }) => {
-      ctx.res.clearCookie(MEGAADMIN_COOKIE, { path: "/" });
+      ctx.res.clearCookie(MEGAADMIN_COOKIE, {
+        ...getSessionCookieOptions(ctx.req),
+        maxAge: -1,
+      });
       // LIMPAR TODOS OS ARRAYS EM MEMÓRIA PARA FORÇAR RECARREGAMENTO DO BANCO
       clients.splice(0, clients.length);
       conversations.splice(0, conversations.length);

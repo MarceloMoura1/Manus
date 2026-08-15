@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { appRouter } from "./routers";
+import { isTestDatabaseEnabled } from "./test-integration-gates";
+const integrationIt = it.runIf(isTestDatabaseEnabled());
+const integrationDescribe = describe.runIf(isTestDatabaseEnabled());
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 const mockReq = { headers: {}, cookies: {} } as any;
@@ -25,7 +28,7 @@ const anonCaller = appRouter.createCaller({
 
 // ─── createClient ─────────────────────────────────────────────────────────────
 describe("megaadmin.createClient", () => {
-  it("cria cliente com todos os campos obrigatórios", async () => {
+  integrationIt("cria cliente com todos os campos obrigatórios", async () => {
     const result = await adminCaller.megaadmin.createClient({
       company: "Empresa Teste Vitest",
       contact: "João Teste",
@@ -42,7 +45,7 @@ describe("megaadmin.createClient", () => {
     expect(result.integrationToken).toBeTruthy();
   });
 
-  it("cria cliente com status ativo", async () => {
+  integrationIt("cria cliente com status ativo", async () => {
     const result = await adminCaller.megaadmin.createClient({
       company: "Empresa Ativa Vitest",
       contact: "Maria Ativa",
@@ -56,7 +59,7 @@ describe("megaadmin.createClient", () => {
     expect(result.client.statusType).toBe("active");
   });
 
-  it("cria cliente com CNPJ preenchido", async () => {
+  integrationIt("cria cliente com CNPJ preenchido", async () => {
     const result = await adminCaller.megaadmin.createClient({
       company: "Empresa CNPJ Vitest",
       contact: "Carlos CNPJ",
@@ -119,6 +122,7 @@ describe("megaadmin.updateClientInfo", () => {
   let testClientId: string;
 
   beforeAll(async () => {
+    if (!isTestDatabaseEnabled()) return;
     const result = await adminCaller.megaadmin.createClient({
       company: "Empresa Update Vitest",
       contact: "Contato Update",
@@ -131,7 +135,7 @@ describe("megaadmin.updateClientInfo", () => {
     testClientId = result.client.clientId;
   });
 
-  it("atualiza campos do cliente", async () => {
+  integrationIt("atualiza campos do cliente", async () => {
     const result = await adminCaller.megaadmin.updateClientInfo({
       clientId: testClientId,
       company: "Empresa Update Modificada",
@@ -144,7 +148,7 @@ describe("megaadmin.updateClientInfo", () => {
     expect(result.client.statusType).toBe("active");
   });
 
-  it("retorna erro para clientId inexistente", async () => {
+  integrationIt("retorna erro para clientId inexistente", async () => {
     await expect(
       adminCaller.megaadmin.updateClientInfo({
         clientId: "cliente-inexistente-999",
@@ -168,6 +172,7 @@ describe("megaadmin.saveClientIntegrations", () => {
   let testClientId: string;
 
   beforeAll(async () => {
+    if (!isTestDatabaseEnabled()) return;
     const result = await adminCaller.megaadmin.createClient({
       company: "Empresa Integrações Vitest",
       contact: "Contato Integ",
@@ -180,7 +185,7 @@ describe("megaadmin.saveClientIntegrations", () => {
     testClientId = result.client.clientId;
   });
 
-  it("salva integrações do cliente", async () => {
+  integrationIt("salva integrações do cliente", async () => {
     const result = await adminCaller.megaadmin.saveClientIntegrations({
       clientId: testClientId,
       integrations: {
@@ -193,7 +198,7 @@ describe("megaadmin.saveClientIntegrations", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("salva credenciais de rastreio", async () => {
+  integrationIt("salva credenciais de rastreio", async () => {
     const result = await adminCaller.megaadmin.saveClientIntegrations({
       clientId: testClientId,
       integrations: {
@@ -206,7 +211,7 @@ describe("megaadmin.saveClientIntegrations", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("retorna erro para clientId inexistente", async () => {
+  integrationIt("retorna erro para clientId inexistente", async () => {
     await expect(
       adminCaller.megaadmin.saveClientIntegrations({
         clientId: "cliente-inexistente-999",
@@ -217,7 +222,7 @@ describe("megaadmin.saveClientIntegrations", () => {
 });
 
 // ─── testIntegration ──────────────────────────────────────────────────────────
-describe("megaadmin.testIntegration", () => {
+integrationDescribe("megaadmin.testIntegration", () => {
   let testClientId: string;
 
   beforeAll(async () => {
@@ -293,6 +298,7 @@ describe("megaadmin.resetUserPassword", () => {
   let testUserId: string;
 
   beforeAll(async () => {
+    if (!isTestDatabaseEnabled()) return;
     const result = await adminCaller.megaadmin.createClient({
       company: "Empresa ResetPwd Vitest",
       contact: "Contato ResetPwd",
@@ -306,7 +312,7 @@ describe("megaadmin.resetUserPassword", () => {
     testUserId = result.client.users[0]?.id;
   });
 
-  it("reseta senha de um usuário existente", async () => {
+  integrationIt("reseta senha de um usuário existente", async () => {
     const result = await adminCaller.megaadmin.resetUserPassword({
       clientId: testClientId,
       userId: testUserId,
@@ -326,7 +332,7 @@ describe("megaadmin.resetUserPassword", () => {
     ).rejects.toThrow();
   });
 
-  it("retorna erro para userId inexistente", async () => {
+  integrationIt("retorna erro para userId inexistente", async () => {
     await expect(
       adminCaller.megaadmin.resetUserPassword({
         clientId: testClientId,
@@ -348,7 +354,7 @@ describe("megaadmin.resetUserPassword", () => {
 });
 
 // ─── Controle de limite de usuários ──────────────────────────────────────────
-describe("Controle de limite de usuários por cliente", () => {
+integrationDescribe("Controle de limite de usuários por cliente", () => {
   let testClientId: string;
 
   beforeAll(async () => {

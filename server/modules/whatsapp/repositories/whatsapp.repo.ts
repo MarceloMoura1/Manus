@@ -3,14 +3,14 @@
  * Operações de banco para contas WhatsApp Business.
  * Todas as queries filtram por clientId (isolamento multiempresa).
  */
-import { getDb } from "../../../db";
+import { getLazyDb } from "../../../db";
 import { waAccounts } from "../../../../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import type { WaAccountRecord, CreateWaAccountInput } from "../types";
 import { parseDatabaseTimestamp } from "./timestamp";
 
-const db = getDb();
+const db = getLazyDb();
 type AccountRow = typeof waAccounts.$inferSelect;
 
 function toAccountRecord(row: AccountRow): WaAccountRecord {

@@ -12,6 +12,7 @@ import {
   getQueueConfig,
   cleanupOldMessages,
   getQueueStats,
+  type EvolutionFailedMessage,
 } from "./db-evolution-queue";
 import { getEvolutionAdapter } from "./evolution-manager";
 
@@ -29,6 +30,7 @@ let processorConfig: ProcessorConfig = {
 
 let processorInterval: NodeJS.Timeout | null = null;
 let isProcessing = false;
+const retriesInFlight = new Set<string>();
 
 /**
  * Inicializar processador de fila
@@ -139,10 +141,14 @@ async function processClientQueue(clientId: string) {
 /**
  * Tentar reenviar uma mensagem
  */
-async function retryMessage(
+export async function retryMessage(
   clientId: string,
-  message: any
+  message: EvolutionFailedMessage
 ) {
+  if (message.clientId !== clientId) throw new Error("Mensagem fora do escopo do tenant.");
+  const idempotencyKey = `${clientId}:${message.failedMessageId}`;
+  if (retriesInFlight.has(idempotencyKey)) return { status: "already_processing" as const };
+  retriesInFlight.add(idempotencyKey);
   const startTime = Date.now();
 
   try {
@@ -186,6 +192,7 @@ async function retryMessage(
         undefined,
         responseTime
       );
+      return { status: "sent" as const };
     } else {
       // Falha - incrementar retry count
       console.log(
@@ -212,6 +219,7 @@ async function retryMessage(
           `[Evolution Queue] ⚠️ Mensagem ${message.failedMessageId} atingiu limite de tentativas`
         );
       }
+      return { status: retryResult?.status ?? "not_found" };
     }
   } catch (error) {
     console.error(
@@ -236,6 +244,9 @@ async function retryMessage(
       "INTERNAL_ERROR",
       responseTime
     );
+    return { status: "retry_failed" as const };
+  } finally {
+    retriesInFlight.delete(idempotencyKey);
   }
 }
 

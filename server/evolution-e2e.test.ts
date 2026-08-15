@@ -3,19 +3,22 @@
  * Valida fluxo completo: criar sessão → conectar → enviar → receber
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { evolutionManager } from "./evolution-manager";
 import { evolutionClient } from "./evolution-api-client";
 import { db } from "./db";
+import { validateEvolutionTestConfig } from "./test-integration-gates";
 
-describe("Evolution API - End-to-End Tests", () => {
+const evolutionE2E = describe.runIf(process.env.RUN_EVOLUTION_E2E === "1");
+
+evolutionE2E("Evolution API - End-to-End Tests [requires RUN_EVOLUTION_E2E=1]", () => {
   const testClientId = "test-client-e2e-" + Date.now();
   const testPhoneNumber = "5541995484515";
   let instanceId: string;
   let token: string;
 
   beforeAll(async () => {
-    // Setup
+    validateEvolutionTestConfig();
   });
 
   afterAll(async () => {

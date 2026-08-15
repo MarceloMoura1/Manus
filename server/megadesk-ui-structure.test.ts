@@ -7,6 +7,7 @@ const adminPanelSource = readFileSync(resolve(process.cwd(), "client/src/pages/A
 const appSource = readFileSync(resolve(process.cwd(), "client/src/App.tsx"), "utf8");
 const metricWebhookSource = readFileSync(resolve(process.cwd(), "server/metricWebhook.ts"), "utf8");
 const dbSource = readFileSync(resolve(process.cwd(), "server/db.ts"), "utf8");
+const botConfigSource = readFileSync(resolve(process.cwd(), "client/src/pages/BotConfigPage.tsx"), "utf8");
 
 describe("MegaDesk UI structure", () => {
   it("preserva a navegação lateral da referência", () => {
@@ -27,37 +28,33 @@ describe("MegaDesk UI structure", () => {
     }
     // Verifica que o filtro por permissão está implementado
     expect(homeSource).toContain("permission");
-    expect(homeSource).toContain("visibleItems");
+    expect(homeSource).toContain("filteredNavItems");
+    expect(homeSource).toContain("navItems.filter");
   });
 
   it("inclui as telas operacionais centrais alinhadas à referência", () => {
     const expectedTexts = [
-      "Sistema Inteligente de Atendimento",
-      "Ações Rápidas",
+      "Atendimento Inteligente em Um Lugar",
+      "Conversas Abertas",
       "Atividade Recente",
-      "Buscar número...",
-      "Selecione uma conversa para visualizar",
-      "Gerencie todos os chamados de atendimento",
-      "N° do chamado",
-      "Selecione um chamado",
-      "Configurar Bot & Testador",
-      "Novo Roteiro",
-      "Testador de Bot",
+      "Selecione uma conversa",
+      "Chamados Ativos",
+      "Novo Chamado",
     ];
 
     for (const text of expectedTexts) {
       expect(homeSource).toContain(text);
     }
+    expect(botConfigSource).toContain("Novo Roteiro");
+    expect(botConfigSource).toContain("Teste do Roteiro");
   });
 
   it("mantém os estados visuais principais de chamados e conversas", () => {
-    expect(homeSource).toContain("🟢 Abertas");
-    expect(homeSource).toContain("🤖 Atendimento BOT");
-    expect(homeSource).toContain("⚫ Fechadas");
-    expect(homeSource).toContain("🔵 Aberto");
-    expect(homeSource).toContain("🟡 Em Progresso");
-    expect(homeSource).toContain("⏳ Aguardando");
-    expect(homeSource).toContain("✅ Fechado");
+    expect(homeSource).toContain("id: 'open', label: 'Abertos'");
+    expect(homeSource).toContain("id: 'in_progress', label: 'Em Progresso'");
+    expect(homeSource).toContain("id: 'waiting', label: 'Aguardando'");
+    expect(homeSource).toContain("id: 'closed', label: 'Fechados'");
+    expect(homeSource).toContain("c.status === 'open'");
   });
 
   it("inclui MegaAdmin e MegaDesk como duas URLs lógicas com backend único", () => {

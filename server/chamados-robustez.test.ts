@@ -13,8 +13,10 @@ import {
   editActivity,
   getNextChamadoNumber,
 } from './db-chamados';
+import { isTestDatabaseEnabled } from './test-integration-gates';
+const databaseIntegration = describe.runIf(isTestDatabaseEnabled());
 
-describe('Robustez - Validações de Input', () => {
+databaseIntegration('Robustez - Validações de Input [database integration]', () => {
   const testClientId = `test-client-${Date.now()}`;
 
   it('deve rejeitar customerName vazio', async () => {
@@ -74,7 +76,7 @@ describe('Robustez - Validações de Input', () => {
   });
 });
 
-describe('Robustez - Sanitização de Strings', () => {
+databaseIntegration('Robustez - Sanitização de Strings [database integration]', () => {
   const testClientId = `test-client-${Date.now()}`;
 
   it('deve sanitizar strings com caracteres de controle', async () => {
@@ -137,7 +139,7 @@ describe('Robustez - Sanitização de Strings', () => {
   });
 });
 
-describe('Robustez - Validação de Status e Prioridade', () => {
+databaseIntegration('Robustez - Validação de Status e Prioridade [database integration]', () => {
   const testClientId = `test-client-${Date.now()}`;
 
   it('deve aceitar status válidos', async () => {
@@ -174,7 +176,7 @@ describe('Robustez - Validação de Status e Prioridade', () => {
   });
 });
 
-describe('Robustez - Isolamento de Tenant', () => {
+databaseIntegration('Robustez - Isolamento de Tenant [database integration]', () => {
   const clientId1 = `client-1-${Date.now()}`;
   const clientId2 = `client-2-${Date.now()}`;
 
@@ -244,7 +246,7 @@ describe('Robustez - Isolamento de Tenant', () => {
   });
 });
 
-describe('Robustez - Sequência de Números', () => {
+databaseIntegration('Robustez - Sequência de Números [database integration]', () => {
   const testClientId = `test-client-seq-${Date.now()}`;
 
   it('deve gerar números sequenciais únicos', async () => {
@@ -282,7 +284,7 @@ describe('Robustez - Sequência de Números', () => {
   });
 });
 
-describe('Robustez - Atividades', () => {
+databaseIntegration('Robustez - Atividades [database integration]', () => {
   const testClientId = `test-client-activities-${Date.now()}`;
 
   it('deve adicionar atividades com sanitização', async () => {
@@ -336,7 +338,7 @@ describe('Robustez - Atividades', () => {
   });
 });
 
-describe('Robustez - Paginação', () => {
+databaseIntegration('Robustez - Paginação [database integration]', () => {
   const testClientId = `test-client-pagination-${Date.now()}`;
 
   it('deve validar limit entre 1 e 100', async () => {
@@ -378,7 +380,7 @@ describe('Robustez - Paginação', () => {
   });
 });
 
-describe('Robustez - Filtros de Status', () => {
+databaseIntegration('Robustez - Filtros de Status [database integration]', () => {
   const testClientId = `test-client-filters-${Date.now()}`;
 
   it('deve filtrar por status específico', async () => {

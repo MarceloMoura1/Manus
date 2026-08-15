@@ -47,6 +47,16 @@ export interface QRCodeResponse {
   };
 }
 
+function isSendMessageResponse(value: unknown): value is SendMessageResponse {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as { key?: { id?: unknown; remoteJid?: unknown; fromMe?: unknown }; status?: unknown; message?: unknown };
+  return typeof candidate.key?.id === "string"
+    && typeof candidate.key.remoteJid === "string"
+    && typeof candidate.key.fromMe === "boolean"
+    && typeof candidate.status === "string"
+    && typeof candidate.message === "string";
+}
+
 export interface InstanceStatusResponse {
   instanceId: string;
   instanceName: string;
@@ -223,6 +233,7 @@ export class EvolutionAPIClient {
       console.log(
         `[Evolution] Mensagem enviada: ${response.data?.key?.id} (status: ${response.data?.status})`
       );
+      if (!isSendMessageResponse(response.data)) throw new Error("Resposta inválida da Evolution API.");
       return response.data;
     } catch (err: any) {
       console.error(`[Evolution] Erro ao enviar mensagem: ${err?.message}`);

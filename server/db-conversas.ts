@@ -9,8 +9,8 @@
  * - Índices otimizados no banco
  */
 
-import { getDb } from './db';
-const db = getDb();
+import { getLazyDb } from './db';
+const db = getLazyDb();
 import {
   megadeskDomainConversations,
 } from '../drizzle/schema';

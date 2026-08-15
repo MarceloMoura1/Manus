@@ -13,6 +13,8 @@ import {
 } from "../drizzle/schema-evolution-queue";
 import { eq, and, lt, gte, lte, sql } from "drizzle-orm";
 
+export type EvolutionFailedMessage = typeof evolutionFailedMessages.$inferSelect;
+
 /**
  * Adicionar mensagem falhada à fila
  */

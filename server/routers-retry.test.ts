@@ -1,168 +1,115 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import * as failedMessages from "./baileys-failed-messages";
-import * as baileysModule from "./whatsapp-baileys";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-describe("Retry Router", () => {
+const database = vi.hoisted(() => {
+  const selectedRows: object[][] = [];
+  const insertedValues = vi.fn();
+  const updatedValues = vi.fn();
+
+  return {
+    selectedRows,
+    insertedValues,
+    updatedValues,
+    db: {
+      select: vi.fn(() => {
+        const rows = selectedRows.shift() ?? [];
+        const query = {
+          then: (resolve: (value: object[]) => unknown) => Promise.resolve(resolve(rows)),
+          limit: () => Promise.resolve(rows),
+        };
+        return { from: () => ({ where: () => query }) };
+      }),
+      insert: vi.fn(() => ({ values: insertedValues })),
+      update: vi.fn(() => ({
+        set: (values: object) => {
+          updatedValues(values);
+          return { where: () => Promise.resolve() };
+        },
+      })),
+    },
+  };
+});
+
+vi.mock("./db", () => ({ getDb: () => database.db }));
+
+import {
+  addFailedMessage,
+  getPendingFailedMessages,
+  incrementRetryCount,
+  updateFailedMessageStatus,
+} from "./db-evolution-queue";
+
+describe("Evolution retry queue", () => {
   beforeEach(() => {
+    database.selectedRows.length = 0;
+    database.insertedValues.mockReset().mockResolvedValue(undefined);
+    database.updatedValues.mockReset();
     vi.clearAllMocks();
   });
 
-  describe("getPendingCount", () => {
-    it("deve retornar contagem de mensagens falhadas", async () => {
-      vi.spyOn(failedMessages, "countPendingFailedMessages").mockResolvedValue(5);
+  it("persists a failed message with the tenant and safe initial state", async () => {
+    const id = await addFailedMessage(
+      "tenant-a",
+      "conversation-a",
+      "5511999999999",
+      "Mensagem",
+      "Agente",
+      undefined,
+      "Falha transitória",
+      "TIMEOUT"
+    );
 
-      const count = await failedMessages.countPendingFailedMessages("client-123");
-      expect(count).toBe(5);
-    });
-
-    it("deve retornar 0 quando não há mensagens falhadas", async () => {
-      vi.spyOn(failedMessages, "countPendingFailedMessages").mockResolvedValue(0);
-
-      const count = await failedMessages.countPendingFailedMessages("client-123");
-      expect(count).toBe(0);
-    });
+    expect(id).toMatch(/^failed-/);
+    expect(database.insertedValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failedMessageId: id,
+        clientId: "tenant-a",
+        conversationId: "conversation-a",
+        status: "pending",
+        retryCount: 0,
+        maxRetries: 3,
+      })
+    );
   });
 
-  describe("getFailedMessages", () => {
-    it("deve obter lista de mensagens falhadas", async () => {
-      const mockMessages = [
-        {
-          id: "msg-1",
-          phone: "5511987654321",
-          message_text: "Teste",
-          error_type: "send_error",
-          error_message: "Erro ao enviar",
-          retry_count: 2,
-          max_retries: 10,
-          status: "pending",
-          created_at: new Date(),
-          last_retry_at: new Date(),
-        },
-      ];
+  it("returns only the rows supplied by the tenant-scoped pending query", async () => {
+    database.selectedRows.push([
+      { failedMessageId: "failed-a", clientId: "tenant-a", status: "pending" },
+    ]);
 
-      vi.spyOn(failedMessages, "getFailedMessagesPending").mockResolvedValue(mockMessages as any);
-
-      const messages = await failedMessages.getFailedMessagesPending("client-123");
-      expect(messages).toHaveLength(1);
-      expect(messages[0].phone).toBe("5511987654321");
-    });
-
-    it("deve retornar array vazio quando não há mensagens", async () => {
-      vi.spyOn(failedMessages, "getFailedMessagesPending").mockResolvedValue([]);
-
-      const messages = await failedMessages.getFailedMessagesPending("client-123");
-      expect(messages).toHaveLength(0);
-    });
+    await expect(getPendingFailedMessages("tenant-a")).resolves.toEqual([
+      { failedMessageId: "failed-a", clientId: "tenant-a", status: "pending" },
+    ]);
+    expect(database.db.select).toHaveBeenCalledOnce();
   });
 
-  describe("retryAll", () => {
-    it("deve reenviar todas as mensagens falhadas", async () => {
-      const mockMessages = [
-        {
-          id: "msg-1",
-          conversation_id: "conv-1",
-          phone: "5511987654321",
-          message_text: "Teste",
-          retry_count: 1,
-          max_retries: 10,
-          status: "pending",
-        },
-      ];
+  it("applies exponential backoff and keeps retries below the configured limit", async () => {
+    database.selectedRows.push(
+      [{ failedMessageId: "failed-a", clientId: "tenant-a", retryCount: 0 }],
+      [{ clientId: "tenant-a", maxRetries: 3, retryDelayMs: 1000, backoffMultiplier: 2, maxBackoffMs: 60000 }]
+    );
 
-      vi.spyOn(failedMessages, "getFailedMessagesPending").mockResolvedValue(mockMessages as any);
-      vi.spyOn(failedMessages, "incrementRetryCount").mockResolvedValue(undefined);
-      vi.spyOn(baileysModule, "sendBaileysMessage").mockResolvedValue({ ok: true });
-      vi.spyOn(failedMessages, "markMessageAsCompleted").mockResolvedValue(undefined);
+    const result = await incrementRetryCount("failed-a", "timeout", "TIMEOUT");
 
-      const messages = await failedMessages.getFailedMessagesPending("client-123");
-      expect(messages).toHaveLength(1);
-    });
-
-    it("deve marcar como falhada quando atinge máximo de retries", async () => {
-      const mockMessages = [
-        {
-          id: "msg-1",
-          conversation_id: "conv-1",
-          phone: "5511987654321",
-          message_text: "Teste",
-          retry_count: 10,
-          max_retries: 10,
-          status: "retrying",
-        },
-      ];
-
-      vi.spyOn(failedMessages, "getFailedMessagesPending").mockResolvedValue(mockMessages as any);
-      vi.spyOn(failedMessages, "markMessageAsFailed").mockResolvedValue(undefined);
-
-      const messages = await failedMessages.getFailedMessagesPending("client-123");
-      expect(messages[0].retry_count).toBe(messages[0].max_retries);
-    });
+    expect(result).toEqual(expect.objectContaining({ newRetryCount: 1, status: "retrying" }));
+    expect(database.updatedValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        retryCount: 1,
+        status: "retrying",
+        lastError: "timeout",
+        errorCode: "TIMEOUT",
+      })
+    );
   });
 
-  describe("retryOne", () => {
-    it("deve reenviar uma mensagem específica", async () => {
-      vi.spyOn(failedMessages, "incrementRetryCount").mockResolvedValue(undefined);
-      vi.spyOn(baileysModule, "sendBaileysMessage").mockResolvedValue({ ok: true });
-      vi.spyOn(failedMessages, "markMessageAsCompleted").mockResolvedValue(undefined);
+  it("marks a sent message and records its delivery timestamp", async () => {
+    await updateFailedMessageStatus("failed-a", "sent", "message-a");
 
-      // Simular reenvio bem-sucedido
-      const result = await baileysModule.sendBaileysMessage(
-        "client-123",
-        "conv-1",
-        "5511987654321",
-        "Teste",
-        "Sistema"
-      );
-
-      expect(result.ok).toBe(true);
-    });
-
-    it("deve retornar erro quando mensagem não encontrada", async () => {
-      vi.spyOn(failedMessages, "getFailedMessagesPending").mockResolvedValue([]);
-
-      const messages = await failedMessages.getFailedMessagesPending("client-123");
-      expect(messages).toHaveLength(0);
-    });
-  });
-
-  describe("Persistência de Mensagens Falhadas", () => {
-    it("deve salvar mensagem falhada no banco", async () => {
-      vi.spyOn(failedMessages, "saveFailedMessage").mockResolvedValue("msg-123");
-
-      const id = await failedMessages.saveFailedMessage(
-        "client-123",
-        "conv-1",
-        "5511987654321",
-        "Teste",
-        "send_error",
-        "Erro ao enviar"
-      );
-
-      expect(id).toBe("msg-123");
-    });
-
-    it("deve incrementar retry count", async () => {
-      vi.spyOn(failedMessages, "incrementRetryCount").mockResolvedValue(undefined);
-
-      await failedMessages.incrementRetryCount("msg-123");
-
-      expect(failedMessages.incrementRetryCount).toHaveBeenCalledWith("msg-123");
-    });
-
-    it("deve marcar como completa após reenvio bem-sucedido", async () => {
-      vi.spyOn(failedMessages, "markMessageAsCompleted").mockResolvedValue(undefined);
-
-      await failedMessages.markMessageAsCompleted("msg-123");
-
-      expect(failedMessages.markMessageAsCompleted).toHaveBeenCalledWith("msg-123");
-    });
-
-    it("deve marcar como falhada permanentemente", async () => {
-      vi.spyOn(failedMessages, "markMessageAsFailed").mockResolvedValue(undefined);
-
-      await failedMessages.markMessageAsFailed("msg-123", "Máximo de tentativas");
-
-      expect(failedMessages.markMessageAsFailed).toHaveBeenCalledWith("msg-123", "Máximo de tentativas");
-    });
+    expect(database.updatedValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "sent",
+        messageId: "message-a",
+        sentAt: expect.any(Date),
+      })
+    );
   });
 });

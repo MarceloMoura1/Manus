@@ -1,5 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { appRouter } from "./routers";
+import { isTestDatabaseEnabled } from "./test-integration-gates";
+const integrationIt = it.runIf(isTestDatabaseEnabled());
 
 const mockReq = { headers: {}, cookies: {} } as any;
 const mockRes = { cookie: () => {}, clearCookie: () => {} } as any;
@@ -28,7 +30,7 @@ const userCaller = appRouter.createCaller({
 const publicCaller = appRouter.createCaller({ req: mockReq, res: mockRes, user: null });
 
 describe("megaadmin.listAdmins", () => {
-  it("retorna a lista de administradores para admin autenticado", async () => {
+  integrationIt("retorna a lista de administradores para admin autenticado", async () => {
     const result = await adminCaller.megaadmin.listAdmins();
     expect(result).toHaveProperty("admins");
     expect(Array.isArray(result.admins)).toBe(true);
@@ -54,7 +56,7 @@ describe("megaadmin.listAdmins", () => {
 describe("megaadmin.createAdmin", () => {
   const testEmail = `test-admin-${Date.now()}@megadesk-test.com`;
 
-  it("cria um novo administrador com dados válidos", async () => {
+  integrationIt("cria um novo administrador com dados válidos", async () => {
     const result = await adminCaller.megaadmin.createAdmin({
       email: testEmail,
       name: "Admin de Teste",
@@ -63,7 +65,7 @@ describe("megaadmin.createAdmin", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("rejeita e-mail duplicado", async () => {
+  integrationIt("rejeita e-mail duplicado", async () => {
     await expect(
       adminCaller.megaadmin.createAdmin({
         email: testEmail,
@@ -105,7 +107,7 @@ describe("megaadmin.createAdmin", () => {
 });
 
 describe("megaadmin.updateAdmin", () => {
-  it("atualiza nome de um administrador existente", async () => {
+  integrationIt("atualiza nome de um administrador existente", async () => {
     const list = await adminCaller.megaadmin.listAdmins();
     const admins = list.admins;
     // Encontrar um admin que não seja o usuário logado para testar atualização
@@ -117,7 +119,7 @@ describe("megaadmin.updateAdmin", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("retorna erro para ID inexistente", async () => {
+  integrationIt("retorna erro para ID inexistente", async () => {
     await expect(
       adminCaller.megaadmin.updateAdmin({ id: 999999, name: "Inexistente" }),
     ).rejects.toThrow();
@@ -131,7 +133,7 @@ describe("megaadmin.updateAdmin", () => {
 });
 
 describe("megaadmin.deleteAdmin", () => {
-  it("impede exclusão do próprio usuário logado", async () => {
+  integrationIt("impede exclusão do próprio usuário logado", async () => {
     const list = await adminCaller.megaadmin.listAdmins();
     const self = list.admins.find((a: any) => a.email === "marcelo.mouraadmpro@gmail.com");
     if (self) {
@@ -145,7 +147,7 @@ describe("megaadmin.deleteAdmin", () => {
     await expect(userCaller.megaadmin.deleteAdmin({ id: 1 })).rejects.toThrow();
   });
 
-  it("retorna erro para ID inexistente", async () => {
+  integrationIt("retorna erro para ID inexistente", async () => {
     await expect(
       adminCaller.megaadmin.deleteAdmin({ id: 999999 }),
     ).rejects.toThrow();
@@ -153,7 +155,7 @@ describe("megaadmin.deleteAdmin", () => {
 });
 
 describe("Expiração de sessão JWT — lógica de backend", () => {
-  it("loginAdmin gera token com expiração de 8h e cookie com maxAge correto", async () => {
+  integrationIt("loginAdmin gera token com expiração de 8h e cookie com maxAge correto", async () => {
     // Verificar que o cookie é configurado com maxAge de 8h (28800000ms)
     const cookieValues: Record<string, any> = {};
     const captureMockRes = {

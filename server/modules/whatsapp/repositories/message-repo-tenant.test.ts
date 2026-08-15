@@ -30,7 +30,7 @@ vi.mock("drizzle-orm", async (importOriginal) => {
   };
 });
 
-vi.mock("../../../db", () => ({ getDb: () => state.db }));
+vi.mock("../../../db", () => ({ getLazyDb: () => state.db }));
 
 import { listMessages, updateMessageStatus } from "./message.repo";
 import { getWaAccountByPhoneNumberId } from "./whatsapp.repo";

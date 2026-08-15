@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { chamadosRouter } from './routers-chamados';
 import { createCallerFactory } from './_core/trpc';
+import { isTestDatabaseEnabled } from './test-integration-gates';
 
 // Mock do contexto
 const mockContext = {
@@ -13,7 +14,7 @@ const mockContext = {
   res: {} as any,
 };
 
-describe('Chamados Router', () => {
+describe.runIf(isTestDatabaseEnabled())('Chamados Router [database integration]', () => {
   let caller: any;
 
   beforeAll(() => {

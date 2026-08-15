@@ -13,11 +13,15 @@ import {
   disconnectWhatsApp,
 } from "./evolution-manager";
 import { handleEvolutionWebhook } from "./evolution-webhook-handler";
+import { validateEvolutionTestConfig } from "./test-integration-gates";
 
-describe("Evolution API Integration", () => {
+const evolutionIntegration = describe.runIf(process.env.RUN_EVOLUTION_E2E === "1");
+
+evolutionIntegration("Evolution API Integration [requires RUN_EVOLUTION_E2E=1]", () => {
   let clientId: string;
 
   beforeAll(async () => {
+    validateEvolutionTestConfig();
     clientId = `test-client-${Date.now()}`;
 
     // Inicializar Evolution Manager
@@ -38,9 +42,6 @@ describe("Evolution API Integration", () => {
       expect(result.instanceId).toBeDefined();
       expect(result.token).toBeDefined();
 
-        instanceId: result.instanceId,
-        token: result.token?.substring(0, 20) + "...",
-      });
     });
 
     it("should get QR code for connection", async () => {
@@ -204,27 +205,7 @@ describe("Evolution API Integration", () => {
   });
 });
 
-describe("Evolution API Comparison with Baileys", () => {
-  it("should provide better error handling than Baileys", () => {
-    // Evolution API valida números antes de enviar
-    // Baileys não valida e envia mesmo para números inválidos
-
-    const evolutionValidation = true; // Evolution valida
-    const baileysValidation = false; // Baileys não valida
-
-    expect(evolutionValidation).toBe(true);
-  });
-
-  it("should handle E2E encryption keys automatically", () => {
-    // Evolution API gerencia chaves E2E automaticamente
-    // Baileys tinha problemas com PENDING status
-
-    const evolutionE2E = "automatic"; // Gerenciado automaticamente
-    const baileysE2E = "manual"; // Problemas com PENDING
-
-    expect(evolutionE2E).toBe("automatic");
-  });
-
+evolutionIntegration("Evolution API multi-client integration [requires RUN_EVOLUTION_E2E=1]", () => {
   it("should support multiple clients simultaneously", async () => {
     const clients = ["client-1", "client-2", "client-3"];
     const results = await Promise.all(

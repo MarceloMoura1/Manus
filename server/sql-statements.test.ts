@@ -72,17 +72,17 @@ describe("SQL statements no db.ts", () => {
   it("deve ter cada migração ALTER TABLE em sua própria execute()", () => {
     // Verifica que as migrações estão no array `migrations` e não em blocos execute()
     expect(dbContent).toContain("const migrations = [");
-    expect(dbContent).toContain("ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS email");
-    expect(dbContent).toContain("ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS cnpj");
-    expect(dbContent).toContain("ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS max_users");
-    expect(dbContent).toContain("ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS status_type");
-    expect(dbContent).toContain("ALTER TABLE megadesk_domain_clients ADD COLUMN IF NOT EXISTS integrations_json");
+    expect(dbContent).toContain("ALTER TABLE megadesk_domain_clients ADD COLUMN email");
+    expect(dbContent).toContain("ALTER TABLE megadesk_domain_clients ADD COLUMN cnpj");
+    expect(dbContent).toContain("ALTER TABLE megadesk_domain_clients ADD COLUMN max_users");
+    expect(dbContent).toContain("ALTER TABLE megadesk_domain_clients ADD COLUMN status_type");
+    expect(dbContent).toContain("ALTER TABLE megadesk_domain_clients ADD COLUMN integrations_json");
   });
 
   it("deve ter migração de password_hash separada do CREATE TABLE", () => {
     // password_hash deve estar no CREATE TABLE E como migração separada
     expect(dbContent).toContain("password_hash VARCHAR(255)");
-    expect(dbContent).toContain("ALTER TABLE megadesk_domain_client_users ADD COLUMN IF NOT EXISTS password_hash");
+    expect(dbContent).toContain("ALTER TABLE megadesk_domain_client_users ADD COLUMN password_hash");
   });
 
   it("função hasMultipleStatements deve detectar corretamente", () => {

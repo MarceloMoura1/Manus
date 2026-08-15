@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import { eq, and } from "drizzle-orm";
 import { users, megadeskDomainCustomers, megadeskDomainTickets, megadeskDomainConversations, megadeskDomainChamados, megadeskDomainChamadoSequence } from "../drizzle/schema";
+import { getTestDatabaseUrl } from "./test-integration-gates";
 
 type Database = ReturnType<typeof drizzle>;
 type UpsertUserInput = {
@@ -26,10 +27,15 @@ let cachedDb: Database | null = null;
 let cachedPool: mysql.Pool | null = null;
 export let inMemoryState: MegaDeskStructuredState | null = null;
 
+function getConfiguredDatabaseUrl(): string {
+  if (process.env.RUN_DATABASE_INTEGRATION === "1") return getTestDatabaseUrl();
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error("DATABASE_URL não configurada.");
+  return url;
+}
+
 export function getDb(): Database {
   if (!cachedDb) {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error("DATABASE_URL não configurada.");
     cachedDb = drizzle(getPool() as any);
   }
   return cachedDb;
@@ -37,9 +43,7 @@ export function getDb(): Database {
 
 export function getPool() {
   if (!cachedPool) {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error("DATABASE_URL não configurada.");
-    cachedPool = mysql.createPool(url);
+    cachedPool = mysql.createPool(getConfiguredDatabaseUrl());
   }
   return cachedPool;
 }
@@ -759,4 +763,23 @@ export async function getMegaDeskBackupInfo(backupId: string) {
 /** Exclusão física do registro principal está bloqueada pelo servidor. */
 export async function deleteClientFromDb(_clientId: string): Promise<never> {
   throw new Error("Exclusão física de tenant bloqueada: use a quarentena recuperável.");
+}
+
+/** Defers DATABASE_URL access until the first actual database operation. */
+export function createLazyDatabase<T extends object>(initialize: () => T): T {
+  let instance: T | undefined;
+  const getInstance = () => (instance ??= initialize());
+  return new Proxy(Object.create(null) as T, {
+    get(_target, property) {
+      if (typeof property === "symbol") return undefined;
+      const database = getInstance();
+      const value = Reflect.get(database, property);
+      return typeof value === "function" ? value.bind(database) : value;
+    },
+  });
+}
+
+/** Defers DATABASE_URL access until the first actual database operation. */
+export function getLazyDb(): Database {
+  return createLazyDatabase(getDb);
 }

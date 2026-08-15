@@ -1,25 +1,39 @@
-import { describe, expect, it } from "vitest";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { testGeminiConnection } from "./gemini-client";
 
-describe("Gemini API Integration", () => {
-  it("should have GEMINI_API_KEY configured", () => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    expect(apiKey).toBeDefined();
-    expect(apiKey).toBeTruthy();
-    expect(apiKey?.length).toBeGreaterThan(0);
+describe("Gemini wrapper", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("handles a valid provider response without real network access", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: "ok" }] } }] }),
+    }));
+    await expect(testGeminiConnection("fake-test-key")).resolves.toEqual(expect.objectContaining({ ok: true }));
   });
 
-  it("should be able to instantiate GoogleGenerativeAI with the API key", () => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error("GEMINI_API_KEY environment variable is not set");
-    }
+  it("handles an invalid provider response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ candidates: [] }) }));
+    await expect(testGeminiConnection("fake-test-key")).resolves.toEqual({ ok: false, message: "Gemini não retornou resposta válida." });
+  });
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-    expect(genAI).toBeDefined();
-    
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    expect(model).toBeDefined();
+  it("sanitizes provider authentication errors", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: { status: "API_KEY_INVALID", message: "API key not valid" } }),
+    }));
+    const result = await testGeminiConnection("fake-test-key");
+    expect(result).toEqual({ ok: false, message: "Token inválido. Verifique a chave da API Gemini." });
+    expect(result.message).not.toContain("fake-test-key");
+  });
+
+  it("handles network failures without leaking the key", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network unavailable")));
+    const result = await testGeminiConnection("fake-test-key");
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("network unavailable");
+    expect(result.message).not.toContain("fake-test-key");
   });
 });
 
