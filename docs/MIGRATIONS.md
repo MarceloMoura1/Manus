@@ -45,7 +45,7 @@ pnpm db:validate
 Aplicação é separada e exige consentimento explícito no processo:
 
 ```text
-ALLOW_DATABASE_MIGRATION=1 MAIN_DATABASE_URL=mysql://.../banco pnpm db:migrate:main
+ALLOW_MAIN_MIGRATION=1 MAIN_DATABASE_URL=mysql://.../banco pnpm db:migrate:main
 ALLOW_TENANT_MIGRATION=1 TENANT_DATABASE_URL=mysql://.../mdsk_cliente pnpm db:migrate:tenant
 ```
 

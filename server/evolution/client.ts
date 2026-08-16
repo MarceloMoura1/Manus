@@ -13,7 +13,7 @@
  *   POST /webhook/set/:name        → configura webhook
  */
 
-import { getEvolutionConfig } from "./config";
+import { getEvolutionConfig, getEvolutionWebhookSecret } from "./config";
 
 function buildHeaders() {
   return {
@@ -43,8 +43,8 @@ async function request<T = any>(
   const text = await res.text();
 
   if (!res.ok) {
-    console.error(`[Evolution] ERRO ${res.status} ${method} ${path}: ${text.slice(0, 500)}`);
-    throw new Error(`Evolution API [${res.status}] ${path}: ${text.slice(0, 300)}`);
+    console.error(`[Evolution] request failed: status=${res.status} method=${method} path=${path}`);
+    throw new Error(`Evolution API request failed [${res.status}] ${path}`);
   }
 
   try {
@@ -77,7 +77,6 @@ function extractQRBase64(data: any): string | null {
     data?.instance?.qrcode?.base64,    // alternativo
     data?.data?.base64,                // wrapper extra
     data?.data?.qrcode?.base64,
-    data?.code,                        // raw QR (menos comum como imagem)
   ];
 
   for (const candidate of candidates) {
@@ -89,7 +88,7 @@ function extractQRBase64(data: any): string | null {
     }
   }
 
-  console.warn("[Evolution] QR Code não encontrado na resposta. Campos disponíveis:", Object.keys(data));
+  console.warn("[Evolution] QR Code não encontrado na resposta.");
   return null;
 }
 
@@ -126,8 +125,6 @@ export async function evoCreateInstance(instanceName: string): Promise<{
 export async function evoGetQRCode(instanceName: string): Promise<EvoQRCode | null> {
   try {
     const data = await request<any>("GET", `/instance/connect/${instanceName}`);
-
-    console.log(`[Evolution] /instance/connect/${instanceName} →`, JSON.stringify(data).slice(0, 300));
 
     // Se a instância já está conectada, o endpoint retorna estado sem QR
     const state = data?.instance?.state || data?.state;
@@ -208,6 +205,22 @@ export async function evoDeleteInstance(instanceName: string): Promise<void> {
   await request("DELETE", `/instance/delete/${instanceName}`);
 }
 
+export function normalizeEvolutionRecipient(number: string): string {
+  const digits = number.replace(/\D/g, "");
+  let normalizedNumber = digits.length === 10 || digits.length === 11
+    ? `55${digits}`
+    : digits;
+  // O WhatsApp pode devolver celulares brasileiros antigos sem o nono dígito.
+  // Canonicalizamos 55 + DDD + assinante móvel de 8 dígitos para 55 + DDD + 9 dígitos.
+  if (normalizedNumber.length === 12 && normalizedNumber.startsWith("55") && /[6-9]/.test(normalizedNumber[4])) {
+    normalizedNumber = `${normalizedNumber.slice(0, 4)}9${normalizedNumber.slice(4)}`;
+  }
+  if (normalizedNumber.length < 12 || normalizedNumber.length > 15) {
+    throw new Error("Número de WhatsApp inválido.");
+  }
+  return normalizedNumber;
+}
+
 /**
  * Envia mensagem de texto.
  */
@@ -216,11 +229,72 @@ export async function evoSendText(
   number: string,
   text: string
 ): Promise<{ key: { id: string } }> {
+  const normalizedNumber = normalizeEvolutionRecipient(number);
   return request("POST", `/message/sendText/${instanceName}`, {
-    number,
+    number: normalizedNumber,
     text,
     delay: 500,
   });
+}
+
+export type EvolutionAttachmentKind = "image" | "video" | "audio" | "document" | "sticker";
+
+export async function evoSendAttachment(input: {
+  instanceName: string;
+  number: string;
+  kind: EvolutionAttachmentKind;
+  dataUrl: string;
+  mimeType: string;
+  fileName?: string;
+  caption?: string;
+}): Promise<{ key: { id: string } }> {
+  const number = normalizeEvolutionRecipient(input.number);
+  // Evolution 2.3.x expects the media field as raw base64 (or a public URL),
+  // not as a browser data URI.
+  const media = input.dataUrl.replace(/^data:[^,]+;base64,/i, "");
+  if (input.kind === "audio") {
+    return request("POST", `/message/sendWhatsAppAudio/${input.instanceName}`, {
+      number,
+      audio: media,
+      encoding: true,
+      delay: 500,
+    });
+  }
+  if (input.kind === "sticker") {
+    return request("POST", `/message/sendSticker/${input.instanceName}`, {
+      number,
+      sticker: media,
+      delay: 500,
+    });
+  }
+  return request("POST", `/message/sendMedia/${input.instanceName}`, {
+    number,
+    mediatype: input.kind,
+    mimetype: input.mimeType,
+    media,
+    fileName: input.fileName,
+    caption: input.caption || "",
+    delay: 500,
+  });
+}
+
+export async function evoGetMediaBase64(
+  instanceName: string,
+  message: Record<string, unknown>,
+): Promise<{ base64: string; mimetype?: string; fileName?: string }> {
+  const result = await request<Record<string, unknown>>(
+    "POST",
+    `/chat/getBase64FromMediaMessage/${instanceName}`,
+    { message, convertToMp4: false },
+  );
+  if (typeof result?.base64 !== "string" || !result.base64) {
+    throw new Error("Evolution API did not return media content.");
+  }
+  return {
+    base64: result.base64,
+    mimetype: typeof result.mimetype === "string" ? result.mimetype : undefined,
+    fileName: typeof result.fileName === "string" ? result.fileName : undefined,
+  };
 }
 
 /**
@@ -229,15 +303,18 @@ export async function evoSendText(
 export async function evoSetWebhook(instanceName: string, webhookUrl: string): Promise<void> {
   console.log(`[Evolution] Configurando webhook: ${instanceName} → ${webhookUrl}`);
   await request("POST", `/webhook/set/${instanceName}`, {
-    url: webhookUrl,
-    byEvents: false,
-    base64: false,
-    headers: { apikey: getEvolutionConfig().apiKey },
-    events: [
-      "MESSAGES_UPSERT",
-      "MESSAGES_UPDATE",
-      "CONNECTION_UPDATE",
-      "QRCODE_UPDATED",
-    ],
+    webhook: {
+      enabled: true,
+      url: webhookUrl,
+      byEvents: false,
+      base64: true,
+      headers: { "x-megadesk-webhook-secret": getEvolutionWebhookSecret() },
+      events: [
+        "MESSAGES_UPSERT",
+        "MESSAGES_UPDATE",
+        "CONNECTION_UPDATE",
+        "QRCODE_UPDATED",
+      ],
+    },
   });
 }

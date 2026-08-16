@@ -40,7 +40,7 @@ services:
     container_name: megadesk-evolution
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       evolution-db:
         condition: service_healthy
@@ -60,12 +60,15 @@ services:
       DATABASE_PROVIDER: "mysql"
       DATABASE_CONNECTION_URI: mysql://${EVOLUTION_MYSQL_USER:?EVOLUTION_MYSQL_USER is required}:${EVOLUTION_MYSQL_PASSWORD:?EVOLUTION_MYSQL_PASSWORD is required}@evolution-db:3306/${EVOLUTION_MYSQL_DATABASE:?EVOLUTION_MYSQL_DATABASE is required}
       DATABASE_SAVE_DATA_INSTANCE: "true"
-      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
-      DATABASE_SAVE_MESSAGE_UPDATE: "true"
-      DATABASE_SAVE_DATA_CONTACTS: "true"
-      DATABASE_SAVE_DATA_CHATS: "true"
-      DATABASE_SAVE_DATA_HISTORIC: "true"
-      DATABASE_SAVE_DATA_LABELS: "true"
+      # O MegaDesk é o repositório das conversas. Na Evolution 2.3.7/MySQL,
+      # a persistência operacional interrompe MESSAGES_UPSERT com erro Prisma P2010
+      # antes da entrega ao webhook; somente a instância precisa permanecer no provider.
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      DATABASE_SAVE_DATA_HISTORIC: "false"
+      DATABASE_SAVE_DATA_LABELS: "false"
       DATABASE_DELETE_MESSAGE: "false"
 
       # ── Cache local (sem Redis) ─────────────────────────
@@ -84,6 +87,13 @@ services:
       LOG_LEVEL: "ERROR,WARN,INFO"
       LOG_COLOR: "true"
       LOG_BAILEYS: "error"
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
     # Volume para sessões WhatsApp (mantém conectado após restart)
     volumes:

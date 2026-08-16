@@ -88,7 +88,7 @@ integrationDescribe("MegaDesk login por e-mail", () => {
     // Define a senha do usuário via resetUserPassword (grava hash no banco)
     await adminCaller.megaadmin.resetUserPassword({ clientId: created.client.clientId, userId: created.client.users[0].id, newPassword: "senha123" });
     // Login deve funcionar agora
-    const result = await publicCaller.megadesk.loginByEmail({ companyId: created.client.clientId, email: "operador@logintest.com", password: "senha123" });
+    const result = await publicCaller.megadesk.loginByEmail({ email: "operador@logintest.com", password: "senha123" });
     expect(result.session.userEmail).toBe("operador@logintest.com");
     expect(result.session.clientId).toBe(created.client.clientId);
     expect(result.session.userName).toBeTruthy();
@@ -104,7 +104,7 @@ integrationDescribe("MegaDesk login por e-mail", () => {
 
   it("rejeita e-mail não cadastrado", async () => {
     await expect(
-      publicCaller.megadesk.loginByEmail({ companyId: "cliente-inexistente", email: "naoexiste@dominio.com", password: "qualquer" })
+      publicCaller.megadesk.loginByEmail({ email: "naoexiste@dominio.com", password: "qualquer" })
     ).rejects.toThrow();
   });
 
@@ -124,7 +124,7 @@ integrationDescribe("MegaDesk login por e-mail", () => {
       role: "agent",
     });
     await expect(
-      publicCaller.megadesk.loginByEmail({ companyId: created.client.clientId, email: addedUser.user.email, password: "qualquer" })
+      publicCaller.megadesk.loginByEmail({ email: addedUser.user.email, password: "qualquer" })
     ).rejects.toThrow();
   });
 
@@ -143,12 +143,14 @@ integrationDescribe("MegaDesk login por e-mail", () => {
     await adminCaller.megaadmin.resetUserPassword({ clientId: first.client.clientId, userId: userA.user.id, newPassword: "senha-tenant-a" });
     await adminCaller.megaadmin.resetUserPassword({ clientId: second.client.clientId, userId: userB.user.id, newPassword: "senha-tenant-b" });
 
-    const loginA = await publicCaller.megadesk.loginByEmail({ companyId: first.client.clientId, email: sharedEmail.toUpperCase(), password: "senha-tenant-a" });
-    const loginB = await publicCaller.megadesk.loginByEmail({ companyId: ` ${second.client.clientId.toUpperCase()} `, email: ` ${sharedEmail} `, password: "senha-tenant-b" });
+    const loginA = await publicCaller.megadesk.loginByEmail({ email: sharedEmail.toUpperCase(), password: "senha-tenant-a" });
+    const loginB = await publicCaller.megadesk.loginByEmail({ email: ` ${sharedEmail} `, password: "senha-tenant-b" });
     expect(loginA.session.clientId).toBe(first.client.clientId);
     expect(loginB.session.clientId).toBe(second.client.clientId);
-    await expect(publicCaller.megadesk.loginByEmail({ companyId: first.client.clientId, email: sharedEmail, password: "senha-tenant-b" })).rejects.toThrow("Empresa, e-mail ou senha inválidos");
-    await expect(publicCaller.megadesk.loginByEmail({ companyId: second.client.clientId, email: sharedEmail, password: "senha-tenant-a" })).rejects.toThrow("Empresa, e-mail ou senha inválidos");
+    await expect(publicCaller.megadesk.loginByEmail({ email: sharedEmail, password: "senha-incorreta" })).rejects.toThrow("E-mail ou senha inválidos");
+    await adminCaller.megaadmin.resetUserPassword({ clientId: first.client.clientId, userId: userA.user.id, newPassword: "senha-ambigua" });
+    await adminCaller.megaadmin.resetUserPassword({ clientId: second.client.clientId, userId: userB.user.id, newPassword: "senha-ambigua" });
+    await expect(publicCaller.megadesk.loginByEmail({ email: sharedEmail, password: "senha-ambigua" })).rejects.toThrow("E-mail ou senha inválidos");
   }, 30_000);
 });
 

@@ -7,7 +7,7 @@ import { COOKIE_NAME, normalizeModuleNamesToBackend, normalizeModuleNamesToAdmin
 import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool, createMegaDeskBackup, listMegaDeskBackups, getMegaDeskBackupInfo, applyMegaDeskBackup } from "./db";
 import bcrypt from "bcryptjs";
 import { megaadminCredentials, megadeskDomainClientUsers } from "../drizzle/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { SignJWT } from "jose";
 import { MEGAADMIN_COOKIE } from "./_core/context";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -26,13 +26,16 @@ import { evolutionRouter } from "./routers-evolution";
 import { conversasRouter } from "./routers-conversas";
 import { enforceAdministrativeRateLimit, normalizeDigits, normalizeEmail, runIdempotent } from "./_core/provisioning-guards";
 import { provisionClientAtomically } from "./_core/client-provisioning";
-import { normalizeCompanyIdentifier, resolveTenantLogin } from "./_core/tenant-login";
+import { resolveTenantLoginCandidates } from "./_core/tenant-login";
 import { runPostCommitBestEffort } from "./_core/post-commit";
+import { normalizeEvolutionRecipient } from "./evolution/client";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
 type ClientStatus = "provisioning" | "active" | "setup" | "failed" | "paused";
 type OperationalRecordType = "conversation" | "ticket" | "tracking" | "erp";
+
+const invalidTenantCredentialHash = bcrypt.hash(randomUUID(), 12);
 
 type ClientIntegrations = {
   geminiKey?: string;
@@ -834,31 +837,169 @@ export const appRouter = router({
       const conversation = conversations.find((item) => item.id === input.conversationId);
       if (!conversation) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
       if (conversation.clientId !== ctx.tenantId) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
-      const client = getReleasedClientOrThrow(conversation.clientId, "Atendimento WhatsApp");
-      assertClientUserPermission(client, "send_messages", input.userEmail);
+      const client = getReleasedClientOrThrow(conversation.clientId);
+      assertClientUserPermission(client, "conversations", input.userEmail);
+
+      try {
+        const [{ evoSendText }, { instanceNameFor }] = await Promise.all([
+          import("./evolution/client"),
+          import("./evolution/session-store"),
+        ]);
+        await evoSendText(instanceNameFor(conversation.clientId), conversation.phone, input.message);
+      } catch {
+        throw new TRPCError({
+          code: "BAD_GATEWAY",
+          message: "Não foi possível enviar a mensagem pelo WhatsApp.",
+        });
+      }
+
       const time = nowLabel();
-      conversation.messages.push({ from: "agent", text: input.message, time });
+      const outgoingMessage = {
+        from: "agent" as const,
+        text: input.message,
+        time,
+        timestamp: new Date().toISOString(),
+        agentName: input.userEmail.split("@")[0],
+      };
+      const connection = await getPool().getConnection();
+      try {
+        await connection.beginTransaction();
+        const [rows] = await connection.execute(
+          `SELECT messages_json
+             FROM megadesk_domain_conversations
+            WHERE conversation_id = ? AND client_id = ?
+            LIMIT 1 FOR UPDATE`,
+          [input.conversationId, ctx.tenantId],
+        ) as any[];
+        if (!rows.length) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
+        let persistedMessages: any[] = [];
+        try { persistedMessages = JSON.parse(rows[0].messages_json || "[]"); } catch { persistedMessages = []; }
+        persistedMessages.push(outgoingMessage);
+        const messageId = `msg-${randomUUID()}`;
+        await connection.execute(
+          `INSERT INTO megadesk_domain_conversations_messages
+             (message_id, conversation_id, sender, message, timestamp, status)
+           VALUES (?, ?, 'agent', ?, NOW(), 'sent')`,
+          [messageId, input.conversationId, input.message],
+        );
+        await connection.execute(
+          `UPDATE megadesk_domain_conversations
+              SET messages_json = ?, last_message = ?, last_message_from = 'agent',
+                  time_label = ?, updated_at = NOW()
+            WHERE conversation_id = ? AND client_id = ?`,
+          [JSON.stringify(persistedMessages), input.message.substring(0, 255), time, input.conversationId, ctx.tenantId],
+        );
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback().catch(() => undefined);
+        throw error;
+      } finally {
+        connection.release();
+      }
+
+      conversation.messages.push(outgoingMessage);
       conversation.lastMessage = input.message;
       conversation.time = time;
       audit("MegaDesk", "Mensagem enviada e sincronizada", conversation.clientId);
-      await persistSyncState();
       await recordMegaDeskMetric(conversation.clientId, "message_sent", 1, { conversationId: input.conversationId });
-      
-      // Enviar mensagem via Evolution API
-      try {
-        const { sendWhatsAppMessage } = await import("./evolution-manager");
-        await sendWhatsAppMessage(
-          conversation.clientId,
-          input.conversationId,
-          conversation.phone,
-          input.message,
-          input.userEmail.split("@")[0]
-        );
-      } catch (err: any) {
-        // Log silencioso - mensagem já foi salva no banco
-      }
-      
+
       return { ok: true, conversationId: input.conversationId, message: input.message, sentAt: new Date().toISOString() };
+    }),
+    sendAttachment: megadeskProcedure.input(z.object({
+      conversationId: z.string().min(1),
+      kind: z.enum(["image", "video", "audio", "document", "sticker"]),
+      dataUrl: z.string().min(20).max(30_000_000),
+      mimeType: z.string().min(3).max(120),
+      fileName: z.string().max(255).optional(),
+      caption: z.string().max(2000).optional(),
+      userEmail: z.string().email(),
+    })).mutation(async ({ input, ctx }) => {
+      await hydrateSyncState();
+      const conversation = conversations.find((item) => item.id === input.conversationId);
+      if (!conversation || conversation.clientId !== ctx.tenantId) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
+      }
+      const client = getReleasedClientOrThrow(ctx.tenantId);
+      assertClientUserPermission(client, "conversations", input.userEmail);
+
+      const { parseMediaDataUrl } = await import("./evolution/media-data");
+      const media = parseMediaDataUrl(input.dataUrl, input.mimeType);
+      if (!media) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Anexo inválido." });
+      }
+      const sizeBytes = Math.floor(media.base64.length * 3 / 4);
+      const limits = { image: 8_000_000, sticker: 8_000_000, audio: 12_000_000, video: 20_000_000, document: 12_000_000 };
+      if (sizeBytes > limits[input.kind]) {
+        throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "Anexo excede o limite permitido." });
+      }
+
+      try {
+        const [{ evoSendAttachment }, { instanceNameFor }] = await Promise.all([
+          import("./evolution/client"),
+          import("./evolution/session-store"),
+        ]);
+        await evoSendAttachment({
+          instanceName: instanceNameFor(ctx.tenantId),
+          number: conversation.phone,
+          kind: input.kind,
+          dataUrl: input.dataUrl,
+          mimeType: input.mimeType,
+          fileName: input.fileName,
+          caption: input.caption,
+        });
+      } catch {
+        throw new TRPCError({ code: "BAD_GATEWAY", message: "Não foi possível enviar o anexo pelo WhatsApp." });
+      }
+
+      const labels = { image: "[Imagem]", video: "[Vídeo]", audio: "[Áudio]", document: "[Documento]", sticker: "[Figurinha]" };
+      const summary = input.caption?.trim() || labels[input.kind];
+      const time = nowLabel();
+      const outgoingMessage = {
+        from: "agent" as const,
+        type: input.kind,
+        text: input.caption?.trim() || labels[input.kind],
+        mediaData: input.dataUrl,
+        mimeType: input.mimeType,
+        fileName: input.fileName || null,
+        time,
+        timestamp: new Date().toISOString(),
+        agentName: input.userEmail.split("@")[0],
+      };
+      const connection = await getPool().getConnection();
+      try {
+        await connection.beginTransaction();
+        const [rows] = await connection.execute(
+          `SELECT messages_json FROM megadesk_domain_conversations
+            WHERE conversation_id = ? AND client_id = ? LIMIT 1 FOR UPDATE`,
+          [input.conversationId, ctx.tenantId],
+        ) as any[];
+        if (!rows.length) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
+        let persistedMessages: any[] = [];
+        try { persistedMessages = JSON.parse(rows[0].messages_json || "[]"); } catch { persistedMessages = []; }
+        persistedMessages.push(outgoingMessage);
+        await connection.execute(
+          `INSERT INTO megadesk_domain_conversations_messages
+             (message_id, conversation_id, sender, message, timestamp, status)
+           VALUES (?, ?, 'agent', ?, NOW(), 'sent')`,
+          [`msg-${randomUUID()}`, input.conversationId, summary],
+        );
+        await connection.execute(
+          `UPDATE megadesk_domain_conversations SET messages_json = ?, last_message = ?,
+             last_message_from = 'agent', time_label = ?, updated_at = NOW()
+           WHERE conversation_id = ? AND client_id = ?`,
+          [JSON.stringify(persistedMessages), summary.substring(0, 255), time, input.conversationId, ctx.tenantId],
+        );
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback().catch(() => undefined);
+        throw error;
+      } finally {
+        connection.release();
+      }
+      conversation.messages.push(outgoingMessage);
+      conversation.lastMessage = summary;
+      conversation.time = time;
+      return { ok: true, conversationId: input.conversationId, kind: input.kind };
     }),
     updateTicketStatus: megadeskProcedure.input(z.object({ ticketId: z.string(), status: z.enum(["open", "in_progress", "waiting", "closed"]), userEmail: z.string().email() })).mutation(async ({ input, ctx }) => {
       await hydrateSyncState();
@@ -938,13 +1079,18 @@ export const appRouter = router({
       }),
     searchCustomer: megadeskProcedure
       .input(z.object({ phone: z.string().min(1), clientId: z.string().min(1) }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         try {
+          if (input.clientId !== ctx.tenantId) {
+            throw new TRPCError({ code: "FORBIDDEN", message: "Tenant inválido." });
+          }
           const { searchCustomerByPhone } = await import("./db");
           const { getPool } = await import("./db");
 
+          const canonicalPhone = normalizeEvolutionRecipient(input.phone);
           // 1º: Buscar na tabela de contatos de conversas (megadesk_domain_customers)
-          const customer = await searchCustomerByPhone(input.phone, input.clientId);
+          const customer = await searchCustomerByPhone(canonicalPhone, ctx.tenantId)
+            ?? await searchCustomerByPhone(canonicalPhone.slice(2), ctx.tenantId);
           if (customer) {
             return {
               found: true,
@@ -958,7 +1104,7 @@ export const appRouter = router({
 
           // 2º: Buscar na tabela de Clientes CRM (megadesk_crm_clients)
           // Normaliza o telefone removendo caracteres não numéricos para comparação
-          const phoneDigits = input.phone.replace(/\D/g, "");
+          const phoneDigits = canonicalPhone;
           const pool = getPool();
           const [crmRows] = await pool.execute(
             `SELECT crm_client_id, company_name, responsible_name, phone, whatsapp, email, contacts_json
@@ -970,7 +1116,7 @@ export const appRouter = router({
                  OR contacts_json LIKE ?
                )
              LIMIT 1`,
-            [input.clientId, `%${phoneDigits}%`, `%${phoneDigits}%`, `%${phoneDigits}%`]
+            [ctx.tenantId, `%${phoneDigits}%`, `%${phoneDigits}%`, `%${phoneDigits}%`]
           ) as any[];
 
           if (crmRows && (crmRows as any[]).length > 0) {
@@ -996,19 +1142,23 @@ export const appRouter = router({
       }),
     createCustomer: megadeskProcedure
       .input(z.object({ phone: z.string().min(1), name: z.string().min(1), company: z.string().min(1), clientId: z.string().min(1) }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         try {
+          if (input.clientId !== ctx.tenantId) {
+            throw new TRPCError({ code: "FORBIDDEN", message: "Tenant inválido." });
+          }
           const { createCustomer: createCustomerDb } = await import("./db");
           await hydrateSyncState();
-          const client = getReleasedClientOrThrow(input.clientId);
+          const client = getReleasedClientOrThrow(ctx.tenantId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
+          const canonicalPhone = normalizeEvolutionRecipient(input.phone);
           
           const customerId = `cust-${Date.now()}`;
           await createCustomerDb({
             customerId,
             clientId: client.clientId,
             name: input.name,
-            phone: input.phone,
+            phone: canonicalPhone,
             company: input.company,
           });
           
@@ -1017,7 +1167,7 @@ export const appRouter = router({
             id: conversationId,
             clientId: client.clientId,
             name: input.name,
-            phone: input.phone,
+            phone: canonicalPhone,
             company: input.company,
             status: "open",
             lastMessage: "Conversa iniciada",
@@ -1027,7 +1177,7 @@ export const appRouter = router({
           conversations.push(newConversation);
           audit("MegaDesk", `Cliente criado: ${input.name}`, client.clientId);
           await persistSyncState();
-          return { id: customerId, name: input.name, company: input.company, phone: input.phone };
+          return { id: customerId, name: input.name, company: input.company, phone: canonicalPhone };
         } catch (error) {
           console.error("Erro ao criar cliente:", error);
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao criar cliente" });
@@ -1035,11 +1185,14 @@ export const appRouter = router({
       }),
     createTicket: megadeskProcedure
       .input(z.object({ customerId: z.string(), phone: z.string(), title: z.string().min(1), observation: z.string().optional(), company: z.string(), customer: z.string(), clientId: z.string().min(1) }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         try {
+          if (input.clientId !== ctx.tenantId) {
+            throw new TRPCError({ code: "FORBIDDEN", message: "Tenant inválido." });
+          }
           const { createChamado } = await import("./db-chamados");
           await hydrateSyncState();
-          const client = getReleasedClientOrThrow(input.clientId);
+          const client = getReleasedClientOrThrow(ctx.tenantId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
           
           // Usar createChamado do db-chamados.ts que persiste corretamente no banco
@@ -1065,17 +1218,22 @@ export const appRouter = router({
       }),
     createConversation: megadeskProcedure
       .input(z.object({ customerId: z.string(), customerName: z.string(), phone: z.string(), company: z.string(), clientId: z.string().min(1), fromCrm: z.boolean().optional(), crmClientId: z.string().optional() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         try {
+          if (input.clientId !== ctx.tenantId) {
+            throw new TRPCError({ code: "FORBIDDEN", message: "Tenant inválido." });
+          }
           const { createConversation: createConversationDb, createCustomer: createCustomerDb, searchCustomerByPhone } = await import("./db");
           await hydrateSyncState();
-          const client = getReleasedClientOrThrow(input.clientId);
+          const client = getReleasedClientOrThrow(ctx.tenantId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
+          const canonicalPhone = normalizeEvolutionRecipient(input.phone);
 
           // Se veio do CRM, garantir que o contato existe em megadesk_domain_customers
           // Busca por telefone OU por customerId para evitar duplicata
           if (input.fromCrm) {
-            const existing = await searchCustomerByPhone(input.phone, client.clientId);
+            const existing = await searchCustomerByPhone(canonicalPhone, client.clientId)
+              ?? await searchCustomerByPhone(canonicalPhone.slice(2), client.clientId);
             if (!existing) {
               const customerId = input.customerId || `cust-${Date.now()}`;
               try {
@@ -1083,7 +1241,7 @@ export const appRouter = router({
                   customerId,
                   clientId: client.clientId,
                   name: input.customerName,
-                  phone: input.phone,
+                  phone: canonicalPhone,
                   company: input.company,
                 });
               } catch (insertErr: any) {
@@ -1102,7 +1260,7 @@ export const appRouter = router({
             clientId: client.clientId,
             crmClientId: input.crmClientId ?? undefined,
             customerName: input.customerName,
-            phone: input.phone,
+            phone: canonicalPhone,
             company: input.company,
             lastMessage: "Conversa iniciada",
             messages: [],
@@ -1112,7 +1270,7 @@ export const appRouter = router({
             id: conversationId,
             clientId: client.clientId,
             name: input.customerName,
-            phone: input.phone,
+            phone: canonicalPhone,
             company: input.company,
             status: "open" as const,
             lastMessage: "Conversa iniciada",
@@ -1289,28 +1447,29 @@ export const appRouter = router({
         return activeUsers;
       }),
     loginByEmail: publicProcedure
-      .input(z.object({ companyId: z.string().trim().toLowerCase().min(3).max(80), email: z.string().trim().toLowerCase().email(), password: z.string().min(1) }))
+      .input(z.object({ email: z.string().trim().toLowerCase().email(), password: z.string().min(1) }))
       .mutation(async ({ input }) => {
         await hydrateSyncState();
         const email = input.email.trim().toLowerCase();
-        const companyId = normalizeCompanyIdentifier(input.companyId);
-        const resolved = resolveTenantLogin(clients, companyId, email);
-        const invalidLogin = () => new TRPCError({ code: "UNAUTHORIZED", message: "Empresa, e-mail ou senha inválidos." });
-        if (!resolved) {
-          audit("MegaDesk", "Login negado por identidade ou estado inválido", undefined, false);
-          throw invalidLogin();
-        }
-        const { tenant: client, user } = resolved;
-        const credRows = await getDb()
-          .select({ passwordHash: megadeskDomainClientUsers.passwordHash })
+        const candidates = resolveTenantLoginCandidates(clients, email);
+        if (candidates.length === 0) await bcrypt.compare(input.password, await invalidTenantCredentialHash);
+        const candidateIds = candidates.map(({ user }) => user.id);
+        const credRows = candidateIds.length ? await getDb()
+          .select({ userId: megadeskDomainClientUsers.userId, passwordHash: megadeskDomainClientUsers.passwordHash })
           .from(megadeskDomainClientUsers)
-          .where(and(eq(megadeskDomainClientUsers.userId, user.id), eq(megadeskDomainClientUsers.clientId, client.clientId)))
-          .limit(1);
-        const cred = credRows[0];
-        if (!cred?.passwordHash || !(await bcrypt.compare(input.password, cred.passwordHash))) {
-          audit("MegaDesk", "Login negado por credencial inválida", client.clientId, false);
+          .where(inArray(megadeskDomainClientUsers.userId, candidateIds)) : [];
+        const hashes = new Map(credRows.map((row) => [row.userId, row.passwordHash]));
+        const checks = await Promise.all(candidates.map(async (candidate) => {
+          const hash = hashes.get(candidate.user.id);
+          return hash && await bcrypt.compare(input.password, hash) ? candidate : null;
+        }));
+        const matches = checks.filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null);
+        const invalidLogin = () => new TRPCError({ code: "UNAUTHORIZED", message: "E-mail ou senha inválidos." });
+        if (matches.length !== 1) {
+          audit("MegaDesk", matches.length > 1 ? "Login negado por credencial ambígua" : "Login negado por credencial inválida", undefined, false);
           throw invalidLogin();
         }
+        const { tenant: client, user } = matches[0];
         const permissions = resolveUserPermissions(user, client.modules);
         audit("MegaDesk", "Login realizado", client.clientId);
         await persistSyncState();

@@ -8,8 +8,10 @@
 
 import type { Request, Response } from "express";
 import { upsertSession, instanceNameFor } from "./session-store";
-import { getPool, getDb, searchCustomerByPhone, createCustomer, createConversation } from "../db";
-import { getEvolutionConfig } from "./config";
+import { randomUUID } from "node:crypto";
+import { getPool } from "../db";
+import { getEvolutionWebhookSecret } from "./config";
+import { evoGetMediaBase64, normalizeEvolutionRecipient } from "./client";
 
 // Socket.IO — importado dinamicamente para evitar dependência circular
 async function emitToClient(clientId: string, event: string, data: unknown) {
@@ -23,8 +25,16 @@ async function emitToClient(clientId: string, event: string, data: unknown) {
 }
 
 /** Resolve clientId a partir do instanceName (ex: "megadesk-cliente-001" → "cliente-001") */
-function clientIdFromInstance(instanceName: string): string {
-  return instanceName.replace(/^megadesk-/, "");
+async function clientIdFromInstance(instanceName: string): Promise<string | null> {
+  const [rows] = await getPool().execute(
+    `SELECT s.client_id AS clientId
+       FROM megadesk_evolution_sessions s
+       JOIN megadesk_domain_clients c ON c.client_id = s.client_id
+      WHERE s.instance_name = ? AND c.status = 'active' AND c.access_released = 1
+      LIMIT 1`,
+    [instanceName],
+  ) as any[];
+  return rows?.[0]?.clientId ?? null;
 }
 
 // ─── Tipos de payload Evolution ──────────────────────────────────────────────
@@ -35,32 +45,57 @@ interface EvolutionWebhookPayload {
   data: Record<string, any>;
 }
 
+export function normalizeEvolutionEvent(event: string): string {
+  return event.trim().toUpperCase().replace(/[.\-\s]+/g, "_");
+}
+
+export function evolutionPhoneCandidates(key: Record<string, any> | undefined): string[] {
+  const primary = typeof key?.remoteJid === "string" ? key.remoteJid : "";
+  const alternative = typeof key?.remoteJidAlt === "string" ? key.remoteJidAlt : "";
+  const jid = primary.endsWith("@lid") && alternative ? alternative : primary || alternative;
+  if (!jid || jid.includes("@g.us")) return [];
+
+  const digits = jid.replace(/@(?:s\.whatsapp\.net|lid)$/, "").replace(/\D/g, "");
+  if (!digits) return [];
+  let canonical: string;
+  try { canonical = normalizeEvolutionRecipient(digits); } catch { return []; }
+  const candidates = [canonical, digits];
+  if (canonical.startsWith("55") && (canonical.length === 12 || canonical.length === 13)) {
+    candidates.push(canonical.slice(2));
+  }
+  return Array.from(new Set(candidates));
+}
+
 // ─── Handler principal ───────────────────────────────────────────────────────
 
 export async function handleEvolutionWebhook(req: Request, res: Response): Promise<void> {
-  // Validar API key da Evolution (quando configurada)
+  // Validar segredo exclusivo do webhook.
   let expectedKey: string;
   try {
-    expectedKey = getEvolutionConfig().apiKey;
+    expectedKey = getEvolutionWebhookSecret();
   } catch {
     res.status(503).json({ error: "Evolution webhook is not configured" });
     return;
   }
-  const receivedKey = req.headers["apikey"] as string || req.headers["x-api-key"] as string;
+  const receivedKey = req.headers["x-megadesk-webhook-secret"] as string;
   if (!receivedKey || receivedKey !== expectedKey) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
-  // Responde 200 imediatamente para não bloquear a Evolution API
-  res.status(200).json({ ok: true });
-
   try {
     const payload = req.body as EvolutionWebhookPayload;
-    if (!payload?.event || !payload?.instance) return;
+    if (!payload?.event || !payload?.instance) {
+      res.status(400).json({ error: "Invalid webhook payload" });
+      return;
+    }
 
-    const clientId = clientIdFromInstance(payload.instance);
-    const event    = payload.event.toUpperCase();
+    const clientId = await clientIdFromInstance(payload.instance);
+    if (!clientId) {
+      res.status(404).json({ error: "Unknown instance" });
+      return;
+    }
+    const event = normalizeEvolutionEvent(payload.event);
 
     switch (event) {
       case "CONNECTION_UPDATE":
@@ -72,15 +107,17 @@ export async function handleEvolutionWebhook(req: Request, res: Response): Promi
         break;
 
       case "MESSAGES_UPSERT":
-        await handleMessagesUpsert(clientId, payload.data);
+        await handleMessagesUpsert(clientId, payload.instance, payload.data);
         break;
 
       default:
         // Eventos ignorados (MESSAGES_UPDATE, PRESENCE_UPDATE, etc.)
         break;
     }
+    res.status(200).json({ ok: true });
   } catch (err) {
-    console.error("[Evolution Webhook] Erro ao processar evento:", err);
+    console.error("[Evolution Webhook] event processing failed");
+    res.status(500).json({ error: "Webhook processing failed" });
   }
 }
 
@@ -105,7 +142,7 @@ async function handleConnectionUpdate(
 
   await upsertSession(clientId, instanceName, status, phoneNumber);
 
-  console.log(`[Evolution] ${clientId} → ${status}${phoneNumber ? ` (${phoneNumber})` : ""}`);
+  console.log(`[Evolution] tenant session status updated: clientId=${clientId} status=${status}`);
 
   // Notifica o frontend em tempo real
   await emitToClient(clientId, "whatsapp:status", {
@@ -143,6 +180,7 @@ async function handleQRCodeUpdated(
 
 async function handleMessagesUpsert(
   clientId: string,
+  instanceName: string,
   data: Record<string, any>
 ): Promise<void> {
   // Evolution pode enviar "messages" como array ou objeto único
@@ -156,58 +194,97 @@ async function handleMessagesUpsert(
     // Ignorar mensagens enviadas por nós (fromMe)
     if (msg?.key?.fromMe) continue;
 
-    const remoteJid: string = msg?.key?.remoteJid || "";
-    // Ignorar grupos (contêm @g.us)
-    if (remoteJid.includes("@g.us")) continue;
+    const phoneCandidates = evolutionPhoneCandidates(msg?.key);
+    if (!phoneCandidates.length) continue;
 
-    // Extrai número limpo: "5541999999999@s.whatsapp.net" → "5541999999999"
-    const phone = remoteJid.replace(/@s\.whatsapp\.net$/, "").replace(/[^0-9]/g, "");
-    if (!phone) continue;
-
-    // Extrai texto da mensagem (suporta texto, extended text e caption de mídia)
-    const text: string =
-      msg?.message?.conversation ||
-      msg?.message?.extendedTextMessage?.text ||
-      msg?.message?.imageMessage?.caption ||
-      msg?.message?.videoMessage?.caption ||
-      msg?.message?.documentMessage?.caption ||
-      msg?.message?.audioMessage ? "[Áudio]" :
-      msg?.message?.imageMessage ? "[Imagem]" :
-      msg?.message?.videoMessage ? "[Vídeo]" :
-      msg?.message?.documentMessage ? "[Documento]" :
-      msg?.message?.stickerMessage ? "[Sticker]" : "";
-
-    if (!text) continue;
+    // Extrai texto, mídia e contatos. Com webhookBase64=true, a Evolution inclui
+    // o binário para persistência compartilhada no banco do tenant.
+    const parsed = parseEvolutionIncomingMessage(msg);
+    if (!parsed) continue;
+    const { text, payload } = parsed;
+    if (payload.type !== "text" && payload.type !== "contact" && !payload.mediaData) {
+      try {
+        const downloaded = await evoGetMediaBase64(instanceName, msg);
+        const mimeType = downloaded.mimetype || String(payload.mimeType || "application/octet-stream");
+        payload.mediaData = downloaded.base64.startsWith("data:")
+          ? downloaded.base64
+          : `data:${mimeType};base64,${downloaded.base64}`;
+        payload.mimeType = mimeType;
+        payload.fileName = downloaded.fileName || payload.fileName;
+      } catch {
+        console.error(`[Evolution Webhook] media download failed: instance=${instanceName} messageId=${String(msg?.key?.id || "unknown")}`);
+      }
+    }
 
     const pushName: string = msg?.pushName || "";
     const now = new Date();
 
-    await saveIncomingMessage(clientId, phone, pushName, text, now);
+    const externalMessageId = msg?.key?.id;
+    if (!externalMessageId || typeof externalMessageId !== "string") continue;
+    await saveIncomingMessage(clientId, externalMessageId, phoneCandidates, pushName, text, now, payload);
   }
+}
+
+export function parseEvolutionIncomingMessage(msg: Record<string, any>): { text: string; payload: Record<string, unknown> } | null {
+  const image = msg?.message?.imageMessage;
+  const video = msg?.message?.videoMessage;
+  const audio = msg?.message?.audioMessage;
+  const document = msg?.message?.documentMessage;
+  const sticker = msg?.message?.stickerMessage;
+  const contact = msg?.message?.contactMessage;
+  const contacts = msg?.message?.contactsArrayMessage;
+  const textualContent: string = msg?.message?.conversation || msg?.message?.extendedTextMessage?.text ||
+    image?.caption || video?.caption || document?.caption || "";
+  const mediaNode = image || video || audio || document || sticker;
+  // Na Evolution 2.3.7 com webhookBase64=true, o binário chega como irmão do
+  // imageMessage/audioMessage/etc. dentro de `message.base64`.
+  const rawBase64 = mediaNode?.base64 || msg?.message?.base64 || msg?.base64 || msg?.data?.base64 || "";
+  const mimeType = mediaNode?.mimetype || mediaNode?.mimeType || "";
+  const type = image ? "image" : video ? "video" : audio ? "audio" : document ? "document" :
+    sticker ? "sticker" : contact || contacts ? "contact" : "text";
+  const text: string = textualContent || (audio ? "[Áudio]" : image ? "[Imagem]" : video ? "[Vídeo]" :
+    document ? "[Documento]" : sticker ? "[Figurinha]" : contact || contacts ? "[Contato]" : "");
+  if (!text) return null;
+  const contactPayload = contact ? { name: contact.displayName || "Contato", vcard: contact.vcard || "" } : contacts ? {
+    name: contacts.displayName || "Contatos",
+    vcard: (contacts.contacts || []).map((item: any) => item.vcard || "").filter(Boolean).join("\n"),
+  } : undefined;
+  const mediaData = rawBase64 ? (String(rawBase64).startsWith("data:") ? String(rawBase64) :
+    `data:${mimeType || "application/octet-stream"};base64,${rawBase64}`) : undefined;
+  return { text, payload: {
+    type, mediaData, mimeType: mimeType || undefined,
+    fileName: document?.fileName || document?.filename || undefined,
+    contact: contactPayload,
+  } };
 }
 
 // ─── Salvar mensagem recebida no banco ───────────────────────────────────────
 
 async function saveIncomingMessage(
   clientId: string,
-  phone: string,
+  externalMessageId: string,
+  phoneCandidates: string[],
   pushName: string,
   text: string,
-  at: Date
+  at: Date,
+  payload: Record<string, unknown> = {},
 ): Promise<void> {
+  const phone = phoneCandidates[0];
   const pool = getPool();
-  const db   = getDb();
-  const now  = at;
+  const connection = await pool.getConnection();
+  const lockName = `evo:${clientId}:${phone}`.slice(0, 64);
 
   try {
+    await connection.execute("SELECT GET_LOCK(?, 10)", [lockName]);
+    await connection.beginTransaction();
     // 1. Busca conversa existente pelo telefone
-    const [convRows] = await pool.execute(
+    const [convRows] = await connection.execute(
       `SELECT conversation_id, messages_json, customer_name
        FROM megadesk_domain_conversations
-       WHERE client_id = ? AND phone = ?
+       WHERE client_id = ? AND phone IN (?, ?, ?)
        ORDER BY created_at DESC
-       LIMIT 1`,
-      [clientId, phone]
+       LIMIT 1 FOR UPDATE`,
+      [clientId, phoneCandidates[0], phoneCandidates[1] ?? phoneCandidates[0], phoneCandidates[2] ?? phoneCandidates[0]]
     ) as any[];
 
     const newMsg = {
@@ -215,6 +292,7 @@ async function saveIncomingMessage(
       text,
       time: at.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
       timestamp: at.toISOString(),
+      ...payload,
     };
 
     if (convRows && convRows.length > 0) {
@@ -227,7 +305,18 @@ async function saveIncomingMessage(
       messages.push(newMsg);
 
       // Atualiza mensagens — mantém status atual (bot ou open), não sobrescreve
-      await pool.execute(
+      const [insertResult] = await connection.execute(
+        `INSERT IGNORE INTO megadesk_domain_conversations_messages
+           (message_id, conversation_id, sender, message, timestamp, status)
+         VALUES (?, ?, 'customer', ?, ?, 'received')`,
+        [externalMessageId, convId, text, at],
+      ) as any[];
+      if (!insertResult.affectedRows) {
+        await connection.rollback();
+        return;
+      }
+
+      await connection.execute(
         `UPDATE megadesk_domain_conversations
          SET messages_json     = ?,
              last_message      = ?,
@@ -246,31 +335,37 @@ async function saveIncomingMessage(
     } else {
       // ─── Nova conversa ───────────────────────────────────────────────────
       const customerName = pushName || `+${phone}`;
-      const conversationId = `conv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const conversationId = `conv-${randomUUID()}`;
 
       // Garante que o contato existe
-      const existing = await searchCustomerByPhone(phone, clientId);
-      if (!existing) {
-        const customerId = `cust-${Date.now()}`;
-        await createCustomer({ customerId, clientId, name: customerName, phone, company: "" });
-      }
+      await connection.execute(
+        `INSERT INTO megadesk_domain_customers (customerId, clientId, name, phone, company)
+         VALUES (?, ?, ?, ?, '')
+         ON DUPLICATE KEY UPDATE name = COALESCE(NULLIF(VALUES(name), ''), name)`,
+        [`cust-${randomUUID()}`, clientId, customerName, phone],
+      );
 
-      await createConversation({
-        conversationId,
-        clientId,
-        customerName,
-        phone,
-        company: "",
-        lastMessage: text.substring(0, 255),
-        messages: [newMsg],
-      });
+      await connection.execute(
+        `INSERT INTO megadesk_domain_conversations
+          (conversation_id, client_id, customer_name, phone, company, status, last_message,
+           last_message_from, time_label, messages_json, unread_count)
+         VALUES (?, ?, ?, ?, '', 'open', ?, 'customer', ?, ?, 1)`,
+        [conversationId, clientId, customerName, phone, text.substring(0, 255), newMsg.time, JSON.stringify([newMsg])],
+      );
+
+      await connection.execute(
+        `INSERT INTO megadesk_domain_conversations_messages
+           (message_id, conversation_id, sender, message, timestamp, status)
+         VALUES (?, ?, 'customer', ?, ?, 'received')`,
+        [externalMessageId, conversationId, text, at],
+      );
 
       // Garante status BOT (primeiro atendimento automático) e campos extras
-      await pool.execute(
+      await connection.execute(
         `UPDATE megadesk_domain_conversations
          SET last_message_from = 'customer',
              unread_count = 1,
-             status = 'bot'
+             status = 'open'
          WHERE conversation_id = ? AND client_id = ?`,
         [conversationId, clientId]
       );
@@ -282,15 +377,20 @@ async function saveIncomingMessage(
           name:         customerName,
           phone,
           company:      "",
-          status:       "bot",
+          status:       "open",
           lastMessage:  text.substring(0, 255),
           unreadCount:  1,
           lastMessageFrom: "customer",
         },
       });
     }
+    await connection.commit();
   } catch (err) {
-    console.error(`[Evolution] Erro ao salvar mensagem de ${phone}:`, err);
+    await connection.rollback().catch(() => undefined);
+    console.error(`[Evolution] incoming message persistence failed: clientId=${clientId}`);
+  } finally {
+    await connection.execute("SELECT RELEASE_LOCK(?)", [lockName]).catch(() => undefined);
+    connection.release();
   }
 }
 

@@ -25,3 +25,9 @@ export function getEvolutionSafeOrigin(): string {
   const url = new URL(getEvolutionConfig().apiUrl);
   return `${url.protocol}//${url.host}`;
 }
+
+export function getEvolutionWebhookSecret(): string {
+  const value = process.env.EVOLUTION_WEBHOOK_SECRET?.trim();
+  if (!value || value.length < 32) throw new Error("Configuração da Evolution inválida: defina EVOLUTION_WEBHOOK_SECRET forte.");
+  return value;
+}

@@ -25,7 +25,7 @@ async function main() {
     return;
   }
   if (command === "apply-main") {
-    if (required("ALLOW_DATABASE_MIGRATION") !== "1") throw new Error("ALLOW_DATABASE_MIGRATION deve ser exatamente 1.");
+    if (required("ALLOW_MAIN_MIGRATION") !== "1") throw new Error("ALLOW_MAIN_MIGRATION deve ser exatamente 1.");
     const url = required("MAIN_DATABASE_URL");
     databaseNameFromUrl(url);
     await applyCanonicalMigrations(url, MAIN_MIGRATIONS_DIR);

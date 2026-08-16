@@ -67,6 +67,7 @@ import {
   Smile,
   MapPin as MapPinIcon,
   Phone as PhoneIcon,
+  Paperclip,
 } from "lucide-react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
@@ -358,35 +359,36 @@ function ConversationsPage() {
   const [selectedConversation, setSelectedConversation] = React.useState<string | null>(null);
   const [conversations, setConversations] = React.useState<any[]>([]);
   const [messageInput, setMessageInput] = React.useState('');
+  const [attachment, setAttachment] = React.useState<{ kind: 'image' | 'video' | 'audio' | 'document' | 'sticker'; dataUrl: string; mimeType: string; fileName: string } | null>(null);
+  const [isSendingMessage, setIsSendingMessage] = React.useState(false);
+  const [optimisticMessages, setOptimisticMessages] = React.useState<any[]>([]);
+  const [isRecordingAudio, setIsRecordingAudio] = React.useState(false);
+  const [recordingSeconds, setRecordingSeconds] = React.useState(0);
+  const [autoSendRecordedAudio, setAutoSendRecordedAudio] = React.useState(false);
+  const attachmentInputRef = React.useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
+  const audioStreamRef = React.useRef<MediaStream | null>(null);
+  const audioChunksRef = React.useRef<Blob[]>([]);
   const [editModalOpen, setEditModalOpen] = React.useState(false);
   const [editName, setEditName] = React.useState('');
   const [editCompany, setEditCompany] = React.useState('');
   const [closeConfirmOpen, setCloseConfirmOpen] = React.useState(false);
   const [reopenConfirmOpen, setReopenConfirmOpen] = React.useState(false);
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [waConnected, setWaConnected] = React.useState<boolean | null>(null); // null = verificando
+  const whatsappStatusQuery = trpc.evolution.getStatus.useQuery(
+    { clientId },
+    {
+      enabled: !!clientId,
+      refetchInterval: 10000,
+      refetchOnWindowFocus: true,
+    },
+  );
+  const waConnected: boolean | null = whatsappStatusQuery.data
+    ? whatsappStatusQuery.data.status === 'connected'
+    : whatsappStatusQuery.isError
+      ? false
+      : null;
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
-
-  // Verificar status do WhatsApp periodicamente
-  React.useEffect(() => {
-    if (!clientId) return;
-    const checkWaStatus = async () => {
-      try {
-        const res = await fetch(`/api/trpc/evolution.getStatus?input=${encodeURIComponent(JSON.stringify({ json: { clientId } }))}`);
-        if (res.ok) {
-          const data = await res.json();
-          setWaConnected(data.status === 'connected');
-        } else {
-          setWaConnected(false);
-        }
-      } catch {
-        setWaConnected(false);
-      }
-    };
-    checkWaStatus();
-    const interval = setInterval(checkWaStatus, 10000); // verificar a cada 10s
-    return () => clearInterval(interval);
-  }, [clientId]);
 
   // Query para mensagens da conversa selecionada (lazy - só busca quando conversa é aberta)
   const { data: conversationMessages, refetch: refetchMessages } = trpc.megadesk.getConversationMessages.useQuery(
@@ -540,7 +542,7 @@ function ConversationsPage() {
 
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [selectedConversation]);
+  }, [selectedConversation, conversationMessages, optimisticMessages]);
 
   const filters: Array<{ id: 'open' | 'bot'; label: string; dot: string; count: number }> = [
     { id: 'open', label: 'Abertas', dot: 'bg-emerald-500', count: conversations.filter(c => c.status === 'open').length },
@@ -629,6 +631,140 @@ function ConversationsPage() {
   });
 
   const selectedConv = conversations.find(c => c.id === selectedConversation);
+
+  React.useEffect(() => {
+    setOptimisticMessages([]);
+  }, [selectedConversation]);
+
+  React.useEffect(() => {
+    if (!isRecordingAudio) return;
+    const timer = window.setInterval(() => setRecordingSeconds(value => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [isRecordingAudio]);
+
+  React.useEffect(() => () => audioStreamRef.current?.getTracks().forEach(track => track.stop()), []);
+
+  const prepareAttachment = React.useCallback((file: File, autoSend = false) => {
+    const kind = file.type === 'image/webp' ? 'sticker' : file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'document';
+    const limits = { image: 8_000_000, sticker: 8_000_000, audio: 12_000_000, video: 20_000_000, document: 12_000_000 };
+    if (file.size > limits[kind]) {
+      showToast('Arquivo excede o limite permitido para este tipo.', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setAttachment({ kind, dataUrl: String(reader.result), mimeType: file.type || 'application/octet-stream', fileName: file.name });
+      if (autoSend) setAutoSendRecordedAudio(true);
+    };
+    reader.onerror = () => showToast('Não foi possível ler o arquivo.', 'error');
+    reader.readAsDataURL(file);
+  }, []);
+
+  const toggleAudioRecording = React.useCallback(async () => {
+    if (isRecordingAudio) {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      showToast('Gravação de áudio não é suportada neste navegador.', 'error');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const preferredType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']
+        .find(type => MediaRecorder.isTypeSupported(type));
+      const recorder = new MediaRecorder(stream, preferredType ? { mimeType: preferredType } : undefined);
+      audioStreamRef.current = stream;
+      audioChunksRef.current = [];
+      recorder.ondataavailable = event => { if (event.data.size) audioChunksRef.current.push(event.data); };
+      recorder.onstop = () => {
+        const mimeType = recorder.mimeType || preferredType || 'audio/webm';
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        stream.getTracks().forEach(track => track.stop());
+        audioStreamRef.current = null;
+        mediaRecorderRef.current = null;
+        setIsRecordingAudio(false);
+        setRecordingSeconds(0);
+        if (!blob.size) { showToast('Nenhum áudio foi gravado.', 'error'); return; }
+        const extension = mimeType.includes('ogg') ? 'ogg' : 'webm';
+        prepareAttachment(new File([blob], `audio-${Date.now()}.${extension}`, { type: mimeType }), true);
+      };
+      recorder.onerror = () => {
+        stream.getTracks().forEach(track => track.stop());
+        setIsRecordingAudio(false);
+        setRecordingSeconds(0);
+        showToast('Não foi possível gravar o áudio.', 'error');
+      };
+      mediaRecorderRef.current = recorder;
+      setAttachment(null);
+      setRecordingSeconds(0);
+      setIsRecordingAudio(true);
+      recorder.start(250);
+    } catch {
+      showToast('Permita o acesso ao microfone para gravar áudio.', 'error');
+    }
+  }, [isRecordingAudio, prepareAttachment]);
+
+  const sendCurrentMessage = React.useCallback(async () => {
+    if (!selectedConv || (!messageInput.trim() && !attachment) || isSendingMessage) return;
+    if (waConnected === false) { showToast('WhatsApp desconectado. Reconecte em Configurações.', 'error'); return; }
+    const textToSend = messageInput.trim();
+    const attachmentToSend = attachment;
+    const optimisticId = `pending-${Date.now()}`;
+    setOptimisticMessages(previous => [...previous, {
+      id: optimisticId,
+      sender: 'agent',
+      from: 'agent',
+      text: textToSend || (attachmentToSend?.kind === 'audio' ? '[Áudio]' : attachmentToSend?.kind === 'video' ? '[Vídeo]' : attachmentToSend?.kind === 'image' ? '[Imagem]' : attachmentToSend?.kind === 'sticker' ? '[Figurinha]' : '[Documento]'),
+      type: attachmentToSend?.kind || 'text',
+      mediaData: attachmentToSend?.dataUrl,
+      mimeType: attachmentToSend?.mimeType,
+      fileName: attachmentToSend?.fileName,
+      timestamp: new Date().toISOString(),
+      time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      pending: true,
+    }]);
+    setMessageInput('');
+    setAttachment(null);
+    setIsSendingMessage(true);
+    try {
+      const endpoint = attachmentToSend ? '/api/trpc/megadesk.sendAttachment' : '/api/trpc/megadesk.sendMessage';
+      const json = attachmentToSend ? {
+        conversationId: selectedConv.id,
+        kind: attachmentToSend.kind,
+        dataUrl: attachmentToSend.dataUrl,
+        mimeType: attachmentToSend.mimeType,
+        fileName: attachmentToSend.fileName,
+        caption: textToSend || undefined,
+        userEmail: sessionData?.userEmail ?? '',
+      } : {
+        conversationId: selectedConv.id,
+        message: textToSend,
+        userEmail: sessionData?.userEmail ?? '',
+      };
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-tenant-id': clientId, 'x-user-email': sessionData?.userEmail ?? '' },
+        body: JSON.stringify({ json }),
+      });
+      if (!res.ok) throw new Error('send failed');
+      await refetchMessages();
+      setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
+    } catch {
+      setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
+      setMessageInput(textToSend);
+      setAttachment(attachmentToSend);
+      showToast(attachmentToSend ? 'Erro ao enviar anexo' : 'Erro ao enviar mensagem', 'error');
+    } finally {
+      setIsSendingMessage(false);
+    }
+  }, [attachment, clientId, isSendingMessage, messageInput, refetchMessages, selectedConv, sessionData?.userEmail, waConnected]);
+
+  React.useEffect(() => {
+    if (!autoSendRecordedAudio || !attachment || attachment.kind !== 'audio' || isSendingMessage) return;
+    setAutoSendRecordedAudio(false);
+    void sendCurrentMessage();
+  }, [attachment, autoSendRecordedAudio, isSendingMessage, sendCurrentMessage]);
 
   const formatTime = (ts: any) => {
     if (!ts) return '';
@@ -970,7 +1106,8 @@ function ConversationsPage() {
             {/* Área de Mensagens */}
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3" style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)' }}>
               {(() => {
-                const msgs: any[] = Array.isArray(conversationMessages) ? conversationMessages : [];
+                const persistedMessages: any[] = Array.isArray(conversationMessages) ? conversationMessages : [];
+                const msgs: any[] = [...persistedMessages, ...optimisticMessages];
                 if (msgs.length === 0) {
                   return (
                     <div className="flex justify-start">
@@ -994,42 +1131,38 @@ function ConversationsPage() {
                   const renderContent = () => {
                     if (msgType === 'image') {
                       return (
-                        <div className="flex items-center gap-2">
-                          <Image className="w-4 h-4 flex-shrink-0" />
-                          <span className="text-sm">{msgText !== '[imagem]' ? msgText : 'Imagem'}</span>
+                        <div className="space-y-2">
+                          {msg.mediaData ? <img src={msg.mediaData} alt={msg.fileName || 'Imagem recebida'} className="max-h-80 rounded-xl object-contain" /> : <Image className="w-5 h-5" />}
+                          {msgText && !/^\[imagem\]$/i.test(msgText) && <p className="text-sm">{msgText}</p>}
                         </div>
                       );
                     }
                     if (msgType === 'audio') {
                       return (
-                        <div className="flex items-center gap-2">
-                          <Mic className="w-4 h-4 flex-shrink-0" />
-                          <span className="text-sm">Mensagem de áudio</span>
-                        </div>
+                        msg.mediaData ? <audio controls preload="metadata" src={msg.mediaData} className="max-w-full" /> :
+                          <div className="flex items-center gap-2"><Mic className="w-4 h-4" /><span className="text-sm">Mensagem de áudio</span></div>
                       );
                     }
                     if (msgType === 'video') {
                       return (
-                        <div className="flex items-center gap-2">
-                          <Video className="w-4 h-4 flex-shrink-0" />
-                          <span className="text-sm">{msgText !== '[vídeo]' ? msgText : 'Vídeo'}</span>
+                        <div className="space-y-2">
+                          {msg.mediaData ? <video controls preload="metadata" src={msg.mediaData} className="max-h-80 rounded-xl" /> : <Video className="w-5 h-5" />}
+                          {msgText && !/^\[vídeo\]$/i.test(msgText) && <p className="text-sm">{msgText}</p>}
                         </div>
                       );
                     }
                     if (msgType === 'document') {
                       return (
-                        <div className="flex items-center gap-2">
+                        <a href={msg.mediaData || undefined} download={msg.fileName || 'documento'} className="flex items-center gap-2 underline-offset-2 hover:underline">
                           <FileText className="w-4 h-4 flex-shrink-0" />
                           <span className="text-sm">{msg.fileName || 'Documento'}</span>
-                        </div>
+                        </a>
                       );
                     }
                     if (msgType === 'sticker') {
                       return (
-                        <div className="flex items-center gap-2">
-                          <Smile className="w-4 h-4 flex-shrink-0" />
-                          <span className="text-sm">Figurinha</span>
-                        </div>
+                        msg.mediaData ? <img src={msg.mediaData} alt="Figurinha" className="h-40 w-40 object-contain" /> :
+                          <div className="flex items-center gap-2"><Smile className="w-4 h-4" /><span className="text-sm">Figurinha</span></div>
                       );
                     }
                     if (msgType === 'location') {
@@ -1041,10 +1174,14 @@ function ConversationsPage() {
                       );
                     }
                     if (msgType === 'contact') {
+                      const contactPhone = String(msg.contact?.vcard || '').match(/TEL[^:]*:([^\r\n]+)/i)?.[1]?.replace(/\D/g, '') || '';
                       return (
-                        <div className="flex items-center gap-2">
-                          <PhoneIcon className="w-4 h-4 flex-shrink-0" />
-                          <span className="text-sm">Contato compartilhado</span>
+                        <div className="min-w-64 space-y-3">
+                          <div className="flex items-center gap-3"><div className="rounded-full bg-emerald-100 p-2"><User className="h-5 w-5 text-emerald-700" /></div><div><p className="font-semibold">{msg.contact?.name || 'Contato compartilhado'}</p>{contactPhone && <p className="text-xs opacity-70">+{contactPhone}</p>}</div></div>
+                          {contactPhone && <button type="button" onClick={() => {
+                            localStorage.setItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE', contactPhone);
+                            window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'active-attendance', phone: contactPhone } }));
+                          }} className="w-full rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700">Iniciar conversa</button>}
                         </div>
                       );
                     }
@@ -1054,7 +1191,7 @@ function ConversationsPage() {
                   return (
                     <div key={msg.id || idx} className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
                       <div className="max-w-xs lg:max-w-md">
-                        <div className={`rounded-2xl px-4 py-2.5 shadow-sm ${
+                        <div className={`rounded-2xl px-4 py-2.5 shadow-sm ${msg.pending ? 'opacity-70' : ''} ${
                           isAgent
                             ? 'bg-gradient-to-br from-blue-500 to-violet-600 text-white rounded-tr-sm'
                             : 'bg-white border border-slate-100 text-slate-800 rounded-tl-sm'
@@ -1081,7 +1218,17 @@ function ConversationsPage() {
                   <span>WhatsApp desconectado. Vá em <strong>Configurações → WhatsApp</strong> para reconectar.</span>
                 </div>
               )}
+              {attachment && (
+                <div className="mb-3 flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
+                  {attachment.kind === 'image' || attachment.kind === 'sticker' ? <img src={attachment.dataUrl} alt="Prévia" className="h-16 w-16 rounded-lg object-contain" /> : attachment.kind === 'video' ? <Video className="h-8 w-8 text-blue-600" /> : attachment.kind === 'audio' ? <Mic className="h-8 w-8 text-blue-600" /> : <FileText className="h-8 w-8 text-blue-600" />}
+                  <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-700">{attachment.fileName}</p><p className="text-xs text-slate-500">Adicione uma legenda e pressione Enter para enviar</p></div>
+                  <button type="button" onClick={() => setAttachment(null)} className="rounded-full p-1 text-slate-500 hover:bg-white"><X className="h-4 w-4" /></button>
+                </div>
+              )}
               <div className="flex items-center gap-3">
+                <input ref={attachmentInputRef} type="file" className="hidden" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" onChange={(e) => { const file = e.target.files?.[0]; if (file) prepareAttachment(file); e.currentTarget.value = ''; }} />
+                <button type="button" title="Adicionar anexo" disabled={waConnected === false || isSendingMessage} onClick={() => attachmentInputRef.current?.click()} className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl border border-slate-200 text-slate-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50"><Paperclip className="h-5 w-5" /></button>
+                <button type="button" title={isRecordingAudio ? 'Parar gravação' : 'Gravar áudio'} disabled={waConnected === false || isSendingMessage} onClick={toggleAudioRecording} className={cn('flex h-11 flex-shrink-0 items-center justify-center rounded-2xl border transition disabled:opacity-50', isRecordingAudio ? 'min-w-20 gap-2 border-red-300 bg-red-50 px-3 text-red-600' : 'w-11 border-slate-200 text-slate-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600')}><Mic className={cn('h-5 w-5', isRecordingAudio && 'animate-pulse')} />{isRecordingAudio && <span className="text-xs font-semibold">{Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, '0')}</span>}</button>
                 <div className="flex-1 relative">
                   <input
                     type="text"
@@ -1089,28 +1236,11 @@ function ConversationsPage() {
                     value={messageInput}
                     disabled={waConnected === false}
                     onChange={(e) => setMessageInput(e.target.value)}
+                    onPaste={(e) => { const file = Array.from(e.clipboardData.files).find(item => item.type.startsWith('image/')); if (file) { e.preventDefault(); prepareAttachment(file); } }}
                     onKeyDown={async (e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
-                        if (!messageInput.trim() || !selectedConv) return;
-                        if (waConnected === false) { showToast('WhatsApp desconectado. Reconecte em Configurações.', 'error'); return; }
-                        const text = messageInput.trim();
-                        setMessageInput('');
-                        try {
-                          const res = await fetch('/api/trpc/megadesk.sendMessage', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'x-tenant-id': clientId, 'x-user-email': sessionData?.userEmail ?? '' },
-                            body: JSON.stringify({ json: { conversationId: selectedConv.id, message: text, userEmail: userName || 'agente@megadesk.local' } }),
-                          });
-                          if (!res.ok) {
-                            showToast('Erro ao enviar mensagem', 'error');
-                          } else {
-                            showToast('Mensagem enviada!', 'success');
-                            refetchMessages();
-                          }
-                        } catch {
-                          showToast('Erro ao enviar mensagem', 'error');
-                        }
+                        await sendCurrentMessage();
                       }
                     }}
                     className={cn(
@@ -1120,28 +1250,8 @@ function ConversationsPage() {
                   />
                 </div>
                 <button
-                  disabled={waConnected === false}
-                  onClick={async () => {
-                    if (!messageInput.trim() || !selectedConv) return;
-                    if (waConnected === false) { showToast('WhatsApp desconectado. Reconecte em Configurações.', 'error'); return; }
-                    const text = messageInput.trim();
-                    setMessageInput('');
-                    try {
-                      const res = await fetch('/api/trpc/megadesk.sendMessage', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'x-tenant-id': clientId, 'x-user-email': sessionData?.userEmail ?? '' },
-                        body: JSON.stringify({ json: { conversationId: selectedConv.id, message: text, userEmail: userName || 'agente@megadesk.local' } }),
-                      });
-                      if (!res.ok) {
-                        showToast('Erro ao enviar mensagem', 'error');
-                      } else {
-                        showToast('Mensagem enviada!', 'success');
-                        refetchMessages();
-                      }
-                    } catch {
-                      showToast('Erro ao enviar mensagem', 'error');
-                    }
-                  }}
+                  disabled={waConnected === false || isSendingMessage || (!messageInput.trim() && !attachment)}
+                  onClick={sendCurrentMessage}
                   className={cn(
                     'w-11 h-11 text-white rounded-2xl flex items-center justify-center transition-all duration-200 flex-shrink-0',
                     waConnected === false
@@ -3229,7 +3339,15 @@ function Shell() {
   const [indicadores, setIndicadores] = useState<any>(null);
   const [activeCrmClientId, setActiveCrmClientId] = useState<string | null>(null);
   const [activeAttendancePhone, setActiveAttendancePhone] = useState<string>('');
-  const [whatsappConnected, setWhatsappConnected] = useState(false);
+  const whatsappStatusQuery = trpc.evolution.getStatus.useQuery(
+    { clientId: session?.clientId ?? '' },
+    {
+      enabled: !!session?.clientId,
+      refetchInterval: 30000,
+      refetchOnWindowFocus: true,
+    },
+  );
+  const whatsappConnected = whatsappStatusQuery.data?.status === 'connected';
 
   const loginMutation = trpc.megadesk.loginByEmail.useMutation();
 
@@ -3244,7 +3362,9 @@ function Shell() {
       const detail = (e as CustomEvent).detail;
       if (detail?.route) {
         // Verificar se há número de telefone para preencher
-        const phone = localStorage.getItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
+        const phone = typeof detail.phone === 'string' && detail.phone.trim()
+          ? detail.phone.trim()
+          : localStorage.getItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
         if (phone) {
           setActiveAttendancePhone(phone);
           localStorage.removeItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
@@ -3255,25 +3375,6 @@ function Shell() {
     window.addEventListener('megadesk-navigate', handleNavigate);
     return () => window.removeEventListener('megadesk-navigate', handleNavigate);
   }, []);
-
-  // Verificar status do WhatsApp periodicamente
-  useEffect(() => {
-    if (!session?.clientId) return;
-    const checkStatus = async () => {
-      try {
-        const res = await fetch(`/api/trpc/evolution.getStatus?input=${encodeURIComponent(JSON.stringify({ json: { clientId: session.clientId } }))}`);
-        if (res.ok) {
-          const data = await res.json();
-          setWhatsappConnected(data.status === 'connected');
-        }
-      } catch {
-        setWhatsappConnected(false);
-      }
-    };
-    checkStatus();
-    const interval = setInterval(checkStatus, 30000); // checar a cada 30s
-    return () => clearInterval(interval);
-  }, [session?.clientId]);
 
   useEffect(() => {
     const storedSession = localStorage.getItem(MEGADESK_SESSION_KEY);
@@ -3555,7 +3656,6 @@ const Sun = (props: any) => (
 );
 
 function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) => void }) {
-  const [companyId, setCompanyId] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -3576,8 +3676,8 @@ function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) =>
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
-    if (!companyId.trim() || !email.trim() || !password.trim()) return;
-    loginMutation.mutate({ companyId: companyId.trim(), email: email.trim(), password });
+    if (!email.trim() || !password.trim()) return;
+    loginMutation.mutate({ email: email.trim(), password });
   }
 
   function handleForgot() {
@@ -3659,17 +3759,6 @@ function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) =>
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="mb-2 block text-sm font-bold text-slate-700">Identificador da empresa</label>
-              <input
-                type="text"
-                value={companyId}
-                onChange={(e) => { setCompanyId(e.target.value); setError(""); }}
-                placeholder="cliente-..."
-                autoComplete="organization"
-                className="h-13 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
-              />
-            </div>
-            <div>
               <label className="mb-2 block text-sm font-bold text-slate-700">E-mail</label>
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -3743,7 +3832,7 @@ function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) =>
 
             <button
               type="submit"
-              disabled={loginMutation.isPending || !companyId.trim() || !email.trim() || !password.trim()}
+              disabled={loginMutation.isPending || !email.trim() || !password.trim()}
               className="login-anim-btn group flex h-13 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700 hover:shadow-blue-300 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
             >
               {loginMutation.isPending ? (

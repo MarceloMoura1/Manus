@@ -1,19 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { resolveTenantLogin, type LoginTenant } from "./_core/tenant-login";
+import { resolveTenantLoginCandidates, type LoginTenant } from "./_core/tenant-login";
 
 function tenant(clientId: string, overrides: Partial<LoginTenant> = {}): LoginTenant {
   return { clientId, status: "active", accessReleased: true, users: [{ id: `user-${clientId}`, email: "same@example.invalid", status: "active" }], ...overrides };
 }
 
-describe("tenant-scoped login resolution", () => {
-  it("selects the explicit tenant when the same email exists in two tenants", () => {
+describe("credential-based tenant login resolution", () => {
+  it("returns every eligible tenant candidate for password verification", () => {
     const tenants = [tenant("company-a"), tenant("company-b")];
-    expect(resolveTenantLogin(tenants, " COMPANY-B ", " SAME@EXAMPLE.INVALID ")?.tenant.clientId).toBe("company-b");
+    expect(resolveTenantLoginCandidates(tenants, " SAME@EXAMPLE.INVALID ")).toHaveLength(2);
   });
 
-  it("never falls back to the first tenant for an absent or ambiguous company identity", () => {
-    expect(resolveTenantLogin([tenant("company-a"), tenant("company-b")], "missing", "same@example.invalid")).toBeNull();
-    expect(resolveTenantLogin([tenant("duplicate"), tenant("DUPLICATE")], "duplicate", "same@example.invalid")).toBeNull();
+  it("returns no candidate for an unknown email", () => {
+    expect(resolveTenantLoginCandidates([tenant("company-a")], "missing@example.invalid")).toHaveLength(0);
   });
 
   it.each([
@@ -22,6 +21,6 @@ describe("tenant-scoped login resolution", () => {
     { status: "active" as const, accessReleased: true, userStatus: "blocked" as const },
   ])("fails closed for tenant/user state %#", ({ status, accessReleased, userStatus }) => {
     const target = tenant("company-a", { status, accessReleased, users: [{ id: "user-a", email: "same@example.invalid", status: userStatus }] });
-    expect(resolveTenantLogin([target], "company-a", "same@example.invalid")).toBeNull();
+    expect(resolveTenantLoginCandidates([target], "same@example.invalid")).toHaveLength(0);
   });
 });

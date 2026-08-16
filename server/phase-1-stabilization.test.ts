@@ -10,12 +10,15 @@ import { handleEvolutionWebhook } from "./evolution/webhook";
 const root = resolve(import.meta.dirname, "..");
 const originalEvolutionUrl = process.env.EVOLUTION_API_URL;
 const originalEvolutionKey = process.env.EVOLUTION_API_KEY;
+const originalEvolutionWebhookSecret = process.env.EVOLUTION_WEBHOOK_SECRET;
 
 afterEach(() => {
   if (originalEvolutionUrl === undefined) delete process.env.EVOLUTION_API_URL;
   else process.env.EVOLUTION_API_URL = originalEvolutionUrl;
   if (originalEvolutionKey === undefined) delete process.env.EVOLUTION_API_KEY;
   else process.env.EVOLUTION_API_KEY = originalEvolutionKey;
+  if (originalEvolutionWebhookSecret === undefined) delete process.env.EVOLUTION_WEBHOOK_SECRET;
+  else process.env.EVOLUTION_WEBHOOK_SECRET = originalEvolutionWebhookSecret;
 });
 
 describe("Fase 1 - configuração Evolution", () => {
@@ -31,6 +34,7 @@ describe("Fase 1 - configuração Evolution", () => {
   it("falha claramente quando URL ou chave estão ausentes", () => {
     delete process.env.EVOLUTION_API_URL;
     delete process.env.EVOLUTION_API_KEY;
+    delete process.env.EVOLUTION_WEBHOOK_SECRET;
     expect(() => getEvolutionConfig()).toThrow("EVOLUTION_API_URL");
     process.env.EVOLUTION_API_URL = "http://evolution.invalid";
     expect(() => getEvolutionConfig()).toThrow("EVOLUTION_API_KEY");
@@ -65,8 +69,9 @@ describe("Fase 1 - configuração Evolution", () => {
 
     process.env.EVOLUTION_API_URL = "https://evolution.invalid";
     process.env.EVOLUTION_API_KEY = "validation-only";
+    process.env.EVOLUTION_WEBHOOK_SECRET = "validation-only-webhook-secret-32-characters";
     const unauthorized = response();
-    await handleEvolutionWebhook({ headers: { apikey: "wrong" }, body: {} } as any, unauthorized);
+    await handleEvolutionWebhook({ headers: { "x-megadesk-webhook-secret": "wrong" }, body: {} } as any, unauthorized);
     expect(unauthorized.statusCode).toBe(401);
   });
 });

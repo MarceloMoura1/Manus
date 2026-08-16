@@ -23,14 +23,11 @@ export function ActiveAttendancePage({ onNavigate, initialPhone }: { onNavigate?
 
   // Ler número de telefone do localStorage quando a página é montada (passado por navegação interna)
   useEffect(() => {
-    if (!initialPhone) {
-      const storedPhone = localStorage.getItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
-      if (storedPhone) {
-        setPhoneNumber(storedPhone);
-        localStorage.removeItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
-      }
-    }
-  }, []);
+    const storedPhone = localStorage.getItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
+    const phone = initialPhone || storedPhone;
+    if (phone) setPhoneNumber(phone);
+    if (storedPhone) localStorage.removeItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
+  }, [initialPhone]);
 
   // Obter clientId da sessão do usuário logado
   const session = useMemo(() => {

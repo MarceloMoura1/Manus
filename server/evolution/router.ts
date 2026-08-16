@@ -86,7 +86,8 @@ export const evolutionRouter = router({
    */
   connect: megadeskProcedure
     .input(z.object({ clientId: z.string().min(1) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (input.clientId !== ctx.tenantId) throw new TRPCError({ code: "FORBIDDEN", message: "Tenant inválido." });
       const { clientId } = input;
       const instanceName = instanceNameFor(clientId);
 
@@ -97,6 +98,7 @@ export const evolutionRouter = router({
       if (liveStatus === "connected") {
         const existing = await getSession(clientId);
         await upsertSession(clientId, instanceName, "connected", existing?.phoneNumber);
+        await setupWebhook(instanceName);
         console.log(`[Evolution] Já conectado: ${instanceName}`);
         return {
           ok: true,
@@ -185,7 +187,8 @@ export const evolutionRouter = router({
    */
   getQRCode: megadeskProcedure
     .input(z.object({ clientId: z.string().min(1) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      if (input.clientId !== ctx.tenantId) throw new TRPCError({ code: "FORBIDDEN", message: "Tenant inválido." });
       const { clientId } = input;
       const instanceName = instanceNameFor(clientId);
 
@@ -216,7 +219,8 @@ export const evolutionRouter = router({
    */
   getStatus: megadeskProcedure
     .input(z.object({ clientId: z.string().min(1) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      if (input.clientId !== ctx.tenantId) throw new TRPCError({ code: "FORBIDDEN", message: "Tenant inválido." });
       const { clientId } = input;
       const instanceName = instanceNameFor(clientId);
 
@@ -276,7 +280,8 @@ export const evolutionRouter = router({
    */
   disconnect: megadeskProcedure
     .input(z.object({ clientId: z.string().min(1) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (input.clientId !== ctx.tenantId) throw new TRPCError({ code: "FORBIDDEN", message: "Tenant inválido." });
       const { clientId } = input;
       const instanceName = instanceNameFor(clientId);
 
@@ -304,7 +309,8 @@ export const evolutionRouter = router({
         text:        z.string().min(1).max(4096),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (input.clientId !== ctx.tenantId) throw new TRPCError({ code: "FORBIDDEN", message: "Tenant inválido." });
       const { clientId, phoneNumber, text } = input;
       const instanceName = instanceNameFor(clientId);
 

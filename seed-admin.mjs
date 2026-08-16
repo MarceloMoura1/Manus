@@ -8,63 +8,54 @@
  *   ou com variáveis customizadas:
  *   ADMIN_EMAIL=outro@email.com ADMIN_PASSWORD=outraSenha node seed-admin.mjs
  */
-import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
-import { megaadminCredentials } from "./drizzle/schema.js";
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { pathToFileURL } from "node:url";
 
-if (!process.env.DATABASE_URL) {
-  console.error("❌ DATABASE_URL não definida no ambiente.");
-  console.error("   cp .env.example .env  →  edite DATABASE_URL");
-  process.exit(1);
+export function validateLocalDatabaseUrl(value) {
+  if (!value) throw new Error("DATABASE_URL is required.");
+  const parsed = new URL(value);
+  if (parsed.protocol !== "mysql:") throw new Error("DATABASE_URL must use mysql:.");
+  if (!["127.0.0.1", "localhost"].includes(parsed.hostname)) throw new Error("Bootstrap is restricted to the authorized local database.");
+  if ((parsed.port || "3306") !== "3308" || decodeURIComponent(parsed.pathname.slice(1)) !== "megadesk_local") {
+    throw new Error("Bootstrap is restricted to 127.0.0.1:3308/megadesk_local.");
+  }
+  return value;
 }
 
-// Credenciais padrão do MegaAdmin (podem ser sobrescritas por env vars)
-const EMAIL    = process.env.ADMIN_EMAIL    ?? "marcelo.mouraadmpro@gmail.com";
-const PASSWORD = process.env.ADMIN_PASSWORD ?? "MegaDesk@123";
-const NAME     = process.env.ADMIN_NAME     ?? "Marcelo Moura";
+export function validateAdminInput(environment) {
+  const email = environment.ADMIN_EMAIL?.trim().toLowerCase();
+  const password = environment.ADMIN_PASSWORD;
+  const name = environment.ADMIN_NAME?.trim() || "Administrador";
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("ADMIN_EMAIL is required and must be valid.");
+  if (!password) throw new Error("ADMIN_PASSWORD is required.");
+  if (password.length < 12 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+    throw new Error("ADMIN_PASSWORD must have at least 12 characters, upper/lowercase letters, a number and a symbol.");
+  }
+  return { email, password, name };
+}
 
-async function seedAdmin() {
-  const pool = await mysql.createPool(process.env.DATABASE_URL);
-  const db = drizzle(pool);
-
+export async function bootstrapAdmin(environment = process.env) {
+  const databaseUrl = validateLocalDatabaseUrl(environment.DATABASE_URL);
+  const { email, password, name } = validateAdminInput(environment);
+  const passwordHash = await bcrypt.hash(password, 12);
+  const pool = mysql.createPool(databaseUrl);
   try {
-    // Verificar se já existe
-    const existing = await db.select({ id: megaadminCredentials.id })
-      .from(megaadminCredentials)
-      .where(eq(megaadminCredentials.email, EMAIL.toLowerCase().trim()))
-      .limit(1);
-
-    const passwordHash = await bcrypt.hash(PASSWORD, 12);
-
-    if (existing.length > 0) {
-      // Atualizar senha se já existir
-      await db.update(megaadminCredentials)
-        .set({ passwordHash, name: NAME.trim(), active: 1 })
-        .where(eq(megaadminCredentials.email, EMAIL.toLowerCase().trim()));
-      console.log("✅ Admin atualizado com sucesso!");
-    } else {
-      // Criar novo
-      await db.insert(megaadminCredentials).values({
-        email: EMAIL.toLowerCase().trim(),
-        name: NAME.trim(),
-        passwordHash,
-        active: 1,
-      });
-      console.log("✅ Admin criado com sucesso!");
-    }
-
-    console.log(`   Email: ${EMAIL}`);
-    console.log(`   Senha: ${PASSWORD}`);
-    console.log(`   Acesse: https://admin.megadesk.online`);
-    console.log(`   Local:  http://localhost:3000/admin`);
-  } catch (err) {
-    console.error("❌ Erro:", err.message);
-    process.exit(1);
+    await pool.execute(
+      `INSERT INTO megaadmin_credentials (email, name, password_hash, active)
+       VALUES (?, ?, ?, 1)
+       ON DUPLICATE KEY UPDATE name = VALUES(name), password_hash = VALUES(password_hash), active = 1`,
+      [email, name, passwordHash],
+    );
   } finally {
     await pool.end();
   }
+  console.log("MegaAdmin bootstrap completed for exactly one account.");
 }
 
-seedAdmin();
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  bootstrapAdmin().catch((error) => {
+    console.error(error instanceof Error ? error.message : "MegaAdmin bootstrap failed.");
+    process.exitCode = 1;
+  });
+}
