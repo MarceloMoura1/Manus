@@ -14,6 +14,12 @@ import { SettingsPage as SettingsPageComponent } from "./SettingsPage";
 import { AdminSettingsPage } from "./AdminSettingsPage";
 import { BotConfigPage } from "./BotConfigPage";
 import { TimelineActivity } from "@/components/TimelineActivity";
+import {
+  AudioRecordingController,
+  browserAudioRecordingDependencies,
+  type AudioRecordingPhase,
+  type PreparedRecordedAudio,
+} from "@/lib/audioRecordingController";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +27,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowRight,
+  ArrowLeft,
   Bell,
   Bot,
   CheckCircle2,
@@ -362,13 +369,11 @@ function ConversationsPage() {
   const [attachment, setAttachment] = React.useState<{ kind: 'image' | 'video' | 'audio' | 'document' | 'sticker'; dataUrl: string; mimeType: string; fileName: string } | null>(null);
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
   const [optimisticMessages, setOptimisticMessages] = React.useState<any[]>([]);
-  const [isRecordingAudio, setIsRecordingAudio] = React.useState(false);
+  const [audioRecordingPhase, setAudioRecordingPhase] = React.useState<AudioRecordingPhase>('idle');
   const [recordingSeconds, setRecordingSeconds] = React.useState(0);
-  const [autoSendRecordedAudio, setAutoSendRecordedAudio] = React.useState(false);
   const attachmentInputRef = React.useRef<HTMLInputElement>(null);
-  const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
-  const audioStreamRef = React.useRef<MediaStream | null>(null);
-  const audioChunksRef = React.useRef<Blob[]>([]);
+  const audioControllerRef = React.useRef<AudioRecordingController | null>(null);
+  const sendRecordedAudioRef = React.useRef<(audio: PreparedRecordedAudio) => Promise<void>>(async () => undefined);
   const [editModalOpen, setEditModalOpen] = React.useState(false);
   const [editName, setEditName] = React.useState('');
   const [editCompany, setEditCompany] = React.useState('');
@@ -631,8 +636,14 @@ function ConversationsPage() {
   });
 
   const selectedConv = conversations.find(c => c.id === selectedConversation);
+  const isRecordingAudio = audioRecordingPhase === 'recording';
+  const isAudioBusy = audioRecordingPhase === 'requesting_permission'
+    || audioRecordingPhase === 'stopping'
+    || audioRecordingPhase === 'processing'
+    || audioRecordingPhase === 'sending';
 
   React.useEffect(() => {
+    audioControllerRef.current?.invalidate('Gravação cancelada porque a conversa foi alterada.');
     setOptimisticMessages([]);
   }, [selectedConversation]);
 
@@ -642,9 +653,9 @@ function ConversationsPage() {
     return () => window.clearInterval(timer);
   }, [isRecordingAudio]);
 
-  React.useEffect(() => () => audioStreamRef.current?.getTracks().forEach(track => track.stop()), []);
+  React.useEffect(() => () => audioControllerRef.current?.dispose(), []);
 
-  const prepareAttachment = React.useCallback((file: File, autoSend = false) => {
+  const prepareAttachment = React.useCallback((file: File) => {
     const kind = file.type === 'image/webp' ? 'sticker' : file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'document';
     const limits = { image: 8_000_000, sticker: 8_000_000, audio: 12_000_000, video: 20_000_000, document: 12_000_000 };
     if (file.size > limits[kind]) {
@@ -654,56 +665,83 @@ function ConversationsPage() {
     const reader = new FileReader();
     reader.onload = () => {
       setAttachment({ kind, dataUrl: String(reader.result), mimeType: file.type || 'application/octet-stream', fileName: file.name });
-      if (autoSend) setAutoSendRecordedAudio(true);
     };
     reader.onerror = () => showToast('Não foi possível ler o arquivo.', 'error');
     reader.readAsDataURL(file);
   }, []);
 
-  const toggleAudioRecording = React.useCallback(async () => {
-    if (isRecordingAudio) {
-      mediaRecorderRef.current?.stop();
-      return;
+  const getAudioController = React.useCallback(() => {
+    if (!audioControllerRef.current) {
+      audioControllerRef.current = new AudioRecordingController(browserAudioRecordingDependencies(), {
+        onPhaseChange: setAudioRecordingPhase,
+        onNotice: showToast,
+        onSend: audio => sendRecordedAudioRef.current(audio),
+      });
     }
+    return audioControllerRef.current;
+  }, []);
+
+  const startAudioRecording = React.useCallback(async () => {
+    if (!selectedConversation || !clientId || isAudioBusy || isRecordingAudio) return;
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       showToast('Gravação de áudio não é suportada neste navegador.', 'error');
       return;
     }
+    setAttachment(null);
+    setRecordingSeconds(0);
+    await getAudioController().start({
+      tenantId: clientId,
+      conversationId: selectedConversation,
+      userEmail: sessionData?.userEmail ?? '',
+    });
+  }, [clientId, getAudioController, isAudioBusy, isRecordingAudio, selectedConversation, sessionData?.userEmail]);
+
+  const finishAudioRecording = React.useCallback((action: 'send' | 'cancel') => {
+    audioControllerRef.current?.decide(action);
+  }, []);
+
+  const returnToConversationList = React.useCallback(() => {
+    audioControllerRef.current?.invalidate('Gravação cancelada ao voltar para a lista de conversas.');
+    setSelectedConversation(null);
+  }, []);
+
+  sendRecordedAudioRef.current = async audio => {
+    if (waConnected === false) throw new Error('WhatsApp disconnected');
+    const optimisticId = `pending-audio-${audio.generation}`;
+    setOptimisticMessages(previous => [...previous, {
+      id: optimisticId,
+      sender: 'agent',
+      from: 'agent',
+      text: '[Áudio]',
+      type: 'audio',
+      mediaData: audio.dataUrl,
+      mimeType: audio.mimeType,
+      fileName: audio.fileName,
+      timestamp: new Date().toISOString(),
+      time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      pending: true,
+    }]);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const preferredType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']
-        .find(type => MediaRecorder.isTypeSupported(type));
-      const recorder = new MediaRecorder(stream, preferredType ? { mimeType: preferredType } : undefined);
-      audioStreamRef.current = stream;
-      audioChunksRef.current = [];
-      recorder.ondataavailable = event => { if (event.data.size) audioChunksRef.current.push(event.data); };
-      recorder.onstop = () => {
-        const mimeType = recorder.mimeType || preferredType || 'audio/webm';
-        const blob = new Blob(audioChunksRef.current, { type: mimeType });
-        stream.getTracks().forEach(track => track.stop());
-        audioStreamRef.current = null;
-        mediaRecorderRef.current = null;
-        setIsRecordingAudio(false);
-        setRecordingSeconds(0);
-        if (!blob.size) { showToast('Nenhum áudio foi gravado.', 'error'); return; }
-        const extension = mimeType.includes('ogg') ? 'ogg' : 'webm';
-        prepareAttachment(new File([blob], `audio-${Date.now()}.${extension}`, { type: mimeType }), true);
-      };
-      recorder.onerror = () => {
-        stream.getTracks().forEach(track => track.stop());
-        setIsRecordingAudio(false);
-        setRecordingSeconds(0);
-        showToast('Não foi possível gravar o áudio.', 'error');
-      };
-      mediaRecorderRef.current = recorder;
-      setAttachment(null);
-      setRecordingSeconds(0);
-      setIsRecordingAudio(true);
-      recorder.start(250);
-    } catch {
-      showToast('Permita o acesso ao microfone para gravar áudio.', 'error');
+      const res = await fetch('/api/trpc/megadesk.sendAttachment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-tenant-id': audio.tenantId, 'x-user-email': audio.userEmail },
+        body: JSON.stringify({ json: {
+          conversationId: audio.conversationId,
+          kind: 'audio',
+          dataUrl: audio.dataUrl,
+          mimeType: audio.mimeType,
+          fileName: audio.fileName,
+          userEmail: audio.userEmail,
+        } }),
+      });
+      if (!res.ok) throw new Error('send failed');
+      await refetchMessages();
+      setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
+    } catch (error) {
+      setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
+      throw error;
     }
-  }, [isRecordingAudio, prepareAttachment]);
+  };
 
   const sendCurrentMessage = React.useCallback(async () => {
     if (!selectedConv || (!messageInput.trim() && !attachment) || isSendingMessage) return;
@@ -760,12 +798,6 @@ function ConversationsPage() {
     }
   }, [attachment, clientId, isSendingMessage, messageInput, refetchMessages, selectedConv, sessionData?.userEmail, waConnected]);
 
-  React.useEffect(() => {
-    if (!autoSendRecordedAudio || !attachment || attachment.kind !== 'audio' || isSendingMessage) return;
-    setAutoSendRecordedAudio(false);
-    void sendCurrentMessage();
-  }, [attachment, autoSendRecordedAudio, isSendingMessage, sendCurrentMessage]);
-
   const formatTime = (ts: any) => {
     if (!ts) return '';
     if (typeof ts === 'string' && ts.includes(':')) return ts;
@@ -785,10 +817,13 @@ function ConversationsPage() {
   const getAvatarColor = (id: string) => avatarColors[id?.charCodeAt(0) % avatarColors.length] || 'bg-slate-500';
 
   return (
-    <div className="flex h-full overflow-hidden rounded-2xl shadow-xl border border-slate-200 bg-white">
+    <div className="flex h-full min-h-0 w-full min-w-0 max-w-full overflow-hidden bg-white min-[900px]:rounded-2xl min-[900px]:border min-[900px]:border-slate-200 min-[900px]:shadow-xl">
 
       {/* ─── Coluna Esquerda: Lista de Conversas ─── */}
-      <div className="w-[420px] flex-shrink-0 flex flex-col border-r border-slate-100 bg-slate-50">
+      <div className={cn(
+        'min-h-0 min-w-0 w-full max-w-full flex-col bg-slate-50 min-[900px]:flex min-[900px]:w-[420px] min-[900px]:flex-shrink-0 min-[900px]:border-r min-[900px]:border-slate-100',
+        selectedConv ? 'hidden' : 'flex',
+      )} data-testid="conversation-list-panel">
 
                 {/* Header */}
         <div className="px-4 pt-4 pb-3 bg-white border-b border-slate-100">
@@ -988,7 +1023,10 @@ function ConversationsPage() {
             filteredConversations.map(conv => (
               <button
                 key={conv.id}
-                onClick={() => setSelectedConversation(conv.id)}
+                onClick={() => {
+                  audioControllerRef.current?.invalidate('Gravação cancelada porque a conversa foi alterada.');
+                  setSelectedConversation(conv.id);
+                }}
                 className={cn(
                   'w-full text-left px-4 py-3 border-b border-slate-100 transition-all duration-150 relative',
                   selectedConversation === conv.id
@@ -1046,20 +1084,32 @@ function ConversationsPage() {
       </div>
 
       {/* ─── Coluna Direita: Chat ─── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className={cn(
+        'min-h-0 min-w-0 w-full max-w-full flex-col overflow-hidden min-[900px]:flex min-[900px]:w-auto min-[900px]:flex-1',
+        selectedConv ? 'flex' : 'hidden',
+      )} data-testid="conversation-chat-panel">
         {selectedConv ? (
           <>
             {/* Header do Chat */}
-            <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-slate-100 flex-shrink-0">
-              <div className="flex items-center gap-3">
-                <div className={cn('w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold', getAvatarColor(selectedConv.id))}>
+            <div className="flex min-w-0 flex-shrink-0 items-center justify-between gap-2 border-b border-slate-100 bg-white px-3 py-3 md:px-6 md:py-4">
+              <div className="flex min-w-0 items-center gap-2 md:gap-3">
+                <button
+                  type="button"
+                  onClick={returnToConversationList}
+                  aria-label="Voltar para conversas"
+                  className="flex h-11 flex-shrink-0 items-center gap-1 rounded-xl px-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 min-[900px]:hidden"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                  <span>Voltar</span>
+                </button>
+                <div className={cn('hidden h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold text-white sm:flex', getAvatarColor(selectedConv.id))}>
                   {getInitials(selectedConv.name)}
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-slate-900">{selectedConv.name}</h3>
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-1.5 md:gap-2">
+                    <h3 className="truncate text-sm font-bold text-slate-900 md:text-base">{selectedConv.name}</h3>
                     <span className={cn(
-                      'text-xs px-2 py-0.5 rounded-full font-medium',
+                      'hidden flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium sm:inline',
                       selectedConv.status === 'open' ? 'bg-emerald-100 text-emerald-700' :
                       selectedConv.status === 'bot' ? 'bg-violet-100 text-violet-700' :
                       'bg-slate-100 text-slate-600'
@@ -1067,24 +1117,24 @@ function ConversationsPage() {
                       {selectedConv.status === 'open' ? 'Aberta' : selectedConv.status === 'bot' ? 'BOT' : 'Fechada'}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500">{selectedConv.phone} {selectedConv.company ? `• ${selectedConv.company}` : ''}</p>
+                  <p className="truncate text-xs text-slate-500">{selectedConv.phone} {selectedConv.company ? `• ${selectedConv.company}` : ''}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-shrink-0 items-center gap-1 md:gap-2">
                 <button
                   onClick={() => {
                     // Salvar o número no localStorage e navegar para Atendimento Ativo
                     localStorage.setItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE', selectedConv.phone || '');
                     window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'active-attendance' } }));
                   }}
-                  className="p-2 hover:bg-slate-100 rounded-xl transition-colors text-slate-500 hover:text-slate-700"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
                   title="Abrir Atendimento Ativo"
                 >
                   <PhoneCall className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => { setEditName(selectedConv.name); setEditCompany(selectedConv.company || ''); setEditModalOpen(true); }}
-                  className="p-2 hover:bg-slate-100 rounded-xl transition-colors text-slate-500 hover:text-slate-700"
+                  className="hidden h-10 w-10 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 sm:flex"
                   title="Editar cliente"
                 >
                   <Edit2 className="w-4 h-4" />
@@ -1092,7 +1142,7 @@ function ConversationsPage() {
                 <button
                   onClick={() => selectedConv.status === 'closed' ? setReopenConfirmOpen(true) : setCloseConfirmOpen(true)}
                   className={cn(
-                    'px-4 py-2 rounded-xl text-sm font-medium transition-all',
+                    'hidden rounded-xl px-3 py-2 text-sm font-medium transition-all sm:block md:px-4',
                     selectedConv.status === 'closed'
                       ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                       : 'bg-red-50 text-red-600 hover:bg-red-100'
@@ -1104,14 +1154,14 @@ function ConversationsPage() {
             </div>
 
             {/* Área de Mensagens */}
-            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3" style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)' }}>
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-4 md:px-6" style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)' }}>
               {(() => {
                 const persistedMessages: any[] = Array.isArray(conversationMessages) ? conversationMessages : [];
                 const msgs: any[] = [...persistedMessages, ...optimisticMessages];
                 if (msgs.length === 0) {
                   return (
                     <div className="flex justify-start">
-                      <div className="max-w-xs lg:max-w-md">
+                      <div className="min-w-0 max-w-[85%] md:max-w-xs lg:max-w-md">
                         <div className="bg-white rounded-2xl rounded-tl-sm px-4 py-2.5 shadow-sm border border-slate-100">
                           <p className="text-sm text-slate-800">{selectedConv.lastMessage || 'Conversa iniciada'}</p>
                           <p className="text-xs text-slate-400 mt-1 text-right">{formatTime(selectedConv.timestamp)}</p>
@@ -1190,7 +1240,7 @@ function ConversationsPage() {
                   
                   return (
                     <div key={msg.id || idx} className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
-                      <div className="max-w-xs lg:max-w-md">
+                      <div className="min-w-0 max-w-[85%] md:max-w-xs lg:max-w-md">
                         <div className={`rounded-2xl px-4 py-2.5 shadow-sm ${msg.pending ? 'opacity-70' : ''} ${
                           isAgent
                             ? 'bg-gradient-to-br from-blue-500 to-violet-600 text-white rounded-tr-sm'
@@ -1210,7 +1260,7 @@ function ConversationsPage() {
             </div>
 
             {/* Input de Mensagem */}
-            <div className="px-6 py-4 bg-white border-t border-slate-100 flex-shrink-0">
+            <div data-testid="conversation-composer" className="max-w-full flex-shrink-0 border-t border-slate-100 bg-white px-3 pt-3 md:px-6 md:pt-4" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
               {/* Indicador de status do WhatsApp */}
               {waConnected === false && (
                 <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 text-xs text-red-700">
@@ -1225,16 +1275,29 @@ function ConversationsPage() {
                   <button type="button" onClick={() => setAttachment(null)} className="rounded-full p-1 text-slate-500 hover:bg-white"><X className="h-4 w-4" /></button>
                 </div>
               )}
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:gap-3">
                 <input ref={attachmentInputRef} type="file" className="hidden" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" onChange={(e) => { const file = e.target.files?.[0]; if (file) prepareAttachment(file); e.currentTarget.value = ''; }} />
-                <button type="button" title="Adicionar anexo" disabled={waConnected === false || isSendingMessage} onClick={() => attachmentInputRef.current?.click()} className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl border border-slate-200 text-slate-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50"><Paperclip className="h-5 w-5" /></button>
-                <button type="button" title={isRecordingAudio ? 'Parar gravação' : 'Gravar áudio'} disabled={waConnected === false || isSendingMessage} onClick={toggleAudioRecording} className={cn('flex h-11 flex-shrink-0 items-center justify-center rounded-2xl border transition disabled:opacity-50', isRecordingAudio ? 'min-w-20 gap-2 border-red-300 bg-red-50 px-3 text-red-600' : 'w-11 border-slate-200 text-slate-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600')}><Mic className={cn('h-5 w-5', isRecordingAudio && 'animate-pulse')} />{isRecordingAudio && <span className="text-xs font-semibold">{Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, '0')}</span>}</button>
-                <div className="flex-1 relative">
+                <button type="button" title="Adicionar anexo" disabled={waConnected === false || isSendingMessage || isAudioBusy || isRecordingAudio} onClick={() => attachmentInputRef.current?.click()} className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl border border-slate-200 text-slate-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50"><Paperclip className="h-5 w-5" /></button>
+                {isRecordingAudio ? (
+                  <div className="order-first flex w-full items-center gap-2 sm:order-none sm:w-auto" role="group" aria-label="Controles da gravação de áudio">
+                    <button type="button" title="Cancelar gravação" aria-label="Cancelar gravação" onClick={() => finishAudioRecording('cancel')} className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl border border-red-200 bg-red-50 text-red-600 transition hover:border-red-300 hover:bg-red-100"><X className="h-5 w-5" /></button>
+                    <div className="flex h-11 min-w-20 items-center justify-center gap-2 rounded-2xl border border-red-300 bg-red-50 px-3 text-red-600" role="status" aria-label={`Gravando áudio há ${recordingSeconds} segundos`}><Mic className="h-5 w-5 animate-pulse" /><span className="text-xs font-semibold">{Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, '0')}</span></div>
+                    <button type="button" title="Enviar áudio" aria-label="Enviar áudio" onClick={() => finishAudioRecording('send')} className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white transition hover:bg-blue-700 disabled:opacity-50"><Send className="h-5 w-5" /></button>
+                  </div>
+                ) : isAudioBusy ? (
+                  <div className="order-first flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 px-3 text-sm font-medium text-blue-700 sm:order-none sm:w-auto" role="status">
+                    <Mic className="h-5 w-5" />
+                    {audioRecordingPhase === 'requesting_permission' ? 'Aguardando microfone…' : audioRecordingPhase === 'sending' ? 'Enviando áudio…' : 'Finalizando áudio…'}
+                  </div>
+                ) : (
+                  <button type="button" title="Gravar áudio" aria-label="Gravar áudio" disabled={waConnected === false || isSendingMessage || !selectedConversation} onClick={startAudioRecording} className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl border border-slate-200 text-slate-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50"><Mic className="h-5 w-5" /></button>
+                )}
+                <div className="relative min-w-0 flex-[1_1_10rem]">
                   <input
                     type="text"
                     placeholder={waConnected === false ? 'WhatsApp desconectado...' : 'Digite sua mensagem...'}
                     value={messageInput}
-                    disabled={waConnected === false}
+                    disabled={waConnected === false || isAudioBusy || isRecordingAudio}
                     onChange={(e) => setMessageInput(e.target.value)}
                     onPaste={(e) => { const file = Array.from(e.clipboardData.files).find(item => item.type.startsWith('image/')); if (file) { e.preventDefault(); prepareAttachment(file); } }}
                     onKeyDown={async (e) => {
@@ -1250,7 +1313,7 @@ function ConversationsPage() {
                   />
                 </div>
                 <button
-                  disabled={waConnected === false || isSendingMessage || (!messageInput.trim() && !attachment)}
+                  disabled={waConnected === false || isSendingMessage || isAudioBusy || isRecordingAudio || (!messageInput.trim() && !attachment)}
                   onClick={sendCurrentMessage}
                   className={cn(
                     'w-11 h-11 text-white rounded-2xl flex items-center justify-center transition-all duration-200 flex-shrink-0',
@@ -3427,10 +3490,11 @@ function Shell() {
   const settingsNavItems = filteredNavItems.filter(item => ["settings", "admin-settings", "bot-config", "ai-assistant", "help", "notifications", "whatsapp-config"].includes(item.id));
 
   return (
-    <div className={`flex h-screen bg-slate-50 ${theme === 'dark' ? 'dark bg-slate-950' : ''}`}>
+    <div className={`flex h-screen h-[100dvh] min-w-0 overflow-hidden bg-slate-50 ${theme === 'dark' ? 'dark bg-slate-950' : ''}`}>
       {/* Sidebar */}
       <div className={cn(
-        "fixed lg:relative z-40 h-full bg-slate-950 text-white flex flex-col transition-all duration-300",
+        "fixed lg:relative z-40 h-full bg-slate-950 text-white flex-col transition-all duration-300",
+        active === 'conversations' ? 'hidden lg:flex' : 'flex',
         sidebarOpen ? "w-64" : "w-20"
       )}>
         {/* Header com Logo */}
@@ -3591,7 +3655,7 @@ function Shell() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Header — oculto na rota conversations pois ela tem header próprio */}
         <header className={`bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between${active === 'conversations' ? ' hidden' : ''}`}>
           <div>
@@ -3606,7 +3670,7 @@ function Shell() {
         </header>
 
         {/* Content */}
-        <main className={`flex-1 flex flex-col ${active === 'conversations' ? 'overflow-hidden' : 'overflow-auto p-8'}`}>
+        <main className={`flex min-h-0 min-w-0 flex-1 flex-col ${active === 'conversations' ? 'overflow-hidden' : 'overflow-auto p-8'}`}>
           <ErrorBoundary key={active}>
           {active === "home" && <DashboardPage setActive={setActive} indicadores={indicadores} />}
           {active === "conversations" && <ConversationsPage />}
