@@ -5,7 +5,9 @@
  */
 import type { Server as HttpServer } from "http";
 import { Server as SocketIOServer, type Socket } from "socket.io";
+import type { Request } from "express";
 import type { WaConversationRecord, WaMessageRecord, WaMessageStatus } from "../types";
+import { operationalAllowedOrigins, resolveOperationalSession } from "../../../_core/megadesk-session";
 
 let io: SocketIOServer | null = null;
 
@@ -19,30 +21,44 @@ export function initWhatsAppSocket(httpServer: HttpServer): SocketIOServer {
   io = new SocketIOServer(httpServer, {
     path: "/api/ws/whatsapp",
     cors: {
-      origin: "*",
+      origin: [...operationalAllowedOrigins()],
       methods: ["GET", "POST"],
+      credentials: true,
     },
     transports: ["websocket", "polling"],
   });
 
+  io.use(async (socket, next) => {
+    try {
+      const identity = await resolveOperationalSession(socket.request as Request);
+      if (!identity) return next(new Error("UNAUTHORIZED"));
+      const declaredTenant = socket.handshake.auth?.clientId ?? socket.handshake.query?.clientId ?? socket.handshake.headers["x-tenant-id"];
+      if (typeof declaredTenant === "string" && declaredTenant !== identity.tenantId) return next(new Error("FORBIDDEN"));
+      socket.data.operationalIdentity = identity;
+      next();
+    } catch { next(new Error("UNAUTHORIZED")); }
+  });
+
   io.on("connection", (socket: Socket) => {
-    console.log(`[WA Socket] Cliente conectado: ${socket.id}`);
+    const identity = socket.data.operationalIdentity as Awaited<ReturnType<typeof resolveOperationalSession>>;
+    if (!identity) return socket.disconnect(true);
+    socket.join(`client:${identity.tenantId}`);
 
     // Cliente entra na sala do seu tenant
-    socket.on("wa:join_client", (clientId: string) => {
-      if (typeof clientId === "string" && clientId.length > 0) {
-        socket.join(`client:${clientId}`);
-        console.log(`[WA Socket] ${socket.id} entrou na sala: client:${clientId}`);
-      }
+    socket.on("wa:join_client", async (clientId: string) => {
+      const current = await resolveOperationalSession(socket.request as Request).catch(() => null);
+      if (!current || current.tenantId !== identity.tenantId || clientId !== identity.tenantId) socket.disconnect(true);
     });
 
     // Cliente sai da sala
-    socket.on("wa:leave_client", (clientId: string) => {
-      socket.leave(`client:${clientId}`);
+    socket.on("wa:leave_client", async (clientId: string) => {
+      const current = await resolveOperationalSession(socket.request as Request).catch(() => null);
+      if (!current || current.tenantId !== identity.tenantId || clientId !== identity.tenantId) return socket.disconnect(true);
+      socket.leave(`client:${identity.tenantId}`);
     });
 
     socket.on("disconnect", (reason) => {
-      console.log(`[WA Socket] Cliente desconectado: ${socket.id} (${reason})`);
+      if (process.env.NODE_ENV === "development") console.log(`[WA Socket] Cliente desconectado (${reason})`);
     });
   });
 
@@ -57,6 +73,20 @@ export function getSocketIO(): SocketIOServer | null {
   return io;
 }
 
+function emitTenantEvent(clientId: string, event: string, payload: unknown): void {
+  if (!io) return;
+  void (async () => {
+    const sockets = [...io!.sockets.sockets.values()].filter(socket => socket.rooms.has(`client:${clientId}`));
+    await Promise.all(sockets.map(async socket => {
+      const identity = await resolveOperationalSession(socket.request as Request).catch(() => null);
+      if (!identity || identity.tenantId !== clientId) return socket.disconnect(true);
+      socket.emit(event, payload);
+    }));
+  })().catch(() => {
+    if (process.env.NODE_ENV === "development") console.error("[WA Socket] Falha ao validar destinatários de evento.");
+  });
+}
+
 // ─── Emissores de Eventos ──────────────────────────────────────────────────────
 
 /**
@@ -67,20 +97,18 @@ export function emitNewMessage(
   conversation: WaConversationRecord,
   message: WaMessageRecord
 ): void {
-  if (!io) return;
-  io.to(`client:${clientId}`).emit("wa:new_message", { conversation, message });
+  emitTenantEvent(clientId, "wa:new_message", { conversation, message });
 }
 
 /**
  * Emite atualização de status de mensagem.
  */
 export function emitMessageStatus(
+  clientId: string,
   waMessageId: string,
   status: WaMessageStatus
 ): void {
-  if (!io) return;
-  // Broadcast global — o frontend filtra pelo ID
-  io.emit("wa:message_status", { waMessageId, status });
+  emitTenantEvent(clientId, "wa:message_status", { waMessageId, status });
 }
 
 /**
@@ -90,8 +118,7 @@ export function emitConversationUpdated(
   clientId: string,
   conversation: WaConversationRecord
 ): void {
-  if (!io) return;
-  io.to(`client:${clientId}`).emit("wa:conversation_updated", { conversation });
+  emitTenantEvent(clientId, "wa:conversation_updated", { conversation });
 }
 
 /**
@@ -101,6 +128,5 @@ export function emitNewConversation(
   clientId: string,
   conversation: WaConversationRecord
 ): void {
-  if (!io) return;
-  io.to(`client:${clientId}`).emit("wa:new_conversation", { conversation });
+  emitTenantEvent(clientId, "wa:new_conversation", { conversation });
 }

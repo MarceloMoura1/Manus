@@ -2,6 +2,7 @@ import type { CreateExpressContextOptions } from "@trpc/server/adapters/express"
 import type { User } from "./types";
 import { sdk } from "./sdk";
 import { jwtVerify } from "jose";
+import { resolveOperationalSession, type OperationalIdentity } from "./megadesk-session";
 
 export const MEGAADMIN_COOKIE = "megaadmin_session";
 
@@ -13,7 +14,9 @@ export type TrpcContext = {
   userRole?: string; // role do usuário no tenant
   userEmail?: string; // identidade da sessão MegaDesk para revalidação autoritativa
   operationalUserId?: string;
-  operationalUserRole?: string;
+  operationalUserRole?: OperationalIdentity["role"];
+  operationalSessionId?: string;
+  operationalPermissions?: string[];
 };
 
 async function tryMegaAdminSession(req: CreateExpressContextOptions["req"]): Promise<User | null> {
@@ -59,9 +62,7 @@ export async function createContext(
   opts: CreateExpressContextOptions
 ): Promise<TrpcContext> {
   let user: User | null = null;
-  let tenantId: string | undefined;
-  let userRole: string | undefined;
-  let userEmail: string | undefined;
+  let operationalSession: Awaited<ReturnType<typeof resolveOperationalSession>> = null;
 
   // 1. Try Manus OAuth session
   try {
@@ -91,36 +92,23 @@ export async function createContext(
     } as User;
   }
 
-  // 4. Extract tenant info from headers or session
+  // 4. MegaDesk operational identity comes only from its opaque server session.
   try {
-    const sessionData = opts.req.headers?.["x-tenant-id"];
-    if (typeof sessionData === "string") {
-      tenantId = sessionData;
-    }
-
-    const roleData = opts.req.headers?.["x-user-role"];
-    if (typeof roleData === "string") {
-      userRole = roleData;
-    }
-    const emailData = opts.req.headers?.["x-user-email"];
-    if (typeof emailData === "string") userEmail = emailData.trim().toLowerCase();
-
-    // For test user, use test client ID
-    if (!tenantId && user?.openId === 'test-user-dev') {
-      tenantId = 'test-client-dev';
-    }
+    operationalSession = await resolveOperationalSession(opts.req);
   } catch {
-    // Ignore errors extracting tenant info
+    operationalSession = null;
   }
 
   return {
     req: opts.req,
     res: opts.res,
     user,
-    tenantId,
-    userRole,
-    userEmail,
-    operationalUserId: undefined,
-    operationalUserRole: undefined,
+    tenantId: operationalSession?.tenantId,
+    userRole: operationalSession?.role,
+    userEmail: operationalSession?.userEmail,
+    operationalUserId: operationalSession?.userId,
+    operationalUserRole: operationalSession?.role,
+    operationalSessionId: operationalSession?.sessionId,
+    operationalPermissions: operationalSession?.permissions,
   };
 }

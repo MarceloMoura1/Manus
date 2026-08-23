@@ -15,19 +15,21 @@ const conversation = {
   assignedUserId: null,
 };
 
+const publicSession = {
+  clientId: "e2e-tenant",
+  company: "E2E",
+  permissions: ["conversations"],
+  userName: "Atendente E2E",
+  userEmail: "e2e@example.test",
+  userRole: "agent" as const,
+  plan: "test",
+  modules: ["conversations"],
+  expiresAt: Date.now() + 3_600_000,
+};
+
 async function preparePage(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem("megadesk_session_v1", JSON.stringify({
-      clientId: "e2e-tenant",
-      company: "E2E",
-      permissions: ["conversations"],
-      userName: "Atendente E2E",
-      userEmail: "e2e@example.test",
-      userRole: "agent",
-      plan: "test",
-      modules: ["conversations"],
-      expiresAt: Date.now() + 3_600_000,
-    }));
+  await page.addInitScript((session) => {
+    localStorage.setItem("megadesk_session_v1", JSON.stringify(session));
     localStorage.setItem("megadesk_active_page_v1", "conversations");
     Reflect.set(window, "__audioTracksStopped", 0);
     Object.defineProperty(navigator, "mediaDevices", {
@@ -53,17 +55,19 @@ async function preparePage(page: Page) {
       }
     }
     Object.defineProperty(window, "MediaRecorder", { configurable: true, value: FakeMediaRecorder });
-  });
+  }, publicSession);
   let sendRequests = 0;
   await page.route("**/api/trpc/**", async route => {
     const url = route.request().url();
-    if (route.request().method() === "POST") sendRequests += 1;
+    if (url.includes("megadesk.sendMessage") || url.includes("megadesk.sendAttachment")) sendRequests += 1;
     let data: unknown = null;
-    if (url.includes("megadesk.getConversations")) data = [conversation];
+    if (url.includes("megadesk.refreshSession")) data = { ok: true, session: publicSession };
+    else if (url.includes("megadesk.getConversations")) data = [conversation];
     else if (url.includes("megadesk.getConversationMessages")) data = [];
     else if (url.includes("evolution.getStatus")) data = { status: "connected" };
     const payload = { result: { data: { json: data } } };
-    await route.fulfill({ status: 200, contentType: "application/json", body: url.includes("batch=1") ? JSON.stringify([payload]) : JSON.stringify(payload) });
+    const batchSize = decodeURIComponent(new URL(url).pathname).split(",").length;
+    await route.fulfill({ status: 200, contentType: "application/json", body: url.includes("batch=1") ? JSON.stringify(Array.from({ length: batchSize }, () => payload)) : JSON.stringify(payload) });
   });
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("button", { name: /Cliente Teste Responsivo/ })).toBeVisible();

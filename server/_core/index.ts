@@ -12,6 +12,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
 import { handleEvolutionWebhook, ensureSessionTable } from "../evolution";
+import { operationalAllowedOrigins } from "./megadesk-session";
 
 // ─── Domínios permitidos (CORS) ───────────────────────────────────────────────
 const ALLOWED_ORIGINS = [
@@ -42,14 +43,18 @@ async function startServer() {
   const app = express();
   const server = createServer(app);
 
+  const trustedProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? "0");
+  if (Number.isInteger(trustedProxyHops) && trustedProxyHops > 0) app.set("trust proxy", trustedProxyHops);
+
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
   // ─── CORS ─────────────────────────────────────────────────────────────────
   app.use((req, res, next) => {
     const origin = req.headers.origin ?? "";
-    if (ALLOWED_ORIGINS.includes(origin) || !origin) {
-      res.setHeader("Access-Control-Allow-Origin", origin || "*");
+    const allowedOrigins = new Set([...ALLOWED_ORIGINS, ...operationalAllowedOrigins()]);
+    if ((typeof origin === "string" && allowedOrigins.has(origin)) || !origin) {
+      if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Credentials", "true");
       res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,PATCH,OPTIONS");
       res.setHeader("Access-Control-Allow-Headers",

@@ -724,7 +724,8 @@ function ConversationsPage() {
     try {
       const res = await fetch('/api/trpc/megadesk.sendAttachment', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-tenant-id': audio.tenantId, 'x-user-email': audio.userEmail },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ json: {
           conversationId: audio.conversationId,
           kind: 'audio',
@@ -782,7 +783,8 @@ function ConversationsPage() {
       };
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-tenant-id': clientId, 'x-user-email': sessionData?.userEmail ?? '' },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ json }),
       });
       if (!res.ok) throw new Error('send failed');
@@ -3412,7 +3414,7 @@ function Shell() {
   );
   const whatsappConnected = whatsappStatusQuery.data?.status === 'connected';
 
-  const loginMutation = trpc.megadesk.loginByEmail.useMutation();
+  const logoutMutation = trpc.megadesk.logout.useMutation();
 
   // Persistir página ativa no localStorage
   useEffect(() => {
@@ -3634,12 +3636,15 @@ function Shell() {
           
           {/* Logout Button */}
           <button
-            onClick={() => {
+            onClick={async () => {
+              try { await logoutMutation.mutateAsync(); }
+              catch { return; }
               localStorage.removeItem(MEGADESK_SESSION_KEY);
               localStorage.removeItem(MEGADESK_ACTIVE_PAGE_KEY);
               localStorage.removeItem("megadesk-session-token");
               localStorage.removeItem("manus-runtime-user-info");
               setSession(null);
+              window.location.replace("/");
             }}
             className={cn(
               "flex items-center py-3 rounded-lg text-slate-300 hover:text-red-400 hover:bg-red-900/20 transition-all duration-200 px-2"
@@ -3831,7 +3836,7 @@ function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) =>
                   value={email}
                   onChange={(e) => { setEmail(e.target.value); setError(""); }}
                   placeholder="seu@email.com"
-                  autoFocus
+                  autoComplete="username"
                   className="h-13 w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                 />
               </div>
@@ -3843,6 +3848,7 @@ function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) =>
                 <Lock className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
                   type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => { setPassword(e.target.value); setError(""); }}
                   placeholder="Sua senha de acesso"
@@ -3938,7 +3944,7 @@ function MegaDeskLoginGate({ onLogin }: { onLogin: (session: MegaDeskSession) =>
   );
 }
 
-function useSessionRefresh(session: MegaDeskSession | null, setSession: (session: MegaDeskSession) => void) {
+function useSessionRefresh(session: MegaDeskSession | null, setSession: (session: MegaDeskSession | null) => void) {
   const refreshMutation = trpc.megadesk.refreshSession.useMutation();
 
   React.useEffect(() => {
@@ -3946,22 +3952,17 @@ function useSessionRefresh(session: MegaDeskSession | null, setSession: (session
 
     // Verificar se a sessão precisa ser renovada
     const checkAndRefresh = async () => {
-      if (shouldRefreshSession(session)) {
-        try {
-          const result = await refreshMutation.mutateAsync({ userEmail: session.userEmail });
-          if (result.ok) {
-            const updatedSession = saveSession(result.session);
-            setSession(updatedSession);
-          }
-        } catch (error) {
-          console.error("Erro ao renovar sessão:", error);
-          // Se falhar, não fazer nada - deixar o usuário continuar
+      try {
+        const result = await refreshMutation.mutateAsync();
+        if (result.ok) {
+          const updatedSession = saveSession({ ...session, ...result.session });
+          setSession(updatedSession);
         }
+      } catch {
+        clearSession();
+        setSession(null);
       }
     };
-
-    // Verificar renovação imediatamente
-    checkAndRefresh();
 
     // Configurar intervalo para verificar periodicamente
     const interval = setInterval(checkAndRefresh, REFRESH_INTERVAL);
@@ -3974,9 +3975,12 @@ export function Home() {
   const [session, setSession] = useState<MegaDeskSession | null>(() => loadSession());
   const [isValidating, setIsValidating] = useState(true);
   const refreshMutation = trpc.megadesk.refreshSession.useMutation();
+  const validationStartedRef = React.useRef(false);
   
   // Validar e renovar sessão ao carregar a página
   React.useEffect(() => {
+    if (validationStartedRef.current) return;
+    validationStartedRef.current = true;
     const validateAndRefreshSession = async () => {
       try {
         const loadedSession = loadSession();
@@ -3986,12 +3990,12 @@ export function Home() {
           return;
         }
         
-        // Se a sessão está próxima de expirar, renovar
-        if (shouldRefreshSession(loadedSession)) {
+        // Browser storage is display-only; the opaque cookie is authoritative.
+        {
           try {
-            const result = await refreshMutation.mutateAsync({ userEmail: loadedSession.userEmail });
+            const result = await refreshMutation.mutateAsync();
             if (result.ok) {
-              const updatedSession = saveSession(result.session);
+              const updatedSession = saveSession({ ...loadedSession, ...result.session });
               setSession(updatedSession);
             } else {
               clearSession();
@@ -4003,8 +4007,6 @@ export function Home() {
             clearSession();
             setSession(null);
           }
-        } else {
-          setSession(loadedSession);
         }
       } catch (error) {
         console.error("Erro ao validar sessão:", error);

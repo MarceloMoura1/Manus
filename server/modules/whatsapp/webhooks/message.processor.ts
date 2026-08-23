@@ -149,5 +149,5 @@ export async function processMessageStatus(clientId: string, status: MetaWebhook
   await updateMessageStatus(clientId, status.id, waStatus);
 
   // Emitir atualização de status via socket
-  emitMessageStatus(status.id, waStatus);
+  emitMessageStatus(clientId, status.id, waStatus);
 }

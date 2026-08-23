@@ -54,22 +54,14 @@ export default function App() {
         httpBatchLink({
           url: TRPC_URL,
           transformer: superjson,
+          fetch(url, options) {
+            return fetch(url, { ...options, credentials: "include" });
+          },
           headers() {
             // Forward local session token for megaadmin procedures if present
             const token = localStorage.getItem("megadesk-session-token");
             const headers: Record<string, string> = {};
             if (token) headers["Authorization"] = `Bearer ${token}`;
-            // Forward MegaDesk tenant info for multi-tenant isolation
-            try {
-              const megadeskSession = localStorage.getItem("megadesk_session_v1");
-              if (megadeskSession) {
-                const parsed = JSON.parse(megadeskSession);
-                if (parsed?.clientId) headers["x-tenant-id"] = parsed.clientId;
-                if (parsed?.userRole) headers["x-user-role"] = parsed.userRole;
-                else if (parsed?.role) headers["x-user-role"] = parsed.role;
-                if (parsed?.userEmail) headers["x-user-email"] = parsed.userEmail;
-              }
-            } catch { /* ignore */ }
             return headers;
           },
         }),

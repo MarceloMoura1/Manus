@@ -29,6 +29,7 @@ import { provisionClientAtomically } from "./_core/client-provisioning";
 import { resolveTenantLoginCandidates } from "./_core/tenant-login";
 import { runPostCommitBestEffort } from "./_core/post-commit";
 import { normalizeEvolutionRecipient } from "./evolution/client";
+import { assertOperationalCsrf, clearOperationalSessionCookie, createOperationalSession, revokeOperationalSession } from "./_core/megadesk-session";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -1448,7 +1449,9 @@ export const appRouter = router({
       }),
     loginByEmail: publicProcedure
       .input(z.object({ email: z.string().trim().toLowerCase().email(), password: z.string().min(1) }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
+        try { assertOperationalCsrf(ctx.req); }
+        catch { throw new TRPCError({ code: "FORBIDDEN", message: "Origem da requisição não autorizada." }); }
         await hydrateSyncState();
         const email = input.email.trim().toLowerCase();
         const candidates = resolveTenantLoginCandidates(clients, email);
@@ -1458,8 +1461,8 @@ export const appRouter = router({
           .select({ userId: megadeskDomainClientUsers.userId, passwordHash: megadeskDomainClientUsers.passwordHash })
           .from(megadeskDomainClientUsers)
           .where(inArray(megadeskDomainClientUsers.userId, candidateIds)) : [];
-        const hashes = new Map(credRows.map((row) => [row.userId, row.passwordHash]));
-        const checks = await Promise.all(candidates.map(async (candidate) => {
+        const hashes = new Map(credRows.map(row => [row.userId, row.passwordHash]));
+        const checks = await Promise.all(candidates.map(async candidate => {
           const hash = hashes.get(candidate.user.id);
           return hash && await bcrypt.compare(input.password, hash) ? candidate : null;
         }));
@@ -1470,6 +1473,7 @@ export const appRouter = router({
           throw invalidLogin();
         }
         const { tenant: client, user } = matches[0];
+        const { expiresAt } = await createOperationalSession({ userId: user.id, clientId: client.clientId }, ctx.res, ctx.req);
         const permissions = resolveUserPermissions(user, client.modules);
         audit("MegaDesk", "Login realizado", client.clientId);
         await persistSyncState();
@@ -1484,29 +1488,27 @@ export const appRouter = router({
             company: client.company,
             plan: client.plan,
             modules: client.modules,
+            expiresAt: expiresAt.getTime(),
           },
         };
       }),
     refreshSession: megadeskProcedure
-      .input(z.object({ userEmail: z.string().email() }))
-      .mutation(async ({ input, ctx }) => {
+      .input(z.void())
+      .mutation(async ({ ctx }) => {
         await hydrateSyncState();
-        const email = input.userEmail.trim().toLowerCase();
         const client = clients.find((item) => item.clientId === ctx.tenantId);
-        const user = client?.users.find((item) => item.email.trim().toLowerCase() === email);
+        const user = client?.users.find((item) => item.id === ctx.operationalUserId);
         if (!client || !user || user.status !== "active" || !client.accessReleased || client.status !== "active") {
           audit("MegaDesk", "Refresh negado por identidade ou estado inválido", ctx.tenantId, false);
           throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão expirada. Faça login novamente." });
         }
-        const permissions = resolveUserPermissions(user, client.modules);
-        audit("MegaDesk", "Sessão renovada", client.clientId);
-        await persistSyncState();
+        const permissions = resolveUserPermissions({ ...user, role: ctx.operationalUserRole, permissions: ctx.operationalPermissions }, client.modules);
         return {
           ok: true,
           session: {
             userEmail: user.email,
             userName: user.name,
-            userRole: user.role,
+            userRole: ctx.operationalUserRole,
             permissions,
             clientId: client.clientId,
             company: client.company,
@@ -1515,6 +1517,18 @@ export const appRouter = router({
           },
         };
       }),
+    logout: publicProcedure.mutation(async ({ ctx }) => {
+      try { assertOperationalCsrf(ctx.req); }
+      catch { throw new TRPCError({ code: "FORBIDDEN", message: "Origem da requisição não autorizada." }); }
+      try {
+        await revokeOperationalSession(ctx.req);
+      } catch {
+        clearOperationalSessionCookie(ctx.res, ctx.req);
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Não foi possível encerrar a sessão com segurança." });
+      }
+      clearOperationalSessionCookie(ctx.res, ctx.req);
+      return { ok: true };
+    }),
   }),
   assistant: router({
     chat: publicProcedure

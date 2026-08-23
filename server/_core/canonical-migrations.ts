@@ -8,6 +8,7 @@ export const REQUIRED_RUNTIME_MAIN_TABLES = [
   "megadesk_ticket_statuses", "megadesk_crm_timeline", "megadesk_domain_conversations_messages",
   "megadesk_evolution_sessions", "megadesk_domain_ia_conversations",
   "megadesk_domain_ia_conversation_history", "megadesk_ia_token_usage",
+  "megadesk_operational_sessions",
 ] as const;
 
 export const REQUIRED_RUNTIME_COLUMNS: Record<string, readonly string[]> = {
@@ -16,6 +17,7 @@ export const REQUIRED_RUNTIME_COLUMNS: Record<string, readonly string[]> = {
   megadesk_domain_conversations_messages: ["message_id", "conversation_id", "status"],
   megadesk_evolution_sessions: ["client_id", "instance_name", "status"],
   megadesk_ia_token_usage: ["id", "client_id", "created_at"],
+  megadesk_operational_sessions: ["id", "token_hash", "user_id", "client_id", "expires_at", "revoked_at"],
 };
 
 function validateStrongCanonicalContract(folder: string, sqlFiles: string[], entries: Array<{ idx?: number; tag?: string }>): void {

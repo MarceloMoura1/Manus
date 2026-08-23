@@ -387,6 +387,24 @@ export const waAccounts = mysqlTable("wa_accounts", {
 	index("idx_wa_accounts_phone").on(table.phoneNumberId),
 ]);
 
+export const megadeskOperationalSessions = mysqlTable("megadesk_operational_sessions", {
+	id: varchar({ length: 80 }).primaryKey().notNull(),
+	tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+	userId: varchar("user_id", { length: 80 }).notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	sessionVersion: int("session_version").default(1).notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
+	expiresAt: timestamp("expires_at", { mode: 'string' }).notNull(),
+	lastUsedAt: timestamp("last_used_at", { mode: 'string' }).defaultNow().notNull(),
+	revokedAt: timestamp("revoked_at", { mode: 'string' }),
+},
+(table) => [
+	uniqueIndex("uq_mos_token_hash").on(table.tokenHash),
+	index("idx_mos_user").on(table.userId),
+	index("idx_mos_client").on(table.clientId),
+	index("idx_mos_expires").on(table.expiresAt),
+]);
+
 export const megadeskTenantProvisioningRequests = mysqlTable("megadesk_tenant_provisioning_requests", {
 	idempotencyKey: varchar("idempotency_key", { length: 120 }).primaryKey().notNull(),
 	payloadHash: varchar("payload_hash", { length: 64 }).notNull(),

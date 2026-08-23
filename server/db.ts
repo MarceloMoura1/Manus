@@ -42,7 +42,7 @@ export const REQUIRED_MAIN_TABLES = [
 	"megadesk_ticket_statuses", "megadesk_crm_timeline", "megadesk_domain_conversations_messages",
 	"megadesk_evolution_sessions", "megadesk_domain_ia_conversations",
 	"megadesk_domain_ia_conversation_history", "megadesk_ia_token_usage",
-	"megadesk_tenant_provisioning_requests",
+	"megadesk_tenant_provisioning_requests", "megadesk_operational_sessions",
 ] as const;
 
 export const REQUIRED_MAIN_COLUMNS = {
@@ -54,6 +54,7 @@ export const REQUIRED_MAIN_COLUMNS = {
 	megadesk_domain_conversations_messages: ["message_id", "conversation_id", "status"],
 	megadesk_ia_token_usage: ["id", "client_id", "created_at"],
 	megadesk_tenant_provisioning_requests: ["idempotency_key", "payload_hash", "client_id"],
+	megadesk_operational_sessions: ["id", "token_hash", "user_id", "client_id", "expires_at", "revoked_at"],
 } as const;
 
 export async function verifyMainSchema(pool: Pick<mysql.Pool, "execute"> = getPool()): Promise<void> {

@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const e2eBaseUrl = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
+const e2eWebServerCommand = process.env.PLAYWRIGHT_WEB_SERVER_COMMAND ?? 'pnpm dev';
+
 /**
  * Configuração do Playwright para testes E2E
  */
@@ -11,7 +14,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: e2eBaseUrl,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -33,8 +36,8 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: 'pnpm dev',
-    url: 'http://localhost:3000',
+    command: e2eWebServerCommand,
+    url: e2eBaseUrl,
     reuseExistingServer: !process.env.CI,
   },
 });
