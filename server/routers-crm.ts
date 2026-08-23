@@ -1,8 +1,6 @@
 /**
  * routers-crm.ts — Procedures tRPC para a página de Clientes (CRM)
- * REGRA 1: Toda procedure filtra por clientId.
- * REGRA 6: getReleasedClientOrThrow é chamado antes de qualquer operação.
- * REGRA 8: clientId sempre vem da sessão MegaDesk.
+ * O tenant é derivado exclusivamente da sessão operacional.
  */
 import { z } from "zod";
 import { router, megadeskProcedure } from "./_core/trpc";
@@ -12,11 +10,38 @@ import {
   getCrmClientById,
   createCrmClient,
   updateCrmClient,
-  deleteCrmClient,
   addCrmTimeline,
   listCrmTimeline,
 } from "./db-crm";
 import { getPool } from "./db";
+
+const CRM_ROLES = new Set(["admin", "manager"]);
+
+function requireCrmAccess(ctx: {
+  tenantId: string;
+  operationalUserRole?: string;
+  operationalPermissions?: string[];
+}) {
+  if (!ctx.operationalUserRole || !CRM_ROLES.has(ctx.operationalUserRole)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Acesso a Clientes indisponível." });
+  }
+  if (ctx.operationalPermissions && !ctx.operationalPermissions.includes("clients")) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Acesso a Clientes indisponível." });
+  }
+  return ctx.tenantId;
+}
+
+function publicCrmClient(client: Record<string, unknown>) {
+  const { clientId: _tenantId, ...publicClient } = client;
+  return publicClient;
+}
+
+function crmClientOrNotFound<T>(client: T | undefined | null): T {
+  if (!client) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Cliente não encontrado." });
+  }
+  return client;
+}
 
 const crmClientInputSchema = z.object({
   companyName: z.string().min(1, "Nome da empresa é obrigatório"),
@@ -39,86 +64,104 @@ const crmClientInputSchema = z.object({
     whatsapp: z.string(),
     description: z.string().optional(),
   })).optional().default([]),
-});
+}).strict();
 
 export const crmRouter = router({
   // Listar clientes CRM do tenant
   list: megadeskProcedure
     .input(z.object({
-      clientId: z.string().min(1),
       search: z.string().optional(),
-    }))
-    .query(async ({ input }) => {
-      const clients = await listCrmClients(input.clientId, input.search);
-      return { clients };
+    }).strict())
+    .query(async ({ input, ctx }) => {
+      const tenantId = requireCrmAccess(ctx);
+      const clients = await listCrmClients(tenantId, input.search);
+      return { clients: clients.map((client) => publicCrmClient(client as unknown as Record<string, unknown>)) };
+    }),
+
+  exportCsv: megadeskProcedure
+    .input(z.void())
+    .query(async ({ ctx }) => {
+      const tenantId = requireCrmAccess(ctx);
+      const clients = await listCrmClients(tenantId);
+      return {
+        rows: clients.map((client) => ({
+          companyName: client.companyName,
+          responsibleName: client.responsibleName,
+          cpfCnpj: client.cpfCnpj,
+          phone: client.phone,
+          whatsapp: client.whatsapp,
+          email: client.email,
+          address: client.address,
+          city: client.city,
+          state: client.state,
+          cep: client.cep,
+          status: client.status,
+          origin: client.origin,
+          observations: client.observations,
+        })),
+      };
     }),
 
   // Buscar cliente CRM por ID
   getById: megadeskProcedure
     .input(z.object({
-      clientId: z.string().min(1),
       crmClientId: z.string().min(1),
-    }))
-    .query(async ({ input }) => {
-      const client = await getCrmClientById(input.crmClientId, input.clientId);
-      if (!client) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Cliente não encontrado." });
-      }
-      return { client };
+    }).strict())
+    .query(async ({ input, ctx }) => {
+      const tenantId = requireCrmAccess(ctx);
+      const client = crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
+      return { client: publicCrmClient(client as unknown as Record<string, unknown>) };
     }),
 
   // Criar novo cliente CRM
   create: megadeskProcedure
     .input(z.object({
-      clientId: z.string().min(1),
       data: crmClientInputSchema,
-    }))
-    .mutation(async ({ input }) => {
-      const result = await createCrmClient(input.clientId, input.data);
+    }).strict())
+    .mutation(async ({ input, ctx }) => {
+      const tenantId = requireCrmAccess(ctx);
+      const result = await createCrmClient(tenantId, input.data);
       return { success: true, crmClientId: result.crmClientId };
     }),
 
   // Atualizar cliente CRM com registro de histórico na timeline
   update: megadeskProcedure
     .input(z.object({
-      clientId: z.string().min(1),
       crmClientId: z.string().min(1),
       data: crmClientInputSchema.partial(),
-      editedBy: z.string().optional().default("Usuário"),
-    }))
-    .mutation(async ({ input }) => {
-      await updateCrmClient(input.crmClientId, input.clientId, input.data);
+    }).strict())
+    .mutation(async ({ input, ctx }) => {
+      const tenantId = requireCrmAccess(ctx);
+      await updateCrmClient(input.crmClientId, tenantId, input.data);
       // Registrar na timeline quem editou e quando
-      await addCrmTimeline(input.crmClientId, input.clientId, {
+      await addCrmTimeline(input.crmClientId, tenantId, {
         type: "edit",
-        description: `Cadastro editado por ${input.editedBy}`,
-        author: input.editedBy,
+        description: `Cadastro editado por ${ctx.userEmail}`,
+        author: ctx.userEmail,
       });
-      return { success: true };
-    }),
-
-  // Excluir cliente CRM
-  delete: megadeskProcedure
-    .input(z.object({
-      clientId: z.string().min(1),
-      crmClientId: z.string().min(1),
-    }))
-    .mutation(async ({ input }) => {
-      await deleteCrmClient(input.crmClientId, input.clientId);
       return { success: true };
     }),
 
   // Buscar chamados vinculados ao cliente CRM pelo nome/empresa
   getChamados: megadeskProcedure
     .input(z.object({
-      clientId: z.string().min(1),
       crmClientId: z.string().min(1),
-    }))
-    .query(async ({ input }) => {
+    }).strict())
+    .query(async ({ input, ctx }) => {
+      const tenantId = requireCrmAccess(ctx);
       const pool = getPool();
       // Buscar dados do cliente CRM para usar como filtro
-      const crmClient = await getCrmClientById(input.crmClientId, input.clientId);
-      if (!crmClient) return { chamados: [] };
+      const crmClient = crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
+
+      const [directRows] = await pool.execute(
+        `SELECT chamadoId AS chamado_id, chamadoNumber AS chamado_number,
+                customerName AS customer_name, company, title, status, priority,
+                createdAt AS created_at
+         FROM megadesk_domain_chamados
+         WHERE clientId = ? AND customerId = ?
+         ORDER BY createdAt DESC LIMIT 50`,
+        [tenantId, input.crmClientId]
+      ) as any[];
 
       const searchTerms: string[] = [];
       if (crmClient.companyName) searchTerms.push(crmClient.companyName);
@@ -126,25 +169,34 @@ export const crmRouter = router({
       if (crmClient.phone) searchTerms.push(crmClient.phone);
       if (crmClient.whatsapp) searchTerms.push(crmClient.whatsapp);
 
-      if (searchTerms.length === 0) return { chamados: [] };
+      if (searchTerms.length === 0 && (directRows as any[]).length === 0) return { chamados: [] };
 
       // Buscar chamados que correspondam ao cliente (por empresa ou nome)
-      const placeholders = searchTerms.map(() => "customer_name LIKE ? OR company LIKE ?").join(" OR ");
+      const placeholders = searchTerms.map(() => "customerName LIKE ? OR company LIKE ?").join(" OR ");
       const values: string[] = [];
       searchTerms.forEach(term => {
         values.push(`%${term}%`, `%${term}%`);
       });
 
-      const [rows] = await pool.execute(
-        `SELECT chamado_id, chamado_number, customer_name, company, title, status, priority, created_at
+      const [rows] = searchTerms.length > 0 ? await pool.execute(
+        `SELECT chamadoId AS chamado_id, chamadoNumber AS chamado_number,
+                customerName AS customer_name, company, title, status, priority,
+                createdAt AS created_at
          FROM megadesk_domain_chamados
-         WHERE client_id = ? AND (${placeholders})
-         ORDER BY created_at DESC LIMIT 50`,
-        [input.clientId, ...values]
-      ) as any[];
+         WHERE clientId = ? AND (customerId IS NULL OR customerId = '') AND (${placeholders})
+         ORDER BY createdAt DESC LIMIT 50`,
+        [tenantId, ...values]
+      ) as any[] : [[]];
+
+      const seen = new Set<string>();
+      const linkedRows = [...(directRows as any[]), ...(rows as any[])].filter((row) => {
+        if (seen.has(row.chamado_id)) return false;
+        seen.add(row.chamado_id);
+        return true;
+      });
 
       return {
-        chamados: (rows as any[]).map(r => ({
+        chamados: linkedRows.map(r => ({
           id: r.chamado_id,
           number: r.chamado_number,
           customerName: r.customer_name,
@@ -160,13 +212,12 @@ export const crmRouter = router({
   // Buscar conversas vinculadas ao cliente CRM pelo telefone/empresa
   getConversas: megadeskProcedure
     .input(z.object({
-      clientId: z.string().min(1),
       crmClientId: z.string().min(1),
-    }))
-    .query(async ({ input }) => {
+    }).strict())
+    .query(async ({ input, ctx }) => {
+      const tenantId = requireCrmAccess(ctx);
       const pool = getPool();
-      const crmClient = await getCrmClientById(input.crmClientId, input.clientId);
-      if (!crmClient) return { conversas: [] };
+      const crmClient = crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
 
       // Busca 1: por crm_client_id direto (vínculo criado ao abrir conversa via Atendimento Ativo)
       const [directRows] = await pool.execute(
@@ -174,7 +225,7 @@ export const crmRouter = router({
          FROM megadesk_domain_conversations
          WHERE client_id = ? AND crm_client_id = ?
          ORDER BY created_at DESC LIMIT 50`,
-        [input.clientId, input.crmClientId]
+        [tenantId, input.crmClientId]
       ) as any[];
 
       // Busca 2: por nome/empresa/telefone (fallback para conversas sem vínculo direto)
@@ -196,7 +247,7 @@ export const crmRouter = router({
            FROM megadesk_domain_conversations
            WHERE client_id = ? AND (crm_client_id IS NULL OR crm_client_id = '') AND (${placeholders})
            ORDER BY created_at DESC LIMIT 50`,
-          [input.clientId, ...values]
+          [tenantId, ...values]
         ) as any[];
         indirectRows = rows as any[];
       }
@@ -228,28 +279,29 @@ export const crmRouter = router({
   // Buscar timeline do cliente CRM
   getTimeline: megadeskProcedure
     .input(z.object({
-      clientId: z.string().min(1),
       crmClientId: z.string().min(1),
-    }))
-    .query(async ({ input }) => {
-      const entries = await listCrmTimeline(input.crmClientId, input.clientId);
+    }).strict())
+    .query(async ({ input, ctx }) => {
+      const tenantId = requireCrmAccess(ctx);
+      crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
+      const entries = await listCrmTimeline(input.crmClientId, tenantId);
       return { entries };
     }),
 
   // Adicionar entrada manual na timeline
   addTimelineEntry: megadeskProcedure
     .input(z.object({
-      clientId: z.string().min(1),
       crmClientId: z.string().min(1),
       description: z.string().min(1),
-      author: z.string().optional().default("Usuário"),
       type: z.enum(["note", "call", "meeting", "email", "edit", "status_change", "other"]).optional().default("note"),
-    }))
-    .mutation(async ({ input }) => {
-      await addCrmTimeline(input.crmClientId, input.clientId, {
+    }).strict())
+    .mutation(async ({ input, ctx }) => {
+      const tenantId = requireCrmAccess(ctx);
+      crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
+      await addCrmTimeline(input.crmClientId, tenantId, {
         type: input.type,
         description: input.description,
-        author: input.author,
+        author: ctx.userEmail,
       });
       return { success: true };
     }),
@@ -257,7 +309,6 @@ export const crmRouter = router({
   // Importar clientes em massa via CSV (array de objetos já parseados)
   importCsv: megadeskProcedure
     .input(z.object({
-      clientId: z.string().min(1),
       rows: z.array(z.object({
         companyName: z.string().min(1),
         responsibleName: z.string().optional().default(""),
@@ -272,9 +323,10 @@ export const crmRouter = router({
         status: z.string().optional().default("lead"),
         origin: z.string().optional().default("outro"),
         observations: z.string().optional().default(""),
-      })).max(500, "Máximo de 500 registros por importação"),
-    }))
-    .mutation(async ({ input }) => {
+      }).strict()).max(500, "Máximo de 500 registros por importação"),
+    }).strict())
+    .mutation(async ({ input, ctx }) => {
+      const tenantId = requireCrmAccess(ctx);
       let imported = 0;
       let errors = 0;
       const errorMessages: string[] = [];
@@ -288,7 +340,7 @@ export const crmRouter = router({
             ? (row.origin as any)
             : "outro";
 
-          await createCrmClient(input.clientId, {
+          await createCrmClient(tenantId, {
             companyName: row.companyName,
             responsibleName: row.responsibleName ?? "",
             cpfCnpj: row.cpfCnpj ?? "",

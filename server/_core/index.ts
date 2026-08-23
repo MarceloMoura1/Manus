@@ -137,10 +137,14 @@ async function startServer() {
     console.log(`Port ${preferredPort} busy, using ${port}`);
   }
 
-  server.listen(port, () => {
-    console.log(`\nMegaDesk rodando em http://localhost:${port}`);
-    console.log(`Admin:  http://localhost:${port}/admin\n`);
-  });
+  const listenHost = process.env.HOST?.trim();
+  const onListening = () => {
+    const displayHost = listenHost || "localhost";
+    console.log(`\nMegaDesk rodando em http://${displayHost}:${port}`);
+    console.log(`Admin:  http://${displayHost}:${port}/admin\n`);
+  };
+  if (listenHost) server.listen(port, listenHost, onListening);
+  else server.listen(port, onListening);
 }
 
 startServer().catch(console.error);

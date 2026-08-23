@@ -192,6 +192,7 @@ const CONFIGURABLE_MODULES = [
   "conversations",
   "tickets",
   "tracking",
+  "clients",
   "erp",
   "bot-config",
   "ai-assistant",
@@ -225,6 +226,13 @@ function resolveUserPermissions(user: MegaClient["users"][number], clientModules
   } else {
     // Sem customizações: usar permissões da role
     finalPerms = rolePermissions(user.role);
+  }
+
+  // O CRM completo permanece restrito a admin/manager mesmo diante de uma
+  // permissão persistida arbitrária, sem reduzir os demais módulos já
+  // autorizados explicitamente para agent/viewer.
+  if (user.role === "agent" || user.role === "viewer") {
+    finalPerms = finalPerms.filter((permission) => permission !== "clients");
   }
   
   // CORREÇÃO: Filtrar por módulos do cliente (respeitar o que foi liberado)
@@ -1108,18 +1116,30 @@ export const appRouter = router({
           // 2º: Buscar na tabela de Clientes CRM (megadesk_crm_clients)
           // Normaliza o telefone removendo caracteres não numéricos para comparação
           const phoneDigits = canonicalPhone;
+          const localPhoneDigits = canonicalPhone.startsWith("55") ? canonicalPhone.slice(2) : canonicalPhone;
           const pool = getPool();
           const [crmRows] = await pool.execute(
             `SELECT crm_client_id, company_name, responsible_name, phone, whatsapp, email, contacts_json
              FROM megadesk_crm_clients
              WHERE client_id = ?
                AND (
-                 REPLACE(REPLACE(REPLACE(phone, '-', ''), ' ', ''), '()', '') LIKE ?
-                 OR REPLACE(REPLACE(REPLACE(whatsapp, '-', ''), ' ', ''), '()', '') LIKE ?
-                 OR contacts_json LIKE ?
-               )
-             LIMIT 1`,
-            [ctx.tenantId, `%${phoneDigits}%`, `%${phoneDigits}%`, `%${phoneDigits}%`]
+                  REPLACE(REPLACE(REPLACE(phone, '-', ''), ' ', ''), '()', '') LIKE ?
+                  OR REPLACE(REPLACE(REPLACE(phone, '-', ''), ' ', ''), '()', '') LIKE ?
+                  OR REPLACE(REPLACE(REPLACE(whatsapp, '-', ''), ' ', ''), '()', '') LIKE ?
+                  OR REPLACE(REPLACE(REPLACE(whatsapp, '-', ''), ' ', ''), '()', '') LIKE ?
+                  OR contacts_json LIKE ?
+                  OR contacts_json LIKE ?
+                )
+              LIMIT 1`,
+            [
+              ctx.tenantId,
+              `%${phoneDigits}%`,
+              `%${localPhoneDigits}%`,
+              `%${phoneDigits}%`,
+              `%${localPhoneDigits}%`,
+              `%${phoneDigits}%`,
+              `%${localPhoneDigits}%`,
+            ]
           ) as any[];
 
           if (crmRows && (crmRows as any[]).length > 0) {

@@ -18,7 +18,6 @@ import {
   Paperclip,
   Clock,
   Edit3,
-  Trash2,
   X,
   ChevronRight,
   Briefcase,
@@ -33,6 +32,7 @@ import {
   MinusCircle,
   TrendingDown,
   UploadCloud,
+  Download,
   RefreshCw,
   AlertTriangle,
   CheckCircle2,
@@ -47,7 +47,6 @@ function cn(...classes: Array<string | false | undefined | null>) {
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 type CrmClient = {
   crmClientId: string;
-  clientId: string;
   companyName: string;
   responsibleName: string;
   cpfCnpj: string;
@@ -128,12 +127,10 @@ const EMPTY_FORM: FormData = {
 };
 
 function ClientFormModal({
-  clientId,
   onClose,
   onSaved,
   editData,
 }: {
-  clientId: string;
   onClose: () => void;
   onSaved: () => void;
   editData?: CrmClient | null;
@@ -183,10 +180,6 @@ function ClientFormModal({
     onError(err) { toast.error(err.message); },
   });
 
-  const sessionUser = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem("megadesk_session_v1") ?? "{}"); } catch { return {}; }
-  }, []);
-
   const updateMutation = trpc.crm.update.useMutation({
     onSuccess() { toast.success("Cliente atualizado com sucesso!"); onSaved(); onClose(); },
     onError(err) { toast.error(err.message); },
@@ -200,9 +193,9 @@ function ClientFormModal({
     e.preventDefault();
     if (!form.companyName.trim()) { toast.error("Nome da empresa é obrigatório."); return; }
     if (editData) {
-      updateMutation.mutate({ clientId, crmClientId: editData.crmClientId, data: form, editedBy: sessionUser.userName ?? sessionUser.email ?? "Usuário" });
+      updateMutation.mutate({ crmClientId: editData.crmClientId, data: form });
     } else {
-      createMutation.mutate({ clientId, data: form });
+      createMutation.mutate({ data: form });
     }
   }
 
@@ -238,62 +231,62 @@ function ClientFormModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">Nome da Empresa *</label>
-                <input type="text" value={form.companyName} onChange={e => setField("companyName", e.target.value)}
+                <input aria-label="Nome da Empresa" type="text" value={form.companyName} onChange={e => setField("companyName", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   placeholder="Ex: Empresa XYZ Ltda" required />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Nome do Responsável</label>
-                <input type="text" value={form.responsibleName} onChange={e => setField("responsibleName", e.target.value)}
+                <input aria-label="Nome do Responsável" type="text" value={form.responsibleName} onChange={e => setField("responsibleName", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   placeholder="João Silva" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">CPF / CNPJ</label>
-                <input type="text" value={form.cpfCnpj} onChange={e => setField("cpfCnpj", e.target.value)}
+                <input aria-label="CPF / CNPJ" type="text" value={form.cpfCnpj} onChange={e => setField("cpfCnpj", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   placeholder="00.000.000/0001-00" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Telefone</label>
-                <input type="text" value={form.phone} onChange={e => setField("phone", e.target.value)}
+                <input aria-label="Telefone principal" type="text" value={form.phone} onChange={e => setField("phone", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   placeholder="(11) 9999-9999" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">WhatsApp</label>
-                <input type="text" value={form.whatsapp} onChange={e => setField("whatsapp", e.target.value)}
+                <input aria-label="WhatsApp principal" type="text" value={form.whatsapp} onChange={e => setField("whatsapp", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   placeholder="(11) 9999-9999" />
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">E-mail</label>
-                <input type="email" value={form.email} onChange={e => setField("email", e.target.value)}
+                <input aria-label="E-mail" type="email" value={form.email} onChange={e => setField("email", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   placeholder="contato@empresa.com.br" />
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">Endereço</label>
-                <input type="text" value={form.address} onChange={e => setField("address", e.target.value)}
+                <input aria-label="Endereço" type="text" value={form.address} onChange={e => setField("address", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   placeholder="Rua, número, bairro" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Cidade</label>
-                <input type="text" value={form.city} onChange={e => setField("city", e.target.value)}
+                <input aria-label="Cidade" type="text" value={form.city} onChange={e => setField("city", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   placeholder="São Paulo" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Estado</label>
-                  <input type="text" value={form.state} onChange={e => setField("state", e.target.value.toUpperCase().slice(0, 2))}
+                  <input aria-label="Estado" type="text" value={form.state} onChange={e => setField("state", e.target.value.toUpperCase().slice(0, 2))}
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                     placeholder="SP" maxLength={2} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">CEP</label>
-                  <input type="text" value={form.cep} onChange={e => setField("cep", e.target.value)}
+                  <input aria-label="CEP" type="text" value={form.cep} onChange={e => setField("cep", e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                     placeholder="00000-000" />
                 </div>
@@ -309,7 +302,7 @@ function ClientFormModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
-                <select value={form.status} onChange={e => setField("status", e.target.value as FormData["status"])}
+                <select aria-label="Status" value={form.status} onChange={e => setField("status", e.target.value as FormData["status"])}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white">
                   <option value="lead">Lead</option>
                   <option value="ativo">Ativo</option>
@@ -320,7 +313,7 @@ function ClientFormModal({
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Origem</label>
-                <select value={form.origin} onChange={e => setField("origin", e.target.value as FormData["origin"])}
+                <select aria-label="Origem" value={form.origin} onChange={e => setField("origin", e.target.value as FormData["origin"])}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white">
                   <option value="whatsapp">WhatsApp</option>
                   <option value="instagram">Instagram</option>
@@ -332,13 +325,13 @@ function ClientFormModal({
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">Responsável Interno</label>
-                <input type="text" value={form.internalResponsible} onChange={e => setField("internalResponsible", e.target.value)}
+                <input aria-label="Responsável Interno" type="text" value={form.internalResponsible} onChange={e => setField("internalResponsible", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   placeholder="Nome do atendente responsável" />
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">Tags</label>
-                <input type="text" value={form.tags} onChange={e => setField("tags", e.target.value)}
+                <input aria-label="Tags" type="text" value={form.tags} onChange={e => setField("tags", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   placeholder="vip, prioritário, parceiro (separados por vírgula)" />
               </div>
@@ -378,6 +371,7 @@ function ClientFormModal({
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1">Telefone</label>
                         <input
+                          aria-label={`Telefone do contato ${idx + 1}`}
                           type="text"
                           value={contact.phone}
                           onChange={e => updateContact(idx, "phone", e.target.value)}
@@ -388,6 +382,7 @@ function ClientFormModal({
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1">WhatsApp</label>
                         <input
+                          aria-label={`WhatsApp do contato ${idx + 1}`}
                           type="text"
                           value={contact.whatsapp}
                           onChange={e => updateContact(idx, "whatsapp", e.target.value)}
@@ -398,6 +393,7 @@ function ClientFormModal({
                       <div className="sm:col-span-2">
                         <label className="block text-xs font-medium text-slate-600 mb-1">Descrição (opcional)</label>
                         <input
+                          aria-label={`Descrição do contato ${idx + 1}`}
                           type="text"
                           value={contact.description || ""}
                           onChange={e => updateContact(idx, "description", e.target.value)}
@@ -420,6 +416,7 @@ function ClientFormModal({
               <FileText className="w-4 h-4 text-slate-400" /> Observações Internas
             </h3>
             <textarea
+              aria-label="Observações Internas"
               value={form.observations}
               onChange={e => setField("observations", e.target.value)}
               rows={4}
@@ -452,16 +449,12 @@ function ClientFormModal({
 // ─── Painel de Detalhes do Cliente ─────────────────────────────────────────────
 function ClientDetailPanel({
   client,
-  clientId,
   onEdit,
-  onDelete,
   onClose,
   onSendMessage,
 }: {
   client: CrmClient;
-  clientId: string;
   onEdit: () => void;
-  onDelete: () => void;
   onClose: () => void;
   onSendMessage?: (phone: string) => void;
 }) {
@@ -480,15 +473,15 @@ function ClientDetailPanel({
 
   // Queries das abas
   const chamadosQuery = trpc.crm.getChamados.useQuery(
-    { clientId, crmClientId: client.crmClientId },
+    { crmClientId: client.crmClientId },
     { enabled: activeTab === "chamados", refetchOnWindowFocus: false }
   );
   const conversasQuery = trpc.crm.getConversas.useQuery(
-    { clientId, crmClientId: client.crmClientId },
+    { crmClientId: client.crmClientId },
     { enabled: activeTab === "conversas", refetchOnWindowFocus: false }
   );
   const timelineQuery = trpc.crm.getTimeline.useQuery(
-    { clientId, crmClientId: client.crmClientId },
+    { crmClientId: client.crmClientId },
     { enabled: activeTab === "timeline", refetchOnWindowFocus: false }
   );
   const addTimelineMutation = trpc.crm.addTimelineEntry.useMutation({
@@ -519,9 +512,6 @@ function ClientDetailPanel({
           <div className="flex items-center gap-1">
             <button type="button" onClick={onEdit} className="p-2 hover:bg-slate-100 rounded-lg transition-colors" title="Editar">
               <Edit3 className="w-4 h-4 text-slate-500" />
-            </button>
-            <button type="button" onClick={onDelete} className="p-2 hover:bg-red-50 rounded-lg transition-colors" title="Excluir">
-              <Trash2 className="w-4 h-4 text-red-400" />
             </button>
             <button type="button" onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg transition-colors" title="Fechar">
               <X className="w-4 h-4 text-slate-500" />
@@ -819,12 +809,9 @@ function ClientDetailPanel({
               <button
                 onClick={() => {
                   if (!newTimelineNote.trim()) return;
-                  const session = JSON.parse(localStorage.getItem("megadesk_session_v1") ?? "{}");
                   addTimelineMutation.mutate({
-                    clientId,
                     crmClientId: client.crmClientId,
                     description: newTimelineNote.trim(),
-                    author: session.userName ?? "Usuário",
                     type: "note",
                   });
                 }}
@@ -907,13 +894,6 @@ function ClientDetailPanel({
 
 // ─── Página Principal ──────────────────────────────────────────────────────────
 export function ClientesPage({ initialSelectedId, onNavigate }: { initialSelectedId?: string; onNavigate?: (phone: string) => void } = {}) {
-  const session = useMemo(() => {
-    try {
-      return JSON.parse(localStorage.getItem("megadesk_session_v1") ?? "{}");
-    } catch { return {}; }
-  }, []);
-  const clientId: string = session.clientId ?? "";
-
   const handleSendMessage = useCallback((phone: string) => {
     if (onNavigate) {
       onNavigate(phone);
@@ -924,7 +904,6 @@ export function ClientesPage({ initialSelectedId, onNavigate }: { initialSelecte
   const [selectedClientId, setSelectedClientId] = useState<string | null>(initialSelectedId ?? null);
   const [showModal, setShowModal] = useState(false);
   const [editClient, setEditClient] = useState<CrmClient | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [csvImporting, setCsvImporting] = useState(false);
   const [csvResult, setCsvResult] = useState<{ imported: number; errors: number; errorMessages: string[] } | null>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
@@ -937,6 +916,29 @@ export function ClientesPage({ initialSelectedId, onNavigate }: { initialSelecte
     },
     onError(err) { setCsvImporting(false); toast.error(err.message); },
   });
+  const exportCsvQuery = trpc.crm.exportCsv.useQuery(undefined, { enabled: false });
+
+  const handleCsvExport = useCallback(async () => {
+    const result = await exportCsvQuery.refetch();
+    if (result.error || !result.data) {
+      toast.error(result.error?.message ?? "Não foi possível exportar os clientes.");
+      return;
+    }
+    const headers = ["empresa", "responsavel", "cpf_cnpj", "telefone", "whatsapp", "email", "endereco", "cidade", "estado", "cep", "status", "origem", "observacoes"];
+    const safeCell = (value: unknown) => {
+      const raw = String(value ?? "");
+      const formulaSafe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
+      return `"${formulaSafe.replace(/"/g, '""')}"`;
+    };
+    const rows = result.data.rows.map((row) => [row.companyName, row.responsibleName, row.cpfCnpj, row.phone, row.whatsapp, row.email, row.address, row.city, row.state, row.cep, row.status, row.origin, row.observations].map(safeCell).join(";"));
+    const blob = new Blob([`\uFEFF${headers.join(";")}\n${rows.join("\n")}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "clientes.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [exportCsvQuery]);
 
   const handleCsvFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -970,21 +972,16 @@ export function ClientesPage({ initialSelectedId, onNavigate }: { initialSelecte
         origin: r["origem"] || r["origin"] || "outro",
         observations: r["observacoes"] || r["observations"] || "",
       }));
-      importCsvMutation.mutate({ clientId, rows: mapped });
+      importCsvMutation.mutate({ rows: mapped });
     };
     reader.readAsText(file, "UTF-8");
     e.target.value = "";
-  }, [clientId, importCsvMutation]);
+  }, [importCsvMutation]);
 
-  const { data, isLoading, refetch } = trpc.crm.list.useQuery(
-    { clientId, search: search.trim() || undefined },
-    { enabled: !!clientId, refetchOnWindowFocus: false }
+  const { data, isLoading, isError, error, refetch } = trpc.crm.list.useQuery(
+    { search: search.trim() || undefined },
+    { refetchOnWindowFocus: false }
   );
-
-  const deleteMutation = trpc.crm.delete.useMutation({
-    onSuccess() { toast.success("Cliente excluído."); refetch(); setDeleteConfirm(null); setSelectedClientId(null); },
-    onError(err) { toast.error(err.message); },
-  });
 
   const clients: CrmClient[] = (data?.clients ?? []) as unknown as CrmClient[];
 
@@ -1006,20 +1003,12 @@ export function ClientesPage({ initialSelectedId, onNavigate }: { initialSelecte
     }
   }, [initialSelectedId, clients, selectedClient]);
 
-  if (!clientId) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <p className="text-slate-500">Sessão inválida. Faça login novamente.</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex h-full gap-0 overflow-hidden">
+    <div data-testid="clients-page" className="flex h-full min-w-0 flex-col gap-0 overflow-hidden lg:flex-row">
       {/* ─── Lista de Clientes (esquerda) ─── */}
       <div className={cn(
-        "flex flex-col border-r border-slate-200 bg-white transition-all duration-200",
-        selectedClient ? "w-80 flex-shrink-0" : "flex-1"
+        "flex min-h-0 min-w-0 flex-col border-r border-slate-200 bg-white transition-all duration-200",
+        selectedClient ? "max-h-[45%] w-full flex-shrink-0 lg:max-h-none lg:w-80" : "flex-1"
       )}>
         {/* Header da lista */}
         <div className="p-4 border-b border-slate-200">
@@ -1042,6 +1031,16 @@ export function ClientesPage({ initialSelectedId, onNavigate }: { initialSelecte
               >
                 {csvImporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
                 {csvImporting ? "Importando..." : "CSV"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleCsvExport()}
+                disabled={exportCsvQuery.isFetching}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors text-sm font-medium disabled:opacity-60"
+                title="Exportar clientes em CSV"
+              >
+                <Download className="w-4 h-4" />
+                Exportar
               </button>
               <button
                 onClick={() => { setEditClient(null); setShowModal(true); }}
@@ -1073,6 +1072,15 @@ export function ClientesPage({ initialSelectedId, onNavigate }: { initialSelecte
           {isLoading ? (
             <div className="flex items-center justify-center h-32">
               <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : isError ? (
+            <div className="flex flex-col items-center justify-center h-48 text-center p-4" role="alert">
+              <AlertTriangle className="w-10 h-10 text-amber-500 mb-3" />
+              <p className="text-slate-700 font-medium text-sm">Não foi possível carregar os clientes</p>
+              <p className="text-slate-400 text-xs mt-1">{error.message}</p>
+              <button type="button" onClick={() => void refetch()} className="mt-3 px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium">
+                Tentar novamente
+              </button>
             </div>
           ) : filteredClients.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-center p-4">
@@ -1128,12 +1136,10 @@ export function ClientesPage({ initialSelectedId, onNavigate }: { initialSelecte
 
       {/* ─── Painel de Detalhes (direita) ─── */}
       {selectedClient ? (
-        <div className="flex-1 bg-white overflow-hidden">
-          <ClientDetailPanel
-            client={selectedClient}
-            clientId={clientId}
-            onEdit={() => { setEditClient(selectedClient); setShowModal(true); }}
-            onDelete={() => setDeleteConfirm(selectedClient.crmClientId)}
+        <div className="min-h-0 min-w-0 flex-1 bg-white overflow-hidden">
+            <ClientDetailPanel
+              client={selectedClient}
+              onEdit={() => { setEditClient(selectedClient); setShowModal(true); }}
             onClose={() => setSelectedClientId(null)}
             onSendMessage={handleSendMessage}
           />
@@ -1151,41 +1157,12 @@ export function ClientesPage({ initialSelectedId, onNavigate }: { initialSelecte
       {/* ─── Modal de Cadastro/Edição ─── */}
       {showModal && (
         <ClientFormModal
-          clientId={clientId}
           onClose={() => { setShowModal(false); setEditClient(null); }}
           onSaved={() => refetch()}
           editData={editClient}
         />
       )}
 
-      {/* ─── Modal de Confirmação de Exclusão ─── */}
-      {deleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-80 mx-4">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center">
-                <Trash2 className="w-5 h-5 text-red-600" />
-              </div>
-              <div>
-                <h3 className="font-bold text-slate-900">Excluir Cliente</h3>
-                <p className="text-sm text-slate-500">Esta ação não pode ser desfeita.</p>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setDeleteConfirm(null)}
-                className="flex-1 px-4 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-colors font-medium text-sm">
-                Cancelar
-              </button>
-              <button
-                onClick={() => deleteMutation.mutate({ clientId, crmClientId: deleteConfirm })}
-                disabled={deleteMutation.isPending}
-                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors font-medium text-sm disabled:opacity-60">
-                {deleteMutation.isPending ? "Excluindo..." : "Excluir"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -470,7 +470,7 @@ export function ActiveAttendancePage({ onNavigate, initialPhone }: { onNavigate?
                     </div>
                   )}
                 </div>
-                {customerData.source === 'crm' && customerData.crmClientId && onNavigate && (
+                {customerData.source === 'crm' && customerData.crmClientId && onNavigate && session?.permissions?.includes('clients') && (
                   <div className="mt-4 flex justify-end">
                     <button
                       onClick={() => onNavigate({ route: 'clients', crmClientId: customerData.crmClientId })}

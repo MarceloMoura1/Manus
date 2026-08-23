@@ -3304,6 +3304,7 @@ function NotificationsPage() {
 function Shell() {
   const { theme, toggleTheme } = useTheme();
   const [active, setActive] = useState<RouteId>(() => {
+    if (window.location.pathname === "/clientes") return "clients";
     if (window.location.pathname === "/erp/produtos") return "erp-products";
     if (window.location.pathname === "/erp/estoque") return "erp-stock";
     if (window.location.pathname === "/erp/fornecedores") return "erp-suppliers";
@@ -3324,6 +3325,25 @@ function Shell() {
     setSidebarOpen(false);
     if (restoreFocus) window.setTimeout(() => sidebarTriggerRef.current?.focus(), 0);
   }, []);
+  const navigateToRoute = React.useCallback((route: RouteId, options?: { replace?: boolean }) => {
+    const path = route === "clients"
+      ? "/clientes"
+      : route === "erp-products"
+        ? "/erp/produtos"
+        : route === "erp-stock"
+          ? "/erp/estoque"
+          : route === "erp-suppliers"
+            ? "/erp/fornecedores"
+            : route === "erp-summary"
+              ? "/erp"
+              : "/";
+    window.history[options?.replace ? "replaceState" : "pushState"](null, "", path);
+    setActive(route);
+    if (window.innerWidth < 1024) {
+      setSidebarOpen(false);
+      window.setTimeout(() => mainContentRef.current?.focus(), 0);
+    }
+  }, []);
   React.useEffect(() => {
     if (!sidebarOpen || window.innerWidth >= 1024) return;
     window.setTimeout(() => sidebarRef.current?.querySelector<HTMLElement>('button:not([disabled])')?.focus(), 0);
@@ -3343,14 +3363,26 @@ function Shell() {
 
   const logoutMutation = trpc.megadesk.logout.useMutation();
 
-  // Persistir página ativa no localStorage
+  // Persistir página ativa no localStorage. A URL é alterada apenas por navegação explícita.
   useEffect(() => {
     localStorage.setItem(MEGADESK_ACTIVE_PAGE_KEY, active);
-    if (active.startsWith("erp-")) {
-      const path = active === "erp-products" ? "/erp/produtos" : active === "erp-stock" ? "/erp/estoque" : active === "erp-suppliers" ? "/erp/fornecedores" : "/erp";
-      window.history.replaceState(null, "", path);
-    }
   }, [active]);
+
+  useEffect(() => {
+    const restoreFromHistory = () => {
+      const path = window.location.pathname;
+      setActive(path === "/clientes" ? "clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp" ? "erp-summary" : "home");
+      window.setTimeout(() => mainContentRef.current?.focus(), 0);
+    };
+    window.addEventListener("popstate", restoreFromHistory);
+    return () => window.removeEventListener("popstate", restoreFromHistory);
+  }, []);
+
+  useEffect(() => {
+    if (session && active === "clients" && !session.permissions.includes("clients")) {
+      navigateToRoute("home", { replace: true });
+    }
+  }, [active, navigateToRoute, session]);
 
   // Escutar evento de navegação interna (ex: Atendimento Ativo com número preenchido)
   useEffect(() => {
@@ -3476,11 +3508,7 @@ function Shell() {
             const isActive = active === item.id;
             if (item.id === "erp-summary") {
               const openErpWorkspace = () => {
-                setActive("erp-summary");
-                if (window.innerWidth < 1024) {
-                  setSidebarOpen(false);
-                  window.setTimeout(() => mainContentRef.current?.focus(), 0);
-                }
+                navigateToRoute("erp-summary");
               };
               return <button key="erp" type="button" onClick={openErpWorkspace} className={cn("flex items-center rounded-lg py-3 transition-all duration-300 relative px-3 mx-2",active.startsWith("erp-")?"bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50 rounded-xl":"text-slate-300 hover:text-white hover:bg-slate-800/50")} style={active.startsWith("erp-")&&sidebarOpen?{width:"215px"}:{}} title="ERP"><PackageSearch className="h-5 w-5 flex-shrink-0"/>{sidebarOpen&&<span className="ml-3 overflow-hidden whitespace-nowrap text-base font-medium">ERP</span>}</button>;
             }
@@ -3488,7 +3516,7 @@ function Shell() {
             return (
               <button
                 key={item.id}
-                onClick={() => setActive(item.id)}
+                onClick={() => navigateToRoute(item.id)}
                 className={cn(
                   "flex items-center py-3 rounded-lg transition-all duration-300 relative px-3 mx-2",
                   isActive
@@ -3618,13 +3646,13 @@ function Shell() {
         </header>
 
         {/* Content */}
-        <main ref={mainContentRef} tabIndex={-1} className={`flex min-h-0 min-w-0 flex-1 flex-col ${active === 'conversations' ? 'overflow-hidden' : 'overflow-auto p-8'}`}>
+        <main ref={mainContentRef} tabIndex={-1} className={`flex min-h-0 min-w-0 flex-1 flex-col ${active === 'conversations' ? 'overflow-hidden' : 'overflow-auto p-4 sm:p-8'}`}>
           <ErrorBoundary key={active}>
-          {active === "home" && <DashboardPage setActive={setActive} indicadores={indicadores} />}
+          {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} />}
           {active === "conversations" && <ConversationsPage />}
           {active === "tickets" && <TicketsPage />}
           {active === "tracking" && <TrackingPage />}
-          {active.startsWith("erp-") && <ERPWorkspace section={(active === "erp-products" ? "products" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : "summary") as ErpSection} onNavigate={(section) => setActive(section === "products" ? "erp-products" : section === "stock" ? "erp-stock" : section === "suppliers" ? "erp-suppliers" : "erp-summary")} />}
+          {active.startsWith("erp-") && <ERPWorkspace section={(active === "erp-products" ? "products" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : "summary") as ErpSection} onNavigate={(section) => navigateToRoute(section === "products" ? "erp-products" : section === "stock" ? "erp-stock" : section === "suppliers" ? "erp-suppliers" : "erp-summary")} />}
           {active === "settings" && <SettingsPageComponent />}
           {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
           {active === "bot-config" && <BotConfigPage />}
@@ -3633,18 +3661,18 @@ function Shell() {
           {active === "notifications" && <NotificationsPage />}
           {active === "active-attendance" && <ActiveAttendancePage initialPhone={activeAttendancePhone} onNavigate={(nav) => {
             if (typeof nav === 'string') {
-              setActive(nav as RouteId);
+              navigateToRoute(nav as RouteId);
             } else if (nav && typeof nav === 'object') {
               const { route, crmClientId } = nav as { route: string; crmClientId?: string };
               if (crmClientId) {
                 setActiveCrmClientId(crmClientId);
               }
-              setActive(route as RouteId);
+              navigateToRoute(route as RouteId);
             }
           }} />}
           {active === "clients" && <ClientesPage initialSelectedId={activeCrmClientId ?? undefined} onNavigate={(phone) => {
             // Navegar para Conversas com novo chat aberto
-            setActive('conversations');
+            navigateToRoute('conversations');
           }} />}
           </ErrorBoundary>
         </main>

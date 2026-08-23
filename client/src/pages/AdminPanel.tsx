@@ -41,6 +41,7 @@ const ALL_MODULES = [
   "chamados",
   "rastreio",
   "erp",
+  "clientes",
   "configurar_bot",
   "assistente_ia",
 ] as const;
