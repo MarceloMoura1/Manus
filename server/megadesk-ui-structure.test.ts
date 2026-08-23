@@ -8,8 +8,17 @@ const appSource = readFileSync(resolve(process.cwd(), "client/src/App.tsx"), "ut
 const metricWebhookSource = readFileSync(resolve(process.cwd(), "server/metricWebhook.ts"), "utf8");
 const dbSource = readFileSync(resolve(process.cwd(), "server/db.ts"), "utf8");
 const botConfigSource = readFileSync(resolve(process.cwd(), "client/src/pages/BotConfigPage.tsx"), "utf8");
+const erpSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/ERPWorkspace.tsx"), "utf8");
 
 describe("MegaDesk UI structure", () => {
+  it("keeps a single real ERP implementation without legacy fictional metrics", () => {
+    expect(homeSource).not.toContain("function ERPPage()");
+    expect(homeSource).not.toContain("Vendas Hoje");
+    expect(homeSource).not.toContain("Pedido #PED-100");
+    expect(erpSource).toContain("trpc.erp.summary.useQuery");
+    expect(erpSource).toContain("trpc.erp.products.list.useQuery");
+    expect(erpSource).toContain("trpc.erp.stock.list.useQuery");
+  });
   it("preserva a navegação lateral da referência", () => {
     // Itens sempre visíveis (sem permissão)
     const alwaysVisible = ["Home", "Configurações", "Notificações"];
@@ -36,7 +45,7 @@ describe("MegaDesk UI structure", () => {
     const expectedTexts = [
       "Atendimento Inteligente em Um Lugar",
       "Conversas Abertas",
-      "Atividade Recente",
+      "Atividades Recentes",
       "Selecione uma conversa",
       "Chamados Ativos",
       "Novo Chamado",

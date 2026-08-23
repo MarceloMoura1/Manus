@@ -1,4 +1,4 @@
-import { mysqlTable, index, uniqueIndex, varchar, timestamp, int, mysqlEnum, text, longtext, date, bigint, tinyint, boolean } from "drizzle-orm/mysql-core"
+import { mysqlTable, index, uniqueIndex, varchar, timestamp, int, mysqlEnum, text, longtext, date, bigint, tinyint, boolean, decimal } from "drizzle-orm/mysql-core"
 
 export const evolutionFailedMessages = mysqlTable("evolution_failed_messages", {
 	failedMessageId: varchar("failed_message_id", { length: 255 }).primaryKey().notNull(),
@@ -695,4 +695,68 @@ export const megadeskUserShortcuts = mysqlTable("megadesk_user_shortcuts", {
 (table) => [
 	index("idx_mush_client_user").on(table.clientId, table.userId),
 	uniqueIndex("uq_mush_client_user_key").on(table.clientId, table.userId, table.shortcutKey),
+]);
+
+export const erpProducts = mysqlTable("erp_products", {
+	id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+	publicId: varchar("public_id", { length: 36 }).notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	name: varchar({ length: 180 }).notNull(),
+	sku: varchar({ length: 80 }).notNull(),
+	barcode: varchar({ length: 80 }),
+	description: text(),
+	category: varchar({ length: 120 }),
+	unit: mysqlEnum(['unit','kg','liter','meter']).notNull(),
+	costPriceCents: bigint("cost_price_cents", { mode: "number" }).default(0).notNull(),
+	salePriceCents: bigint("sale_price_cents", { mode: "number" }).default(0).notNull(),
+	minimumStock: decimal("minimum_stock", { precision: 18, scale: 3 }).default("0.000").notNull(),
+	active: tinyint().default(1).notNull(),
+	createdBy: varchar("created_by", { length: 80 }).notNull(),
+	updatedBy: varchar("updated_by", { length: 80 }),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+	uniqueIndex("uq_erp_products_tenant_public").on(table.clientId, table.publicId),
+	uniqueIndex("uq_erp_products_tenant_sku").on(table.clientId, table.sku),
+	uniqueIndex("uq_erp_products_tenant_barcode").on(table.clientId, table.barcode),
+	index("idx_erp_products_tenant_name").on(table.clientId, table.name),
+	index("idx_erp_products_tenant_active").on(table.clientId, table.active),
+]);
+
+export const erpStockBalances = mysqlTable("erp_stock_balances", {
+	id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	productId: bigint("product_id", { mode: "number" }).notNull(),
+	quantity: decimal({ precision: 18, scale: 3 }).default("0.000").notNull(),
+	version: int().default(0).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+	uniqueIndex("uq_erp_stock_balance_tenant_product").on(table.clientId, table.productId),
+	index("idx_erp_stock_balance_tenant").on(table.clientId),
+]);
+
+export const erpStockMovements = mysqlTable("erp_stock_movements", {
+	id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+	publicId: varchar("public_id", { length: 36 }).notNull(),
+	clientId: varchar("client_id", { length: 80 }).notNull(),
+	productId: bigint("product_id", { mode: "number" }).notNull(),
+	type: mysqlEnum(['initial','manual_in','manual_out','adjustment_in','adjustment_out','reversal']).notNull(),
+	direction: mysqlEnum(['in','out']).notNull(),
+	quantity: decimal({ precision: 18, scale: 3 }).notNull(),
+	previousBalance: decimal("previous_balance", { precision: 18, scale: 3 }).notNull(),
+	resultingBalance: decimal("resulting_balance", { precision: 18, scale: 3 }).notNull(),
+	reason: varchar({ length: 500 }).notNull(),
+	referenceType: mysqlEnum("reference_type", ['manual','purchase','sale','purchase_reversal','sale_reversal','movement']),
+	referenceId: varchar("reference_id", { length: 80 }),
+	idempotencyKey: varchar("idempotency_key", { length: 100 }).notNull(),
+	payloadHash: varchar("payload_hash", { length: 64 }).notNull(),
+	reversalOf: bigint("reversal_of", { mode: "number" }),
+	createdBy: varchar("created_by", { length: 80 }).notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	uniqueIndex("uq_erp_stock_movement_tenant_public").on(table.clientId, table.publicId),
+	uniqueIndex("uq_erp_stock_movement_tenant_idempotency").on(table.clientId, table.idempotencyKey),
+	uniqueIndex("uq_erp_stock_movement_tenant_reversal").on(table.clientId, table.reversalOf),
+	index("idx_erp_stock_movement_tenant_product_date").on(table.clientId, table.productId, table.createdAt),
+	index("idx_erp_stock_movement_tenant_date").on(table.clientId, table.createdAt),
 ]);

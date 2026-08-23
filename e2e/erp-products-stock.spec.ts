@@ -1,0 +1,49 @@
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
+
+const session = { clientId:"erp-e2e",company:"ERP E2E",permissions:["erp"],userName:"Gestor ERP",userEmail:"gestor@example.invalid",userRole:"manager",plan:"test",modules:["erp"],expiresAt:Date.now()+3_600_000 };
+const product = { publicId:"11111111-1111-4111-8111-111111111111",name:"Produto controlado",sku:"PROD-001",barcode:null,description:null,category:"Teste",unit:"unit",costPriceCents:1000,salePriceCents:1500,minimumStock:"2.000",active:true,quantity:"5.000",createdAt:"2026-01-01T00:00:00.000Z",updatedAt:"2026-01-01T00:00:00.000Z" };
+const movement = { publicId:"22222222-2222-4222-8222-222222222222",productPublicId:product.publicId,productName:product.name,sku:product.sku,type:"manual_in",direction:"in",quantity:"5.000",previousBalance:"0.000",resultingBalance:"5.000",reason:"Entrada controlada",referenceType:"manual",referenceId:null,createdBy:"erp-user",createdAt:"2026-01-01T00:00:00.000Z",reversed:false };
+
+function result(json: unknown) { return { result:{ data:{ json } } }; }
+async function prepareClosedMobileDrawer(page:Page){const drawer=page.getByLabel("Menu principal");const overlay=page.getByRole("button",{name:"Fechar menu lateral"});const trigger=page.locator("header").getByTitle("Abrir menu");await expect(drawer,"setup mobile deve deixar o drawer aberto").toBeVisible();await expect(overlay,"setup mobile deve deixar o overlay aberto").toBeVisible();const closeButton=drawer.getByTitle("Fechar menu");await expect(closeButton).toBeVisible();await closeButton.click();await expect(drawer).toBeHidden();await expect(overlay).toHaveCount(0);await expect(trigger).toHaveCount(1);await expect(trigger).toBeVisible();await expect(trigger).toBeEnabled();return{drawer,overlay,trigger};}
+async function clickExposedDrawerOverlay(overlay:Locator,drawer:Locator){const overlayBox=await overlay.boundingBox();const drawerBox=await drawer.boundingBox();expect(overlayBox).not.toBeNull();expect(drawerBox).not.toBeNull();const exposedLeft=Math.max(overlayBox!.x,drawerBox!.x+drawerBox!.width);const exposedRight=overlayBox!.x+overlayBox!.width;expect(exposedRight).toBeGreaterThan(exposedLeft);const absoluteX=exposedLeft+(exposedRight-exposedLeft)/2;const absoluteY=overlayBox!.y+overlayBox!.height/2;expect(absoluteX).toBeGreaterThanOrEqual(overlayBox!.x);expect(absoluteX).toBeLessThan(overlayBox!.x+overlayBox!.width);expect(absoluteY).toBeGreaterThanOrEqual(overlayBox!.y);expect(absoluteY).toBeLessThan(overlayBox!.y+overlayBox!.height);expect(absoluteX).toBeGreaterThan(drawerBox!.x+drawerBox!.width);await overlay.click({position:{x:absoluteX-overlayBox!.x,y:absoluteY-overlayBox!.y}});}
+async function prepare(page: Page, options: { empty?: boolean; readOnly?: boolean } = {}) {
+  page.on("pageerror", error => console.log(`ERP_PAGE_ERROR: ${error.message}`));
+  page.on("console", message => { if (message.type() === "error") console.log(`ERP_CONSOLE_ERROR: ${message.text()}`); });
+  await page.addInitScript(value => { localStorage.setItem("megadesk_session_v1",JSON.stringify(value)); localStorage.setItem("megadesk_active_page_v1","erp-summary"); }, session);
+  await page.route("**/api/trpc/**", async route => { const url=route.request().url();
+    const responseFor = (procedure:string):unknown => {
+      if(procedure.includes("megadesk.refreshSession")) return {ok:true,session};
+      if(procedure.includes("evolution.getStatus")) return {status:"disconnected"};
+      if(procedure.includes("erp.summary")) return {metrics:{activeProducts:options.empty?0:1,inactiveProducts:0,lowProducts:0,emptyProducts:0,totalQuantity:options.empty?"0.000":"5.000",costValueCents:options.empty?0:5000,saleValueCents:options.empty?0:7500},critical:[],recent:options.empty?[]:[movement],canWrite:!options.readOnly};
+      if(procedure.includes("erp.products.list")) return {items:options.empty?[]:[product],total:options.empty?0:1,page:1,pageSize:20,totalPages:options.empty?0:1,canWrite:!options.readOnly};
+      if(procedure.includes("erp.stock.list")) return {items:options.empty?[]:[movement],total:options.empty?0:1,page:1,pageSize:20,totalPages:options.empty?0:1,canWrite:!options.readOnly};
+      if(procedure.includes("erp.products.create")) return product;
+      if(procedure.includes("erp.products.update")) return {...product,name:"Produto editado"};
+      if(procedure.includes("erp.products.setActive")) return {ok:true};
+      if(procedure.includes("erp.stock.move")) return movement;
+      return null;
+    };
+    const procedures=decodeURIComponent(new URL(url).pathname).replace(/^.*\/api\/trpc\//,"").split(",");
+    const payloads=procedures.map(procedure=>result(responseFor(procedure)));
+    await route.fulfill({status:200,contentType:"application/json",body:url.includes("batch=1")?JSON.stringify(payloads):JSON.stringify(payloads[0])});
+  });
+  await page.goto("/erp");
+  if (await page.getByRole("heading", { name: "Erro ao carregar esta seção" }).isVisible()) console.log(`ERP_ERROR_BOUNDARY: ${await page.locator("main").innerText()}`);
+  await expect(page.getByTestId("erp-summary-page")).toBeVisible();
+  const erpButton = page.getByRole("button", { name: "ERP", exact: true });
+  if (!(await erpButton.isVisible())) {
+    const trigger=page.locator("header").getByTitle("Abrir menu");await expect(trigger).toHaveCount(1);await expect(trigger).toBeVisible();await trigger.click();
+  }
+  if (!(await page.getByRole("button", { name: "Produtos" }).isVisible())) {
+    await erpButton.click();
+  }
+}
+
+test.describe("ERP products and stock",()=>{
+  test("navigates the ERP group and keeps future modules unavailable",async({page})=>{await prepare(page);await expect(page.getByRole("button",{name:/Fornecedores/})).toBeDisabled();await page.getByRole("button",{name:"Produtos"}).click();await expect(page).toHaveURL(/\/erp\/produtos$/);await expect(page.getByTestId("erp-products-page")).toBeVisible();await page.getByRole("button",{name:"Estoque"}).click();await expect(page).toHaveURL(/\/erp\/estoque$/);await expect(page.getByTestId("erp-stock-page")).toBeVisible();});
+  test("uses the controlled product create flow without a real database",async({page})=>{await prepare(page,{empty:true});await page.getByRole("button",{name:"Produtos"}).click();await page.getByRole("button",{name:"Novo produto"}).click();await page.getByLabel("Nome").fill("Produto novo");await page.getByLabel("SKU").fill("novo-1");await page.getByRole("button",{name:"Salvar"}).click();await expect(page.getByText("Produto cadastrado com sucesso.")).toBeVisible();});
+  test("registers a controlled stock movement with explicit confirmation",async({page})=>{await prepare(page);await page.getByRole("button",{name:"Estoque",exact:true}).click();await page.getByRole("button",{name:"Nova movimentação"}).click();await page.getByRole("dialog").getByLabel("Produto").selectOption(product.publicId);await page.getByLabel("Quantidade").fill("2");await page.getByLabel("Motivo").fill("Entrada controlada");await page.getByRole("button",{name:"Confirmar movimentação"}).click();await expect(page.getByText("Movimentação registrada com sucesso.")).toBeVisible();});
+  test("is responsive at 390x844 and removes read-only actions from the DOM",async({page})=>{await page.setViewportSize({width:390,height:844});await prepare(page,{readOnly:true});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.getByRole("button",{name:"Produtos"}).click();await expect(page.getByRole("button",{name:"Novo produto"})).toHaveCount(0);await expect(page.getByRole("button",{name:"Editar"})).toHaveCount(0);const trigger=page.locator("header").getByTitle("Abrir menu");await expect(trigger).toHaveCount(1);await expect(trigger).toBeVisible();await expect(trigger).toBeEnabled();await trigger.click();await page.getByLabel("Menu principal").getByRole("button",{name:"Estoque",exact:true}).click();await expect(page.getByRole("button",{name:"Nova movimentação"})).toHaveCount(0);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);});
+  for(const viewport of [{width:390,height:844},{width:768,height:1024}])test(`drawer restores focus through button, Escape, overlay and navigation at ${viewport.width}x${viewport.height}`,async({page})=>{await page.setViewportSize(viewport);await prepare(page);const{drawer,overlay,trigger}=await prepareClosedMobileDrawer(page);await trigger.focus();await expect(trigger).toBeFocused();await trigger.click();await expect(drawer).toBeVisible();await expect(overlay).toBeVisible();const closeButton=drawer.getByTitle("Fechar menu");await expect(closeButton).toBeFocused();await closeButton.click();await expect(drawer).toBeHidden();await expect(overlay).toHaveCount(0);await expect(trigger).toBeFocused();await trigger.click();await expect(drawer).toBeVisible();await page.keyboard.press("Escape");await expect(drawer).toBeHidden();await expect(overlay).toHaveCount(0);await expect(trigger).toBeFocused();await trigger.click();await expect(drawer).toBeVisible();await expect(overlay).toBeVisible();await clickExposedDrawerOverlay(overlay,drawer);await expect(drawer).toBeHidden();await expect(overlay).toHaveCount(0);await expect(trigger).toBeFocused();await trigger.click();await expect(drawer).toBeVisible();const erp=drawer.getByRole("button",{name:"ERP",exact:true});await expect(erp).toBeVisible();await expect(erp).toHaveAttribute("aria-expanded","true");await drawer.getByRole("button",{name:"Produtos",exact:true}).click();await expect(page).toHaveURL(/\/erp\/produtos$/);await expect(page.getByTestId("erp-products-page")).toBeVisible();await expect(drawer).toBeHidden();await expect(overlay).toHaveCount(0);await expect(page.locator("main")).toBeFocused();});
+});

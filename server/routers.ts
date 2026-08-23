@@ -30,6 +30,7 @@ import { resolveTenantLoginCandidates } from "./_core/tenant-login";
 import { runPostCommitBestEffort } from "./_core/post-commit";
 import { normalizeEvolutionRecipient } from "./evolution/client";
 import { assertOperationalCsrf, clearOperationalSessionCookie, createOperationalSession, revokeOperationalSession } from "./_core/megadesk-session";
+import { erpRouter } from "./modules/erp/router";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -264,6 +265,7 @@ function sanitizeClient(client: MegaClient) {
 }
 
 export const appRouter = router({
+  erp: erpRouter,
   chamados: chamadosRouter,
   crm: crmRouter,
   whatsapp: whatsappRouter,

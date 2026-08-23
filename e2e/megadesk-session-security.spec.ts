@@ -8,6 +8,15 @@ const passwordB = process.env.E2E_PASSWORD_B;
 const sharedEmail = "session-shared@example.invalid";
 let pool: Pool;
 
+type LoginFixtureRow = RowDataPacket & {
+  client_id: string;
+  tenant_status: string;
+  access_released: number;
+  user_id: string;
+  user_status: string;
+  password_hash: string;
+};
+
 async function resetFixtures() {
   await pool.execute("DELETE FROM megadesk_operational_sessions WHERE client_id IN ('e2e-session-a','e2e-session-b')");
   await pool.execute("DELETE FROM megadesk_domain_conversations WHERE client_id IN ('e2e-session-a','e2e-session-b')");
@@ -19,11 +28,65 @@ async function resetFixtures() {
   await pool.execute("INSERT INTO megadesk_domain_conversations (conversation_id,client_id,customer_name,phone,company,status,last_message,last_message_from,time_label,messages_json,unread_count,ia_active) VALUES ('e2e-conversation-a','e2e-session-a','Cliente Fixture A','00000000001','Empresa Fixture Cliente','open','Mensagem fictícia','customer','agora','[]',1,0)");
 }
 
+async function validateLoginFixtures() {
+  expect(passwordA).toBeTruthy();
+  expect(passwordB).toBeTruthy();
+  expect(passwordA).not.toBe(passwordB);
+  const [rows] = await pool.execute<LoginFixtureRow[]>(
+    `SELECT c.client_id,c.status tenant_status,c.access_released,
+            u.user_id,u.status user_status,u.password_hash
+       FROM megadesk_domain_clients c
+       INNER JOIN megadesk_domain_client_users u ON u.client_id=c.client_id
+      WHERE u.email=? AND c.client_id IN ('e2e-session-a','e2e-session-b')
+      ORDER BY c.client_id`,
+    [sharedEmail],
+  );
+  expect(rows).toHaveLength(2);
+  expect(rows.map(row => ({
+    clientId: row.client_id,
+    tenantStatus: row.tenant_status,
+    accessReleased: Number(row.access_released),
+    userId: row.user_id,
+    userStatus: row.user_status,
+  }))).toEqual([
+    { clientId: "e2e-session-a", tenantStatus: "active", accessReleased: 1, userId: "e2e-user-a", userStatus: "active" },
+    { clientId: "e2e-session-b", tenantStatus: "active", accessReleased: 1, userId: "e2e-user-b", userStatus: "active" },
+  ]);
+  expect(await bcrypt.compare(passwordA!, rows[0].password_hash)).toBe(true);
+  expect(await bcrypt.compare(passwordA!, rows[1].password_hash)).toBe(false);
+  expect(await bcrypt.compare(passwordB!, rows[1].password_hash)).toBe(true);
+  expect(await bcrypt.compare(passwordB!, rows[0].password_hash)).toBe(false);
+}
+
 async function login(page: Page, password: string) {
   await page.goto("/");
   await page.getByPlaceholder("seu@email.com").fill(sharedEmail);
   await page.getByPlaceholder("Sua senha de acesso").fill(password);
+  const loginResponse = page.waitForResponse(response =>
+    response.request().method() === "POST" && response.url().includes("/api/trpc/megadesk.loginByEmail"),
+  );
   await page.getByRole("button", { name: "Entrar na plataforma" }).click();
+  const response = await loginResponse;
+  let publicCode = response.ok() ? "OK" : "UNKNOWN";
+  let publicMessage = "";
+  if (!response.ok()) {
+    try {
+      const payload = await response.json();
+      const entry = Array.isArray(payload) ? payload[0] : payload;
+      publicCode = String(entry?.error?.json?.data?.code ?? "UNKNOWN");
+      publicMessage = String(entry?.error?.json?.message ?? "");
+    } catch {
+      publicCode = "UNPARSEABLE_PUBLIC_ERROR";
+    }
+  }
+  const diagnostic = {
+    endpoint: new URL(response.url()).pathname,
+    status: response.status(),
+    publicCode,
+    publicMessage,
+  };
+  console.log(`AUTH_LOGIN_RESPONSE: ${JSON.stringify(diagnostic)}`);
+  expect(response.status(), `Resposta pública sanitizada: ${JSON.stringify(diagnostic)}`).toBe(200);
   await expect(page.getByText(/Empresa Fixture [AB] • Usuário Fixture [AB]/)).toBeVisible();
 }
 
@@ -33,10 +96,13 @@ async function cookieFlags(context: BrowserContext) {
 }
 
 test.describe.serial("MegaDesk secure operational session", () => {
-  test.beforeAll(async () => {
+  test.beforeAll(async ({ request }) => {
     if (!databaseUrl || !passwordA || !passwordB) throw new Error("E2E disposable credentials are required");
     pool = mysql.createPool(databaseUrl);
     await resetFixtures();
+    await validateLoginFixtures();
+    const cacheReset = await request.post("/api/trpc/megaadmin.logoutAdmin", { data: { json: null } });
+    expect(cacheReset.status(), "Invalidação do estado de tenants após fixtures SQL").toBe(200);
   });
 
   test.beforeEach(async () => {
@@ -169,6 +235,7 @@ test.describe.serial("MegaDesk secure operational session", () => {
   test("keeps Conversations usable at 390x844 without sending messages or audio", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await login(page, passwordA!);
+    await page.getByRole("button", { name: "Abrir menu" }).click();
     await page.getByTitle("Conversas").click();
     const list = page.getByTestId("conversation-list-panel");
     await expect(list).toBeVisible();

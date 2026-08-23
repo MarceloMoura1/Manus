@@ -73,7 +73,7 @@ export function getSocketIO(): SocketIOServer | null {
   return io;
 }
 
-function emitTenantEvent(clientId: string, event: string, payload: unknown): void {
+export function emitOperationalTenantEvent(clientId: string, event: string, payload: unknown): void {
   if (!io) return;
   void (async () => {
     const sockets = [...io!.sockets.sockets.values()].filter(socket => socket.rooms.has(`client:${clientId}`));
@@ -97,7 +97,7 @@ export function emitNewMessage(
   conversation: WaConversationRecord,
   message: WaMessageRecord
 ): void {
-  emitTenantEvent(clientId, "wa:new_message", { conversation, message });
+  emitOperationalTenantEvent(clientId, "wa:new_message", { conversation, message });
 }
 
 /**
@@ -108,7 +108,7 @@ export function emitMessageStatus(
   waMessageId: string,
   status: WaMessageStatus
 ): void {
-  emitTenantEvent(clientId, "wa:message_status", { waMessageId, status });
+  emitOperationalTenantEvent(clientId, "wa:message_status", { waMessageId, status });
 }
 
 /**
@@ -118,7 +118,7 @@ export function emitConversationUpdated(
   clientId: string,
   conversation: WaConversationRecord
 ): void {
-  emitTenantEvent(clientId, "wa:conversation_updated", { conversation });
+  emitOperationalTenantEvent(clientId, "wa:conversation_updated", { conversation });
 }
 
 /**
@@ -128,5 +128,5 @@ export function emitNewConversation(
   clientId: string,
   conversation: WaConversationRecord
 ): void {
-  emitTenantEvent(clientId, "wa:new_conversation", { conversation });
+  emitOperationalTenantEvent(clientId, "wa:new_conversation", { conversation });
 }

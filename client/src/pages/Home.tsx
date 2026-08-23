@@ -13,6 +13,7 @@ import { WhatsAppConfigPage } from "./WhatsAppConfigPage";
 import { SettingsPage as SettingsPageComponent } from "./SettingsPage";
 import { AdminSettingsPage } from "./AdminSettingsPage";
 import { BotConfigPage } from "./BotConfigPage";
+import { ERPWorkspace, type ErpSection } from "./erp/ERPWorkspace";
 import { TimelineActivity } from "@/components/TimelineActivity";
 import {
   AudioRecordingController,
@@ -152,7 +153,7 @@ const SESSION_DURATION_LONG = 30 * 24 * 60 * 60 * 1000; // 30 dias ("lembrar meu
 const REFRESH_THRESHOLD = 5 * 60 * 1000; // Renovar 5 minutos antes de expirar
 const REFRESH_INTERVAL = 10 * 60 * 1000; // Verificar renovação a cada 10 minutos
 
-type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "clients" | "whatsapp-config" | "admin-settings";
+type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-products" | "erp-stock" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "clients" | "whatsapp-config" | "admin-settings";
 
 type Ticket = {
   id: string;
@@ -2981,98 +2982,6 @@ function TrackingPage() {
   );
 }
 
-function ERPPage() {
-  const [timeRange, setTimeRange] = React.useState('today');
-
-  const kpis = [
-    { label: 'Vendas Hoje', value: 'R$ 12.540', change: '↑ 12% vs ontem', color: 'text-green-600' },
-    { label: 'Pedidos Pendentes', value: '0', change: 'Aguardando ação', color: 'text-orange-600' },
-    { label: 'Pedidos Atrasados', value: '3', change: 'Requer atenção', color: 'text-red-600' },
-    { label: 'Clientes Ativos', value: '0', change: 'Total registrado', color: 'text-blue-600' },
-    { label: 'Faturamento Total', value: 'R$ 0.00', change: 'Mês atual', color: 'text-slate-600' },
-    { label: 'Chamados Abertos', value: '8', change: 'Aguardando resposta', color: 'text-purple-600' },
-    { label: 'Entregues Hoje', value: '24', change: 'Pedidos completados', color: 'text-green-600' },
-    { label: 'Pagamentos Pendentes', value: 'R$ 0', change: 'Aguardando recebimento', color: 'text-slate-600' },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900">Dashboard Operacional</h2>
-            <p className="text-slate-600 text-sm mt-1">Acompanhe as métricas principais do negócio</p>
-          </div>
-        </div>
-
-        <div className="flex gap-3 mb-8">
-          {['today', 'week', 'month'].map((range) => (
-            <button
-              key={range}
-              onClick={() => setTimeRange(range)}
-              className={cn(
-                'px-4 py-2 rounded-lg font-medium transition-all duration-200',
-                timeRange === range
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              )}
-            >
-              {range === 'today' ? 'Hoje' : range === 'week' ? 'Esta Semana' : 'Este Mês'}
-            </button>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {kpis.map((kpi, idx) => (
-            <div key={idx} className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-6 border border-slate-200">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-slate-600">{kpi.label}</h3>
-              </div>
-              <p className="text-2xl font-bold text-slate-900 mb-1">{kpi.value}</p>
-              <p className="text-xs text-slate-600">{kpi.change}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
-          <h3 className="text-lg font-bold text-slate-900 mb-4">Vendas vs Pedidos</h3>
-          <div className="h-64 flex items-center justify-center bg-slate-50 rounded-lg">
-            <p className="text-slate-500">Gráfico de vendas vs pedidos</p>
-          </div>
-        </div>
-        <div className="bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
-          <h3 className="text-lg font-bold text-slate-900 mb-4">Distribuição de Status</h3>
-          <div className="space-y-3">
-            {['Aguardando Pagamento', 'Separando', 'Em Produção', 'Enviado', 'Entregue'].map((status, idx) => (
-              <div key={idx} className="flex items-center justify-between">
-                <span className="text-sm text-slate-600">{status}</span>
-                <span className="text-sm font-bold text-slate-900">{[0, 12, 8, 24, 156][idx]}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-lg p-6 border border-slate-100">
-        <h3 className="text-lg font-bold text-slate-900 mb-4">Atividade Recente</h3>
-        <div className="space-y-3">
-          {[1, 2, 3, 4, 5].map((item) => (
-            <div key={item} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-              <div>
-                <p className="font-semibold text-slate-900">Pedido #PED-100{item} criado</p>
-                <p className="text-xs text-slate-600">Cliente: João Silva</p>
-              </div>
-              <span className="text-xs text-slate-600">há {item} minutos</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function SettingsPagePlaceholder() {
   return (
     <div className="space-y-6">
@@ -3395,15 +3304,33 @@ function NotificationsPage() {
 function Shell() {
   const { theme, toggleTheme } = useTheme();
   const [active, setActive] = useState<RouteId>(() => {
+    if (window.location.pathname === "/erp/produtos") return "erp-products";
+    if (window.location.pathname === "/erp/estoque") return "erp-stock";
+    if (window.location.pathname === "/erp") return "erp-summary";
     const stored = localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY);
     return (stored as RouteId) || "home";
   });
   const [session, setSession] = useState<MegaDeskSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const sidebarRef = React.useRef<HTMLDivElement>(null);
+  const sidebarTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const mainContentRef = React.useRef<HTMLElement>(null);
+  const [erpExpanded, setErpExpanded] = useState(active.startsWith("erp-"));
   const [indicadores, setIndicadores] = useState<any>(null);
   const [activeCrmClientId, setActiveCrmClientId] = useState<string | null>(null);
   const [activeAttendancePhone, setActiveAttendancePhone] = useState<string>('');
+  const closeMobileSidebar = React.useCallback((restoreFocus = true) => {
+    setSidebarOpen(false);
+    if (restoreFocus) window.setTimeout(() => sidebarTriggerRef.current?.focus(), 0);
+  }, []);
+  React.useEffect(() => {
+    if (!sidebarOpen || window.innerWidth >= 1024) return;
+    window.setTimeout(() => sidebarRef.current?.querySelector<HTMLElement>('button:not([disabled])')?.focus(), 0);
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") closeMobileSidebar(); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [closeMobileSidebar, sidebarOpen]);
   const whatsappStatusQuery = trpc.evolution.getStatus.useQuery(
     { clientId: session?.clientId ?? '' },
     {
@@ -3419,6 +3346,11 @@ function Shell() {
   // Persistir página ativa no localStorage
   useEffect(() => {
     localStorage.setItem(MEGADESK_ACTIVE_PAGE_KEY, active);
+    if (active.startsWith("erp-")) {
+      const path = active === "erp-products" ? "/erp/produtos" : active === "erp-stock" ? "/erp/estoque" : "/erp";
+      window.history.replaceState(null, "", path);
+      setErpExpanded(true);
+    }
   }, [active]);
 
   // Escutar evento de navegação interna (ex: Atendimento Ativo com número preenchido)
@@ -3466,7 +3398,7 @@ function Shell() {
     { id: "conversations" as RouteId, label: "Conversas", icon: MessageCircle },
     { id: "tickets" as RouteId, label: "Chamados", icon: ClipboardList },
     { id: "tracking" as RouteId, label: "Rastreamento", icon: MapPin },
-    { id: "erp" as RouteId, label: "ERP", icon: PackageSearch },
+    { id: "erp-summary" as RouteId, label: "ERP", icon: PackageSearch },
     { id: "clients" as RouteId, label: "Clientes", icon: Building2 },
     { id: "whatsapp-config" as RouteId, label: "WhatsApp", icon: Smartphone },
     { id: "settings" as RouteId, label: "Configurações", icon: Cog },
@@ -3484,7 +3416,7 @@ function Shell() {
     // Itens sempre visíveis
     if (alwaysVisibleItems.includes(item.id)) return true;
     // Itens que dependem de permissões: active-attendance, conversations, tickets, tracking, erp, bot-config, ai-assistant
-    return session.permissions.includes(item.id);
+    return item.id.startsWith("erp-") ? session.permissions.includes("erp") : session.permissions.includes(item.id);
   });
 
   // Separar itens em seções
@@ -3493,11 +3425,12 @@ function Shell() {
 
   return (
     <div className={`flex h-screen h-[100dvh] min-w-0 overflow-hidden bg-slate-50 ${theme === 'dark' ? 'dark bg-slate-950' : ''}`}>
+      {sidebarOpen && active !== 'conversations' && <button type="button" aria-label="Fechar menu lateral" onClick={() => closeMobileSidebar()} className="fixed inset-0 z-30 bg-slate-950/50 lg:hidden" />}
       {/* Sidebar */}
-      <div className={cn(
+      <div ref={sidebarRef} aria-label="Menu principal" className={cn(
         "fixed lg:relative z-40 h-full bg-slate-950 text-white flex-col transition-all duration-300",
-        active === 'conversations' ? 'hidden lg:flex' : 'flex',
-        sidebarOpen ? "w-64" : "w-20"
+        active === 'conversations' ? 'hidden lg:flex' : sidebarOpen ? 'flex' : 'hidden lg:flex',
+        sidebarOpen ? "w-64" : "lg:w-20"
       )}>
         {/* Header com Logo */}
         <div className="p-4 flex items-center justify-between transition-all duration-300">
@@ -3510,7 +3443,7 @@ function Shell() {
                 </span>
               </div>
               <button
-                onClick={() => setSidebarOpen(false)}
+                 onClick={() => closeMobileSidebar()}
                 className="text-slate-400 hover:text-white transition-colors flex-shrink-0"
                 title="Fechar menu"
               >
@@ -3542,6 +3475,23 @@ function Shell() {
           {mainNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = active === item.id;
+            if (item.id === "erp-summary") {
+              const available: Array<{ id: RouteId; label: string }> = [{ id: "erp-summary", label: "Resumo" }, { id: "erp-products", label: "Produtos" }, { id: "erp-stock", label: "Estoque" }];
+              const navigateFromDrawer = (id: RouteId) => {
+                setActive(id);
+                if (window.innerWidth < 1024) {
+                  setSidebarOpen(false);
+                  window.setTimeout(() => mainContentRef.current?.focus(), 0);
+                }
+              };
+              const planned = ["Fornecedores", "Compras", "Vendas", "Financeiro", "Integrações"];
+              return <div key="erp" className="mx-2">
+                <button type="button" aria-expanded={sidebarOpen && erpExpanded} onClick={() => { if (!sidebarOpen) { setSidebarOpen(true); setErpExpanded(true); } else setErpExpanded(value => !value); }} className={cn("flex w-full items-center rounded-lg px-3 py-3 text-slate-300 transition hover:bg-slate-800/50 hover:text-white", active.startsWith("erp-") && "bg-slate-800 text-white")} title="ERP">
+                  <PackageSearch className="h-5 w-5 flex-shrink-0"/>{sidebarOpen && <><span className="ml-3 flex-1 text-left font-medium">ERP</span><ChevronDown className={cn("h-4 w-4 transition", erpExpanded && "rotate-180")}/></>}
+                </button>
+                {sidebarOpen && erpExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-slate-700 pl-3">{available.map(child => <button key={child.id} type="button" onClick={() => navigateFromDrawer(child.id)} className={cn("block w-full rounded-md px-3 py-2 text-left text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400", active === child.id ? "bg-purple-600 text-white" : "text-slate-300 hover:bg-slate-800")}>{child.label}</button>)}{planned.map(label => <button key={label} type="button" disabled aria-disabled="true" title={`${label}: em preparação`} className="block w-full cursor-not-allowed rounded-md px-3 py-2 text-left text-sm text-slate-500"><span>{label}</span><span className="block text-[10px] uppercase tracking-wide">Em preparação</span></button>)}</div>}
+              </div>;
+            }
             
             return (
               <button
@@ -3662,8 +3612,9 @@ function Shell() {
       {/* Main Content */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Header — oculto na rota conversations pois ela tem header próprio */}
-        <header className={`bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between${active === 'conversations' ? ' hidden' : ''}`}>
-          <div>
+         <header className={`bg-white border-b border-slate-200 px-4 py-4 sm:px-8 flex items-center justify-between${active === 'conversations' ? ' hidden' : ''}`}>
+           <div>
+             <button ref={sidebarTriggerRef} type="button" onClick={() => setSidebarOpen(true)} className="mb-2 rounded-lg p-2 text-slate-700 hover:bg-slate-100 lg:hidden" title="Abrir menu"><Menu className="h-5 w-5" /></button>
             <h1 className="text-2xl font-bold text-slate-900">{navItems.find(i => i.id === active)?.label || 'MegaDesk'}</h1>
             <p className="text-sm text-slate-600">{session.company} • {session.userName}</p>
           </div>
@@ -3675,13 +3626,13 @@ function Shell() {
         </header>
 
         {/* Content */}
-        <main className={`flex min-h-0 min-w-0 flex-1 flex-col ${active === 'conversations' ? 'overflow-hidden' : 'overflow-auto p-8'}`}>
+        <main ref={mainContentRef} tabIndex={-1} className={`flex min-h-0 min-w-0 flex-1 flex-col ${active === 'conversations' ? 'overflow-hidden' : 'overflow-auto p-8'}`}>
           <ErrorBoundary key={active}>
           {active === "home" && <DashboardPage setActive={setActive} indicadores={indicadores} />}
           {active === "conversations" && <ConversationsPage />}
           {active === "tickets" && <TicketsPage />}
           {active === "tracking" && <TrackingPage />}
-          {active === "erp" && <ERPPage />}
+          {active.startsWith("erp-") && <ERPWorkspace section={(active === "erp-products" ? "products" : active === "erp-stock" ? "stock" : "summary") as ErpSection} onNavigate={(section) => setActive(section === "products" ? "erp-products" : section === "stock" ? "erp-stock" : "erp-summary")} />}
           {active === "settings" && <SettingsPageComponent />}
           {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
           {active === "bot-config" && <BotConfigPage />}

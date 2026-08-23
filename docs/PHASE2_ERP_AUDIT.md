@@ -111,3 +111,11 @@ arquitetural explícita antes de prosseguir.
 # Estado após autorização da camada de autenticação
 
 A autenticação operacional segura foi autorizada como pré-requisito isolado. O ERP continua bloqueado nesta rodada: nenhuma entidade, rota, tela ou migration funcional de ERP deve ser implementada até a revisão e aprovação explícita desta camada de sessão.
+
+## Atualização — primeira fatia vertical autorizada
+
+A sessão segura foi validada e publicada; o bloqueio anterior foi removido exclusivamente para Resumo, Produtos e Estoque. O dashboard fictício de `Home.tsx` foi substituído na navegação por `ERPWorkspace`, alimentado pelo router autenticado `erp`. O shell, componentes UI e tRPC foram reutilizados; métricas, pedidos e atividades fixas não são mais renderizados.
+
+Foram criados schema main aditivo, repository tenant-aware, service transacional, schemas Zod, erros de domínio e router fino. `operational_records` e a leitura JSON legada do Gemini não foram reutilizados. Não havia tabela, rota ou repository equivalente que justificasse compatibilidade ou migração de dados.
+
+A política inicial usa roles existentes: `admin`/`manager` escrevem e `agent`/`viewer` consultam. Fornecedores, Compras, Vendas, Financeiro e Integrações permanecem desabilitados e identificados como planejados, sem páginas ou botões falsos.

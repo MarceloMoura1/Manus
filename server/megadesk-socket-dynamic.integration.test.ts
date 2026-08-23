@@ -6,6 +6,8 @@ import { io as createClient, type Socket as ClientSocket } from "socket.io-clien
 import { getPool } from "./db";
 import { createOperationalSession, MEGADESK_SESSION_COOKIE, MysqlOperationalSessionRepository, revokeOperationalSession } from "./_core/megadesk-session";
 import { emitMessageStatus, getSocketIO, initWhatsAppSocket } from "./modules/whatsapp/socket/whatsapp.socket";
+import { ErpRepository } from "./modules/erp/repository";
+import { ErpService } from "./modules/erp/service";
 import { isTestDatabaseEnabled } from "./test-integration-gates";
 
 const dynamic = describe.runIf(isTestDatabaseEnabled());
@@ -72,6 +74,9 @@ function disconnected(socket: ClientSocket, timeoutMs = 1200): Promise<boolean> 
 }
 
 async function resetFixtures() {
+  await getPool().execute("DELETE FROM erp_stock_movements WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_stock_balances WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_products WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM megadesk_operational_sessions WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM megadesk_domain_client_users WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM megadesk_domain_clients WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
@@ -80,6 +85,9 @@ async function resetFixtures() {
 }
 
 async function cleanFixtures() {
+  await getPool().execute("DELETE FROM erp_stock_movements WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_stock_balances WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_products WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM megadesk_operational_sessions WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM megadesk_domain_client_users WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM megadesk_domain_clients WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
@@ -183,5 +191,31 @@ dynamic("Socket.IO operational session isolation", () => {
     }
     expect(getSocketIO()?.listenerCount("connection")).toBe(baseline);
     expect([...clients].filter(socket => socket.connected)).toHaveLength(0);
+  });
+
+  it("delivers product creation to the authenticated tenant room", async () => {
+    const a=client(await issueCookie("socket-user-a","socket-tenant-a")); await connected(a);
+    const received=event(a,"erp:product.changed");
+    const service=new ErpService(new ErpRepository()); const created=await service.createProduct({clientId:"socket-tenant-a",userId:"socket-user-a",role:"admin"},{name:"Socket product",sku:"SOCKET-1",barcode:null,description:null,category:null,unit:"unit",costPriceCents:100,salePriceCents:200,minimumStock:"0"});
+    expect(await received).toMatchObject({productPublicId:created.publicId,operation:"created"});
+  });
+
+  it("delivers product update and deactivation events with safe payloads", async () => {
+    const a=client(await issueCookie("socket-user-a","socket-tenant-a")); await connected(a); const service=new ErpService(new ErpRepository()); const identity={clientId:"socket-tenant-a",userId:"socket-user-a",role:"admin" as const}; const command={name:"Socket product",sku:"SOCKET-2",barcode:null,description:null,category:null,unit:"unit" as const,costPriceCents:100,salePriceCents:200,minimumStock:"0"}; const createdEvent=event(a,"erp:product.changed"); const created=await service.createProduct(identity,command); await createdEvent;
+    const updatedEvent=event(a,"erp:product.changed"); await service.updateProduct(identity,created.publicId,{...command,name:"Updated"}); expect(await updatedEvent).toMatchObject({operation:"updated"});
+    const inactiveEvent=event(a,"erp:product.changed"); await service.setProductActive(identity,created.publicId,false); const payload=await inactiveEvent as Record<string,unknown>; expect(payload).toMatchObject({operation:"deactivated"}); expect(Object.keys(payload).sort()).toEqual(["occurredAt","operation","productPublicId"]);
+  });
+
+  it("delivers input, output and reversal events after committed changes", async () => {
+    const a=client(await issueCookie("socket-user-a","socket-tenant-a")); await connected(a); const service=new ErpService(new ErpRepository()); const identity={clientId:"socket-tenant-a",userId:"socket-user-a",role:"admin" as const}; const item=await service.createProduct(identity,{name:"Stock socket",sku:"SOCKET-STOCK",barcode:null,description:null,category:null,unit:"unit",costPriceCents:100,salePriceCents:200,minimumStock:"0"});
+    const inputEvent=event(a,"erp:stock.changed"); const input=await service.moveStock(identity,{productPublicId:item.publicId,type:"manual_in",quantity:"3",reason:"Input",idempotencyKey:crypto.randomUUID()}); expect(await inputEvent).toMatchObject({movementPublicId:input.publicId,operation:"movement_created"});
+    const outputEvent=event(a,"erp:stock.changed"); const output=await service.moveStock(identity,{productPublicId:item.publicId,type:"manual_out",quantity:"1",reason:"Output",idempotencyKey:crypto.randomUUID()}); expect(await outputEvent).toMatchObject({operation:"movement_created"});
+    const reversalEvent=event(a,"erp:stock.changed"); await service.reverseMovement(identity,output.publicId,"Correction",crypto.randomUUID()); const payload=await reversalEvent as Record<string,unknown>; expect(payload).toMatchObject({operation:"movement_reversed"}); expect(Object.keys(payload).sort()).toEqual(["movementPublicId","occurredAt","operation","productPublicId"]);
+  });
+
+  it("does not emit stock events for rollback, insufficient stock or idempotent replay", async () => {
+    const a=client(await issueCookie("socket-user-a","socket-tenant-a")); await connected(a); const service=new ErpService(new ErpRepository()); const identity={clientId:"socket-tenant-a",userId:"socket-user-a",role:"admin" as const}; const item=await service.createProduct(identity,{name:"No event",sku:"SOCKET-NO-EVENT",barcode:null,description:null,category:null,unit:"unit",costPriceCents:0,salePriceCents:0,minimumStock:"0"});
+    const failedEvent=event(a,"erp:stock.changed",300); await expect(service.moveStock(identity,{productPublicId:item.publicId,type:"manual_out",quantity:"1",reason:"Failure",idempotencyKey:crypto.randomUUID()})).rejects.toBeTruthy(); expect(await failedEvent).toBeNull();
+    const key=crypto.randomUUID(); const createdEvent=event(a,"erp:stock.changed"); await service.moveStock(identity,{productPublicId:item.publicId,type:"manual_in",quantity:"1",reason:"Input",idempotencyKey:key}); await createdEvent; const replayEvent=event(a,"erp:stock.changed",300); await service.moveStock(identity,{productPublicId:item.publicId,type:"manual_in",quantity:"1",reason:"Input",idempotencyKey:key}); expect(await replayEvent).toBeNull();
   });
 });
