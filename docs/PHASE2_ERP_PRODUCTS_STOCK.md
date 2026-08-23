@@ -2,7 +2,7 @@
 
 ## Escopo
 
-Esta primeira fatia implementa Resumo, Produtos e Estoque. Fornecedores, Compras, Vendas, Financeiro e integrações externas permanecem planejados e desabilitados. A arquitetura oficial continua sendo isolamento lógico no banco main; não há ativação de banco físico por tenant.
+Esta primeira fatia implementou Resumo, Produtos e Estoque. Fornecedores foi acrescentado na segunda fatia, documentada em `PHASE2_ERP_SUPPLIERS.md`; Compras, Vendas, Financeiro e integrações externas permanecem planejados e desabilitados. A arquitetura oficial continua sendo isolamento lógico no banco main; não há ativação de banco físico por tenant.
 
 ## Entidades e ownership
 
@@ -72,4 +72,4 @@ Rollback de implantação antes de uso consiste em não aplicar/publicar a migra
 
 ## Próximos módulos
 
-Fornecedores e Compras serão a próxima fatia. O recebimento de compra deverá chamar o mesmo service de estoque com origem `purchase`; Vendas usará `sale`. Nenhuma dessas operações foi implementada aqui.
+Fornecedores é a segunda fatia concluída. Compras permanece futura: o recebimento deverá chamar o mesmo service de estoque com origem `purchase`; Vendas usará `sale`. Nenhuma dessas operações foi implementada aqui.

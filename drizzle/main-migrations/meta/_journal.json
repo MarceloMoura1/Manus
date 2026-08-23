@@ -43,6 +43,13 @@
       "when": 1787444567993,
       "tag": "0005_perpetual_ink",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1787514147303,
+      "tag": "0006_broken_green_goblin",
+      "breakpoints": true
     }
   ]
 }

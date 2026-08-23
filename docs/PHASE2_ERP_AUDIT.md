@@ -36,7 +36,7 @@ sessão autenticada e nunca confiar no `clientId` recebido do frontend.
 | Dashboard ERP | `ERPPage` com números, pedidos e atividades codificados | Somente visual e inseguro | Remover dados fictícios; não reutilizar métricas |
 | Produtos | Referência de leitura em `gemini-client.ts` sobre registros operacionais JSON | Legado e inseguro para ERP | Não usar como persistência de produtos |
 | Estoque | Campo JSON consultado pela integração Gemini | Somente visual/legado | Não reutilizar; saldo deve derivar de movimentos |
-| Fornecedores | Nenhuma entidade ou fluxo | Ausente | Implementar no domínio ERP |
+| Fornecedores | Cadastro tenant-aware, filtros, paginação, status, permissões e realtime | Implementado na segunda fatia | Validar fisicamente a migration e a matriz preparada |
 | Compras | Nenhuma entidade ou fluxo | Ausente | Implementar no domínio ERP |
 | Vendas | Métricas genéricas e textos de IA, sem domínio transacional | Somente visual | Implementar no domínio ERP |
 | Financeiro ERP | Aba placeholder em Clientes e textos promocionais | Somente visual | Não reutilizar como domínio financeiro |
@@ -118,4 +118,4 @@ A sessão segura foi validada e publicada; o bloqueio anterior foi removido excl
 
 Foram criados schema main aditivo, repository tenant-aware, service transacional, schemas Zod, erros de domínio e router fino. `operational_records` e a leitura JSON legada do Gemini não foram reutilizados. Não havia tabela, rota ou repository equivalente que justificasse compatibilidade ou migração de dados.
 
-A política inicial usa roles existentes: `admin`/`manager` escrevem e `agent`/`viewer` consultam. Fornecedores, Compras, Vendas, Financeiro e Integrações permanecem desabilitados e identificados como planejados, sem páginas ou botões falsos.
+A política usa roles existentes: `admin`/`manager` escrevem e `agent`/`viewer` consultam. Fornecedores agora é uma página real em `/erp/fornecedores`; Compras, Vendas, Financeiro e Integrações permanecem desabilitados e identificados como planejados, sem páginas ou botões falsos.

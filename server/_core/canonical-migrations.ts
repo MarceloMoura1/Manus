@@ -9,7 +9,7 @@ export const REQUIRED_RUNTIME_MAIN_TABLES = [
   "megadesk_evolution_sessions", "megadesk_domain_ia_conversations",
   "megadesk_domain_ia_conversation_history", "megadesk_ia_token_usage",
   "megadesk_operational_sessions",
-  "erp_products", "erp_stock_balances", "erp_stock_movements",
+  "erp_products", "erp_stock_balances", "erp_stock_movements", "erp_suppliers",
 ] as const;
 
 export const REQUIRED_RUNTIME_COLUMNS: Record<string, readonly string[]> = {
@@ -20,6 +20,7 @@ export const REQUIRED_RUNTIME_COLUMNS: Record<string, readonly string[]> = {
   megadesk_ia_token_usage: ["id", "client_id", "created_at"],
   megadesk_operational_sessions: ["id", "token_hash", "user_id", "client_id", "expires_at", "revoked_at"],
   erp_products: ["id", "public_id", "client_id", "sku", "cost_price_cents", "minimum_stock", "active"],
+  erp_suppliers: ["id", "public_id", "client_id", "legal_name", "person_type", "tax_id", "active", "created_by", "updated_by"],
   erp_stock_balances: ["client_id", "product_id", "quantity", "version"],
   erp_stock_movements: ["public_id", "client_id", "product_id", "type", "quantity", "idempotency_key", "payload_hash", "reversal_of"],
 };

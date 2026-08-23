@@ -153,7 +153,7 @@ const SESSION_DURATION_LONG = 30 * 24 * 60 * 60 * 1000; // 30 dias ("lembrar meu
 const REFRESH_THRESHOLD = 5 * 60 * 1000; // Renovar 5 minutos antes de expirar
 const REFRESH_INTERVAL = 10 * 60 * 1000; // Verificar renovação a cada 10 minutos
 
-type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-products" | "erp-stock" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "clients" | "whatsapp-config" | "admin-settings";
+type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-products" | "erp-stock" | "erp-suppliers" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "clients" | "whatsapp-config" | "admin-settings";
 
 type Ticket = {
   id: string;
@@ -3306,6 +3306,7 @@ function Shell() {
   const [active, setActive] = useState<RouteId>(() => {
     if (window.location.pathname === "/erp/produtos") return "erp-products";
     if (window.location.pathname === "/erp/estoque") return "erp-stock";
+    if (window.location.pathname === "/erp/fornecedores") return "erp-suppliers";
     if (window.location.pathname === "/erp") return "erp-summary";
     const stored = localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY);
     return (stored as RouteId) || "home";
@@ -3316,7 +3317,6 @@ function Shell() {
   const sidebarRef = React.useRef<HTMLDivElement>(null);
   const sidebarTriggerRef = React.useRef<HTMLButtonElement>(null);
   const mainContentRef = React.useRef<HTMLElement>(null);
-  const [erpExpanded, setErpExpanded] = useState(active.startsWith("erp-"));
   const [indicadores, setIndicadores] = useState<any>(null);
   const [activeCrmClientId, setActiveCrmClientId] = useState<string | null>(null);
   const [activeAttendancePhone, setActiveAttendancePhone] = useState<string>('');
@@ -3347,9 +3347,8 @@ function Shell() {
   useEffect(() => {
     localStorage.setItem(MEGADESK_ACTIVE_PAGE_KEY, active);
     if (active.startsWith("erp-")) {
-      const path = active === "erp-products" ? "/erp/produtos" : active === "erp-stock" ? "/erp/estoque" : "/erp";
+      const path = active === "erp-products" ? "/erp/produtos" : active === "erp-stock" ? "/erp/estoque" : active === "erp-suppliers" ? "/erp/fornecedores" : "/erp";
       window.history.replaceState(null, "", path);
-      setErpExpanded(true);
     }
   }, [active]);
 
@@ -3476,21 +3475,14 @@ function Shell() {
             const Icon = item.icon;
             const isActive = active === item.id;
             if (item.id === "erp-summary") {
-              const available: Array<{ id: RouteId; label: string }> = [{ id: "erp-summary", label: "Resumo" }, { id: "erp-products", label: "Produtos" }, { id: "erp-stock", label: "Estoque" }];
-              const navigateFromDrawer = (id: RouteId) => {
-                setActive(id);
+              const openErpWorkspace = () => {
+                setActive("erp-summary");
                 if (window.innerWidth < 1024) {
                   setSidebarOpen(false);
                   window.setTimeout(() => mainContentRef.current?.focus(), 0);
                 }
               };
-              const planned = ["Fornecedores", "Compras", "Vendas", "Financeiro", "Integrações"];
-              return <div key="erp" className="mx-2">
-                <button type="button" aria-expanded={sidebarOpen && erpExpanded} onClick={() => { if (!sidebarOpen) { setSidebarOpen(true); setErpExpanded(true); } else setErpExpanded(value => !value); }} className={cn("flex w-full items-center rounded-lg px-3 py-3 text-slate-300 transition hover:bg-slate-800/50 hover:text-white", active.startsWith("erp-") && "bg-slate-800 text-white")} title="ERP">
-                  <PackageSearch className="h-5 w-5 flex-shrink-0"/>{sidebarOpen && <><span className="ml-3 flex-1 text-left font-medium">ERP</span><ChevronDown className={cn("h-4 w-4 transition", erpExpanded && "rotate-180")}/></>}
-                </button>
-                {sidebarOpen && erpExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-slate-700 pl-3">{available.map(child => <button key={child.id} type="button" onClick={() => navigateFromDrawer(child.id)} className={cn("block w-full rounded-md px-3 py-2 text-left text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400", active === child.id ? "bg-purple-600 text-white" : "text-slate-300 hover:bg-slate-800")}>{child.label}</button>)}{planned.map(label => <button key={label} type="button" disabled aria-disabled="true" title={`${label}: em preparação`} className="block w-full cursor-not-allowed rounded-md px-3 py-2 text-left text-sm text-slate-500"><span>{label}</span><span className="block text-[10px] uppercase tracking-wide">Em preparação</span></button>)}</div>}
-              </div>;
+              return <button key="erp" type="button" onClick={openErpWorkspace} className={cn("flex items-center rounded-lg py-3 transition-all duration-300 relative px-3 mx-2",active.startsWith("erp-")?"bg-gradient-to-r from-purple-600 to-magenta-600 text-white shadow-2xl shadow-purple-500/50 rounded-xl":"text-slate-300 hover:text-white hover:bg-slate-800/50")} style={active.startsWith("erp-")&&sidebarOpen?{width:"215px"}:{}} title="ERP"><PackageSearch className="h-5 w-5 flex-shrink-0"/>{sidebarOpen&&<span className="ml-3 overflow-hidden whitespace-nowrap text-base font-medium">ERP</span>}</button>;
             }
             
             return (
@@ -3632,7 +3624,7 @@ function Shell() {
           {active === "conversations" && <ConversationsPage />}
           {active === "tickets" && <TicketsPage />}
           {active === "tracking" && <TrackingPage />}
-          {active.startsWith("erp-") && <ERPWorkspace section={(active === "erp-products" ? "products" : active === "erp-stock" ? "stock" : "summary") as ErpSection} onNavigate={(section) => setActive(section === "products" ? "erp-products" : section === "stock" ? "erp-stock" : "erp-summary")} />}
+          {active.startsWith("erp-") && <ERPWorkspace section={(active === "erp-products" ? "products" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : "summary") as ErpSection} onNavigate={(section) => setActive(section === "products" ? "erp-products" : section === "stock" ? "erp-stock" : section === "suppliers" ? "erp-suppliers" : "erp-summary")} />}
           {active === "settings" && <SettingsPageComponent />}
           {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
           {active === "bot-config" && <BotConfigPage />}

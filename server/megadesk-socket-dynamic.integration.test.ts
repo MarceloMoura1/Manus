@@ -8,6 +8,8 @@ import { createOperationalSession, MEGADESK_SESSION_COOKIE, MysqlOperationalSess
 import { emitMessageStatus, getSocketIO, initWhatsAppSocket } from "./modules/whatsapp/socket/whatsapp.socket";
 import { ErpRepository } from "./modules/erp/repository";
 import { ErpService } from "./modules/erp/service";
+import { SupplierRepository } from "./modules/erp/suppliers/repository";
+import { SupplierService } from "./modules/erp/suppliers/service";
 import { isTestDatabaseEnabled } from "./test-integration-gates";
 
 const dynamic = describe.runIf(isTestDatabaseEnabled());
@@ -74,6 +76,7 @@ function disconnected(socket: ClientSocket, timeoutMs = 1200): Promise<boolean> 
 }
 
 async function resetFixtures() {
+  await getPool().execute("DELETE FROM erp_suppliers WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_stock_movements WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_stock_balances WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_products WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
@@ -85,6 +88,7 @@ async function resetFixtures() {
 }
 
 async function cleanFixtures() {
+  await getPool().execute("DELETE FROM erp_suppliers WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_stock_movements WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_stock_balances WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_products WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
@@ -102,8 +106,12 @@ dynamic("Socket.IO operational session isolation", () => {
   });
 
   beforeEach(resetFixtures);
-  afterEach(() => {
-    for (const socket of clients) socket.disconnect();
+  afterEach(async () => {
+    const connectedClients=[...clients].filter(socket=>socket.connected);
+    const closed=connectedClients.map(socket=>disconnected(socket));
+    for (const socket of connectedClients) socket.disconnect();
+    expect(await Promise.all(closed)).not.toContain(false);
+    for (const socket of clients) if(socket.connected)socket.disconnect();
     clients.clear();
   });
 
@@ -217,5 +225,19 @@ dynamic("Socket.IO operational session isolation", () => {
     const a=client(await issueCookie("socket-user-a","socket-tenant-a")); await connected(a); const service=new ErpService(new ErpRepository()); const identity={clientId:"socket-tenant-a",userId:"socket-user-a",role:"admin" as const}; const item=await service.createProduct(identity,{name:"No event",sku:"SOCKET-NO-EVENT",barcode:null,description:null,category:null,unit:"unit",costPriceCents:0,salePriceCents:0,minimumStock:"0"});
     const failedEvent=event(a,"erp:stock.changed",300); await expect(service.moveStock(identity,{productPublicId:item.publicId,type:"manual_out",quantity:"1",reason:"Failure",idempotencyKey:crypto.randomUUID()})).rejects.toBeTruthy(); expect(await failedEvent).toBeNull();
     const key=crypto.randomUUID(); const createdEvent=event(a,"erp:stock.changed"); await service.moveStock(identity,{productPublicId:item.publicId,type:"manual_in",quantity:"1",reason:"Input",idempotencyKey:key}); await createdEvent; const replayEvent=event(a,"erp:stock.changed",300); await service.moveStock(identity,{productPublicId:item.publicId,type:"manual_in",quantity:"1",reason:"Input",idempotencyKey:key}); expect(await replayEvent).toBeNull();
+  });
+
+  it("delivers a minimal supplier event only to the authenticated tenant room", async () => {
+    const a=client(await issueCookie("socket-user-a","socket-tenant-a")); await connected(a); const b=client(await issueCookie("socket-user-b","socket-tenant-b")); await connected(b);
+    const receivedA=event(a,"erp:supplier.changed"); const receivedB=event(b,"erp:supplier.changed",300);
+    const created=await new SupplierService(new SupplierRepository()).create({clientId:"socket-tenant-a",userId:"socket-user-a",role:"admin"},{legalName:"Socket supplier",tradeName:null,personType:"legal",taxId:"12345678000190",stateRegistration:null,email:null,phone:null,contactName:null,postalCode:null,street:null,addressNumber:null,addressComplement:null,district:null,city:null,state:null,notes:null});
+    const payload=await receivedA as Record<string,unknown>; expect(payload).toMatchObject({publicId:created.publicId,operation:"created"}); expect(Object.keys(payload).sort()).toEqual(["occurredAt","operation","publicId"]); expect(await receivedB).toBeNull();
+  });
+
+  it("disconnects revoked or blocked supplier event recipients", async () => {
+    const revokedCookie=await issueCookie("socket-user-a","socket-tenant-a"); const revoked=client(revokedCookie); await connected(revoked); await revokeOperationalSession(request(revokedCookie),repository); const revokedDisconnect=disconnected(revoked);
+    await new SupplierService(new SupplierRepository()).create({clientId:"socket-tenant-a",userId:"socket-user-a",role:"admin"},{legalName:"Revoked event",tradeName:null,personType:"legal",taxId:"12345678000191",stateRegistration:null,email:null,phone:null,contactName:null,postalCode:null,street:null,addressNumber:null,addressComplement:null,district:null,city:null,state:null,notes:null}); expect(await revokedDisconnect).toBe(true);
+    const blockedCookie=await issueCookie("socket-user-b","socket-tenant-b"); const blocked=client(blockedCookie); await connected(blocked); await getPool().execute("UPDATE megadesk_domain_clients SET access_released=0 WHERE client_id='socket-tenant-b'"); const blockedDisconnect=disconnected(blocked);
+    await new SupplierService(new SupplierRepository()).create({clientId:"socket-tenant-b",userId:"socket-user-b",role:"manager"},{legalName:"Blocked event",tradeName:null,personType:"legal",taxId:"12345678000192",stateRegistration:null,email:null,phone:null,contactName:null,postalCode:null,street:null,addressNumber:null,addressComplement:null,district:null,city:null,state:null,notes:null}); expect(await blockedDisconnect).toBe(true);
   });
 });
