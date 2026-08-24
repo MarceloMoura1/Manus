@@ -114,6 +114,7 @@ export class ErpService {
         if (!original) throw new ErpDomainError("NOT_FOUND", "Movimentação não encontrada.");
         if (original.type === "reversal") throw new ErpDomainError("VALIDATION", "Um estorno não pode ser estornado.");
         if (original.type === "purchase_in") throw new ErpDomainError("CONFLICT", "Recebimentos de compra não podem ser revertidos isoladamente.");
+        if (original.type === "sale_out") throw new ErpDomainError("CONFLICT", "Baixas de venda não podem ser revertidas isoladamente.");
         const [existing] = await connection.execute<RowDataPacket[]>("SELECT id FROM erp_stock_movements WHERE client_id=? AND reversal_of=? LIMIT 1", [identity.clientId, original.id]);
         if (existing.length) throw new ErpDomainError("ALREADY_REVERSED", "Movimentação já estornada.");
         const [balanceRows] = await connection.execute<RowDataPacket[]>("SELECT quantity FROM erp_stock_balances WHERE client_id=? AND product_id=? FOR UPDATE", [identity.clientId, original.product_id]);

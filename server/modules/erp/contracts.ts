@@ -27,7 +27,7 @@ export const stockMovementInput = z.object({
 });
 
 export const stockListInput = z.object({
-  productPublicId: productPublicId.optional(), type: z.enum([...stockMovementTypes, "reversal"]).optional(),
+  productPublicId: productPublicId.optional(), type: z.enum([...stockMovementTypes, "purchase_in", "sale_out", "reversal"]).optional(),
   search: z.string().trim().max(120).default(""),
   from: z.string().datetime().optional(), to: z.string().datetime().optional(),
   page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(100).default(20),

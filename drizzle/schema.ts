@@ -1163,6 +1163,7 @@ export const erpStockMovements = mysqlTable(
       "adjustment_in",
       "adjustment_out",
       "purchase_in",
+      "sale_out",
       "reversal",
     ]).notNull(),
     direction: mysqlEnum(["in", "out"]).notNull(),
@@ -1514,3 +1515,106 @@ export const erpPurchaseOrderReceiptItems = mysqlTable(
     }),
   ]
 );
+
+export const erpSaleOrderSequences = mysqlTable("erp_sale_order_sequences", {
+  id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  year: int().notNull(),
+  nextNumber: int("next_number").default(1).notNull(),
+}, table => [uniqueIndex("uq_erp_sale_sequence_tenant_year").on(table.clientId, table.year)]);
+
+export const erpSaleOrders = mysqlTable("erp_sale_orders", {
+  id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+  publicId: varchar("public_id", { length: 36 }).notNull(),
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  orderNumber: varchar("order_number", { length: 32 }).notNull(),
+  crmClientId: varchar("crm_client_id", { length: 80 }).notNull(),
+  customerNameSnapshot: varchar("customer_name_snapshot", { length: 255 }).notNull(),
+  status: mysqlEnum(["draft", "confirmed", "fulfilled", "cancelled"]).default("draft").notNull(),
+  notes: text(),
+  expectedDate: date("expected_date", { mode: "string" }),
+  subtotalCents: bigint("subtotal_cents", { mode: "number" }).default(0).notNull(),
+  totalCents: bigint("total_cents", { mode: "number" }).default(0).notNull(),
+  confirmedBy: varchar("confirmed_by", { length: 80 }),
+  confirmedAt: timestamp("confirmed_at", { mode: "string" }),
+  fulfilledBy: varchar("fulfilled_by", { length: 80 }),
+  fulfilledAt: timestamp("fulfilled_at", { mode: "string" }),
+  cancelledBy: varchar("cancelled_by", { length: 80 }),
+  cancelledAt: timestamp("cancelled_at", { mode: "string" }),
+  cancellationReason: varchar("cancellation_reason", { length: 500 }),
+  createdBy: varchar("created_by", { length: 80 }).notNull(),
+  createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow().onUpdateNow().notNull(),
+}, table => [
+  uniqueIndex("uq_erp_sale_orders_tenant_public").on(table.clientId, table.publicId),
+  uniqueIndex("uq_erp_sale_orders_tenant_number").on(table.clientId, table.orderNumber),
+  index("idx_erp_sale_orders_tenant_status_date").on(table.clientId, table.status, table.createdAt),
+  index("idx_erp_sale_orders_tenant_customer").on(table.clientId, table.crmClientId),
+  foreignKey({ name: "fk_erp_so_customer", columns: [table.crmClientId], foreignColumns: [megadeskCrmClients.crmClientId] }),
+]);
+
+export const erpSaleOrderItems = mysqlTable("erp_sale_order_items", {
+  id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+  publicId: varchar("public_id", { length: 36 }).notNull(),
+  saleOrderId: bigint("sale_order_id", { mode: "number" }).notNull(),
+  productId: bigint("product_id", { mode: "number" }).notNull(),
+  productNameSnapshot: varchar("product_name_snapshot", { length: 180 }).notNull(),
+  skuSnapshot: varchar("sku_snapshot", { length: 80 }).notNull(),
+  quantity: decimal({ precision: 18, scale: 3 }).notNull(),
+  unitPriceCents: bigint("unit_price_cents", { mode: "number" }).notNull(),
+  lineTotalCents: bigint("line_total_cents", { mode: "number" }).notNull(),
+  createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow().onUpdateNow().notNull(),
+}, table => [
+  uniqueIndex("uq_erp_sale_items_order_public").on(table.saleOrderId, table.publicId),
+  uniqueIndex("uq_erp_sale_items_order_product").on(table.saleOrderId, table.productId),
+  foreignKey({ name: "fk_erp_soi_order", columns: [table.saleOrderId], foreignColumns: [erpSaleOrders.id] }),
+  foreignKey({ name: "fk_erp_soi_product", columns: [table.productId], foreignColumns: [erpProducts.id] }),
+]);
+
+export const erpSaleOrderHistory = mysqlTable("erp_sale_order_history", {
+  id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+  saleOrderId: bigint("sale_order_id", { mode: "number" }).notNull(),
+  fromStatus: mysqlEnum("from_status", ["draft", "confirmed", "fulfilled", "cancelled"]),
+  toStatus: mysqlEnum("to_status", ["draft", "confirmed", "fulfilled", "cancelled"]).notNull(),
+  reason: varchar({ length: 500 }),
+  changedBy: varchar("changed_by", { length: 80 }).notNull(),
+  createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+}, table => [
+  index("idx_erp_sale_history_order_date").on(table.saleOrderId, table.createdAt),
+  foreignKey({ name: "fk_erp_soh_order", columns: [table.saleOrderId], foreignColumns: [erpSaleOrders.id] }),
+]);
+
+export const erpSaleOrderFulfillments = mysqlTable("erp_sale_order_fulfillments", {
+  id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+  publicId: varchar("public_id", { length: 36 }).notNull(),
+  clientId: varchar("client_id", { length: 80 }).notNull(),
+  saleOrderId: bigint("sale_order_id", { mode: "number" }).notNull(),
+  idempotencyKey: varchar("idempotency_key", { length: 100 }).notNull(),
+  fulfilledBy: varchar("fulfilled_by", { length: 80 }).notNull(),
+  fulfilledAt: timestamp("fulfilled_at", { mode: "string" }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow().onUpdateNow().notNull(),
+}, table => [
+  uniqueIndex("uq_erp_sale_fulfillments_tenant_public").on(table.clientId, table.publicId),
+  uniqueIndex("uq_erp_sale_fulfillments_tenant_idempotency").on(table.clientId, table.idempotencyKey),
+  uniqueIndex("uq_erp_sale_fulfillments_order").on(table.saleOrderId),
+  foreignKey({ name: "fk_erp_sof_order", columns: [table.saleOrderId], foreignColumns: [erpSaleOrders.id] }),
+]);
+
+export const erpSaleOrderFulfillmentItems = mysqlTable("erp_sale_order_fulfillment_items", {
+  id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+  fulfillmentId: bigint("fulfillment_id", { mode: "number" }).notNull(),
+  saleOrderItemId: bigint("sale_order_item_id", { mode: "number" }).notNull(),
+  productId: bigint("product_id", { mode: "number" }).notNull(),
+  quantity: decimal({ precision: 18, scale: 3 }).notNull(),
+  stockMovementId: bigint("stock_movement_id", { mode: "number" }).notNull(),
+  createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+}, table => [
+  uniqueIndex("uq_erp_sale_fulfillment_item_order_item").on(table.fulfillmentId, table.saleOrderItemId),
+  uniqueIndex("uq_erp_sale_fulfillment_item_movement").on(table.stockMovementId),
+  foreignKey({ name: "fk_erp_sofi_fulfillment", columns: [table.fulfillmentId], foreignColumns: [erpSaleOrderFulfillments.id] }),
+  foreignKey({ name: "fk_erp_sofi_order_item", columns: [table.saleOrderItemId], foreignColumns: [erpSaleOrderItems.id] }),
+  foreignKey({ name: "fk_erp_sofi_product", columns: [table.productId], foreignColumns: [erpProducts.id] }),
+  foreignKey({ name: "fk_erp_sofi_movement", columns: [table.stockMovementId], foreignColumns: [erpStockMovements.id] }),
+]);

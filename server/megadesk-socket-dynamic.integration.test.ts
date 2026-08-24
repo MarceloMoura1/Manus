@@ -10,6 +10,8 @@ import { ErpRepository } from "./modules/erp/repository";
 import { ErpService } from "./modules/erp/service";
 import { SupplierRepository } from "./modules/erp/suppliers/repository";
 import { SupplierService } from "./modules/erp/suppliers/service";
+import { SaleRepository } from "./modules/erp/sales/repository";
+import { SaleService } from "./modules/erp/sales/service";
 import { isTestDatabaseEnabled } from "./test-integration-gates";
 
 const dynamic = describe.runIf(isTestDatabaseEnabled());
@@ -76,10 +78,17 @@ function disconnected(socket: ClientSocket, timeoutMs = 1200): Promise<boolean> 
 }
 
 async function resetFixtures() {
+  await getPool().execute("DELETE fi FROM erp_sale_order_fulfillment_items fi INNER JOIN erp_sale_order_fulfillments f ON f.id=fi.fulfillment_id WHERE f.client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_sale_order_fulfillments WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE h FROM erp_sale_order_history h INNER JOIN erp_sale_orders o ON o.id=h.sale_order_id WHERE o.client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE i FROM erp_sale_order_items i INNER JOIN erp_sale_orders o ON o.id=i.sale_order_id WHERE o.client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_sale_orders WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_sale_order_sequences WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_suppliers WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_stock_movements WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_stock_balances WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_products WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM megadesk_crm_clients WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM megadesk_operational_sessions WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM megadesk_domain_client_users WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM megadesk_domain_clients WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
@@ -88,13 +97,29 @@ async function resetFixtures() {
 }
 
 async function cleanFixtures() {
+  await getPool().execute("DELETE fi FROM erp_sale_order_fulfillment_items fi INNER JOIN erp_sale_order_fulfillments f ON f.id=fi.fulfillment_id WHERE f.client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_sale_order_fulfillments WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE h FROM erp_sale_order_history h INNER JOIN erp_sale_orders o ON o.id=h.sale_order_id WHERE o.client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE i FROM erp_sale_order_items i INNER JOIN erp_sale_orders o ON o.id=i.sale_order_id WHERE o.client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_sale_orders WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_sale_order_sequences WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_suppliers WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_stock_movements WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_stock_balances WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_products WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM megadesk_crm_clients WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM megadesk_operational_sessions WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM megadesk_domain_client_users WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM megadesk_domain_clients WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+}
+
+async function saleFixture(clientId: string, userId: string) {
+  const identity={clientId,userId,role:"admin" as const}, erp=new ErpService(new ErpRepository());
+  const crmClientId=crypto.randomUUID();
+  await getPool().execute("INSERT INTO megadesk_crm_clients(crm_client_id,client_id,company_name,status) VALUES(?,?,?,'ativo')",[crmClientId,clientId,`Socket sale ${clientId}`]);
+  const product=await erp.createProduct(identity,{name:`Socket sale ${clientId}`,sku:`SALE-${clientId}`,barcode:null,description:null,category:null,unit:"unit",costPriceCents:0,salePriceCents:100,minimumStock:"0"});
+  await erp.moveStock(identity,{productPublicId:product.publicId,type:"manual_in",quantity:"2",reason:"Socket sale balance",idempotencyKey:crypto.randomUUID()});
+  return {identity,crmClientId,product};
 }
 
 dynamic("Socket.IO operational session isolation", () => {
@@ -225,6 +250,25 @@ dynamic("Socket.IO operational session isolation", () => {
     const a=client(await issueCookie("socket-user-a","socket-tenant-a")); await connected(a); const service=new ErpService(new ErpRepository()); const identity={clientId:"socket-tenant-a",userId:"socket-user-a",role:"admin" as const}; const item=await service.createProduct(identity,{name:"No event",sku:"SOCKET-NO-EVENT",barcode:null,description:null,category:null,unit:"unit",costPriceCents:0,salePriceCents:0,minimumStock:"0"});
     const failedEvent=event(a,"erp:stock.changed",300); await expect(service.moveStock(identity,{productPublicId:item.publicId,type:"manual_out",quantity:"1",reason:"Failure",idempotencyKey:crypto.randomUUID()})).rejects.toBeTruthy(); expect(await failedEvent).toBeNull();
     const key=crypto.randomUUID(); const createdEvent=event(a,"erp:stock.changed"); await service.moveStock(identity,{productPublicId:item.publicId,type:"manual_in",quantity:"1",reason:"Input",idempotencyKey:key}); await createdEvent; const replayEvent=event(a,"erp:stock.changed",300); await service.moveStock(identity,{productPublicId:item.publicId,type:"manual_in",quantity:"1",reason:"Input",idempotencyKey:key}); expect(await replayEvent).toBeNull();
+  });
+
+  it("delivers committed sale and stock events only to the sale tenant with minimal payloads", async () => {
+    const a=client(await issueCookie("socket-user-a","socket-tenant-a")); await connected(a); const b=client(await issueCookie("socket-user-b","socket-tenant-b")); await connected(b);
+    const f=await saleFixture("socket-tenant-a","socket-user-a"), service=new SaleService(new SaleRepository());
+    const createdA=event(a,"erp:sale.changed"), createdB=event(b,"erp:sale.changed",300);
+    const order=await service.create(f.identity,{crmClientId:f.crmClientId,notes:null,expectedDate:null,items:[{productPublicId:f.product.publicId,quantity:"1",unitPriceCents:100}]});
+    const created=await createdA as Record<string,unknown>; expect(created).toMatchObject({publicId:order.publicId,operation:"created"}); expect(Object.keys(created).sort()).toEqual(["occurredAt","operation","publicId"]); expect(await createdB).toBeNull();
+    const confirmedEvent=event(a,"erp:sale.changed"); await service.confirm(f.identity,order.publicId); expect(await confirmedEvent).toMatchObject({operation:"confirmed"});
+    const saleEvent=event(a,"erp:sale.changed"), stockEvent=event(a,"erp:stock.changed"); const key=crypto.randomUUID(); await service.fulfill(f.identity,order.publicId,key); expect(await saleEvent).toMatchObject({operation:"fulfilled"}); expect(await stockEvent).toMatchObject({operation:"sale_fulfilled",productPublicId:f.product.publicId});
+    const replaySale=event(a,"erp:sale.changed",300), replayStock=event(a,"erp:stock.changed",300); await service.fulfill(f.identity,order.publicId,key); expect(await replaySale).toBeNull(); expect(await replayStock).toBeNull();
+  });
+
+  it("does not deliver rolled-back sales and disconnects revoked or blocked sale recipients", async () => {
+    const cookie=await issueCookie("socket-user-a","socket-tenant-a"), a=client(cookie); await connected(a); const f=await saleFixture("socket-tenant-a","socket-user-a"), service=new SaleService(new SaleRepository());
+    const createdEvent=event(a,"erp:sale.changed"); const order=await service.create(f.identity,{crmClientId:f.crmClientId,notes:null,expectedDate:null,items:[{productPublicId:f.product.publicId,quantity:"3",unitPriceCents:100}]}); await createdEvent; const confirmedEvent=event(a,"erp:sale.changed"); await service.confirm(f.identity,order.publicId); await confirmedEvent;
+    const failedSale=event(a,"erp:sale.changed",300), failedStock=event(a,"erp:stock.changed",300); await expect(service.fulfill(f.identity,order.publicId,crypto.randomUUID())).rejects.toMatchObject({code:"INSUFFICIENT_STOCK"}); expect(await failedSale).toBeNull(); expect(await failedStock).toBeNull();
+    await revokeOperationalSession(request(cookie),repository); const revokedDisconnect=disconnected(a); await service.create(f.identity,{crmClientId:f.crmClientId,notes:null,expectedDate:null,items:[{productPublicId:f.product.publicId,quantity:"1",unitPriceCents:100}]}); expect(await revokedDisconnect).toBe(true);
+    const blockedCookie=await issueCookie("socket-user-b","socket-tenant-b"), blocked=client(blockedCookie); await connected(blocked); const fb=await saleFixture("socket-tenant-b","socket-user-b"); await getPool().execute("UPDATE megadesk_domain_clients SET access_released=0 WHERE client_id='socket-tenant-b'"); const blockedDisconnect=disconnected(blocked); await new SaleService(new SaleRepository()).create(fb.identity,{crmClientId:fb.crmClientId,notes:null,expectedDate:null,items:[{productPublicId:fb.product.publicId,quantity:"1",unitPriceCents:100}]}); expect(await blockedDisconnect).toBe(true);
   });
 
   it("delivers a minimal supplier event only to the authenticated tenant room", async () => {

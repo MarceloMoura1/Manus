@@ -6,6 +6,7 @@ import { ErpDomainError, erpTrpcCode } from "./errors";
 import { ErpService } from "./service";
 import { suppliersRouter } from "./suppliers/router";
 import { purchasesRouter } from "./purchases/router";
+import { salesRouter } from "./sales/router";
 
 const service = new ErpService();
 type ErpContext = { tenantId: string; operationalUserId: string; operationalUserRole: "admin" | "manager" | "agent" | "viewer" };
@@ -20,6 +21,7 @@ export const erpRouter = router({
   summary: megadeskProcedure.query(({ ctx }) => runErp(() => service.summary(identity(ctx)))),
   suppliers: suppliersRouter,
   purchases: purchasesRouter,
+  sales: salesRouter,
   products: router({
     list: megadeskProcedure.input(productListInput).query(({ input, ctx }) => runErp(() => service.listProducts(identity(ctx), input))),
     detail: megadeskProcedure.input(z.object({ publicId: productPublicId })).query(({ input, ctx }) => runErp(() => service.getProduct(identity(ctx), input.publicId))),

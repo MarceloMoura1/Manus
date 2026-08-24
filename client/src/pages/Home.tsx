@@ -151,7 +151,7 @@ const SESSION_DURATION_LONG = 30 * 24 * 60 * 60 * 1000; // 30 dias ("lembrar meu
 const REFRESH_THRESHOLD = 5 * 60 * 1000; // Renovar 5 minutos antes de expirar
 const REFRESH_INTERVAL = 10 * 60 * 1000; // Verificar renovação a cada 10 minutos
 
-  type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-clients" | "erp-products" | "erp-stock" | "erp-suppliers" | "erp-purchases" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "whatsapp-config" | "admin-settings";
+  type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-clients" | "erp-products" | "erp-stock" | "erp-suppliers" | "erp-purchases" | "erp-sales" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "whatsapp-config" | "admin-settings";
 
 type Ticket = {
   id: string;
@@ -3311,6 +3311,7 @@ function Shell() {
     if (window.location.pathname === "/erp/estoque") return "erp-stock";
     if (window.location.pathname === "/erp/fornecedores") return "erp-suppliers";
     if (window.location.pathname === "/erp/compras") return "erp-purchases";
+    if (window.location.pathname === "/erp/vendas") return "erp-sales";
     if (window.location.pathname === "/erp") return "erp-summary";
     const stored = localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY);
     return (stored as RouteId) || "home";
@@ -3337,6 +3338,8 @@ function Shell() {
           ? "/erp/estoque"
           : route === "erp-suppliers"
               ? "/erp/fornecedores"
+            : route === "erp-sales"
+              ? "/erp/vendas"
             : route === "erp-purchases"
               ? "/erp/compras"
             : route === "erp-summary"
@@ -3382,7 +3385,7 @@ function Shell() {
         path = "/erp/clientes";
       }
       setActiveCrmClientId(path === "/erp/clientes" ? new URLSearchParams(window.location.search).get("crmClientId") : null);
-        setActive(path === "/erp/clientes" ? "erp-clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp/compras" ? "erp-purchases" : path === "/erp" ? "erp-summary" : "home");
+        setActive(path === "/erp/clientes" ? "erp-clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp/compras" ? "erp-purchases" : path === "/erp/vendas" ? "erp-sales" : path === "/erp" ? "erp-summary" : "home");
       window.setTimeout(() => mainContentRef.current?.focus(), 0);
     };
     window.addEventListener("popstate", restoreFromHistory);
@@ -3663,7 +3666,7 @@ function Shell() {
           {active === "conversations" && <ConversationsPage />}
           {active === "tickets" && <TicketsPage />}
           {active === "tracking" && <TrackingPage />}
-           {active.startsWith("erp-") && <ERPWorkspace section={(active === "erp-clients" ? "clients" : active === "erp-products" ? "products" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : active === "erp-purchases" ? "purchases" : "summary") as ErpSection} onNavigate={(section) => navigateToRoute(section === "clients" ? "erp-clients" : section === "products" ? "erp-products" : section === "stock" ? "erp-stock" : section === "suppliers" ? "erp-suppliers" : section === "purchases" ? "erp-purchases" : "erp-summary")} canAccessClients={session.permissions.includes("clients")} initialCrmClientId={activeCrmClientId ?? undefined} onClientNavigate={() => navigateToRoute("conversations")} />}
+           {active.startsWith("erp-") && <ERPWorkspace section={(active === "erp-clients" ? "clients" : active === "erp-products" ? "products" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : active === "erp-purchases" ? "purchases" : active === "erp-sales" ? "sales" : "summary") as ErpSection} onNavigate={(section) => navigateToRoute(section === "clients" ? "erp-clients" : section === "products" ? "erp-products" : section === "stock" ? "erp-stock" : section === "suppliers" ? "erp-suppliers" : section === "purchases" ? "erp-purchases" : section === "sales" ? "erp-sales" : "erp-summary")} canAccessClients={session.permissions.includes("clients")} initialCrmClientId={activeCrmClientId ?? undefined} onClientNavigate={() => navigateToRoute("conversations")} />}
           {active === "settings" && <SettingsPageComponent />}
           {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
           {active === "bot-config" && <BotConfigPage />}

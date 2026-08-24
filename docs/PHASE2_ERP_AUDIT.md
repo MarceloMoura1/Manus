@@ -119,3 +119,6 @@ A sessão segura foi validada e publicada; o bloqueio anterior foi removido excl
 Foram criados schema main aditivo, repository tenant-aware, service transacional, schemas Zod, erros de domínio e router fino. `operational_records` e a leitura JSON legada do Gemini não foram reutilizados. Não havia tabela, rota ou repository equivalente que justificasse compatibilidade ou migração de dados.
 
 A política usa roles existentes: `admin`/`manager` escrevem e `agent`/`viewer` consultam. Fornecedores é real em `/erp/fornecedores`. A terceira fatia torna Compras funcional em `/erp/compras`, com aprovação, recebimento transacional e ledger; Vendas, Financeiro, Fiscal, Relatórios e Integrações permanecem planejados.
+# Quarta fatia — Vendas
+
+Pedidos de venda transacionais foram adicionados após Compras, integrando Clientes, Produtos, Estoque e ledger imutável. A validação física permanece pendente e deve usar exclusivamente ambiente descartável autorizado. Consulte `docs/PHASE2_ERP_SALES.md`.
