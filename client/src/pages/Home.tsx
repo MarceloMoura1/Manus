@@ -7,7 +7,6 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { validateNewChamado, ValidationError } from "@/lib/validations";
 import { ActiveAttendancePage } from "./ActiveAttendance";
-import { ClientesPage } from "./ClientesPage";
 import { ConversasPage } from "./ConversasPage";
 import { WhatsAppConfigPage } from "./WhatsAppConfigPage";
 import { SettingsPage as SettingsPageComponent } from "./SettingsPage";
@@ -60,7 +59,6 @@ import {
   AlertCircle,
   X,
   Edit2,
-  Building2,
   Smartphone,
   Tag,
   ChevronDown,
@@ -153,7 +151,7 @@ const SESSION_DURATION_LONG = 30 * 24 * 60 * 60 * 1000; // 30 dias ("lembrar meu
 const REFRESH_THRESHOLD = 5 * 60 * 1000; // Renovar 5 minutos antes de expirar
 const REFRESH_INTERVAL = 10 * 60 * 1000; // Verificar renovação a cada 10 minutos
 
-type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-products" | "erp-stock" | "erp-suppliers" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "clients" | "whatsapp-config" | "admin-settings";
+type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-clients" | "erp-products" | "erp-stock" | "erp-suppliers" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "whatsapp-config" | "admin-settings";
 
 type Ticket = {
   id: string;
@@ -3304,7 +3302,11 @@ function NotificationsPage() {
 function Shell() {
   const { theme, toggleTheme } = useTheme();
   const [active, setActive] = useState<RouteId>(() => {
-    if (window.location.pathname === "/clientes") return "clients";
+    if (window.location.pathname === "/clientes") {
+      window.history.replaceState(null, "", `/erp/clientes${window.location.search}${window.location.hash}`);
+      return "erp-clients";
+    }
+    if (window.location.pathname === "/erp/clientes") return "erp-clients";
     if (window.location.pathname === "/erp/produtos") return "erp-products";
     if (window.location.pathname === "/erp/estoque") return "erp-stock";
     if (window.location.pathname === "/erp/fornecedores") return "erp-suppliers";
@@ -3319,15 +3321,15 @@ function Shell() {
   const sidebarTriggerRef = React.useRef<HTMLButtonElement>(null);
   const mainContentRef = React.useRef<HTMLElement>(null);
   const [indicadores, setIndicadores] = useState<any>(null);
-  const [activeCrmClientId, setActiveCrmClientId] = useState<string | null>(null);
+  const [activeCrmClientId, setActiveCrmClientId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("crmClientId"));
   const [activeAttendancePhone, setActiveAttendancePhone] = useState<string>('');
   const closeMobileSidebar = React.useCallback((restoreFocus = true) => {
     setSidebarOpen(false);
     if (restoreFocus) window.setTimeout(() => sidebarTriggerRef.current?.focus(), 0);
   }, []);
-  const navigateToRoute = React.useCallback((route: RouteId, options?: { replace?: boolean }) => {
-    const path = route === "clients"
-      ? "/clientes"
+  const navigateToRoute = React.useCallback((route: RouteId, options?: { replace?: boolean; crmClientId?: string }) => {
+    const path = route === "erp-clients"
+      ? `/erp/clientes${options?.crmClientId ? `?crmClientId=${encodeURIComponent(options.crmClientId)}` : ""}`
       : route === "erp-products"
         ? "/erp/produtos"
         : route === "erp-stock"
@@ -3338,6 +3340,7 @@ function Shell() {
               ? "/erp"
               : "/";
     window.history[options?.replace ? "replaceState" : "pushState"](null, "", path);
+    setActiveCrmClientId(route === "erp-clients" ? options?.crmClientId ?? null : null);
     setActive(route);
     if (window.innerWidth < 1024) {
       setSidebarOpen(false);
@@ -3370,8 +3373,13 @@ function Shell() {
 
   useEffect(() => {
     const restoreFromHistory = () => {
-      const path = window.location.pathname;
-      setActive(path === "/clientes" ? "clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp" ? "erp-summary" : "home");
+      let path = window.location.pathname;
+      if (path === "/clientes") {
+        window.history.replaceState(null, "", `/erp/clientes${window.location.search}${window.location.hash}`);
+        path = "/erp/clientes";
+      }
+      setActiveCrmClientId(path === "/erp/clientes" ? new URLSearchParams(window.location.search).get("crmClientId") : null);
+      setActive(path === "/erp/clientes" ? "erp-clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp" ? "erp-summary" : "home");
       window.setTimeout(() => mainContentRef.current?.focus(), 0);
     };
     window.addEventListener("popstate", restoreFromHistory);
@@ -3379,8 +3387,8 @@ function Shell() {
   }, []);
 
   useEffect(() => {
-    if (session && active === "clients" && !session.permissions.includes("clients")) {
-      navigateToRoute("home", { replace: true });
+    if (session && active === "erp-clients" && !session.permissions.includes("clients")) {
+      navigateToRoute("erp-summary", { replace: true });
     }
   }, [active, navigateToRoute, session]);
 
@@ -3397,12 +3405,13 @@ function Shell() {
           setActiveAttendancePhone(phone);
           localStorage.removeItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
         }
-        setActive(detail.route as RouteId);
+        const route = detail.route === "clients" ? "erp-clients" : detail.route as RouteId;
+        navigateToRoute(route, { crmClientId: typeof detail.crmClientId === "string" ? detail.crmClientId : undefined });
       }
     };
     window.addEventListener('megadesk-navigate', handleNavigate);
     return () => window.removeEventListener('megadesk-navigate', handleNavigate);
-  }, []);
+  }, [navigateToRoute]);
 
   useEffect(() => {
     const storedSession = localStorage.getItem(MEGADESK_SESSION_KEY);
@@ -3430,7 +3439,6 @@ function Shell() {
     { id: "tickets" as RouteId, label: "Chamados", icon: ClipboardList },
     { id: "tracking" as RouteId, label: "Rastreamento", icon: MapPin },
     { id: "erp-summary" as RouteId, label: "ERP", icon: PackageSearch },
-    { id: "clients" as RouteId, label: "Clientes", icon: Building2 },
     { id: "whatsapp-config" as RouteId, label: "WhatsApp", icon: Smartphone },
     { id: "settings" as RouteId, label: "Configurações", icon: Cog },
     { id: "admin-settings" as RouteId, label: "Configurações Admin", icon: Cog },
@@ -3635,7 +3643,7 @@ function Shell() {
          <header className={`bg-white border-b border-slate-200 px-4 py-4 sm:px-8 flex items-center justify-between${active === 'conversations' ? ' hidden' : ''}`}>
            <div>
              <button ref={sidebarTriggerRef} type="button" onClick={() => setSidebarOpen(true)} className="mb-2 rounded-lg p-2 text-slate-700 hover:bg-slate-100 lg:hidden" title="Abrir menu"><Menu className="h-5 w-5" /></button>
-            <h1 className="text-2xl font-bold text-slate-900">{navItems.find(i => i.id === active)?.label || 'MegaDesk'}</h1>
+            <h1 className="text-2xl font-bold text-slate-900">{active === "erp-clients" ? "ERP · Clientes" : navItems.find(i => i.id === active)?.label || 'MegaDesk'}</h1>
             <p className="text-sm text-slate-600">{session.company} • {session.userName}</p>
           </div>
           <div className="flex items-center gap-4">
@@ -3652,7 +3660,7 @@ function Shell() {
           {active === "conversations" && <ConversationsPage />}
           {active === "tickets" && <TicketsPage />}
           {active === "tracking" && <TrackingPage />}
-          {active.startsWith("erp-") && <ERPWorkspace section={(active === "erp-products" ? "products" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : "summary") as ErpSection} onNavigate={(section) => navigateToRoute(section === "products" ? "erp-products" : section === "stock" ? "erp-stock" : section === "suppliers" ? "erp-suppliers" : "erp-summary")} />}
+          {active.startsWith("erp-") && <ERPWorkspace section={(active === "erp-clients" ? "clients" : active === "erp-products" ? "products" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : "summary") as ErpSection} onNavigate={(section) => navigateToRoute(section === "clients" ? "erp-clients" : section === "products" ? "erp-products" : section === "stock" ? "erp-stock" : section === "suppliers" ? "erp-suppliers" : "erp-summary")} canAccessClients={session.permissions.includes("clients")} initialCrmClientId={activeCrmClientId ?? undefined} onClientNavigate={() => navigateToRoute("conversations")} />}
           {active === "settings" && <SettingsPageComponent />}
           {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
           {active === "bot-config" && <BotConfigPage />}
@@ -3664,15 +3672,8 @@ function Shell() {
               navigateToRoute(nav as RouteId);
             } else if (nav && typeof nav === 'object') {
               const { route, crmClientId } = nav as { route: string; crmClientId?: string };
-              if (crmClientId) {
-                setActiveCrmClientId(crmClientId);
-              }
-              navigateToRoute(route as RouteId);
+              navigateToRoute((route === "clients" ? "erp-clients" : route) as RouteId, { crmClientId });
             }
-          }} />}
-          {active === "clients" && <ClientesPage initialSelectedId={activeCrmClientId ?? undefined} onNavigate={(phone) => {
-            // Navegar para Conversas com novo chat aberto
-            navigateToRoute('conversations');
           }} />}
           </ErrorBoundary>
         </main>

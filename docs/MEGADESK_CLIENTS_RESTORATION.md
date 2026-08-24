@@ -39,13 +39,21 @@ identidade operacional mínima sem abrir o router completo de Clientes.
 
 ## Navegação e integrações
 
-Clientes permanece na sidebar principal e possui a rota estável `/clientes`, com
-deep link, refresh e navegação voltar/avançar. ERP continua como um único item da
-sidebar, mantendo seus módulos dentro do workspace.
+Clientes aparece visualmente dentro do workspace ERP, entre Resumo e Produtos. O
+domínio continua central e compartilhado por Atendimento, Conversas, Chamados e
+futuros consumidores; não existe cadastro, tabela ou estado duplicado no ERP.
+ERP permanece como o único item correspondente na sidebar principal.
+
+A rota canônica é `/erp/clientes`. A rota legada `/clientes` redireciona no
+cliente para a rota canônica, preservando query string e fragmento. Deep link,
+refresh e navegação voltar/avançar usam uma única instância de `ClientesPage`.
+O parâmetro público `crmClientId` pode selecionar o cadastro correto; `client_id`
+do tenant nunca integra a URL ou os inputs CRM.
 
 Atendimento ativo preserva a normalização de telefone, a busca tenant-aware e o
 retorno de `crmClientId`. Ao iniciar conversa, esse identificador é armazenado em
-`crm_client_id`. O link para a página completa aparece somente para admin/manager;
+`crm_client_id`. O link para a página completa aponta diretamente para
+`/erp/clientes` e aparece somente para admin/manager;
 agent continua vendo apenas o resumo operacional.
 
 Chamados usa `customer_id = crm_client_id` como vínculo explícito quando ele
@@ -67,7 +75,7 @@ eventual anonimização antes de ampliar operações de inativação/exclusão.
 ## Limitações e próximos passos
 
 Não havia contrato realtime histórico seguro para Clientes; nenhum evento novo
-foi criado e os eventos WhatsApp/ERP não foram alterados. A validação física em
-MySQL permanece pendente e condicionada a autorização específica. CRM, Vendas,
-Financeiro e Fiscal devem consumir futuramente este mesmo cadastro central.
-Compras permanece fora de escopo e bloqueado até a conclusão desta restauração.
+foi criado e os eventos WhatsApp/ERP não foram alterados. A mudança de navegação
+não altera schema, migration ou persistência. Vendas, Financeiro e Fiscal devem
+consumir futuramente este mesmo cadastro central. Compras e os demais módulos
+posteriores permanecem em preparação.

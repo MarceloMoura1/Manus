@@ -16,8 +16,8 @@ export default defineConfig({
   use: {
     baseURL: e2eBaseUrl,
     trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    screenshot: 'off',
+    video: 'off',
   },
 
   projects: [

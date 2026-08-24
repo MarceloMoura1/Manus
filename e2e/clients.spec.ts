@@ -29,24 +29,24 @@ async function prepare(page: Page, role: "admin" | "manager" | "agent" | "viewer
   const allowed = role === "admin" || role === "manager";
   const refreshedSession = {
     company: "Tenant controlado",
-    permissions: allowed ? ["clients"] : ["active-attendance"],
+    permissions: allowed ? ["clients", "erp"] : ["erp"],
     userName: "Usuário controlado",
     userEmail: `${role}@example.invalid`,
     userRole: role,
     plan: "test",
-    modules: allowed ? ["clients"] : ["active-attendance"],
+    modules: allowed ? ["clients", "erp"] : ["erp"],
     expiresAt: Date.now() + 3_600_000,
   };
   await page.addInitScript(({ selectedRole, canAccess }) => {
     localStorage.setItem("megadesk_session_v1", JSON.stringify({
       clientId: "tenant-must-not-leave-browser",
       company: "Tenant controlado",
-      permissions: canAccess ? ["clients"] : ["active-attendance"],
+      permissions: canAccess ? ["clients", "erp"] : ["erp"],
       userName: "Usuário controlado",
       userEmail: `${selectedRole}@example.invalid`,
       userRole: selectedRole,
       plan: "test",
-      modules: canAccess ? ["clients"] : ["active-attendance"],
+      modules: canAccess ? ["clients", "erp"] : ["erp"],
       expiresAt: Date.now() + 3_600_000,
     }));
   }, { selectedRole: role, canAccess: allowed });
@@ -58,6 +58,8 @@ async function prepare(page: Page, role: "admin" | "manager" | "agent" | "viewer
       ? { ok: true, session: refreshedSession }
       : name.includes("crm.list")
       ? { clients: [commercialClient] }
+      : name.includes("erp.summary")
+        ? { metrics: { activeProducts: 0, inactiveProducts: 0, lowProducts: 0, emptyProducts: 0, costValueCents: 0, saleValueCents: 0 }, critical: [], recent: [], canWrite: false }
       : name.includes("crm.create")
         ? { success: true, crmClientId: commercialClient.crmClientId }
         : name.includes("crm.update") || name.includes("crm.addTimelineEntry")
@@ -94,10 +96,13 @@ test.describe("central Clients controlled", () => {
         if (procedure.startsWith("crm.")) crmRequests.push(JSON.stringify(input[index] ?? input));
       });
     });
-    await page.goto("/clientes");
-    await expect(page).toHaveURL(/\/clientes$/);
+    await page.goto(`/clientes?crmClientId=${commercialClient.crmClientId}`);
+    await expect(page).toHaveURL(new RegExp(`/erp/clientes\\?crmClientId=${commercialClient.crmClientId}$`));
     await expect(page.getByTestId("clients-page")).toBeVisible();
-    await expect(page.getByText("Cliente compartilhado")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Cliente compartilhado", exact: true })).toBeVisible();
+    await expect(page.locator("nav").getByRole("button", { name: "Clientes", exact: true })).toBeVisible();
+    await expect(page.getByLabel("Menu principal").getByRole("button", { name: "Clientes", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "ERP", exact: true })).toHaveCount(1);
     expect(crmRequests.join("\n")).not.toContain("tenant-must-not-leave-browser");
     await expect(page.getByTitle("Excluir")).toHaveCount(0);
   });
@@ -105,11 +110,12 @@ test.describe("central Clients controlled", () => {
   test("keeps manager write actions and supports history navigation", async ({ page }) => {
     await prepare(page, "manager");
     await page.goto("/");
-    await page.getByTitle("Clientes").click();
-    await expect(page).toHaveURL(/\/clientes$/);
+    await page.getByRole("button", { name: "ERP", exact: true }).click();
+    await page.getByTestId("erp-workspace").getByRole("button", { name: "Clientes", exact: true }).click();
+    await expect(page).toHaveURL(/\/erp\/clientes$/);
     await expect(page.getByRole("button", { name: "Novo" })).toBeVisible();
     await page.goBack();
-    await expect(page).toHaveURL(/\/$/);
+    await expect(page).toHaveURL(/\/erp$/);
     await page.goForward();
     await expect(page.getByTestId("clients-page")).toBeVisible();
   });
@@ -117,10 +123,11 @@ test.describe("central Clients controlled", () => {
   for (const role of ["agent", "viewer"] as const) {
     test(`keeps Clients unavailable to ${role}`, async ({ page }) => {
       await prepare(page, role);
-      await page.goto("/clientes");
-      await expect(page).toHaveURL(/\/$/);
+      await page.goto("/erp/clientes");
+      await expect(page).toHaveURL(/\/erp$/);
       await expect(page.getByTestId("clients-page")).toHaveCount(0);
-      await expect(page.getByTitle("Clientes")).toHaveCount(0);
+      await expect(page.getByLabel("Menu principal").getByRole("button", { name: "Clientes", exact: true })).toHaveCount(0);
+      await expect(page.getByTestId("erp-workspace").getByRole("button", { name: "Clientes", exact: true })).toHaveCount(0);
     });
   }
 
@@ -133,9 +140,25 @@ test.describe("central Clients controlled", () => {
     test(`remains usable without horizontal overflow at ${viewport.width}x${viewport.height}`, async ({ page }) => {
       await page.setViewportSize(viewport);
       await prepare(page, "admin");
-      await page.goto("/clientes");
+      await page.goto("/");
+      const erp = page.getByRole("button", { name: "ERP", exact: true });
+      if (!await erp.isVisible()) await page.locator("header").getByTitle("Abrir menu").click();
+      await erp.click();
+      await page.getByTestId("erp-workspace").getByRole("button", { name: "Clientes", exact: true }).click();
+      await expect(page).toHaveURL(/\/erp\/clientes$/);
       await expect(page.getByTestId("clients-page")).toBeVisible();
+      if (viewport.width < 1024) await expect(page.locator("main")).toBeFocused();
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+      await page.getByRole("button", { name: "Novo", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      const box = await dialog.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.y).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
+      await page.getByRole("button", { name: "Fechar cadastro de cliente" }).click();
+      await expect(dialog).toBeHidden();
     });
   }
 });

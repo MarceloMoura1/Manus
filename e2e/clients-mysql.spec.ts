@@ -45,8 +45,8 @@ async function fixtures() {
      (user_id, client_id, name, email, role, status, permissions_json, password_hash)
      VALUES ('clients-admin-a', ?, 'Admin Clientes', ?, 'admin', 'active', '["clients","active-attendance","tickets","erp"]', ?),
             ('clients-manager-a', ?, 'Manager Clientes', ?, 'manager', 'active', '["clients","active-attendance","tickets","erp"]', ?),
-            ('clients-agent-a', ?, 'Agent Clientes', ?, 'agent', 'active', '["clients"]', ?),
-            ('clients-viewer-a', ?, 'Viewer Clientes', ?, 'viewer', 'active', '["clients"]', ?),
+            ('clients-agent-a', ?, 'Agent Clientes', ?, 'agent', 'active', '["clients","erp"]', ?),
+            ('clients-viewer-a', ?, 'Viewer Clientes', ?, 'viewer', 'active', '["clients","erp"]', ?),
             ('clients-admin-b', ?, 'Admin Clientes B', ?, 'admin', 'active', '["clients","active-attendance","tickets","erp"]', ?)`,
     [tenantA, users.admin, hashA, tenantA, users.manager, hashA, tenantA, users.agent, hashA, tenantA, users.viewer, hashA, tenantB, users.tenantB, hashB],
   );
@@ -71,10 +71,11 @@ async function closeContext(value: BrowserContext) {
 }
 
 async function openClients(page: Page) {
-  const item = page.getByRole("button", { name: "Clientes", exact: true });
-  if (!await item.isVisible()) await page.locator("header").getByTitle("Abrir menu").click();
-  await item.click();
-  await expect(page).toHaveURL(/\/clientes$/);
+  const erp = page.getByRole("button", { name: "ERP", exact: true });
+  if (!await erp.isVisible()) await page.locator("header").getByTitle("Abrir menu").click();
+  await erp.click();
+  await page.getByTestId("erp-workspace").getByRole("button", { name: "Clientes", exact: true }).click();
+  await expect(page).toHaveURL(/\/erp\/clientes$/);
   await expect(page.getByTestId("clients-page")).toBeVisible();
 }
 
@@ -148,7 +149,7 @@ test.describe.serial("Clients real MySQL journeys", () => {
     await expect(page.getByRole("button", { name: "Ver no CRM" })).toBeVisible();
     await shot(page, "clients-active-attendance-admin-1440.png");
     await page.getByRole("button", { name: "Ver no CRM" }).click();
-    await expect(page).toHaveURL(/\/clientes$/);
+    await expect(page).toHaveURL(new RegExp(`/erp/clientes\\?crmClientId=${crmClientId}$`));
     await expect(page.getByRole("heading", { name: "Cliente compartilhado editado", exact: true })).toBeVisible();
     const csvPath = testInfo.outputPath("clients-import.csv");
     writeFileSync(csvPath, "empresa;responsavel;telefone;email\nCliente CSV;Pessoa CSV;11977770001;csv@example.invalid", "utf8");
@@ -178,9 +179,13 @@ test.describe.serial("Clients real MySQL journeys", () => {
       const ctx = await context(browser, { width: 768, height: 1024 });
       const page = await ctx.newPage();
       await login(page, users[role], passwordA!);
-      await expect(page.getByTitle("Clientes")).toHaveCount(0);
-      await page.goto("/clientes");
-      await expect(page).toHaveURL(/\/$/);
+      await expect(page.getByLabel("Menu principal").getByRole("button", { name: "Clientes", exact: true })).toHaveCount(0);
+      const erp = page.getByRole("button", { name: "ERP", exact: true });
+      if (!await erp.isVisible()) await page.locator("header").getByTitle("Abrir menu").click();
+      await erp.click();
+      await expect(page.getByTestId("erp-workspace").getByRole("button", { name: "Clientes", exact: true })).toHaveCount(0);
+      await page.goto("/erp/clientes");
+      await expect(page).toHaveURL(/\/erp$/);
       await expect(page.getByTestId("clients-page")).toHaveCount(0);
       const cookie = (await ctx.cookies()).find((item) => item.name === "megadesk_session");
       expect(cookie).toBeTruthy();

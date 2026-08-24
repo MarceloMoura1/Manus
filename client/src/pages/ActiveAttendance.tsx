@@ -473,7 +473,7 @@ export function ActiveAttendancePage({ onNavigate, initialPhone }: { onNavigate?
                 {customerData.source === 'crm' && customerData.crmClientId && onNavigate && session?.permissions?.includes('clients') && (
                   <div className="mt-4 flex justify-end">
                     <button
-                      onClick={() => onNavigate({ route: 'clients', crmClientId: customerData.crmClientId })}
+                      onClick={() => onNavigate({ route: 'erp-clients', crmClientId: customerData.crmClientId })}
                       className="flex items-center gap-2 bg-white/20 hover:bg-white/30 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-all duration-200 border border-white/30"
                     >
                       <ArrowRight className="w-3 h-3" />

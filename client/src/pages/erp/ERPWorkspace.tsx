@@ -6,8 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertCircle, Boxes, PackagePlus, RefreshCw, Search, TrendingDown, WalletCards } from "lucide-react";
 import { SuppliersPage } from "./SuppliersPage";
+import { ClientesPage } from "../ClientesPage";
 
-export type ErpSection = "summary" | "products" | "stock" | "suppliers";
+export type ErpSection = "summary" | "clients" | "products" | "stock" | "suppliers";
 type ProductForm = { publicId?: string; name: string; sku: string; barcode: string; category: string; unit: "unit" | "kg" | "liter" | "meter"; cost: string; sale: string; minimumStock: string; description: string };
 type StockForm = { productPublicId: string; type: "manual_in" | "manual_out" | "adjustment_in" | "adjustment_out"; quantity: string; reason: string; idempotencyKey: string };
 type StockFilterType = "all" | "initial" | "manual_in" | "manual_out" | "adjustment_in" | "adjustment_out" | "reversal";
@@ -46,10 +47,10 @@ function Pagination({ page, totalPages, onPage }: { page: number; totalPages: nu
   return <nav aria-label="Paginação" className="flex flex-wrap items-center justify-end gap-2"><Button variant="outline" disabled={page <= 1} onClick={() => onPage(page - 1)}>Anterior</Button><span className="text-sm text-slate-600">Página {page} de {totalPages}</span><Button variant="outline" disabled={page >= totalPages} onClick={() => onPage(page + 1)}>Próxima</Button></nav>;
 }
 
-export function ERPWorkspace({ section, onNavigate }: { section: ErpSection; onNavigate: (section: ErpSection) => void }) {
+export function ERPWorkspace({ section, onNavigate, canAccessClients, initialCrmClientId, onClientNavigate }: { section: ErpSection; onNavigate: (section: ErpSection) => void; canAccessClients: boolean; initialCrmClientId?: string; onClientNavigate: (phone: string) => void }) {
   useErpRealtime();
-  const content = section === "summary" ? <Summary onNavigate={onNavigate}/> : section === "products" ? <Products/> : section === "suppliers" ? <SuppliersPage/> : <Stock/>;
-  const available: Array<{ id: ErpSection; label: string }> = [{id:"summary",label:"Resumo"},{id:"products",label:"Produtos"},{id:"stock",label:"Estoque"},{id:"suppliers",label:"Fornecedores"}];
+  const content = section === "summary" ? <Summary onNavigate={onNavigate}/> : section === "clients" ? canAccessClients ? <ClientesPage initialSelectedId={initialCrmClientId} onNavigate={onClientNavigate}/> : <div role="alert" className="rounded-2xl border border-slate-200 bg-white p-8 text-center"><h1 className="text-xl font-bold text-slate-900">Acesso indisponível</h1><p className="mt-2 text-sm text-slate-600">Este módulo não está disponível para o seu perfil.</p></div> : section === "products" ? <Products/> : section === "suppliers" ? <SuppliersPage/> : <Stock/>;
+  const available: Array<{ id: ErpSection; label: string }> = [{id:"summary",label:"Resumo"},...(canAccessClients?[{id:"clients" as const,label:"Clientes"}]:[]),{id:"products",label:"Produtos"},{id:"stock",label:"Estoque"},{id:"suppliers",label:"Fornecedores"}];
   const planned = ["Compras","Vendas","Financeiro","Fiscal","Relatórios","Integrações"];
   return <div className="min-w-0 max-w-full space-y-5" data-testid="erp-workspace"><nav aria-label="Módulos do ERP" className="min-w-0 max-w-full rounded-2xl border border-slate-200 bg-white p-3"><div className="flex flex-wrap gap-2">{available.map(item=><Button key={item.id} type="button" variant={section===item.id?"default":"outline"} aria-current={section===item.id?"page":undefined} onClick={()=>onNavigate(item.id)}>{item.label}</Button>)}{planned.map(label=><Button key={label} type="button" variant="outline" disabled aria-disabled="true" title={`${label}: em preparação`}><span>{label}</span><span className="sr-only"> — Em preparação</span></Button>)}</div><p className="mt-2 text-xs text-slate-500">Módulos desabilitados estão em preparação.</p></nav>{content}</div>;
 }

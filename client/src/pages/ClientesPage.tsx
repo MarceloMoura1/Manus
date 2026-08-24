@@ -135,6 +135,7 @@ function ClientFormModal({
   onSaved: () => void;
   editData?: CrmClient | null;
 }) {
+  const titleId = React.useId();
   const [form, setForm] = useState<FormData>(editData ? {
     companyName: editData.companyName,
     responsibleName: editData.responsibleName,
@@ -203,7 +204,7 @@ function ClientFormModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto mx-4">
+      <div role="dialog" aria-modal="true" aria-labelledby={titleId} className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto mx-4">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-slate-200">
           <div className="flex items-center gap-3">
@@ -211,13 +212,13 @@ function ClientFormModal({
               <Building2 className="w-5 h-5 text-blue-600" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-900">
+              <h2 id={titleId} className="text-lg font-bold text-slate-900">
                 {editData ? "Editar Cliente" : "Cadastrar Novo Cliente"}
               </h2>
               <p className="text-sm text-slate-500">Preencha os dados do cliente</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+          <button type="button" aria-label="Fechar cadastro de cliente" onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
             <X className="w-5 h-5 text-slate-500" />
           </button>
         </div>
