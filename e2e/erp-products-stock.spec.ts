@@ -232,7 +232,9 @@ test.describe("ERP products and stock", () => {
     await expect(
       page.getByRole("button", { name: "Fornecedores", exact: true })
     ).toBeEnabled();
-    await expect(page.getByRole("button", { name: /Compras/ })).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Compras", exact: true })
+    ).toBeEnabled();
     await page.getByRole("button", { name: "Produtos" }).click();
     await expect(page).toHaveURL(/\/erp\/produtos$/);
     await expect(page.getByTestId("erp-products-page")).toBeVisible();

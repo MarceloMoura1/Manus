@@ -82,6 +82,24 @@ async function prepare(page: Page, role: "admin" | "manager" | "agent" | "viewer
   });
 }
 
+async function openErpFromPrimaryNavigation(page: Page, viewportWidth: number) {
+  const navigation = page.getByLabel("Menu principal"),
+    erp = navigation.getByRole("button", { name: "ERP", exact: true });
+  await expect(navigation).toHaveCount(1);
+  if (viewportWidth < 1024) {
+    const trigger = page.locator("header").getByTitle("Abrir menu");
+    await expect(trigger).toHaveCount(1);
+    await expect(trigger).toBeVisible();
+    await expect(trigger).toBeEnabled();
+    await trigger.click();
+  }
+  await expect(navigation).toBeVisible();
+  await expect(erp).toHaveCount(1);
+  await expect(erp).toBeVisible();
+  await expect(erp).toBeEnabled();
+  await erp.click();
+}
+
 test.describe("central Clients controlled", () => {
   test("opens the stable route and never sends the tenant in CRM input", async ({ page }) => {
     await prepare(page, "admin");
@@ -141,9 +159,7 @@ test.describe("central Clients controlled", () => {
       await page.setViewportSize(viewport);
       await prepare(page, "admin");
       await page.goto("/");
-      const erp = page.getByRole("button", { name: "ERP", exact: true });
-      if (!await erp.isVisible()) await page.locator("header").getByTitle("Abrir menu").click();
-      await erp.click();
+      await openErpFromPrimaryNavigation(page, viewport.width);
       await page.getByTestId("erp-workspace").getByRole("button", { name: "Clientes", exact: true }).click();
       await expect(page).toHaveURL(/\/erp\/clientes$/);
       await expect(page.getByTestId("clients-page")).toBeVisible();

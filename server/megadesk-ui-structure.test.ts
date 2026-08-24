@@ -10,6 +10,7 @@ const dbSource = readFileSync(resolve(process.cwd(), "server/db.ts"), "utf8");
 const botConfigSource = readFileSync(resolve(process.cwd(), "client/src/pages/BotConfigPage.tsx"), "utf8");
 const erpSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/ERPWorkspace.tsx"), "utf8");
 const suppliersSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/SuppliersPage.tsx"), "utf8");
+const purchasesSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/PurchasesPage.tsx"), "utf8");
 
 describe("MegaDesk UI structure", () => {
   it("keeps a single real ERP implementation without legacy fictional metrics", () => {
@@ -22,7 +23,9 @@ describe("MegaDesk UI structure", () => {
     expect(erpSource).toContain("erp:supplier.changed");
     expect(suppliersSource).toContain("trpc.erp.suppliers.list.useQuery");
     expect(erpSource).toContain('label:"Fornecedores"');
-    expect(erpSource).toContain('const planned = ["Compras"');
+    expect(purchasesSource).toContain("trpc.erp.purchases.list.useQuery");
+    expect(erpSource).toContain('label:"Compras"');
+    expect(erpSource).toContain('const planned = ["Vendas"');
     expect(homeSource).not.toContain('label: "Fornecedores"');
   });
   it("preserva a navegação lateral da referência", () => {

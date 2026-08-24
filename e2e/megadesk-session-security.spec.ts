@@ -95,6 +95,31 @@ async function cookieFlags(context: BrowserContext) {
   return cookie ? { present: true, httpOnly: cookie.httpOnly, sameSite: cookie.sameSite, path: cookie.path, secure: cookie.secure } : { present: false };
 }
 
+async function reloadAndObserveSessionRevalidation(page: Page) {
+  const [response] = await Promise.all([
+    page.waitForResponse(candidate =>
+      decodeURIComponent(candidate.url()).includes("megadesk.refreshSession")
+    ),
+    page.reload(),
+  ]);
+  const body = await response.json().catch(() => null),
+    item = Array.isArray(body) ? body[0] : body,
+    publicError = item?.error?.json;
+  console.log(
+    "AUTH_REFRESH_RESPONSE:",
+    JSON.stringify({
+      endpoint: new URL(response.url()).pathname,
+      status: response.status(),
+      publicCode: publicError?.data?.code ?? "OK",
+      publicMessage: publicError?.message ?? "",
+    })
+  );
+  return {
+    status: response.status(),
+    publicCode: publicError?.data?.code ?? "OK",
+  };
+}
+
 test.describe.serial("MegaDesk secure operational session", () => {
   test.beforeAll(async ({ request }) => {
     if (!databaseUrl || !passwordA || !passwordB) throw new Error("E2E disposable credentials are required");
@@ -200,23 +225,40 @@ test.describe.serial("MegaDesk secure operational session", () => {
   test("expires and revalidates user, tenant access and role on the next operation", async ({ page }) => {
     await login(page, passwordA!);
     await pool.execute("UPDATE megadesk_operational_sessions SET expires_at='2000-01-01 00:00:00' WHERE client_id='e2e-session-a' AND revoked_at IS NULL");
-    await page.reload(); await expect(page.getByRole("button", { name: "Entrar na plataforma" })).toBeVisible();
+    expect(await reloadAndObserveSessionRevalidation(page)).toEqual({
+      status: 401,
+      publicCode: "UNAUTHORIZED",
+    });
+    await expect(page.getByRole("button", { name: "Entrar na plataforma" })).toBeVisible();
     await login(page, passwordA!);
     await pool.execute("UPDATE megadesk_domain_client_users SET status='blocked' WHERE user_id='e2e-user-a'");
-    await page.reload(); await expect(page.getByRole("button", { name: "Entrar na plataforma" })).toBeVisible();
+    expect(await reloadAndObserveSessionRevalidation(page)).toEqual({
+      status: 401,
+      publicCode: "UNAUTHORIZED",
+    });
+    await expect(page.getByRole("button", { name: "Entrar na plataforma" })).toBeVisible();
     await pool.execute("UPDATE megadesk_domain_client_users SET status='active',role='agent' WHERE user_id='e2e-user-a'");
     await login(page, passwordA!);
     await pool.execute("UPDATE megadesk_domain_client_users SET role='viewer' WHERE user_id='e2e-user-a'");
-    const roleRefreshResponse = page.waitForResponse(response => response.url().includes("megadesk.refreshSession"));
-    await page.reload();
-    expect((await roleRefreshResponse).status()).toBe(200);
+    expect(await reloadAndObserveSessionRevalidation(page)).toEqual({
+      status: 200,
+      publicCode: "OK",
+    });
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem("megadesk_session_v1") ?? "{}").userRole)).toBe("viewer");
     await pool.execute("UPDATE megadesk_domain_clients SET status='paused' WHERE client_id='e2e-session-a'");
-    await page.reload(); await expect(page.getByRole("button", { name: "Entrar na plataforma" })).toBeVisible();
+    expect(await reloadAndObserveSessionRevalidation(page)).toEqual({
+      status: 401,
+      publicCode: "UNAUTHORIZED",
+    });
+    await expect(page.getByRole("button", { name: "Entrar na plataforma" })).toBeVisible();
     await pool.execute("UPDATE megadesk_domain_clients SET status='active',access_released=1 WHERE client_id='e2e-session-a'");
     await login(page, passwordA!);
     await pool.execute("UPDATE megadesk_domain_clients SET access_released=0 WHERE client_id='e2e-session-a'");
-    await page.reload(); await expect(page.getByRole("button", { name: "Entrar na plataforma" })).toBeVisible();
+    expect(await reloadAndObserveSessionRevalidation(page)).toEqual({
+      status: 401,
+      publicCode: "UNAUTHORIZED",
+    });
+    await expect(page.getByRole("button", { name: "Entrar na plataforma" })).toBeVisible();
   });
 
   test("rejects external Origin without leaking internal details", async ({ page, context }) => {
@@ -225,10 +267,21 @@ test.describe.serial("MegaDesk secure operational session", () => {
     if (!cookie) throw new Error("MegaDesk cookie missing");
     const response = await context.request.post("/api/trpc/megadesk.refreshSession", {
       headers: { Origin: "https://external.example.invalid", Cookie: `${cookie.name}=${cookie.value}` },
-      data: { json: null },
+      data: { json: null, meta: { values: ["undefined"] } },
     });
+    const responseBody = await response.json().catch(() => null),
+      publicError = responseBody?.error?.json;
+    console.log(
+      "AUTH_EXTERNAL_ORIGIN_RESPONSE:",
+      JSON.stringify({
+        endpoint: "/api/trpc/megadesk.refreshSession",
+        status: response.status(),
+        publicCode: publicError?.data?.code ?? "UNKNOWN",
+        publicMessage: publicError?.message ?? "",
+      })
+    );
     expect(response.status()).toBe(403);
-    const publicBody = await response.text();
+    const publicBody = JSON.stringify(responseBody);
     expect(/token_hash|megadesk_operational_sessions|SELECT |INSERT |mysql:\/\//i.test(publicBody)).toBe(false);
   });
 

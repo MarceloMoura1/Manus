@@ -9,7 +9,8 @@ export const REQUIRED_RUNTIME_MAIN_TABLES = [
   "megadesk_evolution_sessions", "megadesk_domain_ia_conversations",
   "megadesk_domain_ia_conversation_history", "megadesk_ia_token_usage",
   "megadesk_operational_sessions",
-  "erp_products", "erp_stock_balances", "erp_stock_movements", "erp_suppliers",
+  "erp_products", "erp_stock_balances", "erp_stock_movements", "erp_suppliers", "erp_purchase_order_sequences",
+  "erp_purchase_orders", "erp_purchase_order_items", "erp_purchase_order_history", "erp_purchase_order_receipts", "erp_purchase_order_receipt_items",
 ] as const;
 
 export const REQUIRED_RUNTIME_COLUMNS: Record<string, readonly string[]> = {
@@ -23,6 +24,10 @@ export const REQUIRED_RUNTIME_COLUMNS: Record<string, readonly string[]> = {
   erp_suppliers: ["id", "public_id", "client_id", "legal_name", "person_type", "tax_id", "active", "created_by", "updated_by"],
   erp_stock_balances: ["client_id", "product_id", "quantity", "version"],
   erp_stock_movements: ["public_id", "client_id", "product_id", "type", "quantity", "idempotency_key", "payload_hash", "reversal_of"],
+  erp_purchase_orders: ["public_id", "client_id", "order_number", "supplier_id", "status", "subtotal_cents", "total_cents"],
+  erp_purchase_order_items: ["public_id", "purchase_order_id", "product_id", "quantity", "unit_cost_cents", "line_total_cents"],
+  erp_purchase_order_receipts: ["public_id", "client_id", "purchase_order_id", "idempotency_key", "received_by"],
+  erp_purchase_order_receipt_items: ["receipt_id", "purchase_order_item_id", "stock_movement_id"],
 };
 
 function validateStrongCanonicalContract(folder: string, sqlFiles: string[], entries: Array<{ idx?: number; tag?: string }>): void {

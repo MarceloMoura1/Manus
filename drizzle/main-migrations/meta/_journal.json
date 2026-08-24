@@ -50,6 +50,13 @@
       "when": 1787514147303,
       "tag": "0006_broken_green_goblin",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1787532553844,
+      "tag": "0007_wide_tiger_shark",
+      "breakpoints": true
     }
   ]
 }

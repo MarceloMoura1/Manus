@@ -34,7 +34,9 @@ export const protectedProcedure = t.procedure.use(requireUser);
 const requireTenant = t.middleware(async opts => {
   const { ctx, next } = opts;
   const tenantId = ctx.tenantId;
-  const trustedTestContext = process.env.NODE_ENV === "test" && Boolean(ctx.operationalUserId || tenantId);
+  const trustedTestContext = process.env.NODE_ENV === "test"
+    && !ctx.operationalSessionId
+    && Boolean(ctx.operationalUserId || tenantId);
   if (!tenantId || tenantId.trim() === '' || (!ctx.operationalSessionId && !trustedTestContext)) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão MegaDesk inválida. Faça login novamente." });
   }

@@ -7,8 +7,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { AlertCircle, Boxes, PackagePlus, RefreshCw, Search, TrendingDown, WalletCards } from "lucide-react";
 import { SuppliersPage } from "./SuppliersPage";
 import { ClientesPage } from "../ClientesPage";
+import { PurchasesPage } from "./PurchasesPage";
 
-export type ErpSection = "summary" | "clients" | "products" | "stock" | "suppliers";
+export type ErpSection = "summary" | "clients" | "products" | "stock" | "suppliers" | "purchases";
 type ProductForm = { publicId?: string; name: string; sku: string; barcode: string; category: string; unit: "unit" | "kg" | "liter" | "meter"; cost: string; sale: string; minimumStock: string; description: string };
 type StockForm = { productPublicId: string; type: "manual_in" | "manual_out" | "adjustment_in" | "adjustment_out"; quantity: string; reason: string; idempotencyKey: string };
 type StockFilterType = "all" | "initial" | "manual_in" | "manual_out" | "adjustment_in" | "adjustment_out" | "reversal";
@@ -28,11 +29,13 @@ function useErpRealtime() {
     socket.on("erp:product.changed", refresh);
     socket.on("erp:stock.changed", refresh);
     socket.on("erp:supplier.changed", refreshSuppliers);
+    socket.on("erp:purchase.changed", refresh);
     return () => {
       socket.off("connect", refresh);
       socket.off("erp:product.changed", refresh);
       socket.off("erp:stock.changed", refresh);
       socket.off("erp:supplier.changed", refreshSuppliers);
+      socket.off("erp:purchase.changed", refresh);
       socket.disconnect();
     };
   }, [utils]);
@@ -49,9 +52,9 @@ function Pagination({ page, totalPages, onPage }: { page: number; totalPages: nu
 
 export function ERPWorkspace({ section, onNavigate, canAccessClients, initialCrmClientId, onClientNavigate }: { section: ErpSection; onNavigate: (section: ErpSection) => void; canAccessClients: boolean; initialCrmClientId?: string; onClientNavigate: (phone: string) => void }) {
   useErpRealtime();
-  const content = section === "summary" ? <Summary onNavigate={onNavigate}/> : section === "clients" ? canAccessClients ? <ClientesPage initialSelectedId={initialCrmClientId} onNavigate={onClientNavigate}/> : <div role="alert" className="rounded-2xl border border-slate-200 bg-white p-8 text-center"><h1 className="text-xl font-bold text-slate-900">Acesso indisponível</h1><p className="mt-2 text-sm text-slate-600">Este módulo não está disponível para o seu perfil.</p></div> : section === "products" ? <Products/> : section === "suppliers" ? <SuppliersPage/> : <Stock/>;
-  const available: Array<{ id: ErpSection; label: string }> = [{id:"summary",label:"Resumo"},...(canAccessClients?[{id:"clients" as const,label:"Clientes"}]:[]),{id:"products",label:"Produtos"},{id:"stock",label:"Estoque"},{id:"suppliers",label:"Fornecedores"}];
-  const planned = ["Compras","Vendas","Financeiro","Fiscal","Relatórios","Integrações"];
+  const content = section === "summary" ? <Summary onNavigate={onNavigate}/> : section === "clients" ? canAccessClients ? <ClientesPage initialSelectedId={initialCrmClientId} onNavigate={onClientNavigate}/> : <div role="alert" className="rounded-2xl border border-slate-200 bg-white p-8 text-center"><h1 className="text-xl font-bold text-slate-900">Acesso indisponível</h1><p className="mt-2 text-sm text-slate-600">Este módulo não está disponível para o seu perfil.</p></div> : section === "products" ? <Products/> : section === "suppliers" ? <SuppliersPage/> : section === "purchases" ? <PurchasesPage/> : <Stock/>;
+  const available: Array<{ id: ErpSection; label: string }> = [{id:"summary",label:"Resumo"},...(canAccessClients?[{id:"clients" as const,label:"Clientes"}]:[]),{id:"products",label:"Produtos"},{id:"stock",label:"Estoque"},{id:"suppliers",label:"Fornecedores"},{id:"purchases",label:"Compras"}];
+  const planned = ["Vendas","Financeiro","Fiscal","Relatórios","Integrações"];
   return <div className="min-w-0 max-w-full space-y-5" data-testid="erp-workspace"><nav aria-label="Módulos do ERP" className="min-w-0 max-w-full rounded-2xl border border-slate-200 bg-white p-3"><div className="flex flex-wrap gap-2">{available.map(item=><Button key={item.id} type="button" variant={section===item.id?"default":"outline"} aria-current={section===item.id?"page":undefined} onClick={()=>onNavigate(item.id)}>{item.label}</Button>)}{planned.map(label=><Button key={label} type="button" variant="outline" disabled aria-disabled="true" title={`${label}: em preparação`}><span>{label}</span><span className="sr-only"> — Em preparação</span></Button>)}</div><p className="mt-2 text-xs text-slate-500">Módulos desabilitados estão em preparação.</p></nav>{content}</div>;
 }
 

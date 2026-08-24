@@ -60,14 +60,31 @@ async function preparePage(page: Page) {
   await page.route("**/api/trpc/**", async route => {
     const url = route.request().url();
     if (url.includes("megadesk.sendMessage") || url.includes("megadesk.sendAttachment")) sendRequests += 1;
-    let data: unknown = null;
-    if (url.includes("megadesk.refreshSession")) data = { ok: true, session: publicSession };
-    else if (url.includes("megadesk.getConversations")) data = [conversation];
-    else if (url.includes("megadesk.getConversationMessages")) data = [];
-    else if (url.includes("evolution.getStatus")) data = { status: "connected" };
-    const payload = { result: { data: { json: data } } };
-    const batchSize = decodeURIComponent(new URL(url).pathname).split(",").length;
-    await route.fulfill({ status: 200, contentType: "application/json", body: url.includes("batch=1") ? JSON.stringify(Array.from({ length: batchSize }, () => payload)) : JSON.stringify(payload) });
+    const procedures = decodeURIComponent(new URL(url).pathname)
+      .replace(/^.*\/api\/trpc\//, "")
+      .split(","),
+      response = (procedure: string): unknown =>
+        procedure.includes("megadesk.refreshSession")
+          ? { ok: true, session: publicSession }
+          : procedure.includes("megadesk.getConversations")
+            ? [conversation]
+            : procedure.includes("megadesk.getConversationMessages")
+              ? []
+              : procedure.includes("evolution.getStatus")
+                ? { status: "connected" }
+                : null,
+      payloads = procedures.map(procedure => ({
+        result: { data: { json: response(procedure) } },
+      }));
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        new URL(url).searchParams.get("batch") === "1"
+          ? payloads
+          : payloads[0]
+      ),
+    });
   });
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("button", { name: /Cliente Teste Responsivo/ })).toBeVisible();
