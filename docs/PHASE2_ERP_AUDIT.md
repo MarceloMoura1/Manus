@@ -122,3 +122,7 @@ A política usa roles existentes: `admin`/`manager` escrevem e `agent`/`viewer` 
 # Quarta fatia — Vendas
 
 Pedidos de venda transacionais foram adicionados após Compras, integrando Clientes, Produtos, Estoque e ledger imutável. A validação física permanece pendente e deve usar exclusivamente ambiente descartável autorizado. Consulte `docs/PHASE2_ERP_SALES.md`.
+
+# Quinta fatia — Financeiro
+
+Contas, categorias, títulos a pagar/receber, liquidação integral, cancelamento e ledger imutável foram adicionados em `/erp/financeiro`. Compras recebidas e Vendas concluídas oferecem geração explícita com valores autoritativos do backend e unique física por origem. `admin`/`manager` escrevem, `viewer` consulta e `agent` não acessa dados, página, opções ou eventos financeiros. Fiscal permanece fora do escopo. A validação MySQL está preparada, condicionada e pendente. Consulte `docs/PHASE2_ERP_FINANCE.md`.

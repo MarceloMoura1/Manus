@@ -12,6 +12,7 @@ export const REQUIRED_RUNTIME_MAIN_TABLES = [
   "erp_products", "erp_stock_balances", "erp_stock_movements", "erp_suppliers", "erp_purchase_order_sequences",
   "erp_purchase_orders", "erp_purchase_order_items", "erp_purchase_order_history", "erp_purchase_order_receipts", "erp_purchase_order_receipt_items",
   "erp_sale_order_sequences", "erp_sale_orders", "erp_sale_order_items", "erp_sale_order_history", "erp_sale_order_fulfillments", "erp_sale_order_fulfillment_items",
+  "erp_financial_accounts", "erp_financial_categories", "erp_financial_entries", "erp_financial_settlements", "erp_financial_ledger",
 ] as const;
 
 export const REQUIRED_RUNTIME_COLUMNS: Record<string, readonly string[]> = {
@@ -33,6 +34,11 @@ export const REQUIRED_RUNTIME_COLUMNS: Record<string, readonly string[]> = {
   erp_sale_order_items: ["public_id", "sale_order_id", "product_id", "quantity", "unit_price_cents", "line_total_cents"],
   erp_sale_order_fulfillments: ["public_id", "client_id", "sale_order_id", "idempotency_key", "fulfilled_by"],
   erp_sale_order_fulfillment_items: ["fulfillment_id", "sale_order_item_id", "stock_movement_id"],
+  erp_financial_accounts: ["public_id", "client_id", "initial_balance_cents", "current_balance_cents", "allow_negative", "active"],
+  erp_financial_categories: ["public_id", "client_id", "name", "direction", "active"],
+  erp_financial_entries: ["public_id", "client_id", "direction", "status", "amount_cents", "source_type", "source_public_id"],
+  erp_financial_settlements: ["public_id", "client_id", "financial_entry_id", "financial_account_id", "idempotency_key", "amount_cents"],
+  erp_financial_ledger: ["public_id", "client_id", "financial_account_id", "type", "amount_cents", "previous_balance_cents", "resulting_balance_cents"],
 };
 
 function validateStrongCanonicalContract(folder: string, sqlFiles: string[], entries: Array<{ idx?: number; tag?: string }>): void {

@@ -74,12 +74,17 @@ export function getSocketIO(): SocketIOServer | null {
 }
 
 export function emitOperationalTenantEvent(clientId: string, event: string, payload: unknown): void {
+  emitOperationalTenantEventForRoles(clientId, event, payload);
+}
+
+export function emitOperationalTenantEventForRoles(clientId: string, event: string, payload: unknown, allowedRoles?: readonly string[]): void {
   if (!io) return;
   void (async () => {
     const sockets = [...io!.sockets.sockets.values()].filter(socket => socket.rooms.has(`client:${clientId}`));
     await Promise.all(sockets.map(async socket => {
       const identity = await resolveOperationalSession(socket.request as Request).catch(() => null);
       if (!identity || identity.tenantId !== clientId) return socket.disconnect(true);
+      if (allowedRoles && !allowedRoles.includes(identity.role)) return;
       socket.emit(event, payload);
     }));
   })().catch(() => {

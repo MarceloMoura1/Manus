@@ -12,6 +12,8 @@ import { SupplierRepository } from "./modules/erp/suppliers/repository";
 import { SupplierService } from "./modules/erp/suppliers/service";
 import { SaleRepository } from "./modules/erp/sales/repository";
 import { SaleService } from "./modules/erp/sales/service";
+import { FinanceRepository } from "./modules/erp/finance/repository";
+import { FinanceService } from "./modules/erp/finance/service";
 import { isTestDatabaseEnabled } from "./test-integration-gates";
 
 const dynamic = describe.runIf(isTestDatabaseEnabled());
@@ -78,6 +80,13 @@ function disconnected(socket: ClientSocket, timeoutMs = 1200): Promise<boolean> 
 }
 
 async function resetFixtures() {
+  await getPool().execute("DELETE FROM erp_financial_ledger WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_financial_settlements WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_financial_entries WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_financial_categories WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_financial_accounts WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_purchase_orders WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_purchase_order_sequences WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE fi FROM erp_sale_order_fulfillment_items fi INNER JOIN erp_sale_order_fulfillments f ON f.id=fi.fulfillment_id WHERE f.client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_sale_order_fulfillments WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE h FROM erp_sale_order_history h INNER JOIN erp_sale_orders o ON o.id=h.sale_order_id WHERE o.client_id IN ('socket-tenant-a','socket-tenant-b')");
@@ -93,10 +102,17 @@ async function resetFixtures() {
   await getPool().execute("DELETE FROM megadesk_domain_client_users WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM megadesk_domain_clients WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("INSERT INTO megadesk_domain_clients (client_id,internal_id,tenant_database_name,company,contact,phone,plan,status,status_type,access_released,api_token,modules_json,integrations_json) VALUES ('socket-tenant-a','socket-a','socket_db_a','Socket A','Fixture','00000000000','Test','active','test',1,'socket-a','[]','{}'),('socket-tenant-b','socket-b','socket_db_b','Socket B','Fixture','00000000000','Test','active','test',1,'socket-b','[]','{}')");
-  await getPool().execute("INSERT INTO megadesk_domain_client_users (user_id,client_id,name,email,role,status,permissions_json) VALUES ('socket-user-a','socket-tenant-a','Socket A','socket-shared@example.invalid','agent','active','[]'),('socket-user-b','socket-tenant-b','Socket B','socket-shared@example.invalid','manager','active','[]')");
+  await getPool().execute("INSERT INTO megadesk_domain_client_users (user_id,client_id,name,email,role,status,permissions_json) VALUES ('socket-user-a','socket-tenant-a','Socket Agent A','socket-agent-a@example.invalid','agent','active','[]'),('socket-admin-a','socket-tenant-a','Socket Admin A','socket-admin-a@example.invalid','admin','active','[]'),('socket-manager-a','socket-tenant-a','Socket Manager A','socket-manager-a@example.invalid','manager','active','[]'),('socket-viewer-a','socket-tenant-a','Socket Viewer A','socket-viewer-a@example.invalid','viewer','active','[]'),('socket-user-b','socket-tenant-b','Socket Manager B','socket-manager-b@example.invalid','manager','active','[]')");
 }
 
 async function cleanFixtures() {
+  await getPool().execute("DELETE FROM erp_financial_ledger WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_financial_settlements WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_financial_entries WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_financial_categories WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_financial_accounts WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_purchase_orders WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
+  await getPool().execute("DELETE FROM erp_purchase_order_sequences WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE fi FROM erp_sale_order_fulfillment_items fi INNER JOIN erp_sale_order_fulfillments f ON f.id=fi.fulfillment_id WHERE f.client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE FROM erp_sale_order_fulfillments WHERE client_id IN ('socket-tenant-a','socket-tenant-b')");
   await getPool().execute("DELETE h FROM erp_sale_order_history h INNER JOIN erp_sale_orders o ON o.id=h.sale_order_id WHERE o.client_id IN ('socket-tenant-a','socket-tenant-b')");
@@ -120,6 +136,33 @@ async function saleFixture(clientId: string, userId: string) {
   const product=await erp.createProduct(identity,{name:`Socket sale ${clientId}`,sku:`SALE-${clientId}`,barcode:null,description:null,category:null,unit:"unit",costPriceCents:0,salePriceCents:100,minimumStock:"0"});
   await erp.moveStock(identity,{productPublicId:product.publicId,type:"manual_in",quantity:"2",reason:"Socket sale balance",idempotencyKey:crypto.randomUUID()});
   return {identity,crmClientId,product};
+}
+
+const financeAdmin = { clientId: "socket-tenant-a", userId: "socket-admin-a", role: "admin" as const };
+const financeManager = { clientId: "socket-tenant-a", userId: "socket-manager-a", role: "manager" as const };
+
+async function financeFixture(service = new FinanceService(new FinanceRepository())) {
+  const account = await service.createAccount(financeAdmin, { name: `Socket account ${crypto.randomUUID()}`, type: "bank", initialBalanceCents: 10_000, allowNegative: false });
+  const category = await service.createCategory(financeAdmin, { name: `Socket category ${crypto.randomUUID()}`, direction: "both" });
+  return { service, accountPublicId: account.publicId, categoryPublicId: category.publicId };
+}
+
+async function financeManual(service: FinanceService, categoryPublicId: string, accountPublicId: string, direction: "payable" | "receivable" = "payable", amountCents = 2_500) {
+  return service.createManual(financeAdmin, { documentNumber: `SOCKET-${crypto.randomUUID()}`, direction, description: "Socket finance entry", amountCents, dueDate: "2026-09-10", issueDate: "2026-08-24", categoryPublicId, financialAccountPublicId: accountPublicId, supplierPublicId: null, crmClientId: null, partyName: "Socket party", notes: null });
+}
+
+async function financeSource(kind: "purchase_order" | "sales_order") {
+  const publicId = crypto.randomUUID();
+  if (kind === "purchase_order") {
+    const supplierPublicId = crypto.randomUUID();
+    const [supplier] = await getPool().execute<any>("INSERT INTO erp_suppliers(public_id,client_id,legal_name,person_type,tax_id,active,created_by,updated_by) VALUES(?,?,?,'legal',?,1,?,?)", [supplierPublicId, "socket-tenant-a", "Socket finance supplier", String(Date.now()).slice(-14).padStart(14, "1"), financeAdmin.userId, financeAdmin.userId]);
+    await getPool().execute("INSERT INTO erp_purchase_orders(public_id,client_id,order_number,supplier_id,supplier_name_snapshot,status,subtotal_cents,total_cents,created_by) VALUES(?,?,?,?,?,'received',?,?,?)", [publicId, "socket-tenant-a", `PO-${publicId.slice(0,8)}`, supplier.insertId, "Socket finance supplier", 7_300, 7_300, financeAdmin.userId]);
+  } else {
+    const crmClientId = crypto.randomUUID();
+    await getPool().execute("INSERT INTO megadesk_crm_clients(crm_client_id,client_id,company_name,status) VALUES(?,?,?,'ativo')", [crmClientId, "socket-tenant-a", "Socket finance customer"]);
+    await getPool().execute("INSERT INTO erp_sale_orders(public_id,client_id,order_number,crm_client_id,customer_name_snapshot,status,subtotal_cents,total_cents,created_by) VALUES(?,?,?,?,?,'fulfilled',?,?,?)", [publicId, "socket-tenant-a", `SO-${publicId.slice(0,8)}`, crmClientId, "Socket finance customer", 9_100, 9_100, financeAdmin.userId]);
+  }
+  return publicId;
 }
 
 dynamic("Socket.IO operational session isolation", () => {
@@ -283,5 +326,45 @@ dynamic("Socket.IO operational session isolation", () => {
     await new SupplierService(new SupplierRepository()).create({clientId:"socket-tenant-a",userId:"socket-user-a",role:"admin"},{legalName:"Revoked event",tradeName:null,personType:"legal",taxId:"12345678000191",stateRegistration:null,email:null,phone:null,contactName:null,postalCode:null,street:null,addressNumber:null,addressComplement:null,district:null,city:null,state:null,notes:null}); expect(await revokedDisconnect).toBe(true);
     const blockedCookie=await issueCookie("socket-user-b","socket-tenant-b"); const blocked=client(blockedCookie); await connected(blocked); await getPool().execute("UPDATE megadesk_domain_clients SET access_released=0 WHERE client_id='socket-tenant-b'"); const blockedDisconnect=disconnected(blocked);
     await new SupplierService(new SupplierRepository()).create({clientId:"socket-tenant-b",userId:"socket-user-b",role:"manager"},{legalName:"Blocked event",tradeName:null,personType:"legal",taxId:"12345678000192",stateRegistration:null,email:null,phone:null,contactName:null,postalCode:null,street:null,addressNumber:null,addressComplement:null,district:null,city:null,state:null,notes:null}); expect(await blockedDisconnect).toBe(true);
+  });
+
+  it("delivers minimal finance account events to A readers but not its agent or tenant B", async () => {
+    const admin=client(await issueCookie("socket-admin-a","socket-tenant-a")); await connected(admin); const manager=client(await issueCookie("socket-manager-a","socket-tenant-a")); await connected(manager); const viewer=client(await issueCookie("socket-viewer-a","socket-tenant-a")); await connected(viewer); const agent=client(await issueCookie("socket-user-a","socket-tenant-a")); await connected(agent); const tenantB=client(await issueCookie("socket-user-b","socket-tenant-b")); await connected(tenantB);
+    const received=[event(admin,"erp:finance.account.changed"),event(manager,"erp:finance.account.changed"),event(viewer,"erp:finance.account.changed")], agentEvent=event(agent,"erp:finance.account.changed",300), crossTenant=event(tenantB,"erp:finance.account.changed",300), service=new FinanceService(new FinanceRepository());
+    const account=await service.createAccount(financeAdmin,{name:"Socket role account",type:"bank",initialBalanceCents:10_000,allowNegative:false});
+    for(const promised of received){const payload=await promised as Record<string,unknown>;expect(payload).toMatchObject({publicId:account.publicId,operation:"created"});expect(Object.keys(payload).sort()).toEqual(["occurredAt","operation","publicId"]);}
+    expect(await agentEvent).toBeNull(); expect(await crossTenant).toBeNull();
+    const deactivated=event(manager,"erp:finance.account.changed"); await service.setAccountActive(financeAdmin,account.publicId,false); expect(await deactivated).toMatchObject({publicId:account.publicId,operation:"deactivated"});
+    const activated=event(viewer,"erp:finance.account.changed"); await service.setAccountActive(financeManager,account.publicId,true); expect(await activated).toMatchObject({publicId:account.publicId,operation:"activated"});
+  });
+
+  it("publishes committed finance entry creation and open-title updates", async () => {
+    const fixture=await financeFixture(), admin=client(await issueCookie("socket-admin-a","socket-tenant-a")); await connected(admin); const manager=client(await issueCookie("socket-manager-a","socket-tenant-a")); await connected(manager); const viewer=client(await issueCookie("socket-viewer-a","socket-tenant-a")); await connected(viewer); const agent=client(await issueCookie("socket-user-a","socket-tenant-a")); await connected(agent);
+    const createdAdmin=event(admin,"erp:finance.entry.changed"), createdManager=event(manager,"erp:finance.entry.changed"), createdViewer=event(viewer,"erp:finance.entry.changed"), createdAgent=event(agent,"erp:finance.entry.changed",300);
+    const entry=await financeManual(fixture.service,fixture.categoryPublicId,fixture.accountPublicId);
+    for(const promised of [createdAdmin,createdManager,createdViewer]){const payload=await promised as Record<string,unknown>;expect(payload).toMatchObject({publicId:entry!.publicId,operation:"created"});expect(Object.keys(payload).sort()).toEqual(["occurredAt","operation","publicId"]);}
+    expect(await createdAgent).toBeNull();
+    const updated=event(admin,"erp:finance.entry.changed"); await fixture.service.update(financeManager,{publicId:entry!.publicId,description:"Socket finance updated",dueDate:"2026-09-11",categoryPublicId:fixture.categoryPublicId,financialAccountPublicId:fixture.accountPublicId,notes:null}); expect(await updated).toMatchObject({publicId:entry!.publicId,operation:"updated"});
+  });
+
+  it("publishes settlement exactly once and suppresses rollback, replay and cancel balance events", async () => {
+    const fixture=await financeFixture(), admin=client(await issueCookie("socket-admin-a","socket-tenant-a")); await connected(admin);
+    const entryCreated=event(admin,"erp:finance.entry.changed"), entry=await financeManual(fixture.service,fixture.categoryPublicId,fixture.accountPublicId); await entryCreated;
+    const settledEntry=event(admin,"erp:finance.entry.changed"), settledAccount=event(admin,"erp:finance.account.changed"), key=crypto.randomUUID(); await fixture.service.settle(financeAdmin,entry!.publicId,fixture.accountPublicId,key); expect(await settledEntry).toMatchObject({publicId:entry!.publicId,operation:"settled"}); expect(await settledAccount).toMatchObject({publicId:fixture.accountPublicId,operation:"updated"});
+    const replayEntry=event(admin,"erp:finance.entry.changed",300), replayAccount=event(admin,"erp:finance.account.changed",300); await fixture.service.settle(financeAdmin,entry!.publicId,fixture.accountPublicId,key); expect(await replayEntry).toBeNull(); expect(await replayAccount).toBeNull();
+    const failingCreated=event(admin,"erp:finance.entry.changed"), failing=await financeManual(fixture.service,fixture.categoryPublicId,fixture.accountPublicId,"payable",20_000); await failingCreated; const rollbackEntry=event(admin,"erp:finance.entry.changed",300), rollbackAccount=event(admin,"erp:finance.account.changed",300); await expect(fixture.service.settle(financeAdmin,failing!.publicId,fixture.accountPublicId,crypto.randomUUID())).rejects.toMatchObject({code:"CONFLICT"}); expect(await rollbackEntry).toBeNull(); expect(await rollbackAccount).toBeNull();
+    const cancellableCreated=event(admin,"erp:finance.entry.changed"), cancellable=await financeManual(fixture.service,fixture.categoryPublicId,fixture.accountPublicId); await cancellableCreated; const cancelled=event(admin,"erp:finance.entry.changed"), cancelAccount=event(admin,"erp:finance.account.changed",300); await fixture.service.cancel(financeAdmin,cancellable!.publicId,"Socket cancellation"); expect(await cancelled).toMatchObject({publicId:cancellable!.publicId,operation:"cancelled"}); expect(await cancelAccount).toBeNull();
+  });
+
+  it("publishes titles created by real purchase and sale source operations", async () => {
+    const fixture=await financeFixture(), purchase=await financeSource("purchase_order"), sale=await financeSource("sales_order"), manager=client(await issueCookie("socket-manager-a","socket-tenant-a")); await connected(manager);
+    const purchaseEvent=event(manager,"erp:finance.entry.changed"); const payable=await fixture.service.createFromSource(financeManager,"purchase_order",{sourcePublicId:purchase,dueDate:"2026-09-10",categoryPublicId:fixture.categoryPublicId,financialAccountPublicId:fixture.accountPublicId,notes:null}); expect(await purchaseEvent).toMatchObject({publicId:payable.publicId,operation:"created"});
+    const saleEvent=event(manager,"erp:finance.entry.changed"); const receivable=await fixture.service.createFromSource(financeManager,"sales_order",{sourcePublicId:sale,dueDate:"2026-09-10",categoryPublicId:fixture.categoryPublicId,financialAccountPublicId:null,notes:null}); expect(await saleEvent).toMatchObject({publicId:receivable.publicId,operation:"created"});
+  });
+
+  it("disconnects revoked and blocked finance recipients before event delivery", async () => {
+    const fixture=await financeFixture(), revokedCookie=await issueCookie("socket-admin-a","socket-tenant-a"), revoked=client(revokedCookie); await connected(revoked); await revokeOperationalSession(request(revokedCookie),repository); const revokedDisconnect=disconnected(revoked); await financeManual(fixture.service,fixture.categoryPublicId,fixture.accountPublicId); expect(await revokedDisconnect).toBe(true);
+    const blockedCookie=await issueCookie("socket-manager-a","socket-tenant-a"), blocked=client(blockedCookie); await connected(blocked); await getPool().execute("UPDATE megadesk_domain_clients SET status='paused' WHERE client_id='socket-tenant-a'"); const blockedDisconnect=disconnected(blocked); await financeManual(fixture.service,fixture.categoryPublicId,fixture.accountPublicId,"receivable"); expect(await blockedDisconnect).toBe(true);
+    await getPool().execute("UPDATE megadesk_domain_clients SET status='active' WHERE client_id='socket-tenant-a'");
   });
 });

@@ -1,0 +1,8 @@
+import { describe,expect,it,vi } from "vitest";
+import { FinanceService } from "./service";
+const admin={clientId:"tenant-a",userId:"user-a",role:"admin" as const};
+describe("FinanceService",()=>{
+ it("blocks agents and viewers independently of the DOM",async()=>{const repo:any={options:vi.fn()};const service=new FinanceService(repo,{publish:vi.fn()});await expect(service.options({...admin,role:"agent"})).rejects.toMatchObject({code:"FORBIDDEN"});await expect(service.createCategory({...admin,role:"viewer"},{name:"Venda",direction:"receivable"})).rejects.toMatchObject({code:"FORBIDDEN"});expect(repo.options).not.toHaveBeenCalled()});
+ it("does not emit on source replay or settlement replay",async()=>{const publish=vi.fn(),entry={publicId:crypto.randomUUID(),status:"open"};const repo:any={createFromSource:vi.fn().mockResolvedValue({entry,replay:true}),settle:vi.fn().mockResolvedValue({entry:{...entry,status:"settled"},replay:true})};const service=new FinanceService(repo,{publish});await service.createFromSource(admin,"sales_order",{sourcePublicId:crypto.randomUUID(),dueDate:"2026-02-01",categoryPublicId:crypto.randomUUID(),financialAccountPublicId:null,notes:null});await service.settle(admin,entry.publicId,crypto.randomUUID(),crypto.randomUUID());expect(publish).not.toHaveBeenCalled()});
+ it("emits only after repository success",async()=>{const publish=vi.fn(),repo:any={cancel:vi.fn().mockRejectedValue(new Error("rollback"))};const service=new FinanceService(repo,{publish});await expect(service.cancel(admin,crypto.randomUUID(),"erro operacional")).rejects.toThrow("rollback");expect(publish).not.toHaveBeenCalled()});
+});
