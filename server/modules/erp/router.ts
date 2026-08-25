@@ -9,6 +9,7 @@ import { purchasesRouter } from "./purchases/router";
 import { salesRouter } from "./sales/router";
 import { financeRouter } from "./finance/router";
 import { fiscalRouter } from "./fiscal/router";
+import { reportsRouter } from "./reports/router";
 
 const service = new ErpService();
 type ErpContext = { tenantId: string; operationalUserId: string; operationalUserRole: "admin" | "manager" | "agent" | "viewer" };
@@ -26,6 +27,7 @@ export const erpRouter = router({
   sales: salesRouter,
   finance: financeRouter,
   fiscal: fiscalRouter,
+  reports: reportsRouter,
   products: router({
     list: megadeskProcedure.input(productListInput).query(({ input, ctx }) => runErp(() => service.listProducts(identity(ctx), input))),
     detail: megadeskProcedure.input(z.object({ publicId: productPublicId })).query(({ input, ctx }) => runErp(() => service.getProduct(identity(ctx), input.publicId))),

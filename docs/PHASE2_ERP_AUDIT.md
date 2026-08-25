@@ -12,6 +12,10 @@
 
 A fundação Fiscal foi implementada sobre a arquitetura operacional já estabilizada nas fatias anteriores. Ela adiciona configuração fiscal, perfil fiscal 1:1 de produtos e documentos internos originados de Compras/Vendas ou de lançamento administrativo. Não existe emissão eletrônica, motor tributário, certificado, provedor ou integração externa. A migration canônica `0010_huge_tombstone` foi gerada localmente e não aplicada em banco; a segunda geração confirmou ausência de mudanças adicionais. Relatórios e Integrações permanecem planejados.
 
+## Encerramento — ERP Essencial
+
+Relatórios Essenciais conclui o escopo nativo com Resumo, Clientes, Produtos, Estoque, Fornecedores, Compras, Vendas, Financeiro, Fiscal interno e Relatórios. O produto passa a ser formalmente **ERP Essencial** e sua expansão funcional nativa está encerrada; qualquer novo módulo requer demanda comercial comprovada. Integrações permanece como ponte futura para ERPs próprios e provedores fiscais especializados. O foco posterior retorna a Conversas, Atendimento Ativo, Chamados, WhatsApp, IA, automações e integrações.
+
 ## Resumo executivo
 
 O repositório não possui domínio ERP persistente. A única implementação chamada ERP é
