@@ -8,6 +8,10 @@
 - O schema físico por tenant é somente referência futura e não está autorizado para esta fase.
 - Nenhuma migration, seed, container ou banco foi executado durante esta auditoria.
 
+## Atualização — fatia Fiscal
+
+A fundação Fiscal foi implementada sobre a arquitetura operacional já estabilizada nas fatias anteriores. Ela adiciona configuração fiscal, perfil fiscal 1:1 de produtos e documentos internos originados de Compras/Vendas ou de lançamento administrativo. Não existe emissão eletrônica, motor tributário, certificado, provedor ou integração externa. A migration canônica `0010_huge_tombstone` foi gerada localmente e não aplicada em banco; a segunda geração confirmou ausência de mudanças adicionais. Relatórios e Integrações permanecem planejados.
+
 ## Resumo executivo
 
 O repositório não possui domínio ERP persistente. A única implementação chamada ERP é

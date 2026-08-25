@@ -11,6 +11,7 @@ const botConfigSource = readFileSync(resolve(process.cwd(), "client/src/pages/Bo
 const erpSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/ERPWorkspace.tsx"), "utf8");
 const suppliersSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/SuppliersPage.tsx"), "utf8");
 const purchasesSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/PurchasesPage.tsx"), "utf8");
+const fiscalSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/FiscalPage.tsx"), "utf8");
 
 describe("MegaDesk UI structure", () => {
   it("keeps a single real ERP implementation without legacy fictional metrics", () => {
@@ -27,7 +28,9 @@ describe("MegaDesk UI structure", () => {
     expect(erpSource).toContain('label:"Compras"');
     expect(erpSource).toContain('{id:"sales",label:"Vendas"}');
     expect(erpSource).toContain('label:"Financeiro"');
-    expect(erpSource).toContain('const planned = ["Fiscal"');
+    expect(erpSource).toContain('label:"Fiscal"');
+    expect(fiscalSource).toContain("Emissão fiscal eletrônica ainda não configurada.");
+    expect(erpSource).toContain('const planned = ["Relatórios","Integrações"]');
     expect(homeSource).not.toContain('label: "Fornecedores"');
   });
   it("preserva a navegação lateral da referência", () => {

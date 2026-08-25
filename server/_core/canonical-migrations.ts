@@ -13,6 +13,8 @@ export const REQUIRED_RUNTIME_MAIN_TABLES = [
   "erp_purchase_orders", "erp_purchase_order_items", "erp_purchase_order_history", "erp_purchase_order_receipts", "erp_purchase_order_receipt_items",
   "erp_sale_order_sequences", "erp_sale_orders", "erp_sale_order_items", "erp_sale_order_history", "erp_sale_order_fulfillments", "erp_sale_order_fulfillment_items",
   "erp_financial_accounts", "erp_financial_categories", "erp_financial_entries", "erp_financial_settlements", "erp_financial_ledger",
+  "erp_fiscal_settings", "erp_fiscal_settings_history", "erp_product_fiscal_profiles", "erp_fiscal_document_sequences",
+  "erp_fiscal_documents", "erp_fiscal_document_items", "erp_fiscal_document_history", "erp_fiscal_operations",
 ] as const;
 
 export const REQUIRED_RUNTIME_COLUMNS: Record<string, readonly string[]> = {
@@ -39,6 +41,14 @@ export const REQUIRED_RUNTIME_COLUMNS: Record<string, readonly string[]> = {
   erp_financial_entries: ["public_id", "client_id", "direction", "status", "amount_cents", "source_type", "source_public_id"],
   erp_financial_settlements: ["public_id", "client_id", "financial_entry_id", "financial_account_id", "idempotency_key", "amount_cents"],
   erp_financial_ledger: ["public_id", "client_id", "financial_account_id", "type", "amount_cents", "previous_balance_cents", "resulting_balance_cents"],
+  erp_fiscal_settings: ["public_id", "client_id", "tax_regime", "taxpayer_indicator", "environment", "provider", "status", "updated_by"],
+  erp_fiscal_settings_history: ["client_id", "settings_id", "operation", "status", "changed_fields", "changed_by"],
+  erp_product_fiscal_profiles: ["public_id", "client_id", "product_id", "ncm", "fiscal_unit", "completeness", "updated_by"],
+  erp_fiscal_document_sequences: ["client_id", "year", "next_number"],
+  erp_fiscal_documents: ["public_id", "client_id", "internal_number", "type", "status", "source_public_id", "total_cents"],
+  erp_fiscal_document_items: ["public_id", "client_id", "fiscal_document_id", "quantity_millis", "unit_amount_cents", "line_total_cents"],
+  erp_fiscal_document_history: ["client_id", "fiscal_document_id", "from_status", "to_status", "changed_by"],
+  erp_fiscal_operations: ["client_id", "idempotency_key", "operation", "fiscal_document_id", "payload_hash"],
 };
 
 function validateStrongCanonicalContract(folder: string, sqlFiles: string[], entries: Array<{ idx?: number; tag?: string }>): void {
