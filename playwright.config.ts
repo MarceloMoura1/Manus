@@ -1,7 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const e2eBaseUrl = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
-const e2eWebServerCommand = process.env.PLAYWRIGHT_WEB_SERVER_COMMAND ?? 'pnpm dev';
+// Browser-only suites intercept their APIs. Starting Vite directly avoids database
+// bootstrap and keeps the controlled Playwright server loopback-only.
+const e2eWebServerCommand = process.env.PLAYWRIGHT_WEB_SERVER_COMMAND ?? 'pnpm exec vite --host 127.0.0.1 --port 3000';
 
 /**
  * Configuração do Playwright para testes E2E
@@ -12,7 +14,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
+  reporter: 'list',
   use: {
     baseURL: e2eBaseUrl,
     trace: 'on-first-retry',

@@ -1,0 +1,1 @@
+ALTER TABLE `megadesk_crm_clients` ADD `customer_type` enum('person','company');

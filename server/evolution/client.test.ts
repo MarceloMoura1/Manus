@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { evoGetMediaBase64, evoSendAttachment, normalizeEvolutionRecipient } from "./client";
+import { EvolutionApiError, evoCreateInstance, evoGetMediaBase64, evoSendAttachment, normalizeEvolutionRecipient, sanitizeEvolutionErrorDetail } from "./client";
 
 beforeEach(() => {
   vi.stubEnv("EVOLUTION_API_URL", "http://evolution.test");
@@ -27,6 +27,31 @@ describe("normalizeEvolutionRecipient", () => {
 
   it("rejeita destinatário incompleto", () => {
     expect(() => normalizeEvolutionRecipient("12345")).toThrow("Número de WhatsApp inválido.");
+  });
+});
+
+describe("Evolution API errors", () => {
+  it("preserva status e mensagem para reconhecer uma instância existente", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: 403,
+      response: { message: ["The instance already exists"] },
+    }), { status: 403 })));
+
+    const error = await evoCreateInstance("tenant-1").catch(value => value);
+    expect(error).toBeInstanceOf(EvolutionApiError);
+    expect(error).toMatchObject({ status: 403, path: "/instance/create" });
+    expect(error.message).toContain("already exists");
+    expect(error).not.toHaveProperty("responseBody");
+  });
+
+  it("redacts credentials, sensitive queries and complete numbers with a hard size limit", () => {
+    const safe = sanitizeEvolutionErrorDetail(`Authorization: Bearer-secret token=abc123 cookie=session-x https://user:pass@example.test/path?apiKey=raw 5541995484515 ${"x".repeat(500)}`);
+    expect(safe).not.toContain("Bearer-secret");
+    expect(safe).not.toContain("abc123");
+    expect(safe).not.toContain("session-x");
+    expect(safe).not.toContain("user:pass");
+    expect(safe).not.toContain("5541995484515");
+    expect(safe.length).toBeLessThanOrEqual(240);
   });
 });
 

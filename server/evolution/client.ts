@@ -8,12 +8,58 @@
  *   GET  /instance/connect/:name   → busca QR Code ou estado atual
  *   GET  /instance/fetchInstances  → status da instância
  *   DELETE /instance/logout/:name  → desconecta (logout)
- *   DELETE /instance/delete/:name  → deleta instância
  *   POST /message/sendText/:name   → envia mensagem
  *   POST /webhook/set/:name        → configura webhook
  */
 
 import { getEvolutionConfig, getEvolutionWebhookSecret } from "./config";
+import { normalizeContactPhone } from "../../shared/contact-phone";
+
+export class EvolutionApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly path: string,
+    public readonly code: string,
+    public readonly safeDetail: string,
+  ) {
+    super(`Evolution API request failed [${status}] ${path}${safeDetail ? `: ${safeDetail}` : ""}`);
+    this.name = "EvolutionApiError";
+  }
+}
+
+const MAX_PROVIDER_ERROR_BODY = 2_000;
+const MAX_SAFE_DETAIL = 240;
+
+export function sanitizeEvolutionErrorDetail(body: string): string {
+  if (!body.trim()) return "";
+  const bounded = body.slice(0, MAX_PROVIDER_ERROR_BODY);
+  let extracted = "";
+  try {
+    const parsed = JSON.parse(bounded);
+    const value = parsed?.response?.message ?? parsed?.message ?? parsed?.error;
+    extracted = Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string").join("; ")
+      : typeof value === "string" ? value : "";
+  } catch {
+    extracted = bounded;
+  }
+  return extracted
+    .replace(/\b(authorization|api[-_ ]?key|cookie|token|secret|password)\b\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]")
+    .replace(/https?:\/\/[^\s/@]+:[^\s/@]+@/gi, "https://[REDACTED]@")
+    .replace(/([?&](?:api[-_]?key|token|secret|authorization|password)=)[^&#\s]+/gi, "$1[REDACTED]")
+    .replace(/\b\+?\d[\d\s().-]{9,}\d\b/g, "[REDACTED_NUMBER]")
+    .replace(/[\r\n\t]+/g, " ")
+    .trim()
+    .slice(0, MAX_SAFE_DETAIL);
+}
+
+function providerErrorCode(status: number): string {
+  if (status === 401 || status === 403) return "EVOLUTION_ACCESS_DENIED";
+  if (status === 404) return "EVOLUTION_NOT_FOUND";
+  if (status === 409) return "EVOLUTION_CONFLICT";
+  if (status >= 500) return "EVOLUTION_UNAVAILABLE";
+  return "EVOLUTION_REQUEST_FAILED";
+}
 
 function buildHeaders() {
   return {
@@ -44,7 +90,7 @@ async function request<T = any>(
 
   if (!res.ok) {
     console.error(`[Evolution] request failed: status=${res.status} method=${method} path=${path}`);
-    throw new Error(`Evolution API request failed [${res.status}] ${path}`);
+    throw new EvolutionApiError(res.status, path.split("?")[0], providerErrorCode(res.status), sanitizeEvolutionErrorDetail(text));
   }
 
   try {
@@ -59,6 +105,13 @@ async function request<T = any>(
 export interface EvoQRCode {
   base64: string;   // data:image/png;base64,...  (já normalizado)
   code?: string;    // raw QR string
+}
+
+export interface EvoWebhookSummary {
+  enabled: boolean;
+  url: string;
+  events: string[];
+  hasSecretHeader: boolean;
 }
 
 // ─── Extrator de QR Code (multi-formato) ──────────────────────────────────
@@ -140,14 +193,12 @@ export async function evoGetQRCode(instanceName: string): Promise<EvoQRCode | nu
       base64,
       code: data?.code || data?.qrcode?.code,
     };
-  } catch (err: any) {
-    // 404 = instância não existe ainda
-    if (err.message?.includes("404") || err.message?.toLowerCase().includes("not found") ||
-        err.message?.toLowerCase().includes("does not exist")) {
+  } catch (err: unknown) {
+    if (err instanceof EvolutionApiError && err.status === 404) {
       console.warn(`[Evolution] Instância ${instanceName} não existe ainda`);
       return null;
     }
-    console.error(`[Evolution] Erro em evoGetQRCode(${instanceName}):`, err.message);
+    console.error("[Evolution] QR request failed", err instanceof EvolutionApiError ? { code: err.code, status: err.status } : undefined);
     throw err;
   }
 }
@@ -181,14 +232,24 @@ export async function evoGetStatus(
     if (state === "open")        return "connected";
     if (state === "connecting")  return "connecting";
     return "disconnected"; // close, logout, undefined, etc.
-  } catch (err: any) {
-    // Instância não existe = disconnected
-    if (err.message?.includes("404") || err.message?.toLowerCase().includes("not found")) {
+  } catch (err: unknown) {
+    if (err instanceof EvolutionApiError && err.status === 404) {
       return "disconnected";
     }
-    console.warn(`[Evolution] evoGetStatus falhou para ${instanceName}:`, err.message);
-    return "disconnected";
+    console.warn("[Evolution] status request failed", err instanceof EvolutionApiError ? { code: err.code, status: err.status } : undefined);
+    throw err;
   }
+}
+
+export async function evoGetWebhookSummary(instanceName: string): Promise<EvoWebhookSummary> {
+  const data = await request<any>("GET", `/webhook/find/${instanceName}`);
+  const webhook = data?.webhook ?? data ?? {};
+  return {
+    enabled: webhook.enabled === true,
+    url: typeof webhook.url === "string" ? webhook.url : "",
+    events: Array.isArray(webhook.events) ? webhook.events.filter((event: unknown): event is string => typeof event === "string") : [],
+    hasSecretHeader: Boolean(webhook.headers?.["x-megadesk-webhook-secret"]),
+  };
 }
 
 /**
@@ -201,24 +262,10 @@ export async function evoLogout(instanceName: string): Promise<void> {
 /**
  * Deleta completamente a instância da Evolution API.
  */
-export async function evoDeleteInstance(instanceName: string): Promise<void> {
-  await request("DELETE", `/instance/delete/${instanceName}`);
-}
-
 export function normalizeEvolutionRecipient(number: string): string {
-  const digits = number.replace(/\D/g, "");
-  let normalizedNumber = digits.length === 10 || digits.length === 11
-    ? `55${digits}`
-    : digits;
-  // O WhatsApp pode devolver celulares brasileiros antigos sem o nono dígito.
-  // Canonicalizamos 55 + DDD + assinante móvel de 8 dígitos para 55 + DDD + 9 dígitos.
-  if (normalizedNumber.length === 12 && normalizedNumber.startsWith("55") && /[6-9]/.test(normalizedNumber[4])) {
-    normalizedNumber = `${normalizedNumber.slice(0, 4)}9${normalizedNumber.slice(4)}`;
-  }
-  if (normalizedNumber.length < 12 || normalizedNumber.length > 15) {
-    throw new Error("Número de WhatsApp inválido.");
-  }
-  return normalizedNumber;
+  const result = normalizeContactPhone(number);
+  if (result.status !== "valid") throw new Error("Número de WhatsApp inválido.");
+  return result.value;
 }
 
 /**

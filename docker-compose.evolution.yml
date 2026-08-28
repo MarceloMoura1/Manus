@@ -73,7 +73,9 @@ services:
 
       # ── Cache local (sem Redis) ─────────────────────────
       CACHE_REDIS_ENABLED: "false"
-      CACHE_LOCAL_ENABLED: "true"
+      # Desativado: na v2.3.7/MySQL o OnWhatsappCache pode enviar o campo `lid`
+      # para um modelo Prisma incompatível e interromper o processamento.
+      CACHE_LOCAL_ENABLED: "false"
       CACHE_LOCAL_TTL: "86400"
 
       # ── Sessão persistente ──────────────────────────────

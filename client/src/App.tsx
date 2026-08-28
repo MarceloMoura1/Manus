@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
@@ -70,6 +70,12 @@ export default function App() {
   );
 
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
+  useEffect(() => {
+    const openAssistant = () => setIsAssistantOpen(true);
+    window.addEventListener("megadesk-open-assistant", openAssistant);
+    return () => window.removeEventListener("megadesk-open-assistant", openAssistant);
+  }, []);
+  const usesAuthenticatedHomeShell = !isAdminRoute() && !isSettingsRoute() && !isBotConfigRoute() && !isNotificationsRoute() && !isWhatsAppBaileysRoute();
   const platform = isAdminRoute() ? "megaadmin" : isSettingsRoute() || isBotConfigRoute() || isNotificationsRoute() || isWhatsAppBaileysRoute() ? "megadesk" : "megadesk";
 
   return (
@@ -85,7 +91,7 @@ export default function App() {
             onClose={() => setIsAssistantOpen(false)}
             platform={platform}
           />
-          {!isAssistantOpen && (
+          {!isAssistantOpen && !usesAuthenticatedHomeShell && (
             <button
               onClick={() => setIsAssistantOpen(true)}
               className="fixed bottom-4 right-4 w-14 h-14 bg-blue-500 text-white rounded-full shadow-lg hover:bg-blue-600 transition flex items-center justify-center z-40"

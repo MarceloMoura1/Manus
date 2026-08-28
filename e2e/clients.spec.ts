@@ -25,31 +25,31 @@ const commercialClient = {
 
 const result = (json: unknown) => ({ result: { data: { json } } });
 
-async function prepare(page: Page, role: "admin" | "manager" | "agent" | "viewer" = "admin") {
+async function prepare(page: Page, role: "admin" | "manager" | "agent" | "viewer" = "admin", options: { conversations?: any[] } = {}) {
   const allowed = role === "admin" || role === "manager";
   const refreshedSession = {
     company: "Tenant controlado",
-    permissions: allowed ? ["clients", "erp"] : ["erp"],
+    permissions: ["erp", "conversations"],
     userName: "Usuário controlado",
     userEmail: `${role}@example.invalid`,
     userRole: role,
     plan: "test",
-    modules: allowed ? ["clients", "erp"] : ["erp"],
+    modules: ["erp"],
     expiresAt: Date.now() + 3_600_000,
   };
-  await page.addInitScript(({ selectedRole, canAccess }) => {
+  await page.addInitScript(({ selectedRole }) => {
     localStorage.setItem("megadesk_session_v1", JSON.stringify({
       clientId: "tenant-must-not-leave-browser",
       company: "Tenant controlado",
-      permissions: canAccess ? ["clients", "erp"] : ["erp"],
+      permissions: ["erp", "conversations"],
       userName: "Usuário controlado",
       userEmail: `${selectedRole}@example.invalid`,
       userRole: selectedRole,
       plan: "test",
-      modules: canAccess ? ["clients", "erp"] : ["erp"],
+      modules: ["erp"],
       expiresAt: Date.now() + 3_600_000,
     }));
-  }, { selectedRole: role, canAccess: allowed });
+  }, { selectedRole: role });
 
   await page.route("**/api/trpc/**", async (route) => {
     const url = new URL(route.request().url());
@@ -58,6 +58,14 @@ async function prepare(page: Page, role: "admin" | "manager" | "agent" | "viewer
       ? { ok: true, session: refreshedSession }
       : name.includes("crm.list")
       ? { clients: [commercialClient] }
+      : name.includes("crm.getById")
+        ? { client: commercialClient }
+      : name.includes("megadesk.getConversations")
+        ? (options.conversations ?? [])
+      : name.includes("megadesk.getConversationMessages")
+        ? []
+      : name.includes("megadesk.createConversation")
+        ? { success: true, conversationId: "conversation-created" }
       : name.includes("erp.summary")
         ? { metrics: { activeProducts: 0, inactiveProducts: 0, lowProducts: 0, emptyProducts: 0, costValueCents: 0, saleValueCents: 0 }, critical: [], recent: [], canWrite: false }
       : name.includes("crm.create")
@@ -71,7 +79,7 @@ async function prepare(page: Page, role: "admin" | "manager" | "agent" | "viewer
               : name.includes("crm.getConversas")
                 ? { conversas: [{ id: "conversation-public", customerName: commercialClient.responsibleName, phone: commercialClient.phone, company: commercialClient.companyName, status: "open", lastMessage: "Olá", timeLabel: "agora", createdAt: "2026-01-01" }] }
                 : name.includes("evolution.getStatus")
-                  ? { status: "disconnected" }
+                  ? { status: "connected", providerReachable: true, integrationStatus: "connected" }
                   : null;
     const payloads = procedures.map((name) => result(response(name)));
     await route.fulfill({
@@ -83,7 +91,7 @@ async function prepare(page: Page, role: "admin" | "manager" | "agent" | "viewer
 }
 
 async function openErpFromPrimaryNavigation(page: Page, viewportWidth: number) {
-  const navigation = page.getByLabel("Menu principal"),
+  const navigation = page.locator('[aria-label="Menu principal"]'),
     erp = navigation.getByRole("button", { name: "ERP", exact: true });
   await expect(navigation).toHaveCount(1);
   if (viewportWidth < 1024) {
@@ -118,24 +126,74 @@ test.describe("central Clients controlled", () => {
     await expect(page).toHaveURL(new RegExp(`/erp/clientes\\?crmClientId=${commercialClient.crmClientId}$`));
     await expect(page.getByTestId("clients-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Cliente compartilhado", exact: true })).toBeVisible();
-    await expect(page.locator("nav").getByRole("button", { name: "Clientes", exact: true })).toBeVisible();
+    const moduleNavigation = page.getByRole("navigation", { name: "Módulos do ERP" });
+    const clientsItem = moduleNavigation.getByRole("button", { name: "Clientes", exact: true });
+    await expect(clientsItem).toBeVisible();
+    await expect(clientsItem).toHaveAttribute("aria-current", "page");
+    const firstItems = await moduleNavigation.getByRole("button").evaluateAll(items => items.slice(0, 3).map(item => item.textContent?.trim()));
+    expect(firstItems).toEqual(["Resumo", "Clientes", "Produtos"]);
     await expect(page.getByLabel("Menu principal").getByRole("button", { name: "Clientes", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "ERP", exact: true })).toHaveCount(1);
     expect(crmRequests.join("\n")).not.toContain("tenant-must-not-leave-browser");
     await expect(page.getByTitle("Excluir")).toHaveCount(0);
+    await page.reload();
+    await expect(page).toHaveURL(new RegExp(`/erp/clientes\\?crmClientId=${commercialClient.crmClientId}$`));
+    await expect(page.getByTestId("clients-page")).toBeVisible();
   });
 
   test("keeps manager write actions and supports history navigation", async ({ page }) => {
     await prepare(page, "manager");
     await page.goto("/");
     await page.getByRole("button", { name: "ERP", exact: true }).click();
-    await page.getByTestId("erp-workspace").getByRole("button", { name: "Clientes", exact: true }).click();
+    const clientsItem = page.getByRole("navigation", { name: "Módulos do ERP" }).getByRole("button", { name: "Clientes", exact: true });
+    await clientsItem.focus();
+    await expect(clientsItem).toBeFocused();
+    await clientsItem.press("Enter");
     await expect(page).toHaveURL(/\/erp\/clientes$/);
     await expect(page.getByRole("button", { name: "Novo" })).toBeVisible();
     await page.goBack();
     await expect(page).toHaveURL(/\/erp$/);
     await page.goForward();
     await expect(page.getByTestId("clients-page")).toBeVisible();
+  });
+
+  for (const existing of [
+    { label: "crmClientId", conversation: { id: "conversation-by-crm", crmClientId: commercialClient.crmClientId, name: "Cliente compartilhado", phone: commercialClient.phone, company: commercialClient.companyName, status: "open", lastMessage: "Olá" } },
+    { label: "telefone", conversation: { id: "conversation-by-phone", crmClientId: null, name: "Cliente compartilhado", phone: "+55 11 99999-0000", company: commercialClient.companyName, status: "open", lastMessage: "Olá" } },
+  ]) test(`CRM handoff opens an existing conversation by ${existing.label} without mutation`, async ({ page }) => {
+    await prepare(page, "admin", { conversations: [existing.conversation] });
+    let creates = 0;
+    page.on("request", request => { if (request.url().includes("megadesk.createConversation")) creates++; });
+    await page.goto(`/erp/clientes?crmClientId=${commercialClient.crmClientId}`);
+    await page.getByTitle("Iniciar atendimento pelo WhatsApp").click();
+    await expect(page).toHaveURL(/:\/\/localhost:3000\/$/);
+    await expect(page.getByTestId("conversation-chat-panel")).toContainText("Cliente compartilhado");
+    expect(creates).toBe(0);
+  });
+
+  test("CRM handoff renders the canonical prefilled composer and mutates only once after confirmation", async ({ page }) => {
+    await prepare(page, "admin", { conversations: [] });
+    let creates = 0;
+    page.on("request", request => { if (request.url().includes("megadesk.createConversation")) creates++; });
+    await page.goto(`/erp/clientes?crmClientId=${commercialClient.crmClientId}`);
+    const handoff = page.getByTitle("Iniciar atendimento pelo WhatsApp");
+    await handoff.evaluate((element: HTMLElement) => { element.click(); element.click(); });
+    const composer = page.getByTestId("crm-new-attendance-composer");
+    await expect(composer).toBeVisible();
+    await expect(composer).toContainText("Cliente compartilhado");
+    await expect(composer).toContainText("11999990000");
+    await expect(composer).toContainText("WhatsApp");
+    await expect(composer).toContainText("Mensagem inicial");
+    expect(creates).toBe(0);
+    await composer.getByRole("button", { name: "Cancelar novo atendimento" }).click();
+    await expect(composer).toBeHidden();
+    expect(creates).toBe(0);
+
+    await page.goto(`/erp/clientes?crmClientId=${commercialClient.crmClientId}`);
+    await page.getByTitle("Iniciar atendimento pelo WhatsApp").click();
+    const confirm = page.getByRole("button", { name: "Iniciar Conversa no WhatsApp" });
+    await confirm.evaluate((element: HTMLElement) => { element.click(); element.click(); });
+    await expect.poll(() => creates).toBe(1);
   });
 
   for (const role of ["agent", "viewer"] as const) {
@@ -145,7 +203,7 @@ test.describe("central Clients controlled", () => {
       await expect(page).toHaveURL(/\/erp$/);
       await expect(page.getByTestId("clients-page")).toHaveCount(0);
       await expect(page.getByLabel("Menu principal").getByRole("button", { name: "Clientes", exact: true })).toHaveCount(0);
-      await expect(page.getByTestId("erp-workspace").getByRole("button", { name: "Clientes", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("navigation", { name: "Módulos do ERP" }).getByRole("button", { name: "Clientes", exact: true })).toHaveCount(0);
     });
   }
 
@@ -160,7 +218,7 @@ test.describe("central Clients controlled", () => {
       await prepare(page, "admin");
       await page.goto("/");
       await openErpFromPrimaryNavigation(page, viewport.width);
-      await page.getByTestId("erp-workspace").getByRole("button", { name: "Clientes", exact: true }).click();
+      await page.getByRole("navigation", { name: "Módulos do ERP" }).getByRole("button", { name: "Clientes", exact: true }).click();
       await expect(page).toHaveURL(/\/erp\/clientes$/);
       await expect(page.getByTestId("clients-page")).toBeVisible();
       if (viewport.width < 1024) await expect(page.locator("main")).toBeFocused();

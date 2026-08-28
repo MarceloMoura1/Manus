@@ -17,6 +17,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
   Smartphone,
@@ -40,15 +41,21 @@ import { toast } from "sonner";
 function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
   const [refreshing, setRefreshing] = React.useState(false);
   const [qrCodeData, setQrCodeData] = React.useState<{ code?: string; base64: string } | null>(null);
+  const [logoutConfirmation, setLogoutConfirmation] = React.useState("");
+  const operationalRole = (() => { try { return JSON.parse(localStorage.getItem("megadesk_session_v1") || "{}").userRole; } catch { return null; } })();
+  const canAdministerEvolution = operationalRole === "admin" || operationalRole === "manager";
 
   // Mutation para conectar e obter QR Code
   const connectMut = trpc.evolution.connect.useMutation({
     onSuccess: (data: any) => {
+      if (data.webhookConfigured === false) toast.warning("Instância disponível, mas o webhook está degradado. Use Reparar integração.");
       if (data.qrCode) {
         toast.success("QR Code gerado! Escaneie com seu WhatsApp.");
         setQrCodeData({ base64: data.qrCode, code: data.code });
-      } else {
+      } else if (data.status === "connected") {
         toast.info("WhatsApp já está conectado.");
+      } else {
+        toast.error("A Evolution não retornou um QR Code. Tente gerar novamente.");
       }
     },
     onError: (e: any) => toast.error(e?.message || "Erro ao conectar"),
@@ -59,15 +66,32 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
     { clientId },
     { enabled: !!clientId, refetchInterval: 3000 }
   );
+  const { data: health } = trpc.evolution.health.useQuery(
+    { clientId },
+    { enabled: !!clientId, refetchInterval: 30_000 }
+  );
 
   // Mutation para desconectar
   const disconnectMut = trpc.evolution.disconnect.useMutation({
-    onSuccess: () => {
-      toast.success("WhatsApp desconectado com sucesso!");
+    onSuccess: (data: any) => {
+      if (data.auditStatus === "degraded") toast.warning("WhatsApp desconectado, mas o registro final de auditoria ficou degradado.");
+      else toast.success("WhatsApp desconectado com sucesso!");
+      setLogoutConfirmation("");
       setQrCodeData(null);
       refetch();
     },
     onError: (e: any) => toast.error(e?.message || "Erro ao desconectar"),
+  });
+  const repairMut = trpc.evolution.repair.useMutation({
+    onSuccess: (data: any) => {
+      if (data.qrCode) setQrCodeData({ base64: data.qrCode });
+      if (data.integrationStatus === "webhook_degraded") toast.warning("A instância respondeu, mas o webhook continua degradado.");
+      else if (data.integrationStatus === "provider_unavailable") toast.error("A Evolution API continua indisponível.");
+      else if (data.auditStatus === "degraded") toast.warning("Integração reparada com auditoria final degradada.");
+      else toast.success("Integração reparada e auditada.");
+      refetch();
+    },
+    onError: (e: any) => toast.error(e?.message || "Erro ao reparar integração"),
   });
 
   // Query para obter novo QR Code
@@ -92,6 +116,11 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
       if (data.data?.qrCode) {
         setQrCodeData({ base64: data.data.qrCode });
         toast.success("Novo QR Code gerado!");
+      } else if (data.data?.status === "connected") {
+        setQrCodeData(null);
+        toast.info("WhatsApp já está conectado.");
+      } else {
+        toast.error("QR Code ainda não disponível. Tente novamente em alguns segundos.");
       }
     } catch (e: any) {
       toast.error(e?.message || "Erro ao gerar QR Code");
@@ -101,12 +130,38 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
   };
 
   const displayQR = qrCodeData?.base64 || (status as any)?.qrCode;
+  const integrationStatus = (health as any)?.integrationStatus || (status as any)?.integrationStatus || (status as any)?.status;
+  const logoutControl = canAdministerEvolution ? <AlertDialog onOpenChange={(open) => { if (!open) setLogoutConfirmation(""); }}>
+    <AlertDialogTrigger asChild><Button disabled={disconnectMut.isPending || repairMut.isPending} variant="outline" size="sm" className="gap-1 text-red-600 border-red-200 hover:bg-red-50"><XCircle className="w-3 h-3" /> Desconectar</Button></AlertDialogTrigger>
+    <AlertDialogContent>
+      <AlertDialogHeader><AlertDialogTitle>Desconectar o WhatsApp real?</AlertDialogTitle><AlertDialogDescription>Esta ação encerra a sessão real do WhatsApp. Será necessário escanear um novo QR Code. Ela não é uma limpeza local.</AlertDialogDescription></AlertDialogHeader>
+      <label className="text-sm font-medium text-slate-700">Digite <strong>DESCONECTAR</strong> para confirmar<Input autoFocus value={logoutConfirmation} onChange={(event) => setLogoutConfirmation(event.target.value)} className="mt-2" aria-label="Confirmação de logout do WhatsApp" /></label>
+      <AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction disabled={logoutConfirmation !== "DESCONECTAR" || disconnectMut.isPending} onClick={() => disconnectMut.mutate({ clientId, confirmation: "DESCONECTAR" })} className="bg-red-600 hover:bg-red-700">Desconectar sessão real</AlertDialogAction></AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog> : null;
 
   return (
     <div className="space-y-4">
+      {health && (!health.providerReachable || !health.webhookHealthy) && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <p className="font-medium">A integração precisa de atenção.</p>
+          <p>{health.providerReachable ? "O webhook está incorreto ou incompleto." : "A Evolution API não está acessível."}</p>
+          <Button type="button" variant="outline" size="sm" className="mt-2" disabled={repairMut.isPending} onClick={() => repairMut.mutate({ clientId })}>
+            <RefreshCw className={`mr-1 h-3 w-3 ${repairMut.isPending ? "animate-spin" : ""}`} /> Reparar integração
+          </Button>
+        </div>
+      )}
       {isLoading || refreshing ? (
         <div className="flex items-center justify-center py-12 text-slate-400">
           <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Carregando QR Code...
+        </div>
+      ) : integrationStatus === "provider_unavailable" ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-8 text-center"><AlertCircle className="mx-auto h-10 w-10 text-amber-600" /><p className="mt-3 font-semibold text-slate-900">Provedor indisponível</p><p className="text-sm text-slate-600">Não é possível confirmar se o WhatsApp está conectado. Nenhum logout foi executado.</p></div>
+      ) : integrationStatus === "connected" || integrationStatus === "webhook_degraded" ? (
+        <div className="flex flex-col items-center gap-4 rounded-xl border border-emerald-200 bg-emerald-50 p-8 text-center">
+          <CheckCircle2 className="h-12 w-12 text-emerald-600" />
+          <div><p className="font-semibold text-slate-900">WhatsApp conectado</p><p className="text-sm text-slate-600">{integrationStatus === "webhook_degraded" ? "A sessão está conectada, mas o webhook precisa de reparo." : "Instância e webhook confirmados."}</p></div>
+          <div className="flex gap-2"><Button type="button" disabled={repairMut.isPending || disconnectMut.isPending} onClick={() => repairMut.mutate({ clientId })}><RefreshCw className={`mr-1 h-3 w-3 ${repairMut.isPending ? "animate-spin" : ""}`} />{repairMut.isPending ? "Reparando..." : "Reparar integração"}</Button>{logoutControl}</div>
         </div>
       ) : displayQR ? (
         <div className="flex flex-col items-center gap-4">
@@ -130,17 +185,11 @@ function EvolutionQRCodeSection({ clientId }: { clientId: string }) {
             >
               <RefreshCw className="w-3 h-3" /> Atualizar QR Code
             </Button>
-            <Button
-              onClick={() => disconnectMut.mutate({ clientId })}
-              disabled={disconnectMut.isPending}
-              variant="outline"
-              size="sm"
-              className="gap-1 text-red-600 border-red-200 hover:bg-red-50"
-            >
-              <XCircle className="w-3 h-3" /> Desconectar
-            </Button>
+            {logoutControl}
           </div>
         </div>
+      ) : integrationStatus === "connecting" || integrationStatus === "qr_required" ? (
+        <div className="flex flex-col items-center justify-center py-12 gap-3"><RefreshCw className="h-8 w-8 animate-spin text-blue-600" /><p className="font-medium text-slate-900">Aguardando QR Code</p><Button onClick={handleRefreshQR} disabled={getQRCodeQuery.isFetching || refreshing}>Atualizar QR Code</Button></div>
       ) : (
         <div className="flex flex-col items-center justify-center py-12 gap-4">
           <div className="w-20 h-20 rounded-full bg-blue-50 flex items-center justify-center">

@@ -52,6 +52,21 @@ ALLOW_TENANT_MIGRATION=1 TENANT_DATABASE_URL=mysql://.../mdsk_cliente pnpm db:mi
 O runner tenant rejeita nomes fora de `mdsk_*`. URLs não possuem default. Nunca
 use `db:push`; ele foi removido.
 
+## Compatibilidade CRM Pessoa/Empresa
+
+`megadesk_crm_clients.customer_type` classifica `person` ou `company` e permanece
+anulável durante a transição dos registros legados. Para Pessoa, `company_name`
+continua armazenando provisoriamente o nome completo; essa dívida evita uma segunda
+coluna e deve ser resolvida apenas em uma evolução futura explicitamente autorizada.
+
+## Auditoria estruturada da Evolution
+
+A migration main `0012` adiciona campos nullable de correlação, identidade,
+origem, fase, erro seguro, IP e metadata JSON à tabela
+`megadesk_domain_audit_logs`. A nulabilidade preserva os registros legados sem
+backfill. Para novos eventos Evolution, a aplicação exige esses campos e usa
+`success = NULL` apenas na fase `intent`; `success` e `failure` usam 1 e 0.
+
 ## Legado
 
 A cadeia antiga permanece para auditoria, descrita em

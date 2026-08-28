@@ -1395,6 +1395,14 @@ export function SettingsPage() {
       toast.error(err.message || 'Erro ao desconectar');
     },
   });
+  const repairEvolutionMut = trpc.evolution.repair.useMutation({
+    onSuccess: (data) => {
+      setEvolutionStatus(data.status as EvolutionStatus);
+      if (data.qrCode) setQrDataUrl(data.qrCode);
+      toast.success('Integração verificada e webhook reconfigurado.');
+    },
+    onError: (err) => toast.error(err.message || 'Erro ao reparar integração'),
+  });
 
   // ─── tRPC: Polling de status ──────────────────────────────────────────────
   // Polling de 3s durante 'connecting'; verificação única nos demais estados
@@ -1405,6 +1413,10 @@ export function SettingsPage() {
       refetchInterval: evolutionStatus === 'connecting' ? 3000 : false,
       refetchOnWindowFocus: false,
     }
+  );
+  const evolutionHealthQuery = trpc.evolution.health.useQuery(
+    { clientId: clientId || '' },
+    { enabled: activeTab === 'whatsapp' && !!clientId, refetchInterval: 30_000 },
   );
 
   // Verificar status ao abrir a aba WhatsApp
@@ -1463,7 +1475,8 @@ export function SettingsPage() {
   /** Desconecta o WhatsApp */
   const handleDisconnectBaileys = async () => {
     if (!clientId) return;
-    await disconnectMut.mutateAsync({ clientId }).catch(() => {});
+    if (!window.confirm('Isso fará logout do WhatsApp neste dispositivo. Para corrigir falhas, use “Reparar integração”. Deseja realmente desconectar?')) return;
+    await disconnectMut.mutateAsync({ clientId, confirmation: 'DESCONECTAR' }).catch(() => {});
   };
 
   const validateCredentials = useCallback(() => {
@@ -1722,6 +1735,15 @@ export function SettingsPage() {
                 {/* Estado: conectado */}
                 {evolutionStatus === 'connected' && (
                   <div className="space-y-4">
+                    {evolutionHealthQuery.data && (!evolutionHealthQuery.data.providerReachable || !evolutionHealthQuery.data.webhookHealthy) && (
+                      <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                        <p className="font-semibold">A conexão está degradada.</p>
+                        <p>{evolutionHealthQuery.data.providerReachable ? 'O webhook precisa ser reconfigurado.' : 'A Evolution API não está acessível.'}</p>
+                        <Button type="button" variant="outline" size="sm" className="mt-3 border-amber-300" disabled={repairEvolutionMut.isPending} onClick={() => clientId && repairEvolutionMut.mutate({ clientId })}>
+                          <RefreshCw className={`mr-2 h-4 w-4 ${repairEvolutionMut.isPending ? 'animate-spin' : ''}`} /> Reparar integração
+                        </Button>
+                      </div>
+                    )}
                     <div className="flex items-center gap-4 p-4 bg-green-50 rounded-xl border border-green-200">
                       <CheckCircle2 className="w-8 h-8 text-green-600 flex-shrink-0" />
                       <div>
@@ -1795,29 +1817,15 @@ export function SettingsPage() {
                         : <><MessageSquare className="w-5 h-5 mr-2" />Gerar QR Code</>
                       }
                     </Button>
-                    {/* Botão Limpar Sessão - para resetar sessão corrompida */}
+                    {/* Reparo seguro: reconfigura webhook e consulta a instância sem logout. */}
                     <Button
                       variant="outline"
-                      className="w-full border-orange-200 text-orange-600 hover:bg-orange-50 text-sm"
-                      onClick={async () => {
-                        const session = localStorage.getItem('megadesk_session_v1');
-                        if (!session) return;
-                        const { clientId, userEmail } = JSON.parse(session);
-                        try {
-                          // Desconectar via tRPC Evolution API
-                          await fetch(`/api/trpc/evolution.disconnect`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'x-tenant-id': clientId, 'x-user-email': userEmail ?? '' },
-                            body: JSON.stringify({ json: { clientId } }),
-                          });
-                          setEvolutionStatus('disconnected');
-                          setEvolutionPhone(null);
-                          setQrDataUrl(null);
-                        } catch {}
-                      }}
+                      className="w-full border-blue-200 text-blue-700 hover:bg-blue-50 text-sm"
+                      disabled={repairEvolutionMut.isPending}
+                      onClick={() => clientId && repairEvolutionMut.mutate({ clientId })}
                     >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      Limpar Sessão (resolver problemas de conexão)
+                      <RefreshCw className={`w-4 h-4 mr-2 ${repairEvolutionMut.isPending ? 'animate-spin' : ''}`} />
+                      Reparar integração sem desconectar
                     </Button>
                   </div>
                 )}

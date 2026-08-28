@@ -1,6 +1,10 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import type { CustomerType, CrmWhatsAppIntent } from "../../../shared/crm";
+import { customerTypeToCsv } from "../../../shared/crm";
+import { isValidCpf, isValidCnpj, suggestCustomerType } from "../../../shared/br-documents";
+import { normalizeContactPhone, sameContactPhone } from "../../../shared/contact-phone";
 import {
   Building2,
   Phone,
@@ -48,6 +52,7 @@ function cn(...classes: Array<string | false | undefined | null>) {
 type CrmClient = {
   crmClientId: string;
   companyName: string;
+  customerType: CustomerType | null;
   responsibleName: string;
   cpfCnpj: string;
   phone: string;
@@ -69,6 +74,7 @@ type CrmClient = {
 };
 
 type ClientTab = "geral" | "chamados" | "conversas" | "timeline" | "financeiro" | "rastreamento" | "arquivos";
+type AdditionalContact = { phone: string; whatsapp: string; description?: string };
 
 // ─── Status config ─────────────────────────────────────────────────────────────
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
@@ -101,6 +107,7 @@ function StatusBadge({ status }: { status: string }) {
 
 // ─── Formulário de Cadastro ────────────────────────────────────────────────────
 type FormData = {
+  customerType: CustomerType | null;
   companyName: string;
   responsibleName: string;
   cpfCnpj: string;
@@ -120,6 +127,7 @@ type FormData = {
 };
 
 const EMPTY_FORM: FormData = {
+  customerType: null,
   companyName: "", responsibleName: "", cpfCnpj: "", phone: "", whatsapp: "",
   email: "", address: "", city: "", state: "", cep: "",
   status: "lead", origin: "outro", internalResponsible: "", tags: "", observations: "",
@@ -137,6 +145,7 @@ function ClientFormModal({
 }) {
   const titleId = React.useId();
   const [form, setForm] = useState<FormData>(editData ? {
+    customerType: editData.customerType,
     companyName: editData.companyName,
     responsibleName: editData.responsibleName,
     cpfCnpj: editData.cpfCnpj,
@@ -154,6 +163,9 @@ function ClientFormModal({
     observations: editData.observations,
     contacts: editData.contactsJson ? JSON.parse(editData.contactsJson) : [],
   } : EMPTY_FORM);
+  const [sameWhatsapp, setSameWhatsapp] = useState(() => editData ? sameContactPhone(editData.phone, editData.whatsapp) : true);
+  const [showOtherWhatsapp, setShowOtherWhatsapp] = useState(() => !!editData?.whatsapp && !sameContactPhone(editData.phone, editData.whatsapp));
+  const legacySuggestion = editData?.customerType === null ? suggestCustomerType(editData.cpfCnpj) : null;
 
   const addContact = () => {
     setForm(prev => ({
@@ -190,13 +202,40 @@ function ClientFormModal({
     setForm(prev => ({ ...prev, [key]: value }));
   }
 
+  function selectCustomerType(next: CustomerType) {
+    if (!form.customerType || form.customerType === next) {
+      setField("customerType", next);
+      return;
+    }
+    const message = form.customerType === "company"
+      ? "Ao mudar para Pessoa, o nome será reinterpretado, o responsável será removido e um CNPJ incompatível será limpo. Confirmar?"
+      : "Ao mudar para Empresa, o nome será reinterpretado e um CPF incompatível será limpo. Confirmar?";
+    if (!window.confirm(message)) return;
+    setForm(prev => ({
+      ...prev,
+      customerType: next,
+      responsibleName: next === "person" ? "" : prev.responsibleName,
+      cpfCnpj: !prev.cpfCnpj || (next === "person" ? isValidCpf(prev.cpfCnpj) : isValidCnpj(prev.cpfCnpj)) ? prev.cpfCnpj : "",
+    }));
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.companyName.trim()) { toast.error("Nome da empresa é obrigatório."); return; }
+    const customerType = form.customerType;
+    if (!customerType) { toast.error("Selecione Pessoa ou Empresa."); return; }
+    if (!form.companyName.trim()) { toast.error(customerType === "person" ? "Nome completo é obrigatório." : "Nome da empresa é obrigatório."); return; }
+    if (form.cpfCnpj && !(customerType === "person" ? isValidCpf(form.cpfCnpj) : isValidCnpj(form.cpfCnpj))) {
+      toast.error(customerType === "person" ? "CPF inválido." : "CNPJ inválido."); return;
+    }
+    const phone = normalizeContactPhone(form.phone);
+    const whatsapp = sameWhatsapp ? phone : normalizeContactPhone(form.whatsapp);
+    if (phone.status === "invalid") { toast.error(phone.reason); return; }
+    if (whatsapp.status === "invalid") { toast.error(whatsapp.reason); return; }
+    const data = { ...form, customerType, phone: phone.value ?? "", whatsapp: whatsapp.value ?? "" };
     if (editData) {
-      updateMutation.mutate({ crmClientId: editData.crmClientId, data: form });
+      updateMutation.mutate({ crmClientId: editData.crmClientId, data });
     } else {
-      createMutation.mutate({ data: form });
+      createMutation.mutate({ data });
     }
   }
 
@@ -229,67 +268,66 @@ function ClientFormModal({
             <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-4 flex items-center gap-2">
               <Building2 className="w-4 h-4 text-slate-400" /> Dados Básicos
             </h3>
+            <fieldset className="mb-4">
+              <legend className="mb-2 text-sm font-medium text-slate-700">Tipo de cliente *</legend>
+              <div className="grid grid-cols-2 gap-3" role="radiogroup" aria-label="Tipo de cliente">
+                {(["person", "company"] as const).map(type => <button key={type} type="button" role="radio" aria-checked={form.customerType === type} onClick={() => selectCustomerType(type)} className={cn("rounded-lg border px-4 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500", form.customerType === type ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-700")}>{type === "person" ? "Pessoa" : "Empresa"}</button>)}
+              </div>
+              {legacySuggestion && !form.customerType && <p className="mt-2 text-sm text-amber-700">Sugestão pelo documento: {legacySuggestion === "person" ? "Pessoa" : "Empresa"}. Confirme uma opção para salvar.</p>}
+            </fieldset>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-slate-700 mb-1">Nome da Empresa *</label>
-                <input aria-label="Nome da Empresa" type="text" value={form.companyName} onChange={e => setField("companyName", e.target.value)}
+                <label className="block text-sm font-medium text-slate-700 mb-1">{form.customerType === "person" ? "Nome completo" : "Nome da empresa"} *</label>
+                <input aria-label={form.customerType === "person" ? "Nome completo" : "Nome da empresa"} autoComplete={form.customerType === "person" ? "name" : "organization"} type="text" value={form.companyName} onChange={e => setField("companyName", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  placeholder="Ex: Empresa XYZ Ltda" required />
+                  required />
               </div>
-              <div>
+              {form.customerType === "company" && <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Nome do Responsável</label>
                 <input aria-label="Nome do Responsável" type="text" value={form.responsibleName} onChange={e => setField("responsibleName", e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  placeholder="João Silva" />
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+              </div>}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">{form.customerType === "person" ? "CPF" : "CNPJ"} (opcional)</label>
+                <input aria-label={form.customerType === "person" ? "CPF" : "CNPJ"} inputMode="numeric" type="text" value={form.cpfCnpj} onChange={e => setField("cpfCnpj", e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">CPF / CNPJ</label>
-                <input aria-label="CPF / CNPJ" type="text" value={form.cpfCnpj} onChange={e => setField("cpfCnpj", e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  placeholder="00.000.000/0001-00" />
+                <label className="block text-sm font-medium text-slate-700 mb-1">Telefone principal (opcional)</label>
+                <input aria-label="Telefone principal" autoComplete="tel" inputMode="tel" type="text" value={form.phone} onChange={e => setField("phone", e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Telefone</label>
-                <input aria-label="Telefone principal" type="text" value={form.phone} onChange={e => setField("phone", e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  placeholder="(11) 9999-9999" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">WhatsApp</label>
-                <input aria-label="WhatsApp principal" type="text" value={form.whatsapp} onChange={e => setField("whatsapp", e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  placeholder="(11) 9999-9999" />
-              </div>
+              <div className="sm:col-span-2 space-y-2"><label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={sameWhatsapp} onChange={e => { setSameWhatsapp(e.target.checked); if (e.target.checked) setShowOtherWhatsapp(false); }} /> Este número também é WhatsApp</label>{!sameWhatsapp && !showOtherWhatsapp && <button type="button" className="text-sm font-medium text-blue-600" onClick={() => setShowOtherWhatsapp(true)}>Adicionar outro número de WhatsApp</button>}{!sameWhatsapp && showOtherWhatsapp && <div><label className="block text-sm font-medium text-slate-700 mb-1">Número do WhatsApp (opcional)</label><input aria-label="Número do WhatsApp" autoComplete="tel" inputMode="tel" value={form.whatsapp} onChange={e => setField("whatsapp", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" /></div>}</div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">E-mail</label>
                 <input aria-label="E-mail" type="email" value={form.email} onChange={e => setField("email", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  placeholder="contato@empresa.com.br" />
+                  autoComplete="email" />
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">Endereço</label>
                 <input aria-label="Endereço" type="text" value={form.address} onChange={e => setField("address", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  placeholder="Rua, número, bairro" />
+                  autoComplete="street-address" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Cidade</label>
                 <input aria-label="Cidade" type="text" value={form.city} onChange={e => setField("city", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  placeholder="São Paulo" />
+                  autoComplete="address-level2" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Estado</label>
                   <input aria-label="Estado" type="text" value={form.state} onChange={e => setField("state", e.target.value.toUpperCase().slice(0, 2))}
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    placeholder="SP" maxLength={2} />
+                    autoComplete="address-level1" maxLength={2} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">CEP</label>
                   <input aria-label="CEP" type="text" value={form.cep} onChange={e => setField("cep", e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    placeholder="00000-000" />
+                    autoComplete="postal-code" />
                 </div>
               </div>
             </div>
@@ -328,13 +366,13 @@ function ClientFormModal({
                 <label className="block text-sm font-medium text-slate-700 mb-1">Responsável Interno</label>
                 <input aria-label="Responsável Interno" type="text" value={form.internalResponsible} onChange={e => setField("internalResponsible", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  placeholder="Nome do atendente responsável" />
+                  />
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">Tags</label>
                 <input aria-label="Tags" type="text" value={form.tags} onChange={e => setField("tags", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  placeholder="vip, prioritário, parceiro (separados por vírgula)" />
+                  />
               </div>
             </div>
           </section>
@@ -377,7 +415,6 @@ function ClientFormModal({
                           value={contact.phone}
                           onChange={e => updateContact(idx, "phone", e.target.value)}
                           className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                          placeholder="(11) 9999-9999"
                         />
                       </div>
                       <div>
@@ -388,7 +425,6 @@ function ClientFormModal({
                           value={contact.whatsapp}
                           onChange={e => updateContact(idx, "whatsapp", e.target.value)}
                           className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                          placeholder="(11) 9999-9999"
                         />
                       </div>
                       <div className="sm:col-span-2">
@@ -399,7 +435,6 @@ function ClientFormModal({
                           value={contact.description || ""}
                           onChange={e => updateContact(idx, "description", e.target.value)}
                           className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                          placeholder="Ex: Gerente, Recepção, etc."
                         />
                       </div>
                     </div>
@@ -422,7 +457,6 @@ function ClientFormModal({
               onChange={e => setField("observations", e.target.value)}
               rows={4}
               className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none"
-              placeholder="Ex: Cliente prefere contato após 18h. Solicitar aprovação antes da produção..."
             />
           </section>
 
@@ -453,11 +487,15 @@ function ClientDetailPanel({
   onEdit,
   onClose,
   onSendMessage,
+  whatsappConnected,
+  canStartConversation,
 }: {
   client: CrmClient;
   onEdit: () => void;
   onClose: () => void;
-  onSendMessage?: (phone: string) => void;
+  onSendMessage?: (intent: CrmWhatsAppIntent) => void;
+  whatsappConnected: boolean;
+  canStartConversation: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<ClientTab>("geral");
   const [newTimelineNote, setNewTimelineNote] = useState("");
@@ -566,29 +604,22 @@ function ClientDetailPanel({
                   <div className="flex items-center gap-2 text-sm text-slate-700 group">
                     <Phone className="w-4 h-4 text-slate-400 flex-shrink-0" />
                     <span>{client.phone}</span>
-                    <button
-                      type="button"
-                      onClick={() => onSendMessage?.(client.phone)}
-                      className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-slate-100 rounded"
-                      title="Enviar mensagem"
-                    >
-                      <MessageSquare className="w-4 h-4 text-blue-500" />
-                    </button>
                   </div>
                 )}
                 {client.whatsapp && (
                   <div className="flex items-center gap-2 text-sm text-slate-700 group">
                     <Smartphone className="w-4 h-4 text-green-500 flex-shrink-0" />
                     <span>{client.whatsapp}</span>
-                    <span className="text-xs text-green-600 font-medium">WhatsApp</span>
-                    <button
+                    <span className="text-xs text-green-600 font-medium" title="Número declarado como WhatsApp">WhatsApp</span>
+                    {canStartConversation && <button
                       type="button"
-                      onClick={() => onSendMessage?.(client.whatsapp)}
-                      className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-slate-100 rounded"
-                      title="Enviar mensagem"
+                      disabled={!whatsappConnected || normalizeContactPhone(client.whatsapp).status !== "valid"}
+                      onClick={() => onSendMessage?.({ crmClientId: client.crmClientId, phone: client.whatsapp, channel: "whatsapp" })}
+                      className="ml-auto p-1 hover:bg-slate-100 rounded disabled:cursor-not-allowed disabled:opacity-40"
+                      title={whatsappConnected ? "Iniciar atendimento pelo WhatsApp" : "WhatsApp desconectado"}
                     >
                       <MessageSquare className="w-4 h-4 text-blue-500" />
-                    </button>
+                    </button>}
                   </div>
                 )}
                 {client.email && (
@@ -607,11 +638,11 @@ function ClientDetailPanel({
                 {/* Contatos Adicionais */}
                 {client.contactsJson && (() => {
                   try {
-                    const contacts = JSON.parse(client.contactsJson);
+                    const contacts = JSON.parse(client.contactsJson) as AdditionalContact[];
                     if (contacts.length > 0) {
                       return (
                         <>
-                          {contacts.map((contact: any, idx: number) => (
+                          {contacts.map((contact, idx) => (
                             <div key={idx} className="border-t border-slate-200 pt-2 mt-2">
                               {contact.description && (
                                 <p className="text-xs font-medium text-slate-600 mb-1">{contact.description}</p>
@@ -620,29 +651,22 @@ function ClientDetailPanel({
                                 <div className="flex items-center gap-2 text-sm text-slate-700 group">
                                   <Phone className="w-4 h-4 text-slate-400 flex-shrink-0" />
                                   <span>{contact.phone}</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => onSendMessage?.(contact.phone)}
-                                    className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-slate-100 rounded"
-                                    title="Enviar mensagem"
-                                  >
-                                    <MessageSquare className="w-4 h-4 text-blue-500" />
-                                  </button>
                                 </div>
                               )}
                               {contact.whatsapp && (
                                 <div className="flex items-center gap-2 text-sm text-slate-700 group">
                                   <Smartphone className="w-4 h-4 text-green-500 flex-shrink-0" />
                                   <span>{contact.whatsapp}</span>
-                                  <span className="text-xs text-green-600 font-medium">WhatsApp</span>
-                                  <button
+                                  <span className="text-xs text-green-600 font-medium" title="Número declarado como WhatsApp">WhatsApp</span>
+                                  {canStartConversation && <button
                                     type="button"
-                                    onClick={() => onSendMessage?.(contact.whatsapp)}
-                                    className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-slate-100 rounded"
-                                    title="Enviar mensagem"
+                                    disabled={!whatsappConnected || normalizeContactPhone(contact.whatsapp).status !== "valid"}
+                                    onClick={() => onSendMessage?.({ crmClientId: client.crmClientId, phone: contact.whatsapp, channel: "whatsapp" })}
+                                    className="ml-auto p-1 hover:bg-slate-100 rounded disabled:cursor-not-allowed disabled:opacity-40"
+                                    title={whatsappConnected ? "Iniciar atendimento pelo WhatsApp" : "WhatsApp desconectado"}
                                   >
                                     <MessageSquare className="w-4 h-4 text-blue-500" />
-                                  </button>
+                                  </button>}
                                 </div>
                               )}
                             </div>
@@ -894,10 +918,10 @@ function ClientDetailPanel({
 }
 
 // ─── Página Principal ──────────────────────────────────────────────────────────
-export function ClientesPage({ initialSelectedId, onNavigate }: { initialSelectedId?: string; onNavigate?: (phone: string) => void } = {}) {
-  const handleSendMessage = useCallback((phone: string) => {
+export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected = false, canStartConversation = false }: { initialSelectedId?: string; onNavigate?: (intent: CrmWhatsAppIntent) => void; whatsappConnected?: boolean; canStartConversation?: boolean } = {}) {
+  const handleSendMessage = useCallback((intent: CrmWhatsAppIntent) => {
     if (onNavigate) {
-      onNavigate(phone);
+      onNavigate(intent);
     }
   }, [onNavigate]);
 
@@ -925,13 +949,13 @@ export function ClientesPage({ initialSelectedId, onNavigate }: { initialSelecte
       toast.error(result.error?.message ?? "Não foi possível exportar os clientes.");
       return;
     }
-    const headers = ["empresa", "responsavel", "cpf_cnpj", "telefone", "whatsapp", "email", "endereco", "cidade", "estado", "cep", "status", "origem", "observacoes"];
+    const headers = ["empresa", "tipo", "responsavel", "cpf_cnpj", "telefone", "whatsapp", "email", "endereco", "cidade", "estado", "cep", "status", "origem", "observacoes"];
     const safeCell = (value: unknown) => {
       const raw = String(value ?? "");
       const formulaSafe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
       return `"${formulaSafe.replace(/"/g, '""')}"`;
     };
-    const rows = result.data.rows.map((row) => [row.companyName, row.responsibleName, row.cpfCnpj, row.phone, row.whatsapp, row.email, row.address, row.city, row.state, row.cep, row.status, row.origin, row.observations].map(safeCell).join(";"));
+    const rows = result.data.rows.map((row) => [row.companyName, customerTypeToCsv(row.customerType), row.responsibleName, row.cpfCnpj, row.phone, row.whatsapp, row.email, row.address, row.city, row.state, row.cep, row.status, row.origin, row.observations].map(safeCell).join(";"));
     const blob = new Blob([`\uFEFF${headers.join(";")}\n${rows.join("\n")}`], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -960,6 +984,7 @@ export function ClientesPage({ initialSelectedId, onNavigate }: { initialSelecte
       if (rows.length === 0) { toast.error("Nenhum dado válido encontrado. Verifique o CSV."); setCsvImporting(false); return; }
       const mapped = rows.map(r => ({
         companyName: r["empresa"] || r["companyname"] || r["nome_empresa"] || "",
+        customerType: r["tipo"] || r["type"] || "",
         responsibleName: r["responsavel"] || r["responsiblename"] || r["contato"] || "",
         cpfCnpj: r["cnpj"] || r["cpf"] || r["cpfcnpj"] || "",
         phone: r["telefone"] || r["phone"] || "",
@@ -1143,6 +1168,8 @@ export function ClientesPage({ initialSelectedId, onNavigate }: { initialSelecte
               onEdit={() => { setEditClient(selectedClient); setShowModal(true); }}
             onClose={() => setSelectedClientId(null)}
             onSendMessage={handleSendMessage}
+            whatsappConnected={whatsappConnected}
+            canStartConversation={canStartConversation}
           />
         </div>
       ) : (

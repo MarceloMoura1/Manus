@@ -458,7 +458,7 @@ export async function loadMegaDeskStructuredState(defaultState: MegaDeskStructur
       tickets: (ticketRows as any[]).map((row) => ({ id: row.ticket_id, clientId: row.client_id, company: row.company, customer: row.customer, problem: row.problem, category: row.category, status: row.status, createdAt: row.created_label, description: row.description })),
       botScripts: (scriptRows as any[]).map((row) => ({ id: row.script_id, clientId: row.client_id, name: row.name, description: row.description, initialMessage: row.initial_message, active: Boolean(row.active) })),
       operationalRecords: (recordRows as any[]).map((row) => ({ id: row.record_id, clientId: row.client_id, tenantDatabaseName: row.tenant_database_name, type: row.record_type, ownerPhone: row.owner_phone, title: row.title, status: row.status, payload: JSON.parse(row.payload_json || "{}"), createdAt: row.created_at?.toISOString?.() ?? String(row.created_at) })),
-      auditLogs: (auditRows as any[]).map((row) => ({ id: row.audit_id, platform: row.platform, action: row.action, clientId: row.client_id ?? undefined, success: Boolean(row.success), createdAt: row.created_at?.toISOString?.() ?? String(row.created_at) })),
+      auditLogs: (auditRows as any[]).map((row) => ({ id: row.audit_id, platform: row.platform, action: row.action, clientId: row.client_id ?? undefined, success: row.success == null ? null : Boolean(row.success), eventPhase: row.event_phase === "intent" || row.event_phase === "success" || row.event_phase === "failure" ? row.event_phase : null, createdAt: row.created_at?.toISOString?.() ?? String(row.created_at) })),
     };
     // ATUALIZAR inMemoryState COM DADOS DO BANCO (SEMPRE SINCRONIZADO)
     inMemoryState = loadedState;
@@ -525,7 +525,7 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
         await connection.execute("INSERT INTO megadesk_domain_operational_records (record_id, client_id, tenant_database_name, record_type, owner_phone, title, status, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), status=VALUES(status), payload_json=VALUES(payload_json)", [record.id, record.clientId, record.tenantDatabaseName, record.type, record.ownerPhone, record.title, record.status, JSON.stringify(record.payload ?? {})]);
       }
       for (const audit of state.auditLogs) {
-        await connection.execute("INSERT INTO megadesk_domain_audit_logs (audit_id, platform, action, client_id, success) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE action=VALUES(action), success=VALUES(success)", [audit.id, audit.platform, audit.action, audit.clientId ?? null, audit.success ? 1 : 0]);
+        await connection.execute("INSERT INTO megadesk_domain_audit_logs (audit_id, platform, action, client_id, success) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE action=VALUES(action), success=VALUES(success)", [audit.id, audit.platform, audit.action, audit.clientId ?? null, audit.success == null ? null : audit.success ? 1 : 0]);
       }
       for (const client of state.clients) {
         await connection.execute("INSERT INTO megadesk_domain_metrics (client_id, metric_type, amount, source, metadata_json) VALUES (?, ?, ?, ?, ?)", [client.clientId, "conversations", state.conversations.filter((conversation) => conversation.clientId === client.clientId).length, "sync", JSON.stringify({ tenantDatabaseName: client.tenantDatabaseName })]);
@@ -604,7 +604,7 @@ export async function readMegaDeskTenantObservability(clientId: string) {
     );
     return {
       metrics: (metricRows as any[]).map((row) => ({ metricType: row.metric_type, amount: Number(row.amount), source: row.source, metadata: JSON.parse(row.metadata_json || "{}"), createdAt: row.created_at })),
-      auditLogs: (auditRows as any[]).map((row) => ({ sourcePlatform: row.platform, action: row.action, success: Boolean(row.success), createdAt: row.created_at })),
+      auditLogs: (auditRows as any[]).map((row) => ({ sourcePlatform: row.platform, action: row.action, success: row.success == null ? null : Boolean(row.success), createdAt: row.created_at })),
       botScripts: (scriptRows as any[]).map((row) => ({ id: row.script_id, name: row.name, description: row.description, initialMessage: row.initial_message, active: Boolean(row.active) })),
     };
   } catch (error) {

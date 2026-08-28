@@ -9,6 +9,7 @@ const clients = source("client/src/pages/ClientesPage.tsx");
 const attendance = source("client/src/pages/ActiveAttendance.tsx");
 const router = source("server/routers-crm.ts");
 const permissions = source("server/routers.ts");
+const moduleTopbar = source("client/src/components/ModuleTopbar.tsx");
 
 describe("central Clients restoration structure", () => {
   it("keeps Clients central inside ERP with a canonical and legacy route", () => {
@@ -17,8 +18,12 @@ describe("central Clients restoration structure", () => {
     expect(home).toContain('`/erp/clientes${window.location.search}${window.location.hash}`');
     expect(home).not.toContain('{ id: "clients" as RouteId, label: "Clientes"');
     expect(home.match(/label: "ERP"/g)).toHaveLength(1);
-    expect(workspace).toContain('{id:"clients" as const,label:"Clientes"}');
+    expect(workspace).toContain('{id:"clients" as const,label:"Clientes",hidden:!canAccessClients}');
+    expect(workspace.indexOf('label:"Resumo"')).toBeLessThan(workspace.indexOf('label:"Clientes"'));
+    expect(workspace.indexOf('label:"Clientes"')).toBeLessThan(workspace.indexOf('label:"Produtos"'));
     expect(workspace).toContain('<ClientesPage initialSelectedId={initialCrmClientId}');
+    expect(home).toContain('activeItemId={active.startsWith("erp-") ? erpSection : undefined}');
+    expect(moduleTopbar).toContain('aria-current={isActive ? "page" : undefined}');
     expect(home).toContain('route === "clients" ? "erp-clients"');
     expect(home).toContain('window.addEventListener("popstate"');
   });

@@ -9,6 +9,8 @@ import { megadeskCrmClients } from "../drizzle/schema";
 import { getPool } from "./db";
 import { randomUUID } from "crypto";
 import { normalizeDigits, normalizeEmail } from "./_core/provisioning-guards";
+import type { CustomerType } from "../shared/crm";
+import { normalizeContactPhone } from "../shared/contact-phone";
 
 type Database = ReturnType<typeof drizzle>;
 
@@ -17,6 +19,7 @@ function getDb(): Database {
 }
 
 export type CrmClientInput = {
+  customerType: CustomerType | null;
   companyName: string;
   responsibleName?: string;
   cpfCnpj?: string;
@@ -95,11 +98,12 @@ export async function createCrmClient(clientId: string, input: CrmClientInput) {
   await db.insert(megadeskCrmClients).values({
     crmClientId,
     clientId,
+    customerType: input.customerType,
     companyName: input.companyName,
     responsibleName: input.responsibleName ?? "",
     cpfCnpj: input.cpfCnpj ? normalizeDigits(input.cpfCnpj) : null,
-    phone: input.phone ? normalizeDigits(input.phone) : null,
-    whatsapp: input.whatsapp ?? "",
+    phone: normalizeStoredPhone(input.phone, true),
+    whatsapp: normalizeStoredPhone(input.whatsapp, false) ?? "",
     email: input.email ? normalizeEmail(input.email) : null,
     address: input.address ?? "",
     city: input.city ?? "",
@@ -128,12 +132,13 @@ export async function updateCrmClient(
   const existing = await getCrmClientById(crmClientId, clientId);
   if (!existing) throw new Error("Cliente não encontrado ou sem permissão.");
 
-  const updateData: Record<string, any> = {};
+  const updateData: Partial<typeof megadeskCrmClients.$inferInsert> = {};
+  if (input.customerType !== undefined) updateData.customerType = input.customerType;
   if (input.companyName !== undefined) updateData.companyName = input.companyName;
   if (input.responsibleName !== undefined) updateData.responsibleName = input.responsibleName;
   if (input.cpfCnpj !== undefined) updateData.cpfCnpj = input.cpfCnpj;
-  if (input.phone !== undefined) updateData.phone = input.phone;
-  if (input.whatsapp !== undefined) updateData.whatsapp = input.whatsapp;
+  if (input.phone !== undefined) updateData.phone = normalizeStoredPhone(input.phone, true);
+  if (input.whatsapp !== undefined) updateData.whatsapp = normalizeStoredPhone(input.whatsapp, false) ?? "";
   if (input.email !== undefined) updateData.email = input.email;
   if (input.address !== undefined) updateData.address = input.address;
   if (input.city !== undefined) updateData.city = input.city;
@@ -157,6 +162,13 @@ export async function updateCrmClient(
         eq(megadeskCrmClients.clientId, clientId) // REGRA 4: AND client_id = ?
       )
     );
+}
+
+function normalizeStoredPhone(value: string | undefined, nullable: boolean): string | null {
+  const result = normalizeContactPhone(value);
+  if (result.status === "empty") return nullable ? null : "";
+  if (result.status === "invalid") throw new Error(result.reason);
+  return result.value;
 }
 
 /**

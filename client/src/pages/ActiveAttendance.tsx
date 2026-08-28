@@ -1,13 +1,37 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Phone, User, Building2, CheckCircle, AlertCircle, Loader2, ArrowRight, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
+import type { CrmWhatsAppIntent } from '../../../shared/crm';
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
 
-export function ActiveAttendancePage({ onNavigate, initialPhone }: { onNavigate?: (route: any) => void; initialPhone?: string }) {
+type InitialCrmCustomer = CrmWhatsAppIntent & {
+  name: string;
+  company: string;
+  email?: string;
+};
+
+export function ActiveAttendancePage({ onNavigate, initialPhone, initialCrmCustomer, embedded = false, onCancel }: {
+  onNavigate?: (route: any) => void;
+  initialPhone?: string;
+  initialCrmCustomer?: InitialCrmCustomer;
+  embedded?: boolean;
+  onCancel?: () => void;
+}) {
   const [phoneNumber, setPhoneNumber] = useState(initialPhone || '');
-  const [customerData, setCustomerData] = useState<any>(null);
+  const [customerData, setCustomerData] = useState<any>(() => initialCrmCustomer ? {
+    id: initialCrmCustomer.crmClientId,
+    name: initialCrmCustomer.name,
+    company: initialCrmCustomer.company,
+    phone: initialCrmCustomer.phone,
+    email: initialCrmCustomer.email ?? '',
+    whatsapp: initialCrmCustomer.phone,
+    exists: true,
+    source: 'crm',
+    crmClientId: initialCrmCustomer.crmClientId,
+    customerId: initialCrmCustomer.crmClientId,
+  } : null);
   const [isSearching, setIsSearching] = useState(false);
   const [showNewCustomerForm, setShowNewCustomerForm] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState('');
@@ -19,6 +43,7 @@ export function ActiveAttendancePage({ onNavigate, initialPhone }: { onNavigate?
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [createdChamadoNumber, setCreatedChamadoNumber] = useState<number | null>(null);
+  const conversationSubmissionRef = useRef(false);
   const [createdChamadoId, setCreatedChamadoId] = useState<string | null>(null);
 
   // Ler número de telefone do localStorage quando a página é montada (passado por navegação interna)
@@ -116,7 +141,8 @@ export function ActiveAttendancePage({ onNavigate, initialPhone }: { onNavigate?
   };
 
   const handleStartConversation = async () => {
-    if (!customerData) return;
+    if (!customerData || conversationSubmissionRef.current) return;
+    conversationSubmissionRef.current = true;
 
     setError(null);
     setSuccessMessage(null);
@@ -142,7 +168,7 @@ export function ActiveAttendancePage({ onNavigate, initialPhone }: { onNavigate?
       // Redirecionar para a página de Conversas após 1.2s
       setTimeout(() => {
         if (onNavigate) {
-          onNavigate('conversations');
+          onNavigate({ route: 'conversations', conversationId: result.conversationId });
         } else {
           handleReset();
         }
@@ -151,6 +177,7 @@ export function ActiveAttendancePage({ onNavigate, initialPhone }: { onNavigate?
       setError(err.message || 'Erro ao iniciar conversa');
     } finally {
       setIsSearching(false);
+      conversationSubmissionRef.current = false;
     }
   };
 
@@ -202,10 +229,14 @@ export function ActiveAttendancePage({ onNavigate, initialPhone }: { onNavigate?
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8">
+    <div className={cn(embedded ? "bg-slate-50 p-4" : "min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8")}>
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="text-center mb-12">
+        {embedded && <div className="mb-4 flex items-start justify-between rounded-xl border border-blue-200 bg-blue-50 p-4">
+          <div><h2 className="font-bold text-slate-900">Novo atendimento pelo WhatsApp</h2><p className="text-sm text-slate-600">Cliente e telefone foram preenchidos pelo CRM. Nenhuma conversa será criada antes da confirmação.</p></div>
+          <button type="button" onClick={onCancel} className="rounded-lg p-2 text-slate-500 hover:bg-white" aria-label="Cancelar novo atendimento"><X className="h-4 w-4" /></button>
+        </div>}
+        {!embedded && <div className="text-center mb-12">
           <div className="flex items-center justify-center gap-3 mb-4">
             <div className="bg-blue-600 rounded-full p-3">
               <Phone className="w-6 h-6 text-white" />
@@ -213,7 +244,7 @@ export function ActiveAttendancePage({ onNavigate, initialPhone }: { onNavigate?
             <h1 className="text-4xl font-bold text-slate-900">Atendimento Ativo</h1>
           </div>
           <p className="text-slate-600">Inicie um atendimento com um cliente</p>
-        </div>
+        </div>}
 
         {/* Messages */}
         {error && (
@@ -232,7 +263,7 @@ export function ActiveAttendancePage({ onNavigate, initialPhone }: { onNavigate?
         {/* LAYOUT RESPONSIVO */}
         <div className="flex gap-8 justify-center items-start">
           {/* ESQUERDA: Input de busca + Card de Chamado (animação para esquerda quando cliente encontrado) */}
-          <div
+          {!embedded && <div
             className={cn(
               "flex flex-col gap-6 transition-all duration-500 ease-out",
               customerData ? "w-96" : "w-full max-w-md"
@@ -411,11 +442,12 @@ export function ActiveAttendancePage({ onNavigate, initialPhone }: { onNavigate?
                 </div>
               </div>
             )}
-          </div>
+          </div>}
 
           {/* CENTRO: Dados do Cliente (aparecem quando cliente encontrado) */}
           {customerData && (
             <div className="flex flex-col gap-6 w-full max-w-2xl animate-fadeSlideIn">
+              {embedded && <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-white p-3 text-sm"><div><span className="block text-xs text-slate-500">Canal</span><strong>WhatsApp</strong></div><div><span className="block text-xs text-slate-500">Mensagem inicial</span><span className="text-slate-400">Vazia</span></div></div>}
               {/* Customer Info Card */}
               <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-lg p-12 text-white border-2 border-slate-400">
                 <div className="flex items-center justify-between mb-6">

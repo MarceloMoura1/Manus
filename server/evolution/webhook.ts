@@ -111,13 +111,13 @@ export async function handleEvolutionWebhook(req: Request, res: Response): Promi
         break;
 
       default:
-        // Eventos ignorados (MESSAGES_UPDATE, PRESENCE_UPDATE, etc.)
-        break;
+        res.status(204).send();
+        return;
     }
     res.status(200).json({ ok: true });
   } catch (err) {
     console.error("[Evolution Webhook] event processing failed");
-    res.status(500).json({ error: "Webhook processing failed" });
+    res.status(503).json({ error: "Webhook processing failed" });
   }
 }
 
@@ -268,7 +268,7 @@ async function saveIncomingMessage(
   text: string,
   at: Date,
   payload: Record<string, unknown> = {},
-): Promise<void> {
+): Promise<"persisted" | "duplicate"> {
   const phone = phoneCandidates[0];
   const pool = getPool();
   const connection = await pool.getConnection();
@@ -313,7 +313,7 @@ async function saveIncomingMessage(
       ) as any[];
       if (!insertResult.affectedRows) {
         await connection.rollback();
-        return;
+        return "duplicate";
       }
 
       await connection.execute(
@@ -385,9 +385,11 @@ async function saveIncomingMessage(
       });
     }
     await connection.commit();
+    return "persisted";
   } catch (err) {
     await connection.rollback().catch(() => undefined);
     console.error(`[Evolution] incoming message persistence failed: clientId=${clientId}`);
+    throw err;
   } finally {
     await connection.execute("SELECT RELEASE_LOCK(?)", [lockName]).catch(() => undefined);
     connection.release();

@@ -13,6 +13,7 @@ const suppliersSource = readFileSync(resolve(process.cwd(), "client/src/pages/er
 const purchasesSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/PurchasesPage.tsx"), "utf8");
 const fiscalSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/FiscalPage.tsx"), "utf8");
 const reportsSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/ReportsPage.tsx"), "utf8");
+const moduleTopbarSource = readFileSync(resolve(process.cwd(), "client/src/components/ModuleTopbar.tsx"), "utf8");
 
 describe("MegaDesk UI structure", () => {
   it("keeps a single real ERP implementation without legacy fictional metrics", () => {
@@ -27,7 +28,7 @@ describe("MegaDesk UI structure", () => {
     expect(erpSource).toContain('label:"Fornecedores"');
     expect(purchasesSource).toContain("trpc.erp.purchases.list.useQuery");
     expect(erpSource).toContain('label:"Compras"');
-    expect(erpSource).toContain('{id:"sales",label:"Vendas"}');
+    expect(erpSource).toContain('{id:"sales" as const,label:"Vendas"}');
     expect(erpSource).toContain('label:"Financeiro"');
     expect(erpSource).toContain('label:"Fiscal"');
     expect(erpSource).toContain('label:"Relatórios"');
@@ -35,6 +36,11 @@ describe("MegaDesk UI structure", () => {
     expect(fiscalSource).toContain("Emissão fiscal eletrônica ainda não configurada.");
     expect(erpSource).toContain('const planned = ["Integrações"]');
     expect(homeSource).not.toContain('label: "Fornecedores"');
+    expect(homeSource).toContain("<ModuleTopbar");
+    expect(moduleTopbarSource).toContain("overflow-x-auto");
+    expect(moduleTopbarSource).toContain('aria-current={isActive ? "page" : undefined}');
+    expect(moduleTopbarSource).toContain("item.hidden");
+    expect(moduleTopbarSource).toContain("item.disabled");
   });
   it("preserva a navegação lateral da referência", () => {
     // Itens sempre visíveis (sem permissão)

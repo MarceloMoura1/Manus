@@ -14,6 +14,7 @@ import {
   tinyint,
   boolean,
   decimal,
+  json,
 } from "drizzle-orm/mysql-core";
 
 export const evolutionFailedMessages = mysqlTable(
@@ -156,12 +157,24 @@ export const megadeskDomainAuditLogs = mysqlTable(
     platform: mysqlEnum(["MegaAdmin", "MegaDesk"]).notNull(),
     action: varchar({ length: 255 }).notNull(),
     clientId: varchar("client_id", { length: 80 }),
-    success: tinyint().default(1).notNull(),
+    success: tinyint().default(1),
+    operationId: varchar("operation_id", { length: 36 }),
+    operatorUserId: varchar("operator_user_id", { length: 80 }),
+    operatorRole: varchar("operator_role", { length: 20 }),
+    instanceName: varchar("instance_name", { length: 120 }),
+    origin: varchar({ length: 80 }),
+    eventPhase: mysqlEnum("event_phase", ["intent", "success", "failure"]),
+    errorCode: varchar("error_code", { length: 80 }),
+    sourceIp: varchar("source_ip", { length: 45 }),
+    metadataJson: json("metadata_json"),
     createdAt: timestamp("created_at", { mode: "string" })
       .defaultNow()
       .notNull(),
   },
-  table => [index("idx_mdal_client").on(table.clientId)]
+  table => [
+    index("idx_mdal_client").on(table.clientId),
+    index("idx_mdal_operation").on(table.operationId),
+  ]
 );
 
 export const megadeskDomainBackups = mysqlTable(
@@ -946,6 +959,7 @@ export const megadeskCrmClients = mysqlTable(
       .primaryKey()
       .notNull(),
     clientId: varchar("client_id", { length: 80 }).notNull(),
+    customerType: mysqlEnum("customer_type", ["person", "company"]),
     companyName: varchar("company_name", { length: 255 }).notNull(),
     responsibleName: varchar("responsible_name", { length: 180 })
       .default("")

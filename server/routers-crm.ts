@@ -14,6 +14,8 @@ import {
   listCrmTimeline,
 } from "./db-crm";
 import { getPool } from "./db";
+import { CUSTOMER_TYPES, parseCustomerType, customerTypeToCsv } from "../shared/crm";
+import { isValidCpf, isValidCnpj } from "../shared/br-documents";
 
 const CRM_ROLES = new Set(["admin", "manager"]);
 
@@ -25,7 +27,7 @@ function requireCrmAccess(ctx: {
   if (!ctx.operationalUserRole || !CRM_ROLES.has(ctx.operationalUserRole)) {
     throw new TRPCError({ code: "FORBIDDEN", message: "Acesso a Clientes indisponível." });
   }
-  if (ctx.operationalPermissions && !ctx.operationalPermissions.includes("clients")) {
+  if (ctx.operationalPermissions && !ctx.operationalPermissions.some(permission => permission === "clients" || permission === "erp")) {
     throw new TRPCError({ code: "FORBIDDEN", message: "Acesso a Clientes indisponível." });
   }
   return ctx.tenantId;
@@ -44,7 +46,8 @@ function crmClientOrNotFound<T>(client: T | undefined | null): T {
 }
 
 const crmClientInputSchema = z.object({
-  companyName: z.string().min(1, "Nome da empresa é obrigatório"),
+  customerType: z.enum(CUSTOMER_TYPES),
+  companyName: z.string().min(1, "Nome do cliente é obrigatório"),
   responsibleName: z.string().optional().default(""),
   cpfCnpj: z.string().optional().default(""),
   phone: z.string().optional().default(""),
@@ -66,6 +69,13 @@ const crmClientInputSchema = z.object({
   })).optional().default([]),
 }).strict();
 
+function validateCustomerDocument(data: z.infer<typeof crmClientInputSchema>) {
+  if (!data.cpfCnpj) return data;
+  const valid = data.customerType === "person" ? isValidCpf(data.cpfCnpj) : isValidCnpj(data.cpfCnpj);
+  if (!valid) throw new TRPCError({ code: "BAD_REQUEST", message: data.customerType === "person" ? "CPF inválido." : "CNPJ inválido." });
+  return data;
+}
+
 export const crmRouter = router({
   // Listar clientes CRM do tenant
   list: megadeskProcedure
@@ -86,6 +96,8 @@ export const crmRouter = router({
       return {
         rows: clients.map((client) => ({
           companyName: client.companyName,
+          customerType: client.customerType,
+          tipo: customerTypeToCsv(client.customerType),
           responsibleName: client.responsibleName,
           cpfCnpj: client.cpfCnpj,
           phone: client.phone,
@@ -120,7 +132,7 @@ export const crmRouter = router({
     }).strict())
     .mutation(async ({ input, ctx }) => {
       const tenantId = requireCrmAccess(ctx);
-      const result = await createCrmClient(tenantId, input.data);
+      const result = await createCrmClient(tenantId, validateCustomerDocument(input.data));
       return { success: true, crmClientId: result.crmClientId };
     }),
 
@@ -132,6 +144,16 @@ export const crmRouter = router({
     }).strict())
     .mutation(async ({ input, ctx }) => {
       const tenantId = requireCrmAccess(ctx);
+      const existing = crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
+      const merged = { ...existing, ...input.data };
+      if (!merged.customerType) throw new TRPCError({ code: "BAD_REQUEST", message: "Selecione Pessoa ou Empresa antes de salvar." });
+      validateCustomerDocument({
+        companyName: merged.companyName,
+        customerType: merged.customerType,
+        responsibleName: merged.responsibleName ?? "", cpfCnpj: merged.cpfCnpj ?? "", phone: merged.phone ?? "", whatsapp: merged.whatsapp ?? "",
+        email: merged.email ?? "", address: merged.address ?? "", city: merged.city ?? "", state: merged.state ?? "", cep: merged.cep ?? "",
+        status: merged.status, origin: merged.origin, internalResponsible: merged.internalResponsible ?? "", tags: merged.tags ?? "", observations: merged.observations ?? "", contacts: input.data.contacts ?? [],
+      });
       await updateCrmClient(input.crmClientId, tenantId, input.data);
       // Registrar na timeline quem editou e quando
       await addCrmTimeline(input.crmClientId, tenantId, {
@@ -310,6 +332,7 @@ export const crmRouter = router({
   importCsv: megadeskProcedure
     .input(z.object({
       rows: z.array(z.object({
+        customerType: z.string().optional().default(""),
         companyName: z.string().min(1),
         responsibleName: z.string().optional().default(""),
         cpfCnpj: z.string().optional().default(""),
@@ -333,6 +356,7 @@ export const crmRouter = router({
 
       for (const row of input.rows) {
         try {
+          const customerType = parseCustomerType(row.customerType);
           const status = ["lead", "ativo", "inativo", "cancelado", "inadimplente"].includes(row.status ?? "")
             ? (row.status as any)
             : "lead";
@@ -341,6 +365,7 @@ export const crmRouter = router({
             : "outro";
 
           await createCrmClient(tenantId, {
+            customerType,
             companyName: row.companyName,
             responsibleName: row.responsibleName ?? "",
             cpfCnpj: row.cpfCnpj ?? "",
@@ -358,9 +383,9 @@ export const crmRouter = router({
             observations: row.observations ?? "",
           });
           imported++;
-        } catch (err: any) {
+        } catch (err: unknown) {
           errors++;
-          errorMessages.push(`Linha "${row.companyName}": ${err.message ?? "Erro desconhecido"}`);
+          errorMessages.push(`Linha "${row.companyName}": ${err instanceof Error ? err.message : "Erro desconhecido"}`);
         }
       }
 

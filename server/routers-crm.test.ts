@@ -51,6 +51,12 @@ describe("CRM tenant and authorization contract", () => {
     expect(JSON.stringify(result)).not.toContain("tenant-session");
   });
 
+  it.each(["admin", "manager"] as const)("allows legacy %s ERP access without a separate clients permission", async (role) => {
+    const result = await crmRouter.createCaller(context(role, ["erp"])).list({});
+    expect(result.clients).toHaveLength(1);
+    expect(mocks.listCrmClients).toHaveBeenCalledWith("tenant-session", undefined);
+  });
+
   it.each(["agent", "viewer"] as const)("refuses %s access", async (role) => {
     await expect(crmRouter.createCaller(context(role)).list({})).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect(mocks.listCrmClients).not.toHaveBeenCalled();
@@ -58,6 +64,7 @@ describe("CRM tenant and authorization contract", () => {
 
   it("does not let a persisted permission enlarge the role matrix", async () => {
     await expect(crmRouter.createCaller(context("agent", ["clients"])).list({})).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(crmRouter.createCaller(context("agent", ["erp"])).list({})).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("rejects a public tenant field instead of silently accepting it", async () => {

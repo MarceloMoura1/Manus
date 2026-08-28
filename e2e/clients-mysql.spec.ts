@@ -74,7 +74,7 @@ async function openClients(page: Page) {
   const erp = page.getByRole("button", { name: "ERP", exact: true });
   if (!await erp.isVisible()) await page.locator("header").getByTitle("Abrir menu").click();
   await erp.click();
-  await page.getByTestId("erp-workspace").getByRole("button", { name: "Clientes", exact: true }).click();
+  await page.getByRole("navigation", { name: "Módulos do ERP" }).getByRole("button", { name: "Clientes", exact: true }).click();
   await expect(page).toHaveURL(/\/erp\/clientes$/);
   await expect(page.getByTestId("clients-page")).toBeVisible();
 }
@@ -183,7 +183,7 @@ test.describe.serial("Clients real MySQL journeys", () => {
       const erp = page.getByRole("button", { name: "ERP", exact: true });
       if (!await erp.isVisible()) await page.locator("header").getByTitle("Abrir menu").click();
       await erp.click();
-      await expect(page.getByTestId("erp-workspace").getByRole("button", { name: "Clientes", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("navigation", { name: "Módulos do ERP" }).getByRole("button", { name: "Clientes", exact: true })).toHaveCount(0);
       await page.goto("/erp/clientes");
       await expect(page).toHaveURL(/\/erp$/);
       await expect(page.getByTestId("clients-page")).toHaveCount(0);

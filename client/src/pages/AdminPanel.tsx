@@ -2,7 +2,10 @@ import {
   Bot,
   Building2,
   Check,
+  CheckCircle2,
   ChevronRight,
+  CircleHelp,
+  Clock3,
   Database,
   Eye,
   EyeOff,
@@ -17,9 +20,11 @@ import {
   Settings,
   ShieldCheck,
   Trash2,
+  TriangleAlert,
   UserCog,
   Users,
   Zap,
+  XCircle,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -51,6 +56,47 @@ type ModuleName = (typeof ALL_MODULES)[number];
 // MODULE_LABELS importado de @shared/const
 
 type Section = "dashboard" | "clients" | "users" | "admins" | "backups" | "settings";
+
+export type AdminAuditLog = {
+  action: string;
+  platform: "MegaAdmin" | "MegaDesk";
+  success: boolean | null;
+  eventPhase: "intent" | "success" | "failure" | null;
+};
+
+export function resolveAdminAuditState(log: Pick<AdminAuditLog, "eventPhase" | "success">) {
+  if (log.eventPhase === "intent" && log.success === null) return { kind: "intent" as const, label: "Em andamento", description: "Intenção registrada; ainda não há resultado final.", className: "border-sky-300/30 bg-sky-300/10 text-sky-200", Icon: Clock3 };
+  if (log.eventPhase === "success" && log.success === true) return { kind: "success" as const, label: "Concluído", description: "Operação concluída com sucesso.", className: "border-emerald-400/30 bg-emerald-400/10 text-emerald-200", Icon: CheckCircle2 };
+  if (log.eventPhase === "failure" && log.success === false) return { kind: "failure" as const, label: "Falhou", description: "A operação terminou com falha.", className: "border-red-400/30 bg-red-400/10 text-red-200", Icon: XCircle };
+  if (log.eventPhase !== null) return { kind: "inconsistent" as const, label: "Estado inconsistente", description: "A fase e o resultado registrados são contraditórios; revisão administrativa necessária.", className: "border-amber-300/30 bg-amber-300/10 text-amber-100", Icon: TriangleAlert };
+  if (log.success === true) return { kind: "success" as const, label: "Sucesso", description: "Registro legado concluído com sucesso.", className: "border-emerald-400/30 bg-emerald-400/10 text-emerald-200", Icon: CheckCircle2 };
+  if (log.success === false) return { kind: "failure" as const, label: "Falha", description: "Registro legado concluído com falha.", className: "border-red-400/30 bg-red-400/10 text-red-200", Icon: XCircle };
+  return { kind: "unknown" as const, label: "Resultado desconhecido", description: "Registro legado sem resultado disponível.", className: "border-slate-300/30 bg-slate-300/10 text-slate-200", Icon: CircleHelp };
+}
+
+function AuditLogList({ logs }: { logs: AdminAuditLog[] }) {
+  const inconsistentCount = logs.filter(log => resolveAdminAuditState(log).kind === "inconsistent").length;
+  useEffect(() => {
+    if (inconsistentCount > 0) console.warn("[AdminPanel] inconsistent audit state detected", { count: inconsistentCount });
+  }, [inconsistentCount]);
+  return (
+    <div className="space-y-2">
+      {logs.slice(0, 8).map((log, i) => {
+        const state = resolveAdminAuditState(log);
+        return (
+          <div key={i} className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-white/[.02] px-4 py-3 text-sm">
+            <span role="status" aria-label={`${state.label}. ${state.description}`} title={state.description} className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium", state.className)}>
+              <state.Icon aria-hidden="true" className="h-3.5 w-3.5" />
+              {state.label}
+            </span>
+            <span className="text-slate-300">{log.action}</span>
+            <span className="ml-auto text-xs text-slate-500">{log.platform}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function getAdminLoginUrl() {
   const origin = window.location.origin;
@@ -1117,15 +1163,7 @@ export default function AdminPanel() {
                 {(summary?.auditLogs ?? []).length > 0 && (
                   <div className="rounded-[2rem] border border-white/10 bg-slate-950/70 p-6">
                     <h3 className="mb-4 text-xl font-semibold text-white">Log de auditoria</h3>
-                    <div className="space-y-2">
-                      {(summary?.auditLogs ?? []).slice(0, 8).map((log: any, i: number) => (
-                        <div key={i} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[.02] px-4 py-3 text-sm">
-                          <span className={cn("h-2 w-2 rounded-full", log.success ? "bg-emerald-400" : "bg-red-400")} />
-                          <span className="text-slate-300">{log.action}</span>
-                          <span className="ml-auto text-xs text-slate-500">{log.platform}</span>
-                        </div>
-                      ))}
-                    </div>
+                    <AuditLogList logs={summary?.auditLogs ?? []} />
                   </div>
                 )}
               </section>

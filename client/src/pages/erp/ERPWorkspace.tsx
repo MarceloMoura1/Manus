@@ -7,13 +7,48 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { AlertCircle, Boxes, PackagePlus, RefreshCw, Search, TrendingDown, WalletCards } from "lucide-react";
 import { SuppliersPage } from "./SuppliersPage";
 import { ClientesPage } from "../ClientesPage";
+import type { CrmWhatsAppIntent } from "../../../../shared/crm";
 import { PurchasesPage } from "./PurchasesPage";
 import { SalesPage } from "./SalesPage";
 import { FinancePage } from "./FinancePage";
 import { FiscalPage } from "./FiscalPage";
 import { ReportsPage } from "./ReportsPage";
+import type { ModuleTopbarItem } from "@/components/ModuleTopbar";
 
 export type ErpSection = "summary" | "clients" | "products" | "stock" | "suppliers" | "purchases" | "sales" | "finance" | "fiscal" | "reports";
+const planned = ["Integrações"];
+
+export function getErpTopbarItems({
+  canAccessClients,
+  canAccessFinance,
+  canAccessFiscal,
+  canAccessReports,
+  onNavigate,
+}: {
+  canAccessClients: boolean;
+  canAccessFinance: boolean;
+  canAccessFiscal: boolean;
+  canAccessReports: boolean;
+  onNavigate: (section: ErpSection) => void;
+}): ModuleTopbarItem[] {
+  const available = [
+    {id:"summary" as const,label:"Resumo"},
+    {id:"clients" as const,label:"Clientes",hidden:!canAccessClients},
+    {id:"products" as const,label:"Produtos"},
+    {id:"stock" as const,label:"Estoque"},
+    {id:"suppliers" as const,label:"Fornecedores"},
+    {id:"purchases" as const,label:"Compras"},
+    {id:"sales" as const,label:"Vendas"},
+    {id:"finance" as const,label:"Financeiro",hidden:!canAccessFinance},
+    {id:"fiscal" as const,label:"Fiscal",hidden:!canAccessFiscal},
+    {id:"reports" as const,label:"Relatórios",hidden:!canAccessReports},
+  ];
+
+  return [
+    ...available.map(item => ({ ...item, onSelect: () => onNavigate(item.id) })),
+    ...planned.map(label => ({ id: `planned-${label}`, label, disabled: true, unavailableReason: "Em preparação" })),
+  ];
+}
 type ProductForm = { publicId?: string; name: string; sku: string; barcode: string; category: string; unit: "unit" | "kg" | "liter" | "meter"; cost: string; sale: string; minimumStock: string; description: string };
 type StockForm = { productPublicId: string; type: "manual_in" | "manual_out" | "adjustment_in" | "adjustment_out"; quantity: string; reason: string; idempotencyKey: string };
 type StockFilterType = "all" | "initial" | "manual_in" | "manual_out" | "adjustment_in" | "adjustment_out" | "purchase_in" | "sale_out" | "reversal";
@@ -66,13 +101,11 @@ function Pagination({ page, totalPages, onPage }: { page: number; totalPages: nu
   return <nav aria-label="Paginação" className="flex flex-wrap items-center justify-end gap-2"><Button variant="outline" disabled={page <= 1} onClick={() => onPage(page - 1)}>Anterior</Button><span className="text-sm text-slate-600">Página {page} de {totalPages}</span><Button variant="outline" disabled={page >= totalPages} onClick={() => onPage(page + 1)}>Próxima</Button></nav>;
 }
 
-export function ERPWorkspace({ section, onNavigate, canAccessClients, canAccessFinance, canAccessFiscal, canAccessReports, initialCrmClientId, onClientNavigate }: { section: ErpSection; onNavigate: (section: ErpSection) => void; canAccessClients: boolean; canAccessFinance: boolean; canAccessFiscal: boolean; canAccessReports: boolean; initialCrmClientId?: string; onClientNavigate: (phone: string) => void }) {
+export function ERPWorkspace({ section, onNavigate, canAccessClients, canAccessFinance, canAccessFiscal, canAccessReports, initialCrmClientId, onClientNavigate, whatsappConnected, canStartConversation }: { section: ErpSection; onNavigate: (section: ErpSection) => void; canAccessClients: boolean; canAccessFinance: boolean; canAccessFiscal: boolean; canAccessReports: boolean; initialCrmClientId?: string; onClientNavigate: (intent: CrmWhatsAppIntent) => void; whatsappConnected: boolean; canStartConversation: boolean }) {
   useErpRealtime();
   const denied = <div role="alert" className="rounded-2xl border border-slate-200 bg-white p-8 text-center"><h1 className="text-xl font-bold text-slate-900">Acesso indisponível</h1><p className="mt-2 text-sm text-slate-600">Este módulo não está disponível para o seu perfil.</p></div>;
-  const content = section === "summary" ? <Summary onNavigate={onNavigate}/> : section === "clients" ? canAccessClients ? <ClientesPage initialSelectedId={initialCrmClientId} onNavigate={onClientNavigate}/> : denied : section === "products" ? <Products/> : section === "suppliers" ? <SuppliersPage/> : section === "purchases" ? <PurchasesPage/> : section === "sales" ? <SalesPage/> : section === "finance" ? canAccessFinance ? <FinancePage/> : denied : section === "fiscal" ? canAccessFiscal ? <FiscalPage/> : denied : section === "reports" ? canAccessReports ? <ReportsPage/> : denied : <Stock/>;
-  const available: Array<{ id: ErpSection; label: string }> = [{id:"summary",label:"Resumo"},...(canAccessClients?[{id:"clients" as const,label:"Clientes"}]:[]),{id:"products",label:"Produtos"},{id:"stock",label:"Estoque"},{id:"suppliers",label:"Fornecedores"},{id:"purchases",label:"Compras"},{id:"sales",label:"Vendas"},...(canAccessFinance?[{id:"finance" as const,label:"Financeiro"}]:[]),...(canAccessFiscal?[{id:"fiscal" as const,label:"Fiscal"}]:[]),...(canAccessReports?[{id:"reports" as const,label:"Relatórios"}]:[])];
-  const planned = ["Integrações"];
-  return <div className="min-w-0 max-w-full space-y-5" data-testid="erp-workspace"><nav aria-label="Módulos do ERP" className="min-w-0 max-w-full rounded-2xl border border-slate-200 bg-white p-3"><div className="flex flex-wrap gap-2">{available.map(item=><Button key={item.id} type="button" variant={section===item.id?"default":"outline"} aria-current={section===item.id?"page":undefined} onClick={()=>onNavigate(item.id)}>{item.label}</Button>)}{planned.map(label=><Button key={label} type="button" variant="outline" disabled aria-disabled="true" title={`${label}: em preparação`}><span>{label}</span><span className="sr-only"> — Em preparação</span></Button>)}</div><p className="mt-2 text-xs text-slate-500">Módulos desabilitados estão em preparação.</p></nav>{content}</div>;
+  const content = section === "summary" ? <Summary onNavigate={onNavigate}/> : section === "clients" ? canAccessClients ? <ClientesPage initialSelectedId={initialCrmClientId} onNavigate={onClientNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation}/> : denied : section === "products" ? <Products/> : section === "suppliers" ? <SuppliersPage/> : section === "purchases" ? <PurchasesPage/> : section === "sales" ? <SalesPage/> : section === "finance" ? canAccessFinance ? <FinancePage/> : denied : section === "fiscal" ? canAccessFiscal ? <FiscalPage/> : denied : section === "reports" ? canAccessReports ? <ReportsPage/> : denied : <Stock/>;
+  return <div className="min-w-0 max-w-full" data-testid="erp-workspace">{content}</div>;
 }
 
 function Summary({ onNavigate }: { onNavigate: (section: ErpSection) => void }) {

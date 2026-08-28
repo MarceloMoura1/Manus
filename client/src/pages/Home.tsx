@@ -4,6 +4,7 @@ import { navigateToPlatform } from "@/lib/platformRouting";
 import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/contexts/ThemeContext";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import { ModuleTopbar } from "@/components/ModuleTopbar";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { validateNewChamado, ValidationError } from "@/lib/validations";
 import { ActiveAttendancePage } from "./ActiveAttendance";
@@ -12,7 +13,9 @@ import { WhatsAppConfigPage } from "./WhatsAppConfigPage";
 import { SettingsPage as SettingsPageComponent } from "./SettingsPage";
 import { AdminSettingsPage } from "./AdminSettingsPage";
 import { BotConfigPage } from "./BotConfigPage";
-import { ERPWorkspace, type ErpSection } from "./erp/ERPWorkspace";
+import { ERPWorkspace, getErpTopbarItems, type ErpSection } from "./erp/ERPWorkspace";
+import type { CrmWhatsAppIntent } from "../../../shared/crm";
+import { normalizeContactPhone } from "../../../shared/contact-phone";
 import { TimelineActivity } from "@/components/TimelineActivity";
 import {
   AudioRecordingController,
@@ -144,6 +147,11 @@ type MegaDeskSession = {
   expiresAt?: number; // timestamp em ms quando a sessão expira
   refreshedAt?: number; // timestamp em ms da última renovação
 };
+
+function canAccessErpClients(session: MegaDeskSession): boolean {
+  return (session.userRole === "admin" || session.userRole === "manager")
+    && session.permissions.some(permission => permission === "clients" || permission === "erp");
+}
 
 // Constantes para renovação de token
 const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 horas em ms (padrão sem "lembrar")
@@ -353,6 +361,13 @@ function ConversationsPage() {
   const userName: string = sessionData?.userName ?? 'Atendente';
 
   const [searchTerm, setSearchTerm] = React.useState('');
+  const [crmIntent, setCrmIntent] = React.useState<CrmWhatsAppIntent | null>(() => {
+    try {
+      const raw = sessionStorage.getItem("megadesk-crm-whatsapp-intent");
+      sessionStorage.removeItem("megadesk-crm-whatsapp-intent");
+      return raw ? JSON.parse(raw) as CrmWhatsAppIntent : null;
+    } catch { return null; }
+  });
   const [selectedFilter, setSelectedFilter] = React.useState<'open' | 'bot'>('open');
   const [ownerFilter, setOwnerFilter] = React.useState<'all' | 'mine' | 'history' | 'closed'>('all');
   const [attendantFilter, setAttendantFilter] = React.useState<string>('');
@@ -363,6 +378,7 @@ function ConversationsPage() {
   const [dateFrom, setDateFrom] = React.useState<string>('');
   const [dateTo, setDateTo] = React.useState<string>('');
   const [selectedConversation, setSelectedConversation] = React.useState<string | null>(null);
+  const [crmHandoffState, setCrmHandoffState] = React.useState<'idle' | 'resolving' | 'composer' | 'error'>(() => crmIntent ? 'resolving' : 'idle');
   const [conversations, setConversations] = React.useState<any[]>([]);
   const [messageInput, setMessageInput] = React.useState('');
   const [attachment, setAttachment] = React.useState<{ kind: 'image' | 'video' | 'audio' | 'document' | 'sticker'; dataUrl: string; mimeType: string; fileName: string } | null>(null);
@@ -388,7 +404,7 @@ function ConversationsPage() {
     },
   );
   const waConnected: boolean | null = whatsappStatusQuery.data
-    ? whatsappStatusQuery.data.status === 'connected'
+    ? whatsappStatusQuery.data.status === 'connected' && whatsappStatusQuery.data.providerReachable !== false
     : whatsappStatusQuery.isError
       ? false
       : null;
@@ -462,6 +478,10 @@ function ConversationsPage() {
     { clientId },
     { enabled: !!clientId, refetchInterval: 5000, refetchOnWindowFocus: true }
   );
+  const crmCustomerQuery = trpc.crm.getById.useQuery(
+    { crmClientId: crmIntent?.crmClientId ?? '' },
+    { enabled: crmHandoffState === 'resolving' && !!crmIntent && !!conversationsData },
+  );
 
   React.useEffect(() => {
     if (conversationsData) {
@@ -475,6 +495,47 @@ function ConversationsPage() {
       }
     }
   }, [conversationsData]);
+
+  React.useEffect(() => {
+    if (!crmIntent || !conversationsData) return;
+    const requested = normalizeContactPhone(crmIntent.phone);
+    const existing = conversationsData.find((conversation: { id: string; crmClientId?: string | null; phone?: string | null }) => {
+      if (conversation.crmClientId === crmIntent.crmClientId) return true;
+      const candidate = normalizeContactPhone(conversation.phone);
+      return requested.status === "valid" && candidate.status === "valid" && requested.value === candidate.value;
+    });
+    if (existing) {
+      setSelectedConversation(existing.id);
+      setSelectedFilter(existing.status === "bot" ? "bot" : "open");
+      setCrmIntent(null);
+      setCrmHandoffState('idle');
+    } else if (requested.status !== "valid") {
+      setCrmIntent(null);
+      setCrmHandoffState('error');
+    }
+  }, [crmIntent, conversationsData]);
+
+  React.useEffect(() => {
+    if (crmHandoffState !== 'resolving' || !crmIntent || !crmCustomerQuery.data) return;
+    setCrmHandoffState('composer');
+  }, [crmCustomerQuery.data, crmHandoffState, crmIntent]);
+
+  React.useEffect(() => {
+    if (crmHandoffState !== 'resolving' || !crmCustomerQuery.isError) return;
+    setCrmIntent(null);
+    setCrmHandoffState('error');
+  }, [crmCustomerQuery.isError, crmHandoffState]);
+
+  React.useEffect(() => {
+    if (waConnected !== false || crmHandoffState === 'idle') return;
+    setCrmIntent(null);
+    setCrmHandoffState('error');
+  }, [crmHandoffState, waConnected]);
+
+  const cancelCrmHandoff = React.useCallback(() => {
+    setCrmIntent(null);
+    setCrmHandoffState('idle');
+  }, []);
 
   // Socket.IO para atualizações em tempo real de conversas
   React.useEffect(() => {
@@ -1087,9 +1148,28 @@ function ConversationsPage() {
       {/* ─── Coluna Direita: Chat ─── */}
       <div className={cn(
         'min-h-0 min-w-0 w-full max-w-full flex-col overflow-hidden min-[900px]:flex min-[900px]:w-auto min-[900px]:flex-1',
-        selectedConv ? 'flex' : 'hidden',
+        selectedConv || crmHandoffState === 'composer' ? 'flex' : 'hidden',
       )} data-testid="conversation-chat-panel">
-        {selectedConv ? (
+        {crmHandoffState === 'composer' && crmIntent && crmCustomerQuery.data?.client ? (
+          <div className="flex-1 overflow-auto" data-testid="crm-new-attendance-composer">
+            <ActiveAttendancePage
+              embedded
+              initialPhone={crmIntent.phone}
+              initialCrmCustomer={{
+                ...crmIntent,
+                name: String(crmCustomerQuery.data.client.responsibleName || crmCustomerQuery.data.client.companyName || ''),
+                company: String(crmCustomerQuery.data.client.companyName || ''),
+                email: String(crmCustomerQuery.data.client.email || ''),
+              }}
+              onCancel={cancelCrmHandoff}
+              onNavigate={(navigation) => {
+                if (navigation?.conversationId) setSelectedConversation(navigation.conversationId);
+                setCrmIntent(null);
+                setCrmHandoffState('idle');
+              }}
+            />
+          </div>
+        ) : selectedConv ? (
           <>
             {/* Header do Chat */}
             <div className="flex min-w-0 flex-shrink-0 items-center justify-between gap-2 border-b border-slate-100 bg-white px-3 py-3 md:px-6 md:py-4">
@@ -3381,7 +3461,15 @@ function Shell() {
       refetchOnWindowFocus: true,
     },
   );
-  const whatsappConnected = whatsappStatusQuery.data?.status === 'connected';
+  const whatsappConnected = whatsappStatusQuery.data?.status === 'connected' && whatsappStatusQuery.data.providerReachable !== false;
+  const canStartConversation = !!session?.permissions.includes("conversations");
+  const handleClientNavigate = React.useCallback((intent: CrmWhatsAppIntent) => {
+    if (!canStartConversation || !whatsappConnected) return;
+    const normalized = normalizeContactPhone(intent.phone);
+    if (normalized.status !== "valid") return;
+    sessionStorage.setItem("megadesk-crm-whatsapp-intent", JSON.stringify({ ...intent, phone: normalized.value }));
+    navigateToRoute("conversations");
+  }, [canStartConversation, navigateToRoute, whatsappConnected]);
 
   const logoutMutation = trpc.megadesk.logout.useMutation();
 
@@ -3406,7 +3494,7 @@ function Shell() {
   }, []);
 
   useEffect(() => {
-    if (session && active === "erp-clients" && !session.permissions.includes("clients")) {
+    if (session && active === "erp-clients" && !canAccessErpClients(session)) {
       navigateToRoute("erp-summary", { replace: true });
     }
   }, [active, navigateToRoute, session]);
@@ -3480,6 +3568,16 @@ function Shell() {
   // Separar itens em seções
   const mainNavItems = filteredNavItems.filter(item => !["settings", "admin-settings", "bot-config", "ai-assistant", "help", "notifications"].includes(item.id));
   const settingsNavItems = filteredNavItems.filter(item => ["settings", "admin-settings", "bot-config", "ai-assistant", "help", "notifications", "whatsapp-config"].includes(item.id));
+  const canAccessClients = canAccessErpClients(session);
+  const erpSection = (active === "erp-clients" ? "clients" : active === "erp-products" ? "products" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : active === "erp-purchases" ? "purchases" : active === "erp-sales" ? "sales" : active === "erp-finance" ? "finance" : active === "erp-fiscal" ? "fiscal" : active === "erp-reports" ? "reports" : "summary") as ErpSection;
+  const navigateToErpSection = (section: ErpSection) => navigateToRoute(section === "clients" ? "erp-clients" : section === "products" ? "erp-products" : section === "stock" ? "erp-stock" : section === "suppliers" ? "erp-suppliers" : section === "purchases" ? "erp-purchases" : section === "sales" ? "erp-sales" : section === "finance" ? "erp-finance" : section === "fiscal" ? "erp-fiscal" : section === "reports" ? "erp-reports" : "erp-summary");
+  const erpTopbarItems = getErpTopbarItems({
+    canAccessClients,
+    canAccessFinance: session.userRole !== "agent",
+    canAccessFiscal: session.userRole !== "agent",
+    canAccessReports: session.userRole !== "agent",
+    onNavigate: navigateToErpSection,
+  });
 
   return (
     <div className={`flex h-screen h-[100dvh] min-w-0 overflow-hidden bg-slate-50 ${theme === 'dark' ? 'dark bg-slate-950' : ''}`}>
@@ -3658,19 +3756,15 @@ function Shell() {
 
       {/* Main Content */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Header — oculto na rota conversations pois ela tem header próprio */}
-         <header className={`bg-white border-b border-slate-200 px-4 py-4 sm:px-8 flex items-center justify-between${active === 'conversations' ? ' hidden' : ''}`}>
-           <div>
-             <button ref={sidebarTriggerRef} type="button" onClick={() => setSidebarOpen(true)} className="mb-2 rounded-lg p-2 text-slate-700 hover:bg-slate-100 lg:hidden" title="Abrir menu"><Menu className="h-5 w-5" /></button>
-            <h1 className="text-2xl font-bold text-slate-900">{active === "erp-clients" ? "ERP · Clientes" : navItems.find(i => i.id === active)?.label || 'MegaDesk'}</h1>
-            <p className="text-sm text-slate-600">{session.company} • {session.userName}</p>
-          </div>
-          <div className="flex items-center gap-4">
-            <button className="p-2 hover:bg-slate-100 rounded-lg transition-colors" title="Abrir assistente IA">
-              <Sparkles className="w-6 h-6 text-slate-600" />
-            </button>
-          </div>
-        </header>
+        {active !== "conversations" && (
+          <ModuleTopbar
+            ariaLabel={active.startsWith("erp-") ? "Módulos do ERP" : "Ações da página"}
+            activeItemId={active.startsWith("erp-") ? erpSection : undefined}
+            items={active.startsWith("erp-") ? erpTopbarItems : []}
+            leading={<button ref={sidebarTriggerRef} type="button" onClick={() => setSidebarOpen(true)} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-700 hover:bg-slate-100 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
+            actions={<button type="button" onClick={() => window.dispatchEvent(new Event("megadesk-open-assistant"))} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500" title="Abrir assistente IA" aria-label="Abrir assistente IA"><Sparkles className="h-5 w-5" /></button>}
+          />
+        )}
 
         {/* Content */}
         <main ref={mainContentRef} tabIndex={-1} className={`flex min-h-0 min-w-0 flex-1 flex-col ${active === 'conversations' ? 'overflow-hidden' : 'overflow-auto p-4 sm:p-8'}`}>
@@ -3679,7 +3773,7 @@ function Shell() {
           {active === "conversations" && <ConversationsPage />}
           {active === "tickets" && <TicketsPage />}
           {active === "tracking" && <TrackingPage />}
-           {active.startsWith("erp-") && <ERPWorkspace section={(active === "erp-clients" ? "clients" : active === "erp-products" ? "products" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : active === "erp-purchases" ? "purchases" : active === "erp-sales" ? "sales" : active === "erp-finance" ? "finance" : active === "erp-fiscal" ? "fiscal" : active === "erp-reports" ? "reports" : "summary") as ErpSection} onNavigate={(section) => navigateToRoute(section === "clients" ? "erp-clients" : section === "products" ? "erp-products" : section === "stock" ? "erp-stock" : section === "suppliers" ? "erp-suppliers" : section === "purchases" ? "erp-purchases" : section === "sales" ? "erp-sales" : section === "finance" ? "erp-finance" : section === "fiscal" ? "erp-fiscal" : section === "reports" ? "erp-reports" : "erp-summary")} canAccessClients={session.permissions.includes("clients")} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} initialCrmClientId={activeCrmClientId ?? undefined} onClientNavigate={() => navigateToRoute("conversations")} />}
+           {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} initialCrmClientId={activeCrmClientId ?? undefined} onClientNavigate={handleClientNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
           {active === "settings" && <SettingsPageComponent />}
           {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
           {active === "bot-config" && <BotConfigPage />}

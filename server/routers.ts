@@ -124,7 +124,7 @@ const tickets: TicketRecord[] = [];
 const botScripts: Array<{ id: string; clientId: string; name: string; description: string; initialMessage: string; active: boolean }> = [];
 
 const operationalRecords: OperationalRecord[] = [];
-const auditLogs: Array<{ id: string; platform: "MegaAdmin" | "MegaDesk"; action: string; clientId?: string; success: boolean; createdAt: string }> = [];
+const auditLogs: Array<{ id: string; platform: "MegaAdmin" | "MegaDesk"; action: string; clientId?: string; success: boolean | null; eventPhase: "intent" | "success" | "failure" | null; createdAt: string }> = [];
 
 const defaultSyncState: MegaDeskStructuredState = { clients, conversations, tickets, botScripts, operationalRecords, auditLogs };
 let syncStateHydrated = false;
@@ -150,7 +150,7 @@ function nowLabel() {
 }
 
 function audit(platform: "MegaAdmin" | "MegaDesk", action: string, clientId: string | undefined, success = true) {
-  auditLogs.unshift({ id: `audit-${Date.now()}-${auditLogs.length}`, platform, action, clientId, success, createdAt: new Date().toISOString() });
+  auditLogs.unshift({ id: `audit-${Date.now()}-${auditLogs.length}`, platform, action, clientId, success, eventPhase: null, createdAt: new Date().toISOString() });
   if (auditLogs.length > 30) auditLogs.pop();
 }
 
@@ -233,6 +233,10 @@ function resolveUserPermissions(user: MegaClient["users"][number], clientModules
   // autorizados explicitamente para agent/viewer.
   if (user.role === "agent" || user.role === "viewer") {
     finalPerms = finalPerms.filter((permission) => permission !== "clients");
+  } else if (finalPerms.includes("erp") && !finalPerms.includes("clients")) {
+    // Clientes pertence ao ERP Essencial. Mantém compatibilidade com usuários
+    // administrativos criados antes da permissão granular "clients" existir.
+    finalPerms.push("clients");
   }
   
   // CORREÇÃO: Filtrar por módulos do cliente (respeitar o que foi liberado)
@@ -245,7 +249,7 @@ function resolveUserPermissions(user: MegaClient["users"][number], clientModules
       // Base permissions sempre incluídas
       if (base.includes(perm)) return true;
       // Permissões que correspondem a módulos ativados
-      return normalizedModules.includes(perm);
+      return normalizedModules.includes(perm) || (perm === "clients" && normalizedModules.includes("erp"));
     });
     
     return Array.from(new Set(filteredPerms));
