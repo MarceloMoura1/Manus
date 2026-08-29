@@ -795,7 +795,10 @@ function ConversationsPage() {
           userEmail: audio.userEmail,
         } }),
       });
-      if (!res.ok) throw new Error('send failed');
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null) as any;
+        throw new Error(payload?.error?.json?.message || 'Não foi possível enviar o áudio pelo WhatsApp.');
+      }
       await refetchMessages();
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
     } catch (error) {
@@ -847,14 +850,17 @@ function ConversationsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ json }),
       });
-      if (!res.ok) throw new Error('send failed');
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null) as any;
+        throw new Error(payload?.error?.json?.message || (attachmentToSend ? 'Não foi possível enviar o anexo pelo WhatsApp.' : 'Não foi possível enviar a mensagem pelo WhatsApp.'));
+      }
       await refetchMessages();
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
-    } catch {
+    } catch (error) {
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
       setMessageInput(textToSend);
       setAttachment(attachmentToSend);
-      showToast(attachmentToSend ? 'Erro ao enviar anexo' : 'Erro ao enviar mensagem', 'error');
+      showToast(error instanceof Error ? error.message : (attachmentToSend ? 'Erro ao enviar anexo' : 'Erro ao enviar mensagem'), 'error');
     } finally {
       setIsSendingMessage(false);
     }

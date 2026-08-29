@@ -53,7 +53,7 @@ export function evolutionPhoneCandidates(key: Record<string, any> | undefined): 
   const primary = typeof key?.remoteJid === "string" ? key.remoteJid : "";
   const alternative = typeof key?.remoteJidAlt === "string" ? key.remoteJidAlt : "";
   const jid = primary.endsWith("@lid") && alternative ? alternative : primary || alternative;
-  if (!jid || jid.includes("@g.us")) return [];
+  if (!jid || jid.includes("@g.us") || jid.endsWith("@lid")) return [];
 
   const digits = jid.replace(/@(?:s\.whatsapp\.net|lid)$/, "").replace(/\D/g, "");
   if (!digits) return [];

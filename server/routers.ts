@@ -29,6 +29,7 @@ import { provisionClientAtomically } from "./_core/client-provisioning";
 import { resolveTenantLoginCandidates } from "./_core/tenant-login";
 import { runPostCommitBestEffort } from "./_core/post-commit";
 import { normalizeEvolutionRecipient } from "./evolution/client";
+import { loadOutboundConversation, resolveOutboundRecipient, safeOutboundProviderMessage } from "./evolution/outbound-recipient";
 import { assertOperationalCsrf, clearOperationalSessionCookie, createOperationalSession, revokeOperationalSession } from "./_core/megadesk-session";
 import { erpRouter } from "./modules/erp/router";
 
@@ -849,10 +850,10 @@ export const appRouter = router({
     }),
     sendMessage: megadeskProcedure.input(z.object({ conversationId: z.string(), message: z.string().min(1), userEmail: z.string().email() })).mutation(async ({ input, ctx }) => {
       await hydrateSyncState();
-      const conversation = conversations.find((item) => item.id === input.conversationId);
-      if (!conversation) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
-      if (conversation.clientId !== ctx.tenantId) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
-      const client = getReleasedClientOrThrow(conversation.clientId);
+      const outboundConversation = await loadOutboundConversation(getPool(), ctx.tenantId, input.conversationId);
+      if (!outboundConversation) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
+      const conversation = conversations.find((item) => item.id === input.conversationId && item.clientId === ctx.tenantId);
+      const client = getReleasedClientOrThrow(outboundConversation.clientId);
       assertClientUserPermission(client, "conversations", input.userEmail);
 
       try {
@@ -860,11 +861,12 @@ export const appRouter = router({
           import("./evolution/client"),
           import("./evolution/session-store"),
         ]);
-        await evoSendText(instanceNameFor(conversation.clientId), conversation.phone, input.message);
-      } catch {
+        const recipient = resolveOutboundRecipient(outboundConversation);
+        await evoSendText(instanceNameFor(outboundConversation.clientId), recipient, input.message);
+      } catch (error) {
         throw new TRPCError({
           code: "BAD_GATEWAY",
-          message: "Não foi possível enviar a mensagem pelo WhatsApp.",
+          message: safeOutboundProviderMessage(error),
         });
       }
 
@@ -912,11 +914,13 @@ export const appRouter = router({
         connection.release();
       }
 
-      conversation.messages.push(outgoingMessage);
-      conversation.lastMessage = input.message;
-      conversation.time = time;
-      audit("MegaDesk", "Mensagem enviada e sincronizada", conversation.clientId);
-      await recordMegaDeskMetric(conversation.clientId, "message_sent", 1, { conversationId: input.conversationId });
+      if (conversation) {
+        conversation.messages.push(outgoingMessage);
+        conversation.lastMessage = input.message;
+        conversation.time = time;
+      }
+      audit("MegaDesk", "Mensagem enviada e sincronizada", outboundConversation.clientId);
+      await recordMegaDeskMetric(outboundConversation.clientId, "message_sent", 1, { conversationId: input.conversationId });
 
       return { ok: true, conversationId: input.conversationId, message: input.message, sentAt: new Date().toISOString() };
     }),
@@ -930,10 +934,11 @@ export const appRouter = router({
       userEmail: z.string().email(),
     })).mutation(async ({ input, ctx }) => {
       await hydrateSyncState();
-      const conversation = conversations.find((item) => item.id === input.conversationId);
-      if (!conversation || conversation.clientId !== ctx.tenantId) {
+      const outboundConversation = await loadOutboundConversation(getPool(), ctx.tenantId, input.conversationId);
+      if (!outboundConversation) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
       }
+      const conversation = conversations.find((item) => item.id === input.conversationId && item.clientId === ctx.tenantId);
       const client = getReleasedClientOrThrow(ctx.tenantId);
       assertClientUserPermission(client, "conversations", input.userEmail);
 
@@ -955,15 +960,15 @@ export const appRouter = router({
         ]);
         await evoSendAttachment({
           instanceName: instanceNameFor(ctx.tenantId),
-          number: conversation.phone,
+          number: resolveOutboundRecipient(outboundConversation),
           kind: input.kind,
           dataUrl: input.dataUrl,
           mimeType: input.mimeType,
           fileName: input.fileName,
           caption: input.caption,
         });
-      } catch {
-        throw new TRPCError({ code: "BAD_GATEWAY", message: "Não foi possível enviar o anexo pelo WhatsApp." });
+      } catch (error) {
+        throw new TRPCError({ code: "BAD_GATEWAY", message: safeOutboundProviderMessage(error) });
       }
 
       const labels = { image: "[Imagem]", video: "[Vídeo]", audio: "[Áudio]", document: "[Documento]", sticker: "[Figurinha]" };
@@ -1011,9 +1016,11 @@ export const appRouter = router({
       } finally {
         connection.release();
       }
-      conversation.messages.push(outgoingMessage);
-      conversation.lastMessage = summary;
-      conversation.time = time;
+      if (conversation) {
+        conversation.messages.push(outgoingMessage);
+        conversation.lastMessage = summary;
+        conversation.time = time;
+      }
       return { ok: true, conversationId: input.conversationId, kind: input.kind };
     }),
     updateTicketStatus: megadeskProcedure.input(z.object({ ticketId: z.string(), status: z.enum(["open", "in_progress", "waiting", "closed"]), userEmail: z.string().email() })).mutation(async ({ input, ctx }) => {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { EvolutionApiError, evoCreateInstance, evoGetMediaBase64, evoSendAttachment, normalizeEvolutionRecipient, sanitizeEvolutionErrorDetail } from "./client";
+import { EvolutionApiError, evoCreateInstance, evoGetMediaBase64, evoSendAttachment, evoSendText, normalizeEvolutionRecipient, sanitizeEvolutionErrorDetail } from "./client";
 
 beforeEach(() => {
   vi.stubEnv("EVOLUTION_API_URL", "http://evolution.test");
@@ -52,6 +52,31 @@ describe("Evolution API errors", () => {
     expect(safe).not.toContain("user:pass");
     expect(safe).not.toContain("5541995484515");
     expect(safe.length).toBeLessThanOrEqual(240);
+  });
+});
+
+describe("evoSendText", () => {
+  it.each([200, 201])("aceita confirmação HTTP %i com message id", async status => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ key: { id: "message-1" }, status: "PENDING" }), { status }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(evoSendText("tenant-1", "+55 41 99548-4515", "Resposta controlada")).resolves.toMatchObject({ key: { id: "message-1" } });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({ number: "5541995484515", text: "Resposta controlada" });
+  });
+
+  it.each([400, 401, 403, 404, 422, 500])("propaga falha HTTP %i sem falso sucesso", async status => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: "provider rejected" }), { status })));
+    await expect(evoSendText("tenant-1", "5541995484515", "Resposta controlada")).rejects.toMatchObject({ status });
+  });
+
+  it("recusa 2xx sem confirmação do provider", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "PENDING" }), { status: 200 })));
+    await expect(evoSendText("tenant-1", "5541995484515", "Resposta controlada")).rejects.toThrow("não confirmou");
+  });
+
+  it("propaga timeout sem persistir sucesso", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError")));
+    await expect(evoSendText("tenant-1", "5541995484515", "Resposta controlada")).rejects.toMatchObject({ name: "TimeoutError" });
   });
 });
 

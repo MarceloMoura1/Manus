@@ -277,11 +277,15 @@ export async function evoSendText(
   text: string
 ): Promise<{ key: { id: string } }> {
   const normalizedNumber = normalizeEvolutionRecipient(number);
-  return request("POST", `/message/sendText/${instanceName}`, {
+  const response = await request<any>("POST", `/message/sendText/${instanceName}`, {
     number: normalizedNumber,
     text,
     delay: 500,
   });
+  if (!response?.key || typeof response.key.id !== "string" || !response.key.id) {
+    throw new Error("A Evolution não confirmou o envio da mensagem.");
+  }
+  return response;
 }
 
 export type EvolutionAttachmentKind = "image" | "video" | "audio" | "document" | "sticker";

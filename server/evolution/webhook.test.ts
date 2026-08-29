@@ -37,6 +37,10 @@ describe("Evolution webhook normalization", () => {
     })).toEqual(["5541995484515", "41995484515"]);
   });
 
+  it("não adivinha telefone a partir de LID sem mapping telefônico", () => {
+    expect(evolutionPhoneCandidates({ remoteJid: "123456789012345@lid" })).toEqual([]);
+  });
+
   it("ignora grupos", () => {
     expect(evolutionPhoneCandidates({ remoteJid: "12345@g.us" })).toEqual([]);
   });
