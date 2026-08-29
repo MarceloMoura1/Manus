@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 const homeSource = readFileSync(resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
 const adminPanelSource = readFileSync(resolve(process.cwd(), "client/src/pages/AdminPanel.tsx"), "utf8");
 const appSource = readFileSync(resolve(process.cwd(), "client/src/App.tsx"), "utf8");
+const trpcUrlSource = readFileSync(resolve(process.cwd(), "client/src/lib/trpc-url.ts"), "utf8");
 const metricWebhookSource = readFileSync(resolve(process.cwd(), "server/metricWebhook.ts"), "utf8");
 const dbSource = readFileSync(resolve(process.cwd(), "server/db.ts"), "utf8");
 const botConfigSource = readFileSync(resolve(process.cwd(), "client/src/pages/BotConfigPage.tsx"), "utf8");
@@ -95,7 +96,8 @@ describe("MegaDesk UI structure", () => {
     expect(appSource).toContain("/admin");
     expect(appSource).toContain("AdminPanel");
     expect(appSource).toContain("httpBatchLink");
-    expect(appSource).toContain("/api/trpc");
+    expect(appSource).toContain("trpcBaseUrl");
+    expect(trpcUrlSource).toContain("/api/trpc");
 
     // AdminPanel tem as funcionalidades administrativas
     expect(adminPanelSource).toContain("MegaAdmin");

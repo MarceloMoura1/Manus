@@ -32,9 +32,9 @@ vi.mock("./config", () => ({
 import { EvolutionApiError } from "./client";
 import { evolutionRouter, isExistingEvolutionInstanceError } from "./router";
 
-function context(role: "admin" | "manager" | "agent" = "admin") {
+function context(role: "admin" | "manager" | "agent" = "admin", tenantId = "tenant-a") {
   return {
-    tenantId: "tenant-a", operationalUserId: `user-${role}`, operationalUserRole: role,
+    tenantId, operationalUserId: `user-${role}`, operationalUserRole: role,
     operationalPermissions: ["conversations"], userEmail: `${role}@example.invalid`, req: { headers: {}, ip: "127.0.0.1" },
   } as any;
 }
@@ -76,6 +76,17 @@ describe("Evolution contingency controls", () => {
       .resolves.toMatchObject({ ok: true, status: "connected", qrCode: null });
     expect(mocks.evoSetWebhook).toHaveBeenCalledOnce();
     expect(mocks.upsertSession).toHaveBeenCalledWith("tenant-a", "megadesk-tenant-a", "connected");
+    expect(mocks.evoLogout).not.toHaveBeenCalled();
+  });
+
+  it("keeps diagnostics and repair isolated for two tenants", async () => {
+    mocks.evoGetStatus.mockResolvedValue("connected");
+    await evolutionRouter.createCaller(context("admin", "tenant-a")).health({ clientId: "tenant-a" });
+    await evolutionRouter.createCaller(context("admin", "tenant-b")).repair({ clientId: "tenant-b" });
+    expect(mocks.evoGetStatus).toHaveBeenNthCalledWith(1, "megadesk-tenant-a");
+    expect(mocks.evoGetStatus).toHaveBeenNthCalledWith(2, "megadesk-tenant-b");
+    expect(mocks.upsertSession).toHaveBeenCalledWith("tenant-b", "megadesk-tenant-b", "connected");
+    expect(mocks.upsertSession).not.toHaveBeenCalledWith("tenant-a", expect.anything(), expect.anything());
     expect(mocks.evoLogout).not.toHaveBeenCalled();
   });
 

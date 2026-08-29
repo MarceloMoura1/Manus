@@ -102,7 +102,7 @@ function requireEvolutionAdmin(role: string | null | undefined): void {
 type AuditPhase = "intent" | "success" | "failure";
 type EvolutionAuditEvent = {
   operationId: string; tenantId: string; operatorUserId: string; operatorRole: string;
-  instanceName: string; origin: "whatsapp.settings"; action: "evolution.repair" | "evolution.logout";
+  instanceName: string; origin: "whatsapp.settings" | "megaadmin.platform_health"; action: "evolution.repair" | "evolution.logout";
   phase: AuditPhase; errorCode?: string | null; sourceIp?: string | null;
   metadata: { sourceIpStatus: "recorded" | "unavailable"; providerRecovered?: boolean; webhookConfigured?: boolean };
 };
@@ -116,7 +116,7 @@ async function auditEvolutionAction(event: EvolutionAuditEvent): Promise<void> {
   const parsed = z.object({
     operationId: z.string().uuid(), tenantId: z.string().min(1).max(80), operatorUserId: z.string().min(1).max(80),
     operatorRole: z.enum(["admin", "manager"]), instanceName: z.string().min(1).max(120),
-    origin: z.literal("whatsapp.settings"), action: z.enum(["evolution.repair", "evolution.logout"]),
+    origin: z.enum(["whatsapp.settings", "megaadmin.platform_health"]), action: z.enum(["evolution.repair", "evolution.logout"]),
     phase: z.enum(["intent", "success", "failure"]), errorCode: z.string().max(80).nullable().optional(),
     sourceIp: z.string().max(45).refine(value => isIP(value) !== 0).nullable().optional(),
     metadata: z.object({ sourceIpStatus: z.enum(["recorded", "unavailable"]), providerRecovered: z.boolean().optional(), webhookConfigured: z.boolean().optional() }).strict(),
@@ -131,6 +131,47 @@ async function auditEvolutionAction(event: EvolutionAuditEvent): Promise<void> {
       parsed.operatorRole, parsed.instanceName, parsed.origin, parsed.phase, parsed.errorCode ?? null,
       parsed.sourceIp ?? null, JSON.stringify(parsed.metadata).slice(0, 1_000)],
   );
+}
+
+export type CanonicalRepairInput = {
+  tenantId: string;
+  operatorUserId: string;
+  operatorRole: "admin" | "manager";
+  origin: "whatsapp.settings" | "megaadmin.platform_health";
+  sourceIp: string | null;
+  includeQr?: boolean;
+};
+
+export async function runCanonicalEvolutionRepair(input: CanonicalRepairInput) {
+  const instanceName = instanceNameFor(input.tenantId);
+  const operationId = randomUUID();
+  const baseAudit = {
+    operationId, tenantId: input.tenantId, operatorUserId: input.operatorUserId, operatorRole: input.operatorRole,
+    instanceName, origin: input.origin, action: "evolution.repair" as const, sourceIp: input.sourceIp,
+    metadata: { sourceIpStatus: input.sourceIp ? "recorded" as const : "unavailable" as const },
+  };
+  try { await auditEvolutionAction({ ...baseAudit, phase: "intent" }); }
+  catch { throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "A tentativa de reparo não pôde ser auditada; nenhuma alteração foi executada." }); }
+  try {
+    const status = await evoGetStatus(instanceName);
+    const webhook = await setupWebhook(instanceName);
+    const qr = input.includeQr && status !== "connected" ? await evoGetQRCode(instanceName) : null;
+    await upsertSession(input.tenantId, instanceName, status);
+    let auditStatus: "complete" | "degraded" = "complete";
+    try {
+      await auditEvolutionAction({ ...baseAudit, phase: webhook.ok ? "success" : "failure", errorCode: webhook.ok ? null : webhook.code,
+        metadata: { ...baseAudit.metadata, providerRecovered: true, webhookConfigured: webhook.ok } });
+    } catch { auditStatus = "degraded"; console.error("[Evolution] repair final audit failed", { operationId }); }
+    return { ok: webhook.ok && auditStatus === "complete", providerRecovered: true, webhookConfigured: webhook.ok, auditStatus,
+      integrationStatus: webhook.ok ? (status === "connected" ? "connected" as const : qr ? "qr_required" as const : status) : "webhook_degraded" as const,
+      status, qrCode: qr?.base64 ?? null, operationId };
+  } catch (error) {
+    let auditStatus: "complete" | "degraded" = "complete";
+    try { await auditEvolutionAction({ ...baseAudit, phase: "failure", errorCode: error instanceof EvolutionApiError ? error.code : "REPAIR_FAILED",
+      metadata: { ...baseAudit.metadata, providerRecovered: false, webhookConfigured: false } }); }
+    catch { auditStatus = "degraded"; console.error("[Evolution] repair failure audit failed", { operationId }); }
+    return { ok: false, providerRecovered: false, webhookConfigured: false, auditStatus, integrationStatus: "provider_unavailable" as const, status: "unknown" as const, qrCode: null, operationId };
+  }
 }
 
 // ─── Router ──────────────────────────────────────────────────────────────────
@@ -370,50 +411,9 @@ export const evolutionRouter = router({
     .mutation(async ({ input, ctx }) => {
       if (input.clientId !== ctx.tenantId) throw new TRPCError({ code: "FORBIDDEN", message: "Tenant inválido." });
       requireEvolutionAdmin(ctx.operationalUserRole);
-      const instanceName = instanceNameFor(input.clientId);
-      const operationId = randomUUID();
       const sourceIp = trustedSourceIp(ctx.req);
-      const baseAudit = {
-        operationId, tenantId: input.clientId, operatorUserId: ctx.operationalUserId!, operatorRole: ctx.operationalUserRole!,
-        instanceName, origin: "whatsapp.settings" as const, action: "evolution.repair" as const, sourceIp,
-        metadata: { sourceIpStatus: sourceIp ? "recorded" as const : "unavailable" as const },
-      };
-      try {
-        await auditEvolutionAction({ ...baseAudit, phase: "intent" });
-      } catch {
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "A tentativa de reparo não pôde ser auditada; nenhuma alteração foi executada." });
-      }
-      try {
-        const status = await evoGetStatus(instanceName);
-        const webhook = await setupWebhook(instanceName);
-        const qr = status === "connected" ? null : await evoGetQRCode(instanceName);
-        await upsertSession(input.clientId, instanceName, status);
-        let auditStatus: "complete" | "degraded" = "complete";
-        try {
-          await auditEvolutionAction({ ...baseAudit, phase: webhook.ok ? "success" : "failure",
-            errorCode: webhook.ok ? null : webhook.code,
-            metadata: { ...baseAudit.metadata, providerRecovered: true, webhookConfigured: webhook.ok } });
-        } catch {
-          auditStatus = "degraded";
-          console.error("[Evolution] repair final audit failed", { operationId });
-        }
-        return {
-          ok: webhook.ok && auditStatus === "complete", providerRecovered: true, webhookConfigured: webhook.ok,
-          auditStatus, integrationStatus: webhook.ok ? (status === "connected" ? "connected" as const : qr ? "qr_required" as const : status) : "webhook_degraded" as const,
-          status, qrCode: qr?.base64 ?? null,
-        };
-      } catch (error) {
-        let auditStatus: "complete" | "degraded" = "complete";
-        try {
-          await auditEvolutionAction({ ...baseAudit, phase: "failure", errorCode: error instanceof EvolutionApiError ? error.code : "REPAIR_FAILED",
-            metadata: { ...baseAudit.metadata, providerRecovered: false, webhookConfigured: false } });
-        } catch {
-          auditStatus = "degraded";
-          console.error("[Evolution] repair failure audit failed", { operationId });
-        }
-        return { ok: false, providerRecovered: false, webhookConfigured: false, auditStatus,
-          integrationStatus: "provider_unavailable" as const, status: "unknown" as const, qrCode: null };
-      }
+      return runCanonicalEvolutionRepair({ tenantId: input.clientId, operatorUserId: ctx.operationalUserId!,
+        operatorRole: ctx.operationalUserRole as "admin" | "manager", origin: "whatsapp.settings", sourceIp, includeQr: true });
     }),
 
   /**

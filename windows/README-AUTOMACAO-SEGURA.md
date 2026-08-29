@@ -12,8 +12,15 @@ No Windows PowerShell 5.1, sem privilegios administrativos:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\windows\Instalar-Atalhos-MegaDesk.ps1
 ```
 
-Sao criados tres atalhos na Area de Trabalho: `Iniciar MegaDesk`,
-`Atualizar MegaDesk` e `Parar MegaDesk`.
+Sao criados quatro atalhos na Area de Trabalho: `Iniciar MegaDesk`,
+`Atualizar MegaDesk`, `Parar MegaDesk` e `Diagnosticar MegaDesk`.
+
+`Diagnosticar MegaDesk` e a contingencia read-only quando Node ou MegaAdmin nao
+respondem. Ele nao inicia ou encerra processos, nao altera Docker, Git ou banco e
+nao chama Repair, Connect ou QR. O relatorio JSON nasce de uma allowlist, tem no
+maximo 64 KiB e fica em `%LOCALAPPDATA%\MegaDesk\diagnostics`, herdando a ACL do
+runtime existente. Somente estados, HTTP seguros, contagens por categoria e flags
+booleanas sao gravados; mensagens, contatos, payloads e credenciais sao excluidos.
 
 ## Estado e logs
 

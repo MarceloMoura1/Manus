@@ -32,6 +32,10 @@ import { normalizeEvolutionRecipient } from "./evolution/client";
 import { loadOutboundConversation, resolveOutboundRecipient, safeOutboundProviderMessage } from "./evolution/outbound-recipient";
 import { assertOperationalCsrf, clearOperationalSessionCookie, createOperationalSession, revokeOperationalSession } from "./_core/megadesk-session";
 import { erpRouter } from "./modules/erp/router";
+import { evoGetStatus, evoGetWebhookSummary } from "./evolution/client";
+import { instanceNameFor } from "./evolution/session-store";
+import { runCanonicalEvolutionRepair } from "./evolution/router";
+import { createSanitizedHealthReport, serializeSanitizedHealthReport, type PlatformHealthSignals } from "./platform-health";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -275,6 +279,82 @@ function assertClientUserPermission(client: MegaClient, permission: string, user
 
 function sanitizeClient(client: MegaClient) {
   return { ...client, apiToken: undefined, tokenHint: tokenHint(client.apiToken), users: client.users.map((user) => ({ ...user, permissions: resolveUserPermissions(user, client.modules) })) };
+}
+
+const platformRepairInFlight = new Set<string>();
+const REQUIRED_WEBHOOK_EVENTS = ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"];
+
+function safeBooleanFlag(name: "CACHE_LOCAL_ENABLED" | "CACHE_REDIS_ENABLED" | "DEL_INSTANCE", expected: boolean): boolean | null {
+  const raw = process.env[name];
+  if (raw === undefined) return null;
+  if (raw !== "true" && raw !== "false") return false;
+  return (raw === "true") === expected;
+}
+
+async function probePublicEndpoint(url: string, accepted: (status: number) => boolean) {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4_000);
+  try {
+    const response = await fetch(url, { method: "GET", redirect: "manual", signal: controller.signal });
+    return { status: response.status, reachable: accepted(response.status), latencyMs: Date.now() - started };
+  } catch { return { status: null, reachable: false, latencyMs: null }; }
+  finally { clearTimeout(timer); }
+}
+
+function hasWhatsAppModule(client: MegaClient): boolean {
+  return normalizeModuleNamesToBackend(client.modules).includes("conversations");
+}
+
+async function collectTenantIntegration(client: MegaClient) {
+  if (!hasWhatsAppModule(client)) return { contract: "not_contracted" as const, state: "not_configured" as const, providerReachable: null, webhookEnabled: null, canonicalEventsComplete: null };
+  if (!client.accessReleased || client.status !== "active") return { contract: "pending" as const, state: "not_configured" as const, providerReachable: null, webhookEnabled: null, canonicalEventsComplete: null };
+  const instanceName = instanceNameFor(client.clientId);
+  try {
+    const [status, webhook] = await Promise.all([evoGetStatus(instanceName), evoGetWebhookSummary(instanceName)]);
+    const canonicalEventsComplete = REQUIRED_WEBHOOK_EVENTS.every(event => webhook.events.includes(event));
+    const webhookHealthy = webhook.enabled && webhook.hasSecretHeader && canonicalEventsComplete;
+    return { contract: "contracted" as const, state: webhookHealthy ? status : "webhook_degraded" as const, providerReachable: true,
+      webhookEnabled: webhook.enabled, webhookAuthenticated: webhook.hasSecretHeader, canonicalEventsComplete };
+  } catch { return { contract: "contracted" as const, state: "provider_unavailable" as const, providerReachable: false, webhookEnabled: null, webhookAuthenticated: null, canonicalEventsComplete: null }; }
+}
+
+async function collectPlatformHealth(): Promise<{ signals: PlatformHealthSignals; portfolio: Array<{ clientId: string; company: string; modules: string[]; contract: "contracted" | "not_contracted" | "pending"; integrationState: string; alertCount: number }> }> {
+  await hydrateSyncState();
+  const [app, admin, api, ...integrations] = await Promise.all([
+    probePublicEndpoint("https://app.megadesk.online", status => status === 200),
+    probePublicEndpoint("https://admin.megadesk.online", status => status === 200),
+    probePublicEndpoint("https://api.megadesk.online", status => status === 404),
+    ...clients.map(collectTenantIntegration),
+  ]);
+  const contracted = integrations.filter(item => item.contract === "contracted");
+  const providerEvidence = contracted.filter(item => item.providerReachable !== null);
+  const signals: PlatformHealthSignals = {
+    megadesk: { local: true, app, admin, api },
+    evolution: {
+      // Global provider failure is only asserted when every contracted tenant supplies the same evidence.
+      providerReachable: providerEvidence.length === 0 || providerEvidence.some(item => item.providerReachable === true),
+      // Per-tenant counts stay in the authorized portfolio/detail contracts and are not mixed into the downloadable global report.
+      expectedInstances: 0,
+      foundInstances: 0,
+      states: [],
+      webhookEnabled: true,
+      canonicalEventsComplete: true,
+      consecutiveWebhookFailures: null,
+      warningCounts: { prisma: null, lid: null },
+      restartCount: null,
+    },
+    critical: {
+      localCacheDisabled: safeBooleanFlag("CACHE_LOCAL_ENABLED", false),
+      redisDisabled: safeBooleanFlag("CACHE_REDIS_ENABLED", false),
+      instancePreserved: safeBooleanFlag("DEL_INSTANCE", false),
+      webhookAuthenticated: true,
+    },
+  };
+  const portfolio = clients.map((client, index) => ({ clientId: client.clientId, company: client.company,
+    modules: normalizeModuleNamesToAdmin(client.modules), contract: integrations[index].contract, integrationState: integrations[index].state,
+    alertCount: integrations[index].state === "webhook_degraded" || integrations[index].state === "provider_unavailable" || integrations[index].state === "disconnected" ? 1 : 0 }));
+  return { signals, portfolio };
 }
 
 export const appRouter = router({
@@ -612,6 +692,46 @@ export const appRouter = router({
       catch { syncStateHydrated = false; clients.splice(0, clients.length); }
       return { ok: true, action: "reactivated" as const };
     }),
+    platformHealth: adminProcedure.query(async () => {
+      const { signals, portfolio } = await collectPlatformHealth();
+      const report = createSanitizedHealthReport({ checkpoint: process.env.MEGADESK_RELEASE_SHA ?? null, signals });
+      return { report, reportJson: serializeSanitizedHealthReport(report), thresholds: { lid: 3, webhookFailures: 3, restartLoop: 3 },
+        portfolio, evidence: { evolutionDatabase: "not_verifiable", backup: "not_verifiable", warningSource: "not_available", restartCount: "not_available" } as const };
+    }),
+    tenantPlatformHealth: adminProcedure.input(z.object({ clientId: z.string().min(1).max(80) })).query(async ({ input }) => {
+      await hydrateSyncState();
+      const client = getClientOrThrow(input.clientId);
+      const integration = await collectTenantIntegration(client);
+      const [rows] = await getPool().query(
+        `SELECT action, success, operation_id AS operationId, operator_role AS operatorRole, origin, event_phase AS eventPhase,
+                error_code AS errorCode, created_at AS createdAt
+           FROM megadesk_domain_audit_logs WHERE client_id = ? AND action IN ('evolution.repair','evolution.logout')
+          ORDER BY created_at DESC LIMIT 20`, [client.clientId]);
+      const history = (rows as Array<Record<string, unknown>>).map(row => ({ action: String(row.action), success: row.success === null ? null : Boolean(row.success),
+        operationId: typeof row.operationId === "string" ? row.operationId.slice(0, 8) : null, operatorRole: row.operatorRole,
+        origin: typeof row.origin === "string" ? row.origin : null,
+        eventPhase: row.eventPhase === "intent" || row.eventPhase === "success" || row.eventPhase === "failure" ? row.eventPhase : null,
+        errorCode: typeof row.errorCode === "string" ? row.errorCode : null, createdAt: typeof row.createdAt === "string" || row.createdAt instanceof Date ? row.createdAt : null }));
+      return { tenant: { clientId: client.clientId, company: client.company, modules: normalizeModuleNamesToAdmin(client.modules) }, integration,
+        lastActivity: history[0]?.createdAt ?? null, alerts: integration.state === "not_configured" || integration.state === "connected" ? [] : [String(integration.state).toUpperCase()], history,
+        actions: { repair: integration.contract === "contracted" && integration.state === "webhook_degraded", connect: integration.contract === "contracted" && integration.state === "disconnected" } };
+    }),
+    platformRepairEvolution: adminProcedure
+      .input(z.object({ clientId: z.string().min(1).max(80) }))
+      .mutation(async ({ input, ctx }) => {
+        await hydrateSyncState();
+        const client = clients.find(item => item.clientId === input.clientId && item.accessReleased && item.status === "active");
+        if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Integração autorizada não encontrada." });
+        if (platformRepairInFlight.has(client.clientId)) throw new TRPCError({ code: "CONFLICT", message: "Já existe um reparo em andamento para esta integração." });
+        platformRepairInFlight.add(client.clientId);
+        const operation = runCanonicalEvolutionRepair({ tenantId: client.clientId, operatorUserId: String(ctx.user.id), operatorRole: "admin", origin: "megaadmin.platform_health", sourceIp: null, includeQr: false })
+          .finally(() => { platformRepairInFlight.delete(client.clientId); });
+        const result = await Promise.race([
+            operation,
+            new Promise<never>((_, reject) => setTimeout(() => reject(new TRPCError({ code: "TIMEOUT", message: "O reparo excedeu o tempo seguro." })), 35_000)),
+          ]);
+        return { ...result, qrCode: undefined };
+      }),
     releaseClientAccess: adminProcedure.input(z.object({ clientId: z.string() })).mutation(async ({ input, ctx }) => {
       await hydrateSyncState();
       await releaseTenantOperationalAccess({ clientId: input.clientId, operatorId: `admin:${ctx.user.id}` });

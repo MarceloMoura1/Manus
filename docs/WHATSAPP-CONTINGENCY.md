@@ -4,6 +4,36 @@
 
 Uma indisponibilidade da Evolution, do webhook ou do WhatsApp não deve apagar a sessão local, provocar logout automático nem ficar invisível para o operador.
 
+Baseline funcional: `c0e0f33e625eb1d76d6d84129f80eb44cd6d408b`.
+
+Backup Evolution verificado: `evolution-20260827-215910`. Integridade do manifesto
+SHA-256: `1F35F3483C9F8EB9CD8C6FEAC94769B288498D83AA10C368B9C62E13E4A350D3`.
+O backup é externo ao repositório; conteúdo, caminhos e dados restaurados não são
+expostos pela aplicação.
+
+## Matriz de primeira resposta
+
+| Sintoma | Evidência | Causa provável | Primeira ação segura | Ação proibida inicialmente |
+| ------- | --------- | -------------- | -------------------- | -------------------------- |
+| Sessão MegaDesk inválida | HTTP 401 / `UNAUTHORIZED` | Cookie ausente ou expirado | Logout, recarga forçada e novo login | Enfraquecer autenticação ou Repair |
+| URL tRPC incorreta | Mutation destinada ao host do app | Base relativa em produção | Confirmar URL canônica da API | Alterar tenant ou cookie no navegador |
+| Evolution indisponível | Provedor sem resposta no diagnóstico | Serviço ou rede indisponível | Coletar diagnóstico read-only | QR, logout ou recriação |
+| Instância desconectada | Estado confirmado `disconnected` | Vínculo encerrado | Ir para o fluxo normal Conectar | Repair repetido ou exclusão |
+| QR necessário | Estado confirmado `qr_required` | Novo vínculo exigido | Abrir a conexão WhatsApp | Gerar QR por polling global |
+| Webhook degradado | URL, segredo ou eventos divergentes | Configuração incompleta | Diagnosticar e usar Repair uma vez | Logout ou apagar instância |
+| Erro de identificador do provedor | Categoria recorrente atinge 3 eventos na janela observada | Incompatibilidade do provedor | Preservar cache local desativado e acompanhar impacto | Converter identificador em telefone |
+| HTTP 2xx sem `key.id` | Aceite outbound incompleto | Resposta inválida do provedor | Tratar como falha e preservar texto | Persistir ou anunciar sucesso |
+| Recebimento funciona, envio falha | Webhook recebe e outbound não confirma | Resolução, auth ou aceite outbound | Diagnosticar a camada exata | Enviar novamente automaticamente |
+| Envio funciona, recebimento falha | `key.id` presente e webhook sem eventos | Webhook degradado | Diagnosticar webhook e usar Repair se indicado | Logout inicial |
+| MegaAdmin indisponível | Admin público sem HTTP 200 | Node, tunnel ou rota indisponível | Usar Diagnosticar MegaDesk | Iniciar componentes sem identificar estado |
+| Docker Desktop fechado | Engine inacessível no relatório | Docker não iniciado | Abrir Docker Desktop manualmente e revalidar | Recriar containers ou volumes |
+
+Limites deterministas: três falhas consecutivas de webhook tornam a integração
+degradada; três erros recorrentes da categoria de identificador tornam o tenant
+degradado; restart count igual ou superior a três é tratado como restart loop.
+Um warning Prisma isolado é apenas atenção. Esses estados são avaliados por tenant;
+um tenant não degrada outro. Backup não verificável gera atenção, não indisponibilidade.
+
 ## Estados operacionais
 
 - **Conectado e saudável**: Evolution acessível, instância `open` e webhook completo.

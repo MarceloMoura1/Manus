@@ -17,6 +17,7 @@ import {
   Menu,
   Plus,
   Radar,
+  HeartPulse,
   Settings,
   ShieldCheck,
   Trash2,
@@ -34,6 +35,7 @@ import { MODULE_LABELS } from "@shared/const";
 import { AdminsSection } from "./AdminsSection";
 import { AdminSettingsPage } from "./AdminSettingsPage";
 import { ClientEditPage } from "./ClientEditPage";
+import { PlatformHealthSection } from "./PlatformHealthSection";
 
 function cn(...classes: Array<string | false | undefined | null>) {
   return classes.filter(Boolean).join(" ");
@@ -55,7 +57,7 @@ type ModuleName = (typeof ALL_MODULES)[number];
 
 // MODULE_LABELS importado de @shared/const
 
-type Section = "dashboard" | "clients" | "users" | "admins" | "backups" | "settings";
+type Section = "dashboard" | "health" | "clients" | "users" | "admins" | "backups" | "settings";
 
 export type AdminAuditLog = {
   action: string;
@@ -398,6 +400,7 @@ function AccessDeniedScreen({ onLogout }: { onLogout: () => void }) {
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 const NAV_ITEMS = [
   { key: "dashboard" as Section, label: "Dashboard", icon: LayoutDashboard },
+  { key: "health" as Section, label: "Saúde da Plataforma", icon: HeartPulse },
   { key: "clients" as Section, label: "Clientes", icon: Building2 },
   { key: "users" as Section, label: "Usuários", icon: Users },
   { key: "admins" as Section, label: "Administradores", icon: ShieldCheck },
@@ -1089,7 +1092,7 @@ export default function AdminPanel() {
                 <div>
                   <p className="text-sm text-emerald-300">MegaAdmin</p>
                   <h2 className="mt-1 text-3xl font-semibold text-white">
-                    {active === "dashboard" ? "Dashboard administrativo" : active === "clients" ? "Clientes" : active === "users" ? "Usuários" : "Administradores"}
+                    {active === "dashboard" ? "Dashboard administrativo" : active === "health" ? "Saúde da Plataforma" : active === "clients" ? "Clientes" : active === "users" ? "Usuários" : active === "admins" ? "Administradores" : active === "backups" ? "Backups" : "Configurações"}
                   </h2>
                   <p className="mt-2 text-sm text-slate-400">
                     Controle clientes, usuários e módulos com acesso sincronizado à MegaDesk.
@@ -1332,6 +1335,8 @@ export default function AdminPanel() {
                 </div>
               </section>
             )}
+
+            {active === "health" && <PlatformHealthSection />}
 
             {/* Admins */}
             {active === "admins" && (
