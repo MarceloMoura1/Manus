@@ -17,6 +17,7 @@ import { ERPWorkspace, getErpTopbarItems, type ErpSection } from "./erp/ERPWorks
 import type { CrmWhatsAppIntent } from "../../../shared/crm";
 import { normalizeContactPhone } from "../../../shared/contact-phone";
 import { trpcProcedureUrl } from "@/lib/trpc-url";
+import { ConversationMedia } from "@/components/ConversationMedia";
 import { TimelineActivity } from "@/components/TimelineActivity";
 import {
   AudioRecordingController,
@@ -1282,37 +1283,32 @@ function ConversationsPage() {
                     if (msgType === 'image') {
                       return (
                         <div className="space-y-2">
-                          {msg.mediaData ? <img src={msg.mediaData} alt={msg.fileName || 'Imagem recebida'} className="max-h-80 rounded-xl object-contain" /> : <Image className="w-5 h-5" />}
+                          <ConversationMedia conversationId={selectedConv.id} message={msg} fallback={<Image className="w-5 h-5" />} />
                           {msgText && !/^\[imagem\]$/i.test(msgText) && <p className="text-sm">{msgText}</p>}
                         </div>
                       );
                     }
                     if (msgType === 'audio') {
                       return (
-                        msg.mediaData ? <audio controls preload="metadata" src={msg.mediaData} className="max-w-full" /> :
-                          <div className="flex items-center gap-2"><Mic className="w-4 h-4" /><span className="text-sm">Mensagem de áudio</span></div>
+                        <ConversationMedia conversationId={selectedConv.id} message={msg} fallback={<div className="flex items-center gap-2"><Mic className="w-4 h-4" /><span className="text-sm">Mensagem de áudio indisponível</span></div>} />
                       );
                     }
                     if (msgType === 'video') {
                       return (
                         <div className="space-y-2">
-                          {msg.mediaData ? <video controls preload="metadata" src={msg.mediaData} className="max-h-80 rounded-xl" /> : <Video className="w-5 h-5" />}
+                          <ConversationMedia conversationId={selectedConv.id} message={msg} fallback={<Video className="w-5 h-5" />} />
                           {msgText && !/^\[vídeo\]$/i.test(msgText) && <p className="text-sm">{msgText}</p>}
                         </div>
                       );
                     }
                     if (msgType === 'document') {
                       return (
-                        <a href={msg.mediaData || undefined} download={msg.fileName || 'documento'} className="flex items-center gap-2 underline-offset-2 hover:underline">
-                          <FileText className="w-4 h-4 flex-shrink-0" />
-                          <span className="text-sm">{msg.fileName || 'Documento'}</span>
-                        </a>
+                        <ConversationMedia conversationId={selectedConv.id} message={msg} fallback={<div className="flex items-center gap-2"><FileText className="w-4 h-4 flex-shrink-0" /><span className="text-sm">Documento indisponível</span></div>} />
                       );
                     }
                     if (msgType === 'sticker') {
                       return (
-                        msg.mediaData ? <img src={msg.mediaData} alt="Figurinha" className="h-40 w-40 object-contain" /> :
-                          <div className="flex items-center gap-2"><Smile className="w-4 h-4" /><span className="text-sm">Figurinha</span></div>
+                        <ConversationMedia conversationId={selectedConv.id} message={msg} fallback={<div className="flex items-center gap-2"><Smile className="w-4 h-4" /><span className="text-sm">Figurinha indisponível</span></div>} />
                       );
                     }
                     if (msgType === 'location') {

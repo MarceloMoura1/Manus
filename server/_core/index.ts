@@ -13,6 +13,7 @@ import { serveStatic, setupVite } from "./vite";
 import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
 import { handleEvolutionWebhook, ensureSessionTable } from "../evolution";
 import { operationalAllowedOrigins } from "./megadesk-session";
+import { registerConversationMediaBridge } from "../conversation-media-bridge";
 
 // ─── Domínios permitidos (CORS) ───────────────────────────────────────────────
 const ALLOWED_ORIGINS = [
@@ -69,6 +70,7 @@ async function startServer() {
   registerOAuthRoutes(app);
   registerMetricWebhook(app);
   registerIntegrationApi(app);
+  registerConversationMediaBridge(app);
 
   // ─── Webhooks ─────────────────────────────────────────────────────────────
   // Meta WhatsApp Business API
