@@ -222,6 +222,16 @@ export async function resolveOperationalSession(req: Pick<Request, "headers">, r
   return { sessionId: session.sessionId, userId: session.userId, tenantId: session.tenantId, role: session.role, permissions: session.permissions, userEmail: session.userEmail };
 }
 
+/** Authentication-only variant for endpoints that must never write while resolving a session. */
+export async function resolveOperationalSessionReadOnly(req: Pick<Request, "headers">, repository: OperationalSessionRepository = defaultRepository(), now = new Date()): Promise<OperationalIdentity | null> {
+  const token = readOperationalSessionToken(req);
+  if (!token) return null;
+  const session = await repository.findByTokenHash(hashOperationalSessionToken(token));
+  if (!session || session.revokedAt || session.expiresAt.getTime() <= now.getTime()) return null;
+  if (session.tenantStatus !== "active" || !session.accessReleased || session.userStatus !== "active") return null;
+  return { sessionId: session.sessionId, userId: session.userId, tenantId: session.tenantId, role: session.role, permissions: session.permissions, userEmail: session.userEmail };
+}
+
 export async function revokeOperationalSession(req: Pick<Request, "headers">, repository: OperationalSessionRepository = defaultRepository()): Promise<boolean> {
   const token = readOperationalSessionToken(req);
   if (!token) return false;
