@@ -27,7 +27,7 @@ const publicSession = {
   expiresAt: Date.now() + 3_600_000,
 };
 
-async function preparePage(page: Page) {
+async function preparePage(page: Page, options: { sendStatus?: number; sendMessage?: string } = {}) {
   await page.addInitScript((session) => {
     localStorage.setItem("megadesk_session_v1", JSON.stringify(session));
     localStorage.setItem("megadesk_active_page_v1", "conversations");
@@ -59,7 +59,17 @@ async function preparePage(page: Page) {
   let sendRequests = 0;
   await page.route("**/api/trpc/**", async route => {
     const url = route.request().url();
-    if (url.includes("megadesk.sendMessage") || url.includes("megadesk.sendAttachment")) sendRequests += 1;
+    if (url.includes("megadesk.sendMessage") || url.includes("megadesk.sendAttachment")) {
+      sendRequests += 1;
+      if (options.sendStatus) {
+        await route.fulfill({
+          status: options.sendStatus,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { json: { message: options.sendMessage ?? "Falha controlada", code: -32001, data: { code: "UNAUTHORIZED", httpStatus: options.sendStatus } } } }),
+        });
+        return;
+      }
+    }
     const procedures = decodeURIComponent(new URL(url).pathname)
       .replace(/^.*\/api\/trpc\//, "")
       .split(","),
@@ -98,6 +108,27 @@ async function expectNoHorizontalOverflow(page: Page) {
 }
 
 test.describe("Conversas responsivas e áudio seguro", () => {
+  test("sessão válida alcança a mutation outbound mockada", async ({ page }) => {
+    const requests = await preparePage(page);
+    await page.getByRole("button", { name: /Cliente Teste Responsivo/ }).click();
+    const input = page.getByPlaceholder("Digite sua mensagem...");
+    await input.fill("Mensagem controlada");
+    await input.press("Enter");
+    await expect.poll(requests.getSendRequests).toBe(1);
+    await expect(input).toHaveValue("");
+  });
+
+  test("sessão inválida preserva o texto e não produz falso sucesso", async ({ page }) => {
+    const requests = await preparePage(page, { sendStatus: 401, sendMessage: "Sessão MegaDesk inválida. Faça login novamente." });
+    await page.getByRole("button", { name: /Cliente Teste Responsivo/ }).click();
+    const input = page.getByPlaceholder("Digite sua mensagem...");
+    await input.fill("Mensagem preservada");
+    await input.press("Enter");
+    await expect.poll(requests.getSendRequests).toBe(1);
+    await expect(input).toHaveValue("Mensagem preservada");
+    await expect(page.getByText("Sessão MegaDesk inválida. Faça login novamente.")).toBeVisible();
+  });
+
   test("390x844 usa painel único e mantém o composer e áudio acessíveis", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const requests = await preparePage(page);

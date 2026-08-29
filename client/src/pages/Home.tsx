@@ -16,6 +16,7 @@ import { BotConfigPage } from "./BotConfigPage";
 import { ERPWorkspace, getErpTopbarItems, type ErpSection } from "./erp/ERPWorkspace";
 import type { CrmWhatsAppIntent } from "../../../shared/crm";
 import { normalizeContactPhone } from "../../../shared/contact-phone";
+import { trpcProcedureUrl } from "@/lib/trpc-url";
 import { TimelineActivity } from "@/components/TimelineActivity";
 import {
   AudioRecordingController,
@@ -782,7 +783,7 @@ function ConversationsPage() {
       pending: true,
     }]);
     try {
-      const res = await fetch('/api/trpc/megadesk.sendAttachment', {
+      const res = await fetch(trpcProcedureUrl('megadesk.sendAttachment'), {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -830,7 +831,7 @@ function ConversationsPage() {
     setAttachment(null);
     setIsSendingMessage(true);
     try {
-      const endpoint = attachmentToSend ? '/api/trpc/megadesk.sendAttachment' : '/api/trpc/megadesk.sendMessage';
+      const endpoint = trpcProcedureUrl(attachmentToSend ? 'megadesk.sendAttachment' : 'megadesk.sendMessage');
       const json = attachmentToSend ? {
         conversationId: selectedConv.id,
         kind: attachmentToSend.kind,

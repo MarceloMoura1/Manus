@@ -12,11 +12,11 @@ import { AIAssistant } from "./components/AIAssistant";
 import { trpc } from "./lib/trpc";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { trpcBaseUrl } from "./lib/trpc-url";
 
-// URL da API: produção usa subdomínio dedicado, local usa relativo
 const hostname = typeof window !== "undefined" ? window.location.hostname : "localhost";
 const IS_PROD = hostname.endsWith("megadesk.online");
-const TRPC_URL = IS_PROD ? "https://api.megadesk.online/api/trpc" : "/api/trpc";
+const TRPC_URL = trpcBaseUrl(hostname);
 // admin.megadesk.online sempre renderiza AdminPanel
 const IS_ADMIN_SUBDOMAIN = hostname === "admin.megadesk.online";
 
