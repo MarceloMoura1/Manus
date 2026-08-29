@@ -613,11 +613,11 @@ export async function readMegaDeskTenantObservability(clientId: string) {
   }
 }
 
-export async function updateConversationStatus(conversationId: string, status: "open" | "bot" | "closed") {
+export async function updateConversationStatus(clientId: string, conversationId: string, status: "open" | "bot" | "closed") {
   const now = new Date().toISOString().slice(0,19).replace('T',' ');
   await getDb().update(megadeskDomainConversations)
     .set({ status, updatedAt: now })
-    .where(eq(megadeskDomainConversations.conversationId, conversationId));
+    .where(and(eq(megadeskDomainConversations.conversationId, conversationId), eq(megadeskDomainConversations.clientId, clientId)));
 }
 
 export async function updateCustomer(input: {

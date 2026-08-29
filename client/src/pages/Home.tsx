@@ -794,6 +794,7 @@ function ConversationsPage() {
           mimeType: audio.mimeType,
           fileName: audio.fileName,
           userEmail: audio.userEmail,
+          clientAttemptId: crypto.randomUUID(),
         } }),
       });
       if (!res.ok) {
@@ -813,7 +814,8 @@ function ConversationsPage() {
     if (waConnected === false) { showToast('WhatsApp desconectado. Reconecte em Configurações.', 'error'); return; }
     const textToSend = messageInput.trim();
     const attachmentToSend = attachment;
-    const optimisticId = `pending-${Date.now()}`;
+    const clientAttemptId = crypto.randomUUID();
+    const optimisticId = `pending-${clientAttemptId}`;
     setOptimisticMessages(previous => [...previous, {
       id: optimisticId,
       sender: 'agent',
@@ -840,10 +842,12 @@ function ConversationsPage() {
         fileName: attachmentToSend.fileName,
         caption: textToSend || undefined,
         userEmail: sessionData?.userEmail ?? '',
+        clientAttemptId,
       } : {
         conversationId: selectedConv.id,
         message: textToSend,
         userEmail: sessionData?.userEmail ?? '',
+        clientAttemptId,
       };
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -1211,14 +1215,12 @@ function ConversationsPage() {
               <div className="flex flex-shrink-0 items-center gap-1 md:gap-2">
                 <button
                   onClick={() => {
-                    // Salvar o número no localStorage e navegar para Atendimento Ativo
-                    localStorage.setItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE', selectedConv.phone || '');
-                    window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'active-attendance' } }));
+                    localStorage.setItem('MEGADESK_SELECTED_CONVERSATION_ID', selectedConv.id);
+                    window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'conversations', conversationId: selectedConv.id } }));
                   }}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
-                  title="Abrir Atendimento Ativo"
+                  className="hidden rounded-xl px-3 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-50 lg:block"
                 >
-                  <PhoneCall className="w-4 h-4" />
+                  Transferir conversa
                 </button>
                 <button
                   onClick={() => { setEditName(selectedConv.name); setEditCompany(selectedConv.company || ''); setEditModalOpen(true); }}
@@ -1238,6 +1240,17 @@ function ConversationsPage() {
                 >
                   {selectedConv.status === 'closed' ? 'Reabrir' : 'Encerrar'}
                 </button>
+                <details className="relative">
+                  <summary className="flex h-10 cursor-pointer list-none items-center rounded-xl px-3 text-sm font-medium text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                    Mais ações
+                  </summary>
+                  <div className="absolute right-0 z-30 mt-2 w-52 rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+                    <button type="button" onClick={() => { setEditName(selectedConv.name); setEditCompany(selectedConv.company || ''); setEditModalOpen(true); }} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Editar contato</button>
+                    <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'erp-clients' } }))} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Cadastrar cliente / Visualizar perfil</button>
+                    <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'tickets', conversationId: selectedConv.id } }))} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Abrir / Visualizar chamados</button>
+                    <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'conversations', contactPhone: selectedConv.phone } }))} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Histórico de conversas</button>
+                  </div>
+                </details>
               </div>
             </div>
 
@@ -1254,7 +1267,6 @@ function ConversationsPage() {
                           <p className="text-sm text-slate-800">{selectedConv.lastMessage || 'Conversa iniciada'}</p>
                           <p className="text-xs text-slate-400 mt-1 text-right">{formatTime(selectedConv.timestamp)}</p>
                         </div>
-                        <p className="text-xs text-slate-400 mt-1 ml-1">{selectedConv.name}</p>
                       </div>
                     </div>
                   );
@@ -1334,11 +1346,10 @@ function ConversationsPage() {
                             ? 'bg-gradient-to-br from-blue-500 to-violet-600 text-white rounded-tr-sm'
                             : 'bg-white border border-slate-100 text-slate-800 rounded-tl-sm'
                         }`}>
+                          {isAgent && msg.agentName && <p className="mb-1 text-xs font-bold text-white">{msg.agentName}</p>}
                           {renderContent()}
                           <p className={`text-xs mt-1 text-right ${isAgent ? 'text-blue-100' : 'text-slate-400'}`}>{msgTime}</p>
                         </div>
-                        {!isAgent && <p className="text-xs text-slate-400 mt-1 ml-1">{selectedConv.name}</p>}
-                        {isAgent && msg.agentName && <p className="text-xs text-slate-400 mt-1 mr-1 text-right">{msg.agentName}</p>}
                       </div>
                     </div>
                   );

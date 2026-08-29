@@ -35,11 +35,13 @@ import { validations } from "@/lib/validations";
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
 
-type ViewMode = "all" | "mine" | "specific";
-type StatusTab = "open" | "pending" | "closed";
+type ViewMode = "all" | "mine" | "waiting";
+type StatusTab = "active" | "closed";
 
 type ConversationItem = {
   id: string;
+  publicCode?: string | null;
+  contactId?: string | null;
   customerName: string;
   customerPhone: string;
   companyName: string;
@@ -52,6 +54,7 @@ type ConversationItem = {
   iaActive: boolean;
   lastMessageFrom?: "customer" | "agent" | "bot";
   createdAt?: string;
+  crmClientId?: string | null;
   syncStatus?: "synced" | "syncing" | "sync_failed";
 };
 
@@ -114,6 +117,7 @@ type ConversationCardProps = {
   onClose: (id: string) => void;
   onReopen: (id: string) => void;
   onAssign: (id: string) => void;
+  onClaim: (id: string) => void;
   confirmingClose: string | null;
   setConfirmingClose: (id: string | null) => void;
   confirmingReopen: string | null;
@@ -125,6 +129,7 @@ function ConversationCard({
   onClose,
   onReopen,
   onAssign,
+  onClaim,
   confirmingClose,
   setConfirmingClose,
   confirmingReopen,
@@ -161,6 +166,13 @@ function ConversationCard({
                 </span>
               )}
             </div>
+            {conv.publicCode && (
+              <button type="button" title="Copiar código do atendimento"
+                onClick={() => void navigator.clipboard.writeText(conv.publicCode ?? "")}
+                className="mt-1 text-[11px] font-medium text-blue-600 hover:underline">
+                Atendimento {conv.publicCode}
+              </button>
+            )}
             <div className="space-y-0.5 mt-0.5">
               {conv.companyName && (
                 <div className="flex items-center gap-1">
@@ -234,13 +246,19 @@ function ConversationCard({
 
           {/* Ações */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
-            {!isClosed && (
+            {!isClosed && conv.status === "pending" && !conv.assignedUserId && (
+              <button type="button" onClick={() => onClaim(conv.id)}
+                className="text-xs font-semibold text-blue-600 px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100">
+                Assumir conversa
+              </button>
+            )}
+            {!isClosed && conv.status !== "pending" && (
               <button
                 type="button"
                 onClick={() => onAssign(conv.id)}
                 className="text-xs text-slate-500 hover:text-blue-600 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors"
               >
-                Atribuir
+                Transferir conversa
               </button>
             )}
 
@@ -377,12 +395,10 @@ function AssignModal({ conversationId, users, onAssign, onClose }: AssignModalPr
 export function ConversasPage() {
   const session = useMemo(() => getSession(), []);
   const clientId = session?.clientId ?? null;
-  const userEmail = session?.userEmail ?? null;
 
   // Estados de filtro
   const [viewMode, setViewMode] = useState<ViewMode>("all");
-  const [specificUserId, setSpecificUserId] = useState<string | null>(null);
-  const [statusTab, setStatusTab] = useState<StatusTab>("open");
+  const [statusTab, setStatusTab] = useState<StatusTab>("active");
   const [searchTerm, setSearchTerm] = useState("");
 
   // Estados de ação
@@ -405,30 +421,17 @@ export function ConversasPage() {
   }, []);
 
   // ─── Busca de usuários ──────────────────────────────────────────────────────
-  const { data: usersData } = trpc.users.list.useQuery(
-    { clientId: clientId ?? "" },
-    { enabled: !!clientId, staleTime: 60_000 }
-  );
-
-  // Encontrar o userId do usuário logado pelo email
-  const currentUserId = useMemo(() => {
-    if (!userEmail || !usersData) return null;
-    return usersData.find((u) => u.email === userEmail)?.id ?? null;
-  }, [userEmail, usersData]);
-
-  // Calcular o assignedUserId para o filtro
-  const filterAssignedUserId = useMemo(() => {
-    if (viewMode === "mine") return currentUserId;
-    if (viewMode === "specific") return specificUserId;
-    return null;
-  }, [viewMode, currentUserId, specificUserId]);
+  const { data: usersData } = trpc.conversations.eligibleUsers.useQuery(undefined, { enabled: !!clientId, staleTime: 60_000 });
+  const { data: countsData } = trpc.conversations.counts.useQuery(undefined, { enabled: !!clientId });
 
   // ─── Query de conversas ─────────────────────────────────────────────────────
   const { data: conversationsData, isLoading, refetch } = trpc.conversations.list.useQuery(
     {
-      clientId: clientId ?? "",
       viewMode,
-      assignedUserId: filterAssignedUserId,
+      status: statusTab,
+      search: searchTerm,
+      limit: 50,
+      offset: 0,
     },
     {
       enabled: !!clientId,
@@ -441,7 +444,7 @@ export function ConversasPage() {
   useEffect(() => {
     if (conversationsData) {
       setLocalConversations(
-        conversationsData.map((c) => ({
+        conversationsData.map((c: ConversationItem) => ({
           ...c,
           lastMessageAt:
             c.lastMessageAt instanceof Date ? c.lastMessageAt : new Date(c.lastMessageAt),
@@ -472,22 +475,26 @@ export function ConversasPage() {
     },
   });
 
-  const assignMutation = trpc.conversations.assign.useMutation({
-    onSuccess: (_, vars) => {
-      const user = usersData?.find((u) => u.id === vars.userId);
+  const assignMutation = trpc.conversations.transfer.useMutation({
+    onSuccess: (result, vars) => {
       setLocalConversations((prev) =>
         prev.map((c) =>
           c.id === vars.conversationId
             ? {
                 ...c,
-                assignedUserId: vars.userId,
-                assignedUserName: vars.userName ?? user?.name,
+                assignedUserId: result.assignedUserId,
+                assignedUserName: result.assignedUserName,
               }
             : c
         )
       );
       setAssigningConvId(null);
     },
+  });
+  const claimMutation = trpc.conversations.claim.useMutation({
+    onSuccess: (result, vars) => setLocalConversations((prev) => prev.map((conversation) =>
+      conversation.id === vars.conversationId ? { ...conversation, status: "open" as const,
+        assignedUserId: result.assignedUserId, assignedUserName: result.assignedUserName } : conversation)),
   });
 
   // ─── Socket.IO — atualizações em tempo real ─────────────────────────────────
@@ -541,49 +548,23 @@ export function ConversasPage() {
 
   // ─── Filtragem local ────────────────────────────────────────────────────────
   const filteredConversations = useMemo(() => {
-    let list = localConversations;
-
-    // Filtro de status (aba)
-    list = list.filter((c) => c.status === statusTab);
-
-    // Busca por texto
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
-      list = list.filter(
-        (c) =>
-          c.customerName?.toLowerCase().includes(term) ||
-          c.companyName?.toLowerCase().includes(term) ||
-          c.customerPhone?.includes(term) ||
-          c.lastMessage?.toLowerCase().includes(term)
-      );
-    }
-
-    // Ordenar: não lidas primeiro, depois por data
-    list = [...list].sort((a, b) => {
-      const aUnread = a.unreadCount > 0 && a.lastMessageFrom === "customer" ? 1 : 0;
-      const bUnread = b.unreadCount > 0 && b.lastMessageFrom === "customer" ? 1 : 0;
-      if (aUnread !== bUnread) return bUnread - aUnread;
-      return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime();
-    });
-
-    return list;
-  }, [localConversations, statusTab, searchTerm]);
+    return localConversations;
+  }, [localConversations]);
 
   // Contadores por aba
   const counts = useMemo(
     () => ({
-      open: localConversations.filter((c) => c.status === "open").length,
-      pending: localConversations.filter((c) => c.status === "pending").length,
-      closed: localConversations.filter((c) => c.status === "closed").length,
+      active: countsData?.active ?? 0,
+      closed: countsData?.closed ?? 0,
     }),
-    [localConversations]
+    [countsData]
   );
 
   // ─── Handlers ───────────────────────────────────────────────────────────────
   const handleClose = useCallback(
     (conversationId: string) => {
       if (!clientId) return;
-      closeMutation.mutate({ conversationId, clientId });
+      closeMutation.mutate({ conversationId });
     },
     [clientId, closeMutation]
   );
@@ -591,7 +572,7 @@ export function ConversasPage() {
   const handleReopen = useCallback(
     (conversationId: string) => {
       if (!clientId) return;
-      reopenMutation.mutate({ conversationId, clientId });
+      reopenMutation.mutate({ conversationId });
     },
     [clientId, reopenMutation]
   );
@@ -599,7 +580,7 @@ export function ConversasPage() {
   const handleAssignConfirm = useCallback(
     (userId: string, userName: string) => {
       if (!clientId || !assigningConvId) return;
-      assignMutation.mutate({ conversationId: assigningConvId, userId, userName, clientId });
+      assignMutation.mutate({ conversationId: assigningConvId, targetUserId: userId });
     },
     [clientId, assigningConvId, assignMutation]
   );
@@ -614,8 +595,7 @@ export function ConversasPage() {
   }
 
   const tabConfig: Array<{ id: StatusTab; label: string; icon: React.ReactNode }> = [
-    { id: "open", label: "Abertas", icon: <MessageCircle className="w-3.5 h-3.5" /> },
-    { id: "pending", label: "Pendentes", icon: <Clock className="w-3.5 h-3.5" /> },
+    { id: "active", label: "Abertas", icon: <MessageCircle className="w-3.5 h-3.5" /> },
     { id: "closed", label: "Encerradas", icon: <CheckCircle2 className="w-3.5 h-3.5" /> },
   ];
 
@@ -664,7 +644,7 @@ export function ConversasPage() {
                 [
                   { id: "all" as ViewMode, label: "Todas" },
                   { id: "mine" as ViewMode, label: "Minhas" },
-                  { id: "specific" as ViewMode, label: "Específico" },
+                  { id: "waiting" as ViewMode, label: "Bot/Aguardando" },
                 ] as const
               ).map((opt) => (
                 <button
@@ -672,7 +652,6 @@ export function ConversasPage() {
                   type="button"
                   onClick={() => {
                     setViewMode(opt.id);
-                    if (opt.id !== "specific") setSpecificUserId(null);
                   }}
                   className={[
                     "px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150",
@@ -686,38 +665,6 @@ export function ConversasPage() {
               ))}
             </div>
 
-            {/* Dropdown para filtrar por atendente - SEMPRE VISÍVEL */}
-            <div style={{ animation: "scaleIn 0.15s cubic-bezier(0.23, 1, 0.32, 1)" }}>
-              <Select
-                value={specificUserId ?? ""}
-                onValueChange={(v) => {
-                  if (v) {
-                    setViewMode("specific");
-                    setSpecificUserId(v);
-                  } else {
-                    setViewMode("all");
-                    setSpecificUserId(null);
-                  }
-                }}
-              >
-                <SelectTrigger className="w-56 h-9 text-sm bg-white border-slate-200">
-                  <SelectValue placeholder="Filtrar por Atendente..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {!usersData || usersData.length === 0 ? (
-                    <SelectItem value="_none" disabled>
-                      Nenhum usuário
-                    </SelectItem>
-                  ) : (
-                    usersData.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.name}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
         </div>
 
@@ -758,7 +705,7 @@ export function ConversasPage() {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <Input
-              placeholder="Buscar por nome, empresa, telefone ou mensagem..."
+              placeholder="Buscar por código, nome, empresa ou telefone..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-9 h-9 text-sm bg-slate-50 border-slate-200 focus:bg-white transition-colors"
@@ -791,10 +738,8 @@ export function ConversasPage() {
               <p className="text-slate-500 font-medium">
                 {searchTerm
                   ? "Nenhuma conversa encontrada para esta busca"
-                  : statusTab === "open"
+                  : statusTab === "active"
                   ? "Nenhuma conversa aberta"
-                  : statusTab === "pending"
-                  ? "Nenhuma conversa pendente"
                   : "Nenhuma conversa encerrada"}
               </p>
               {searchTerm && (
@@ -819,6 +764,7 @@ export function ConversasPage() {
                     onClose={handleClose}
                     onReopen={handleReopen}
                     onAssign={(id) => setAssigningConvId(id)}
+                    onClaim={(id) => claimMutation.mutate({ conversationId: id })}
                     confirmingClose={confirmingClose}
                     setConfirmingClose={setConfirmingClose}
                     confirmingReopen={confirmingReopen}

@@ -18,27 +18,27 @@ describe('Conversation Actions', () => {
       const conversationId = 'conv-123';
       const status = 'closed' as const;
 
-      await updateConversationStatus(conversationId, status);
+      await updateConversationStatus('tenant-a', conversationId, status);
 
-      expect(updateConversationStatus).toHaveBeenCalledWith(conversationId, status);
+      expect(updateConversationStatus).toHaveBeenCalledWith('tenant-a', conversationId, status);
     });
 
     it('deve atualizar status da conversa para bot', async () => {
       const conversationId = 'conv-456';
       const status = 'bot' as const;
 
-      await updateConversationStatus(conversationId, status);
+      await updateConversationStatus('tenant-a', conversationId, status);
 
-      expect(updateConversationStatus).toHaveBeenCalledWith(conversationId, status);
+      expect(updateConversationStatus).toHaveBeenCalledWith('tenant-a', conversationId, status);
     });
 
     it('deve atualizar status da conversa para open', async () => {
       const conversationId = 'conv-789';
       const status = 'open' as const;
 
-      await updateConversationStatus(conversationId, status);
+      await updateConversationStatus('tenant-a', conversationId, status);
 
-      expect(updateConversationStatus).toHaveBeenCalledWith(conversationId, status);
+      expect(updateConversationStatus).toHaveBeenCalledWith('tenant-a', conversationId, status);
     });
   });
 

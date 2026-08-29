@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { withPublicCodeRetry } from "./conversation-public-code";
+import { executeOutboundAttempt } from "./conversation-outbound";
 
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure, megadeskProcedure } from "./_core/trpc";
@@ -24,6 +26,7 @@ import { notificationsRouter } from "./routers-notifications";
 import { megadeskSettingsRouter } from "./routers-megadesk-settings";
 import { evolutionRouter } from "./routers-evolution";
 import { conversasRouter } from "./routers-conversas";
+import { conversationsRouter } from "./routers-conversations";
 import { enforceAdministrativeRateLimit, normalizeDigits, normalizeEmail, runIdempotent } from "./_core/provisioning-guards";
 import { provisionClientAtomically } from "./_core/client-provisioning";
 import { resolveTenantLoginCandidates } from "./_core/tenant-login";
@@ -278,6 +281,7 @@ function sanitizeClient(client: MegaClient) {
 }
 
 export const appRouter = router({
+  conversations: conversationsRouter,
   erp: erpRouter,
   chamados: chamadosRouter,
   crm: crmRouter,
@@ -716,7 +720,7 @@ export const appRouter = router({
       const record: OperationalRecord = { id: `op-${Date.now()}`, clientId: client.clientId, tenantDatabaseName: client.tenantDatabaseName, type: input.type, ownerPhone: input.ownerPhone, title: input.title, status: input.status, payload: input.payload, createdAt: new Date().toISOString() };
       operationalRecords.unshift(record);
       if (input.type === "conversation") {
-        const newConv = { id: `conv-${Date.now()}`, clientId: client.clientId, name: client.contact, phone: input.ownerPhone, company: client.company, status: "open" as ConversationStatus, lastMessage: input.title, time: nowLabel(), messages: [{ from: "customer" as const, text: input.title, time: nowLabel() }], createdAt: new Date().toISOString(), lastMessageFrom: "customer" as const, unreadCount: 1 };
+        const newConv = { id: `conv-${randomUUID()}`, clientId: client.clientId, name: client.contact, phone: input.ownerPhone, company: client.company, status: "open" as ConversationStatus, lastMessage: input.title, time: nowLabel(), messages: [{ from: "customer" as const, text: input.title, time: nowLabel() }], createdAt: new Date().toISOString(), lastMessageFrom: "customer" as const, unreadCount: 1 };
         conversations.unshift(newConv);
         try {
           const { getSocketIO } = await import("./modules/whatsapp/socket/whatsapp.socket");
@@ -848,7 +852,8 @@ export const appRouter = router({
       await persistSyncState();
       return { ok: true, clientId: input.clientId, tenantDatabaseName: client.tenantDatabaseName, modules: client.modules, user: { email: user.email, role: user.role, permissions: user.permissions }, tokenHint: tokenHint(input.token), message: "Token validado no backend sincronizado MegaAdmin → MegaDesk para este cliente." };
     }),
-    sendMessage: megadeskProcedure.input(z.object({ conversationId: z.string(), message: z.string().min(1), userEmail: z.string().email() })).mutation(async ({ input, ctx }) => {
+    sendMessage: megadeskProcedure.input(z.object({ conversationId: z.string(), message: z.string().min(1),
+      userEmail: z.string().email(), clientAttemptId: z.string().uuid() })).mutation(async ({ input, ctx }) => {
       await hydrateSyncState();
       const outboundConversation = await loadOutboundConversation(getPool(), ctx.tenantId, input.conversationId);
       if (!outboundConversation) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
@@ -856,62 +861,33 @@ export const appRouter = router({
       const client = getReleasedClientOrThrow(outboundConversation.clientId);
       assertClientUserPermission(client, "conversations", input.userEmail);
 
-      try {
-        const [{ evoSendText }, { instanceNameFor }] = await Promise.all([
-          import("./evolution/client"),
-          import("./evolution/session-store"),
-        ]);
-        const recipient = resolveOutboundRecipient(outboundConversation);
-        await evoSendText(instanceNameFor(outboundConversation.clientId), recipient, input.message);
-      } catch (error) {
-        throw new TRPCError({
-          code: "BAD_GATEWAY",
-          message: safeOutboundProviderMessage(error),
-        });
-      }
-
       const time = nowLabel();
+      const [operatorRows] = await getPool().execute(
+        `SELECT name FROM megadesk_domain_client_users WHERE client_id = ? AND user_id = ? AND status = 'active' LIMIT 1`,
+        [ctx.tenantId, ctx.operationalUserId],
+      ) as any[];
+      const operatorName = operatorRows[0]?.name ?? ctx.userEmail;
       const outgoingMessage = {
         from: "agent" as const,
         text: input.message,
         time,
         timestamp: new Date().toISOString(),
-        agentName: input.userEmail.split("@")[0],
+        agentName: operatorName,
       };
-      const connection = await getPool().getConnection();
+      const messageId = `msg-${randomUUID()}`;
       try {
-        await connection.beginTransaction();
-        const [rows] = await connection.execute(
-          `SELECT messages_json
-             FROM megadesk_domain_conversations
-            WHERE conversation_id = ? AND client_id = ?
-            LIMIT 1 FOR UPDATE`,
-          [input.conversationId, ctx.tenantId],
-        ) as any[];
-        if (!rows.length) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
-        let persistedMessages: any[] = [];
-        try { persistedMessages = JSON.parse(rows[0].messages_json || "[]"); } catch { persistedMessages = []; }
-        persistedMessages.push(outgoingMessage);
-        const messageId = `msg-${randomUUID()}`;
-        await connection.execute(
-          `INSERT INTO megadesk_domain_conversations_messages
-             (message_id, conversation_id, sender, message, timestamp, status)
-           VALUES (?, ?, 'agent', ?, NOW(), 'sent')`,
-          [messageId, input.conversationId, input.message],
-        );
-        await connection.execute(
-          `UPDATE megadesk_domain_conversations
-              SET messages_json = ?, last_message = ?, last_message_from = 'agent',
-                  time_label = ?, updated_at = NOW()
-            WHERE conversation_id = ? AND client_id = ?`,
-          [JSON.stringify(persistedMessages), input.message.substring(0, 255), time, input.conversationId, ctx.tenantId],
-        );
-        await connection.commit();
+        const [{ evoSendText }, { instanceNameFor }] = await Promise.all([
+          import("./evolution/client"), import("./evolution/session-store"),
+        ]);
+        await executeOutboundAttempt(getPool(), { messageId, clientAttemptId: input.clientAttemptId, conversationId: input.conversationId,
+          clientId: ctx.tenantId, provider: "evolution", integrationId: outboundConversation.integrationId,
+          messageType: "text",
+          sender: "agent", senderUserId: ctx.operationalUserId, senderNameSnapshot: operatorName,
+          text: input.message, timestamp: new Date(), legacyMessage: outgoingMessage },
+          () => evoSendText(instanceNameFor(outboundConversation.clientId),
+            resolveOutboundRecipient(outboundConversation), input.message));
       } catch (error) {
-        await connection.rollback().catch(() => undefined);
-        throw error;
-      } finally {
-        connection.release();
+        throw new TRPCError({ code: "BAD_GATEWAY", message: safeOutboundProviderMessage(error) });
       }
 
       if (conversation) {
@@ -932,6 +908,7 @@ export const appRouter = router({
       fileName: z.string().max(255).optional(),
       caption: z.string().max(2000).optional(),
       userEmail: z.string().email(),
+      clientAttemptId: z.string().uuid(),
     })).mutation(async ({ input, ctx }) => {
       await hydrateSyncState();
       const outboundConversation = await loadOutboundConversation(getPool(), ctx.tenantId, input.conversationId);
@@ -953,24 +930,6 @@ export const appRouter = router({
         throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "Anexo excede o limite permitido." });
       }
 
-      try {
-        const [{ evoSendAttachment }, { instanceNameFor }] = await Promise.all([
-          import("./evolution/client"),
-          import("./evolution/session-store"),
-        ]);
-        await evoSendAttachment({
-          instanceName: instanceNameFor(ctx.tenantId),
-          number: resolveOutboundRecipient(outboundConversation),
-          kind: input.kind,
-          dataUrl: input.dataUrl,
-          mimeType: input.mimeType,
-          fileName: input.fileName,
-          caption: input.caption,
-        });
-      } catch (error) {
-        throw new TRPCError({ code: "BAD_GATEWAY", message: safeOutboundProviderMessage(error) });
-      }
-
       const labels = { image: "[Imagem]", video: "[Vídeo]", audio: "[Áudio]", document: "[Documento]", sticker: "[Figurinha]" };
       const summary = input.caption?.trim() || labels[input.kind];
       const time = nowLabel();
@@ -983,38 +942,25 @@ export const appRouter = router({
         fileName: input.fileName || null,
         time,
         timestamp: new Date().toISOString(),
-        agentName: input.userEmail.split("@")[0],
+        agentName: ctx.userEmail,
       };
-      const connection = await getPool().getConnection();
+      const messageId = `msg-${randomUUID()}`;
       try {
-        await connection.beginTransaction();
-        const [rows] = await connection.execute(
-          `SELECT messages_json FROM megadesk_domain_conversations
-            WHERE conversation_id = ? AND client_id = ? LIMIT 1 FOR UPDATE`,
-          [input.conversationId, ctx.tenantId],
-        ) as any[];
-        if (!rows.length) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
-        let persistedMessages: any[] = [];
-        try { persistedMessages = JSON.parse(rows[0].messages_json || "[]"); } catch { persistedMessages = []; }
-        persistedMessages.push(outgoingMessage);
-        await connection.execute(
-          `INSERT INTO megadesk_domain_conversations_messages
-             (message_id, conversation_id, sender, message, timestamp, status)
-           VALUES (?, ?, 'agent', ?, NOW(), 'sent')`,
-          [`msg-${randomUUID()}`, input.conversationId, summary],
-        );
-        await connection.execute(
-          `UPDATE megadesk_domain_conversations SET messages_json = ?, last_message = ?,
-             last_message_from = 'agent', time_label = ?, updated_at = NOW()
-           WHERE conversation_id = ? AND client_id = ?`,
-          [JSON.stringify(persistedMessages), summary.substring(0, 255), time, input.conversationId, ctx.tenantId],
-        );
-        await connection.commit();
+        const [{ evoSendAttachment }, { instanceNameFor }] = await Promise.all([
+          import("./evolution/client"), import("./evolution/session-store"),
+        ]);
+        await executeOutboundAttempt(getPool(), { messageId, clientAttemptId: input.clientAttemptId,
+          conversationId: input.conversationId, clientId: ctx.tenantId, provider: "evolution",
+          integrationId: outboundConversation.integrationId,
+          messageType: input.kind, sender: "agent",
+          senderUserId: ctx.operationalUserId, senderNameSnapshot: ctx.userEmail, text: summary,
+          timestamp: new Date(), legacyMessage: outgoingMessage,
+          mediaReference: { mediaData: input.dataUrl, mimeType: input.mimeType, fileName: input.fileName ?? null } },
+          () => evoSendAttachment({ instanceName: instanceNameFor(ctx.tenantId),
+            number: resolveOutboundRecipient(outboundConversation), kind: input.kind, dataUrl: input.dataUrl,
+            mimeType: input.mimeType, fileName: input.fileName, caption: input.caption }));
       } catch (error) {
-        await connection.rollback().catch(() => undefined);
-        throw error;
-      } finally {
-        connection.release();
+        throw new TRPCError({ code: "BAD_GATEWAY", message: safeOutboundProviderMessage(error) });
       }
       if (conversation) {
         conversation.messages.push(outgoingMessage);
@@ -1067,7 +1013,7 @@ export const appRouter = router({
      */
     searchCustomerByCompany: megadeskProcedure
       .input(z.object({ company: z.string().min(1), clientId: z.string().min(1) }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
         try {
           const { getPool } = await import("./db");
           const pool = getPool();
@@ -1196,7 +1142,7 @@ export const appRouter = router({
             company: input.company,
           });
           
-          const conversationId = `conv-${Date.now()}`;
+          const conversationId = `conv-${randomUUID()}`;
           const newConversation: Conversation = {
             id: conversationId,
             clientId: client.clientId,
@@ -1257,7 +1203,7 @@ export const appRouter = router({
           if (input.clientId !== ctx.tenantId) {
             throw new TRPCError({ code: "FORBIDDEN", message: "Tenant inválido." });
           }
-          const { createConversation: createConversationDb, createCustomer: createCustomerDb, searchCustomerByPhone } = await import("./db");
+          const { createCustomer: createCustomerDb, searchCustomerByPhone } = await import("./db");
           await hydrateSyncState();
           const client = getReleasedClientOrThrow(ctx.tenantId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
@@ -1288,17 +1234,62 @@ export const appRouter = router({
             }
           }
           
-          const conversationId = `conv-${Date.now()}`;
-          await createConversationDb({
-            conversationId,
-            clientId: client.clientId,
-            crmClientId: input.crmClientId ?? undefined,
-            customerName: input.customerName,
-            phone: canonicalPhone,
-            company: input.company,
-            lastMessage: "Conversa iniciada",
-            messages: [],
-          });
+          const connection = await getPool().getConnection();
+          let conversationId = "";
+          let attendanceLock: string | null = null;
+          try {
+            await connection.beginTransaction();
+            const contactId = `contact-${randomUUID()}`;
+            await connection.execute(
+              `INSERT INTO megadesk_conversation_contacts
+               (contact_id, client_id, display_name, canonical_phone, channel, provider, external_identity, crm_client_id)
+               VALUES (?, ?, ?, ?, 'whatsapp', 'evolution', ?, ?)
+               ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), crm_client_id = COALESCE(VALUES(crm_client_id), crm_client_id)`,
+              [contactId, ctx.tenantId, input.customerName, canonicalPhone, canonicalPhone, input.crmClientId ?? null],
+            );
+            const [contactRows] = await connection.execute(
+              `SELECT contact_id FROM megadesk_conversation_contacts WHERE client_id = ? AND channel = 'whatsapp'
+               AND provider = 'evolution' AND external_identity = ? LIMIT 1 FOR UPDATE`, [ctx.tenantId, canonicalPhone],
+            ) as any[];
+            const canonicalContactId = contactRows[0].contact_id as string;
+            const integrationId = `megadesk-${ctx.tenantId}`;
+            const activeKey = createHash("sha256").update(`${ctx.tenantId}\0evolution\0${integrationId}\0${canonicalContactId}`).digest("hex");
+            attendanceLock = `mdc:${activeKey}`;
+            const [lockRows] = await connection.execute("SELECT GET_LOCK(?, 10) AS acquired", [attendanceLock]) as any[];
+            if (Number(lockRows?.[0]?.acquired) !== 1) throw new Error("ATTENDANCE_LOCK_TIMEOUT");
+            const [activeRows] = await connection.execute(
+              `SELECT conversation_id FROM megadesk_domain_conversations WHERE client_id = ? AND status IN ('open','bot')
+               AND (active_key = ? OR (active_key IS NULL AND phone = ?)) ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+              [ctx.tenantId, activeKey, canonicalPhone],
+            ) as any[];
+            if (activeRows.length) {
+              conversationId = activeRows[0].conversation_id;
+            } else {
+              conversationId = `conv-${randomUUID()}`;
+              await withPublicCodeRetry(async (publicCode) => {
+                  await connection.execute(
+                    `INSERT INTO megadesk_domain_conversations
+                     (conversation_id, client_id, crm_client_id, public_code, contact_id, origin, channel, provider,
+                      integration_id, active_key, customer_name, phone, company, status, last_message, time_label, messages_json,
+                      assigned_user_id, assigned_user_name, opened_at)
+                     VALUES (?, ?, ?, ?, ?, 'outbound', 'whatsapp', 'evolution', ?, ?, ?, ?, ?, 'open', '', '', '[]', ?, ?, NOW())`,
+                    [conversationId, ctx.tenantId, input.crmClientId ?? null, publicCode, canonicalContactId, integrationId, activeKey,
+                      input.customerName, canonicalPhone, input.company, ctx.operationalUserId, ctx.userEmail],
+                  );
+                  return publicCode;
+              });
+              await connection.execute(
+                `INSERT INTO megadesk_conversation_events
+                 (event_id, client_id, conversation_id, event_type, operator_user_id, metadata_json)
+                 VALUES (?, ?, ?, 'created_outbound', ?, '{}')`,
+                [`event-${randomUUID()}`, ctx.tenantId, conversationId, ctx.operationalUserId],
+              );
+            }
+            await connection.commit();
+          } catch (error) { await connection.rollback(); throw error; } finally {
+            if (attendanceLock) await connection.execute("SELECT RELEASE_LOCK(?)", [attendanceLock]).catch(() => undefined);
+            connection.release();
+          }
           
           const newConversation: any = {
             id: conversationId,
@@ -1307,11 +1298,11 @@ export const appRouter = router({
             phone: canonicalPhone,
             company: input.company,
             status: "open" as const,
-            lastMessage: "Conversa iniciada",
+            lastMessage: "",
             time: new Date().toLocaleString('pt-BR'),
             messages: [],
           };
-          conversations.push(newConversation);
+          if (!conversations.some((item) => item.id === conversationId && item.clientId === ctx.tenantId)) conversations.push(newConversation);
           audit("MegaDesk", `Conversa iniciada com ${input.customerName}`, client.clientId);
           // Não chamar persistSyncState() aqui — a conversa já foi salva diretamente no banco
           // via createConversationDb acima. persistSyncState faz DELETE+INSERT em massa e é muito lento.
@@ -1380,7 +1371,7 @@ export const appRouter = router({
       }),
     closeConversation: megadeskProcedure
       .input(z.object({ conversationId: z.string(), clientId: z.string().min(1) }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         try {
           const { updateConversationStatus, getDb } = await import("./db");
           const { megadeskDomainConversations } = await import("../drizzle/schema");
@@ -1390,13 +1381,13 @@ export const appRouter = router({
             .from(megadeskDomainConversations)
             .where(and(
               eq(megadeskDomainConversations.conversationId, input.conversationId),
-              eq(megadeskDomainConversations.clientId, input.clientId)
+              eq(megadeskDomainConversations.clientId, ctx.tenantId)
             ))
             .limit(1);
           if (!rows.length) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
-          await updateConversationStatus(input.conversationId, "closed");
+          await updateConversationStatus(ctx.tenantId, input.conversationId, "closed");
           // Atualizar array em memória se existir
-          const memConv = conversations.find(c => c.id === input.conversationId && c.clientId === input.clientId);
+          const memConv = conversations.find(c => c.id === input.conversationId && c.clientId === ctx.tenantId);
           if (memConv) memConv.status = "closed";
           return { ok: true };
         } catch (error) {
@@ -1407,7 +1398,7 @@ export const appRouter = router({
       }),
     getActiveUsers: megadeskProcedure
       .input(z.object({ clientId: z.string().min(1) }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
         try {
           await hydrateSyncState();
           const client = getReleasedClientOrThrow(input.clientId);
@@ -1806,17 +1797,17 @@ export const appRouter = router({
         };
       }),
   }),
-  conversations: router({
+  legacyConversations: router({
     list: megadeskProcedure
       .input(z.object({
         clientId: z.string(),
         viewMode: z.enum(["all", "mine", "specific"]).optional(),
         assignedUserId: z.string().nullable().optional(),
       }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
         // Ler diretamente do banco para incluir conversas do Baileys
         const { getConversationsByClientId } = await import("./db");
-        let rows = await getConversationsByClientId(input.clientId);
+        let rows = await getConversationsByClientId(ctx.tenantId);
         // Filtrar por modo de visualização
         if ((input.viewMode === "mine" || input.viewMode === "specific") && input.assignedUserId) {
           rows = rows.filter((r: any) => r.assignedUserId === input.assignedUserId);
@@ -1845,50 +1836,50 @@ export const appRouter = router({
       }),
     close: megadeskProcedure
       .input(z.object({ conversationId: z.string(), clientId: z.string() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const { updateConversationStatus } = await import("./db");
-        await updateConversationStatus(input.conversationId, "closed");
+        await updateConversationStatus(ctx.tenantId, input.conversationId, "closed");
         // Também atualizar array em memória se existir
-        const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === input.clientId);
+        const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === ctx.tenantId);
         if (conv) conv.status = "closed";
         try {
           const { getSocketIO } = require("../modules/whatsapp/socket/whatsapp.socket");
           const io = getSocketIO();
-          if (io) io.to(`client:${input.clientId}`).emit("conversation:closed", { conversationId: input.conversationId, clientId: input.clientId });
+          if (io) io.to(`client:${ctx.tenantId}`).emit("conversation:closed", { conversationId: input.conversationId, clientId: ctx.tenantId });
         } catch {}
         return { ok: true };
       }),
     assign: megadeskProcedure
       .input(z.object({ conversationId: z.string(), userId: z.string(), userName: z.string().optional(), clientId: z.string() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const { getDb } = await import("./db");
         const { megadeskDomainConversations } = await import("../drizzle/schema");
         const { eq, and } = await import("drizzle-orm");
         await getDb().update(megadeskDomainConversations)
           .set({ assignedUserId: input.userId, assignedUserName: input.userName ?? null, updatedAt: new Date().toISOString().slice(0,19).replace('T',' ') })
-          .where(and(eq(megadeskDomainConversations.conversationId, input.conversationId), eq(megadeskDomainConversations.clientId, input.clientId)));
+          .where(and(eq(megadeskDomainConversations.conversationId, input.conversationId), eq(megadeskDomainConversations.clientId, ctx.tenantId)));
         // Também atualizar array em memória se existir
-        const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === input.clientId);
+        const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === ctx.tenantId);
         if (conv) { conv.assignedUserId = input.userId; conv.assignedUserName = input.userName; }
         try {
           const { getSocketIO } = require("../modules/whatsapp/socket/whatsapp.socket");
           const io = getSocketIO();
-          if (io) io.to(`client:${input.clientId}`).emit("conversation:assigned", { conversationId: input.conversationId, assignedUserId: input.userId, assignedUserName: input.userName, clientId: input.clientId });
+          if (io) io.to(`client:${ctx.tenantId}`).emit("conversation:assigned", { conversationId: input.conversationId, assignedUserId: input.userId, assignedUserName: input.userName, clientId: ctx.tenantId });
         } catch {}
         return { ok: true };
       }),
     reopen: megadeskProcedure
       .input(z.object({ conversationId: z.string(), clientId: z.string() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const { updateConversationStatus } = await import("./db");
-        await updateConversationStatus(input.conversationId, "open");
+        await updateConversationStatus(ctx.tenantId, input.conversationId, "open");
         // Também atualizar array em memória se existir
-        const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === input.clientId);
+        const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === ctx.tenantId);
         if (conv) conv.status = "open";
         try {
           const { getSocketIO } = require("../modules/whatsapp/socket/whatsapp.socket");
           const io = getSocketIO();
-          if (io) io.to(`client:${input.clientId}`).emit("conversation:reopened", { conversationId: input.conversationId, clientId: input.clientId });
+          if (io) io.to(`client:${ctx.tenantId}`).emit("conversation:reopened", { conversationId: input.conversationId, clientId: ctx.tenantId });
         } catch {}
         return { ok: true };
       }),

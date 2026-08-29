@@ -8,8 +8,10 @@
 
 import type { Request, Response } from "express";
 import { upsertSession, instanceNameFor } from "./session-store";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { getPool } from "../db";
+import { generateConversationPublicCode, withPublicCodeRetry } from "../conversation-public-code";
+import { persistCanonicalMessage } from "../conversation-message-store";
 import { getEvolutionWebhookSecret } from "./config";
 import { evoGetMediaBase64, normalizeEvolutionRecipient } from "./client";
 
@@ -221,7 +223,7 @@ async function handleMessagesUpsert(
 
     const externalMessageId = msg?.key?.id;
     if (!externalMessageId || typeof externalMessageId !== "string") continue;
-    await saveIncomingMessage(clientId, externalMessageId, phoneCandidates, pushName, text, now, payload);
+    await saveIncomingMessage(clientId, instanceName, externalMessageId, phoneCandidates, pushName, text, now, payload);
   }
 }
 
@@ -262,6 +264,7 @@ export function parseEvolutionIncomingMessage(msg: Record<string, any>): { text:
 
 async function saveIncomingMessage(
   clientId: string,
+  integrationId: string,
   externalMessageId: string,
   phoneCandidates: string[],
   pushName: string,
@@ -272,19 +275,37 @@ async function saveIncomingMessage(
   const phone = phoneCandidates[0];
   const pool = getPool();
   const connection = await pool.getConnection();
-  const lockName = `evo:${clientId}:${phone}`.slice(0, 64);
+  let lockName: string | null = null;
 
   try {
-    await connection.execute("SELECT GET_LOCK(?, 10)", [lockName]);
     await connection.beginTransaction();
+    const contactName = pushName || `+${phone}`;
+    await connection.execute(
+      `INSERT INTO megadesk_conversation_contacts
+       (contact_id, client_id, display_name, canonical_phone, channel, provider, external_identity)
+       VALUES (?, ?, ?, ?, 'whatsapp', 'evolution', ?)
+       ON DUPLICATE KEY UPDATE display_name = COALESCE(NULLIF(VALUES(display_name), ''), display_name)`,
+      [`contact-${randomUUID()}`, clientId, contactName, phone, phone],
+    );
+    const [contactRows] = await connection.execute(
+      `SELECT contact_id FROM megadesk_conversation_contacts
+       WHERE client_id = ? AND channel = 'whatsapp' AND provider = 'evolution' AND external_identity = ? LIMIT 1`,
+      [clientId, phone],
+    ) as any[];
+    const contactId = contactRows[0].contact_id as string;
+    const activeKey = createHash("sha256").update(`${clientId}\0evolution\0${integrationId}\0${contactId}`).digest("hex");
+    lockName = `mdc:${activeKey}`;
+    const [lockRows] = await connection.execute("SELECT GET_LOCK(?, 10) AS acquired", [lockName]) as any[];
+    if (Number(lockRows?.[0]?.acquired) !== 1) throw new Error("ATTENDANCE_LOCK_TIMEOUT");
     // 1. Busca conversa existente pelo telefone
     const [convRows] = await connection.execute(
       `SELECT conversation_id, messages_json, customer_name
        FROM megadesk_domain_conversations
-       WHERE client_id = ? AND phone IN (?, ?, ?)
+       WHERE client_id = ? AND status IN ('open', 'bot')
+         AND (active_key = ? OR (active_key IS NULL AND phone IN (?, ?, ?)))
        ORDER BY created_at DESC
        LIMIT 1 FOR UPDATE`,
-      [clientId, phoneCandidates[0], phoneCandidates[1] ?? phoneCandidates[0], phoneCandidates[2] ?? phoneCandidates[0]]
+      [clientId, activeKey, phoneCandidates[0], phoneCandidates[1] ?? phoneCandidates[0], phoneCandidates[2] ?? phoneCandidates[0]]
     ) as any[];
 
     const newMsg = {
@@ -299,33 +320,17 @@ async function saveIncomingMessage(
       // ─── Conversa existente: adiciona mensagem ───────────────────────────
       const conv      = convRows[0];
       const convId    = conv.conversation_id;
-      let   messages: any[] = [];
-
-      try { messages = JSON.parse(conv.messages_json || "[]"); } catch { messages = []; }
-      messages.push(newMsg);
-
-      // Atualiza mensagens — mantém status atual (bot ou open), não sobrescreve
-      const [insertResult] = await connection.execute(
-        `INSERT IGNORE INTO megadesk_domain_conversations_messages
-           (message_id, conversation_id, sender, message, timestamp, status)
-         VALUES (?, ?, 'customer', ?, ?, 'received')`,
-        [externalMessageId, convId, text, at],
-      ) as any[];
-      if (!insertResult.affectedRows) {
+      const inserted = await persistCanonicalMessage(connection, {
+        messageId: externalMessageId, externalMessageId, conversationId: convId, clientId,
+        provider: "evolution", integrationId, direction: "inbound", messageType: String(payload.type ?? "text"),
+        sender: "customer", text, status: "received", timestamp: at, legacyMessage: newMsg,
+        mediaReference: payload.type === "text" ? null : payload,
+        incrementUnread: true,
+      });
+      if (!inserted) {
         await connection.rollback();
         return "duplicate";
       }
-
-      await connection.execute(
-        `UPDATE megadesk_domain_conversations
-         SET messages_json     = ?,
-             last_message      = ?,
-             last_message_from = 'customer',
-             unread_count      = unread_count + 1,
-             updated_at        = NOW()
-         WHERE conversation_id = ? AND client_id = ?`,
-        [JSON.stringify(messages), text.substring(0, 255), convId, clientId]
-      );
 
       await emitToClient(clientId, "conversation:message", {
         conversationId: convId,
@@ -334,8 +339,9 @@ async function saveIncomingMessage(
       });
     } else {
       // ─── Nova conversa ───────────────────────────────────────────────────
-      const customerName = pushName || `+${phone}`;
+      const customerName = contactName;
       const conversationId = `conv-${randomUUID()}`;
+      let publicCode = "";
 
       // Garante que o contato existe
       await connection.execute(
@@ -345,29 +351,42 @@ async function saveIncomingMessage(
         [`cust-${randomUUID()}`, clientId, customerName, phone],
       );
 
-      await connection.execute(
-        `INSERT INTO megadesk_domain_conversations
-          (conversation_id, client_id, customer_name, phone, company, status, last_message,
-           last_message_from, time_label, messages_json, unread_count)
-         VALUES (?, ?, ?, ?, '', 'open', ?, 'customer', ?, ?, 1)`,
-        [conversationId, clientId, customerName, phone, text.substring(0, 255), newMsg.time, JSON.stringify([newMsg])],
-      );
+      publicCode = await withPublicCodeRetry(async (candidate) => {
+          publicCode = candidate;
+          await connection.execute(
+          `INSERT INTO megadesk_domain_conversations
+          (conversation_id, client_id, public_code, origin, channel, provider, integration_id,
+           contact_id, active_key, customer_name, phone, company, status, last_message, last_message_from, time_label,
+           messages_json, unread_count, opened_at)
+         VALUES (?, ?, ?, 'inbound', 'whatsapp', 'evolution', ?, ?, ?, ?, ?, '', 'bot', ?, 'customer', ?, ?, 1, NOW())`,
+         [conversationId, clientId, publicCode, integrationId, contactId, activeKey, customerName, phone,
+          text.substring(0, 255), newMsg.time, "[]"],
+          );
+          return candidate;
+      }, { generate: () => generateConversationPublicCode(at) });
 
-      await connection.execute(
-        `INSERT INTO megadesk_domain_conversations_messages
-           (message_id, conversation_id, sender, message, timestamp, status)
-         VALUES (?, ?, 'customer', ?, ?, 'received')`,
-        [externalMessageId, conversationId, text, at],
-      );
+      await persistCanonicalMessage(connection, {
+        messageId: externalMessageId, externalMessageId, conversationId, clientId,
+        provider: "evolution", integrationId, direction: "inbound", messageType: String(payload.type ?? "text"),
+        sender: "customer", text, status: "received", timestamp: at, legacyMessage: newMsg,
+        mediaReference: payload.type === "text" ? null : payload,
+        incrementUnread: true,
+      });
 
       // Garante status BOT (primeiro atendimento automático) e campos extras
       await connection.execute(
         `UPDATE megadesk_domain_conversations
          SET last_message_from = 'customer',
              unread_count = 1,
-             status = 'open'
+             status = 'bot'
          WHERE conversation_id = ? AND client_id = ?`,
         [conversationId, clientId]
+      );
+      await connection.execute(
+        `INSERT INTO megadesk_conversation_events
+         (event_id, client_id, conversation_id, event_type, metadata_json)
+         VALUES (?, ?, ?, 'created_inbound', '{"queue":"bot"}')`,
+        [`event-${randomUUID()}`, clientId, conversationId],
       );
 
       await emitToClient(clientId, "conversation:new", {
@@ -377,7 +396,8 @@ async function saveIncomingMessage(
           name:         customerName,
           phone,
           company:      "",
-          status:       "open",
+          status:       "bot",
+          publicCode,
           lastMessage:  text.substring(0, 255),
           unreadCount:  1,
           lastMessageFrom: "customer",
@@ -391,7 +411,7 @@ async function saveIncomingMessage(
     console.error(`[Evolution] incoming message persistence failed: clientId=${clientId}`);
     throw err;
   } finally {
-    await connection.execute("SELECT RELEASE_LOCK(?)", [lockName]).catch(() => undefined);
+    if (lockName) await connection.execute("SELECT RELEASE_LOCK(?)", [lockName]).catch(() => undefined);
     connection.release();
   }
 }

@@ -403,6 +403,13 @@ export const megadeskDomainConversations = mysqlTable(
       .notNull(),
     clientId: varchar("client_id", { length: 80 }).notNull(),
     crmClientId: varchar("crm_client_id", { length: 80 }),
+    publicCode: varchar("public_code", { length: 24 }),
+    contactId: varchar("contact_id", { length: 80 }),
+    origin: mysqlEnum(["inbound", "outbound"]),
+    channel: varchar({ length: 40 }),
+    provider: varchar({ length: 40 }),
+    integrationId: varchar("integration_id", { length: 120 }),
+    activeKey: varchar("active_key", { length: 255 }),
     customerName: varchar("customer_name", { length: 180 }).notNull(),
     phone: varchar({ length: 40 }).notNull(),
     company: varchar({ length: 255 }).notNull(),
@@ -419,6 +426,12 @@ export const megadeskDomainConversations = mysqlTable(
     iaActive: tinyint("ia_active").default(0),
     assignedUserId: varchar("assigned_user_id", { length: 80 }),
     assignedUserName: varchar("assigned_user_name", { length: 180 }),
+    openedAt: timestamp("opened_at", { mode: "string" }),
+    closedAt: timestamp("closed_at", { mode: "string" }),
+    closedByUserId: varchar("closed_by_user_id", { length: 80 }),
+    reopenedAt: timestamp("reopened_at", { mode: "string" }),
+    reopenedByUserId: varchar("reopened_by_user_id", { length: 80 }),
+    botSuspendedAt: timestamp("bot_suspended_at", { mode: "string" }),
     createdAt: timestamp("created_at", { mode: "string" })
       .defaultNow()
       .notNull(),
@@ -430,6 +443,64 @@ export const megadeskDomainConversations = mysqlTable(
   table => [
     index("idx_mdc_client").on(table.clientId),
     index("idx_mdc_status").on(table.status),
+    uniqueIndex("uq_mdc_public_code").on(table.publicCode),
+    uniqueIndex("uq_mdc_active_key").on(table.activeKey),
+    index("idx_mdc_tenant_contact").on(table.clientId, table.contactId),
+    index("idx_mdc_tenant_activity").on(table.clientId, table.status, table.updatedAt),
+  ]
+);
+
+export const megadeskConversationContacts = mysqlTable(
+  "megadesk_conversation_contacts",
+  {
+    contactId: varchar("contact_id", { length: 80 }).primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    displayName: varchar("display_name", { length: 180 }).notNull(),
+    canonicalPhone: varchar("canonical_phone", { length: 40 }),
+    channel: varchar({ length: 40 }).notNull(),
+    provider: varchar({ length: 40 }).notNull(),
+    externalIdentity: varchar("external_identity", { length: 180 }).notNull(),
+    crmClientId: varchar("crm_client_id", { length: 80 }),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow().onUpdateNow().notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mcc_identity").on(table.clientId, table.channel, table.provider, table.externalIdentity),
+    index("idx_mcc_tenant_phone").on(table.clientId, table.canonicalPhone),
+    index("idx_mcc_tenant_crm").on(table.clientId, table.crmClientId),
+  ]
+);
+
+export const megadeskConversationEvents = mysqlTable(
+  "megadesk_conversation_events",
+  {
+    eventId: varchar("event_id", { length: 80 }).primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    conversationId: varchar("conversation_id", { length: 80 }).notNull(),
+    eventType: varchar("event_type", { length: 40 }).notNull(),
+    operatorUserId: varchar("operator_user_id", { length: 80 }),
+    metadataJson: text("metadata_json").default("{}").notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+  },
+  table => [
+    index("idx_mce_tenant_conversation").on(table.clientId, table.conversationId, table.createdAt),
+  ]
+);
+
+export const megadeskConversationTickets = mysqlTable(
+  "megadesk_conversation_tickets",
+  {
+    linkId: varchar("link_id", { length: 80 }).primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    conversationId: varchar("conversation_id", { length: 80 }).notNull(),
+    chamadoId: varchar("chamado_id", { length: 80 }).notNull(),
+    contactId: varchar("contact_id", { length: 80 }),
+    linkedByUserId: varchar("linked_by_user_id", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mct_tenant_link").on(table.clientId, table.conversationId, table.chamadoId),
+    index("idx_mct_tenant_chamado").on(table.clientId, table.chamadoId),
   ]
 );
 
@@ -688,6 +759,16 @@ export const megadeskConversationMessages = mysqlTable(
   {
     messageId: varchar("message_id", { length: 100 }).primaryKey().notNull(),
     conversationId: varchar("conversation_id", { length: 80 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }),
+    externalMessageId: varchar("external_message_id", { length: 180 }),
+    provider: varchar({ length: 40 }),
+    integrationId: varchar("integration_id", { length: 120 }),
+    clientAttemptId: varchar("client_attempt_id", { length: 80 }),
+    direction: mysqlEnum(["inbound", "outbound", "system"]),
+    messageType: varchar("message_type", { length: 40 }),
+    senderUserId: varchar("sender_user_id", { length: 80 }),
+    senderNameSnapshot: varchar("sender_name_snapshot", { length: 180 }),
+    mediaReference: longtext("media_reference"),
     sender: varchar({ length: 180 }).notNull(),
     message: text().notNull(),
     timestamp: timestamp({ mode: "string" }).defaultNow().notNull(),
@@ -697,7 +778,12 @@ export const megadeskConversationMessages = mysqlTable(
       .onUpdateNow()
       .notNull(),
   },
-  table => [index("idx_mdcm_conversation").on(table.conversationId)]
+  table => [
+    index("idx_mdcm_conversation").on(table.conversationId),
+    index("idx_mdcm_tenant_conversation").on(table.clientId, table.conversationId, table.timestamp),
+    uniqueIndex("uq_mdcm_external").on(table.clientId, table.provider, table.integrationId, table.externalMessageId),
+    uniqueIndex("uq_mdcm_client_attempt").on(table.clientId, table.clientAttemptId),
+  ]
 );
 
 export const megadeskEvolutionSessions = mysqlTable(

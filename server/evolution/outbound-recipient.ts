@@ -7,6 +7,7 @@ type QueryExecutor = {
 export type OutboundConversation = {
   conversationId: string;
   clientId: string;
+  integrationId: string;
   conversationPhone: string;
   crmWhatsapp: string | null;
   crmPhone: string | null;
@@ -71,6 +72,7 @@ export async function loadOutboundConversation(
   const rows = rowsOf(await executor.execute(
     `SELECT c.conversation_id AS conversationId,
             c.client_id AS clientId,
+            COALESCE(c.integration_id, CONCAT('megadesk-', c.client_id)) AS integrationId,
             c.phone AS conversationPhone,
             crm.whatsapp AS crmWhatsapp,
             crm.phone AS crmPhone
@@ -87,6 +89,7 @@ export async function loadOutboundConversation(
   return {
     conversationId: String(row.conversationId),
     clientId: String(row.clientId),
+    integrationId: String(row.integrationId),
     conversationPhone: String(row.conversationPhone ?? ""),
     crmWhatsapp: row.crmWhatsapp == null ? null : String(row.crmWhatsapp),
     crmPhone: row.crmPhone == null ? null : String(row.crmPhone),

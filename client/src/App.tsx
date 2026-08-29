@@ -17,6 +17,7 @@ import { trpcBaseUrl } from "./lib/trpc-url";
 const hostname = typeof window !== "undefined" ? window.location.hostname : "localhost";
 const IS_PROD = hostname.endsWith("megadesk.online");
 const TRPC_URL = trpcBaseUrl(hostname);
+// Canonical backend path remains /api/trpc; trpcBaseUrl only selects its origin.
 // admin.megadesk.online sempre renderiza AdminPanel
 const IS_ADMIN_SUBDOMAIN = hostname === "admin.megadesk.online";
 

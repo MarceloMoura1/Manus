@@ -110,9 +110,11 @@ describe("Evolution webhook HTTP contract", () => {
     const connection = {
       beginTransaction: vi.fn(), commit: vi.fn(), rollback: vi.fn(), release: vi.fn(),
       execute: vi.fn()
-        .mockResolvedValueOnce([{}])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([[{ contact_id: "contact-a" }]])
+        .mockResolvedValueOnce([[{ acquired: 1 }]])
         .mockResolvedValueOnce([[{ conversation_id: "conv-a", messages_json: "[]", customer_name: "Cliente" }]])
-        .mockResolvedValueOnce([{ affectedRows: 0 }])
+        .mockRejectedValueOnce({ code: "ER_DUP_ENTRY", sqlMessage: "Duplicate entry for key 'uq_mdcm_external'" })
         .mockResolvedValueOnce([{}]),
     };
     webhookMocks.poolExecute.mockResolvedValueOnce([[{ clientId: "tenant-a" }]]);
@@ -127,9 +129,12 @@ describe("Evolution webhook HTTP contract", () => {
     const connection = {
       beginTransaction: vi.fn(), commit: vi.fn(), rollback: vi.fn(), release: vi.fn(),
       execute: vi.fn()
-        .mockResolvedValueOnce([{}])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([[{ contact_id: "contact-a" }]])
+        .mockResolvedValueOnce([[{ acquired: 1 }]])
         .mockResolvedValueOnce([[{ conversation_id: "conv-a", messages_json: "[]", customer_name: "Cliente" }]])
         .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([[{ messages_json: "[]" }]])
         .mockResolvedValueOnce([{}])
         .mockResolvedValueOnce([{}]),
     };

@@ -4,6 +4,7 @@
  */
 
 import { getPool } from "./db";
+import { randomUUID } from "node:crypto";
 import { loadMegaDeskStructuredState, saveMegaDeskStructuredState } from "./db";
 
 export interface EvolutionWebhookPayload {
@@ -94,7 +95,7 @@ export async function handleIncomingMessage(payload: EvolutionWebhookPayload): P
         console.log(`[Evolution Webhook] Conversa existente: ${conversationId}`);
       } else {
         // Criar nova conversa
-        conversationId = `conv-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+        conversationId = `conv-${randomUUID()}`;
 
         await connection.execute(
           `INSERT INTO megadesk_domain_conversations 
