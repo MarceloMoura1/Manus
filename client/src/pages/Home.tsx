@@ -1538,15 +1538,9 @@ function ConversationsPage() {
         open={conversationDetailsOpen}
         onClose={() => setConversationDetailsOpen(false)}
         onContactUpdated={({ displayName, companyText }) => setConversations(current => current.map(item => item.contactId === selectedConv.contactId ? { ...item, name: displayName, companyText } : item))}
+        onCrmLinked={({ crmClientId, companyName }) => setConversations(current => current.map(item => item.contactId === selectedConv.contactId ? { ...item, crmClientId, companyName: companyName ?? null } : item))}
         onToast={showToast}
         onNavigate={(route, detail) => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route, ...detail } }))}
-        onSelectConversation={(item) => {
-          setConversations(current => current.some(conversation => conversation.id === item.id) ? current : [...current, {
-            ...item, name: item.customerName, phone: selectedConv.phone, company: selectedConv.company, companyText: selectedConv.companyText, companyName: selectedConv.companyName,
-            assignedTo: item.assignedUserName, timestamp: item.startedAt,
-          }]);
-          setSelectedConversation(item.id);
-        }}
       />}
 
       {transferOpen && selectedConv && (
@@ -1709,6 +1703,19 @@ export function TicketsPage() {
   const [isSearchingCompany, setIsSearchingCompany] = React.useState(false);
   const [selectedCrmCustomer, setSelectedCrmCustomer] = React.useState<any | null>(null);
   const [showCompanyDropdown, setShowCompanyDropdown] = React.useState(false);
+
+  React.useEffect(() => {
+    const raw = sessionStorage.getItem("MEGADESK_TICKET_INTENT");
+    if (!raw) return;
+    sessionStorage.removeItem("MEGADESK_TICKET_INTENT");
+    try {
+      const intent = JSON.parse(raw);
+      if (intent.mode !== "create" || !intent.crmClientId) return;
+      setSelectedCrmCustomer({ id: intent.crmClientId, company: intent.companyName || "", name: intent.contactName || "" });
+      setNewChamadoForm(current => ({ ...current, company: intent.companyName || "", customerName: intent.contactName || "" }));
+      setShowNewChamadoModal(true);
+    } catch { /* intenção inválida é ignorada */ }
+  }, []);
 
   // Queries tRPC
   const chamadosQuery = trpc.chamados.list.useQuery(
@@ -3611,6 +3618,9 @@ function Shell() {
           localStorage.removeItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
         }
         const route = detail.route === "clients" ? "erp-clients" : detail.route as RouteId;
+        if (route === "tickets" && detail.mode === "create" && typeof detail.crmClientId === "string") {
+          sessionStorage.setItem("MEGADESK_TICKET_INTENT", JSON.stringify({ mode: "create", crmClientId: detail.crmClientId, companyName: detail.companyName, contactName: detail.contactName, conversationId: detail.conversationId }));
+        }
         navigateToRoute(route, { crmClientId: typeof detail.crmClientId === "string" ? detail.crmClientId : undefined });
       }
     };

@@ -54,6 +54,23 @@ async function eligibleUser(tenantId: string, userId: string) {
 }
 
 export const conversationsRouter = router({
+  companyCandidates: megadeskProcedure.input(z.object({
+    search: z.string().trim().max(120).default(""),
+    limit: z.number().int().min(1).max(25).default(10),
+    offset: z.number().int().min(0).default(0),
+  })).query(async ({ input, ctx }) => {
+    requireConversationAccess(ctx);
+    const search = `%${input.search}%`;
+    const [rows] = await getPool().execute(
+      `SELECT crm_client_id AS id, company_name AS name, cpf_cnpj AS document, customer_type AS customerType
+       FROM megadesk_crm_clients
+       WHERE client_id = ? AND customer_type = 'company'
+         AND (? = '%%' OR company_name LIKE ? OR cpf_cnpj LIKE ?)
+       ORDER BY company_name, crm_client_id LIMIT ${input.limit} OFFSET ${input.offset}`,
+      [ctx.tenantId, search, search, search],
+    ) as any[];
+    return { items: rows, hasMore: rows.length === input.limit };
+  }),
   list: megadeskProcedure.input(listInput).query(async ({ input, ctx }) => {
     requireConversationAccess(ctx);
     const eligibleOwner = `EXISTS (SELECT 1 FROM megadesk_domain_client_users u
@@ -73,15 +90,17 @@ export const conversationsRouter = router({
     const [rows] = await getPool().execute(
       `SELECT c.conversation_id AS id, c.public_code AS publicCode, c.contact_id AS contactId,
        COALESCE(contact.display_name, c.customer_name) AS customerName, c.phone AS customerPhone,
-       contact.company_text AS companyText, c.company AS companyName,
+       contact.company_text AS companyText, crm.company_name AS companyName,
        c.last_message AS lastMessage, c.updated_at AS lastMessageAt, c.unread_count AS unreadCount,
        CASE WHEN c.status = 'bot' THEN 'pending' ELSE c.status END AS status,
        c.assigned_user_id AS assignedUserId, c.assigned_user_name AS assignedUserName,
-       c.last_message_from AS lastMessageFrom, c.crm_client_id AS crmClientId, c.origin,
+       c.last_message_from AS lastMessageFrom, contact.crm_client_id AS crmClientId, c.origin,
        c.created_at AS createdAt, c.closed_at AS closedAt
        FROM megadesk_domain_conversations c
        LEFT JOIN megadesk_conversation_contacts contact
          ON contact.contact_id = c.contact_id AND contact.client_id = c.client_id
+       LEFT JOIN megadesk_crm_clients crm
+         ON crm.crm_client_id = contact.crm_client_id AND crm.client_id = c.client_id
        WHERE ${conditions.join(" AND ")}
        ORDER BY (c.public_code = ?) DESC, c.updated_at DESC LIMIT ${input.limit} OFFSET ${input.offset}`,
       [...values, input.search || ""],
@@ -254,17 +273,44 @@ export const conversationsRouter = router({
     return rows as any[];
   }),
 
+  historyDetail: megadeskProcedure.input(z.object({ conversationId: id })).query(async ({ input, ctx }) => {
+    requireConversationAccess(ctx);
+    const [conversations] = await getPool().execute(
+      `SELECT conversation_id AS id, public_code AS publicCode, status,
+       customer_name AS customerName, assigned_user_name AS assignedUserName,
+       created_at AS startedAt, closed_at AS closedAt, messages_json AS messagesJson
+       FROM megadesk_domain_conversations WHERE client_id = ? AND conversation_id = ? LIMIT 1`,
+      [ctx.tenantId, input.conversationId],
+    ) as any[];
+    if (!conversations.length) throw new TRPCError({ code: "NOT_FOUND", message: "Atendimento não encontrado." });
+    const [rows] = await getPool().execute(
+      `SELECT message_id AS id, sender, message AS text, timestamp, status, direction,
+       message_type AS type, sender_name_snapshot AS agentName, media_reference AS mediaReference
+       FROM megadesk_domain_conversations_messages
+       WHERE client_id = ? AND conversation_id = ? ORDER BY timestamp ASC, message_id ASC LIMIT 200`,
+      [ctx.tenantId, input.conversationId],
+    ) as any[];
+    let messages = rows.map(normalizedMessage);
+    if (!messages.length) {
+      try { messages = JSON.parse(conversations[0].messagesJson || "[]").slice(0, 200); } catch { messages = []; }
+    }
+    const { messagesJson: _private, ...conversation } = conversations[0];
+    return { conversation, messages };
+  }),
+
   linkedTickets: megadeskProcedure.input(z.object({ conversationId: id })).query(async ({ input, ctx }) => {
     requireConversationAccess(ctx);
     const [rows] = await getPool().execute(
       `SELECT DISTINCT t.chamadoId AS id, t.chamadoNumber AS number, t.title, t.status, t.createdAt AS createdAt
        FROM megadesk_domain_conversations c
+       LEFT JOIN megadesk_conversation_contacts contact
+         ON contact.client_id = c.client_id AND contact.contact_id = c.contact_id
        JOIN megadesk_domain_chamados t ON t.clientId = c.client_id
        LEFT JOIN megadesk_conversation_tickets l
          ON l.client_id = c.client_id AND l.chamado_id = t.chamadoId
         AND (l.contact_id = c.contact_id OR l.conversation_id = c.conversation_id)
        WHERE c.client_id = ? AND c.conversation_id = ?
-         AND (l.link_id IS NOT NULL OR (c.crm_client_id IS NOT NULL AND t.customerId = c.crm_client_id))
+          AND (l.link_id IS NOT NULL OR (contact.crm_client_id IS NOT NULL AND t.customerId = contact.crm_client_id))
        ORDER BY t.createdAt DESC, t.chamadoId DESC LIMIT 50`,
       [ctx.tenantId, input.conversationId],
     );
@@ -312,32 +358,30 @@ export const conversationsRouter = router({
       return rows[0];
     }),
 
-  linkCrm: megadeskProcedure.input(z.object({ conversationId: id, contactId: id, crmClientId: id }))
+  linkCrm: megadeskProcedure.input(z.object({ contactId: id, crmClientId: id.nullable() }))
     .mutation(async ({ input, ctx }) => {
       requireConversationAccess(ctx);
       const connection = await getPool().getConnection();
       try {
         await connection.beginTransaction();
-        const [crm] = await connection.execute(
-          `SELECT crm_client_id FROM megadesk_crm_clients WHERE crm_client_id = ? AND client_id = ? LIMIT 1 FOR UPDATE`,
-          [input.crmClientId, ctx.tenantId],
+        const [contacts] = await connection.execute(
+          `SELECT contact_id FROM megadesk_conversation_contacts WHERE contact_id = ? AND client_id = ? LIMIT 1 FOR UPDATE`,
+          [input.contactId, ctx.tenantId],
         ) as any[];
-        const [attendance] = await connection.execute(
-          `SELECT conversation_id FROM megadesk_domain_conversations WHERE conversation_id = ? AND contact_id = ? AND client_id = ? LIMIT 1 FOR UPDATE`,
-          [input.conversationId, input.contactId, ctx.tenantId],
-        ) as any[];
-        if (!crm.length || !attendance.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Contato, cliente ou atendimento divergente." });
-        await connection.execute(
+        if (!contacts.length) throw new TRPCError({ code: "NOT_FOUND", message: "Contato não encontrado." });
+        if (input.crmClientId) {
+          const [crm] = await connection.execute(
+            `SELECT crm_client_id FROM megadesk_crm_clients WHERE crm_client_id = ? AND client_id = ? AND customer_type = 'company' LIMIT 1`,
+            [input.crmClientId, ctx.tenantId],
+          ) as any[];
+          if (!crm.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Empresa indisponível para vínculo." });
+        }
+        const [updated] = await connection.execute(
           `UPDATE megadesk_conversation_contacts SET crm_client_id = ?, updated_at = NOW() WHERE contact_id = ? AND client_id = ?`,
           [input.crmClientId, input.contactId, ctx.tenantId],
-        );
-        await connection.execute(
-          `UPDATE megadesk_domain_conversations SET crm_client_id = ?, updated_at = NOW() WHERE conversation_id = ? AND client_id = ?`,
-          [input.crmClientId, input.conversationId, ctx.tenantId],
-        );
-        await attendanceEvent(connection, ctx.tenantId, input.conversationId, "crm_linked", ctx.operationalUserId,
-          { crmClientId: input.crmClientId });
-        await connection.commit(); return { ok: true };
+        ) as any[];
+        if (!updated.affectedRows) throw new TRPCError({ code: "NOT_FOUND", message: "Contato não encontrado." });
+        await connection.commit(); return { ok: true, crmClientId: input.crmClientId };
       } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); }
     }),
 

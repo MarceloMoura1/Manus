@@ -34,7 +34,9 @@ async function mockedPage(page: Page, deepLink = false) {
       : name.includes("conversations.counts") ? { active: 3, closed: 4, waiting: 2, mine: 1 }
       : name.includes("conversations.eligibleUsers") ? [{ id: "user-ui", name: "Agent", email: "agent@example.test", role: "agent" }]
       : name.includes("conversations.messages") ? { source: "legacy_json", messages: [{ id: "legacy-1", from: "customer", text: "Mensagem legada", type: "text", timestamp: new Date().toISOString() }] }
-      : name.includes("conversations.history") ? [{ id: conversation.id, publicCode: conversation.publicCode, status: "open", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }]
+      : name.includes("conversations.companyCandidates") ? { items: [{ id: "crm-ui", name: "Empresa CRM UI", document: "12345678000190", customerType: "company" }], hasMore: false }
+      : name.includes("conversations.historyDetail") ? { conversation: { id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, messages: [{ id: "history-message", from: "customer", type: "text", text: "Mensagem histórica", timestamp: new Date().toISOString() }] }
+      : name.includes("conversations.history") ? [{ id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: conversation.id, publicCode: conversation.publicCode, status: "open", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }]
       : name.includes("conversations.linkedTickets") ? []
       : name.includes("conversations.updateContact") ? { contactId: conversation.contactId, displayName: "Cliente Editado", companyText: "Empresa Informada", canonicalPhone: conversation.customerPhone, crmClientId: conversation.crmClientId }
       : { ok: true };
@@ -202,6 +204,22 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(page.getByTestId("conversation-details-panel")).toHaveCount(0);
   });
 
+  test("opens prior history read-only without changing the operational conversation", async ({ page }) => {
+    const { calls } = await mockedPage(page, true);
+    await page.locator('button[aria-controls="conversation-details-panel"]').click();
+    await page.getByRole("button", { name: /CV-HIST-1/ }).click();
+    const modal = page.getByRole("dialog", { name: /Cliente UI/ });
+    await expect(modal).toBeVisible();
+    await expect(modal.getByText("Somente leitura")).toBeVisible();
+    await expect(modal.getByText("Mensagem histórica", { exact: true })).toBeVisible();
+    await expect(modal.getByTestId("conversation-composer")).toHaveCount(0);
+    await expect(page.getByTestId("conversation-chat-panel").getByText("Mensagem legada")).toBeVisible();
+    expect(calls.some(name => name.includes("conversations.claim") || name.includes("conversations.transfer") || name.includes("conversations.close") || name.includes("conversations.reopen"))).toBe(false);
+    await page.keyboard.press("Escape");
+    await expect(modal).toHaveCount(0);
+    await expect(page.getByTestId("conversation-chat-panel").getByText("Mensagem legada")).toBeVisible();
+  });
+
   for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 1024, height: 768 }, { width: 1440, height: 900 }]) {
     test(`remains usable at ${viewport.width}px`, async ({ page }) => {
       await page.setViewportSize(viewport);
@@ -211,6 +229,8 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
       await page.locator('button[aria-controls="conversation-details-panel"]').click();
       await expect(page.getByTestId("conversation-details-panel")).toBeVisible();
       await expect(page.getByTestId("conversation-composer")).toBeVisible();
+      await page.getByRole("button", { name: /CV-HIST-1/ }).click();
+      await expect(page.getByRole("dialog", { name: /Cliente UI/ })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     });
   }
