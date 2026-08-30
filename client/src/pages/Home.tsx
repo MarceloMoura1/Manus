@@ -1073,7 +1073,7 @@ function ConversationsPage() {
         {/* Filtros de responsabilidade no layout compacto anterior */}
         <div className="px-3 py-2 bg-white border-b border-slate-100">
           <div className="flex rounded-lg border border-slate-200 overflow-hidden">
-            {(['all', 'mine', 'waiting'] as const).map((f, i) => (
+            {(['all', 'mine'] as const).map((f, i) => (
               <button
                 key={f}
                 onClick={() => { 
@@ -1086,7 +1086,21 @@ function ConversationsPage() {
                   ownerFilter === f ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
                 )}
               >
-                {f === 'all' ? 'Todas' : f === 'mine' ? 'Minhas' : 'Bot/Aguardando'}
+                {f === 'all' ? 'Todas' : 'Minhas'}
+              </button>
+            ))}
+            {filters.filter(filter => filter.id === 'closed').map(filter => (
+              <button
+                key={filter.id}
+                onClick={() => setSelectedFilter(filter.id)}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all duration-200 border-l border-slate-200',
+                  selectedFilter === filter.id ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                )}
+              >
+                <span className={cn('w-1.5 h-1.5 rounded-full', selectedFilter === filter.id ? 'bg-white' : filter.dot)} />
+                <span>{filter.label}</span>
+                <span className={cn('text-xs font-bold', selectedFilter === filter.id ? 'text-blue-100' : 'text-slate-400')}>{filter.count}</span>
               </button>
             ))}
           </div>
@@ -1095,17 +1109,14 @@ function ConversationsPage() {
         {/* Estados do atendimento no layout compacto anterior */}
         <div className="px-3 py-2 bg-white border-b border-slate-100">
           <div className="flex rounded-lg border border-slate-200 overflow-hidden">
-            {filters.map((filter, i) => (
+            {filters.filter(filter => filter.id === 'active').map(filter => (
               <button
                 key={filter.id}
                 onClick={() => setSelectedFilter(filter.id)}
                 className={cn(
                   'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all duration-200',
-                  i > 0 && 'border-l border-slate-200',
                   selectedFilter === filter.id
-                      ? filter.id === 'active'
                       ? 'bg-emerald-500 text-white'
-                      : 'bg-blue-600 text-white'
                     : 'bg-white text-slate-600 hover:bg-slate-50'
                 )}
               >
@@ -1119,7 +1130,19 @@ function ConversationsPage() {
                 )}>{filter.count}</span>
               </button>
             ))}
-
+            <button
+              aria-label="BOT/Aguardando"
+              onClick={() => {
+                setOwnerFilter('waiting');
+                setAttendantFilter('');
+              }}
+              className={cn(
+                'flex-1 px-3 py-1.5 text-xs font-medium transition-all duration-150 border-l border-slate-200',
+                ownerFilter === 'waiting' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+              )}
+            >
+              BOT
+            </button>
           </div>
         </div>
 

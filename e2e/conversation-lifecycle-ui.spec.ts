@@ -38,13 +38,30 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(page.getByText("Cliente UI", { exact: true }).first()).toBeVisible();
     await expect(page.getByTestId("conversation-chat-panel")).toBeVisible();
     await expect(page.getByText("Mensagem legada").last()).toBeVisible();
-    for (const label of ["Todas", "Minhas", "Bot/Aguardando", "Abertas", "Encerradas"]) {
+    for (const label of ["Todas", "Minhas", "Encerradas", "Abertas", "BOT/Aguardando"]) {
       await expect(page.getByRole("button", { name: new RegExp(label) })).toBeVisible();
     }
     await expect(page.getByTestId("conversation-list-panel")).toHaveClass(/min-\[900px\]:w-\[420px\]/);
     await expect(page.locator(".fixed.inset-0.z-40")).toHaveCount(0);
+    const all = page.getByRole("button", { name: "Todas" });
+    await expect(all.locator("xpath=following-sibling::button[1]")).toHaveAccessibleName("Minhas");
+    await expect(all.locator("xpath=following-sibling::button[2]")).toHaveAccessibleName(/Encerradas/);
+    const open = page.getByRole("button", { name: /Abertas/ });
+    await expect(open.locator("xpath=following-sibling::button[1]")).toHaveAccessibleName("BOT/Aguardando");
+    await expect(page.getByRole("button", { name: /Encerradas/ })).toContainText("1");
+    await expect(open).toContainText("1");
+    await all.click();
+    await expect(all).toHaveClass(/bg-blue-600/);
     await page.getByRole("button", { name: "Minhas" }).click();
-    await page.getByRole("button", { name: "Bot/Aguardando" }).click();
+    await expect(page.getByRole("button", { name: "Minhas" })).toHaveClass(/bg-blue-600/);
+    const closed = page.getByRole("button", { name: /Encerradas/ });
+    await closed.click();
+    await expect(closed).toHaveClass(/bg-blue-600/);
+    await open.click();
+    await expect(open).toHaveClass(/bg-emerald-500/);
+    const bot = page.getByRole("button", { name: "BOT/Aguardando" });
+    await bot.click();
+    await expect(bot).toHaveClass(/bg-blue-600/);
     await page.goto("/?conversationId=conv-ui");
     await expect(page.getByTestId("conversation-chat-panel")).toBeVisible();
     expect(calls.some(name => name.includes("conversations.list"))).toBe(true);
