@@ -5,7 +5,7 @@ vi.mock("../db", () => ({ getPool: () => ({ execute: webhookMocks.poolExecute, g
 vi.mock("./config", () => ({ getEvolutionWebhookSecret: () => "webhook-secret" }));
 vi.mock("./session-store", () => ({ upsertSession: webhookMocks.upsertSession, instanceNameFor: (clientId: string) => `megadesk-${clientId}` }));
 
-import { evolutionPhoneCandidates, handleEvolutionWebhook, normalizeEvolutionEvent, parseEvolutionIncomingMessage } from "./webhook";
+import { evolutionPhoneCandidates, handleEvolutionWebhook, normalizeEvolutionEvent, parseEvolutionIncomingMessage, saveIncomingMessage } from "./webhook";
 
 function responseDouble() {
   const response: any = { statusCode: 200, body: undefined };
@@ -110,9 +110,10 @@ describe("Evolution webhook HTTP contract", () => {
     const connection = {
       beginTransaction: vi.fn(), commit: vi.fn(), rollback: vi.fn(), release: vi.fn(),
       execute: vi.fn()
+        .mockResolvedValueOnce([[{ acquired: 1 }]])
+        .mockResolvedValueOnce([[]])
         .mockResolvedValueOnce([{ affectedRows: 1 }])
         .mockResolvedValueOnce([[{ contact_id: "contact-a" }]])
-        .mockResolvedValueOnce([[{ acquired: 1 }]])
         .mockResolvedValueOnce([[{ conversation_id: "conv-a", messages_json: "[]", customer_name: "Cliente" }]])
         .mockRejectedValueOnce({ code: "ER_DUP_ENTRY", sqlMessage: "Duplicate entry for key 'uq_mdcm_external'" })
         .mockResolvedValueOnce([{}]),
@@ -129,9 +130,10 @@ describe("Evolution webhook HTTP contract", () => {
     const connection = {
       beginTransaction: vi.fn(), commit: vi.fn(), rollback: vi.fn(), release: vi.fn(),
       execute: vi.fn()
+        .mockResolvedValueOnce([[{ acquired: 1 }]])
+        .mockResolvedValueOnce([[]])
         .mockResolvedValueOnce([{ affectedRows: 1 }])
         .mockResolvedValueOnce([[{ contact_id: "contact-a" }]])
-        .mockResolvedValueOnce([[{ acquired: 1 }]])
         .mockResolvedValueOnce([[{ conversation_id: "conv-a", messages_json: "[]", customer_name: "Cliente" }]])
         .mockResolvedValueOnce([{ affectedRows: 1 }])
         .mockResolvedValueOnce([[{ messages_json: "[]" }]])
@@ -147,11 +149,99 @@ describe("Evolution webhook HTTP contract", () => {
   });
 
   it("returns 503 when persistence fails so the provider can retry", async () => {
-    const connection = { beginTransaction: vi.fn(), commit: vi.fn(), rollback: vi.fn(), release: vi.fn(), execute: vi.fn().mockResolvedValueOnce([{}]).mockRejectedValueOnce(new Error("db unavailable")).mockResolvedValueOnce([{}]) };
+    const connection = { beginTransaction: vi.fn(), commit: vi.fn(), rollback: vi.fn(), release: vi.fn(), execute: vi.fn().mockResolvedValueOnce([[{ acquired: 1 }]]).mockRejectedValueOnce(new Error("db unavailable")).mockResolvedValueOnce([{}]) };
     webhookMocks.poolExecute.mockResolvedValueOnce([[{ clientId: "tenant-a" }]]);
     webhookMocks.getConnection.mockResolvedValueOnce(connection);
     const res = responseDouble();
     await handleEvolutionWebhook({ headers: { "x-megadesk-webhook-secret": "webhook-secret" }, body: { event: "MESSAGES_UPSERT", instance: "megadesk-tenant-a", data: { messages: [{ key: { id: "external-b", remoteJid: "5541995484515@s.whatsapp.net", fromMe: false }, message: { conversation: "Olá" } }] } } } as any, res);
     expect(res.statusCode).toBe(503);
+  });
+});
+
+describe("Evolution inbound attendance lifecycle", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it.each(["open", "bot"])("appends an inbound message to an existing %s attendance", async () => {
+    const connection = {
+      beginTransaction: vi.fn(), commit: vi.fn(), rollback: vi.fn(), release: vi.fn(),
+      execute: vi.fn()
+        .mockResolvedValueOnce([[{ acquired: 1 }]])
+        .mockResolvedValueOnce([[]])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([[{ contact_id: "contact-a" }]])
+        .mockResolvedValueOnce([[{ conversation_id: "conv-active", messages_json: "[]", customer_name: "Known" }]])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([[{ messages_json: "[]" }]])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([{}]),
+    };
+    webhookMocks.getConnection.mockResolvedValue(connection);
+    await expect(saveIncomingMessage("tenant-a", "instance-a", "event-a", ["5541999999999"], "Known", "Oi", new Date()))
+      .resolves.toBe("persisted");
+    const sql = connection.execute.mock.calls.map(call => String(call[0])).join("\n");
+    expect(sql).toContain("status IN ('open', 'bot')");
+    expect(sql).not.toContain("INSERT INTO megadesk_domain_conversations\n          (");
+    expect(connection.commit).toHaveBeenCalledOnce();
+  });
+
+  it("creates a new unassigned bot attendance when only closed history exists", async () => {
+    const connection = {
+      beginTransaction: vi.fn(), commit: vi.fn(), rollback: vi.fn(), release: vi.fn(),
+      execute: vi.fn()
+        .mockResolvedValueOnce([[{ acquired: 1 }]])
+        .mockResolvedValueOnce([[]])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([[{ contact_id: "contact-a" }]])
+        .mockResolvedValueOnce([[]])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([[{ messages_json: "[]" }]])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([{}]),
+    };
+    webhookMocks.getConnection.mockResolvedValue(connection);
+    await expect(saveIncomingMessage("tenant-a", "instance-a", "event-new", ["5541999999999"], "Known", "Nova", new Date()))
+      .resolves.toBe("persisted");
+    const insert = connection.execute.mock.calls.find(call => String(call[0]).includes("INSERT INTO megadesk_domain_conversations\n"));
+    expect(insert).toBeTruthy();
+    expect(String(insert?.[0])).toContain("'bot'");
+    expect(insert?.[1][1]).toBe("tenant-a");
+    expect(insert?.[1][2]).toMatch(/^CV-/);
+    expect(String(insert?.[1][0])).toMatch(/^conv-/);
+    expect(connection.commit).toHaveBeenCalledOnce();
+  });
+
+  it("deduplicates before creating contacts or attendances, scoped by tenant and integration", async () => {
+    const connection = {
+      beginTransaction: vi.fn(), commit: vi.fn(), rollback: vi.fn(), release: vi.fn(),
+      execute: vi.fn()
+        .mockResolvedValueOnce([[{ acquired: 1 }]])
+        .mockResolvedValueOnce([[{ message_id: "event-a" }]])
+        .mockResolvedValueOnce([{}]),
+    };
+    webhookMocks.getConnection.mockResolvedValue(connection);
+    await expect(saveIncomingMessage("tenant-a", "instance-a", "event-a", ["5541999999999"], "", "Oi", new Date()))
+      .resolves.toBe("duplicate");
+    expect(connection.execute.mock.calls[1][1]).toEqual(["tenant-a", "instance-a", "event-a"]);
+    expect(connection.commit).not.toHaveBeenCalled();
+    expect(connection.rollback).toHaveBeenCalledOnce();
+  });
+
+  it("acquires the canonical phone lock before opening the transaction", async () => {
+    const order: string[] = [];
+    const connection = {
+      beginTransaction: vi.fn(async () => { order.push("transaction"); }), commit: vi.fn(), rollback: vi.fn(), release: vi.fn(),
+      execute: vi.fn(async (sql: string) => {
+        if (sql.includes("GET_LOCK")) { order.push("lock"); return [[{ acquired: 1 }]]; }
+        if (sql.includes("external_message_id")) return [[{ message_id: "duplicate" }]];
+        return [{}];
+      }),
+    };
+    webhookMocks.getConnection.mockResolvedValue(connection);
+    await saveIncomingMessage("tenant-a", "instance-a", "event-a", ["5541999999999"], "", "Oi", new Date());
+    expect(order).toEqual(["lock", "transaction"]);
   });
 });

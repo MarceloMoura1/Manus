@@ -1200,6 +1200,10 @@ export const appRouter = router({
       .input(z.object({ customerId: z.string(), customerName: z.string(), phone: z.string(), company: z.string(), clientId: z.string().min(1), fromCrm: z.boolean().optional(), crmClientId: z.string().optional() }))
       .mutation(async ({ input, ctx }) => {
         try {
+          if (!ctx.operationalPermissions?.includes("active-attendance") ||
+              !ctx.operationalUserRole || !["admin", "manager", "agent"].includes(ctx.operationalUserRole)) {
+            throw new TRPCError({ code: "FORBIDDEN", message: "Operador sem acesso ao Atendimento Ativo." });
+          }
           if (input.clientId !== ctx.tenantId) {
             throw new TRPCError({ code: "FORBIDDEN", message: "Tenant inválido." });
           }
@@ -1208,6 +1212,16 @@ export const appRouter = router({
           const client = getReleasedClientOrThrow(ctx.tenantId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
           const canonicalPhone = normalizeEvolutionRecipient(input.phone);
+          const [operatorRows] = await getPool().execute(
+            `SELECT user_id, name FROM megadesk_domain_client_users
+             WHERE client_id = ? AND user_id = ? AND status = 'active' AND role IN ('admin','manager','agent')
+               AND JSON_CONTAINS(permissions_json, JSON_QUOTE('active-attendance')) LIMIT 1`,
+            [ctx.tenantId, ctx.operationalUserId],
+          ) as any[];
+          if (!operatorRows.length) {
+            throw new TRPCError({ code: "FORBIDDEN", message: "Operador indisponível para iniciar atendimento." });
+          }
+          const operator = operatorRows[0] as { user_id: string; name: string };
 
           // Se veio do CRM, garantir que o contato existe em megadesk_domain_customers
           // Busca por telefone OU por customerId para evitar duplicata
@@ -1234,11 +1248,23 @@ export const appRouter = router({
             }
           }
           
+          const { getSession } = await import("./evolution/session-store");
+          const evolutionSession = await getSession(ctx.tenantId);
+          if (!evolutionSession) {
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Instância de atendimento não vinculada ao tenant." });
+          }
+          const integrationId = evolutionSession.instanceName;
           const connection = await getPool().getConnection();
           let conversationId = "";
           let attendanceLock: string | null = null;
+          let transactionStarted = false;
           try {
+            const phoneLockKey = createHash("sha256").update(`${ctx.tenantId}\0evolution\0${integrationId}\0${canonicalPhone}`).digest("hex").slice(0, 54);
+            attendanceLock = `mdc-phone:${phoneLockKey}`;
+            const [lockRows] = await connection.execute("SELECT GET_LOCK(?, 10) AS acquired", [attendanceLock]) as any[];
+            if (Number(lockRows?.[0]?.acquired) !== 1) throw new Error("ATTENDANCE_LOCK_TIMEOUT");
             await connection.beginTransaction();
+            transactionStarted = true;
             const contactId = `contact-${randomUUID()}`;
             await connection.execute(
               `INSERT INTO megadesk_conversation_contacts
@@ -1252,11 +1278,7 @@ export const appRouter = router({
                AND provider = 'evolution' AND external_identity = ? LIMIT 1 FOR UPDATE`, [ctx.tenantId, canonicalPhone],
             ) as any[];
             const canonicalContactId = contactRows[0].contact_id as string;
-            const integrationId = `megadesk-${ctx.tenantId}`;
             const activeKey = createHash("sha256").update(`${ctx.tenantId}\0evolution\0${integrationId}\0${canonicalContactId}`).digest("hex");
-            attendanceLock = `mdc:${activeKey}`;
-            const [lockRows] = await connection.execute("SELECT GET_LOCK(?, 10) AS acquired", [attendanceLock]) as any[];
-            if (Number(lockRows?.[0]?.acquired) !== 1) throw new Error("ATTENDANCE_LOCK_TIMEOUT");
             const [activeRows] = await connection.execute(
               `SELECT conversation_id FROM megadesk_domain_conversations WHERE client_id = ? AND status IN ('open','bot')
                AND (active_key = ? OR (active_key IS NULL AND phone = ?)) ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
@@ -1274,7 +1296,7 @@ export const appRouter = router({
                       assigned_user_id, assigned_user_name, opened_at)
                      VALUES (?, ?, ?, ?, ?, 'outbound', 'whatsapp', 'evolution', ?, ?, ?, ?, ?, 'open', '', '', '[]', ?, ?, NOW())`,
                     [conversationId, ctx.tenantId, input.crmClientId ?? null, publicCode, canonicalContactId, integrationId, activeKey,
-                      input.customerName, canonicalPhone, input.company, ctx.operationalUserId, ctx.userEmail],
+                      input.customerName, canonicalPhone, input.company, operator.user_id, operator.name],
                   );
                   return publicCode;
               });
@@ -1282,11 +1304,12 @@ export const appRouter = router({
                 `INSERT INTO megadesk_conversation_events
                  (event_id, client_id, conversation_id, event_type, operator_user_id, metadata_json)
                  VALUES (?, ?, ?, 'created_outbound', ?, '{}')`,
-                [`event-${randomUUID()}`, ctx.tenantId, conversationId, ctx.operationalUserId],
+                [`event-${randomUUID()}`, ctx.tenantId, conversationId, operator.user_id],
               );
             }
             await connection.commit();
-          } catch (error) { await connection.rollback(); throw error; } finally {
+            transactionStarted = false;
+          } catch (error) { if (transactionStarted) await connection.rollback(); throw error; } finally {
             if (attendanceLock) await connection.execute("SELECT RELEASE_LOCK(?)", [attendanceLock]).catch(() => undefined);
             connection.release();
           }
@@ -1309,7 +1332,8 @@ export const appRouter = router({
           return { ok: true, conversationId };
         } catch (error) {
           console.error("Erro ao criar conversa:", error);
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao criar conversa" });
+          if (error instanceof TRPCError) throw error;
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Erro ao criar conversa com segurança." });
         }
       }),
     getConversations: megadeskProcedure

@@ -34,8 +34,10 @@ describe("canonical attendance architecture", () => {
 
   it("uses one cross-process lock identity for inbound and outbound", () => {
     const legacyRouter = readFileSync(new URL("./routers.ts", import.meta.url), "utf8");
-    expect(webhook).toContain("`mdc:${activeKey}`");
-    expect(legacyRouter).toContain("`mdc:${activeKey}`");
+    expect(webhook).toContain('.digest("hex").slice(0, 54)');
+    expect(legacyRouter).toContain('.digest("hex").slice(0, 54)');
+    expect(webhook).toContain("`mdc-phone:${phoneLockKey}`");
+    expect(legacyRouter).toContain("`mdc-phone:${phoneLockKey}`");
   });
 
   it("orders equal timestamps by immutable message id", () => {

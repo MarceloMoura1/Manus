@@ -262,7 +262,7 @@ export function parseEvolutionIncomingMessage(msg: Record<string, any>): { text:
 
 // ─── Salvar mensagem recebida no banco ───────────────────────────────────────
 
-async function saveIncomingMessage(
+export async function saveIncomingMessage(
   clientId: string,
   integrationId: string,
   externalMessageId: string,
@@ -276,9 +276,28 @@ async function saveIncomingMessage(
   const pool = getPool();
   const connection = await pool.getConnection();
   let lockName: string | null = null;
+  let transactionStarted = false;
+  let committedEvent: { name: "conversation:message" | "conversation:new"; payload: Record<string, unknown> } | null = null;
 
   try {
+    // The canonical phone lock is acquired before any mutable contact/conversation work.
+    // This gives retries and concurrent first messages one protected re-query region.
+    const phoneLockKey = createHash("sha256").update(`${clientId}\0evolution\0${integrationId}\0${phone}`).digest("hex").slice(0, 54);
+    lockName = `mdc-phone:${phoneLockKey}`;
+    const [lockRows] = await connection.execute("SELECT GET_LOCK(?, 10) AS acquired", [lockName]) as any[];
+    if (Number(lockRows?.[0]?.acquired) !== 1) throw new Error("ATTENDANCE_LOCK_TIMEOUT");
     await connection.beginTransaction();
+    transactionStarted = true;
+    const [duplicateRows] = await connection.execute(
+      `SELECT message_id FROM megadesk_domain_conversations_messages
+       WHERE client_id = ? AND provider = 'evolution' AND integration_id = ? AND external_message_id = ? LIMIT 1 FOR UPDATE`,
+      [clientId, integrationId, externalMessageId],
+    ) as any[];
+    if (duplicateRows.length) {
+      await connection.rollback();
+      transactionStarted = false;
+      return "duplicate";
+    }
     const contactName = pushName || `+${phone}`;
     await connection.execute(
       `INSERT INTO megadesk_conversation_contacts
@@ -294,9 +313,6 @@ async function saveIncomingMessage(
     ) as any[];
     const contactId = contactRows[0].contact_id as string;
     const activeKey = createHash("sha256").update(`${clientId}\0evolution\0${integrationId}\0${contactId}`).digest("hex");
-    lockName = `mdc:${activeKey}`;
-    const [lockRows] = await connection.execute("SELECT GET_LOCK(?, 10) AS acquired", [lockName]) as any[];
-    if (Number(lockRows?.[0]?.acquired) !== 1) throw new Error("ATTENDANCE_LOCK_TIMEOUT");
     // 1. Busca conversa existente pelo telefone
     const [convRows] = await connection.execute(
       `SELECT conversation_id, messages_json, customer_name
@@ -329,14 +345,15 @@ async function saveIncomingMessage(
       });
       if (!inserted) {
         await connection.rollback();
+        transactionStarted = false;
         return "duplicate";
       }
 
-      await emitToClient(clientId, "conversation:message", {
+      committedEvent = { name: "conversation:message", payload: {
         conversationId: convId,
         clientId,
         message: newMsg,
-      });
+      } };
     } else {
       // ─── Nova conversa ───────────────────────────────────────────────────
       const customerName = contactName;
@@ -365,13 +382,18 @@ async function saveIncomingMessage(
           return candidate;
       }, { generate: () => generateConversationPublicCode(at) });
 
-      await persistCanonicalMessage(connection, {
+      const inserted = await persistCanonicalMessage(connection, {
         messageId: externalMessageId, externalMessageId, conversationId, clientId,
         provider: "evolution", integrationId, direction: "inbound", messageType: String(payload.type ?? "text"),
         sender: "customer", text, status: "received", timestamp: at, legacyMessage: newMsg,
         mediaReference: payload.type === "text" ? null : payload,
         incrementUnread: true,
       });
+      if (!inserted) {
+        await connection.rollback();
+        transactionStarted = false;
+        return "duplicate";
+      }
 
       // Garante status BOT (primeiro atendimento automático) e campos extras
       await connection.execute(
@@ -389,7 +411,7 @@ async function saveIncomingMessage(
         [`event-${randomUUID()}`, clientId, conversationId],
       );
 
-      await emitToClient(clientId, "conversation:new", {
+      committedEvent = { name: "conversation:new", payload: {
         clientId,
         conversation: {
           id:           conversationId,
@@ -402,12 +424,14 @@ async function saveIncomingMessage(
           unreadCount:  1,
           lastMessageFrom: "customer",
         },
-      });
+      } };
     }
     await connection.commit();
+    transactionStarted = false;
+    if (committedEvent) await emitToClient(clientId, committedEvent.name, committedEvent.payload);
     return "persisted";
   } catch (err) {
-    await connection.rollback().catch(() => undefined);
+    if (transactionStarted) await connection.rollback().catch(() => undefined);
     console.error(`[Evolution] incoming message persistence failed: clientId=${clientId}`);
     throw err;
   } finally {

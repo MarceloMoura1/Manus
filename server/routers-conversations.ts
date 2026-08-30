@@ -13,6 +13,17 @@ const listInput = z.object({
   offset: z.number().int().min(0).default(0),
 });
 
+const CONVERSATION_ROLES = new Set(["admin", "manager", "agent"]);
+
+export function requireConversationAccess(ctx: { operationalUserRole?: string; operationalPermissions?: string[] }, permission = "conversations") {
+  if (!ctx.operationalUserRole || !CONVERSATION_ROLES.has(ctx.operationalUserRole)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Operador sem acesso a Conversas." });
+  }
+  if (ctx.operationalPermissions && !ctx.operationalPermissions.includes(permission)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Operador sem acesso a Conversas." });
+  }
+}
+
 function attendanceEvent(connection: any, tenantId: string, conversationId: string, eventType: string,
   operatorUserId: string | null, metadata: Record<string, string> = {}) {
   return connection.execute(
@@ -34,7 +45,8 @@ export function normalizedMessage(row: Record<string, any>) {
 async function eligibleUser(tenantId: string, userId: string) {
   const [rows] = await getPool().execute(
     `SELECT user_id, name FROM megadesk_domain_client_users
-     WHERE client_id = ? AND user_id = ? AND status = 'active' AND role IN ('admin','manager','agent') LIMIT 1`,
+     WHERE client_id = ? AND user_id = ? AND status = 'active' AND role IN ('admin','manager','agent')
+       AND JSON_CONTAINS(permissions_json, JSON_QUOTE('conversations')) LIMIT 1`,
     [tenantId, userId],
   ) as any[];
   if (!rows.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Usuário indisponível para atribuição." });
@@ -43,6 +55,7 @@ async function eligibleUser(tenantId: string, userId: string) {
 
 export const conversationsRouter = router({
   list: megadeskProcedure.input(listInput).query(async ({ input, ctx }) => {
+    requireConversationAccess(ctx);
     const conditions = ["c.client_id = ?", input.status === "closed" ? "c.status = 'closed'" : "c.status IN ('open','bot')"];
     const values: unknown[] = [ctx.tenantId];
     if (input.viewMode === "mine") { conditions.push("c.assigned_user_id = ?"); values.push(ctx.operationalUserId); }
@@ -60,13 +73,14 @@ export const conversationsRouter = router({
        c.last_message_from AS lastMessageFrom, c.crm_client_id AS crmClientId, c.origin,
        c.created_at AS createdAt, c.closed_at AS closedAt
        FROM megadesk_domain_conversations c WHERE ${conditions.join(" AND ")}
-       ORDER BY (c.public_code = ?) DESC, c.updated_at DESC LIMIT ? OFFSET ?`,
-      [...values, input.search || "", input.limit, input.offset],
+       ORDER BY (c.public_code = ?) DESC, c.updated_at DESC LIMIT ${input.limit} OFFSET ${input.offset}`,
+      [...values, input.search || ""],
     ) as any[];
     return rows;
   }),
 
   counts: megadeskProcedure.query(async ({ ctx }) => {
+    requireConversationAccess(ctx);
     const [rows] = await getPool().execute(
       `SELECT SUM(status IN ('open','bot')) AS active,
        SUM(status = 'closed') AS closed,
@@ -80,6 +94,7 @@ export const conversationsRouter = router({
 
   close: megadeskProcedure.input(z.object({ conversationId: id, reason: z.string().trim().max(240).optional() }))
     .mutation(async ({ input, ctx }) => {
+      requireConversationAccess(ctx);
       const connection = await getPool().getConnection();
       try {
         await connection.beginTransaction();
@@ -97,10 +112,25 @@ export const conversationsRouter = router({
     }),
 
   reopen: megadeskProcedure.input(z.object({ conversationId: id })).mutation(async ({ input, ctx }) => {
+    requireConversationAccess(ctx);
     const user = await eligibleUser(ctx.tenantId, ctx.operationalUserId);
     const connection = await getPool().getConnection();
     try {
       await connection.beginTransaction();
+      const [rows] = await connection.execute(
+        `SELECT conversation_id, active_key,
+         SHA2(CONCAT(client_id, CHAR(0), provider, CHAR(0), integration_id, CHAR(0), contact_id), 256) AS requested_active_key
+         FROM megadesk_domain_conversations
+         WHERE conversation_id = ? AND client_id = ? AND status = 'closed' LIMIT 1 FOR UPDATE`,
+        [input.conversationId, ctx.tenantId],
+      ) as any[];
+      if (!rows.length) throw new TRPCError({ code: "CONFLICT", message: "O atendimento não está encerrado." });
+      const [otherActive] = await connection.execute(
+        `SELECT conversation_id FROM megadesk_domain_conversations
+         WHERE client_id = ? AND active_key = ? AND status IN ('open','bot') AND conversation_id <> ? LIMIT 1 FOR UPDATE`,
+        [ctx.tenantId, rows[0].requested_active_key, input.conversationId],
+      ) as any[];
+      if (otherActive.length) throw new TRPCError({ code: "CONFLICT", message: "Já existe outro atendimento ativo para este contato." });
       const [result] = await connection.execute(
         `UPDATE megadesk_domain_conversations SET status = 'open', assigned_user_id = ?, assigned_user_name = ?,
          reopened_at = NOW(), reopened_by_user_id = ?, closed_at = NULL, closed_by_user_id = NULL,
@@ -117,6 +147,7 @@ export const conversationsRouter = router({
   }),
 
   claim: megadeskProcedure.input(z.object({ conversationId: id })).mutation(async ({ input, ctx }) => {
+    requireConversationAccess(ctx);
     const user = await eligibleUser(ctx.tenantId, ctx.operationalUserId);
     const connection = await getPool().getConnection();
     try {
@@ -133,8 +164,10 @@ export const conversationsRouter = router({
     } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); }
   }),
 
-  transfer: megadeskProcedure.input(z.object({ conversationId: id, targetUserId: id, note: z.string().trim().max(240).optional() }))
+  transfer: megadeskProcedure.input(z.object({ conversationId: id, targetUserId: id,
+    expectedAssignedUserId: id.nullable(), note: z.string().trim().max(240).optional() }))
     .mutation(async ({ input, ctx }) => {
+      requireConversationAccess(ctx);
       const target = await eligibleUser(ctx.tenantId, input.targetUserId);
       const connection = await getPool().getConnection();
       try {
@@ -145,12 +178,21 @@ export const conversationsRouter = router({
           [input.conversationId, ctx.tenantId],
         ) as any[];
         if (!current.length) throw new TRPCError({ code: "CONFLICT", message: "Reabra o atendimento antes de transferir." });
-        await connection.execute(
+        if ((current[0].assigned_user_id ?? null) !== input.expectedAssignedUserId) {
+          throw new TRPCError({ code: "CONFLICT", message: "A atribuição mudou. Atualize a lista antes de transferir." });
+        }
+        if (current[0].assigned_user_id === target.user_id) {
+          await connection.commit();
+          return { ok: true, unchanged: true, assignedUserId: target.user_id, assignedUserName: target.name };
+        }
+        const [updated] = await connection.execute(
           `UPDATE megadesk_domain_conversations SET status = 'open', assigned_user_id = ?, assigned_user_name = ?,
            ia_active = 0, bot_suspended_at = NOW(), updated_at = NOW()
-           WHERE conversation_id = ? AND client_id = ?`,
-          [target.user_id, target.name, input.conversationId, ctx.tenantId],
-        );
+           WHERE conversation_id = ? AND client_id = ? AND status IN ('open','bot')
+             AND assigned_user_id <=> ?`,
+          [target.user_id, target.name, input.conversationId, ctx.tenantId, input.expectedAssignedUserId],
+        ) as any[];
+        if (!updated.affectedRows) throw new TRPCError({ code: "CONFLICT", message: "A atribuição mudou. Atualize a lista antes de transferir." });
         await attendanceEvent(connection, ctx.tenantId, input.conversationId, "transferred", ctx.operationalUserId,
           { fromUserId: current[0].assigned_user_id ?? "unassigned", toUserId: target.user_id, ...(input.note ? { note: input.note } : {}) });
         await connection.commit(); return { ok: true, assignedUserId: target.user_id, assignedUserName: target.name };
@@ -158,21 +200,24 @@ export const conversationsRouter = router({
     }),
 
   eligibleUsers: megadeskProcedure.query(async ({ ctx }) => {
+    requireConversationAccess(ctx);
     const [rows] = await getPool().execute(
       `SELECT user_id AS id, name, email, role FROM megadesk_domain_client_users
-       WHERE client_id = ? AND status = 'active' AND role IN ('admin','manager','agent') ORDER BY name`, [ctx.tenantId],
+       WHERE client_id = ? AND status = 'active' AND role IN ('admin','manager','agent')
+         AND JSON_CONTAINS(permissions_json, JSON_QUOTE('conversations')) ORDER BY name`, [ctx.tenantId],
     );
     return rows as any[];
   }),
 
   messages: megadeskProcedure.input(z.object({ conversationId: id, limit: z.number().int().min(1).max(200).default(100) }))
     .query(async ({ input, ctx }) => {
+      requireConversationAccess(ctx);
       const [rows] = await getPool().execute(
         `SELECT message_id AS id, sender, message AS text, timestamp, status, direction,
          message_type AS type, sender_name_snapshot AS agentName, media_reference AS mediaReference
          FROM megadesk_domain_conversations_messages
-         WHERE client_id = ? AND conversation_id = ? ORDER BY timestamp ASC, message_id ASC LIMIT ?`,
-        [ctx.tenantId, input.conversationId, input.limit],
+         WHERE client_id = ? AND conversation_id = ? ORDER BY timestamp ASC, message_id ASC LIMIT ${input.limit}`,
+        [ctx.tenantId, input.conversationId],
       ) as any[];
       if (rows.length) return { source: "normalized" as const, messages: rows.map(normalizedMessage) };
       const [legacy] = await getPool().execute(
@@ -185,6 +230,7 @@ export const conversationsRouter = router({
     }),
 
   history: megadeskProcedure.input(z.object({ contactId: id })).query(async ({ input, ctx }) => {
+    requireConversationAccess(ctx);
     const [rows] = await getPool().execute(
       `SELECT conversation_id AS id, public_code AS publicCode, status, customer_name AS customerName,
        assigned_user_name AS assignedUserName, last_message AS summary, created_at AS startedAt, closed_at AS closedAt
@@ -196,6 +242,7 @@ export const conversationsRouter = router({
 
   updateContact: megadeskProcedure.input(z.object({ contactId: id, displayName: z.string().trim().min(1).max(180) }))
     .mutation(async ({ input, ctx }) => {
+      requireConversationAccess(ctx);
       const [result] = await getPool().execute(
         `UPDATE megadesk_conversation_contacts SET display_name = ?, updated_at = NOW()
          WHERE contact_id = ? AND client_id = ?`, [input.displayName, input.contactId, ctx.tenantId],
@@ -206,6 +253,7 @@ export const conversationsRouter = router({
 
   linkCrm: megadeskProcedure.input(z.object({ conversationId: id, contactId: id, crmClientId: id }))
     .mutation(async ({ input, ctx }) => {
+      requireConversationAccess(ctx);
       const connection = await getPool().getConnection();
       try {
         await connection.beginTransaction();
@@ -234,6 +282,7 @@ export const conversationsRouter = router({
 
   linkTicket: megadeskProcedure.input(z.object({ conversationId: id, chamadoId: id }))
     .mutation(async ({ input, ctx }) => {
+      requireConversationAccess(ctx);
       const connection = await getPool().getConnection();
       try {
         await connection.beginTransaction();

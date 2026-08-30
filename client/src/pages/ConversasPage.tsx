@@ -29,6 +29,7 @@ import {
 import { trpc } from "@/lib/trpc";
 import { useConversasSocket } from "@/hooks/useConversasSocket";
 import { FailedMessagesRetry } from "@/components/FailedMessagesRetry";
+import { ConversationMedia } from "@/components/ConversationMedia";
 import type { ConversaSocketItem } from "@/hooks/useConversasSocket";
 import { validations } from "@/lib/validations";
 
@@ -118,6 +119,7 @@ type ConversationCardProps = {
   onReopen: (id: string) => void;
   onAssign: (id: string) => void;
   onClaim: (id: string) => void;
+  onOpen: (id: string) => void;
   confirmingClose: string | null;
   setConfirmingClose: (id: string | null) => void;
   confirmingReopen: string | null;
@@ -130,6 +132,7 @@ function ConversationCard({
   onReopen,
   onAssign,
   onClaim,
+  onOpen,
   confirmingClose,
   setConfirmingClose,
   confirmingReopen,
@@ -150,7 +153,7 @@ function ConversationCard({
       <div className="p-4">
         {/* Header do card */}
         <div className="flex items-start justify-between gap-3 mb-2">
-          <div className="flex-1 min-w-0">
+          <button type="button" className="flex-1 min-w-0 text-left" onClick={() => onOpen(conv.id)}>
             <div className="flex items-center gap-2">
               <span
                 className={[
@@ -187,7 +190,7 @@ function ConversationCard({
                 </div>
               )}
             </div>
-          </div>
+          </button>
           <div className="flex items-center gap-2 flex-shrink-0">
             {conv.syncStatus === 'syncing' && (
               <div className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded-lg">
@@ -393,6 +396,7 @@ function AssignModal({ conversationId, users, onAssign, onClose }: AssignModalPr
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 export function ConversasPage() {
+  const utils = trpc.useUtils();
   const session = useMemo(() => getSession(), []);
   const clientId = session?.clientId ?? null;
 
@@ -410,14 +414,35 @@ export function ConversasPage() {
   const [localConversations, setLocalConversations] = useState<ConversationItem[]>([]);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+  const [draftMessage, setDraftMessage] = useState("");
 
   // Carregar conversa selecionada do localStorage quando a página é montada
   useEffect(() => {
-    const conversationId = localStorage.getItem('MEGADESK_SELECTED_CONVERSATION_ID');
-    if (conversationId) {
-      setSelectedConversation(conversationId);
-      localStorage.removeItem('MEGADESK_SELECTED_CONVERSATION_ID');
+    const readSelection = () => new URLSearchParams(window.location.search).get("conversationId")
+      ?? localStorage.getItem('MEGADESK_SELECTED_CONVERSATION_ID');
+    const conversationId = readSelection();
+    if (conversationId) setSelectedConversation(conversationId);
+    const onPopState = () => setSelectedConversation(readSelection());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedConversation) return;
+    localStorage.setItem('MEGADESK_SELECTED_CONVERSATION_ID', selectedConversation);
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("conversationId") !== selectedConversation) {
+      url.searchParams.set("conversationId", selectedConversation);
+      window.history.replaceState(window.history.state, "", url);
     }
+  }, [selectedConversation]);
+
+  const closeSelectedConversation = useCallback(() => {
+    setSelectedConversation(null);
+    localStorage.removeItem('MEGADESK_SELECTED_CONVERSATION_ID');
+    const url = new URL(window.location.href);
+    url.searchParams.delete("conversationId");
+    window.history.replaceState(window.history.state, "", url);
   }, []);
 
   // ─── Busca de usuários ──────────────────────────────────────────────────────
@@ -439,6 +464,10 @@ export function ConversasPage() {
       refetchOnWindowFocus: false,
     }
   );
+  const { data: selectedMessages, refetch: refetchMessages } = trpc.conversations.messages.useQuery(
+    { conversationId: selectedConversation ?? "", limit: 200 },
+    { enabled: !!selectedConversation, refetchInterval: selectedConversation ? 3000 : false },
+  );
 
   // Sincronizar dados do servidor com estado local
   useEffect(() => {
@@ -455,28 +484,34 @@ export function ConversasPage() {
   }, [conversationsData]);
 
   // ─── Mutations ──────────────────────────────────────────────────────────────
+  const refreshConversationQueries = useCallback(async () => {
+    await Promise.all([utils.conversations.list.invalidate(), utils.conversations.counts.invalidate()]);
+  }, [utils]);
+
   const closeMutation = trpc.conversations.close.useMutation({
-    onSuccess: (_, vars) => {
+    onSuccess: async (_, vars) => {
       setLocalConversations((prev) =>
         prev.map((c) =>
           c.id === vars.conversationId ? { ...c, status: "closed" as const } : c
         )
       );
+      await refreshConversationQueries();
     },
   });
 
   const reopenMutation = trpc.conversations.reopen.useMutation({
-    onSuccess: (_, vars) => {
+    onSuccess: async (_, vars) => {
       setLocalConversations((prev) =>
         prev.map((c) =>
           c.id === vars.conversationId ? { ...c, status: "open" as const } : c
         )
       );
+      await refreshConversationQueries();
     },
   });
 
   const assignMutation = trpc.conversations.transfer.useMutation({
-    onSuccess: (result, vars) => {
+    onSuccess: async (result, vars) => {
       setLocalConversations((prev) =>
         prev.map((c) =>
           c.id === vars.conversationId
@@ -489,12 +524,22 @@ export function ConversasPage() {
         )
       );
       setAssigningConvId(null);
+      await refreshConversationQueries();
     },
   });
   const claimMutation = trpc.conversations.claim.useMutation({
-    onSuccess: (result, vars) => setLocalConversations((prev) => prev.map((conversation) =>
-      conversation.id === vars.conversationId ? { ...conversation, status: "open" as const,
-        assignedUserId: result.assignedUserId, assignedUserName: result.assignedUserName } : conversation)),
+    onSuccess: async (result, vars) => {
+      setLocalConversations((prev) => prev.map((conversation) =>
+        conversation.id === vars.conversationId ? { ...conversation, status: "open" as const,
+          assignedUserId: result.assignedUserId, assignedUserName: result.assignedUserName } : conversation));
+      await refreshConversationQueries();
+    },
+  });
+  const sendMutation = trpc.megadesk.sendMessage.useMutation({
+    onSuccess: async () => {
+      setDraftMessage("");
+      await Promise.all([refetchMessages(), refreshConversationQueries()]);
+    },
   });
 
   // ─── Socket.IO — atualizações em tempo real ─────────────────────────────────
@@ -580,7 +625,9 @@ export function ConversasPage() {
   const handleAssignConfirm = useCallback(
     (userId: string, userName: string) => {
       if (!clientId || !assigningConvId) return;
-      assignMutation.mutate({ conversationId: assigningConvId, targetUserId: userId });
+      const current = localConversations.find((conversation) => conversation.id === assigningConvId);
+      assignMutation.mutate({ conversationId: assigningConvId, targetUserId: userId,
+        expectedAssignedUserId: current?.assignedUserId ?? null });
     },
     [clientId, assigningConvId, assignMutation]
   );
@@ -723,7 +770,7 @@ export function ConversasPage() {
         </div>
 
         {/* ─── Lista de Conversas ──────────────────────────────────────────── */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div data-testid="conversation-list-panel" className="flex-1 overflow-y-auto px-6 py-4">
           {isLoading && !hasLoaded ? (
             <div className="space-y-3">
               {Array.from({ length: 5 }).map((_, i) => (
@@ -761,6 +808,7 @@ export function ConversasPage() {
                 >
                   <ConversationCard
                     conv={conv}
+                    onOpen={setSelectedConversation}
                     onClose={handleClose}
                     onReopen={handleReopen}
                     onAssign={(id) => setAssigningConvId(id)}
@@ -776,6 +824,40 @@ export function ConversasPage() {
           )}
         </div>
       </div>
+
+      {selectedConversation && (
+        <div className="fixed inset-0 z-40 flex justify-end bg-black/20" onClick={closeSelectedConversation}>
+          <section data-testid="conversation-chat-panel" className="flex h-full w-full max-w-xl flex-col bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <header className="flex items-center justify-between border-b px-4 py-3">
+              <div>
+                <h2 className="font-semibold">Atendimento {localConversations.find(c => c.id === selectedConversation)?.publicCode ?? ""}</h2>
+                <p className="text-xs text-slate-500">{localConversations.find(c => c.id === selectedConversation)?.customerName ?? "Conversa"}</p>
+              </div>
+              <button type="button" onClick={closeSelectedConversation} aria-label="Fechar conversa">×</button>
+            </header>
+            <div className="flex-1 space-y-3 overflow-y-auto p-4">
+              {(selectedMessages?.messages ?? []).map((message: any) => (
+                <div key={message.id ?? `${message.timestamp}-${message.text}`} className={`flex ${message.sender === "customer" || message.from === "customer" ? "justify-start" : "justify-end"}`}>
+                  <div className="max-w-[85%] rounded-xl bg-slate-100 px-3 py-2 text-sm">
+                    <ConversationMedia conversationId={selectedConversation} message={message} fallback={<span>{message.text}</span>} />
+                    {message.sender !== "customer" && message.from !== "customer" && message.agentName &&
+                      <p className="mt-1 text-[10px] text-slate-500">{message.agentName}</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <form data-testid="conversation-composer" className="flex gap-2 border-t p-3" onSubmit={(event) => {
+              event.preventDefault();
+              const message = draftMessage.trim();
+              if (!message || sendMutation.isPending || !session?.userEmail) return;
+              sendMutation.mutate({ conversationId: selectedConversation, message, userEmail: session.userEmail, clientAttemptId: crypto.randomUUID() });
+            }}>
+              <Input value={draftMessage} onChange={(event) => setDraftMessage(event.target.value)} placeholder="Digite uma mensagem" />
+              <button type="submit" disabled={!draftMessage.trim() || sendMutation.isPending} className="rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50">Enviar</button>
+            </form>
+          </section>
+        </div>
+      )}
 
       {/* ─── Modal de Atribuição ─────────────────────────────────────────── */}
       <AssignModal
