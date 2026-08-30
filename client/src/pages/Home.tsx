@@ -17,6 +17,7 @@ import type { CrmWhatsAppIntent } from "../../../shared/crm";
 import { normalizeContactPhone } from "../../../shared/contact-phone";
 import { trpcProcedureUrl } from "@/lib/trpc-url";
 import { ConversationMedia } from "@/components/ConversationMedia";
+import { ConversationDetailsPanel } from "@/components/ConversationDetailsPanel";
 import {
   conversationFilterStorageKey,
   readConversationFilters,
@@ -417,6 +418,7 @@ function ConversationsPage() {
   const [closeConfirmOpen, setCloseConfirmOpen] = React.useState(false);
   const [reopenConfirmOpen, setReopenConfirmOpen] = React.useState(false);
   const [transferOpen, setTransferOpen] = React.useState(false);
+  const [conversationDetailsOpen, setConversationDetailsOpen] = React.useState(false);
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const whatsappStatusQuery = trpc.evolution.getStatus.useQuery(
     { clientId },
@@ -971,7 +973,7 @@ function ConversationsPage() {
   const getAvatarColor = (id: string) => avatarColors[id?.charCodeAt(0) % avatarColors.length] || 'bg-slate-500';
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 max-w-full overflow-hidden bg-white min-[900px]:rounded-2xl min-[900px]:border min-[900px]:border-slate-200 min-[900px]:shadow-xl">
+    <div className="relative flex h-full min-h-0 w-full min-w-0 max-w-full overflow-hidden bg-white min-[900px]:rounded-2xl min-[900px]:border min-[900px]:border-slate-200 min-[900px]:shadow-xl">
 
       {/* ─── Coluna Esquerda: Lista de Conversas ─── */}
       <div className={cn(
@@ -1336,31 +1338,13 @@ function ConversationsPage() {
                 >
                   {selectedConv.status === 'closed' ? 'Reabrir' : 'Encerrar'}
                 </button>
-                <details className="relative">
-                  <summary className="flex h-10 cursor-pointer list-none items-center rounded-xl px-3 text-sm font-medium text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
-                    Mais ações
-                  </summary>
-                  <div className="absolute right-0 z-30 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
-                    <div className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500">
-                      <span>ID da conversa</span>
-                      <strong className="block break-all text-slate-700">{selectedConv.publicCode || selectedConv.id}</strong>
-                      <button
-                        type="button"
-                        aria-label="Copiar ID da conversa"
-                        onClick={() => void navigator.clipboard.writeText(selectedConv.publicCode || selectedConv.id)}
-                        className="mt-1 font-medium text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                      >
-                        Copiar ID
-                      </button>
-                    </div>
-                    <button type="button" onClick={() => { setEditName(selectedConv.name); setEditCompany(selectedConv.company || ''); setEditModalOpen(true); }} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Editar contato</button>
-                    <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'erp-clients' } }))} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Cadastrar cliente / Visualizar perfil</button>
-                    <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'tickets', conversationId: selectedConv.id } }))} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Abrir chamado</button>
-                    <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'tickets', conversationId: selectedConv.id } }))} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Visualizar chamados</button>
-                    <button type="button" onClick={() => { setEditName(selectedConv.name); setEditCompany(selectedConv.company || ''); setEditModalOpen(true); }} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Vincular contato</button>
-                    <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'conversations', contactPhone: selectedConv.phone } }))} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Histórico de conversas</button>
-                  </div>
-                </details>
+                <button type="button" aria-expanded={conversationDetailsOpen} aria-controls="conversation-details-panel"
+                  aria-label={conversationDetailsOpen ? "Fechar detalhes da conversa" : "Abrir detalhes da conversa"}
+                  title={conversationDetailsOpen ? "Fechar detalhes da conversa" : "Abrir detalhes da conversa"}
+                  onClick={() => setConversationDetailsOpen(value => !value)}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                  {conversationDetailsOpen ? <ArrowRight className="h-5 w-5" aria-hidden="true" /> : <ArrowLeft className="h-5 w-5" aria-hidden="true" />}
+                </button>
               </div>
             </div>
 
@@ -1551,7 +1535,20 @@ function ConversationsPage() {
         )}
       </div>
 
-
+      {selectedConv && <ConversationDetailsPanel
+        conversation={selectedConv}
+        open={conversationDetailsOpen}
+        onClose={() => setConversationDetailsOpen(false)}
+        onEditContact={() => { setEditName(selectedConv.name); setEditCompany(selectedConv.company || ''); setEditModalOpen(true); }}
+        onNavigate={(route, detail) => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route, ...detail } }))}
+        onSelectConversation={(item) => {
+          setConversations(current => current.some(conversation => conversation.id === item.id) ? current : [...current, {
+            ...item, name: item.customerName, phone: selectedConv.phone, company: selectedConv.company,
+            assignedTo: item.assignedUserName, timestamp: item.startedAt,
+          }]);
+          setSelectedConversation(item.id);
+        }}
+      />}
 
       {transferOpen && selectedConv && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-labelledby="transfer-conversation-title" onMouseDown={(event) => {

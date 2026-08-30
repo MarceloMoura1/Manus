@@ -250,6 +250,23 @@ export const conversationsRouter = router({
     return rows as any[];
   }),
 
+  linkedTickets: megadeskProcedure.input(z.object({ conversationId: id })).query(async ({ input, ctx }) => {
+    requireConversationAccess(ctx);
+    const [rows] = await getPool().execute(
+      `SELECT DISTINCT t.chamadoId AS id, t.chamadoNumber AS number, t.title, t.status, t.createdAt AS createdAt
+       FROM megadesk_domain_conversations c
+       JOIN megadesk_domain_chamados t ON t.clientId = c.client_id
+       LEFT JOIN megadesk_conversation_tickets l
+         ON l.client_id = c.client_id AND l.chamado_id = t.chamadoId
+        AND (l.contact_id = c.contact_id OR l.conversation_id = c.conversation_id)
+       WHERE c.client_id = ? AND c.conversation_id = ?
+         AND (l.link_id IS NOT NULL OR (c.crm_client_id IS NOT NULL AND t.customerId = c.crm_client_id))
+       ORDER BY t.createdAt DESC, t.chamadoId DESC LIMIT 50`,
+      [ctx.tenantId, input.conversationId],
+    );
+    return rows as any[];
+  }),
+
   updateContact: megadeskProcedure.input(z.object({ contactId: id, displayName: z.string().trim().min(1).max(180) }))
     .mutation(async ({ input, ctx }) => {
       requireConversationAccess(ctx);

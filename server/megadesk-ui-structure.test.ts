@@ -14,6 +14,7 @@ const purchasesSource = readFileSync(resolve(process.cwd(), "client/src/pages/er
 const fiscalSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/FiscalPage.tsx"), "utf8");
 const reportsSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/ReportsPage.tsx"), "utf8");
 const moduleTopbarSource = readFileSync(resolve(process.cwd(), "client/src/components/ModuleTopbar.tsx"), "utf8");
+const conversationDetailsSource = readFileSync(resolve(process.cwd(), "client/src/components/ConversationDetailsPanel.tsx"), "utf8");
 
 describe("MegaDesk UI structure", () => {
   it("keeps a single real ERP implementation without legacy fictional metrics", () => {
@@ -97,8 +98,12 @@ describe("MegaDesk UI structure", () => {
     expect(homeSource).toContain('data-testid="conversation-chat-panel"');
     expect(homeSource).toContain('data-testid="conversation-composer"');
     expect(homeSource).toContain("['all', 'mine']");
-    for (const label of ["Todas", "Minhas", "BOT/Aguardando", "Abertas", "Encerradas", "Assumir", "Transferir", "Mais ações", "ID da conversa", "Copiar ID"]) {
+    for (const label of ["Todas", "Minhas", "BOT/Aguardando", "Abertas", "Encerradas", "Assumir", "Transferir", "Abrir detalhes da conversa", "Fechar detalhes da conversa"]) {
       expect(homeSource).toContain(label);
+    }
+    expect(homeSource).not.toContain("Mais ações");
+    for (const label of ["Atendimento", "Contato", "Cliente", "Chamados", "Histórico de conversas", "Copiar protocolo"]) {
+      expect(conversationDetailsSource).toContain(label);
     }
     expect(homeSource).toContain("<ConversationMedia");
     expect(homeSource).toContain("isAgent && msg.agentName");

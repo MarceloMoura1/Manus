@@ -34,6 +34,8 @@ async function mockedPage(page: Page, deepLink = false) {
       : name.includes("conversations.counts") ? { active: 3, closed: 4, waiting: 2, mine: 1 }
       : name.includes("conversations.eligibleUsers") ? [{ id: "user-ui", name: "Agent", email: "agent@example.test", role: "agent" }]
       : name.includes("conversations.messages") ? { source: "legacy_json", messages: [{ id: "legacy-1", from: "customer", text: "Mensagem legada", type: "text", timestamp: new Date().toISOString() }] }
+      : name.includes("conversations.history") ? [{ id: conversation.id, publicCode: conversation.publicCode, status: "open", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }]
+      : name.includes("conversations.linkedTickets") ? []
       : { ok: true };
     const body = names.map(name => ({ result: { data: { json: result(name) } } }));
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(url.searchParams.get("batch") === "1" ? body : body[0]) });
@@ -111,9 +113,13 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await page.getByRole("button", { name: /Filtros/ }).click();
     await page.getByPlaceholder("Nome, empresa ou telefone...").fill(conversation.publicCode);
     await expect.poll(() => listInputs.at(-1)).toMatchObject({ search: conversation.publicCode });
-    await page.getByText("Mais ações", { exact: true }).click();
-    await expect(page.getByText(conversation.publicCode, { exact: true })).toBeVisible();
-    const copyId = page.getByRole("button", { name: "Copiar ID da conversa" });
+    const detailsToggle = page.getByRole("button", { name: "Abrir detalhes da conversa" });
+    await expect(detailsToggle).toHaveAttribute("aria-expanded", "false");
+    await detailsToggle.click();
+    await expect(page.getByTestId("conversation-details-panel")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Fechar detalhes da conversa" }).first()).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("#attendance-content").getByText(conversation.publicCode, { exact: true })).toBeVisible();
+    const copyId = page.getByRole("button", { name: "Copiar protocolo" });
     await copyId.focus();
     await expect(copyId).toBeFocused();
     await copyId.click();
@@ -164,7 +170,19 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await all.focus();
     await expect(all).toBeFocused();
     await expect(page.getByRole("button", { name: "Transferir" })).toBeVisible();
-    await expect(page.getByText("Mais ações")).toBeVisible();
+    const details = page.locator('button[aria-controls="conversation-details-panel"]');
+    await expect(details).toBeVisible();
+    await details.focus();
+    await expect(details).toBeFocused();
+    await details.press("Enter");
+    await expect(details).toHaveAttribute("aria-expanded", "true");
+    await details.press("Space");
+    await expect(details).toHaveAttribute("aria-expanded", "false");
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await details.click();
+    await expect(page.getByTestId("conversation-details-panel")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("conversation-details-panel")).toHaveCount(0);
   });
 
   for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 1024, height: 768 }, { width: 1440, height: 900 }]) {
@@ -172,6 +190,9 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
       await page.setViewportSize(viewport);
       await mockedPage(page);
       await page.getByText("Cliente UI").click();
+      await expect(page.getByTestId("conversation-composer")).toBeVisible();
+      await page.locator('button[aria-controls="conversation-details-panel"]').click();
+      await expect(page.getByTestId("conversation-details-panel")).toBeVisible();
       await expect(page.getByTestId("conversation-composer")).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     });
