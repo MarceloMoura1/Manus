@@ -86,7 +86,23 @@ describe("MegaDesk UI structure", () => {
     expect(homeSource).toContain("id: 'in_progress', label: 'Em Progresso'");
     expect(homeSource).toContain("id: 'waiting', label: 'Aguardando'");
     expect(homeSource).toContain("id: 'closed', label: 'Fechados'");
-    expect(homeSource).toContain("c.status === 'open'");
+    expect(homeSource).toContain("selectedConv.status === 'open'");
+  });
+
+  it("preserva o contrato visual anterior de Conversas com controles pontuais do lifecycle", () => {
+    expect(homeSource).toContain('active === "conversations" && <ConversationsPage />');
+    expect(homeSource).not.toContain('active === "conversations" && <ConversasPage />');
+    expect(homeSource).toContain("min-[900px]:w-[420px]");
+    expect(homeSource).toContain('data-testid="conversation-list-panel"');
+    expect(homeSource).toContain('data-testid="conversation-chat-panel"');
+    expect(homeSource).toContain('data-testid="conversation-composer"');
+    expect(homeSource).toContain("['all', 'mine', 'waiting']");
+    for (const label of ["Todas", "Minhas", "Bot/Aguardando", "Abertas", "Encerradas", "Assumir", "Transferir", "Mais ações", "ID/protocolo"]) {
+      expect(homeSource).toContain(label);
+    }
+    expect(homeSource).toContain("<ConversationMedia");
+    expect(homeSource).toContain("isAgent && msg.agentName");
+    expect(homeSource).not.toContain("!isAgent && <p className=\"text-xs text-slate-400 mt-1 ml-1\"");
   });
 
   it("inclui MegaAdmin e MegaDesk como duas URLs lógicas com backend único", () => {

@@ -31,8 +31,8 @@ async function mockedPage(page: Page, deepLink = false) {
   return calls;
 }
 
-test.describe("WIP conversation lifecycle UI", () => {
-  test("uses the canonical backend list, filters and persistent deep link", async ({ page }) => {
+test.describe("restored conversation layout with WIP lifecycle", () => {
+  test("keeps the baseline two-column contract on the canonical backend", async ({ page }) => {
     const calls = await mockedPage(page, true);
     await expect(page.getByTestId("conversation-list-panel")).toBeVisible();
     await expect(page.getByText("Cliente UI", { exact: true }).first()).toBeVisible();
@@ -41,13 +41,23 @@ test.describe("WIP conversation lifecycle UI", () => {
     for (const label of ["Todas", "Minhas", "Bot/Aguardando", "Abertas", "Encerradas"]) {
       await expect(page.getByRole("button", { name: new RegExp(label) })).toBeVisible();
     }
-    await page.getByRole("button", { name: "Fechar conversa" }).click();
+    await expect(page.getByTestId("conversation-list-panel")).toHaveClass(/min-\[900px\]:w-\[420px\]/);
+    await expect(page.locator(".fixed.inset-0.z-40")).toHaveCount(0);
     await page.getByRole("button", { name: "Minhas" }).click();
     await page.getByRole("button", { name: "Bot/Aguardando" }).click();
     await page.goto("/?conversationId=conv-ui");
     await expect(page.getByTestId("conversation-chat-panel")).toBeVisible();
     expect(calls.some(name => name.includes("conversations.list"))).toBe(true);
     expect(calls.some(name => name.includes("megadesk.getConversations"))).toBe(false);
+  });
+
+  test("exposes filters and actions to keyboard focus", async ({ page }) => {
+    await mockedPage(page, true);
+    const all = page.getByRole("button", { name: "Todas" });
+    await all.focus();
+    await expect(all).toBeFocused();
+    await expect(page.getByRole("button", { name: "Transferir" })).toBeVisible();
+    await expect(page.getByText("Mais ações")).toBeVisible();
   });
 
   for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 1024, height: 768 }, { width: 1440, height: 900 }]) {

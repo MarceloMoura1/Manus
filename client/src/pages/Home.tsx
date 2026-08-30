@@ -8,7 +8,6 @@ import { ModuleTopbar } from "@/components/ModuleTopbar";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { validateNewChamado, ValidationError } from "@/lib/validations";
 import { ActiveAttendancePage } from "./ActiveAttendance";
-import { ConversasPage } from "./ConversasPage";
 import { WhatsAppConfigPage } from "./WhatsAppConfigPage";
 import { SettingsPage as SettingsPageComponent } from "./SettingsPage";
 import { AdminSettingsPage } from "./AdminSettingsPage";
@@ -355,6 +354,7 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
 }
 
 function ConversationsPage() {
+  const utils = trpc.useUtils();
   // Obter dados da sessão
   const sessionData = React.useMemo(() => {
     try { return JSON.parse(localStorage.getItem(MEGADESK_SESSION_KEY) || 'null'); } catch { return null; }
@@ -370,8 +370,8 @@ function ConversationsPage() {
       return raw ? JSON.parse(raw) as CrmWhatsAppIntent : null;
     } catch { return null; }
   });
-  const [selectedFilter, setSelectedFilter] = React.useState<'open' | 'bot'>('open');
-  const [ownerFilter, setOwnerFilter] = React.useState<'all' | 'mine' | 'history' | 'closed'>('all');
+  const [selectedFilter, setSelectedFilter] = React.useState<'active' | 'closed'>('active');
+  const [ownerFilter, setOwnerFilter] = React.useState<'all' | 'mine' | 'waiting' | 'history'>('all');
   const [attendantFilter, setAttendantFilter] = React.useState<string>('');
   const [historySearch, setHistorySearch] = React.useState<string>('');
   const [attendantDropdownOpen, setAttendantDropdownOpen] = React.useState(false);
@@ -396,6 +396,7 @@ function ConversationsPage() {
   const [editCompany, setEditCompany] = React.useState('');
   const [closeConfirmOpen, setCloseConfirmOpen] = React.useState(false);
   const [reopenConfirmOpen, setReopenConfirmOpen] = React.useState(false);
+  const [transferOpen, setTransferOpen] = React.useState(false);
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const whatsappStatusQuery = trpc.evolution.getStatus.useQuery(
     { clientId },
@@ -413,13 +414,17 @@ function ConversationsPage() {
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
 
   // Query para mensagens da conversa selecionada (lazy - só busca quando conversa é aberta)
-  const { data: conversationMessages, refetch: refetchMessages } = trpc.megadesk.getConversationMessages.useQuery(
-    { conversationId: selectedConversation ?? '', clientId },
+  const { data: conversationMessageResult, refetch: refetchMessages } = trpc.conversations.messages.useQuery(
+    { conversationId: selectedConversation ?? '', limit: 200 },
     { enabled: !!selectedConversation && !!clientId, refetchInterval: 3000 }
   );
+  const conversationMessages = conversationMessageResult?.messages ?? [];
 
   // Mutations tRPC
-  const closeConversationMutation = trpc.megadesk.closeConversation.useMutation();
+  const closeConversationMutation = trpc.conversations.close.useMutation();
+  const reopenConversationMutation = trpc.conversations.reopen.useMutation();
+  const claimConversationMutation = trpc.conversations.claim.useMutation();
+  const transferConversationMutation = trpc.conversations.transfer.useMutation();
   const updateCustomerMutation = trpc.megadesk.updateCustomerInfo.useMutation();
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
@@ -435,7 +440,8 @@ function ConversationsPage() {
     ));
     showToast('Conversa encerrada!', 'success');
     try {
-      await closeConversationMutation.mutateAsync({ conversationId: selectedConversation, clientId });
+      await closeConversationMutation.mutateAsync({ conversationId: selectedConversation });
+      await Promise.all([utils.conversations.list.invalidate(), utils.conversations.counts.invalidate()]);
     } catch {
       setConversations(prev => prev.map(conv =>
         conv.id === selectedConversation ? { ...conv, status: 'open' } : conv
@@ -446,19 +452,42 @@ function ConversationsPage() {
 
   const handleReopenConversation = async () => {
     if (!selectedConversation) return;
-    setConversations(prev => prev.map(conv =>
-      conv.id === selectedConversation ? { ...conv, status: 'open' } : conv
-    ));
     setReopenConfirmOpen(false);
-    showToast('Conversa reaberta com sucesso!', 'success');
+    try {
+      await reopenConversationMutation.mutateAsync({ conversationId: selectedConversation });
+      await Promise.all([utils.conversations.list.invalidate(), utils.conversations.counts.invalidate()]);
+      showToast('Conversa reaberta com sucesso!', 'success');
+    } catch {
+      showToast('Erro ao reabrir conversa', 'error');
+    }
   };
+
+  React.useEffect(() => {
+    const readSelectedConversation = () => new URLSearchParams(window.location.search).get('conversationId')
+      ?? localStorage.getItem('MEGADESK_SELECTED_CONVERSATION_ID');
+    const selected = readSelectedConversation();
+    if (selected) setSelectedConversation(selected);
+    const onPopState = () => setSelectedConversation(readSelectedConversation());
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  React.useEffect(() => {
+    if (!selectedConversation) return;
+    localStorage.setItem('MEGADESK_SELECTED_CONVERSATION_ID', selectedConversation);
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('conversationId') !== selectedConversation) {
+      url.searchParams.set('conversationId', selectedConversation);
+      window.history.replaceState(window.history.state, '', url);
+    }
+  }, [selectedConversation]);
 
   React.useEffect(() => {
     const newConvId = localStorage.getItem('MEGADESK_NEW_CONVERSATION_ID');
     const newConvPhone = localStorage.getItem('MEGADESK_NEW_CONVERSATION_PHONE');
     if (newConvId && newConvPhone) {
       setSelectedConversation(newConvId);
-      setSelectedFilter('open');
+      setSelectedFilter('active');
       localStorage.removeItem('MEGADESK_NEW_CONVERSATION_ID');
       localStorage.removeItem('MEGADESK_NEW_CONVERSATION_PHONE');
     } else {
@@ -476,10 +505,26 @@ function ConversationsPage() {
     }
   }, []);
 
-  const { data: conversationsData } = trpc.megadesk.getConversations.useQuery(
-    { clientId },
+  const { data: conversationRows, isLoading: conversationsLoading } = trpc.conversations.list.useQuery(
+    {
+      viewMode: ownerFilter === 'mine' ? 'mine' : ownerFilter === 'waiting' ? 'waiting' : 'all',
+      status: selectedFilter,
+      search: searchTerm || historySearch,
+      limit: 100,
+      offset: 0,
+    },
     { enabled: !!clientId, refetchInterval: 5000, refetchOnWindowFocus: true }
   );
+  const conversationsData = React.useMemo(() => (conversationRows ?? []).map((conversation: any) => ({
+    ...conversation,
+    name: conversation.customerName,
+    phone: conversation.customerPhone,
+    company: conversation.companyName,
+    timestamp: conversation.lastMessageAt,
+    status: conversation.status === 'pending' ? 'bot' : conversation.status,
+    assignedTo: conversation.assignedUserName,
+    isUnread: Number(conversation.unreadCount ?? 0) > 0 && conversation.lastMessageFrom === 'customer',
+  })), [conversationRows]);
   const crmCustomerQuery = trpc.crm.getById.useQuery(
     { crmClientId: crmIntent?.crmClientId ?? '' },
     { enabled: crmHandoffState === 'resolving' && !!crmIntent && !!conversationsData },
@@ -490,11 +535,6 @@ function ConversationsPage() {
       setConversations(conversationsData);
       // Auto-selecionar filtro: se não há conversas abertas mas há conversas bot,
       // mudar para aba BOT automaticamente (conversas do WhatsApp entram como bot)
-      const hasOpen = conversationsData.some((c: any) => c.status === 'open');
-      const hasBot = conversationsData.some((c: any) => c.status === 'bot');
-      if (!hasOpen && hasBot) {
-        setSelectedFilter('bot');
-      }
     }
   }, [conversationsData]);
 
@@ -508,7 +548,7 @@ function ConversationsPage() {
     });
     if (existing) {
       setSelectedConversation(existing.id);
-      setSelectedFilter(existing.status === "bot" ? "bot" : "open");
+      setSelectedFilter(existing.status === "closed" ? "closed" : "active");
       setCrmIntent(null);
       setCrmHandoffState('idle');
     } else if (requested.status !== "valid") {
@@ -611,16 +651,14 @@ function ConversationsPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [selectedConversation, conversationMessages, optimisticMessages]);
 
-  const filters: Array<{ id: 'open' | 'bot'; label: string; dot: string; count: number }> = [
-    { id: 'open', label: 'Abertas', dot: 'bg-emerald-500', count: conversations.filter(c => c.status === 'open').length },
-    { id: 'bot', label: 'BOT', dot: 'bg-violet-500', count: conversations.filter(c => c.status === 'bot').length },
+  const { data: countsData } = trpc.conversations.counts.useQuery(undefined, { enabled: !!clientId });
+  const filters: Array<{ id: 'active' | 'closed'; label: string; dot: string; count: number }> = [
+    { id: 'active', label: 'Abertas', dot: 'bg-emerald-500', count: countsData?.active ?? 0 },
+    { id: 'closed', label: 'Encerradas', dot: 'bg-slate-500', count: countsData?.closed ?? 0 },
   ];
 
   // Buscar todos os usuários ativos do cliente
-  const { data: activeUsersData } = trpc.megadesk.getActiveUsers.useQuery(
-    { clientId },
-    { enabled: !!clientId }
-  );
+  const { data: activeUsersData } = trpc.conversations.eligibleUsers.useQuery(undefined, { enabled: !!clientId });
 
   // Lista de atendentes (todos os usuários ativos)
   const attendants = React.useMemo(() => {
@@ -676,16 +714,6 @@ function ConversationsPage() {
         conv.phone?.includes(historySearch)
       );
     }
-    // Modo Fechadas: mostrar apenas conversas fechadas
-    if (ownerFilter === 'closed') {
-      const matchesSearch = searchTerm === '' ||
-        conv.phone?.includes(searchTerm) ||
-        conv.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        conv.company?.toLowerCase().includes(searchTerm.toLowerCase());
-      return conv.status === 'closed' && matchesSearch;
-    }
-
-    const matchesFilter = conv.status === selectedFilter;
     const matchesSearch = searchTerm === '' ||
       conv.phone?.includes(searchTerm) ||
       conv.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -694,7 +722,7 @@ function ConversationsPage() {
       ownerFilter === 'all' ? true :
       ownerFilter === 'mine' ? (conv.assignedTo === userName || conv.assignedTo === sessionData?.userId) :
       true;
-    return matchesFilter && matchesSearch && matchesOwner;
+    return matchesSearch && matchesOwner;
   });
 
   const selectedConv = conversations.find(c => c.id === selectedConversation);
@@ -765,6 +793,10 @@ function ConversationsPage() {
   const returnToConversationList = React.useCallback(() => {
     audioControllerRef.current?.invalidate('Gravação cancelada ao voltar para a lista de conversas.');
     setSelectedConversation(null);
+    localStorage.removeItem('MEGADESK_SELECTED_CONVERSATION_ID');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('conversationId');
+    window.history.replaceState(window.history.state, '', url);
   }, []);
 
   sendRecordedAudioRef.current = async audio => {
@@ -1038,30 +1070,30 @@ function ConversationsPage() {
           )}
         </div>
 
-        {/* Botões Todas / Minhas / Fechadas */}
+        {/* Filtros de responsabilidade no layout compacto anterior */}
         <div className="px-3 py-2 bg-white border-b border-slate-100">
           <div className="flex rounded-lg border border-slate-200 overflow-hidden">
-            {(['all', 'mine', 'closed'] as const).map((f, i) => (
+            {(['all', 'mine', 'waiting'] as const).map((f, i) => (
               <button
                 key={f}
                 onClick={() => { 
-                  setOwnerFilter(f as 'all' | 'mine' | 'history' | 'closed');
+                  setOwnerFilter(f);
                   setAttendantFilter('');
                 }}
                 className={cn(
                   'flex-1 px-3 py-1.5 text-xs font-medium transition-all duration-150',
                   i > 0 && 'border-l border-slate-200',
-                  ownerFilter === f ? 'bg-blue-600 text-white' : f === 'closed' ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-white text-slate-600 hover:bg-slate-50'
+                  ownerFilter === f ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
                 )}
               >
-                {f === 'all' ? 'Todas' : f === 'mine' ? 'Minhas' : 'Fechadas'}
+                {f === 'all' ? 'Todas' : f === 'mine' ? 'Minhas' : 'Bot/Aguardando'}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Filtros - ocultar quando modo Fechadas está ativo */}
-        {ownerFilter !== 'closed' && <div className="px-3 py-2 bg-white border-b border-slate-100">
+        {/* Estados do atendimento no layout compacto anterior */}
+        <div className="px-3 py-2 bg-white border-b border-slate-100">
           <div className="flex rounded-lg border border-slate-200 overflow-hidden">
             {filters.map((filter, i) => (
               <button
@@ -1071,7 +1103,7 @@ function ConversationsPage() {
                   'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all duration-200',
                   i > 0 && 'border-l border-slate-200',
                   selectedFilter === filter.id
-                    ? filter.id === 'open'
+                      ? filter.id === 'active'
                       ? 'bg-emerald-500 text-white'
                       : 'bg-blue-600 text-white'
                     : 'bg-white text-slate-600 hover:bg-slate-50'
@@ -1089,11 +1121,13 @@ function ConversationsPage() {
             ))}
 
           </div>
-        </div>}
+        </div>
 
         {/* Lista */}
         <div className="flex-1 overflow-y-auto">
-          {filteredConversations.length > 0 ? (
+          {conversationsLoading ? (
+            <div className="flex h-48 items-center justify-center text-sm text-slate-500" role="status">Carregando conversas...</div>
+          ) : filteredConversations.length > 0 ? (
             filteredConversations.map(conv => (
               <button
                 key={conv.id}
@@ -1118,6 +1152,7 @@ function ConversationsPage() {
                       <p className={cn('text-sm font-semibold truncate', conv.isUnread ? 'text-slate-900' : 'text-slate-700')}>{conv.name}</p>
                       <span className="text-xs text-slate-400 flex-shrink-0 ml-2">{formatDate(conv.timestamp)}</span>
                     </div>
+                    {conv.publicCode && <p className="mb-0.5 text-[11px] font-medium text-blue-600">{conv.publicCode}</p>}
                     <p className="text-xs text-slate-500 truncate mb-1">{conv.company || conv.phone}</p>
                     <div className="flex items-center gap-1.5">
                       {isHistoryMode && (
@@ -1135,9 +1170,7 @@ function ConversationsPage() {
                       </p>
                     </div>
                   </div>
-                  {conv.isUnread && (
-                    <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 mt-1" />
-                  )}
+                  {conv.isUnread && <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 mt-1" />}
                 </div>
               </button>
             ))
@@ -1210,18 +1243,24 @@ function ConversationsPage() {
                       {selectedConv.status === 'open' ? 'Aberta' : selectedConv.status === 'bot' ? 'BOT' : 'Fechada'}
                     </span>
                   </div>
-                  <p className="truncate text-xs text-slate-500">{selectedConv.phone} {selectedConv.company ? `• ${selectedConv.company}` : ''}</p>
+                  <p className="truncate text-xs text-slate-500">{selectedConv.phone} {selectedConv.company ? `• ${selectedConv.company}` : ''} {selectedConv.publicCode ? `• ${selectedConv.publicCode}` : ''}</p>
                 </div>
               </div>
               <div className="flex flex-shrink-0 items-center gap-1 md:gap-2">
+                {selectedConv.status === 'bot' && !selectedConv.assignedUserId && (
+                  <button type="button" onClick={() => claimConversationMutation.mutate({ conversationId: selectedConv.id }, {
+                    onSuccess: async () => {
+                      await Promise.all([utils.conversations.list.invalidate(), utils.conversations.counts.invalidate()]);
+                      showToast('Conversa assumida com sucesso!', 'success');
+                    },
+                    onError: () => showToast('Não foi possível assumir a conversa', 'error'),
+                  })} className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Assumir</button>
+                )}
                 <button
-                  onClick={() => {
-                    localStorage.setItem('MEGADESK_SELECTED_CONVERSATION_ID', selectedConv.id);
-                    window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'conversations', conversationId: selectedConv.id } }));
-                  }}
+                  onClick={() => setTransferOpen(true)}
                   className="hidden rounded-xl px-3 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-50 lg:block"
                 >
-                  Transferir conversa
+                  Transferir
                 </button>
                 <button
                   onClick={() => { setEditName(selectedConv.name); setEditCompany(selectedConv.company || ''); setEditModalOpen(true); }}
@@ -1245,10 +1284,13 @@ function ConversationsPage() {
                   <summary className="flex h-10 cursor-pointer list-none items-center rounded-xl px-3 text-sm font-medium text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
                     Mais ações
                   </summary>
-                  <div className="absolute right-0 z-30 mt-2 w-52 rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+                  <div className="absolute right-0 z-30 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+                    <div className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500">ID/protocolo: <strong className="text-slate-700">{selectedConv.publicCode || selectedConv.id}</strong></div>
                     <button type="button" onClick={() => { setEditName(selectedConv.name); setEditCompany(selectedConv.company || ''); setEditModalOpen(true); }} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Editar contato</button>
                     <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'erp-clients' } }))} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Cadastrar cliente / Visualizar perfil</button>
-                    <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'tickets', conversationId: selectedConv.id } }))} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Abrir / Visualizar chamados</button>
+                    <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'tickets', conversationId: selectedConv.id } }))} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Abrir chamado</button>
+                    <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'tickets', conversationId: selectedConv.id } }))} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Visualizar chamados</button>
+                    <button type="button" onClick={() => { setEditName(selectedConv.name); setEditCompany(selectedConv.company || ''); setEditModalOpen(true); }} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Vincular contato</button>
                     <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'conversations', contactPhone: selectedConv.phone } }))} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Histórico de conversas</button>
                   </div>
                 </details>
@@ -1443,6 +1485,38 @@ function ConversationsPage() {
       </div>
 
 
+
+      {transferOpen && selectedConv && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-labelledby="transfer-conversation-title" onMouseDown={(event) => {
+          if (event.currentTarget === event.target) setTransferOpen(false);
+        }}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 id="transfer-conversation-title" className="font-semibold text-slate-900">Transferir conversa</h3>
+              <button type="button" onClick={() => setTransferOpen(false)} aria-label="Fechar transferência" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="max-h-64 space-y-2 overflow-y-auto">
+              {(activeUsersData ?? []).map((user) => (
+                <button key={user.id} type="button" disabled={transferConversationMutation.isPending} onClick={() => transferConversationMutation.mutate({
+                  conversationId: selectedConv.id,
+                  targetUserId: user.id,
+                  expectedAssignedUserId: selectedConv.assignedUserId ?? null,
+                }, {
+                  onSuccess: async () => {
+                    setTransferOpen(false);
+                    await Promise.all([utils.conversations.list.invalidate(), utils.conversations.counts.invalidate()]);
+                    showToast('Conversa transferida com sucesso!', 'success');
+                  },
+                  onError: () => showToast('Não foi possível transferir a conversa', 'error'),
+                })} className="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-sm font-semibold text-blue-700">{user.name.charAt(0).toUpperCase()}</span>
+                  <span className="min-w-0"><span className="block truncate text-sm font-medium text-slate-800">{user.name}</span><span className="block truncate text-xs text-slate-500">{user.email}</span></span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de Confirmação - Encerrar Conversa - Simplificado */}
       {closeConfirmOpen && (
@@ -3784,7 +3858,7 @@ function Shell() {
         <main ref={mainContentRef} tabIndex={-1} className={`flex min-h-0 min-w-0 flex-1 flex-col ${active === 'conversations' ? 'overflow-hidden' : 'overflow-auto p-4 sm:p-8'}`}>
           <ErrorBoundary key={active}>
           {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} />}
-          {active === "conversations" && <ConversasPage />}
+          {active === "conversations" && <ConversationsPage />}
           {active === "tickets" && <TicketsPage />}
           {active === "tracking" && <TrackingPage />}
            {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} initialCrmClientId={activeCrmClientId ?? undefined} onClientNavigate={handleClientNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
