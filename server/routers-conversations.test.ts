@@ -23,6 +23,9 @@ describe("Conversations authorization, filters and lifecycle", () => {
     await conversationsRouter.createCaller(context()).list({ viewMode: "mine", status: "active", search: "CV-1", limit: 20, offset: 5 });
     const [sql, values] = mocks.execute.mock.calls[0];
     expect(sql).toContain("c.client_id = ?");
+    expect(sql).toContain("c.status = 'open' AND c.assigned_user_id IS NOT NULL");
+    expect(sql).toContain("u.client_id = c.client_id");
+    expect(sql).toContain("JSON_CONTAINS(u.permissions_json");
     expect(sql).toContain("c.assigned_user_id = ?");
     expect(sql).toContain("LIMIT 20 OFFSET 5");
     expect(values[0]).toBe("tenant-a");
@@ -32,6 +35,24 @@ describe("Conversations authorization, filters and lifecycle", () => {
     mocks.execute.mockClear().mockResolvedValue([[]]);
     await conversationsRouter.createCaller(context()).list({ viewMode: "waiting", status: "active", search: "", limit: 30, offset: 0 });
     expect(mocks.execute.mock.calls[0][0]).toContain("c.status = 'bot' AND c.assigned_user_id IS NULL");
+
+    mocks.execute.mockClear().mockResolvedValue([[]]);
+    await conversationsRouter.createCaller(context()).list({ viewMode: "mine", status: "closed", search: "", limit: 30, offset: 0 });
+    expect(mocks.execute.mock.calls[0][0]).toContain("c.status = 'closed'");
+    expect(mocks.execute.mock.calls[0][0]).not.toContain("c.assigned_user_id = ?");
+  });
+
+  it("counts the same disjoint open, mine, bot and closed inboxes used by listing", async () => {
+    mocks.execute.mockResolvedValue([[{ active: 3, mine: 1, waiting: 2, closed: 4 }]]);
+    const result = await conversationsRouter.createCaller(context()).counts();
+    const [sql, values] = mocks.execute.mock.calls[0];
+    expect(sql).toContain("c.status = 'open' AND c.assigned_user_id IS NOT NULL");
+    expect(sql).toContain("u.client_id = c.client_id");
+    expect(sql).toContain("c.status = 'open' AND c.assigned_user_id = ?");
+    expect(sql).toContain("c.status = 'bot' AND c.assigned_user_id IS NULL");
+    expect(sql).toContain("c.status = 'closed'");
+    expect(values).toEqual(["user-a", "tenant-a"]);
+    expect(result).toEqual({ active: 3, mine: 1, waiting: 2, closed: 4 });
   });
 
   it.each([

@@ -56,10 +56,16 @@ async function eligibleUser(tenantId: string, userId: string) {
 export const conversationsRouter = router({
   list: megadeskProcedure.input(listInput).query(async ({ input, ctx }) => {
     requireConversationAccess(ctx);
-    const conditions = ["c.client_id = ?", input.status === "closed" ? "c.status = 'closed'" : "c.status IN ('open','bot')"];
+    const eligibleOwner = `EXISTS (SELECT 1 FROM megadesk_domain_client_users u
+      WHERE u.client_id = c.client_id AND u.user_id = c.assigned_user_id AND u.status = 'active'
+        AND u.role IN ('admin','manager','agent')
+        AND JSON_CONTAINS(u.permissions_json, JSON_QUOTE('conversations')))`;
+    const activeCondition = input.viewMode === "waiting"
+      ? "c.status = 'bot' AND c.assigned_user_id IS NULL"
+      : `c.status = 'open' AND c.assigned_user_id IS NOT NULL AND ${eligibleOwner}`;
+    const conditions = ["c.client_id = ?", input.status === "closed" ? "c.status = 'closed'" : activeCondition];
     const values: unknown[] = [ctx.tenantId];
-    if (input.viewMode === "mine") { conditions.push("c.assigned_user_id = ?"); values.push(ctx.operationalUserId); }
-    if (input.viewMode === "waiting") conditions.push("c.status = 'bot' AND c.assigned_user_id IS NULL");
+    if (input.status === "active" && input.viewMode === "mine") { conditions.push("c.assigned_user_id = ?"); values.push(ctx.operationalUserId); }
     if (input.search) {
       conditions.push("(UPPER(c.public_code) = UPPER(?) OR c.customer_name LIKE ? OR c.company LIKE ? OR c.phone LIKE ?)");
       values.push(input.search, `%${input.search}%`, `%${input.search}%`, `%${input.search.replace(/\D/g, "")}%`);
@@ -82,11 +88,15 @@ export const conversationsRouter = router({
   counts: megadeskProcedure.query(async ({ ctx }) => {
     requireConversationAccess(ctx);
     const [rows] = await getPool().execute(
-      `SELECT SUM(status IN ('open','bot')) AS active,
-       SUM(status = 'closed') AS closed,
-       SUM(status = 'bot' AND assigned_user_id IS NULL) AS waiting,
-       SUM(status IN ('open','bot') AND assigned_user_id = ?) AS mine
-       FROM megadesk_domain_conversations WHERE client_id = ?`,
+      `SELECT SUM(c.status = 'open' AND c.assigned_user_id IS NOT NULL AND
+         EXISTS (SELECT 1 FROM megadesk_domain_client_users u
+           WHERE u.client_id = c.client_id AND u.user_id = c.assigned_user_id AND u.status = 'active'
+             AND u.role IN ('admin','manager','agent')
+             AND JSON_CONTAINS(u.permissions_json, JSON_QUOTE('conversations')))) AS active,
+       SUM(c.status = 'closed') AS closed,
+       SUM(c.status = 'bot' AND c.assigned_user_id IS NULL) AS waiting,
+       SUM(c.status = 'open' AND c.assigned_user_id = ?) AS mine
+       FROM megadesk_domain_conversations c WHERE c.client_id = ?`,
       [ctx.operationalUserId, ctx.tenantId],
     ) as any[];
     return Object.fromEntries(Object.entries(rows[0] ?? {}).map(([key, value]) => [key, Number(value ?? 0)]));

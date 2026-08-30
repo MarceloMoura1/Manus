@@ -10,6 +10,7 @@ const conversation = { id: "conv-ui", publicCode: "CV-260829000000-TEST", contac
 
 async function mockedPage(page: Page, deepLink = false) {
   const calls: string[] = [];
+  const listInputs: Array<{ viewMode: string; status: string }> = [];
   await page.addInitScript(value => {
     localStorage.setItem("megadesk_session_v1", JSON.stringify(value));
     localStorage.setItem("megadesk_active_page_v1", "conversations");
@@ -18,9 +19,16 @@ async function mockedPage(page: Page, deepLink = false) {
     const url = new URL(route.request().url());
     const names = decodeURIComponent(url.pathname).replace(/^.*\/api\/trpc\//, "").split(",");
     calls.push(...names);
+    const rawInput = url.searchParams.get("input");
+    const parsedInput = rawInput ? JSON.parse(rawInput) : {};
+    names.forEach((name, index) => {
+      if (!name.includes("conversations.list")) return;
+      const input = (parsedInput[index]?.json ?? parsedInput.json) as { viewMode: string; status: string } | undefined;
+      if (input) listInputs.push(input);
+    });
     const result = (name: string) => name.includes("refreshSession") ? { ok: true, session }
       : name.includes("conversations.list") ? [conversation]
-      : name.includes("conversations.counts") ? { active: 1, closed: 1, waiting: 0, mine: 1 }
+      : name.includes("conversations.counts") ? { active: 3, closed: 4, waiting: 2, mine: 1 }
       : name.includes("conversations.eligibleUsers") ? [{ id: "user-ui", name: "Agent", email: "agent@example.test", role: "agent" }]
       : name.includes("conversations.messages") ? { source: "legacy_json", messages: [{ id: "legacy-1", from: "customer", text: "Mensagem legada", type: "text", timestamp: new Date().toISOString() }] }
       : { ok: true };
@@ -28,12 +36,12 @@ async function mockedPage(page: Page, deepLink = false) {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(url.searchParams.get("batch") === "1" ? body : body[0]) });
   });
   await page.goto(deepLink ? "/?conversationId=conv-ui" : "/", { waitUntil: "domcontentloaded" });
-  return calls;
+  return { calls, listInputs };
 }
 
 test.describe("restored conversation layout with WIP lifecycle", () => {
   test("keeps the baseline two-column contract on the canonical backend", async ({ page }) => {
-    const calls = await mockedPage(page, true);
+    const { calls, listInputs } = await mockedPage(page, true);
     await expect(page.getByTestId("conversation-list-panel")).toBeVisible();
     await expect(page.getByText("Cliente UI", { exact: true }).first()).toBeVisible();
     await expect(page.getByTestId("conversation-chat-panel")).toBeVisible();
@@ -48,24 +56,62 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(all.locator("xpath=following-sibling::button[2]")).toHaveAccessibleName(/Encerradas/);
     const open = page.getByRole("button", { name: /Abertas/ });
     await expect(open.locator("xpath=following-sibling::button[1]")).toHaveAccessibleName("BOT/Aguardando");
-    await expect(page.getByRole("button", { name: /Encerradas/ })).toContainText("1");
-    await expect(open).toContainText("1");
-    await all.click();
-    await expect(all).toHaveClass(/bg-blue-600/);
-    await page.getByRole("button", { name: "Minhas" }).click();
-    await expect(page.getByRole("button", { name: "Minhas" })).toHaveClass(/bg-blue-600/);
-    const closed = page.getByRole("button", { name: /Encerradas/ });
-    await closed.click();
-    await expect(closed).toHaveClass(/bg-blue-600/);
-    await open.click();
-    await expect(open).toHaveClass(/bg-emerald-500/);
+    const mine = page.getByRole("button", { name: "Minhas" });
+    const closed = page.getByRole("button", { name: "Encerradas", exact: true });
     const bot = page.getByRole("button", { name: "BOT/Aguardando" });
+    await expect(closed).toHaveText("Encerradas");
+    await expect(open).toContainText("3");
+    await expect(all).toHaveAttribute("aria-pressed", "true");
+    await expect(open).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "all", status: "active" });
+
+    await mine.click();
+    await expect(mine).toHaveAttribute("aria-pressed", "true");
+    await expect(open).toContainText("1");
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "mine", status: "active" });
     await bot.click();
-    await expect(bot).toHaveClass(/bg-blue-600/);
-    await page.goto("/?conversationId=conv-ui");
+    await expect(mine).toHaveAttribute("aria-pressed", "true");
+    await expect(bot).toHaveAttribute("aria-pressed", "true");
+    await expect(open).toHaveAttribute("aria-pressed", "false");
+    await expect(page).toHaveURL(/conversationScope=mine.*conversationInbox=bot/);
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "waiting", status: "active" });
+
+    await open.click();
+    await expect(mine).toHaveAttribute("aria-pressed", "true");
+    await expect(open).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "mine", status: "active" });
+    await closed.click();
+    await expect(closed).toHaveAttribute("aria-pressed", "true");
+    await expect(mine).toHaveAttribute("aria-pressed", "false");
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "all", status: "closed" });
+    await open.click();
+    await expect(mine).toHaveAttribute("aria-pressed", "true");
+
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Minhas" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: /Abertas/ })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("navigation").first().getByRole("button", { name: "Home", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "MegaDesk" })).toBeVisible();
+    await page.goBack();
+    await expect(page.getByRole("button", { name: "Minhas" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: /Abertas/ })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "BOT/Aguardando" }).click();
+    await page.goBack();
+    await expect(page.getByRole("button", { name: /Abertas/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "Minhas" })).toHaveAttribute("aria-pressed", "true");
+    await page.goForward();
+    await expect(page.getByRole("button", { name: "BOT/Aguardando" })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("conversation-chat-panel")).toBeVisible();
     expect(calls.some(name => name.includes("conversations.list"))).toBe(true);
     expect(calls.some(name => name.includes("megadesk.getConversations"))).toBe(false);
+  });
+
+  test("falls back invalid persisted filters to Todas and Abertas", async ({ page }) => {
+    await mockedPage(page);
+    await page.goto("/?conversationScope=invalid&conversationInbox=invalid");
+    await expect(page.getByRole("button", { name: "Todas" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: /Abertas/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(page).toHaveURL(/conversationScope=all.*conversationInbox=open/);
   });
 
   test("exposes filters and actions to keyboard focus", async ({ page }) => {

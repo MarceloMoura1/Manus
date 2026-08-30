@@ -370,8 +370,20 @@ function ConversationsPage() {
       return raw ? JSON.parse(raw) as CrmWhatsAppIntent : null;
     } catch { return null; }
   });
-  const [selectedFilter, setSelectedFilter] = React.useState<'active' | 'closed'>('active');
-  const [ownerFilter, setOwnerFilter] = React.useState<'all' | 'mine' | 'waiting' | 'history'>('all');
+  const [attendantScope, setAttendantScope] = React.useState<'all' | 'mine'>(() => {
+    const value = new URLSearchParams(window.location.search).get('conversationScope');
+    return value === 'mine' ? 'mine' : 'all';
+  });
+  const [inboxView, setInboxView] = React.useState<'open' | 'bot' | 'closed'>(() => {
+    const value = new URLSearchParams(window.location.search).get('conversationInbox');
+    return value === 'bot' || value === 'closed' ? value : 'open';
+  });
+  const selectedFilter: 'active' | 'closed' = inboxView === 'closed' ? 'closed' : 'active';
+  const ownerFilter: 'all' | 'mine' | 'waiting' | 'history' = inboxView === 'bot'
+    ? 'waiting'
+    : inboxView === 'closed'
+      ? 'all'
+      : attendantScope;
   const [attendantFilter, setAttendantFilter] = React.useState<string>('');
   const [historySearch, setHistorySearch] = React.useState<string>('');
   const [attendantDropdownOpen, setAttendantDropdownOpen] = React.useState(false);
@@ -467,10 +479,39 @@ function ConversationsPage() {
       ?? localStorage.getItem('MEGADESK_SELECTED_CONVERSATION_ID');
     const selected = readSelectedConversation();
     if (selected) setSelectedConversation(selected);
-    const onPopState = () => setSelectedConversation(readSelectedConversation());
+    const onPopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      setSelectedConversation(readSelectedConversation());
+      setAttendantScope(params.get('conversationScope') === 'mine' ? 'mine' : 'all');
+      const inbox = params.get('conversationInbox');
+      setInboxView(inbox === 'bot' || inbox === 'closed' ? inbox : 'open');
+    };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
+
+  React.useEffect(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('conversationScope', attendantScope);
+    url.searchParams.set('conversationInbox', inboxView);
+    window.history.replaceState({ ...window.history.state, megadeskRoute: 'conversations' }, '', url);
+  }, [attendantScope, inboxView]);
+
+  const selectAttendantScope = React.useCallback((scope: 'all' | 'mine') => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('conversationScope', scope);
+    url.searchParams.set('conversationInbox', inboxView);
+    window.history.pushState({ ...window.history.state, megadeskRoute: 'conversations' }, '', url);
+    setAttendantScope(scope);
+  }, [inboxView]);
+
+  const selectInboxView = React.useCallback((inbox: 'open' | 'bot' | 'closed') => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('conversationScope', attendantScope);
+    url.searchParams.set('conversationInbox', inbox);
+    window.history.pushState({ ...window.history.state, megadeskRoute: 'conversations' }, '', url);
+    setInboxView(inbox);
+  }, [attendantScope]);
 
   React.useEffect(() => {
     if (!selectedConversation) return;
@@ -487,7 +528,7 @@ function ConversationsPage() {
     const newConvPhone = localStorage.getItem('MEGADESK_NEW_CONVERSATION_PHONE');
     if (newConvId && newConvPhone) {
       setSelectedConversation(newConvId);
-      setSelectedFilter('active');
+      setInboxView('open');
       localStorage.removeItem('MEGADESK_NEW_CONVERSATION_ID');
       localStorage.removeItem('MEGADESK_NEW_CONVERSATION_PHONE');
     } else {
@@ -499,7 +540,7 @@ function ConversationsPage() {
         const phone = params.get('phone');
         if (cId && phone) {
           setSelectedConversation(cId);
-          window.history.replaceState({}, document.title, window.location.pathname + '#/conversas');
+          window.history.replaceState({}, document.title, window.location.pathname + window.location.search + '#/conversas');
         }
       }
     }
@@ -548,7 +589,7 @@ function ConversationsPage() {
     });
     if (existing) {
       setSelectedConversation(existing.id);
-      setSelectedFilter(existing.status === "closed" ? "closed" : "active");
+      setInboxView(existing.status === "closed" ? "closed" : existing.status === "bot" ? "bot" : "open");
       setCrmIntent(null);
       setCrmHandoffState('idle');
     } else if (requested.status !== "valid") {
@@ -652,10 +693,7 @@ function ConversationsPage() {
   }, [selectedConversation, conversationMessages, optimisticMessages]);
 
   const { data: countsData } = trpc.conversations.counts.useQuery(undefined, { enabled: !!clientId });
-  const filters: Array<{ id: 'active' | 'closed'; label: string; dot: string; count: number }> = [
-    { id: 'active', label: 'Abertas', dot: 'bg-emerald-500', count: countsData?.active ?? 0 },
-    { id: 'closed', label: 'Encerradas', dot: 'bg-slate-500', count: countsData?.closed ?? 0 },
-  ];
+  const openCount = attendantScope === 'mine' ? countsData?.mine ?? 0 : countsData?.active ?? 0;
 
   // Buscar todos os usuários ativos do cliente
   const { data: activeUsersData } = trpc.conversations.eligibleUsers.useQuery(undefined, { enabled: !!clientId });
@@ -667,7 +705,7 @@ function ConversationsPage() {
   }, [activeUsersData]);
 
   // Modo Histórico: busca em TODAS as conversas (abertas + fechadas + bot), sem filtro de status
-  const isHistoryMode = ownerFilter === 'history';
+  const isHistoryMode = (ownerFilter as string) === 'history';
 
   // Helper: converte timestamp de conversa para Date
   const convToDate = (conv: any): Date | null => {
@@ -1076,69 +1114,55 @@ function ConversationsPage() {
             {(['all', 'mine'] as const).map((f, i) => (
               <button
                 key={f}
+                aria-pressed={inboxView !== 'closed' && attendantScope === f}
                 onClick={() => { 
-                  setOwnerFilter(f);
+                  selectAttendantScope(f);
                   setAttendantFilter('');
                 }}
                 className={cn(
                   'flex-1 px-3 py-1.5 text-xs font-medium transition-all duration-150',
                   i > 0 && 'border-l border-slate-200',
-                  ownerFilter === f ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                  inboxView !== 'closed' && attendantScope === f ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
                 )}
               >
                 {f === 'all' ? 'Todas' : 'Minhas'}
               </button>
             ))}
-            {filters.filter(filter => filter.id === 'closed').map(filter => (
-              <button
-                key={filter.id}
-                onClick={() => setSelectedFilter(filter.id)}
-                className={cn(
-                  'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all duration-200 border-l border-slate-200',
-                  selectedFilter === filter.id ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
-                )}
-              >
-                <span className={cn('w-1.5 h-1.5 rounded-full', selectedFilter === filter.id ? 'bg-white' : filter.dot)} />
-                <span>{filter.label}</span>
-                <span className={cn('text-xs font-bold', selectedFilter === filter.id ? 'text-blue-100' : 'text-slate-400')}>{filter.count}</span>
-              </button>
-            ))}
+            <button
+              aria-pressed={inboxView === 'closed'}
+              onClick={() => selectInboxView('closed')}
+              className={cn(
+                'flex-1 px-3 py-1.5 text-xs font-medium transition-all duration-200 border-l border-slate-200',
+                inboxView === 'closed' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+              )}
+            >
+              Encerradas
+            </button>
           </div>
         </div>
 
         {/* Estados do atendimento no layout compacto anterior */}
         <div className="px-3 py-2 bg-white border-b border-slate-100">
           <div className="flex rounded-lg border border-slate-200 overflow-hidden">
-            {filters.filter(filter => filter.id === 'active').map(filter => (
-              <button
-                key={filter.id}
-                onClick={() => setSelectedFilter(filter.id)}
-                className={cn(
-                  'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all duration-200',
-                  selectedFilter === filter.id
-                      ? 'bg-emerald-500 text-white'
-                    : 'bg-white text-slate-600 hover:bg-slate-50'
-                )}
-              >
-                <span className={cn('w-1.5 h-1.5 rounded-full', selectedFilter === filter.id ? 'bg-white' : filter.dot)} />
-                <span>
-                  {filter.label}
-                </span>
-                <span className={cn(
-                  'text-xs font-bold',
-                  selectedFilter === filter.id ? 'text-blue-100' : 'text-slate-400'
-                )}>{filter.count}</span>
-              </button>
-            ))}
+            <button
+              aria-pressed={inboxView === 'open'}
+              onClick={() => selectInboxView('open')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all duration-200',
+                inboxView === 'open' ? 'bg-emerald-500 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+              )}
+            >
+              <span className={cn('w-1.5 h-1.5 rounded-full', inboxView === 'open' ? 'bg-white' : 'bg-emerald-500')} />
+              <span>Abertas</span>
+              <span className={cn('text-xs font-bold', inboxView === 'open' ? 'text-blue-100' : 'text-slate-400')}>{openCount}</span>
+            </button>
             <button
               aria-label="BOT/Aguardando"
-              onClick={() => {
-                setOwnerFilter('waiting');
-                setAttendantFilter('');
-              }}
+              aria-pressed={inboxView === 'bot'}
+              onClick={() => selectInboxView('bot')}
               className={cn(
                 'flex-1 px-3 py-1.5 text-xs font-medium transition-all duration-150 border-l border-slate-200',
-                ownerFilter === 'waiting' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                inboxView === 'bot' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
               )}
             >
               BOT
@@ -3590,14 +3614,14 @@ function Shell() {
   }, [active]);
 
   useEffect(() => {
-    const restoreFromHistory = () => {
+    const restoreFromHistory = (event: PopStateEvent) => {
       let path = window.location.pathname;
       if (path === "/clientes") {
         window.history.replaceState(null, "", `/erp/clientes${window.location.search}${window.location.hash}`);
         path = "/erp/clientes";
       }
       setActiveCrmClientId(path === "/erp/clientes" ? new URLSearchParams(window.location.search).get("crmClientId") : null);
-        setActive(path === "/erp/clientes" ? "erp-clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp/compras" ? "erp-purchases" : path === "/erp/vendas" ? "erp-sales" : path === "/erp/financeiro" ? "erp-finance" : path === "/erp/fiscal" ? "erp-fiscal" : path === "/erp/relatorios" ? "erp-reports" : path === "/erp" ? "erp-summary" : "home");
+        setActive(path === "/erp/clientes" ? "erp-clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp/compras" ? "erp-purchases" : path === "/erp/vendas" ? "erp-sales" : path === "/erp/financeiro" ? "erp-finance" : path === "/erp/fiscal" ? "erp-fiscal" : path === "/erp/relatorios" ? "erp-reports" : path === "/erp" ? "erp-summary" : event.state?.megadeskRoute === "conversations" ? "conversations" : "home");
       window.setTimeout(() => mainContentRef.current?.focus(), 0);
     };
     window.addEventListener("popstate", restoreFromHistory);
