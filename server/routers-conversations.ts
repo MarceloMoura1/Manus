@@ -72,13 +72,17 @@ export const conversationsRouter = router({
     }
     const [rows] = await getPool().execute(
       `SELECT c.conversation_id AS id, c.public_code AS publicCode, c.contact_id AS contactId,
-       c.customer_name AS customerName, c.phone AS customerPhone, c.company AS companyName,
+       COALESCE(contact.display_name, c.customer_name) AS customerName, c.phone AS customerPhone,
+       contact.company_text AS companyText, c.company AS companyName,
        c.last_message AS lastMessage, c.updated_at AS lastMessageAt, c.unread_count AS unreadCount,
        CASE WHEN c.status = 'bot' THEN 'pending' ELSE c.status END AS status,
        c.assigned_user_id AS assignedUserId, c.assigned_user_name AS assignedUserName,
        c.last_message_from AS lastMessageFrom, c.crm_client_id AS crmClientId, c.origin,
        c.created_at AS createdAt, c.closed_at AS closedAt
-       FROM megadesk_domain_conversations c WHERE ${conditions.join(" AND ")}
+       FROM megadesk_domain_conversations c
+       LEFT JOIN megadesk_conversation_contacts contact
+         ON contact.contact_id = c.contact_id AND contact.client_id = c.client_id
+       WHERE ${conditions.join(" AND ")}
        ORDER BY (c.public_code = ?) DESC, c.updated_at DESC LIMIT ${input.limit} OFFSET ${input.offset}`,
       [...values, input.search || ""],
     ) as any[];
@@ -267,15 +271,45 @@ export const conversationsRouter = router({
     return rows as any[];
   }),
 
-  updateContact: megadeskProcedure.input(z.object({ contactId: id, displayName: z.string().trim().min(1).max(180) }))
+  updateContact: megadeskProcedure.input(z.object({
+    contactId: id,
+    displayName: z.string().trim().min(1).max(180).optional(),
+    companyText: z.union([z.string().transform(value => value.trim()).pipe(z.string().max(255).superRefine((value, ctx) => {
+      if (/<[^>]*>/.test(value)) ctx.addIssue({ code: "custom", message: "Empresa não aceita HTML." });
+      if (/^[\[{]/.test(value)) {
+        try {
+          const parsed = JSON.parse(value);
+          if (parsed && typeof parsed === "object") ctx.addIssue({ code: "custom", message: "Empresa deve ser texto simples." });
+        } catch { /* texto livre que apenas começa com colchete/chave */ }
+      }
+    })), z.null()]).optional(),
+  }).refine(input => input.displayName !== undefined || input.companyText !== undefined, {
+    message: "Informe ao menos um campo para atualizar.",
+  }))
     .mutation(async ({ input, ctx }) => {
       requireConversationAccess(ctx);
+      const assignments: string[] = [];
+      const values: unknown[] = [];
+      if (input.displayName !== undefined) {
+        assignments.push("display_name = ?");
+        values.push(input.displayName);
+      }
+      if (input.companyText !== undefined) {
+        assignments.push("company_text = ?");
+        values.push(input.companyText?.trim() || null);
+      }
       const [result] = await getPool().execute(
-        `UPDATE megadesk_conversation_contacts SET display_name = ?, updated_at = NOW()
-         WHERE contact_id = ? AND client_id = ?`, [input.displayName, input.contactId, ctx.tenantId],
+        `UPDATE megadesk_conversation_contacts SET ${assignments.join(", ")}, updated_at = NOW()
+         WHERE contact_id = ? AND client_id = ?`, [...values, input.contactId, ctx.tenantId],
       ) as any[];
       if (!result.affectedRows) throw new TRPCError({ code: "NOT_FOUND", message: "Contato não encontrado." });
-      return { ok: true };
+      const [rows] = await getPool().execute(
+        `SELECT contact_id AS contactId, display_name AS displayName, company_text AS companyText,
+         canonical_phone AS canonicalPhone, crm_client_id AS crmClientId
+         FROM megadesk_conversation_contacts WHERE contact_id = ? AND client_id = ? LIMIT 1`,
+        [input.contactId, ctx.tenantId],
+      ) as any[];
+      return rows[0];
     }),
 
   linkCrm: megadeskProcedure.input(z.object({ conversationId: id, contactId: id, crmClientId: id }))

@@ -1,0 +1,1 @@
+ALTER TABLE `megadesk_conversation_contacts` ADD `company_text` varchar(255);

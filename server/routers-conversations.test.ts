@@ -104,4 +104,71 @@ describe("Conversations authorization, filters and lifecycle", () => {
       .rejects.toMatchObject({ code: "CONFLICT" });
     expect(db.rollback).toHaveBeenCalledOnce();
   });
+
+  it("reads the canonical contact name and free-text company without conflating the CRM company", async () => {
+    mocks.execute.mockResolvedValue([[]]);
+    await conversationsRouter.createCaller(context()).list({ viewMode: "all", status: "active", search: "", limit: 30, offset: 0 });
+    const sql = mocks.execute.mock.calls[0][0] as string;
+    expect(sql).toContain("LEFT JOIN megadesk_conversation_contacts contact");
+    expect(sql).toContain("contact.contact_id = c.contact_id AND contact.client_id = c.client_id");
+    expect(sql).toContain("contact.company_text AS companyText");
+    expect(sql).toContain("c.company AS companyName");
+  });
+
+  it("updates only provided contact fields in the authenticated tenant and returns the canonical contact", async () => {
+    mocks.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([[{ contactId: "contact-a", displayName: "Maria", companyText: "Árvore Ltda", canonicalPhone: "5511999999999", crmClientId: "crm-a" }]]);
+    const result = await conversationsRouter.createCaller(context()).updateContact({
+      contactId: "contact-a", displayName: "  Maria  ", companyText: "  Árvore Ltda  ",
+    });
+    const [writeSql, values] = mocks.execute.mock.calls[0];
+    expect(writeSql).toContain("UPDATE megadesk_conversation_contacts");
+    expect(writeSql).toContain("display_name = ?");
+    expect(writeSql).toContain("company_text = ?");
+    expect(writeSql).not.toMatch(/canonical_phone|crm_client_id|wa_/i);
+    expect(values).toEqual(["Maria", "Árvore Ltda", "contact-a", "tenant-a"]);
+    expect(result).toMatchObject({ displayName: "Maria", companyText: "Árvore Ltda", canonicalPhone: "5511999999999", crmClientId: "crm-a" });
+    expect(mocks.execute.mock.calls[1][1]).toEqual(["contact-a", "tenant-a"]);
+  });
+
+  it.each([
+    ["empty", "   ", null],
+    ["null", null, null],
+    ["limit", "x".repeat(255), "x".repeat(255)],
+  ])("normalizes companyText %s without changing the name", async (_case, companyText, expected) => {
+    mocks.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([[{ contactId: "contact-a", displayName: "Original", companyText: expected, canonicalPhone: "5511", crmClientId: "crm-a" }]]);
+    await conversationsRouter.createCaller(context()).updateContact({ contactId: "contact-a", companyText });
+    const [sql, values] = mocks.execute.mock.calls[0];
+    expect(sql).toContain("company_text = ?");
+    expect(sql).not.toContain("display_name = ?");
+    expect(values).toEqual([expected, "contact-a", "tenant-a"]);
+  });
+
+  it("preserves companyText when omitted and rejects values above 255 characters", async () => {
+    mocks.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([[{ contactId: "contact-a", displayName: "Novo", companyText: "Preservada", canonicalPhone: "5511", crmClientId: "crm-a" }]]);
+    await conversationsRouter.createCaller(context()).updateContact({ contactId: "contact-a", displayName: "Novo" });
+    expect(mocks.execute.mock.calls[0][0]).not.toContain("company_text = ?");
+    await expect(conversationsRouter.createCaller(context()).updateContact({ contactId: "contact-a", companyText: "x".repeat(256) }))
+      .rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(conversationsRouter.createCaller(context()).updateContact({ contactId: "contact-a", companyText: "<b>Empresa</b>" }))
+      .rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(conversationsRouter.createCaller(context()).updateContact({ contactId: "contact-a", companyText: '{"name":"Empresa"}' }))
+      .rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("blocks cross-tenant contacts and callers without conversation permission", async () => {
+    mocks.execute.mockResolvedValueOnce([{ affectedRows: 0 }]);
+    await expect(conversationsRouter.createCaller(context()).updateContact({ contactId: "contact-b", displayName: "Outro" }))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(mocks.execute.mock.calls[0][1]).toEqual(["Outro", "contact-b", "tenant-a"]);
+    mocks.execute.mockClear();
+    await expect(conversationsRouter.createCaller(context("user-a", "tenant-a", "agent", [])).updateContact({ contactId: "contact-a", displayName: "Novo" }))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
 });

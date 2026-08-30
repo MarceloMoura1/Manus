@@ -456,6 +456,7 @@ export const megadeskConversationContacts = mysqlTable(
     contactId: varchar("contact_id", { length: 80 }).primaryKey().notNull(),
     clientId: varchar("client_id", { length: 80 }).notNull(),
     displayName: varchar("display_name", { length: 180 }).notNull(),
+    companyText: varchar("company_text", { length: 255 }),
     canonicalPhone: varchar("canonical_phone", { length: 40 }),
     channel: varchar({ length: 40 }).notNull(),
     provider: varchar({ length: 40 }).notNull(),

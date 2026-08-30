@@ -102,9 +102,11 @@ describe("MegaDesk UI structure", () => {
       expect(homeSource).toContain(label);
     }
     expect(homeSource).not.toContain("Mais ações");
-    for (const label of ["Atendimento", "Contato", "Cliente", "Chamados", "Histórico de conversas", "Copiar protocolo"]) {
+    for (const label of ["Atendimento", "Contato", "Cliente", "Chamados", "Histórico de conversas", "Copiar ID da conversa", "+ Adicionar empresa", "Empresa informada"]) {
       expect(conversationDetailsSource).toContain(label);
     }
+    expect(homeSource).not.toContain("Modal de Edição de Cliente");
+    expect(conversationDetailsSource).toContain("trpc.conversations.updateContact.useMutation");
     expect(homeSource).toContain("<ConversationMedia");
     expect(homeSource).toContain("isAgent && msg.agentName");
     expect(homeSource).not.toContain("!isAgent && <p className=\"text-xs text-slate-400 mt-1 ml-1\"");

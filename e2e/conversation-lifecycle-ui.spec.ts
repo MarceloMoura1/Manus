@@ -3,8 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 const session = { clientId: "tenant-ui", company: "UI", permissions: ["conversations", "active-attendance"],
   userName: "Agent", userEmail: "agent@example.test", userRole: "agent", modules: ["conversations"],
   expiresAt: Date.now() + 3_600_000 };
-const conversation = { id: "conv-ui", publicCode: "CV-260829000000-TEST", contactId: "contact-ui",
-  customerName: "Cliente UI", customerPhone: "5541999999999", companyName: "Empresa UI", lastMessage: "Mensagem legada",
+const conversation = { id: "conv-ui", publicCode: "CV-260829000000-TEST", contactId: "contact-ui", crmClientId: "crm-ui",
+  customerName: "Cliente UI", customerPhone: "5541999999999", companyText: null, companyName: "Empresa CRM UI", lastMessage: "Mensagem legada",
   lastMessageAt: new Date().toISOString(), unreadCount: 1, status: "open", assignedUserId: "user-ui",
   assignedUserName: "Agent", lastMessageFrom: "customer" };
 
@@ -36,6 +36,7 @@ async function mockedPage(page: Page, deepLink = false) {
       : name.includes("conversations.messages") ? { source: "legacy_json", messages: [{ id: "legacy-1", from: "customer", text: "Mensagem legada", type: "text", timestamp: new Date().toISOString() }] }
       : name.includes("conversations.history") ? [{ id: conversation.id, publicCode: conversation.publicCode, status: "open", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }]
       : name.includes("conversations.linkedTickets") ? []
+      : name.includes("conversations.updateContact") ? { contactId: conversation.contactId, displayName: "Cliente Editado", companyText: "Empresa Informada", canonicalPhone: conversation.customerPhone, crmClientId: conversation.crmClientId }
       : { ok: true };
     const body = names.map(name => ({ result: { data: { json: result(name) } } }));
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(url.searchParams.get("batch") === "1" ? body : body[0]) });
@@ -117,13 +118,29 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(detailsToggle).toHaveAttribute("aria-expanded", "false");
     await detailsToggle.click();
     await expect(page.getByTestId("conversation-details-panel")).toBeVisible();
+    await expect(page.locator('[data-testid^="details-section-"]')).toHaveCount(5);
+    await expect(page.getByText("Cliente vinculado")).toBeVisible();
+    await expect(page.getByText("Empresa CRM UI", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Fechar detalhes da conversa" }).first()).toHaveAttribute("aria-expanded", "true");
     await expect(page.locator("#attendance-content").getByText(conversation.publicCode, { exact: true })).toBeVisible();
-    const copyId = page.getByRole("button", { name: "Copiar protocolo" });
+    const copyId = page.getByRole("button", { name: "Copiar ID da conversa" });
     await copyId.focus();
     await expect(copyId).toBeFocused();
     await copyId.click();
     await expect.poll(() => page.evaluate(() => (window as typeof window & { __copiedConversationId?: string }).__copiedConversationId)).toBe(conversation.publicCode);
+    await expect(copyId).toContainText("Copiado");
+
+    await page.getByRole("button", { name: "+ Adicionar empresa" }).click();
+    const companyInput = page.getByLabel("Nome da empresa");
+    await expect(companyInput).toBeFocused();
+    await companyInput.fill("Empresa Informada");
+    await companyInput.press("Escape");
+    await expect(page.getByTestId("conversation-details-panel")).toBeVisible();
+    await page.getByRole("button", { name: "+ Adicionar empresa" }).click();
+    await page.getByLabel("Nome da empresa").fill("Empresa Informada");
+    await page.getByLabel("Nome da empresa").press("Enter");
+    await expect(page.getByText("Empresa Informada", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("conversation-details-panel")).toBeVisible();
 
     await page.reload();
     await expect(page.getByRole("button", { name: "Minhas" })).toHaveAttribute("aria-pressed", "true");
