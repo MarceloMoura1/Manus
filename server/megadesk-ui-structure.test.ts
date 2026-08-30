@@ -97,7 +97,7 @@ describe("MegaDesk UI structure", () => {
     expect(homeSource).toContain('data-testid="conversation-chat-panel"');
     expect(homeSource).toContain('data-testid="conversation-composer"');
     expect(homeSource).toContain("['all', 'mine']");
-    for (const label of ["Todas", "Minhas", "BOT/Aguardando", "Abertas", "Encerradas", "Assumir", "Transferir", "Mais ações", "ID/protocolo"]) {
+    for (const label of ["Todas", "Minhas", "BOT/Aguardando", "Abertas", "Encerradas", "Assumir", "Transferir", "Mais ações", "ID da conversa", "Copiar ID"]) {
       expect(homeSource).toContain(label);
     }
     expect(homeSource).toContain("<ConversationMedia");

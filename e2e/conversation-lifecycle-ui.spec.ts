@@ -10,10 +10,13 @@ const conversation = { id: "conv-ui", publicCode: "CV-260829000000-TEST", contac
 
 async function mockedPage(page: Page, deepLink = false) {
   const calls: string[] = [];
-  const listInputs: Array<{ viewMode: string; status: string }> = [];
+  const listInputs: Array<{ viewMode: string; status: string; search?: string }> = [];
   await page.addInitScript(value => {
     localStorage.setItem("megadesk_session_v1", JSON.stringify(value));
     localStorage.setItem("megadesk_active_page_v1", "conversations");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+      writeText: async (text: string) => { (window as typeof window & { __copiedConversationId?: string }).__copiedConversationId = text; },
+    } });
   }, session);
   await page.route("**/api/trpc/**", async route => {
     const url = new URL(route.request().url());
@@ -23,7 +26,7 @@ async function mockedPage(page: Page, deepLink = false) {
     const parsedInput = rawInput ? JSON.parse(rawInput) : {};
     names.forEach((name, index) => {
       if (!name.includes("conversations.list")) return;
-      const input = (parsedInput[index]?.json ?? parsedInput.json) as { viewMode: string; status: string } | undefined;
+      const input = (parsedInput[index]?.json ?? parsedInput.json) as { viewMode: string; status: string; search?: string } | undefined;
       if (input) listInputs.push(input);
     });
     const result = (name: string) => name.includes("refreshSession") ? { ok: true, session }
@@ -46,6 +49,8 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(page.getByText("Cliente UI", { exact: true }).first()).toBeVisible();
     await expect(page.getByTestId("conversation-chat-panel")).toBeVisible();
     await expect(page.getByText("Mensagem legada").last()).toBeVisible();
+    await expect(page.getByTestId("conversation-list-panel").getByText(conversation.publicCode, { exact: true })).toHaveCount(0);
+    await expect(page.getByText(conversation.publicCode, { exact: true })).toBeHidden();
     for (const label of ["Todas", "Minhas", "Encerradas", "Abertas", "BOT/Aguardando"]) {
       await expect(page.getByRole("button", { name: new RegExp(label) })).toBeVisible();
     }
@@ -83,9 +88,36 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await closed.click();
     await expect(closed).toHaveAttribute("aria-pressed", "true");
     await expect(mine).toHaveAttribute("aria-pressed", "false");
+    await expect(open).toHaveAttribute("aria-pressed", "false");
     await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "all", status: "closed" });
+    await all.click();
+    await expect(all).toHaveAttribute("aria-pressed", "true");
+    await expect(open).toHaveAttribute("aria-pressed", "true");
+    await expect(closed).toHaveAttribute("aria-pressed", "false");
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "all", status: "active" });
+
+    await closed.click();
+    await mine.click();
+    await expect(mine).toHaveAttribute("aria-pressed", "true");
+    await expect(open).toHaveAttribute("aria-pressed", "true");
+    await expect(closed).toHaveAttribute("aria-pressed", "false");
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "mine", status: "active" });
+
+    await closed.click();
     await open.click();
     await expect(mine).toHaveAttribute("aria-pressed", "true");
+    await expect(open).toHaveAttribute("aria-pressed", "true");
+
+    await page.getByRole("button", { name: /Filtros/ }).click();
+    await page.getByPlaceholder("Nome, empresa ou telefone...").fill(conversation.publicCode);
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({ search: conversation.publicCode });
+    await page.getByText("Mais ações", { exact: true }).click();
+    await expect(page.getByText(conversation.publicCode, { exact: true })).toBeVisible();
+    const copyId = page.getByRole("button", { name: "Copiar ID da conversa" });
+    await copyId.focus();
+    await expect(copyId).toBeFocused();
+    await copyId.click();
+    await expect.poll(() => page.evaluate(() => (window as typeof window & { __copiedConversationId?: string }).__copiedConversationId)).toBe(conversation.publicCode);
 
     await page.reload();
     await expect(page.getByRole("button", { name: "Minhas" })).toHaveAttribute("aria-pressed", "true");

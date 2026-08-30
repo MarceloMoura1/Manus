@@ -498,11 +498,13 @@ function ConversationsPage() {
   }, [attendantScope, inboxView]);
 
   const selectAttendantScope = React.useCallback((scope: 'all' | 'mine') => {
+    const nextInbox = inboxView === 'closed' ? 'open' : inboxView;
     const url = new URL(window.location.href);
     url.searchParams.set('conversationScope', scope);
-    url.searchParams.set('conversationInbox', inboxView);
+    url.searchParams.set('conversationInbox', nextInbox);
     window.history.pushState({ ...window.history.state, megadeskRoute: 'conversations' }, '', url);
     setAttendantScope(scope);
+    if (inboxView === 'closed') setInboxView('open');
   }, [inboxView]);
 
   const selectInboxView = React.useCallback((inbox: 'open' | 'bot' | 'closed') => {
@@ -1199,7 +1201,6 @@ function ConversationsPage() {
                       <p className={cn('text-sm font-semibold truncate', conv.isUnread ? 'text-slate-900' : 'text-slate-700')}>{conv.name}</p>
                       <span className="text-xs text-slate-400 flex-shrink-0 ml-2">{formatDate(conv.timestamp)}</span>
                     </div>
-                    {conv.publicCode && <p className="mb-0.5 text-[11px] font-medium text-blue-600">{conv.publicCode}</p>}
                     <p className="text-xs text-slate-500 truncate mb-1">{conv.company || conv.phone}</p>
                     <div className="flex items-center gap-1.5">
                       {isHistoryMode && (
@@ -1290,7 +1291,7 @@ function ConversationsPage() {
                       {selectedConv.status === 'open' ? 'Aberta' : selectedConv.status === 'bot' ? 'BOT' : 'Fechada'}
                     </span>
                   </div>
-                  <p className="truncate text-xs text-slate-500">{selectedConv.phone} {selectedConv.company ? `• ${selectedConv.company}` : ''} {selectedConv.publicCode ? `• ${selectedConv.publicCode}` : ''}</p>
+                  <p className="truncate text-xs text-slate-500">{selectedConv.phone} {selectedConv.company ? `• ${selectedConv.company}` : ''}</p>
                 </div>
               </div>
               <div className="flex flex-shrink-0 items-center gap-1 md:gap-2">
@@ -1332,7 +1333,18 @@ function ConversationsPage() {
                     Mais ações
                   </summary>
                   <div className="absolute right-0 z-30 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
-                    <div className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500">ID/protocolo: <strong className="text-slate-700">{selectedConv.publicCode || selectedConv.id}</strong></div>
+                    <div className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500">
+                      <span>ID da conversa</span>
+                      <strong className="block break-all text-slate-700">{selectedConv.publicCode || selectedConv.id}</strong>
+                      <button
+                        type="button"
+                        aria-label="Copiar ID da conversa"
+                        onClick={() => void navigator.clipboard.writeText(selectedConv.publicCode || selectedConv.id)}
+                        className="mt-1 font-medium text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      >
+                        Copiar ID
+                      </button>
+                    </div>
                     <button type="button" onClick={() => { setEditName(selectedConv.name); setEditCompany(selectedConv.company || ''); setEditModalOpen(true); }} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Editar contato</button>
                     <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'erp-clients' } }))} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Cadastrar cliente / Visualizar perfil</button>
                     <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: { route: 'tickets', conversationId: selectedConv.id } }))} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Abrir chamado</button>
