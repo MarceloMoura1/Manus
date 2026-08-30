@@ -17,6 +17,11 @@ import type { CrmWhatsAppIntent } from "../../../shared/crm";
 import { normalizeContactPhone } from "../../../shared/contact-phone";
 import { trpcProcedureUrl } from "@/lib/trpc-url";
 import { ConversationMedia } from "@/components/ConversationMedia";
+import {
+  conversationFilterStorageKey,
+  readConversationFilters,
+  writeConversationFilters,
+} from "@/lib/conversationFilterPersistence";
 import { TimelineActivity } from "@/components/TimelineActivity";
 import {
   AudioRecordingController,
@@ -361,6 +366,15 @@ function ConversationsPage() {
   }, []);
   const clientId: string = sessionData?.clientId ?? '';
   const userName: string = sessionData?.userName ?? 'Atendente';
+  const conversationFiltersStorageKey = React.useMemo(() => conversationFilterStorageKey(
+    clientId,
+    sessionData?.userId ?? sessionData?.userEmail ?? '',
+  ), [clientId, sessionData?.userEmail, sessionData?.userId]);
+  const initialConversationFilters = React.useMemo(() => readConversationFilters(
+    window.location.search,
+    sessionStorage,
+    conversationFiltersStorageKey,
+  ), [conversationFiltersStorageKey]);
 
   const [searchTerm, setSearchTerm] = React.useState('');
   const [crmIntent, setCrmIntent] = React.useState<CrmWhatsAppIntent | null>(() => {
@@ -370,14 +384,8 @@ function ConversationsPage() {
       return raw ? JSON.parse(raw) as CrmWhatsAppIntent : null;
     } catch { return null; }
   });
-  const [attendantScope, setAttendantScope] = React.useState<'all' | 'mine'>(() => {
-    const value = new URLSearchParams(window.location.search).get('conversationScope');
-    return value === 'mine' ? 'mine' : 'all';
-  });
-  const [inboxView, setInboxView] = React.useState<'open' | 'bot' | 'closed'>(() => {
-    const value = new URLSearchParams(window.location.search).get('conversationInbox');
-    return value === 'bot' || value === 'closed' ? value : 'open';
-  });
+  const [attendantScope, setAttendantScope] = React.useState<'all' | 'mine'>(initialConversationFilters.attendantScope);
+  const [inboxView, setInboxView] = React.useState<'open' | 'bot' | 'closed'>(initialConversationFilters.inboxView);
   const selectedFilter: 'active' | 'closed' = inboxView === 'closed' ? 'closed' : 'active';
   const ownerFilter: 'all' | 'mine' | 'waiting' | 'history' = inboxView === 'bot'
     ? 'waiting'
@@ -480,22 +488,22 @@ function ConversationsPage() {
     const selected = readSelectedConversation();
     if (selected) setSelectedConversation(selected);
     const onPopState = () => {
-      const params = new URLSearchParams(window.location.search);
+      const filters = readConversationFilters(window.location.search, sessionStorage, conversationFiltersStorageKey);
       setSelectedConversation(readSelectedConversation());
-      setAttendantScope(params.get('conversationScope') === 'mine' ? 'mine' : 'all');
-      const inbox = params.get('conversationInbox');
-      setInboxView(inbox === 'bot' || inbox === 'closed' ? inbox : 'open');
+      setAttendantScope(filters.attendantScope);
+      setInboxView(filters.inboxView);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, []);
+  }, [conversationFiltersStorageKey]);
 
   React.useEffect(() => {
     const url = new URL(window.location.href);
     url.searchParams.set('conversationScope', attendantScope);
     url.searchParams.set('conversationInbox', inboxView);
     window.history.replaceState({ ...window.history.state, megadeskRoute: 'conversations' }, '', url);
-  }, [attendantScope, inboxView]);
+    writeConversationFilters(sessionStorage, conversationFiltersStorageKey, { attendantScope, inboxView });
+  }, [attendantScope, conversationFiltersStorageKey, inboxView]);
 
   const selectAttendantScope = React.useCallback((scope: 'all' | 'mine') => {
     const nextInbox = inboxView === 'closed' ? 'open' : inboxView;

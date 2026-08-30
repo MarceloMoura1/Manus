@@ -124,15 +124,27 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(page.getByRole("button", { name: /Abertas/ })).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("navigation").first().getByRole("button", { name: "Home", exact: true }).click();
     await expect(page.getByRole("heading", { name: "MegaDesk" })).toBeVisible();
-    await page.goBack();
+    const openRemountStart = listInputs.length;
+    await page.getByRole("button", { name: "Conversas Central de atendimento" }).click();
     await expect(page.getByRole("button", { name: "Minhas" })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("button", { name: /Abertas/ })).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "mine", status: "active" });
+    expect(listInputs.slice(openRemountStart).some(input => input.viewMode === "all")).toBe(false);
+
     await page.getByRole("button", { name: "BOT/Aguardando" }).click();
     await page.goBack();
     await expect(page.getByRole("button", { name: /Abertas/ })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("button", { name: "Minhas" })).toHaveAttribute("aria-pressed", "true");
     await page.goForward();
     await expect(page.getByRole("button", { name: "BOT/Aguardando" })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("navigation").first().getByRole("button", { name: "Home", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "MegaDesk" })).toBeVisible();
+    const botRemountStart = listInputs.length;
+    await page.getByRole("button", { name: "Conversas Central de atendimento" }).click();
+    await expect(page.getByRole("button", { name: "Minhas" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "BOT/Aguardando" })).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "waiting", status: "active" });
+    expect(listInputs.slice(botRemountStart).some(input => input.viewMode === "all")).toBe(false);
     await expect(page.getByTestId("conversation-chat-panel")).toBeVisible();
     expect(calls.some(name => name.includes("conversations.list"))).toBe(true);
     expect(calls.some(name => name.includes("megadesk.getConversations"))).toBe(false);
