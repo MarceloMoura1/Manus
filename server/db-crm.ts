@@ -136,10 +136,10 @@ export async function updateCrmClient(
   if (input.customerType !== undefined) updateData.customerType = input.customerType;
   if (input.companyName !== undefined) updateData.companyName = input.companyName;
   if (input.responsibleName !== undefined) updateData.responsibleName = input.responsibleName;
-  if (input.cpfCnpj !== undefined) updateData.cpfCnpj = input.cpfCnpj;
+  if (input.cpfCnpj !== undefined) updateData.cpfCnpj = input.cpfCnpj ? normalizeDigits(input.cpfCnpj) : null;
   if (input.phone !== undefined) updateData.phone = normalizeStoredPhone(input.phone, true);
   if (input.whatsapp !== undefined) updateData.whatsapp = normalizeStoredPhone(input.whatsapp, false) ?? "";
-  if (input.email !== undefined) updateData.email = input.email;
+  if (input.email !== undefined) updateData.email = input.email ? normalizeEmail(input.email) : null;
   if (input.address !== undefined) updateData.address = input.address;
   if (input.city !== undefined) updateData.city = input.city;
   if (input.state !== undefined) updateData.state = input.state;

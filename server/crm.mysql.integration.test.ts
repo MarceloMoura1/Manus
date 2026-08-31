@@ -22,9 +22,10 @@ function caller(tenantId: string, role: "admin" | "manager" | "agent" | "viewer"
 
 function clientData(suffix: string) {
   return {
+    customerType: "company" as const,
     companyName: `Cliente ${suffix}`,
     responsibleName: `Responsável ${suffix}`,
-    cpfCnpj: `90000000000${suffix.padStart(3, "0")}`.slice(-14),
+    cpfCnpj: "",
     phone: `1199000${suffix.padStart(4, "0")}`,
     whatsapp: `1199000${suffix.padStart(4, "0")}`,
     email: `cliente-${suffix}@example.invalid`,
@@ -116,7 +117,7 @@ describe.skipIf(!runPhysical)("CRM MySQL tenant isolation", () => {
     expect((await getCrmClientById(adminCreated.crmClientId, tenantA))?.companyName).toBe("Cliente editado fisicamente");
     expect(await getCrmClientById(managerCreated.crmClientId, tenantB)).toBeNull();
     await expect(caller(tenantB, "admin").getById({ crmClientId: adminCreated.crmClientId })).rejects.toMatchObject({ code: "NOT_FOUND" });
-    await expect(caller(tenantB, "admin").update({ crmClientId: adminCreated.crmClientId, data: { companyName: "Cross tenant" } })).rejects.toThrow("Cliente não encontrado ou sem permissão.");
+    await expect(caller(tenantB, "admin").update({ crmClientId: adminCreated.crmClientId, data: { companyName: "Cross tenant" } })).rejects.toThrow("Cliente não encontrado.");
   });
 
   it("rejects a forged public tenant field", async () => {
@@ -164,17 +165,23 @@ describe.skipIf(!runPhysical)("CRM MySQL tenant isolation", () => {
     await createCrmClient(tenantA, shared);
     await expect(createCrmClient(tenantA, { ...shared, companyName: "Duplicado" })).rejects.toBeTruthy();
     const otherTenant = await createCrmClient(tenantB, shared);
-    expect((await getCrmClientById(otherTenant.crmClientId, tenantB))?.cpfCnpj).toBe(shared.cpfCnpj);
+    expect((await getCrmClientById(otherTenant.crmClientId, tenantB))?.phone).toBe("5511990000301");
   });
 
-  it("prioritizes explicit conversation and ticket links and confines legacy fallback", async () => {
+  it("returns only canonical conversation and ticket links", async () => {
     const pool = getPool();
     await pool.execute(
+      `INSERT INTO megadesk_conversation_contacts
+       (contact_id,client_id,display_name,canonical_phone,channel,provider,external_identity,crm_client_id)
+       VALUES (?,?,'Canonical contact','550000000001','whatsapp','test',?,?)`,
+      [`contact-direct-${tenantA}`, tenantA, `external-${tenantA}`, publicId],
+    );
+    await pool.execute(
       `INSERT INTO megadesk_domain_conversations
-       (conversation_id, client_id, crm_client_id, customer_name, phone, company, status, last_message, time_label, messages_json)
-       VALUES (?, ?, ?, ?, ?, ?, 'open', '', '', '[]'), (?, ?, NULL, ?, ?, ?, 'open', '', '', '[]'), (?, ?, NULL, ?, ?, ?, 'open', '', '', '[]')`,
+       (conversation_id, client_id, contact_id, crm_client_id, customer_name, phone, company, status, last_message, time_label, messages_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'open', '', '', '[]'), (?, ?, NULL, NULL, ?, ?, ?, 'open', '', '', '[]'), (?, ?, NULL, NULL, ?, ?, ?, 'open', '', '', '[]')`,
       [
-        `conv-direct-${tenantA}`, tenantA, publicId, "Direto", "550000000001", "Direto",
+        `conv-direct-${tenantA}`, tenantA, `contact-direct-${tenantA}`, publicId, "Direto", "550000000001", "Direto",
         `conv-legacy-${tenantA}`, tenantA, "Cliente físico isolado", "", "Cliente físico isolado",
         `conv-other-${tenantB}`, tenantB, "Cliente físico isolado", "", "Cliente físico isolado",
       ],
@@ -190,10 +197,10 @@ describe.skipIf(!runPhysical)("CRM MySQL tenant isolation", () => {
       ],
     );
     const conversations = await caller(tenantA, "admin").getConversas({ crmClientId: publicId });
-    expect(conversations.conversas.map((item) => item.id)).toEqual(expect.arrayContaining([`conv-direct-${tenantA}`, `conv-legacy-${tenantA}`]));
+    expect(conversations.conversas.map((item) => item.id)).toEqual([`conv-direct-${tenantA}`]);
     expect(conversations.conversas.map((item) => item.id)).not.toContain(`conv-other-${tenantB}`);
     const tickets = await caller(tenantA, "admin").getChamados({ crmClientId: publicId });
-    expect(tickets.chamados.map((item) => item.id)).toEqual(expect.arrayContaining([`ticket-direct-${tenantA}`, `ticket-legacy-${tenantA}`]));
+    expect(tickets.chamados.map((item) => item.id)).toEqual([`ticket-direct-${tenantA}`]);
     expect(tickets.chamados.map((item) => item.id)).not.toContain(`ticket-other-${tenantB}`);
   });
 

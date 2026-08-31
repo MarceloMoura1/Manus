@@ -117,15 +117,26 @@ describe("Conversations authorization, filters and lifecycle", () => {
     expect(sql).toContain("crm.crm_client_id = contact.crm_client_id");
   });
 
-  it("lists only tenant-scoped company CRM candidates with bounded pagination", async () => {
+  it("lists tenant-scoped person, company and legacy CRM candidates with bounded pagination", async () => {
     mocks.execute.mockResolvedValue([[{ id: "crm-a", name: "Empresa A", document: "1234", customerType: "company" }]]);
     const result = await conversationsRouter.createCaller(context()).companyCandidates({ search: "Empresa", limit: 10, offset: 20 });
     const [sql, values] = mocks.execute.mock.calls[0];
-    expect(sql).toContain("client_id = ? AND customer_type = 'company'");
-    expect(sql).toContain("company_name LIKE ? OR cpf_cnpj LIKE ?");
+    expect(sql).toContain("client_id = ?");
+    expect(sql).toContain("company_name LIKE ? OR responsible_name LIKE ? OR cpf_cnpj LIKE ?");
+    expect(sql).toContain("phone LIKE ? OR whatsapp LIKE ?");
     expect(sql).toContain("LIMIT 10 OFFSET 20");
-    expect(values).toEqual(["tenant-a", "%Empresa%", "%Empresa%", "%Empresa%"]);
+    expect(values).toEqual(["tenant-a", "%Empresa%", "%Empresa%", "%Empresa%", "%Empresa%", "%%", "%%", "%%"]);
     expect(result).toMatchObject({ hasMore: false, items: [{ id: "crm-a" }] });
+  });
+
+  it("resolves exact normalized phone candidates in the authenticated tenant", async () => {
+    mocks.execute.mockResolvedValue([[{ id: "crm-p", name: "Pessoa", customerType: "person" }]]);
+    const result = await conversationsRouter.createCaller(context()).phoneCandidates({ phone: "(11) 99999-9999" });
+    const [sql, values] = mocks.execute.mock.calls[0];
+    expect(sql).toContain("client_id = ? AND (phone = ? OR whatsapp = ?)");
+    expect(values[0]).toBe("tenant-a");
+    expect(values[1]).toBe(values[2]);
+    expect(result.items).toHaveLength(1);
   });
 
   it("reads tickets only through explicit links or the contact's canonical CRM company", async () => {
@@ -171,7 +182,7 @@ describe("Conversations authorization, filters and lifecycle", () => {
     expect(unlinked.execute).toHaveBeenCalledTimes(2);
   });
 
-  it("rejects a non-company or cross-tenant CRM candidate without updating the contact", async () => {
+  it("rejects a missing or cross-tenant CRM candidate without updating the contact", async () => {
     const db = connection([[[{ contact_id: "contact-a" }]], [[]]]);
     mocks.getConnection.mockResolvedValue(db);
     await expect(conversationsRouter.createCaller(context()).linkCrm({ contactId: "contact-a", crmClientId: "crm-b" }))

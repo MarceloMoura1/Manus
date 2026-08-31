@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
+import { normalizeContactPhone } from "../shared/contact-phone";
 import { z } from "zod";
 import { router, megadeskProcedure } from "./_core/trpc";
 import { getPool } from "./db";
@@ -60,17 +61,38 @@ export const conversationsRouter = router({
     offset: z.number().int().min(0).default(0),
   })).query(async ({ input, ctx }) => {
     requireConversationAccess(ctx);
-    const search = `%${input.search}%`;
+    const trimmed = input.search.trim();
+    if (trimmed.length > 0 && trimmed.length < 2) return { items: [], hasMore: false };
+    const search = `%${trimmed}%`;
+    const digits = trimmed.replace(/\D/g, "");
+    const digitSearch = `%${digits}%`;
     const [rows] = await getPool().execute(
-      `SELECT crm_client_id AS id, company_name AS name, cpf_cnpj AS document, customer_type AS customerType
+      `SELECT crm_client_id AS id, company_name AS name, responsible_name AS responsibleName,
+              cpf_cnpj AS document, customer_type AS customerType, phone, whatsapp
        FROM megadesk_crm_clients
-       WHERE client_id = ? AND customer_type = 'company'
-         AND (? = '%%' OR company_name LIKE ? OR cpf_cnpj LIKE ?)
+       WHERE client_id = ?
+         AND (? = '%%' OR company_name LIKE ? OR responsible_name LIKE ? OR cpf_cnpj LIKE ?
+           OR (? <> '%%' AND (phone LIKE ? OR whatsapp LIKE ?)))
        ORDER BY company_name, crm_client_id LIMIT ${input.limit} OFFSET ${input.offset}`,
-      [ctx.tenantId, search, search, search],
+      [ctx.tenantId, search, search, search, search, digitSearch, digitSearch, digitSearch],
     ) as any[];
     return { items: rows, hasMore: rows.length === input.limit };
   }),
+  phoneCandidates: megadeskProcedure.input(z.object({ phone: z.string().max(40) }).strict())
+    .query(async ({ input, ctx }) => {
+      requireConversationAccess(ctx);
+      const normalized = normalizeContactPhone(input.phone);
+      if (normalized.status !== "valid") return { items: [] };
+      const [rows] = await getPool().execute(
+        `SELECT crm_client_id AS id, company_name AS name, responsible_name AS responsibleName,
+                cpf_cnpj AS document, customer_type AS customerType, phone, whatsapp
+         FROM megadesk_crm_clients
+         WHERE client_id = ? AND (phone = ? OR whatsapp = ?)
+         ORDER BY company_name, crm_client_id LIMIT 25`,
+        [ctx.tenantId, normalized.value, normalized.value],
+      ) as any[];
+      return { items: rows };
+    }),
   list: megadeskProcedure.input(listInput).query(async ({ input, ctx }) => {
     requireConversationAccess(ctx);
     const eligibleOwner = `EXISTS (SELECT 1 FROM megadesk_domain_client_users u
@@ -371,10 +393,10 @@ export const conversationsRouter = router({
         if (!contacts.length) throw new TRPCError({ code: "NOT_FOUND", message: "Contato não encontrado." });
         if (input.crmClientId) {
           const [crm] = await connection.execute(
-            `SELECT crm_client_id FROM megadesk_crm_clients WHERE crm_client_id = ? AND client_id = ? AND customer_type = 'company' LIMIT 1`,
+            `SELECT crm_client_id FROM megadesk_crm_clients WHERE crm_client_id = ? AND client_id = ? LIMIT 1`,
             [input.crmClientId, ctx.tenantId],
           ) as any[];
-          if (!crm.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Empresa indisponível para vínculo." });
+          if (!crm.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Cliente indisponível para vínculo." });
         }
         const [updated] = await connection.execute(
           `UPDATE megadesk_conversation_contacts SET crm_client_id = ?, updated_at = NOW() WHERE contact_id = ? AND client_id = ?`,

@@ -49,7 +49,7 @@ function cn(...classes: Array<string | false | undefined | null>) {
 }
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
-type CrmClient = {
+export type CrmClient = {
   crmClientId: string;
   companyName: string;
   customerType: CustomerType | null;
@@ -106,7 +106,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 // ─── Formulário de Cadastro ────────────────────────────────────────────────────
-type FormData = {
+export type CrmClientFormData = {
   customerType: CustomerType | null;
   companyName: string;
   responsibleName: string;
@@ -126,7 +126,7 @@ type FormData = {
   contacts: Array<{ phone: string; whatsapp: string; description?: string }>;
 };
 
-const EMPTY_FORM: FormData = {
+const EMPTY_FORM: CrmClientFormData = {
   customerType: null,
   companyName: "", responsibleName: "", cpfCnpj: "", phone: "", whatsapp: "",
   email: "", address: "", city: "", state: "", cep: "",
@@ -134,17 +134,19 @@ const EMPTY_FORM: FormData = {
   contacts: [],
 };
 
-function ClientFormModal({
+export function ClientFormModal({
   onClose,
   onSaved,
   editData,
+  initialData,
 }: {
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (crmClientId?: string) => void | Promise<void>;
   editData?: CrmClient | null;
+  initialData?: Partial<CrmClientFormData>;
 }) {
   const titleId = React.useId();
-  const [form, setForm] = useState<FormData>(editData ? {
+  const [form, setForm] = useState<CrmClientFormData>(editData ? {
     customerType: editData.customerType,
     companyName: editData.companyName,
     responsibleName: editData.responsibleName,
@@ -162,7 +164,9 @@ function ClientFormModal({
     tags: editData.tags,
     observations: editData.observations,
     contacts: editData.contactsJson ? JSON.parse(editData.contactsJson) : [],
-  } : EMPTY_FORM);
+  } : { ...EMPTY_FORM, ...initialData });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [sameWhatsapp, setSameWhatsapp] = useState(() => editData ? sameContactPhone(editData.phone, editData.whatsapp) : true);
   const [showOtherWhatsapp, setShowOtherWhatsapp] = useState(() => !!editData?.whatsapp && !sameContactPhone(editData.phone, editData.whatsapp));
   const legacySuggestion = editData?.customerType === null ? suggestCustomerType(editData.cpfCnpj) : null;
@@ -188,18 +192,13 @@ function ClientFormModal({
     }));
   };
 
-  const createMutation = trpc.crm.create.useMutation({
-    onSuccess() { toast.success("Cliente cadastrado com sucesso!"); onSaved(); onClose(); },
-    onError(err) { toast.error(err.message); },
-  });
+  const createMutation = trpc.crm.create.useMutation();
+  const updateMutation = trpc.crm.update.useMutation();
 
-  const updateMutation = trpc.crm.update.useMutation({
-    onSuccess() { toast.success("Cliente atualizado com sucesso!"); onSaved(); onClose(); },
-    onError(err) { toast.error(err.message); },
-  });
-
-  function setField<K extends keyof FormData>(key: K, value: FormData[K]) {
+  function setField<K extends keyof CrmClientFormData>(key: K, value: CrmClientFormData[K]) {
     setForm(prev => ({ ...prev, [key]: value }));
+    setFieldErrors(prev => { const next = { ...prev }; delete next[key]; return next; });
+    setSubmitError(null);
   }
 
   function selectCustomerType(next: CustomerType) {
@@ -219,23 +218,40 @@ function ClientFormModal({
     }));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (isLoading) return;
     const customerType = form.customerType;
-    if (!customerType) { toast.error("Selecione Pessoa ou Empresa."); return; }
-    if (!form.companyName.trim()) { toast.error(customerType === "person" ? "Nome completo é obrigatório." : "Nome da empresa é obrigatório."); return; }
+    const errors: Record<string, string> = {};
+    if (!customerType) errors.customerType = "Selecione Pessoa ou Empresa.";
+    if (!form.companyName.trim()) errors.companyName = customerType === "person" ? "Nome completo é obrigatório." : "Nome da empresa é obrigatório.";
     if (form.cpfCnpj && !(customerType === "person" ? isValidCpf(form.cpfCnpj) : isValidCnpj(form.cpfCnpj))) {
-      toast.error(customerType === "person" ? "CPF inválido." : "CNPJ inválido."); return;
+      errors.cpfCnpj = customerType === "person" ? "CPF inválido." : "CNPJ inválido.";
     }
     const phone = normalizeContactPhone(form.phone);
     const whatsapp = sameWhatsapp ? phone : normalizeContactPhone(form.whatsapp);
-    if (phone.status === "invalid") { toast.error(phone.reason); return; }
-    if (whatsapp.status === "invalid") { toast.error(whatsapp.reason); return; }
+    if (phone.status === "invalid") errors.phone = "Telefone inválido.";
+    if (whatsapp.status === "invalid") errors.whatsapp = "WhatsApp inválido.";
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = "E-mail inválido.";
+    if (Object.keys(errors).length) {
+      setFieldErrors(errors); setSubmitError("Revise os campos indicados para continuar.");
+      requestAnimationFrame(() => document.querySelector<HTMLElement>("[aria-invalid='true']")?.focus());
+      return;
+    }
+    if (!customerType) return;
     const data = { ...form, customerType, phone: phone.value ?? "", whatsapp: whatsapp.value ?? "" };
-    if (editData) {
-      updateMutation.mutate({ crmClientId: editData.crmClientId, data });
-    } else {
-      createMutation.mutate({ data });
+    try {
+      if (editData) {
+        await updateMutation.mutateAsync({ crmClientId: editData.crmClientId, data });
+        await onSaved(editData.crmClientId); toast.success("Cliente atualizado com sucesso!");
+      } else {
+        const result = await createMutation.mutateAsync({ data });
+        await onSaved(result.crmClientId); toast.success("Cliente cadastrado com sucesso!");
+      }
+      onClose();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Não foi possível salvar agora. Tente novamente.";
+      setSubmitError(message); toast.error(message);
     }
   }
 
@@ -262,7 +278,8 @@ function ClientFormModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+        <form noValidate onSubmit={handleSubmit} className="p-6 space-y-6">
+          {submitError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{submitError}</div>}
           {/* Dados Básicos */}
           <section>
             <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-4 flex items-center gap-2">
@@ -273,14 +290,16 @@ function ClientFormModal({
               <div className="grid grid-cols-2 gap-3" role="radiogroup" aria-label="Tipo de cliente">
                 {(["person", "company"] as const).map(type => <button key={type} type="button" role="radio" aria-checked={form.customerType === type} onClick={() => selectCustomerType(type)} className={cn("rounded-lg border px-4 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500", form.customerType === type ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-700")}>{type === "person" ? "Pessoa" : "Empresa"}</button>)}
               </div>
+              {fieldErrors.customerType && <p id="customer-type-error" className="mt-1 text-xs text-red-600">{fieldErrors.customerType}</p>}
               {legacySuggestion && !form.customerType && <p className="mt-2 text-sm text-amber-700">Sugestão pelo documento: {legacySuggestion === "person" ? "Pessoa" : "Empresa"}. Confirme uma opção para salvar.</p>}
             </fieldset>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">{form.customerType === "person" ? "Nome completo" : "Nome da empresa"} *</label>
-                <input aria-label={form.customerType === "person" ? "Nome completo" : "Nome da empresa"} autoComplete={form.customerType === "person" ? "name" : "organization"} type="text" value={form.companyName} onChange={e => setField("companyName", e.target.value)}
+                <input aria-label={form.customerType === "person" ? "Nome completo" : "Nome da empresa"} aria-invalid={!!fieldErrors.companyName} aria-describedby={fieldErrors.companyName ? "company-name-error" : undefined} autoComplete={form.customerType === "person" ? "name" : "organization"} type="text" value={form.companyName} onChange={e => setField("companyName", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  required />
+                  />
+                {fieldErrors.companyName && <p id="company-name-error" className="mt-1 text-xs text-red-600">{fieldErrors.companyName}</p>}
               </div>
               {form.customerType === "company" && <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Nome do Responsável</label>
@@ -289,20 +308,23 @@ function ClientFormModal({
               </div>}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">{form.customerType === "person" ? "CPF" : "CNPJ"} (opcional)</label>
-                <input aria-label={form.customerType === "person" ? "CPF" : "CNPJ"} inputMode="numeric" type="text" value={form.cpfCnpj} onChange={e => setField("cpfCnpj", e.target.value)}
+                <input aria-label={form.customerType === "person" ? "CPF" : "CNPJ"} aria-invalid={!!fieldErrors.cpfCnpj} aria-describedby={fieldErrors.cpfCnpj ? "document-error" : undefined} inputMode="numeric" type="text" value={form.cpfCnpj} onChange={e => setField("cpfCnpj", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+                {fieldErrors.cpfCnpj && <p id="document-error" className="mt-1 text-xs text-red-600">{fieldErrors.cpfCnpj}</p>}
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Telefone principal (opcional)</label>
-                <input aria-label="Telefone principal" autoComplete="tel" inputMode="tel" type="text" value={form.phone} onChange={e => setField("phone", e.target.value)}
+                <input aria-label="Telefone principal" aria-invalid={!!fieldErrors.phone} aria-describedby={fieldErrors.phone ? "phone-error" : undefined} autoComplete="tel" inputMode="tel" type="text" value={form.phone} onChange={e => setField("phone", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+                {fieldErrors.phone && <p id="phone-error" className="mt-1 text-xs text-red-600">{fieldErrors.phone}</p>}
               </div>
               <div className="sm:col-span-2 space-y-2"><label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={sameWhatsapp} onChange={e => { setSameWhatsapp(e.target.checked); if (e.target.checked) setShowOtherWhatsapp(false); }} /> Este número também é WhatsApp</label>{!sameWhatsapp && !showOtherWhatsapp && <button type="button" className="text-sm font-medium text-blue-600" onClick={() => setShowOtherWhatsapp(true)}>Adicionar outro número de WhatsApp</button>}{!sameWhatsapp && showOtherWhatsapp && <div><label className="block text-sm font-medium text-slate-700 mb-1">Número do WhatsApp (opcional)</label><input aria-label="Número do WhatsApp" autoComplete="tel" inputMode="tel" value={form.whatsapp} onChange={e => setField("whatsapp", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" /></div>}</div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">E-mail</label>
-                <input aria-label="E-mail" type="email" value={form.email} onChange={e => setField("email", e.target.value)}
+                <input aria-label="E-mail" aria-invalid={!!fieldErrors.email} aria-describedby={fieldErrors.email ? "email-error" : undefined} type="email" value={form.email} onChange={e => setField("email", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   autoComplete="email" />
+                {fieldErrors.email && <p id="email-error" className="mt-1 text-xs text-red-600">{fieldErrors.email}</p>}
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">Endereço</label>
@@ -341,7 +363,7 @@ function ClientFormModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
-                <select aria-label="Status" value={form.status} onChange={e => setField("status", e.target.value as FormData["status"])}
+                <select aria-label="Status" value={form.status} onChange={e => setField("status", e.target.value as CrmClientFormData["status"])}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white">
                   <option value="lead">Lead</option>
                   <option value="ativo">Ativo</option>
@@ -352,7 +374,7 @@ function ClientFormModal({
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Origem</label>
-                <select aria-label="Origem" value={form.origin} onChange={e => setField("origin", e.target.value as FormData["origin"])}
+                <select aria-label="Origem" value={form.origin} onChange={e => setField("origin", e.target.value as CrmClientFormData["origin"])}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white">
                   <option value="whatsapp">WhatsApp</option>
                   <option value="instagram">Instagram</option>
@@ -1186,7 +1208,7 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
       {showModal && (
         <ClientFormModal
           onClose={() => { setShowModal(false); setEditClient(null); }}
-          onSaved={() => refetch()}
+          onSaved={async () => { await refetch(); }}
           editData={editClient}
         />
       )}

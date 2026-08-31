@@ -3,6 +3,8 @@ import { Check, ChevronDown, Copy, Pencil, Trash2, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { ConversationMedia } from "@/components/ConversationMedia";
+import { ClientFormModal } from "@/pages/ClientesPage";
+import { useDebounce } from "@/hooks/useDebounce";
 
 type Conversation = {
   id: string;
@@ -20,7 +22,7 @@ type Conversation = {
   closedAt?: string | Date | null;
 };
 
-const initialSections = ["attendance", "contact", "history"];
+const initialSections = ["attendance", "contact", "client", "history"];
 
 function dateTime(value?: string | Date | null) {
   if (!value) return "—";
@@ -59,13 +61,17 @@ export function ConversationDetailsPanel({ conversation, open, onClose, onContac
   const [linking, setLinking] = React.useState(false);
   const [crmSearch, setCrmSearch] = React.useState("");
   const [crmOffset, setCrmOffset] = React.useState(0);
+  const debouncedCrmSearch = useDebounce(crmSearch, 300);
   const [pendingCrm, setPendingCrm] = React.useState<any | null>(null);
   const [confirmUnlink, setConfirmUnlink] = React.useState(false);
+  const [creatingClient, setCreatingClient] = React.useState(false);
+  const [createdButUnlinked, setCreatedButUnlinked] = React.useState<{ id: string; name: string } | null>(null);
   const [historyId, setHistoryId] = React.useState<string | null>(null);
   const utils = trpc.useUtils();
   const updateContact = trpc.conversations.updateContact.useMutation();
   const linkCrm = trpc.conversations.linkCrm.useMutation();
-  const candidates = trpc.conversations.companyCandidates.useQuery({ search: crmSearch, limit: 10, offset: crmOffset }, { enabled: open && linking });
+  const candidates = trpc.conversations.companyCandidates.useQuery({ search: debouncedCrmSearch, limit: 10, offset: crmOffset }, { enabled: open && linking });
+  const phoneCandidates = trpc.conversations.phoneCandidates.useQuery({ phone: conversation.phone ?? "" }, { enabled: open && !conversation.crmClientId && !!conversation.phone });
   const historyDetail = trpc.conversations.historyDetail.useQuery({ conversationId: historyId ?? "" }, { enabled: !!historyId });
   const history = trpc.conversations.history.useQuery({ contactId: conversation.contactId ?? "" }, { enabled: open && !!conversation.contactId });
   const tickets = trpc.conversations.linkedTickets.useQuery({ conversationId: conversation.id }, { enabled: open });
@@ -103,15 +109,17 @@ export function ConversationDetailsPanel({ conversation, open, onClose, onContac
     setCopied(true); window.setTimeout(() => setCopied(false), 1600);
   };
   const applyCrm = async (crmClientId: string | null, companyName?: string | null) => {
-    if (!conversation.contactId || linkCrm.isPending) return;
+    if (!conversation.contactId || linkCrm.isPending) return false;
     try {
       await linkCrm.mutateAsync({ contactId: conversation.contactId, crmClientId });
       onCrmLinked({ crmClientId, companyName });
       await Promise.all([utils.conversations.list.invalidate(), utils.conversations.linkedTickets.invalidate()]);
       setPendingCrm(null); setLinking(false); setConfirmUnlink(false);
-      onToast(crmClientId ? "Empresa vinculada ao contato." : "Vínculo removido.");
+      onToast(crmClientId ? "Cliente vinculado ao contato." : "Vínculo removido.");
+      return true;
     } catch (error) {
       onToast(error instanceof Error ? error.message : "Não foi possível alterar o vínculo.", "error");
+      return false;
     }
   };
   React.useEffect(() => {
@@ -161,8 +169,9 @@ export function ConversationDetailsPanel({ conversation, open, onClose, onContac
         {formError && <p role="alert" className="text-xs text-red-600">{formError}</p>}
       </Section>
       <Section id="client" title="Cliente" open={sections.has("client")} onToggle={() => toggle("client")}>
-        {conversation.crmClientId ? <div className="space-y-2"><div className="rounded-lg bg-blue-50 p-2"><strong className="block text-blue-900">{conversation.companyName || "Empresa vinculada"}</strong><span className="text-xs text-blue-700">Vinculada ao CRM</span></div><div className="flex flex-wrap gap-2"><button onClick={() => navigate("erp-clients", { crmClientId: conversation.crmClientId })}>Visualizar perfil</button><button onClick={() => setLinking(true)}>Alterar vínculo</button><button onClick={() => setConfirmUnlink(true)} className="text-red-600">Remover vínculo</button></div></div> : <div><p>Contato ainda não vinculado</p><button onClick={() => setLinking(true)} className="mt-2 text-blue-700">+ Vincular a uma empresa</button></div>}
-        {linking && <div className="space-y-2 border-t pt-3"><label htmlFor="crm-search" className="text-xs">Buscar por nome/documento</label><input id="crm-search" value={crmSearch} onChange={e => { setCrmSearch(e.target.value); setCrmOffset(0); }} className="min-h-10 w-full rounded-lg border px-3" /><QueryState loading={candidates.isLoading} error={candidates.isError} empty={!candidates.data?.items.length} emptyText="Nenhuma empresa encontrada."><ul className="max-h-48 space-y-1 overflow-auto">{candidates.data?.items.map((item: any) => <li key={item.id}><button onClick={() => setPendingCrm(item)} className="w-full rounded-lg border p-2 text-left"><strong className="block">{item.name}</strong><span className="text-xs">{item.document ? `•••${String(item.document).replace(/\D/g, "").slice(-4)}` : "Documento não informado"}</span></button></li>)}</ul></QueryState><div className="flex justify-between text-xs"><button disabled={!crmOffset} onClick={() => setCrmOffset(Math.max(0, crmOffset - 10))}>Anterior</button><button disabled={!candidates.data?.hasMore} onClick={() => setCrmOffset(crmOffset + 10)}>Próxima</button><button onClick={() => setLinking(false)}>Cancelar</button></div></div>}
+        {conversation.crmClientId ? <div className="space-y-2"><div className="rounded-lg bg-blue-50 p-2"><strong className="block text-blue-900">{conversation.companyName || "Cliente vinculado"}</strong><span className="text-xs text-blue-700">Vinculado ao CRM</span></div><div className="flex flex-wrap gap-2"><button onClick={() => navigate("erp-clients", { crmClientId: conversation.crmClientId })}>Visualizar perfil</button><button onClick={() => setLinking(true)}>Alterar vínculo</button><button onClick={() => setConfirmUnlink(true)} className="text-red-600">Remover vínculo</button></div></div> : <div className="space-y-2">{phoneCandidates.isLoading ? <p role="status" className="text-xs">Procurando pelo telefone…</p> : phoneCandidates.data?.items.length === 1 ? <div className="rounded-lg bg-emerald-50 p-2"><strong className="block">Cliente encontrado pelo telefone</strong><span className="block text-xs">{phoneCandidates.data.items[0].name} · {phoneCandidates.data.items[0].customerType === "person" ? "Pessoa" : phoneCandidates.data.items[0].customerType === "company" ? "Empresa" : "Não definido"}</span><button className="mt-2 text-blue-700" onClick={() => setPendingCrm(phoneCandidates.data!.items[0])}>Vincular contato</button></div> : (phoneCandidates.data?.items.length ?? 0) > 1 ? <div className="rounded-lg bg-amber-50 p-2"><strong className="block">Encontramos mais de um cadastro com este telefone</strong><button className="mt-2 text-blue-700" onClick={() => { setCrmSearch(conversation.phone ?? ""); setLinking(true); }}>Selecionar cadastro</button></div> : <p>Cliente não cadastrado</p>}<div className="flex gap-3"><button onClick={() => setCreatingClient(true)} className="text-blue-700">Cadastrar cliente</button><button onClick={() => setLinking(true)} className="text-blue-700">Vincular contato</button></div></div>}
+        {createdButUnlinked && <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs"><p>Cliente criado, mas não foi possível vincular o contato.</p><button className="mt-2 font-semibold text-blue-700" onClick={() => void applyCrm(createdButUnlinked.id, createdButUnlinked.name)}>Tentar vincular novamente</button></div>}
+        {linking && <div className="space-y-2 border-t pt-3"><label htmlFor="crm-search" className="text-xs">Buscar por nome, documento ou telefone</label><input id="crm-search" value={crmSearch} onChange={e => { setCrmSearch(e.target.value); setCrmOffset(0); }} className="min-h-10 w-full rounded-lg border px-3" /><QueryState loading={candidates.isLoading} error={candidates.isError} empty={!candidates.data?.items.length} emptyText={crmSearch.length === 1 ? "Digite ao menos 2 caracteres." : "Nenhum cliente encontrado."}><ul className="max-h-48 space-y-1 overflow-auto">{candidates.data?.items.map((item: any) => <li key={item.id}><button onClick={() => setPendingCrm(item)} className="w-full rounded-lg border p-2 text-left"><strong className="block">{item.name}</strong><span className="text-xs">{item.customerType === "person" ? "Pessoa" : item.customerType === "company" ? "Empresa" : "Não definido"} · {item.document ? `•••${String(item.document).replace(/\D/g, "").slice(-4)}` : "sem documento"} · {item.phone ? `•••${String(item.phone).slice(-4)}` : "sem telefone"}</span></button></li>)}</ul></QueryState><div className="flex justify-between text-xs"><button disabled={!crmOffset} onClick={() => setCrmOffset(Math.max(0, crmOffset - 10))}>Anterior</button><button disabled={!candidates.data?.hasMore} onClick={() => setCrmOffset(crmOffset + 10)}>Próxima</button><button onClick={() => setLinking(false)}>Cancelar</button></div></div>}
         {pendingCrm && <div role="alertdialog" aria-label="Confirmar vínculo" className="rounded-lg border p-3"><strong>{pendingCrm.name}</strong><p className="text-xs">Confirmar vínculo?</p><button disabled={linkCrm.isPending} onClick={() => void applyCrm(pendingCrm.id, pendingCrm.name)} className="mr-2 mt-2 rounded bg-blue-600 p-2 text-white">Confirmar</button><button onClick={() => setPendingCrm(null)}>Cancelar</button></div>}
         {confirmUnlink && <div role="alertdialog" aria-label="Confirmar remoção" className="rounded-lg border p-3"><p>Remover somente o vínculo CRM?</p><button disabled={linkCrm.isPending} onClick={() => void applyCrm(null)} className="mr-2 mt-2 text-red-600">Remover vínculo</button><button onClick={() => setConfirmUnlink(false)}>Cancelar</button></div>}
       </Section>
@@ -176,5 +185,5 @@ export function ConversationDetailsPanel({ conversation, open, onClose, onContac
     </div>
   </aside>;
   const historyModal = historyId && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/40 p-0 sm:p-4" onMouseDown={e => { if (e.currentTarget === e.target) setHistoryId(null); }}><div role="dialog" aria-modal="true" aria-labelledby="history-title" className="flex h-full w-full flex-col overflow-hidden bg-white sm:h-[88vh] sm:max-w-5xl sm:rounded-2xl"><header className="flex justify-between border-b p-4"><div><span className="text-xs font-semibold text-blue-700">Somente leitura</span><h2 id="history-title" className="text-lg font-semibold">{historyDetail.data?.conversation.customerName || "Conversa anterior"}</h2><p className="text-xs">{historyDetail.data?.conversation.publicCode} · {historyDetail.data?.conversation.status} · {dateTime(historyDetail.data?.conversation.startedAt)}</p><p className="text-xs">Responsável: {historyDetail.data?.conversation.assignedUserName || "Não atribuído"}</p></div><button autoFocus aria-label="Fechar histórico" onClick={() => setHistoryId(null)}><X /></button></header><div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4"><QueryState loading={historyDetail.isLoading} error={historyDetail.isError} empty={!historyDetail.data?.messages.length} emptyText="Nenhuma mensagem."><div className="space-y-3">{historyDetail.data?.messages.map((msg: any, i: number) => { const out = msg.direction === "outbound" || msg.from === "agent"; return <div key={msg.id || i} className={cn("flex", out ? "justify-end" : "justify-start")}><div className={cn("max-w-[85%] rounded-2xl p-3", out ? "bg-blue-600 text-white" : "bg-slate-100")}>{msg.type === "text" || !msg.type ? <p>{msg.text}</p> : <ConversationMedia conversationId={historyId} message={msg} fallback={<span>{msg.text || "Mídia indisponível"}</span>} />}<span className="block text-[10px] opacity-70">{msg.agentName || msg.sender} · {dateTime(msg.timestamp)}</span></div></div>; })}</div></QueryState></div><footer className="border-t p-3 text-right"><button onClick={() => setHistoryId(null)} className="rounded bg-slate-900 px-4 py-2 text-white">Voltar para o atendimento</button></footer></div></div>;
-  return <>{<button type="button" aria-label="Fechar detalhes da conversa" onClick={onClose} className="absolute inset-0 z-40 bg-slate-950/20 min-[1280px]:hidden" />}{panel}{historyModal}</>;
+  return <>{<button type="button" aria-label="Fechar detalhes da conversa" onClick={onClose} className="absolute inset-0 z-40 bg-slate-950/20 min-[1280px]:hidden" />}{panel}{historyModal}{creatingClient && <ClientFormModal initialData={{ companyName: conversation.name ?? "", phone: conversation.phone ?? "", whatsapp: conversation.phone ?? "" }} onClose={() => setCreatingClient(false)} onSaved={async crmClientId => { if (!crmClientId) return; const linked = await applyCrm(crmClientId, conversation.name); if (!linked) { setCreatedButUnlinked({ id: crmClientId, name: conversation.name ?? "Cliente" }); throw new Error("Cliente criado, mas não foi possível vincular o contato"); } setCreatedButUnlinked(null); await utils.crm.list.invalidate(); }} />}</>;
 }

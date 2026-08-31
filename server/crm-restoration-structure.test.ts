@@ -40,7 +40,8 @@ describe("central Clients restoration structure", () => {
     expect(router).not.toContain("input.clientId");
     expect(router).toContain("ctx.tenantId");
     expect(router).toContain("customerId = ?");
-    expect(router).toContain("customerId IS NULL OR customerId = ''");
+    expect(router).not.toContain("customerId IS NULL OR customerId = ''");
+    expect(router).not.toContain("customerName LIKE ? OR company LIKE ?");
   });
 
   it("includes clients in the backend module set while preserving the role boundary", () => {

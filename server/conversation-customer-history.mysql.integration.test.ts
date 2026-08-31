@@ -80,18 +80,19 @@ physical.sequential("canonical customer, tickets and read-only history", () => {
 
   afterAll(async () => { await reset(); await getPool().end(); });
 
-  it("returns only company candidates from the authenticated tenant", async () => {
+  it("returns person and company candidates from the authenticated tenant", async () => {
     const result = await caller().companyCandidates({ search: "Alpha", limit: 10, offset: 0 });
-    expect(result.items.map(item => item.id)).toEqual(["crm-company-a"]);
+    expect(result.items.map(item => item.id)).toEqual(["crm-company-a", "crm-person-a"]);
     expect((await caller(tenantB).companyCandidates({ search: "Alpha", limit: 10, offset: 0 })).items).toEqual([]);
   });
 
-  it("links exactly once while preserving identity and free company, and rejects invalid companies", async () => {
+  it("links person or company while preserving identity and rejects another tenant", async () => {
     await caller().linkCrm({ contactId: "contact-a", crmClientId: "crm-company-a" });
     expect((await rows("SELECT display_name,company_text,canonical_phone,crm_client_id FROM megadesk_conversation_contacts WHERE contact_id='contact-a'"))[0])
       .toMatchObject({ display_name: "Synthetic Contact", company_text: "Free Company", canonical_phone: "5511999990001", crm_client_id: "crm-company-a" });
-    await expect(caller().linkCrm({ contactId: "contact-a", crmClientId: "crm-person-a" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await caller().linkCrm({ contactId: "contact-a", crmClientId: "crm-person-a" });
     await expect(caller().linkCrm({ contactId: "contact-a", crmClientId: "crm-company-b" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await caller().linkCrm({ contactId: "contact-a", crmClientId: "crm-company-a" });
   });
 
   it("finds tickets through canonical CRM id and the explicit link only", async () => {

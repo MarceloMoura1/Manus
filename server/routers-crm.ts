@@ -16,6 +16,7 @@ import {
 import { getPool } from "./db";
 import { CUSTOMER_TYPES, parseCustomerType, customerTypeToCsv } from "../shared/crm";
 import { isValidCpf, isValidCnpj } from "../shared/br-documents";
+import { normalizeContactPhone } from "../shared/contact-phone";
 
 const CRM_ROLES = new Set(["admin", "manager"]);
 
@@ -47,16 +48,16 @@ function crmClientOrNotFound<T>(client: T | undefined | null): T {
 
 const crmClientInputSchema = z.object({
   customerType: z.enum(CUSTOMER_TYPES),
-  companyName: z.string().min(1, "Nome do cliente é obrigatório"),
-  responsibleName: z.string().optional().default(""),
-  cpfCnpj: z.string().optional().default(""),
-  phone: z.string().optional().default(""),
-  whatsapp: z.string().optional().default(""),
-  email: z.string().optional().default(""),
-  address: z.string().optional().default(""),
-  city: z.string().optional().default(""),
+  companyName: z.string().trim().min(1, "Nome do cliente é obrigatório").max(255),
+  responsibleName: z.string().max(180).optional().default(""),
+  cpfCnpj: z.string().max(20).optional().default(""),
+  phone: z.string().max(40).optional().default(""),
+  whatsapp: z.string().max(40).optional().default(""),
+  email: z.union([z.literal(""), z.string().email("E-mail inválido.").max(255)]).optional().default(""),
+  address: z.string().max(255).optional().default(""),
+  city: z.string().max(120).optional().default(""),
   state: z.string().max(2).optional().default(""),
-  cep: z.string().optional().default(""),
+  cep: z.string().max(10).optional().default(""),
   status: z.enum(["lead", "ativo", "inativo", "cancelado", "inadimplente"]).optional().default("lead"),
   origin: z.enum(["whatsapp", "instagram", "facebook", "site", "indicacao", "outro"]).optional().default("outro"),
   internalResponsible: z.string().optional().default(""),
@@ -70,10 +71,27 @@ const crmClientInputSchema = z.object({
 }).strict();
 
 function validateCustomerDocument(data: z.infer<typeof crmClientInputSchema>) {
-  if (!data.cpfCnpj) return data;
-  const valid = data.customerType === "person" ? isValidCpf(data.cpfCnpj) : isValidCnpj(data.cpfCnpj);
-  if (!valid) throw new TRPCError({ code: "BAD_REQUEST", message: data.customerType === "person" ? "CPF inválido." : "CNPJ inválido." });
+  if (data.cpfCnpj) {
+    const valid = data.customerType === "person" ? isValidCpf(data.cpfCnpj) : isValidCnpj(data.cpfCnpj);
+    if (!valid) throw new TRPCError({ code: "BAD_REQUEST", message: data.customerType === "person" ? "CPF inválido." : "CNPJ inválido." });
+  }
+  for (const [label, value] of [["Telefone", data.phone], ["WhatsApp", data.whatsapp]] as const) {
+    if (normalizeContactPhone(value).status === "invalid") throw new TRPCError({ code: "BAD_REQUEST", message: `${label} inválido.` });
+  }
   return data;
+}
+
+function safeCrmWriteError(error: unknown): never {
+  if (error instanceof TRPCError) throw error;
+  const dbError = error as { code?: string; message?: string };
+  if (dbError.code === "ER_DUP_ENTRY") {
+    const message = dbError.message ?? "";
+    if (message.includes("tenant_document")) throw new TRPCError({ code: "CONFLICT", message: "Documento já cadastrado." });
+    if (message.includes("tenant_phone")) throw new TRPCError({ code: "CONFLICT", message: "Telefone já cadastrado." });
+    if (message.includes("tenant_email")) throw new TRPCError({ code: "CONFLICT", message: "E-mail já cadastrado." });
+    throw new TRPCError({ code: "CONFLICT", message: "Cliente duplicado." });
+  }
+  throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Não foi possível salvar agora. Tente novamente." });
 }
 
 export const crmRouter = router({
@@ -132,8 +150,10 @@ export const crmRouter = router({
     }).strict())
     .mutation(async ({ input, ctx }) => {
       const tenantId = requireCrmAccess(ctx);
-      const result = await createCrmClient(tenantId, validateCustomerDocument(input.data));
-      return { success: true, crmClientId: result.crmClientId };
+      try {
+        const result = await createCrmClient(tenantId, validateCustomerDocument(input.data));
+        return { success: true, crmClientId: result.crmClientId };
+      } catch (error) { safeCrmWriteError(error); }
     }),
 
   // Atualizar cliente CRM com registro de histórico na timeline
@@ -172,8 +192,7 @@ export const crmRouter = router({
     .query(async ({ input, ctx }) => {
       const tenantId = requireCrmAccess(ctx);
       const pool = getPool();
-      // Buscar dados do cliente CRM para usar como filtro
-      const crmClient = crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
+      crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
 
       const [directRows] = await pool.execute(
         `SELECT chamadoId AS chamado_id, chamadoNumber AS chamado_number,
@@ -185,40 +204,8 @@ export const crmRouter = router({
         [tenantId, input.crmClientId]
       ) as any[];
 
-      const searchTerms: string[] = [];
-      if (crmClient.companyName) searchTerms.push(crmClient.companyName);
-      if (crmClient.responsibleName) searchTerms.push(crmClient.responsibleName);
-      if (crmClient.phone) searchTerms.push(crmClient.phone);
-      if (crmClient.whatsapp) searchTerms.push(crmClient.whatsapp);
-
-      if (searchTerms.length === 0 && (directRows as any[]).length === 0) return { chamados: [] };
-
-      // Buscar chamados que correspondam ao cliente (por empresa ou nome)
-      const placeholders = searchTerms.map(() => "customerName LIKE ? OR company LIKE ?").join(" OR ");
-      const values: string[] = [];
-      searchTerms.forEach(term => {
-        values.push(`%${term}%`, `%${term}%`);
-      });
-
-      const [rows] = searchTerms.length > 0 ? await pool.execute(
-        `SELECT chamadoId AS chamado_id, chamadoNumber AS chamado_number,
-                customerName AS customer_name, company, title, status, priority,
-                createdAt AS created_at
-         FROM megadesk_domain_chamados
-         WHERE clientId = ? AND (customerId IS NULL OR customerId = '') AND (${placeholders})
-         ORDER BY createdAt DESC LIMIT 50`,
-        [tenantId, ...values]
-      ) as any[] : [[]];
-
-      const seen = new Set<string>();
-      const linkedRows = [...(directRows as any[]), ...(rows as any[])].filter((row) => {
-        if (seen.has(row.chamado_id)) return false;
-        seen.add(row.chamado_id);
-        return true;
-      });
-
       return {
-        chamados: linkedRows.map(r => ({
+        chamados: (directRows as any[]).map(r => ({
           id: r.chamado_id,
           number: r.chamado_number,
           customerName: r.customer_name,
@@ -239,53 +226,19 @@ export const crmRouter = router({
     .query(async ({ input, ctx }) => {
       const tenantId = requireCrmAccess(ctx);
       const pool = getPool();
-      const crmClient = crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
-
-      // Busca 1: por crm_client_id direto (vínculo criado ao abrir conversa via Atendimento Ativo)
+      crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
       const [directRows] = await pool.execute(
-        `SELECT conversation_id, customer_name, phone, company, status, last_message, time_label, created_at
-         FROM megadesk_domain_conversations
-         WHERE client_id = ? AND crm_client_id = ?
-         ORDER BY created_at DESC LIMIT 50`,
+        `SELECT c.conversation_id, c.customer_name, c.phone, c.company, c.status, c.last_message, c.time_label, c.created_at
+         FROM megadesk_domain_conversations c
+         JOIN megadesk_conversation_contacts contact
+           ON contact.client_id = c.client_id AND contact.contact_id = c.contact_id
+         WHERE c.client_id = ? AND contact.crm_client_id = ?
+         ORDER BY c.created_at DESC LIMIT 50`,
         [tenantId, input.crmClientId]
       ) as any[];
 
-      // Busca 2: por nome/empresa/telefone (fallback para conversas sem vínculo direto)
-      const searchTerms: string[] = [];
-      if (crmClient.phone) searchTerms.push(crmClient.phone.replace(/\D/g, ""));
-      if (crmClient.whatsapp) searchTerms.push(crmClient.whatsapp.replace(/\D/g, ""));
-      if (crmClient.companyName) searchTerms.push(crmClient.companyName);
-      if (crmClient.responsibleName) searchTerms.push(crmClient.responsibleName);
-
-      let indirectRows: any[] = [];
-      if (searchTerms.length > 0) {
-        const placeholders = searchTerms.map(() => "REPLACE(REPLACE(phone, '-', ''), ' ', '') LIKE ? OR company LIKE ? OR customer_name LIKE ?").join(" OR ");
-        const values: string[] = [];
-        searchTerms.forEach(term => {
-          values.push(`%${term}%`, `%${term}%`, `%${term}%`);
-        });
-        const [rows] = await pool.execute(
-          `SELECT conversation_id, customer_name, phone, company, status, last_message, time_label, created_at
-           FROM megadesk_domain_conversations
-           WHERE client_id = ? AND (crm_client_id IS NULL OR crm_client_id = '') AND (${placeholders})
-           ORDER BY created_at DESC LIMIT 50`,
-          [tenantId, ...values]
-        ) as any[];
-        indirectRows = rows as any[];
-      }
-
-      // Combinar e deduplicar por conversation_id
-      const allRows = [...(directRows as any[]), ...indirectRows];
-      const seen = new Set<string>();
-      const uniqueRows = allRows.filter(r => {
-        if (seen.has(r.conversation_id)) return false;
-        seen.add(r.conversation_id);
-        return true;
-      });
-      uniqueRows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
       return {
-        conversas: uniqueRows.slice(0, 50).map(r => ({
+        conversas: (directRows as any[]).map(r => ({
           id: r.conversation_id,
           customerName: r.customer_name,
           phone: r.phone,
