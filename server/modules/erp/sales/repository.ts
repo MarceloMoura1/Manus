@@ -55,7 +55,7 @@ export class SaleRepository {
   }
   async options(clientId: string) {
     const [customers] = await this.db().execute<RowDataPacket[]>(
-      "SELECT crm_client_id crmClientId,company_name customerName FROM megadesk_crm_clients WHERE client_id=? AND status NOT IN ('inativo','cancelado') ORDER BY company_name,crm_client_id LIMIT 100",
+      "SELECT crm_client_id crmClientId,company_name customerName FROM megadesk_crm_clients WHERE client_id=? AND lifecycle_state='active' AND status NOT IN ('inativo','cancelado') ORDER BY company_name,crm_client_id LIMIT 100",
       [clientId]
     );
     const [products] = await this.db().execute<RowDataPacket[]>(
@@ -157,7 +157,7 @@ export class SaleRepository {
     input: SaleDraftInput
   ) {
     const [customers] = await c.execute<RowDataPacket[]>(
-      "SELECT crm_client_id,company_name,status FROM megadesk_crm_clients WHERE client_id=? AND crm_client_id=? AND status NOT IN ('inativo','cancelado') LIMIT 1",
+      "SELECT crm_client_id,company_name,status FROM megadesk_crm_clients WHERE client_id=? AND crm_client_id=? AND lifecycle_state='active' AND status NOT IN ('inativo','cancelado') LIMIT 1",
       [clientId, input.crmClientId]
     );
     if (!customers[0])

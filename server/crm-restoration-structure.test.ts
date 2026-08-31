@@ -28,9 +28,12 @@ describe("central Clients restoration structure", () => {
     expect(home).toContain('window.addEventListener("popstate"');
   });
 
-  it("keeps unauthorized actions out of the Clients DOM", () => {
-    expect(clients).not.toContain("trpc.crm.delete");
-    expect(clients).not.toContain("Excluir Cliente");
+  it("keeps lifecycle risk actions explicit and backend-authorized", () => {
+    expect(clients).toContain("trpc.crm.deletePermanently");
+    expect(clients).toContain("Zona de risco");
+    expect(clients).toContain('deletePhrase !== "EXCLUIR"');
+    expect(clients).not.toContain("window.confirm(\"Excluir");
+    expect(router).toContain("requireCrmAdmin(ctx)");
     expect(attendance).toContain("session?.permissions?.includes('clients')");
     expect(attendance).toContain("{ route: 'erp-clients', crmClientId: customerData.crmClientId }");
   });

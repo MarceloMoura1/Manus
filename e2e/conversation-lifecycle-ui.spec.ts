@@ -51,15 +51,13 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
 }
 
 test.describe("restored conversation layout with WIP lifecycle", () => {
-  test("shows create above link for an already linked client only with CRM permission", async ({ page }) => {
+  test("hides create for an already linked canonical client", async ({ page }) => {
     const managerSession = { ...session, permissions: ["conversations", "clients"], userRole: "manager" as const };
     await mockedPage(page, true, { session: managerSession });
     await page.locator('button[aria-controls="conversation-details-panel"]').click();
     const clientSection = page.locator("#client-content");
-    const create = clientSection.getByRole("button", { name: "Cadastrar cliente" });
-    const toggle = clientSection.locator('button[aria-controls="crm-link-search"]');
-    await expect(create).toBeVisible();
-    expect(await create.evaluate((button, link) => !!(button.compareDocumentPosition(link as Node) & Node.DOCUMENT_POSITION_FOLLOWING), await toggle.elementHandle())).toBe(true);
+    await expect(clientSection.getByRole("button", { name: "Cadastrar cliente" })).toHaveCount(0);
+    await expect(clientSection.getByRole("button", { name: "Visualizar perfil" })).toBeVisible();
   });
 
   test("keeps create above link with a phone candidate and renders search results as name only", async ({ page }) => {
@@ -170,16 +168,8 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect.poll(() => page.evaluate(() => (window as typeof window & { __copiedConversationId?: string }).__copiedConversationId)).toBe(conversation.publicCode);
     await expect(copyId).toContainText("Copiado");
 
-    await page.getByRole("button", { name: "+ Adicionar empresa" }).click();
-    const companyInput = page.getByLabel("Nome da empresa");
-    await expect(companyInput).toBeFocused();
-    await companyInput.fill("Empresa Informada");
-    await companyInput.press("Escape");
-    await expect(page.getByTestId("conversation-details-panel")).toBeVisible();
-    await page.getByRole("button", { name: "+ Adicionar empresa" }).click();
-    await page.getByLabel("Nome da empresa").fill("Empresa Informada");
-    await page.getByLabel("Nome da empresa").press("Enter");
-    await expect(page.getByText("Empresa Informada", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "+ Adicionar empresa" })).toHaveCount(0);
+    await expect(page.getByLabel("Nome da empresa")).toHaveCount(0);
     await expect(page.getByTestId("conversation-details-panel")).toBeVisible();
 
     await page.reload();

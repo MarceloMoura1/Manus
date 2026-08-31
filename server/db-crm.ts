@@ -3,7 +3,7 @@
  * REGRA 1: Toda query DEVE filtrar por clientId para garantir isolamento de dados.
  */
 import { drizzle } from "drizzle-orm/mysql2";
-import { eq, and, like, or, desc } from "drizzle-orm";
+import { eq, and, like, or, desc, ne } from "drizzle-orm";
 import { megadeskCrmClients } from "../drizzle/schema";
 
 import { getPool } from "./db";
@@ -42,8 +42,11 @@ export type CrmClientInput = {
  * Lista todos os clientes CRM de um tenant (clientId).
  * Suporta busca por nome, telefone, CNPJ ou e-mail.
  */
-export async function listCrmClients(clientId: string, search?: string) {
+export async function listCrmClients(clientId: string, search?: string, lifecycle: "active" | "inactive" | "archived" | "all" = "active") {
   const db = getDb();
+  const lifecycleClause = lifecycle === "all"
+    ? ne(megadeskCrmClients.lifecycleState, "archived")
+    : eq(megadeskCrmClients.lifecycleState, lifecycle);
   if (search && search.trim()) {
     const term = `%${search.trim()}%`;
     const rows = await db
@@ -52,6 +55,7 @@ export async function listCrmClients(clientId: string, search?: string) {
       .where(
         and(
           eq(megadeskCrmClients.clientId, clientId),
+          lifecycleClause,
           or(
             like(megadeskCrmClients.companyName, term),
             like(megadeskCrmClients.phone, term),
@@ -67,7 +71,7 @@ export async function listCrmClients(clientId: string, search?: string) {
   return db
     .select()
     .from(megadeskCrmClients)
-    .where(eq(megadeskCrmClients.clientId, clientId))
+    .where(and(eq(megadeskCrmClients.clientId, clientId), lifecycleClause))
     .orderBy(desc(megadeskCrmClients.updatedAt));
 }
 

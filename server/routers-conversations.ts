@@ -70,7 +70,7 @@ export const conversationsRouter = router({
       `SELECT crm_client_id AS id, company_name AS name, responsible_name AS responsibleName,
               cpf_cnpj AS document, customer_type AS customerType, phone, whatsapp
        FROM megadesk_crm_clients
-       WHERE client_id = ?
+       WHERE client_id = ? AND lifecycle_state = 'active'
          AND (? = '%%' OR company_name LIKE ? OR responsible_name LIKE ? OR cpf_cnpj LIKE ?
            OR (? <> '%%' AND (phone LIKE ? OR whatsapp LIKE ?)))
        ORDER BY company_name, crm_client_id LIMIT ${input.limit} OFFSET ${input.offset}`,
@@ -87,7 +87,7 @@ export const conversationsRouter = router({
         `SELECT crm_client_id AS id, company_name AS name, responsible_name AS responsibleName,
                 cpf_cnpj AS document, customer_type AS customerType, phone, whatsapp
          FROM megadesk_crm_clients
-         WHERE client_id = ? AND (phone = ? OR whatsapp = ?)
+         WHERE client_id = ? AND lifecycle_state = 'active' AND (phone = ? OR whatsapp = ?)
          ORDER BY company_name, crm_client_id LIMIT 25`,
         [ctx.tenantId, normalized.value, normalized.value],
       ) as any[];
@@ -116,7 +116,7 @@ export const conversationsRouter = router({
        c.last_message AS lastMessage, c.updated_at AS lastMessageAt, c.unread_count AS unreadCount,
        CASE WHEN c.status = 'bot' THEN 'pending' ELSE c.status END AS status,
        c.assigned_user_id AS assignedUserId, c.assigned_user_name AS assignedUserName,
-       c.last_message_from AS lastMessageFrom, contact.crm_client_id AS crmClientId, c.origin,
+       c.last_message_from AS lastMessageFrom, crm.crm_client_id AS crmClientId, c.origin,
        c.created_at AS createdAt, c.closed_at AS closedAt
        FROM megadesk_domain_conversations c
        LEFT JOIN megadesk_conversation_contacts contact
@@ -393,7 +393,7 @@ export const conversationsRouter = router({
         if (!contacts.length) throw new TRPCError({ code: "NOT_FOUND", message: "Contato não encontrado." });
         if (input.crmClientId) {
           const [crm] = await connection.execute(
-            `SELECT crm_client_id FROM megadesk_crm_clients WHERE crm_client_id = ? AND client_id = ? LIMIT 1`,
+            `SELECT crm_client_id FROM megadesk_crm_clients WHERE crm_client_id = ? AND client_id = ? AND lifecycle_state = 'active' LIMIT 1`,
             [input.crmClientId, ctx.tenantId],
           ) as any[];
           if (!crm.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Cliente indisponível para vínculo." });

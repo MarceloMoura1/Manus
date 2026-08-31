@@ -1,5 +1,5 @@
 import React from "react";
-import { Check, ChevronDown, Copy, Link2, Pencil, Search, Trash2, UserPlus, X } from "lucide-react";
+import { Check, ChevronDown, Copy, Link2, Pencil, Search, UserPlus, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { ConversationMedia } from "@/components/ConversationMedia";
@@ -51,11 +51,8 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
   const [sections, setSections] = React.useState(() => new Set(initialSections));
   const closeButtonRef = React.useRef<HTMLButtonElement>(null);
   const nameInputRef = React.useRef<HTMLInputElement>(null);
-  const companyInputRef = React.useRef<HTMLInputElement>(null);
   const [editingName, setEditingName] = React.useState(false);
-  const [editingCompany, setEditingCompany] = React.useState(false);
   const [name, setName] = React.useState(conversation.name ?? "");
-  const [companyText, setCompanyText] = React.useState(conversation.companyText ?? "");
   const [formError, setFormError] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
   const [linking, setLinking] = React.useState(false);
@@ -85,15 +82,14 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
   const navigate = (route: string, detail: Record<string, unknown> = {}) => onNavigate(route, { conversationId: conversation.id, contactId: conversation.contactId, crmClientId: conversation.crmClientId, companyName: conversation.companyName, contactName: conversation.name, phone: conversation.phone, ...detail });
 
   React.useEffect(() => {
-    setEditingName(false); setEditingCompany(false); setFormError(null);
-    setName(conversation.name ?? ""); setCompanyText(conversation.companyText ?? "");
+    setEditingName(false); setFormError(null);
+    setName(conversation.name ?? "");
     setLinking(false); setCrmSearch(""); setCrmOffset(0); setPendingCrm(null);
   }, [conversation.id, conversation.name, conversation.companyText]);
   React.useEffect(() => {
     if (!open) { setLinking(false); setCrmSearch(""); setCrmOffset(0); setPendingCrm(null); }
   }, [open]);
   React.useEffect(() => { if (editingName) nameInputRef.current?.focus(); }, [editingName]);
-  React.useEffect(() => { if (editingCompany) companyInputRef.current?.focus(); }, [editingCompany]);
   React.useEffect(() => { if (linking) requestAnimationFrame(() => crmSearchInputRef.current?.focus()); }, [linking]);
 
   const closeCrmSearch = (restoreFocus = true) => {
@@ -117,15 +113,15 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
     setCreatingClient(true);
   };
 
-  const save = async (fields: { displayName?: string; companyText?: string | null }) => {
+  const save = async (fields: { displayName?: string }) => {
     if (!conversation.contactId || updateContact.isPending) return;
     setFormError(null);
     try {
       const updated = await updateContact.mutateAsync({ contactId: conversation.contactId, ...fields });
-      setName(updated.displayName); setCompanyText(updated.companyText ?? "");
+      setName(updated.displayName);
       onContactUpdated({ displayName: updated.displayName, companyText: updated.companyText });
       await utils.conversations.list.invalidate();
-      setEditingName(false); setEditingCompany(false);
+      setEditingName(false);
       onToast("Contato atualizado.");
     } catch {
       setFormError("Não foi possível salvar. Revise os dados e tente novamente.");
@@ -187,15 +183,7 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
           <input ref={nameInputRef} id="contact-name" value={name} maxLength={180} disabled={updateContact.isPending} onChange={event => setName(event.target.value)} className="min-h-10 w-full rounded-lg border border-slate-200 px-3 text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
           <div className="mt-2 flex gap-2"><button type="button" disabled={updateContact.isPending || !name.trim()} onClick={() => void save({ displayName: name })} className="inline-flex min-h-9 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white disabled:opacity-60"><Check className="h-3.5 w-3.5" />{updateContact.isPending ? "Salvando…" : "Salvar"}</button><button type="button" disabled={updateContact.isPending} onClick={() => { setName(conversation.name ?? ""); setEditingName(false); setFormError(null); }} className="min-h-9 rounded-lg px-2.5 text-xs font-semibold hover:bg-slate-100">Cancelar</button></div>
         </div> : <div className="flex min-w-0 items-start justify-between gap-2"><div className="min-w-0"><strong className="block truncate text-slate-800">{conversation.name || "Contato sem nome"}</strong><span className="block text-xs">{conversation.phone || "Telefone indisponível"}</span></div><button type="button" onClick={() => setEditingName(true)} className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"><Pencil className="h-3.5 w-3.5" />Editar</button></div>}
-        <div className="border-t border-slate-100 pt-3">
-          {editingCompany ? <div onKeyDown={event => keys(event, () => void save({ companyText }), () => { setCompanyText(conversation.companyText ?? ""); setEditingCompany(false); setFormError(null); })}>
-            <label htmlFor="contact-company" className="mb-1 block text-xs font-medium">Nome da empresa</label>
-            <input ref={companyInputRef} id="contact-company" value={companyText} maxLength={255} disabled={updateContact.isPending} onChange={event => setCompanyText(event.target.value)} className="min-h-10 w-full rounded-lg border border-slate-200 px-3 text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-            <p className="mt-1 text-[11px] text-slate-500">Informação declarada pelo contato; não cria cadastro empresarial.</p>
-            <div className="mt-2 flex gap-2"><button type="button" disabled={updateContact.isPending} onClick={() => void save({ companyText })} className="inline-flex min-h-9 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white disabled:opacity-60"><Check className="h-3.5 w-3.5" />{updateContact.isPending ? "Salvando…" : "Salvar"}</button><button type="button" disabled={updateContact.isPending} onClick={() => { setCompanyText(conversation.companyText ?? ""); setEditingCompany(false); setFormError(null); }} className="min-h-9 rounded-lg px-2.5 text-xs font-semibold hover:bg-slate-100">Cancelar</button></div>
-          </div> : conversation.companyText ? <div><span className="block text-[11px] font-medium text-slate-500">Empresa informada</span><div className="flex min-w-0 items-center justify-between gap-2"><span className="min-w-0 truncate text-slate-800">{conversation.companyText}</span><span className="flex shrink-0"><button type="button" aria-label="Editar empresa informada" onClick={() => setEditingCompany(true)} className="min-h-9 rounded-lg p-2 text-blue-700 hover:bg-blue-50"><Pencil className="h-3.5 w-3.5" /></button><button type="button" aria-label="Remover empresa informada" disabled={updateContact.isPending} onClick={() => void save({ companyText: null })} className="min-h-9 rounded-lg p-2 text-red-600 hover:bg-red-50 disabled:opacity-60"><Trash2 className="h-3.5 w-3.5" /></button></span></div><p className="text-[11px] text-slate-500">Informação do contato</p></div>
-            : <button type="button" onClick={() => setEditingCompany(true)} className="min-h-9 rounded-lg px-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">+ Adicionar empresa</button>}
-        </div>
+        {conversation.companyText && <div className="border-t border-slate-100 pt-3"><span className="block text-[11px] font-medium text-slate-500">Empresa informada</span><span className="block truncate text-slate-800">{conversation.companyText}</span><p className="text-[11px] text-slate-500">Informação preservada do contato</p></div>}
         {conversation.crmClientId && <div className="rounded-lg bg-blue-50 px-2.5 py-2 text-xs text-blue-800"><span className="block font-semibold">Cliente vinculado</span><span className="block truncate">{conversation.companyName || conversation.company || "Cadastro CRM vinculado"}</span></div>}
         {formError && <p role="alert" className="text-xs text-red-600">{formError}</p>}
       </Section>
@@ -203,7 +191,6 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
         {conversation.crmClientId ? <div className="space-y-3">
           <div className="rounded-lg bg-blue-50 p-2.5"><strong className="block truncate text-blue-900">{conversation.companyName || "Cliente vinculado"}</strong><span className="text-xs text-blue-700">Vinculado ao CRM</span></div>
           <button type="button" onClick={() => navigate("erp-clients", { crmClientId: conversation.crmClientId })} className="flex min-h-10 w-full items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Visualizar perfil</button>
-          {canManageClients && <button type="button" onClick={openClientForm} className="flex min-h-10 w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><UserPlus className="h-4 w-4 text-slate-500" aria-hidden="true" />Cadastrar cliente</button>}
           <button ref={crmLinkButtonRef} type="button" aria-expanded={linking} aria-controls="crm-link-search" onClick={toggleCrmSearch} className="flex min-h-10 w-full items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><span className="inline-flex items-center gap-2"><Link2 className="h-4 w-4" aria-hidden="true" />Vincular contato</span><ChevronDown className={cn("h-4 w-4 transition-transform", linking && "rotate-180")} aria-hidden="true" /></button>
           <button type="button" onClick={() => setConfirmUnlink(true)} className="min-h-9 w-full rounded-lg px-3 text-xs font-semibold text-red-600 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500">Remover vínculo</button>
         </div> : <div className="space-y-3">

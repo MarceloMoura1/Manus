@@ -103,9 +103,12 @@ describe("MegaDesk UI structure", () => {
       expect(homeSource).toContain(label);
     }
     expect(homeSource).not.toContain("Mais ações");
-    for (const label of ["Atendimento", "Contato", "Cliente", "Chamados", "Histórico de conversas", "Copiar ID da conversa", "+ Adicionar empresa", "Empresa informada"]) {
+    for (const label of ["Atendimento", "Contato", "Cliente", "Chamados", "Histórico de conversas", "Copiar ID da conversa", "Empresa informada"]) {
       expect(conversationDetailsSource).toContain(label);
     }
+    expect(conversationDetailsSource).not.toContain("Adicionar empresa");
+    expect(conversationDetailsSource).not.toContain("Editar empresa informada");
+    expect(conversationDetailsSource).not.toContain("Remover empresa informada");
     expect(homeSource).not.toContain("Modal de Edição de Cliente");
     expect(conversationDetailsSource).toContain("trpc.conversations.updateContact.useMutation");
     expect(conversationDetailsSource).toContain("enabled: open && linking && crmSearchIsReady");

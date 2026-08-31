@@ -113,7 +113,7 @@ describe("Conversations authorization, filters and lifecycle", () => {
     expect(sql).toContain("contact.contact_id = c.contact_id AND contact.client_id = c.client_id");
     expect(sql).toContain("contact.company_text AS companyText");
     expect(sql).toContain("crm.company_name AS companyName");
-    expect(sql).toContain("contact.crm_client_id AS crmClientId");
+    expect(sql).toContain("crm.crm_client_id AS crmClientId");
     expect(sql).toContain("crm.crm_client_id = contact.crm_client_id");
   });
 
@@ -139,7 +139,7 @@ describe("Conversations authorization, filters and lifecycle", () => {
     mocks.execute.mockResolvedValue([[{ id: "crm-p", name: "Pessoa", customerType: "person" }]]);
     const result = await conversationsRouter.createCaller(context()).phoneCandidates({ phone: "(11) 99999-9999" });
     const [sql, values] = mocks.execute.mock.calls[0];
-    expect(sql).toContain("client_id = ? AND (phone = ? OR whatsapp = ?)");
+    expect(sql).toContain("client_id = ? AND lifecycle_state = 'active' AND (phone = ? OR whatsapp = ?)");
     expect(values[0]).toBe("tenant-a");
     expect(values[1]).toBe(values[2]);
     expect(result.items).toHaveLength(1);

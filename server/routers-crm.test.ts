@@ -48,7 +48,7 @@ describe("CRM tenant and authorization contract", () => {
 
   it.each(["admin", "manager"] as const)("allows %s and derives the tenant from the session", async (role) => {
     const result = await crmRouter.createCaller(context(role)).list({});
-    expect(mocks.listCrmClients).toHaveBeenCalledWith("tenant-session", undefined);
+    expect(mocks.listCrmClients).toHaveBeenCalledWith("tenant-session", undefined, "active");
     expect(result.clients).toEqual([{ crmClientId: "crm-public", companyName: "Cliente seguro" }]);
     expect(JSON.stringify(result)).not.toContain("tenant-session");
   });
@@ -56,7 +56,7 @@ describe("CRM tenant and authorization contract", () => {
   it.each(["admin", "manager"] as const)("allows legacy %s ERP access without a separate clients permission", async (role) => {
     const result = await crmRouter.createCaller(context(role, ["erp"])).list({});
     expect(result.clients).toHaveLength(1);
-    expect(mocks.listCrmClients).toHaveBeenCalledWith("tenant-session", undefined);
+    expect(mocks.listCrmClients).toHaveBeenCalledWith("tenant-session", undefined, "active");
   });
 
   it.each(["agent", "viewer"] as const)("refuses %s access", async (role) => {
@@ -73,8 +73,9 @@ describe("CRM tenant and authorization contract", () => {
     await expect(crmRouter.createCaller(context("admin")).list({ clientId: "other-tenant" } as never)).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
-  it("does not expose a physical delete procedure", () => {
+  it("exposes only the guarded permanent delete procedure", () => {
     expect((crmRouter as any)._def.procedures.delete).toBeUndefined();
+    expect((crmRouter as any)._def.procedures.deletePermanently).toBeDefined();
   });
 
   it("resolves duplicates inside the session tenant without exposing identity fields", async () => {

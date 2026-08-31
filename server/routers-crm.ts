@@ -18,8 +18,24 @@ import { getPool } from "./db";
 import { CUSTOMER_TYPES, parseCustomerType, customerTypeToCsv } from "../shared/crm";
 import { isValidCpf, isValidCnpj } from "../shared/br-documents";
 import { normalizeContactPhone } from "../shared/contact-phone";
+import { changeCrmClientLifecycle, permanentlyDeleteCrmClient, CrmLifecycleError } from "./crm-client-lifecycle";
 
 const CRM_ROLES = new Set(["admin", "manager"]);
+
+function requireCrmAdmin(ctx: { operationalUserRole?: string }) {
+  if (ctx.operationalUserRole !== "admin") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Somente administradores podem excluir clientes definitivamente." });
+  }
+}
+
+function safeLifecycleError(error: unknown): never {
+  if (error instanceof TRPCError) throw error;
+  if (error instanceof CrmLifecycleError) {
+    const code = error.kind === "not_found" ? "NOT_FOUND" : error.kind === "conflict" ? "CONFLICT" : "BAD_REQUEST";
+    throw new TRPCError({ code, message: error.message });
+  }
+  throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Não foi possível concluir a ação. Tente novamente." });
+}
 
 function requireCrmAccess(ctx: {
   tenantId: string;
@@ -112,10 +128,11 @@ export const crmRouter = router({
   list: megadeskProcedure
     .input(z.object({
       search: z.string().optional(),
+      lifecycle: z.enum(["active", "inactive", "archived", "all"]).optional().default("active"),
     }).strict())
     .query(async ({ input, ctx }) => {
       const tenantId = requireCrmAccess(ctx);
-      const clients = await listCrmClients(tenantId, input.search);
+      const clients = await listCrmClients(tenantId, input.search, input.lifecycle);
       return { clients: clients.map((client) => publicCrmClient(client as unknown as Record<string, unknown>)) };
     }),
 
@@ -178,6 +195,7 @@ export const crmRouter = router({
     .mutation(async ({ input, ctx }) => {
       const tenantId = requireCrmAccess(ctx);
       const existing = crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
+      if (existing.lifecycleState === "archived") throw new TRPCError({ code: "BAD_REQUEST", message: "Restaure o cliente antes de editar o cadastro." });
       const merged = { ...existing, ...input.data };
       if (!merged.customerType) throw new TRPCError({ code: "BAD_REQUEST", message: "Selecione Pessoa ou Empresa antes de salvar." });
       validateCustomerDocument({
@@ -197,6 +215,29 @@ export const crmRouter = router({
         });
         return { success: true };
       } catch (error) { safeCrmWriteError(error); }
+    }),
+
+  changeLifecycle: megadeskProcedure
+    .input(z.object({
+      crmClientId: z.string().min(1).max(80),
+      action: z.enum(["deactivate", "reactivate", "archive", "restore"]),
+      expectedVersion: z.number().int().positive(),
+    }).strict())
+    .mutation(async ({ input, ctx }) => {
+      const tenantId = requireCrmAccess(ctx);
+      try {
+        return await changeCrmClientLifecycle({ ...input, tenantId, operatorUserId: ctx.operationalUserId, operatorRole: ctx.operationalUserRole });
+      } catch (error) { safeLifecycleError(error); }
+    }),
+
+  deletePermanently: megadeskProcedure
+    .input(z.object({ crmClientId: z.string().min(1).max(80), expectedVersion: z.number().int().positive() }).strict())
+    .mutation(async ({ input, ctx }) => {
+      const tenantId = requireCrmAccess(ctx);
+      requireCrmAdmin(ctx);
+      try {
+        return await permanentlyDeleteCrmClient({ ...input, tenantId, operatorUserId: ctx.operationalUserId, operatorRole: ctx.operationalUserRole });
+      } catch (error) { safeLifecycleError(error); }
     }),
 
   // Buscar chamados vinculados ao cliente CRM pelo nome/empresa
@@ -287,7 +328,8 @@ export const crmRouter = router({
     }).strict())
     .mutation(async ({ input, ctx }) => {
       const tenantId = requireCrmAccess(ctx);
-      crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
+      const client = crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
+      if (client.lifecycleState === "archived") throw new TRPCError({ code: "BAD_REQUEST", message: "Restaure o cliente antes de adicionar registros." });
       await addCrmTimeline(input.crmClientId, tenantId, {
         type: input.type,
         description: input.description,

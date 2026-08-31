@@ -16,7 +16,7 @@ export class FinanceRepository {
     const [accounts]=await this.db().execute<RowDataPacket[]>("SELECT public_id publicId,name,type,current_balance_cents currentBalanceCents,allow_negative allowNegative,active FROM erp_financial_accounts WHERE client_id=? ORDER BY name",[clientId]);
     const [categories]=await this.db().execute<RowDataPacket[]>("SELECT public_id publicId,name,direction,active FROM erp_financial_categories WHERE client_id=? ORDER BY name",[clientId]);
     const [suppliers]=await this.db().execute<RowDataPacket[]>("SELECT public_id publicId,legal_name name FROM erp_suppliers WHERE client_id=? AND active=1 ORDER BY legal_name LIMIT 100",[clientId]);
-    const [customers]=await this.db().execute<RowDataPacket[]>("SELECT crm_client_id crmClientId,company_name name FROM megadesk_crm_clients WHERE client_id=? AND status NOT IN ('inativo','cancelado') ORDER BY company_name LIMIT 100",[clientId]);
+    const [customers]=await this.db().execute<RowDataPacket[]>("SELECT crm_client_id crmClientId,company_name name FROM megadesk_crm_clients WHERE client_id=? AND lifecycle_state='active' AND status NOT IN ('inativo','cancelado') ORDER BY company_name LIMIT 100",[clientId]);
     return { accounts, categories, suppliers, customers };
   }
   async createAccount(clientId:string,userId:string,input:AccountInput){
@@ -41,7 +41,7 @@ export class FinanceRepository {
   async createManual(clientId:string,userId:string,input:ManualEntryInput){
     const c=await this.db().getConnection(), publicId=randomUUID(); try { await c.beginTransaction(); const refs=await this.references(c,clientId,input.direction,input.categoryPublicId,input.financialAccountPublicId);
       let supplierId:null|number=null, party=input.partyName; if(input.supplierPublicId){const [s]=await c.execute<RowDataPacket[]>("SELECT id,legal_name FROM erp_suppliers WHERE client_id=? AND public_id=? LIMIT 1",[clientId,input.supplierPublicId]);if(!s[0])throw new ErpDomainError("NOT_FOUND","Fornecedor não encontrado.");supplierId=Number(s[0].id);party=String(s[0].legal_name);}
-      if(input.crmClientId){const [x]=await c.execute<RowDataPacket[]>("SELECT company_name FROM megadesk_crm_clients WHERE client_id=? AND crm_client_id=? LIMIT 1",[clientId,input.crmClientId]);if(!x[0])throw new ErpDomainError("NOT_FOUND","Cliente não encontrado.");party=String(x[0].company_name);}
+      if(input.crmClientId){const [x]=await c.execute<RowDataPacket[]>("SELECT company_name FROM megadesk_crm_clients WHERE client_id=? AND crm_client_id=? AND lifecycle_state='active' LIMIT 1",[clientId,input.crmClientId]);if(!x[0])throw new ErpDomainError("NOT_FOUND","Cliente indisponível para novas operações.");party=String(x[0].company_name);}
       await c.execute("INSERT INTO erp_financial_entries(public_id,client_id,document_number,direction,status,description,amount_cents,due_date,issue_date,category_id,financial_account_id,supplier_id,crm_client_id,source_type,party_name_snapshot,notes,created_by) VALUES(?,?,?,?,'open',?,?,?,?,?,?,?,?,'manual',?,?,?)",[publicId,clientId,input.documentNumber,input.direction,input.description,input.amountCents,input.dueDate,input.issueDate,refs.categoryId,refs.accountId,supplierId,input.crmClientId,party,input.notes,userId]); await c.commit();
     }catch(e){await c.rollback();throw e;}finally{c.release();} return this.detail(clientId,publicId);
   }

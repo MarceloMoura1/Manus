@@ -1062,6 +1062,13 @@ export const megadeskCrmClients = mysqlTable(
     status: mysqlEnum(["lead", "ativo", "inativo", "cancelado", "inadimplente"])
       .default("lead")
       .notNull(),
+    lifecycleState: mysqlEnum("lifecycle_state", ["active", "inactive", "archived"])
+      .default("active")
+      .notNull(),
+    preArchiveState: mysqlEnum("pre_archive_state", ["active", "inactive"]),
+    lifecycleChangedAt: timestamp("lifecycle_changed_at", { mode: "string" }),
+    archivedAt: timestamp("archived_at", { mode: "string" }),
+    lifecycleVersion: int("lifecycle_version").default(1).notNull(),
     origin: mysqlEnum([
       "whatsapp",
       "instagram",
@@ -1090,6 +1097,7 @@ export const megadeskCrmClients = mysqlTable(
   table => [
     index("idx_mcc_client").on(table.clientId),
     index("idx_mcc_status").on(table.status),
+    index("idx_mcc_tenant_lifecycle").on(table.clientId, table.lifecycleState),
     index("idx_mcc_company").on(table.companyName),
     index("idx_mcc_phone").on(table.phone),
     uniqueIndex("uq_mcc_tenant_document").on(table.clientId, table.cpfCnpj),

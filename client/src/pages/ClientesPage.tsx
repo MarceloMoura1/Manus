@@ -48,6 +48,17 @@ function cn(...classes: Array<string | false | undefined | null>) {
   return classes.filter(Boolean).join(" ");
 }
 
+function safeLifecycleMessage(error: unknown) {
+  const message = typeof error === "object" && error && "message" in error ? String(error.message) : "";
+  const allowed = [
+    "Este cliente possui histórico ou vínculos e não pode ser excluído. Arquive o cadastro para preservá-los.",
+    "O cliente foi alterado por outra pessoa. Atualize a página e tente novamente.",
+    "Esta ação não está disponível no estado atual do cliente.",
+    "Somente administradores podem excluir clientes definitivamente.",
+  ];
+  return allowed.includes(message) ? message : "Não foi possível concluir a ação. Tente novamente.";
+}
+
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 export type CrmClient = {
   crmClientId: string;
@@ -71,6 +82,11 @@ export type CrmClient = {
   lastInteractionAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  lifecycleState: "active" | "inactive" | "archived";
+  preArchiveState: "active" | "inactive" | null;
+  lifecycleChangedAt: Date | null;
+  archivedAt: Date | null;
+  lifecycleVersion: number;
 };
 
 type ClientTab = "geral" | "chamados" | "conversas" | "timeline" | "financeiro" | "rastreamento" | "arquivos";
@@ -552,6 +568,8 @@ function ClientDetailPanel({
   onSendMessage,
   whatsappConnected,
   canStartConversation,
+  onLifecycleChanged,
+  onDeleted,
 }: {
   client: CrmClient;
   onEdit: () => void;
@@ -559,9 +577,33 @@ function ClientDetailPanel({
   onSendMessage?: (intent: CrmWhatsAppIntent) => void;
   whatsappConnected: boolean;
   canStartConversation: boolean;
+  onLifecycleChanged: () => Promise<void>;
+  onDeleted: () => Promise<void>;
 }) {
   const [activeTab, setActiveTab] = useState<ClientTab>("geral");
   const [newTimelineNote, setNewTimelineNote] = useState("");
+  const [riskAction, setRiskAction] = useState<"deactivate" | "reactivate" | "archive" | "restore" | "delete" | null>(null);
+  const [deletePhrase, setDeletePhrase] = useState("");
+  const lifecycleMutation = trpc.crm.changeLifecycle.useMutation();
+  const deleteMutation = trpc.crm.deletePermanently.useMutation();
+  const riskPending = lifecycleMutation.isPending || deleteMutation.isPending;
+  const lifecycleLabel = client.lifecycleState === "archived" ? "Arquivado" : client.lifecycleState === "inactive" ? "Inativo" : "Ativo";
+  const runRiskAction = async () => {
+    if (!riskAction || riskPending) return;
+    try {
+      if (riskAction === "delete") {
+        if (deletePhrase !== "EXCLUIR") return;
+        await deleteMutation.mutateAsync({ crmClientId: client.crmClientId, expectedVersion: client.lifecycleVersion });
+        toast.success("Cliente excluído definitivamente.");
+        await onDeleted();
+      } else {
+        await lifecycleMutation.mutateAsync({ crmClientId: client.crmClientId, action: riskAction, expectedVersion: client.lifecycleVersion });
+        toast.success("Estado do cliente atualizado.");
+        await onLifecycleChanged();
+      }
+      setRiskAction(null); setDeletePhrase("");
+    } catch (error) { toast.error(safeLifecycleMessage(error)); }
+  };
 
   const tabs: { id: ClientTab; label: string; icon: React.ReactNode }[] = [
     { id: "geral",        label: "Geral",        icon: <User className="w-4 h-4" /> },
@@ -612,7 +654,7 @@ function ClientDetailPanel({
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <button type="button" onClick={onEdit} className="p-2 hover:bg-slate-100 rounded-lg transition-colors" title="Editar">
+            <button type="button" disabled={client.lifecycleState === "archived"} onClick={onEdit} className="p-2 hover:bg-slate-100 rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40" title={client.lifecycleState === "archived" ? "Restaure o cliente antes de editar" : "Editar"}>
               <Edit3 className="w-4 h-4 text-slate-500" />
             </button>
             <button type="button" onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg transition-colors" title="Fechar">
@@ -622,6 +664,7 @@ function ClientDetailPanel({
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <StatusBadge status={client.status} />
+          <span className={cn("inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold", client.lifecycleState === "active" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : client.lifecycleState === "inactive" ? "border-slate-200 bg-slate-100 text-slate-700" : "border-amber-200 bg-amber-50 text-amber-800")}>{lifecycleLabel}</span>
           {client.origin && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
               {ORIGIN_CONFIG[client.origin]?.icon}
@@ -976,6 +1019,25 @@ function ClientDetailPanel({
           </div>
         )}
       </div>
+      <section aria-labelledby="risk-zone-title" className="border-t border-red-100 bg-red-50/40 p-4">
+        <h3 id="risk-zone-title" className="text-sm font-bold text-red-800">Zona de risco</h3>
+        <p className="mt-1 text-xs text-slate-600">O histórico e os vínculos são preservados ao inativar ou arquivar.</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {client.lifecycleState === "active" && <button type="button" onClick={() => setRiskAction("deactivate")} className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold">Inativar</button>}
+          {client.lifecycleState === "inactive" && <button type="button" onClick={() => setRiskAction("reactivate")} className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold">Reativar</button>}
+          {client.lifecycleState !== "archived" && <button type="button" onClick={() => setRiskAction("archive")} className="min-h-10 rounded-lg border border-amber-300 bg-white px-3 text-sm font-semibold text-amber-800">Arquivar</button>}
+          {client.lifecycleState === "archived" && <button type="button" onClick={() => setRiskAction("restore")} className="min-h-10 rounded-lg border border-blue-300 bg-white px-3 text-sm font-semibold text-blue-700">Restaurar</button>}
+          <button type="button" onClick={() => setRiskAction("delete")} className="min-h-10 rounded-lg bg-red-700 px-3 text-sm font-semibold text-white">Excluir</button>
+        </div>
+      </section>
+      {riskAction && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4" onMouseDown={event => { if (event.target === event.currentTarget && !riskPending) setRiskAction(null); }} onKeyDown={event => { if (event.key === "Escape" && !riskPending) setRiskAction(null); }}>
+        <div role="alertdialog" aria-modal="true" aria-labelledby="risk-dialog-title" className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+          <h2 id="risk-dialog-title" className="text-lg font-bold text-slate-900">{riskAction === "delete" ? "Excluir cliente permanentemente" : `${riskAction === "archive" ? "Arquivar" : riskAction === "restore" ? "Restaurar" : riskAction === "deactivate" ? "Inativar" : "Reativar"} cliente`}</h2>
+          <p className="mt-2 text-sm text-slate-600">{riskAction === "delete" ? "Esta ação é permanente e só será permitida se o cadastro não possuir histórico ou vínculos." : riskAction === "archive" ? "O cliente sairá das buscas padrão, mas todo o histórico será preservado." : riskAction === "deactivate" ? "Novos vínculos e operações ficarão bloqueados até a reativação." : "O cadastro voltará ao estado operacional seguro correspondente."}</p>
+          {riskAction === "delete" && <label className="mt-4 block text-sm font-semibold text-slate-800">Digite EXCLUIR para confirmar<input autoFocus value={deletePhrase} onChange={event => setDeletePhrase(event.target.value)} className="mt-2 min-h-10 w-full rounded-lg border border-red-300 px-3 outline-none focus:ring-2 focus:ring-red-500" /></label>}
+          <div className="mt-5 flex justify-end gap-2"><button type="button" disabled={riskPending} onClick={() => { setRiskAction(null); setDeletePhrase(""); }} className="min-h-10 rounded-lg px-3 font-semibold">Cancelar</button><button type="button" disabled={riskPending || (riskAction === "delete" && deletePhrase !== "EXCLUIR")} onClick={() => void runRiskAction()} className="min-h-10 rounded-lg bg-red-700 px-4 font-semibold text-white disabled:opacity-50">{riskPending ? "Processando…" : "Confirmar"}</button></div>
+        </div>
+      </div>}
     </div>
   );
 }
@@ -989,6 +1051,7 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
   }, [onNavigate]);
 
   const [search, setSearch] = useState("");
+  const [lifecycleFilter, setLifecycleFilter] = useState<"active" | "inactive" | "archived" | "all">("active");
   const [selectedClientId, setSelectedClientId] = useState<string | null>(initialSelectedId ?? null);
   const [showModal, setShowModal] = useState(false);
   const [editClient, setEditClient] = useState<CrmClient | null>(null);
@@ -1068,7 +1131,7 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
   }, [importCsvMutation]);
 
   const { data, isLoading, isError, error, refetch } = trpc.crm.list.useQuery(
-    { search: search.trim() || undefined },
+    { search: search.trim() || undefined, lifecycle: lifecycleFilter },
     { refetchOnWindowFocus: false }
   );
 
@@ -1153,6 +1216,10 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
             />
           </div>
 
+          <div className="flex flex-wrap gap-1" aria-label="Filtrar clientes por estado">
+            {([['active','Ativos'],['inactive','Inativos'],['archived','Arquivados'],['all','Todos']] as const).map(([value,label]) => <button key={value} type="button" aria-pressed={lifecycleFilter === value} onClick={() => { setLifecycleFilter(value); setSelectedClientId(null); }} className={cn("min-h-9 rounded-lg px-2.5 text-xs font-semibold", lifecycleFilter === value ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700")}>{label}</button>)}
+          </div>
+
 
         </div>
 
@@ -1205,6 +1272,7 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
                   </div>
                   <div className="flex flex-col items-end gap-1 flex-shrink-0">
                     <StatusBadge status={client.status} />
+                    <span className="text-[11px] font-semibold text-slate-500">{client.lifecycleState === "archived" ? "Arquivado" : client.lifecycleState === "inactive" ? "Inativo" : "Ativo"}</span>
                     <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
                   </div>
                 </div>
@@ -1233,6 +1301,8 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
             onSendMessage={handleSendMessage}
             whatsappConnected={whatsappConnected}
             canStartConversation={canStartConversation}
+            onLifecycleChanged={async () => { await refetch(); }}
+            onDeleted={async () => { setSelectedClientId(null); await refetch(); }}
           />
         </div>
       ) : (
