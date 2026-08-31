@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getCrmClientById: vi.fn(),
   createCrmClient: vi.fn(),
   updateCrmClient: vi.fn(),
+  findDuplicateCrmClient: vi.fn(),
   addCrmTimeline: vi.fn(),
   listCrmTimeline: vi.fn(),
   execute: vi.fn(),
@@ -15,6 +16,7 @@ vi.mock("./db-crm", () => ({
   getCrmClientById: mocks.getCrmClientById,
   createCrmClient: mocks.createCrmClient,
   updateCrmClient: mocks.updateCrmClient,
+  findDuplicateCrmClient: mocks.findDuplicateCrmClient,
   addCrmTimeline: mocks.addCrmTimeline,
   listCrmTimeline: mocks.listCrmTimeline,
 }));
@@ -73,5 +75,13 @@ describe("CRM tenant and authorization contract", () => {
 
   it("does not expose a physical delete procedure", () => {
     expect((crmRouter as any)._def.procedures.delete).toBeUndefined();
+  });
+
+  it("resolves duplicates inside the session tenant without exposing identity fields", async () => {
+    mocks.findDuplicateCrmClient.mockResolvedValue({ crmClientId: "crm-existing", companyName: "Existente", cpfCnpj: "52998224725", phone: null });
+    const result = await crmRouter.createCaller(context("admin")).findDuplicate({ cpfCnpj: "529.982.247-25", phone: "" });
+    expect(mocks.findDuplicateCrmClient).toHaveBeenCalledWith("tenant-session", { cpfCnpj: "529.982.247-25", phone: "" });
+    expect(result).toEqual({ crmClientId: "crm-existing", companyName: "Existente", matchedField: "cpfCnpj" });
+    expect(JSON.stringify(result)).not.toContain("52998224725");
   });
 });

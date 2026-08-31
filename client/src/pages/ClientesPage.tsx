@@ -53,21 +53,21 @@ export type CrmClient = {
   crmClientId: string;
   companyName: string;
   customerType: CustomerType | null;
-  responsibleName: string;
-  cpfCnpj: string;
-  phone: string;
-  whatsapp: string;
-  email: string;
-  address: string;
-  city: string;
-  state: string;
-  cep: string;
+  responsibleName: string | null;
+  cpfCnpj: string | null;
+  phone: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  cep: string | null;
   status: "lead" | "ativo" | "inativo" | "cancelado" | "inadimplente";
   origin: "whatsapp" | "instagram" | "facebook" | "site" | "indicacao" | "outro";
-  internalResponsible: string;
-  tags: string;
-  observations: string;
-  contactsJson: string;
+  internalResponsible: string | null;
+  tags: string | null;
+  observations: string | null;
+  contactsJson: string | null;
   lastInteractionAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -134,42 +134,63 @@ const EMPTY_FORM: CrmClientFormData = {
   contacts: [],
 };
 
+const visualString = (value: unknown) => typeof value === "string" ? value : "";
+
+function contactsForForm(value: unknown): CrmClientFormData["contacts"] {
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(contact => ({
+      phone: visualString(contact?.phone), whatsapp: visualString(contact?.whatsapp), description: visualString(contact?.description),
+    })) : [];
+  } catch { return []; }
+}
+
+function editableClient(client: CrmClient): CrmClientFormData {
+  return {
+    customerType: client.customerType,
+    companyName: visualString(client.companyName),
+    responsibleName: visualString(client.responsibleName),
+    cpfCnpj: visualString(client.cpfCnpj),
+    phone: visualString(client.phone),
+    whatsapp: visualString(client.whatsapp),
+    email: visualString(client.email),
+    address: visualString(client.address),
+    city: visualString(client.city),
+    state: visualString(client.state),
+    cep: visualString(client.cep),
+    status: client.status ?? "lead",
+    origin: client.origin ?? "outro",
+    internalResponsible: visualString(client.internalResponsible),
+    tags: visualString(client.tags),
+    observations: visualString(client.observations),
+    contacts: contactsForForm(client.contactsJson),
+  };
+}
+
 export function ClientFormModal({
   onClose,
   onSaved,
+  onUseExisting,
+  onViewExisting,
   editData,
   initialData,
 }: {
   onClose: () => void;
   onSaved: (crmClientId?: string) => void | Promise<void>;
+  onUseExisting?: (client: { crmClientId: string; companyName: string }) => void | Promise<void>;
+  onViewExisting?: (client: { crmClientId: string; companyName: string }) => void;
   editData?: CrmClient | null;
   initialData?: Partial<CrmClientFormData>;
 }) {
   const titleId = React.useId();
-  const [form, setForm] = useState<CrmClientFormData>(editData ? {
-    customerType: editData.customerType,
-    companyName: editData.companyName,
-    responsibleName: editData.responsibleName,
-    cpfCnpj: editData.cpfCnpj,
-    phone: editData.phone,
-    whatsapp: editData.whatsapp,
-    email: editData.email,
-    address: editData.address,
-    city: editData.city,
-    state: editData.state,
-    cep: editData.cep,
-    status: editData.status,
-    origin: editData.origin,
-    internalResponsible: editData.internalResponsible,
-    tags: editData.tags,
-    observations: editData.observations,
-    contacts: editData.contactsJson ? JSON.parse(editData.contactsJson) : [],
-  } : { ...EMPTY_FORM, ...initialData });
+  const [form, setForm] = useState<CrmClientFormData>(editData ? editableClient(editData) : { ...EMPTY_FORM, ...initialData });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [duplicateClient, setDuplicateClient] = useState<{ crmClientId: string; companyName: string; matchedField: "cpfCnpj" | "phone" } | null>(null);
   const [sameWhatsapp, setSameWhatsapp] = useState(() => editData ? sameContactPhone(editData.phone, editData.whatsapp) : true);
   const [showOtherWhatsapp, setShowOtherWhatsapp] = useState(() => !!editData?.whatsapp && !sameContactPhone(editData.phone, editData.whatsapp));
-  const legacySuggestion = editData?.customerType === null ? suggestCustomerType(editData.cpfCnpj) : null;
+  const legacySuggestion = editData?.customerType === null ? suggestCustomerType(visualString(editData.cpfCnpj)) : null;
 
   const addContact = () => {
     setForm(prev => ({
@@ -194,11 +215,13 @@ export function ClientFormModal({
 
   const createMutation = trpc.crm.create.useMutation();
   const updateMutation = trpc.crm.update.useMutation();
+  const utils = trpc.useUtils();
 
   function setField<K extends keyof CrmClientFormData>(key: K, value: CrmClientFormData[K]) {
     setForm(prev => ({ ...prev, [key]: value }));
     setFieldErrors(prev => { const next = { ...prev }; delete next[key]; return next; });
     setSubmitError(null);
+    setDuplicateClient(null);
   }
 
   function selectCustomerType(next: CustomerType) {
@@ -234,12 +257,20 @@ export function ClientFormModal({
     if (whatsapp.status === "invalid") errors.whatsapp = "WhatsApp inválido.";
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = "E-mail inválido.";
     if (Object.keys(errors).length) {
-      setFieldErrors(errors); setSubmitError("Revise os campos indicados para continuar.");
+      setFieldErrors(errors); setSubmitError("Revise os campos destacados.");
       requestAnimationFrame(() => document.querySelector<HTMLElement>("[aria-invalid='true']")?.focus());
       return;
     }
     if (!customerType) return;
-    const data = { ...form, customerType, phone: phone.value ?? "", whatsapp: whatsapp.value ?? "" };
+    const data = {
+      ...form,
+      customerType,
+      companyName: form.companyName.trim(), responsibleName: form.responsibleName.trim(), cpfCnpj: form.cpfCnpj.trim(),
+      phone: phone.value ?? "", whatsapp: whatsapp.value ?? "", email: form.email.trim(), address: form.address.trim(),
+      city: form.city.trim(), state: form.state.trim(), cep: form.cep.trim(), internalResponsible: form.internalResponsible.trim(),
+      tags: form.tags.trim(), observations: form.observations.trim(),
+      contacts: form.contacts.map(contact => ({ phone: contact.phone.trim(), whatsapp: contact.whatsapp.trim(), description: contact.description?.trim() || "" })),
+    };
     try {
       if (editData) {
         await updateMutation.mutateAsync({ crmClientId: editData.crmClientId, data });
@@ -250,7 +281,17 @@ export function ClientFormModal({
       }
       onClose();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Não foi possível salvar agora. Tente novamente.";
+      const code = (error as { data?: { code?: string } } | null)?.data?.code;
+      if (code === "CONFLICT") {
+        const duplicate = await utils.crm.findDuplicate.fetch({ cpfCnpj: data.cpfCnpj, phone: data.phone }).catch(() => null);
+        setDuplicateClient(duplicate);
+        const duplicateField = duplicate?.matchedField ?? (data.cpfCnpj ? "cpfCnpj" : "phone");
+        setFieldErrors(prev => ({ ...prev, [duplicateField]: "Já existe um cadastro com este dado." }));
+        setSubmitError("Já existe um cadastro. Vincule ou visualize o cadastro existente, ou altere os dados do novo cadastro.");
+        requestAnimationFrame(() => document.querySelector<HTMLElement>("[aria-invalid='true']")?.focus());
+        return;
+      }
+      const message = "Não foi possível salvar o cliente. Tente novamente.";
       setSubmitError(message); toast.error(message);
     }
   }
@@ -279,7 +320,7 @@ export function ClientFormModal({
         </div>
 
         <form noValidate onSubmit={handleSubmit} className="p-6 space-y-6">
-          {submitError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{submitError}</div>}
+          {submitError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"><p>{submitError}</p>{duplicateClient && <div className="mt-3 flex flex-col gap-2 sm:flex-row">{onUseExisting && <button type="button" onClick={() => void onUseExisting(duplicateClient)} className="min-h-9 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white">Vincular cadastro existente</button>}{onViewExisting && <button type="button" onClick={() => onViewExisting(duplicateClient)} className="min-h-9 rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-slate-700">Visualizar perfil</button>}</div>}</div>}
           {/* Dados Básicos */}
           <section>
             <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-4 flex items-center gap-2">
@@ -318,7 +359,7 @@ export function ClientFormModal({
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
                 {fieldErrors.phone && <p id="phone-error" className="mt-1 text-xs text-red-600">{fieldErrors.phone}</p>}
               </div>
-              <div className="sm:col-span-2 space-y-2"><label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={sameWhatsapp} onChange={e => { setSameWhatsapp(e.target.checked); if (e.target.checked) setShowOtherWhatsapp(false); }} /> Este número também é WhatsApp</label>{!sameWhatsapp && !showOtherWhatsapp && <button type="button" className="text-sm font-medium text-blue-600" onClick={() => setShowOtherWhatsapp(true)}>Adicionar outro número de WhatsApp</button>}{!sameWhatsapp && showOtherWhatsapp && <div><label className="block text-sm font-medium text-slate-700 mb-1">Número do WhatsApp (opcional)</label><input aria-label="Número do WhatsApp" autoComplete="tel" inputMode="tel" value={form.whatsapp} onChange={e => setField("whatsapp", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" /></div>}</div>
+              <div className="sm:col-span-2 space-y-2"><label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={sameWhatsapp} onChange={e => { setSameWhatsapp(e.target.checked); if (e.target.checked) setShowOtherWhatsapp(false); }} /> Este número também é WhatsApp</label>{!sameWhatsapp && !showOtherWhatsapp && <button type="button" className="text-sm font-medium text-blue-600" onClick={() => setShowOtherWhatsapp(true)}>Adicionar outro número de WhatsApp</button>}{!sameWhatsapp && showOtherWhatsapp && <div><label className="block text-sm font-medium text-slate-700 mb-1">Número do WhatsApp (opcional)</label><input aria-label="Número do WhatsApp" aria-invalid={!!fieldErrors.whatsapp} aria-describedby={fieldErrors.whatsapp ? "whatsapp-error" : undefined} autoComplete="tel" inputMode="tel" value={form.whatsapp} onChange={e => setField("whatsapp", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />{fieldErrors.whatsapp && <p id="whatsapp-error" className="mt-1 text-xs text-red-600">{fieldErrors.whatsapp}</p>}</div>}</div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">E-mail</label>
                 <input aria-label="E-mail" aria-invalid={!!fieldErrors.email} aria-describedby={fieldErrors.email ? "email-error" : undefined} type="email" value={form.email} onChange={e => setField("email", e.target.value)}
@@ -636,7 +677,7 @@ function ClientDetailPanel({
                     {canStartConversation && <button
                       type="button"
                       disabled={!whatsappConnected || normalizeContactPhone(client.whatsapp).status !== "valid"}
-                      onClick={() => onSendMessage?.({ crmClientId: client.crmClientId, phone: client.whatsapp, channel: "whatsapp" })}
+                      onClick={() => onSendMessage?.({ crmClientId: client.crmClientId, phone: client.whatsapp ?? "", channel: "whatsapp" })}
                       className="ml-auto p-1 hover:bg-slate-100 rounded disabled:cursor-not-allowed disabled:opacity-40"
                       title={whatsappConnected ? "Iniciar atendimento pelo WhatsApp" : "WhatsApp desconectado"}
                     >
@@ -1209,6 +1250,7 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
         <ClientFormModal
           onClose={() => { setShowModal(false); setEditClient(null); }}
           onSaved={async () => { await refetch(); }}
+          onViewExisting={client => { setSelectedClientId(client.crmClientId); setShowModal(false); setEditClient(null); }}
           editData={editClient}
         />
       )}

@@ -164,6 +164,25 @@ export async function updateCrmClient(
     );
 }
 
+export async function findDuplicateCrmClient(clientId: string, input: { cpfCnpj?: string; phone?: string }, excludeCrmClientId?: string) {
+  const document = input.cpfCnpj ? normalizeDigits(input.cpfCnpj) : "";
+  const normalizedPhone = normalizeStoredPhone(input.phone, true) ?? "";
+  if (!document && !normalizedPhone) return null;
+  const clauses: string[] = [];
+  const values: unknown[] = [clientId];
+  if (document) { clauses.push("cpf_cnpj = ?"); values.push(document); }
+  if (normalizedPhone) { clauses.push("phone = ?"); values.push(normalizedPhone); }
+  if (excludeCrmClientId) { values.push(excludeCrmClientId); }
+  const [rows] = await getPool().execute(
+    `SELECT crm_client_id AS crmClientId, company_name AS companyName, cpf_cnpj AS cpfCnpj, phone
+     FROM megadesk_crm_clients
+     WHERE client_id = ? AND (${clauses.join(" OR ")})${excludeCrmClientId ? " AND crm_client_id <> ?" : ""}
+     ORDER BY company_name, crm_client_id LIMIT 1`,
+    values,
+  ) as any[];
+  return rows[0] as { crmClientId: string; companyName: string; cpfCnpj: string | null; phone: string | null } | undefined ?? null;
+}
+
 function normalizeStoredPhone(value: string | undefined, nullable: boolean): string | null {
   const result = normalizeContactPhone(value);
   if (result.status === "empty") return nullable ? null : "";

@@ -8,7 +8,9 @@ const conversation = { id: "conv-ui", publicCode: "CV-260829000000-TEST", contac
   lastMessageAt: new Date().toISOString(), unreadCount: 1, status: "open", assignedUserId: "user-ui",
   assignedUserName: "Agent", lastMessageFrom: "customer" };
 
-async function mockedPage(page: Page, deepLink = false) {
+async function mockedPage(page: Page, deepLink = false, options: { session?: typeof session; conversation?: typeof conversation } = {}) {
+  const activeSession = options.session ?? session;
+  const activeConversation = options.conversation ?? conversation;
   const calls: string[] = [];
   const listInputs: Array<{ viewMode: string; status: string; search?: string }> = [];
   await page.addInitScript(value => {
@@ -17,7 +19,7 @@ async function mockedPage(page: Page, deepLink = false) {
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
       writeText: async (text: string) => { (window as typeof window & { __copiedConversationId?: string }).__copiedConversationId = text; },
     } });
-  }, session);
+  }, activeSession);
   await page.route("**/api/trpc/**", async route => {
     const url = new URL(route.request().url());
     const names = decodeURIComponent(url.pathname).replace(/^.*\/api\/trpc\//, "").split(",");
@@ -29,12 +31,13 @@ async function mockedPage(page: Page, deepLink = false) {
       const input = (parsedInput[index]?.json ?? parsedInput.json) as { viewMode: string; status: string; search?: string } | undefined;
       if (input) listInputs.push(input);
     });
-    const result = (name: string) => name.includes("refreshSession") ? { ok: true, session }
-      : name.includes("conversations.list") ? [conversation]
+    const result = (name: string) => name.includes("refreshSession") ? { ok: true, session: activeSession }
+      : name.includes("conversations.list") ? [activeConversation]
       : name.includes("conversations.counts") ? { active: 3, closed: 4, waiting: 2, mine: 1 }
       : name.includes("conversations.eligibleUsers") ? [{ id: "user-ui", name: "Agent", email: "agent@example.test", role: "agent" }]
       : name.includes("conversations.messages") ? { source: "legacy_json", messages: [{ id: "legacy-1", from: "customer", text: "Mensagem legada", type: "text", timestamp: new Date().toISOString() }] }
       : name.includes("conversations.companyCandidates") ? { items: [{ id: "crm-ui", name: "Empresa CRM UI", document: "12345678000190", customerType: "company" }], hasMore: false }
+      : name.includes("conversations.phoneCandidates") ? { items: [{ id: "crm-phone", name: "Cliente localizado", document: "52998224725", phone: "5541999999999", customerType: "person" }] }
       : name.includes("conversations.historyDetail") ? { conversation: { id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, messages: [{ id: "history-message", from: "customer", type: "text", text: "Mensagem histórica", timestamp: new Date().toISOString() }] }
       : name.includes("conversations.history") ? [{ id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: conversation.id, publicCode: conversation.publicCode, status: "open", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }]
       : name.includes("conversations.linkedTickets") ? []
@@ -48,6 +51,40 @@ async function mockedPage(page: Page, deepLink = false) {
 }
 
 test.describe("restored conversation layout with WIP lifecycle", () => {
+  test("shows create above link for an already linked client only with CRM permission", async ({ page }) => {
+    const managerSession = { ...session, permissions: ["conversations", "clients"], userRole: "manager" as const };
+    await mockedPage(page, true, { session: managerSession });
+    await page.locator('button[aria-controls="conversation-details-panel"]').click();
+    const clientSection = page.locator("#client-content");
+    const create = clientSection.getByRole("button", { name: "Cadastrar cliente" });
+    const toggle = clientSection.locator('button[aria-controls="crm-link-search"]');
+    await expect(create).toBeVisible();
+    expect(await create.evaluate((button, link) => !!(button.compareDocumentPosition(link as Node) & Node.DOCUMENT_POSITION_FOLLOWING), await toggle.elementHandle())).toBe(true);
+  });
+
+  test("keeps create above link with a phone candidate and renders search results as name only", async ({ page }) => {
+    const managerSession = { ...session, permissions: ["conversations", "clients"], userRole: "manager" as const };
+    const unlinked = { ...conversation, crmClientId: null, companyName: null };
+    await mockedPage(page, true, { session: managerSession, conversation: unlinked });
+    await page.locator('button[aria-controls="conversation-details-panel"]').click();
+    await expect(page.getByText("Cliente encontrado pelo telefone")).toBeVisible();
+    const clientSection = page.locator("#client-content");
+    const create = clientSection.getByRole("button", { name: "Cadastrar cliente" });
+    const toggle = clientSection.locator('button[aria-controls="crm-link-search"]');
+    await expect(create).toBeVisible();
+    expect(await create.evaluate((button, link) => !!(button.compareDocumentPosition(link as Node) & Node.DOCUMENT_POSITION_FOLLOWING), await toggle.elementHandle())).toBe(true);
+    await toggle.click();
+    await page.getByPlaceholder("Digite o nome da pessoa ou empresa").fill("Em");
+    const resultButton = page.locator("#crm-link-search li button");
+    await expect(resultButton).toHaveText("Empresa CRM UI");
+    await expect(resultButton).not.toContainText(/Pessoa|Empresa\s*$|1234|documento|telefone/i);
+    await create.click();
+    const dialog = page.getByRole("dialog", { name: "Cadastrar Novo Cliente" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Nome da empresa")).toHaveValue("Cliente UI");
+    await expect(dialog.getByLabel("Telefone principal")).toHaveValue("5541999999999");
+  });
+
   test("keeps the baseline two-column contract on the canonical backend", async ({ page }) => {
     const { calls, listInputs } = await mockedPage(page, true);
     await expect(page.getByTestId("conversation-list-panel")).toBeVisible();
@@ -122,6 +159,7 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(page.getByTestId("conversation-details-panel")).toBeVisible();
     await expect(page.locator('[data-testid^="details-section-"]')).toHaveCount(5);
     await expect(page.getByText("Cliente vinculado")).toBeVisible();
+    await expect(page.locator("#client-content").getByRole("button", { name: "Cadastrar cliente" })).toHaveCount(0);
     await expect(page.locator("#client-content").getByText("Empresa CRM UI", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Fechar detalhes da conversa" }).first()).toHaveAttribute("aria-expanded", "true");
     await expect(page.locator("#attendance-content").getByText(conversation.publicCode, { exact: true })).toBeVisible();

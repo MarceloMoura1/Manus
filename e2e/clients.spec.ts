@@ -25,7 +25,7 @@ const commercialClient = {
 
 const result = (json: unknown) => ({ result: { data: { json } } });
 
-async function prepare(page: Page, role: "admin" | "manager" | "agent" | "viewer" = "admin", options: { conversations?: any[] } = {}) {
+async function prepare(page: Page, role: "admin" | "manager" | "agent" | "viewer" = "admin", options: { conversations?: any[]; client?: any; createConflict?: boolean } = {}) {
   const allowed = role === "admin" || role === "manager";
   const refreshedSession = {
     company: "Tenant controlado",
@@ -57,9 +57,9 @@ async function prepare(page: Page, role: "admin" | "manager" | "agent" | "viewer
     const response = (name: string) => name.includes("megadesk.refreshSession")
       ? { ok: true, session: refreshedSession }
       : name.includes("crm.list")
-      ? { clients: [commercialClient] }
+      ? { clients: [options.client ?? commercialClient] }
       : name.includes("crm.getById")
-        ? { client: commercialClient }
+        ? { client: options.client ?? commercialClient }
       : name.includes("megadesk.getConversations")
         ? (options.conversations ?? [])
       : name.includes("megadesk.getConversationMessages")
@@ -70,6 +70,8 @@ async function prepare(page: Page, role: "admin" | "manager" | "agent" | "viewer
         ? { metrics: { activeProducts: 0, inactiveProducts: 0, lowProducts: 0, emptyProducts: 0, costValueCents: 0, saleValueCents: 0 }, critical: [], recent: [], canWrite: false }
       : name.includes("crm.create")
         ? { success: true, crmClientId: commercialClient.crmClientId }
+        : name.includes("crm.findDuplicate")
+          ? { crmClientId: commercialClient.crmClientId, companyName: commercialClient.companyName, matchedField: "phone" }
         : name.includes("crm.update") || name.includes("crm.addTimelineEntry")
           ? { success: true }
           : name.includes("crm.getTimeline")
@@ -81,7 +83,9 @@ async function prepare(page: Page, role: "admin" | "manager" | "agent" | "viewer
                 : name.includes("evolution.getStatus")
                   ? { status: "connected", providerReachable: true, integrationStatus: "connected" }
                   : null;
-    const payloads = procedures.map((name) => result(response(name)));
+    const payloads = procedures.map((name) => options.createConflict && name.includes("crm.create")
+      ? { error: { json: { message: "technical duplicate detail", code: -32009, data: { code: "CONFLICT", httpStatus: 409, path: "crm.create" } } } }
+      : result(response(name)));
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -109,6 +113,40 @@ async function openErpFromPrimaryNavigation(page: Page, viewportWidth: number) {
 }
 
 test.describe("central Clients controlled", () => {
+  test("shows a safe duplicate resolution without rendering technical errors", async ({ page }) => {
+    await prepare(page, "admin", { createConflict: true });
+    await page.goto("/erp/clientes");
+    await page.getByRole("button", { name: "Novo", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Cadastrar Novo Cliente" });
+    await dialog.getByRole("radio", { name: "Empresa" }).click();
+    await dialog.getByLabel("Nome da empresa").fill("Novo cadastro");
+    await dialog.getByLabel("Telefone principal").fill("11999990000");
+    await dialog.getByRole("button", { name: "Cadastrar Cliente" }).click();
+    await expect(dialog.getByText(/Já existe um cadastro/).first()).toBeVisible();
+    await expect(dialog.getByText("Já existe um cadastro com este dado.")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Visualizar perfil" })).toBeVisible();
+    await expect(dialog.getByText(/technical duplicate|invalid_union|invalid_type|data\.cpfCnpj/i)).toHaveCount(0);
+    await expect(dialog.getByLabel("Telefone principal")).toHaveValue("11999990000");
+    await expect(dialog.getByLabel("Telefone principal")).toBeFocused();
+  });
+
+  test("edits a legacy client with nullable optional fields as empty controlled inputs", async ({ page }) => {
+    const legacyClient = { ...commercialClient, customerType: "person", companyName: "Pessoa legada", responsibleName: null,
+      cpfCnpj: null, phone: null, whatsapp: null, email: null, address: null, city: null, state: null, cep: null,
+      internalResponsible: null, tags: null, observations: null, contactsJson: null };
+    await prepare(page, "admin", { client: legacyClient });
+    await page.goto(`/erp/clientes?crmClientId=${legacyClient.crmClientId}`);
+    await page.getByTitle("Editar").click();
+    const dialog = page.getByRole("dialog", { name: "Editar Cliente" });
+    await expect(dialog).toBeVisible();
+    for (const label of ["CPF", "Telefone principal", "E-mail", "Endereço", "Cidade", "Estado", "CEP", "Responsável Interno", "Observações Internas"]) {
+      await expect(dialog.getByLabel(label, { exact: true })).toHaveValue("");
+    }
+    await dialog.getByRole("button", { name: "Salvar Alterações" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText(/expected string|invalid_union|invalid_type|data\.cpfCnpj/i)).toHaveCount(0);
+  });
+
   test("opens the stable route and never sends the tenant in CRM input", async ({ page }) => {
     await prepare(page, "admin");
     const crmRequests: string[] = [];
@@ -166,7 +204,7 @@ test.describe("central Clients controlled", () => {
     page.on("request", request => { if (request.url().includes("megadesk.createConversation")) creates++; });
     await page.goto(`/erp/clientes?crmClientId=${commercialClient.crmClientId}`);
     await page.getByTitle("Iniciar atendimento pelo WhatsApp").click();
-    await expect(page).toHaveURL(/:\/\/localhost:3000\/$/);
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/");
     await expect(page.getByTestId("conversation-chat-panel")).toContainText("Cliente compartilhado");
     expect(creates).toBe(0);
   });

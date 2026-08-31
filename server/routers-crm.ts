@@ -10,6 +10,7 @@ import {
   getCrmClientById,
   createCrmClient,
   updateCrmClient,
+  findDuplicateCrmClient,
   addCrmTimeline,
   listCrmTimeline,
 } from "./db-crm";
@@ -83,7 +84,8 @@ function validateCustomerDocument(data: z.infer<typeof crmClientInputSchema>) {
 
 function safeCrmWriteError(error: unknown): never {
   if (error instanceof TRPCError) throw error;
-  const dbError = error as { code?: string; message?: string };
+  const wrapped = error as { code?: string; message?: string; cause?: { code?: string; message?: string } };
+  const dbError = wrapped.cause?.code ? wrapped.cause : wrapped;
   if (dbError.code === "ER_DUP_ENTRY") {
     const message = dbError.message ?? "";
     if (message.includes("tenant_document")) throw new TRPCError({ code: "CONFLICT", message: "Documento já cadastrado." });
@@ -91,10 +93,21 @@ function safeCrmWriteError(error: unknown): never {
     if (message.includes("tenant_email")) throw new TRPCError({ code: "CONFLICT", message: "E-mail já cadastrado." });
     throw new TRPCError({ code: "CONFLICT", message: "Cliente duplicado." });
   }
-  throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Não foi possível salvar agora. Tente novamente." });
+  throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Não foi possível salvar o cliente. Tente novamente." });
 }
 
 export const crmRouter = router({
+  findDuplicate: megadeskProcedure
+    .input(z.object({ cpfCnpj: z.string().max(20).optional().default(""), phone: z.string().max(40).optional().default("") }).strict())
+    .query(async ({ input, ctx }) => {
+      const tenantId = requireCrmAccess(ctx);
+      const duplicate = await findDuplicateCrmClient(tenantId, input);
+      return duplicate ? {
+        crmClientId: duplicate.crmClientId,
+        companyName: duplicate.companyName,
+        matchedField: input.cpfCnpj && duplicate.cpfCnpj === input.cpfCnpj.replace(/\D/g, "") ? "cpfCnpj" as const : "phone" as const,
+      } : null;
+    }),
   // Listar clientes CRM do tenant
   list: megadeskProcedure
     .input(z.object({
@@ -174,14 +187,16 @@ export const crmRouter = router({
         email: merged.email ?? "", address: merged.address ?? "", city: merged.city ?? "", state: merged.state ?? "", cep: merged.cep ?? "",
         status: merged.status, origin: merged.origin, internalResponsible: merged.internalResponsible ?? "", tags: merged.tags ?? "", observations: merged.observations ?? "", contacts: input.data.contacts ?? [],
       });
-      await updateCrmClient(input.crmClientId, tenantId, input.data);
-      // Registrar na timeline quem editou e quando
-      await addCrmTimeline(input.crmClientId, tenantId, {
-        type: "edit",
-        description: `Cadastro editado por ${ctx.userEmail}`,
-        author: ctx.userEmail,
-      });
-      return { success: true };
+      try {
+        await updateCrmClient(input.crmClientId, tenantId, input.data);
+        // Registrar na timeline quem editou e quando
+        await addCrmTimeline(input.crmClientId, tenantId, {
+          type: "edit",
+          description: `Cadastro editado por ${ctx.userEmail}`,
+          author: ctx.userEmail,
+        });
+        return { success: true };
+      } catch (error) { safeCrmWriteError(error); }
     }),
 
   // Buscar chamados vinculados ao cliente CRM pelo nome/empresa

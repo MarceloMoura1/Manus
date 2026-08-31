@@ -1536,6 +1536,7 @@ function ConversationsPage() {
       {selectedConv && <ConversationDetailsPanel
         conversation={selectedConv}
         open={conversationDetailsOpen}
+        canManageClients={!!sessionData && canAccessErpClients(sessionData)}
         onClose={() => setConversationDetailsOpen(false)}
         onContactUpdated={({ displayName, companyText }) => setConversations(current => current.map(item => item.contactId === selectedConv.contactId ? { ...item, name: displayName, companyText } : item))}
         onCrmLinked={({ crmClientId, companyName }) => setConversations(current => current.map(item => item.contactId === selectedConv.contactId ? { ...item, crmClientId, companyName: companyName ?? null } : item))}

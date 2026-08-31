@@ -15,6 +15,7 @@ const fiscalSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/F
 const reportsSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/ReportsPage.tsx"), "utf8");
 const moduleTopbarSource = readFileSync(resolve(process.cwd(), "client/src/components/ModuleTopbar.tsx"), "utf8");
 const conversationDetailsSource = readFileSync(resolve(process.cwd(), "client/src/components/ConversationDetailsPanel.tsx"), "utf8");
+const clientsPageSource = readFileSync(resolve(process.cwd(), "client/src/pages/ClientesPage.tsx"), "utf8");
 
 describe("MegaDesk UI structure", () => {
   it("keeps a single real ERP implementation without legacy fictional metrics", () => {
@@ -114,7 +115,15 @@ describe("MegaDesk UI structure", () => {
     expect(conversationDetailsSource).toContain("closeCrmSearch");
     expect(conversationDetailsSource).toContain("crmSearchInputRef.current?.focus()");
     expect(conversationDetailsSource).toContain("crmLinkButtonRef.current?.focus()");
-    expect(conversationDetailsSource).toContain("phoneCandidates.data?.items.length !== 1");
+    expect(conversationDetailsSource).toContain("canManageClients && <button");
+    expect(conversationDetailsSource).not.toContain("item.document ?");
+    expect(conversationDetailsSource).not.toContain("item.phone ?");
+    expect(conversationDetailsSource).not.toContain('item.customerType === "person"');
+    expect(clientsPageSource).toContain("editableClient(editData)");
+    expect(clientsPageSource).toContain('const visualString = (value: unknown)');
+    expect(clientsPageSource).toContain('setSubmitError("Revise os campos destacados.")');
+    expect(clientsPageSource).toContain('const message = "Não foi possível salvar o cliente. Tente novamente."');
+    expect(clientsPageSource).not.toContain("error instanceof Error ? error.message");
     expect(homeSource).toContain("<ConversationMedia");
     expect(homeSource).toContain("isAgent && msg.agentName");
     expect(homeSource).not.toContain("!isAgent && <p className=\"text-xs text-slate-400 mt-1 ml-1\"");
