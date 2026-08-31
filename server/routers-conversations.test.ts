@@ -129,6 +129,12 @@ describe("Conversations authorization, filters and lifecycle", () => {
     expect(result).toMatchObject({ hasMore: false, items: [{ id: "crm-a" }] });
   });
 
+  it.each(["", "   ", "a", " a "])("returns no broad CRM listing for an invalid search term (%j)", async search => {
+    const result = await conversationsRouter.createCaller(context()).companyCandidates({ search, limit: 10, offset: 0 });
+    expect(result).toEqual({ items: [], hasMore: false });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
   it("resolves exact normalized phone candidates in the authenticated tenant", async () => {
     mocks.execute.mockResolvedValue([[{ id: "crm-p", name: "Pessoa", customerType: "person" }]]);
     const result = await conversationsRouter.createCaller(context()).phoneCandidates({ phone: "(11) 99999-9999" });

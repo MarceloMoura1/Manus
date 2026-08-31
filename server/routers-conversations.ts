@@ -62,7 +62,7 @@ export const conversationsRouter = router({
   })).query(async ({ input, ctx }) => {
     requireConversationAccess(ctx);
     const trimmed = input.search.trim();
-    if (trimmed.length > 0 && trimmed.length < 2) return { items: [], hasMore: false };
+    if (trimmed.length < 2) return { items: [], hasMore: false };
     const search = `%${trimmed}%`;
     const digits = trimmed.replace(/\D/g, "");
     const digitSearch = `%${digits}%`;

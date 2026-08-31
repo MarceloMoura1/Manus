@@ -107,6 +107,14 @@ describe("MegaDesk UI structure", () => {
     }
     expect(homeSource).not.toContain("Modal de Edição de Cliente");
     expect(conversationDetailsSource).toContain("trpc.conversations.updateContact.useMutation");
+    expect(conversationDetailsSource).toContain("enabled: open && linking && crmSearchIsReady");
+    expect(conversationDetailsSource).toContain('aria-expanded={linking}');
+    expect(conversationDetailsSource).toContain('aria-controls="crm-link-search"');
+    expect(conversationDetailsSource).toContain('placeholder="Digite o nome da pessoa ou empresa"');
+    expect(conversationDetailsSource).toContain("closeCrmSearch");
+    expect(conversationDetailsSource).toContain("crmSearchInputRef.current?.focus()");
+    expect(conversationDetailsSource).toContain("crmLinkButtonRef.current?.focus()");
+    expect(conversationDetailsSource).toContain("phoneCandidates.data?.items.length !== 1");
     expect(homeSource).toContain("<ConversationMedia");
     expect(homeSource).toContain("isAgent && msg.agentName");
     expect(homeSource).not.toContain("!isAgent && <p className=\"text-xs text-slate-400 mt-1 ml-1\"");
