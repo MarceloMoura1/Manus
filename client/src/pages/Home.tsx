@@ -224,7 +224,7 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
   ];
 
   const quickActions = [
-    { title: "Conversas", subtitle: "Central de atendimento", route: "conversations" as RouteId },
+    { title: "Atendimento", subtitle: "Central de atendimento", route: "conversations" as RouteId },
     { title: "Chamados", subtitle: "Gerenciar tickets", route: "tickets" as RouteId },
     { title: "Rastreio", subtitle: "Monitorar atividades", route: "tracking" as RouteId },
   ];
@@ -314,7 +314,7 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
           <h2 className="text-2xl font-bold text-slate-900 mb-8">Atalhos Principais</h2>
           <div className="grid gap-4 md:grid-cols-3">
             {quickActions.map((action, idx) => {
-              const Icon = action.title === "Conversas" ? MessageCircle : action.title === "Chamados" ? ClipboardList : Zap;
+              const Icon = action.title === "Atendimento" ? MessageCircle : action.title === "Chamados" ? ClipboardList : Zap;
               return (
                 <button
                   key={action.route}
@@ -360,7 +360,10 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
   );
 }
 
-function ConversationsPage() {
+function ConversationsPage({ attendanceLaunch, attendancePhone }: {
+  attendanceLaunch: number;
+  attendancePhone: string;
+}) {
   const utils = trpc.useUtils();
   // Obter dados da sessão
   const sessionData = React.useMemo(() => {
@@ -402,6 +405,9 @@ function ConversationsPage() {
   const [dateFrom, setDateFrom] = React.useState<string>('');
   const [dateTo, setDateTo] = React.useState<string>('');
   const [selectedConversation, setSelectedConversation] = React.useState<string | null>(null);
+  const [newAttendanceOpen, setNewAttendanceOpen] = React.useState(false);
+  const [newAttendancePhone, setNewAttendancePhone] = React.useState('');
+  const handledAttendanceLaunch = React.useRef(0);
   const [crmHandoffState, setCrmHandoffState] = React.useState<'idle' | 'resolving' | 'composer' | 'error'>(() => crmIntent ? 'resolving' : 'idle');
   const [conversations, setConversations] = React.useState<any[]>([]);
   const [messageInput, setMessageInput] = React.useState('');
@@ -432,6 +438,13 @@ function ConversationsPage() {
       ? false
       : null;
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!attendanceLaunch || attendanceLaunch === handledAttendanceLaunch.current) return;
+    handledAttendanceLaunch.current = attendanceLaunch;
+    setNewAttendancePhone(attendancePhone);
+    setNewAttendanceOpen(true);
+  }, [attendanceLaunch, attendancePhone]);
 
   // Query para mensagens da conversa selecionada (lazy - só busca quando conversa é aberta)
   const { data: conversationMessageResult, refetch: refetchMessages } = trpc.conversations.messages.useQuery(
@@ -977,40 +990,51 @@ function ConversationsPage() {
       {/* ─── Coluna Esquerda: Lista de Conversas ─── */}
       <div className={cn(
         'min-h-0 min-w-0 w-full max-w-full flex-col bg-slate-50 min-[900px]:flex min-[900px]:w-[420px] min-[900px]:flex-shrink-0 min-[900px]:border-r min-[900px]:border-slate-100',
-        selectedConv ? 'hidden' : 'flex',
+        selectedConv || newAttendanceOpen || crmHandoffState === 'composer' ? 'hidden' : 'flex',
       )} data-testid="conversation-list-panel">
 
                 {/* Header */}
         <div className="px-4 pt-4 pb-3 bg-white border-b border-slate-100">
           {/* Linha 1: Ícone + Título */}
-          <div className="flex items-center gap-3 mb-3">
+          <div className="flex items-center gap-3 mb-3" data-testid="attendance-header">
             <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center shadow-lg flex-shrink-0">
               <MessageCircle className="w-9 h-9 text-white" />
             </div>
             <div>
-              <h2 className="text-3xl font-bold text-slate-900 leading-tight" style={{textShadow: '0 2px 8px rgba(99,102,241,0.25), 0 1px 3px rgba(0,0,0,0.12)'}}>Conversas</h2>
+              <h2 className="text-3xl font-bold text-slate-900 leading-tight" style={{textShadow: '0 2px 8px rgba(99,102,241,0.25), 0 1px 3px rgba(0,0,0,0.12)'}}>Atendimento</h2>
 
             </div>
           </div>
 
           {/* Botão único de Filtros */}
-          <button
-            onClick={() => setDateFilterOpen(o => !o)}
-            className={cn(
-              'w-full flex items-center justify-between px-3 py-2.5 rounded-xl border text-sm font-medium transition-all duration-200',
-              (hasDateFilter || searchTerm || historySearch || attendantFilter)
-                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-            )}
-          >
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4" />
-              <span>
-                {(hasDateFilter || searchTerm || historySearch || attendantFilter) ? 'Filtros ativos' : 'Filtros'}
-              </span>
-            </div>
-            <ChevronDown className={cn('w-4 h-4 transition-transform duration-200', dateFilterOpen && 'rotate-180')} />
-          </button>
+          <div className="flex overflow-hidden rounded-xl border border-slate-200" data-testid="attendance-primary-controls">
+            <button
+              type="button"
+              aria-expanded={dateFilterOpen}
+              onClick={() => setDateFilterOpen(o => !o)}
+              className={cn(
+                'flex flex-1 items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500',
+                (dateFilterOpen || hasDateFilter || searchTerm || historySearch || attendantFilter)
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-white text-slate-600 hover:bg-slate-50'
+              )}
+            >
+              <Filter className="h-4 w-4" />
+              <span>Filtro</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={inboxView === 'closed'}
+              onClick={() => selectInboxView('closed')}
+              className={cn(
+                'flex flex-1 items-center justify-center gap-2 border-l border-slate-200 px-3 py-2.5 text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500',
+                inboxView === 'closed' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+              )}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              <span>Encerradas</span>
+            </button>
+          </div>
 
           {/* Painel de filtros unificado */}
           {dateFilterOpen && (
@@ -1121,9 +1145,10 @@ function ConversationsPage() {
 
         {/* Filtros de responsabilidade no layout compacto anterior */}
         <div className="px-3 py-2 bg-white border-b border-slate-100">
-          <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+          <div className="flex overflow-hidden rounded-lg border border-slate-200" data-testid="attendance-scope-controls">
             {(['all', 'mine'] as const).map((f, i) => (
               <button
+                type="button"
                 key={f}
                 aria-pressed={inboxView !== 'closed' && attendantScope === f}
                 onClick={() => { 
@@ -1131,23 +1156,31 @@ function ConversationsPage() {
                   setAttendantFilter('');
                 }}
                 className={cn(
-                  'flex-1 px-3 py-1.5 text-xs font-medium transition-all duration-150',
+                  'flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:px-3',
                   i > 0 && 'border-l border-slate-200',
                   inboxView !== 'closed' && attendantScope === f ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
                 )}
               >
-                {f === 'all' ? 'Todas' : 'Minhas'}
+                {f === 'all' ? <MessageCircle className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+                <span>{f === 'all' ? 'Todos' : 'Meus'}</span>
               </button>
             ))}
             <button
-              aria-pressed={inboxView === 'closed'}
-              onClick={() => selectInboxView('closed')}
+              type="button"
+              aria-pressed={newAttendanceOpen}
+              disabled={crmHandoffState !== 'idle'}
+              title={crmHandoffState !== 'idle' ? 'Conclua ou cancele o atendimento iniciado pelo CRM primeiro' : undefined}
+              onClick={() => {
+                setNewAttendancePhone('');
+                setNewAttendanceOpen(true);
+              }}
               className={cn(
-                'flex-1 px-3 py-1.5 text-xs font-medium transition-all duration-200 border-l border-slate-200',
-                inboxView === 'closed' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                'flex-[1.35] flex items-center justify-center gap-1.5 border-l border-slate-200 px-2 py-2 text-xs font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3',
+                newAttendanceOpen ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
               )}
             >
-              Encerradas
+              <PhoneCall className="h-3.5 w-3.5" />
+              <span>Novo atendimento</span>
             </button>
           </div>
         </div>
@@ -1250,7 +1283,7 @@ function ConversationsPage() {
       {/* ─── Coluna Direita: Chat ─── */}
       <div className={cn(
         'min-h-0 min-w-0 w-full max-w-full flex-col overflow-hidden min-[900px]:flex min-[900px]:w-auto min-[900px]:flex-1',
-        selectedConv || crmHandoffState === 'composer' ? 'flex' : 'hidden',
+        selectedConv || newAttendanceOpen || crmHandoffState === 'composer' ? 'flex' : 'hidden',
       )} data-testid="conversation-chat-panel">
         {crmHandoffState === 'composer' && crmIntent && crmCustomerQuery.data?.client ? (
           <div className="flex-1 overflow-auto" data-testid="crm-new-attendance-composer">
@@ -1268,6 +1301,25 @@ function ConversationsPage() {
                 if (navigation?.conversationId) setSelectedConversation(navigation.conversationId);
                 setCrmIntent(null);
                 setCrmHandoffState('idle');
+              }}
+            />
+          </div>
+        ) : newAttendanceOpen ? (
+          <div className="flex-1 overflow-auto" data-testid="new-attendance-composer">
+            <ActiveAttendancePage
+              embedded
+              initialPhone={newAttendancePhone}
+              onCancel={() => {
+                setNewAttendancePhone('');
+                setNewAttendanceOpen(false);
+              }}
+              onNavigate={(navigation) => {
+                if (navigation?.conversationId) setSelectedConversation(navigation.conversationId);
+                setNewAttendancePhone('');
+                setNewAttendanceOpen(false);
+                if (navigation?.route === 'erp-clients') {
+                  window.dispatchEvent(new CustomEvent('megadesk-navigate', { detail: navigation }));
+                }
               }}
             />
           </div>
@@ -3504,7 +3556,7 @@ function Shell() {
     if (window.location.pathname === "/erp/relatorios") return "erp-reports";
     if (window.location.pathname === "/erp") return "erp-summary";
     const stored = localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY);
-    return (stored as RouteId) || "home";
+    return stored === "active-attendance" ? "conversations" : (stored as RouteId) || "home";
   });
   const [session, setSession] = useState<MegaDeskSession | null>(null);
   const [loading, setLoading] = useState(true);
@@ -3514,36 +3566,46 @@ function Shell() {
   const mainContentRef = React.useRef<HTMLElement>(null);
   const [indicadores, setIndicadores] = useState<any>(null);
   const [activeCrmClientId, setActiveCrmClientId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("crmClientId"));
-  const [activeAttendancePhone, setActiveAttendancePhone] = useState<string>('');
+  const [activeAttendancePhone, setActiveAttendancePhone] = useState<string>(() =>
+    localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY) === "active-attendance"
+      ? localStorage.getItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE') ?? ''
+      : '',
+  );
+  const [attendanceLaunch, setAttendanceLaunch] = useState(() =>
+    localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY) === "active-attendance" ? 1 : 0,
+  );
   const closeMobileSidebar = React.useCallback((restoreFocus = true) => {
     setSidebarOpen(false);
     if (restoreFocus) window.setTimeout(() => sidebarTriggerRef.current?.focus(), 0);
   }, []);
   const navigateToRoute = React.useCallback((route: RouteId, options?: { replace?: boolean; crmClientId?: string }) => {
-    const path = route === "erp-clients"
+    const isLegacyAttendanceRoute = route === "active-attendance";
+    const targetRoute: RouteId = isLegacyAttendanceRoute ? "conversations" : route;
+    if (isLegacyAttendanceRoute) setAttendanceLaunch(current => current + 1);
+    const path = targetRoute === "erp-clients"
       ? `/erp/clientes${options?.crmClientId ? `?crmClientId=${encodeURIComponent(options.crmClientId)}` : ""}`
-      : route === "erp-products"
+      : targetRoute === "erp-products"
         ? "/erp/produtos"
-        : route === "erp-stock"
+        : targetRoute === "erp-stock"
           ? "/erp/estoque"
-          : route === "erp-suppliers"
+          : targetRoute === "erp-suppliers"
               ? "/erp/fornecedores"
-            : route === "erp-sales"
+            : targetRoute === "erp-sales"
               ? "/erp/vendas"
-            : route === "erp-finance"
+            : targetRoute === "erp-finance"
               ? "/erp/financeiro"
-            : route === "erp-fiscal"
+            : targetRoute === "erp-fiscal"
               ? "/erp/fiscal"
-            : route === "erp-reports"
+            : targetRoute === "erp-reports"
               ? "/erp/relatorios"
-            : route === "erp-purchases"
+            : targetRoute === "erp-purchases"
               ? "/erp/compras"
-            : route === "erp-summary"
+            : targetRoute === "erp-summary"
               ? "/erp"
               : "/";
     window.history[options?.replace ? "replaceState" : "pushState"](null, "", path);
-    setActiveCrmClientId(route === "erp-clients" ? options?.crmClientId ?? null : null);
-    setActive(route);
+    setActiveCrmClientId(targetRoute === "erp-clients" ? options?.crmClientId ?? null : null);
+    setActive(targetRoute);
     if (window.innerWidth < 1024) {
       setSidebarOpen(false);
       window.setTimeout(() => mainContentRef.current?.focus(), 0);
@@ -3651,8 +3713,7 @@ function Shell() {
 
   const navItems = [
     { id: "home" as RouteId, label: "Home", icon: HomeIcon },
-    { id: "active-attendance" as RouteId, label: "Atendimento Ativo", icon: PhoneCall },
-    { id: "conversations" as RouteId, label: "Conversas", icon: MessageCircle },
+    { id: "conversations" as RouteId, label: "Atendimento", icon: MessageCircle },
     { id: "tickets" as RouteId, label: "Chamados", icon: ClipboardList },
     { id: "tracking" as RouteId, label: "Rastreamento", icon: MapPin },
     { id: "erp-summary" as RouteId, label: "ERP", icon: PackageSearch },
@@ -3880,7 +3941,7 @@ function Shell() {
         <main ref={mainContentRef} tabIndex={-1} className={`flex min-h-0 min-w-0 flex-1 flex-col ${active === 'conversations' ? 'overflow-hidden' : 'overflow-auto p-4 sm:p-8'}`}>
           <ErrorBoundary key={active}>
           {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} />}
-          {active === "conversations" && <ConversationsPage />}
+          {active === "conversations" && <ConversationsPage attendanceLaunch={attendanceLaunch} attendancePhone={activeAttendancePhone} />}
           {active === "tickets" && <TicketsPage />}
           {active === "tracking" && <TrackingPage />}
            {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} initialCrmClientId={activeCrmClientId ?? undefined} onClientNavigate={handleClientNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
@@ -3890,14 +3951,6 @@ function Shell() {
           {active === "whatsapp-config" && <WhatsAppConfigPage />}
           {active === "ai-assistant" && <AIAssistantPage />}
           {active === "notifications" && <NotificationsModernPage />}
-          {active === "active-attendance" && <ActiveAttendancePage initialPhone={activeAttendancePhone} onNavigate={(nav) => {
-            if (typeof nav === 'string') {
-              navigateToRoute(nav as RouteId);
-            } else if (nav && typeof nav === 'object') {
-              const { route, crmClientId } = nav as { route: string; crmClientId?: string };
-              navigateToRoute((route === "clients" ? "erp-clients" : route) as RouteId, { crmClientId });
-            }
-          }} />}
           </ErrorBoundary>
         </main>
       </div>

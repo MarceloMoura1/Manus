@@ -42,8 +42,8 @@ test.describe('Sistema de Chamados - Testes E2E', () => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     
-    // Procurar pelo módulo de atendimento ativo
-    const attendanceModule = page.locator('text=Atendimento Ativo, Conversas, Chamados');
+    // Procurar pelo módulo de atendimento consolidado
+    const attendanceModule = page.locator('text=Atendimento, Chamados');
     
     if (await attendanceModule.isVisible()) {
       // Clicar para abrir o módulo

@@ -229,11 +229,11 @@ export function ActiveAttendancePage({ onNavigate, initialPhone, initialCrmCusto
   };
 
   return (
-    <div className={cn(embedded ? "bg-slate-50 p-4" : "min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8")}>
+    <div className={cn(embedded ? initialCrmCustomer ? "bg-slate-50 p-4" : "h-full min-h-0 overflow-y-auto bg-slate-50 p-4 sm:p-6" : "min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8")}>
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         {embedded && <div className="mb-4 flex items-start justify-between rounded-xl border border-blue-200 bg-blue-50 p-4">
-          <div><h2 className="font-bold text-slate-900">Novo atendimento pelo WhatsApp</h2><p className="text-sm text-slate-600">Cliente e telefone foram preenchidos pelo CRM. Nenhuma conversa será criada antes da confirmação.</p></div>
+          <div><h2 className="font-bold text-slate-900">{initialCrmCustomer ? 'Novo atendimento pelo WhatsApp' : 'Novo atendimento'}</h2><p className="text-sm text-slate-600">{initialCrmCustomer ? 'Cliente e telefone foram preenchidos pelo CRM. Nenhuma conversa será criada antes da confirmação.' : 'Localize o cliente e confirme antes de iniciar a conversa no WhatsApp.'}</p></div>
           <button type="button" onClick={onCancel} className="rounded-lg p-2 text-slate-500 hover:bg-white" aria-label="Cancelar novo atendimento"><X className="h-4 w-4" /></button>
         </div>}
         {!embedded && <div className="text-center mb-12">
@@ -261,15 +261,15 @@ export function ActiveAttendancePage({ onNavigate, initialPhone, initialCrmCusto
         )}
 
         {/* LAYOUT RESPONSIVO */}
-        <div className="flex gap-8 justify-center items-start">
+        <div className={cn("flex gap-8 justify-center items-start", embedded && !initialCrmCustomer && "flex-col")}>
           {/* ESQUERDA: Input de busca + Card de Chamado (animação para esquerda quando cliente encontrado) */}
-          {!embedded && <div
+          {(!embedded || !customerData) && <div
             className={cn(
               "flex flex-col gap-6 transition-all duration-500 ease-out",
               customerData ? "w-96" : "w-full max-w-md"
             )}
           >
-            <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300" style={{borderRadius: '18px', height: '150px', paddingTop: '34px', paddingBottom: '38px', marginBottom: '-8px', width: '380px'}}>
+            <div className="bg-white rounded-2xl shadow-lg p-12 border-2 border-slate-400 hover:shadow-xl transition-shadow duration-300" style={{borderRadius: '18px', height: '150px', paddingTop: '34px', paddingBottom: '38px', marginBottom: '-8px', width: '380px', maxWidth: '100%'}}>
               <div className="space-y-4">
                 <div className="flex flex-col items-center gap-4">
                   <label className="block text-sm font-semibold text-slate-900 flex items-center gap-2" style={{paddingRight: '111px', fontSize: '16px'}}>
@@ -296,6 +296,8 @@ export function ActiveAttendancePage({ onNavigate, initialPhone, initialCrmCusto
                       className="flex-1 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder-slate-400 disabled:bg-slate-100 disabled:text-slate-500" style={{height: '45px', marginTop: '0px', width: '225px'}}
                     />
                     <button
+                      type="button"
+                      aria-label="Buscar cliente"
                       onClick={handleSearchCustomer}
                       disabled={isSearching || !!customerData}
                       className="px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg hover:from-blue-600 hover:to-blue-700 disabled:from-slate-400 disabled:to-slate-400 transition-all duration-200 font-semibold flex items-center gap-2 group"

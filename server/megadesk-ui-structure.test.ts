@@ -49,8 +49,7 @@ describe("MegaDesk UI structure", () => {
     const alwaysVisible = ["Home", "Configurações", "Notificações"];
     // Itens controlados por permissão (7 módulos configurados no MegaAdmin)
     const permissionControlled = [
-      "Atendimento Ativo",
-      "Conversas",
+      "Atendimento",
       "Chamados",
       "Rastreio",
       "ERP",
@@ -60,6 +59,9 @@ describe("MegaDesk UI structure", () => {
     for (const label of [...alwaysVisible, ...permissionControlled]) {
       expect(homeSource).toContain(label);
     }
+    expect(homeSource).toContain('{ id: "conversations" as RouteId, label: "Atendimento", icon: MessageCircle }');
+    expect(homeSource).not.toContain('label: "Atendimento Ativo"');
+    expect(homeSource).not.toContain('label: "Conversas"');
     // Verifica que o filtro por permissão está implementado
     expect(homeSource).toContain("permission");
     expect(homeSource).toContain("filteredNavItems");
@@ -91,17 +93,22 @@ describe("MegaDesk UI structure", () => {
     expect(homeSource).toContain("selectedConv.status === 'open'");
   });
 
-  it("preserva o contrato visual anterior de Conversas com controles pontuais do lifecycle", () => {
-    expect(homeSource).toContain('active === "conversations" && <ConversationsPage />');
+  it("preserva o contrato visual unificado de Atendimento com controles do lifecycle", () => {
+    expect(homeSource).toContain('active === "conversations" && <ConversationsPage attendanceLaunch={attendanceLaunch} attendancePhone={activeAttendancePhone} />');
     expect(homeSource).not.toContain('active === "conversations" && <ConversasPage />');
     expect(homeSource).toContain("min-[900px]:w-[420px]");
     expect(homeSource).toContain('data-testid="conversation-list-panel"');
     expect(homeSource).toContain('data-testid="conversation-chat-panel"');
     expect(homeSource).toContain('data-testid="conversation-composer"');
     expect(homeSource).toContain("['all', 'mine']");
-    for (const label of ["Todas", "Minhas", "BOT/Aguardando", "Abertas", "Encerradas", "Assumir", "Transferir", "Abrir detalhes da conversa", "Fechar detalhes da conversa"]) {
+    for (const label of ["Filtro", "Todos", "Meus", "Novo atendimento", "BOT/Aguardando", "Abertas", "Encerradas", "Assumir", "Transferir", "Abrir detalhes da conversa", "Fechar detalhes da conversa"]) {
       expect(homeSource).toContain(label);
     }
+    expect(homeSource).toContain('data-testid="attendance-primary-controls"');
+    expect(homeSource).toContain('data-testid="attendance-scope-controls"');
+    expect(homeSource).toContain('data-testid="new-attendance-composer"');
+    expect(homeSource).toContain("<ActiveAttendancePage");
+    expect(homeSource).toContain("embedded");
     expect(homeSource).not.toContain("Mais ações");
     for (const label of ["Atendimento", "Contato", "Cliente", "Chamados", "Histórico de conversas", "Copiar ID da conversa", "Empresa informada"]) {
       expect(conversationDetailsSource).toContain(label);

@@ -289,7 +289,7 @@ test.describe.serial("MegaDesk secure operational session", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await login(page, passwordA!);
     await page.getByRole("button", { name: "Abrir menu" }).click();
-    await page.getByTitle("Conversas").click();
+    await page.getByTitle("Atendimento").click();
     const list = page.getByTestId("conversation-list-panel");
     await expect(list).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

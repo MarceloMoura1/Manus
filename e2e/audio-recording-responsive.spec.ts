@@ -2,10 +2,12 @@ import { expect, test, type Page } from "@playwright/test";
 
 const conversation = {
   id: "conversation-e2e",
-  name: "Cliente Teste Responsivo",
-  phone: "5511000000000",
-  company: "Empresa com nome suficientemente longo para testar truncamento",
+  customerName: "Cliente Teste Responsivo",
+  customerPhone: "5511000000000",
+  companyName: "Empresa com nome suficientemente longo para testar truncamento",
+  companyText: null,
   lastMessage: "Mensagem de teste",
+  lastMessageAt: new Date().toISOString(),
   status: "open",
   unreadCount: 0,
   isUnread: false,
@@ -76,10 +78,14 @@ async function preparePage(page: Page, options: { sendStatus?: number; sendMessa
       response = (procedure: string): unknown =>
         procedure.includes("megadesk.refreshSession")
           ? { ok: true, session: publicSession }
-          : procedure.includes("megadesk.getConversations")
+          : procedure.includes("conversations.list")
             ? [conversation]
-            : procedure.includes("megadesk.getConversationMessages")
-              ? []
+            : procedure.includes("conversations.messages")
+              ? { source: "legacy_json", messages: [] }
+              : procedure.includes("conversations.counts")
+                ? { active: 1, closed: 0, waiting: 0, mine: 0 }
+                : procedure.includes("conversations.eligibleUsers")
+                  ? []
               : procedure.includes("evolution.getStatus")
                 ? { status: "connected" }
                 : null,

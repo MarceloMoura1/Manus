@@ -141,7 +141,7 @@ test.describe.serial("Clients real MySQL journeys", () => {
     await page.getByRole("button", { name: "Adicionar" }).click();
     await expect(page.getByText("Nota real da timeline")).toBeVisible();
     await shot(page, "clients-timeline-admin-1440.png");
-    await page.getByTitle("Atendimento Ativo").click();
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent("megadesk-navigate", { detail: { route: "active-attendance" } })));
     const attendancePhone = page.getByPlaceholder(/Digite o n.mero/);
     await attendancePhone.fill("11999990001");
     await attendancePhone.press("Enter");
