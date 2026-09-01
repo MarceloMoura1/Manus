@@ -1,4 +1,6 @@
 import {
+  type AnyMySqlColumn,
+  type MySqlTableExtraConfigValue,
   mysqlTable,
   index,
   uniqueIndex,
@@ -16,6 +18,7 @@ import {
   decimal,
   json,
 } from "drizzle-orm/mysql-core";
+import { sql } from "drizzle-orm";
 
 export const evolutionFailedMessages = mysqlTable(
   "evolution_failed_messages",
@@ -1211,6 +1214,7 @@ export const erpProducts = mysqlTable(
       .default("0.000")
       .notNull(),
     active: tinyint().default(1).notNull(),
+    primaryMediaId: bigint("primary_media_id", { mode: "number" }),
     createdBy: varchar("created_by", { length: 80 }).notNull(),
     updatedBy: varchar("updated_by", { length: 80 }),
     createdAt: timestamp("created_at", { mode: "string" })
@@ -1231,8 +1235,65 @@ export const erpProducts = mysqlTable(
       table.clientId,
       table.barcode
     ),
+    uniqueIndex("uq_erp_products_tenant_id").on(table.clientId, table.id),
     index("idx_erp_products_tenant_name").on(table.clientId, table.name),
     index("idx_erp_products_tenant_active").on(table.clientId, table.active),
+    index("idx_erp_products_primary_media").on(table.clientId, table.primaryMediaId),
+    foreignKey({
+      name: "fk_erp_products_primary_media",
+      columns: [table.clientId, table.id, table.primaryMediaId],
+      foreignColumns: [
+        erpProductMedia.clientId as AnyMySqlColumn,
+        erpProductMedia.productId as AnyMySqlColumn,
+        erpProductMedia.id as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const erpProductMedia = mysqlTable(
+  "erp_product_media",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    mediaId: varchar("media_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    productId: bigint("product_id", { mode: "number" }).notNull(),
+    category: mysqlEnum(["product_image"]).default("product_image").notNull(),
+    storageKey: varchar("storage_key", { length: 180 }).notNull(),
+    thumbnailStorageKey: varchar("thumbnail_storage_key", { length: 180 }).notNull(),
+    mimeType: mysqlEnum("mime_type", ["image/jpeg", "image/png", "image/webp"]).notNull(),
+    byteSize: bigint("byte_size", { mode: "number" }).notNull(),
+    sha256: varchar({ length: 64 }).notNull(),
+    width: int().notNull(),
+    height: int().notNull(),
+    state: mysqlEnum(["staged", "active", "pending_delete", "deleted"]).default("staged").notNull(),
+    activeProductId: bigint("active_product_id", { mode: "number" }).generatedAlwaysAs(
+      sql`CASE WHEN ${sql.identifier("state")} = 'active' THEN ${sql.identifier("product_id")} ELSE NULL END`
+    ),
+    clientAttemptId: varchar("client_attempt_id", { length: 36 }).notNull(),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    activatedAt: timestamp("activated_at", { mode: "string" }),
+    pendingDeleteAt: timestamp("pending_delete_at", { mode: "string" }),
+    deletedAt: timestamp("deleted_at", { mode: "string" }),
+  },
+  (table): MySqlTableExtraConfigValue[] => [
+    uniqueIndex("uq_epm_tenant_media").on(table.clientId, table.mediaId),
+    uniqueIndex("uq_epm_tenant_attempt").on(table.clientId, table.clientAttemptId),
+    uniqueIndex("uq_epm_storage_key").on(table.storageKey),
+    uniqueIndex("uq_epm_thumbnail_key").on(table.thumbnailStorageKey),
+    uniqueIndex("uq_epm_tenant_product_id").on(table.clientId, table.productId, table.id),
+    uniqueIndex("uq_epm_one_active").on(table.clientId, table.activeProductId),
+    index("idx_epm_tenant_product_state").on(table.clientId, table.productId, table.state),
+    index("idx_epm_reconcile").on(table.state, table.createdAt, table.pendingDeleteAt),
+    foreignKey({
+      name: "fk_epm_tenant_product",
+      columns: [table.clientId, table.productId],
+      foreignColumns: [
+        erpProducts.clientId as AnyMySqlColumn,
+        erpProducts.id as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
   ]
 );
 
@@ -1249,7 +1310,7 @@ export const erpStockBalances = mysqlTable(
       .onUpdateNow()
       .notNull(),
   },
-  table => [
+  (table): MySqlTableExtraConfigValue[] => [
     uniqueIndex("uq_erp_stock_balance_tenant_product").on(
       table.clientId,
       table.productId
