@@ -14,6 +14,7 @@ import { FinancePage } from "./FinancePage";
 import { FiscalPage } from "./FiscalPage";
 import { ReportsPage } from "./ReportsPage";
 import type { ModuleTopbarItem } from "@/components/ModuleTopbar";
+import { ErpPageHeader } from "@/components/erp/ErpPageHeader";
 
 export type ErpSection = "summary" | "clients" | "products" | "stock" | "suppliers" | "purchases" | "sales" | "finance" | "fiscal" | "reports";
 const planned = ["Integrações"];
@@ -127,10 +128,10 @@ function Summary({ onNavigate }: { onNavigate: (section: ErpSection) => void }) 
   </div>;
 }
 
-function ProductThumbnail({product,className="h-12 w-12",version=0}:{product:{publicId:string;name:string;hasImage?:boolean};className?:string;version?:number}) {
+function ProductThumbnail({product,className="h-16 w-16",version=0}:{product:{publicId:string;name:string;hasImage?:boolean};className?:string;version?:number}) {
   const [failed,setFailed]=React.useState(false);
   React.useEffect(()=>setFailed(false),[product.publicId,product.hasImage,version]);
-  const frame=`${className} shrink-0 overflow-hidden rounded-lg bg-slate-100`;
+  const frame=`${className} shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm`;
   if(!product.hasImage||failed)return <div className={`${frame} flex items-center justify-center`} data-testid="product-image-placeholder" aria-label={`Sem foto para ${product.name}`}><ImageIcon className="h-5 w-5 text-slate-400"/></div>;
   return <img src={`/api/products/${product.publicId}/image?variant=thumbnail&v=${version}`} alt={`Foto de ${product.name}`} loading="lazy" decoding="async" className={`${frame} object-cover`} onError={()=>setFailed(true)}/>;
 }
@@ -152,7 +153,12 @@ function Products() {
   const reset = () => { setSearch("");setActive("all");setCategory("");setStock("all");setSort("name");setDirection("asc");setPage(1); };
   const canWrite=query.data?.canWrite===true;
   return <div className="space-y-5" data-testid="erp-products-page">
-    <header className="flex flex-wrap items-end justify-between gap-3"><h1 className="text-2xl font-bold">Produtos</h1>{canWrite&&<Button onClick={()=>{clearPhoto();setForm({...emptyProduct})}}>Novo produto</Button>}</header>
+    <ErpPageHeader title="Produtos" eyebrow="Catálogo" actions={canWrite&&<Button onClick={()=>{clearPhoto();setForm({...emptyProduct})}}>Novo produto</Button>} />
+    <section aria-label="Visão do catálogo" className="flex flex-wrap items-end justify-between gap-4 rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-950 to-slate-800 p-5 text-white shadow-sm">
+      <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-200">Catálogo visual</p><p className="mt-2 text-sm text-slate-200">Fotos, preço e disponibilidade reunidos para uma leitura rápida.</p></div>
+      <p className="text-3xl font-bold tracking-tight">{query.data?.total ?? 0}<span className="ml-2 text-sm font-medium text-slate-300">itens</span></p>
+    </section>
+    {query.data?.items.length?<section aria-label="Destaques do catálogo" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{query.data.items.slice(0,4).map(product=><article key={product.publicId} className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"><ProductThumbnail product={product} className="h-20 w-20" version={mediaVersions[product.publicId]}/><div className="min-w-0"><p className="truncate text-sm font-bold text-slate-950">{product.name}</p><p className="mt-1 truncate text-xs text-slate-500">{product.sku}</p><p className="mt-2 text-sm font-bold text-slate-900">{money.format(product.salePriceCents/100)}</p></div></article>)}</section>:null}
     {message&&<p role="status" className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">{message}</p>}
     <div className="grid gap-3 rounded-2xl border bg-white p-4 sm:grid-cols-2 xl:grid-cols-4">
       <label className="relative sm:col-span-2"><span className="sr-only">Pesquisar produtos</span><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400"/><Input className="pl-9" value={search} onChange={e=>{setSearch(e.target.value);resetPage()}} placeholder="Nome, SKU ou código de barras"/></label>
@@ -174,6 +180,7 @@ function Products() {
 function Stock() {
   const utils=trpc.useUtils(); const [page,setPage]=React.useState(1); const [pageSize,setPageSize]=React.useState(20); const [search,setSearch]=React.useState(""); const [productFilter,setProductFilter]=React.useState(""); const [typeFilter,setTypeFilter]=React.useState<StockFilterType>("all"); const [from,setFrom]=React.useState(""); const [to,setTo]=React.useState(""); const [form,setForm]=React.useState<StockForm|null>(null); const [reverse,setReverse]=React.useState<{publicId:string;reason:string;idempotencyKey:string}|null>(null); const [detail,setDetail]=React.useState<string|null>(null); const [message,setMessage]=React.useState("");
   const products=trpc.erp.products.list.useQuery({search:"",active:true,stock:"all",sort:"name",direction:"asc",page:1,pageSize:100});
+  const summary=trpc.erp.summary.useQuery();
   const movements=trpc.erp.stock.list.useQuery({search,productPublicId:productFilter||undefined,type:typeFilter==="all"?undefined:typeFilter,from:from?new Date(from+"T00:00:00.000Z").toISOString():undefined,to:to?new Date(to+"T23:59:59.999Z").toISOString():undefined,page,pageSize});
   const move=trpc.erp.stock.move.useMutation({onSuccess:async()=>{setForm(null);setMessage("Movimentação registrada com sucesso.");await utils.erp.invalidate();}});
   const reverseMutation=trpc.erp.stock.reverse.useMutation({onSuccess:async()=>{setReverse(null);setMessage("Movimentação revertida com sucesso.");await utils.erp.invalidate();}});
@@ -181,7 +188,11 @@ function Stock() {
   const canWrite=products.data?.canWrite===true; const submit=(event:React.FormEvent)=>{event.preventDefault();if(!form||move.isPending)return;move.mutate(form);};
   const reset=()=>{setSearch("");setProductFilter("");setTypeFilter("all");setFrom("");setTo("");setPage(1);};
   return <div className="space-y-5" data-testid="erp-stock-page">
-    <header className="flex flex-wrap items-end justify-between gap-3"><h1 className="text-2xl font-bold">Estoque</h1>{canWrite&&<Button onClick={()=>setForm({productPublicId:"",type:"manual_in",quantity:"",reason:"",idempotencyKey:newKey()})}>Nova movimentação</Button>}</header>
+    <ErpPageHeader title="Estoque" eyebrow="Operação" actions={canWrite&&<Button onClick={()=>setForm({productPublicId:"",type:"manual_in",quantity:"",reason:"",idempotencyKey:newKey()})}>Nova movimentação</Button>} />
+    <section aria-label="Panorama do inventário" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {[["Produtos ativos",summary.data?.metrics.activeProducts,"bg-slate-950 text-white"],["Estoque crítico",summary.data?.metrics.lowProducts,"bg-amber-50 text-amber-950"],["Sem saldo",summary.data?.metrics.emptyProducts,"bg-rose-50 text-rose-950"],["Valor em custo",money.format((summary.data?.metrics.costValueCents??0)/100),"bg-blue-50 text-blue-950"]].map(([label,value,tone])=><article key={label as string} className={`rounded-3xl border border-slate-200 p-5 shadow-sm ${tone as string}`}><p className="text-xs font-bold uppercase tracking-[0.14em] opacity-65">{label as string}</p><p className="mt-3 text-3xl font-bold tracking-tight">{value as React.ReactNode}</p></article>)}
+    </section>
+    {summary.data?.critical.length?<section aria-label="Itens críticos" className="rounded-3xl border border-amber-200 bg-amber-50/70 p-5"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-amber-700">Prioridade de reposição</p><h2 className="mt-1 text-lg font-bold tracking-tight text-amber-950">Itens com estoque crítico</h2></div><span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-amber-800">{summary.data.critical.length} itens</span></div><div className="mt-4 grid gap-2 md:grid-cols-3">{summary.data.critical.slice(0,3).map(product=><div key={product.publicId} className="rounded-2xl border border-amber-100 bg-white/80 p-3"><p className="truncate text-sm font-bold text-slate-900">{product.name}</p><p className="mt-1 text-xs text-slate-600">Saldo {formatQuantity(product.quantity)} · mínimo {formatQuantity(product.minimumStock)}</p></div>)}</div></section>:null}
     {message&&<p role="status" className="rounded-lg bg-green-50 p-3 text-sm text-green-800">{message}</p>}
     <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{products.data?.items.map(product=><article key={product.publicId} className="rounded-2xl border bg-white p-4"><p className="font-semibold">{product.name}</p><p className="text-xs text-slate-500">{product.sku}</p><p className="mt-3 text-xl font-bold">{formatQuantity(product.quantity)} <span className="text-sm font-normal">{product.unit}</span></p><p className="text-xs text-slate-500">Mínimo: {formatQuantity(product.minimumStock)}</p></article>)}</section>
     <div className="grid gap-3 rounded-2xl border bg-white p-4 sm:grid-cols-2 xl:grid-cols-4">
