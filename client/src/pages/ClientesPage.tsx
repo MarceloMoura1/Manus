@@ -1260,21 +1260,29 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
                     : "hover:bg-slate-50 border-l-4 border-l-transparent"
                 )}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-slate-900 text-sm truncate">{client.companyName}</p>
-                    {client.responsibleName && (
-                      <p className="text-xs text-slate-500 truncate mt-0.5">{client.responsibleName}</p>
-                    )}
-                    {client.phone && (
-                      <p className="text-xs text-slate-400 truncate mt-0.5">{client.phone}</p>
-                    )}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-900">{client.companyName}</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                        {client.customerType === "person" ? "Pessoa" : client.customerType === "company" ? "Empresa" : "Cadastro legado"}
+                      </span>
+                      <span className={cn(
+                        "rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                        client.lifecycleState === "active"
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : client.lifecycleState === "inactive"
+                            ? "border-slate-200 bg-slate-100 text-slate-700"
+                            : "border-amber-200 bg-amber-50 text-amber-800",
+                      )}>
+                        {client.lifecycleState === "archived" ? "Arquivado" : client.lifecycleState === "inactive" ? "Inativo" : "Ativo"}
+                      </span>
+                      <StatusBadge status={client.status} />
+                    </div>
+                    {client.responsibleName && <p className="mt-1.5 truncate text-xs text-slate-500">{client.responsibleName}</p>}
+                    {client.phone && <p className="mt-0.5 truncate text-xs text-slate-400">{client.phone}</p>}
                   </div>
-                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                    <StatusBadge status={client.status} />
-                    <span className="text-[11px] font-semibold text-slate-500">{client.lifecycleState === "archived" ? "Arquivado" : client.lifecycleState === "inactive" ? "Inativo" : "Ativo"}</span>
-                    <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
-                  </div>
+                  <ChevronRight className="mt-1 h-4 w-4 flex-shrink-0 text-slate-300" />
                 </div>
               </button>
             ))
