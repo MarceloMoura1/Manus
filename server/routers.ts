@@ -36,7 +36,7 @@ import { loadOutboundConversation, resolveOutboundRecipient, safeOutboundProvide
 import { assertOperationalCsrf, clearOperationalSessionCookie, createOperationalSession, revokeOperationalSession } from "./_core/megadesk-session";
 import { erpRouter } from "./modules/erp/router";
 import { normalizeContactPhone } from "../shared/contact-phone";
-import { findAttendanceRecipientByPhone, searchAttendanceRecipients } from "./attendance-recipients";
+import { findCrmClientForAttendance, searchCrmClientsForAttendance } from "./db-crm";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -1055,7 +1055,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "Operador sem acesso ao Atendimento Ativo." });
         }
 
-        const lookup = await searchAttendanceRecipients(getPool(), ctx.tenantId, input.query);
+        const lookup = await searchCrmClientsForAttendance(ctx.tenantId, input.query);
         const { canonicalPhone, candidates } = lookup;
 
         let activeConversation: { id: string; customerName: string; phone: string } | null = null;
@@ -1262,7 +1262,7 @@ export const appRouter = router({
           }
           const operator = operatorRows[0] as { user_id: string; name: string };
 
-          const crmCustomer = await findAttendanceRecipientByPhone(getPool(), ctx.tenantId, canonicalPhone);
+          const crmCustomer = await findCrmClientForAttendance(ctx.tenantId, canonicalPhone);
           const customerName = crmCustomer?.responsibleName?.trim() || crmCustomer?.companyName?.trim()
             || canonicalPhone;
           const company = crmCustomer?.companyName?.trim() || "";
