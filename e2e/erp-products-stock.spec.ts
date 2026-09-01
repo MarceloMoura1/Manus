@@ -32,6 +32,7 @@ const product = {
   quantity: "5.000",
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
+  hasImage: false,
 };
 const movement = {
   publicId: "22222222-2222-4222-8222-222222222222",
@@ -119,7 +120,7 @@ async function clickExposedDrawerOverlay(overlay: Locator, drawer: Locator) {
 }
 async function prepare(
   page: Page,
-  options: { empty?: boolean; readOnly?: boolean } = {}
+  options: { empty?: boolean; readOnly?: boolean; hasImage?: boolean } = {}
 ) {
   page.on("pageerror", error =>
     console.log(`ERP_PAGE_ERROR: ${error.message}`)
@@ -156,7 +157,7 @@ async function prepare(
         };
       if (procedure.includes("erp.products.list"))
         return {
-          items: options.empty ? [] : [product],
+          items: options.empty ? [] : [{...product,hasImage:options.hasImage===true}],
           total: options.empty ? 0 : 1,
           page: 1,
           pageSize: 20,
@@ -254,6 +255,46 @@ test.describe("ERP products and stock", () => {
     await expect(
       page.getByText("Produto cadastrado com sucesso.")
     ).toBeVisible();
+  });
+  for(const viewport of [{width:390,height:844},{width:768,height:1024},{width:1024,height:768},{width:1440,height:900}])test(`renders private product thumbnails safely at ${viewport.width}px`,async({browser})=>{
+    const context=await browser.newContext({viewport});const page=await context.newPage();let imageRequests=0;
+    await page.route("**/api/products/*/image?variant=thumbnail*",async route=>{imageRequests++;await route.fulfill({status:200,contentType:"image/webp",body:Buffer.from("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEALmk0mk0iIiIiIgBoSygABc6zbAAA","base64")});});
+    await prepare(page,{hasImage:true});if(viewport.width<1024)await prepareClosedMobileDrawer(page);await page.getByRole("button",{name:"Produtos"}).click();
+    const image=page.getByRole("img",{name:`Foto de ${product.name}`});await expect(image).toBeVisible();await expect(image).toHaveAttribute("loading","lazy");await expect.poll(()=>imageRequests).toBeGreaterThan(0);
+    expect(await image.evaluate(element=>getComputedStyle(element).objectFit)).toBe("cover");expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(viewport.width);
+    await context.close();
+  });
+  test("uses a stable placeholder and performs no image fetch without a reference",async({page})=>{
+    let imageRequests=0;await page.route("**/api/products/*/image**",route=>{imageRequests++;return route.abort();});await prepare(page);await page.getByRole("button",{name:"Produtos"}).click();
+    await expect(page.getByTestId("product-image-placeholder").first()).toBeVisible();expect(imageRequests).toBe(0);
+  });
+  test("uploads, reloads, replaces and removes a private product image",async({page})=>{
+    const state:{hasImage?:boolean}={hasImage:false};let puts=0;let gets=0;let deletes=0;
+    await page.route("**/api/products/*/image**",async route=>{
+      const method=route.request().method();
+      if(method==="PUT"){puts++;state.hasImage=true;await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({mediaId:"synthetic-media"})});return;}
+      if(method==="DELETE"){deletes++;state.hasImage=false;await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({ok:true})});return;}
+      gets++;await route.fulfill({status:200,contentType:"image/webp",body:Buffer.from("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEALmk0mk0iIiIiIgBoSygABc6zbAAA","base64")});
+    });
+    await prepare(page,state);await page.getByRole("button",{name:"Produtos"}).click();
+    await expect(page.getByTestId("product-image-placeholder").first()).toBeVisible();
+    await page.getByRole("button",{name:"Editar"}).click();let dialog=page.getByRole("dialog");let input=dialog.locator('input[type="file"]');
+    await input.setInputFiles({name:"first.png",mimeType:"image/png",buffer:Buffer.from("first")});await dialog.getByRole("button",{name:"Salvar",exact:true}).click();
+    await expect.poll(()=>puts).toBe(1);let image=page.getByRole("img",{name:`Foto de ${product.name}`});await expect(image).toBeVisible();await expect.poll(()=>gets).toBeGreaterThan(0);
+    await page.reload();await expect(page.getByTestId("erp-products-page")).toBeVisible();image=page.getByRole("img",{name:`Foto de ${product.name}`});await expect(image).toBeVisible();
+    const beforeReplace=await image.getAttribute("src");await page.getByRole("button",{name:"Editar"}).click();dialog=page.getByRole("dialog");input=dialog.locator('input[type="file"]');
+    await input.setInputFiles({name:"second.png",mimeType:"image/png",buffer:Buffer.from("second")});await dialog.getByRole("button",{name:"Salvar",exact:true}).click();
+    await expect.poll(()=>puts).toBe(2);image=page.getByRole("img",{name:`Foto de ${product.name}`});await expect(image).toBeVisible();await expect.poll(()=>image.getAttribute("src")).not.toBe(beforeReplace);
+    await page.getByRole("button",{name:"Editar"}).click();dialog=page.getByRole("dialog");page.once("dialog",confirmation=>void confirmation.accept());await dialog.getByRole("button",{name:"Remover"}).click();await dialog.getByRole("button",{name:"Salvar",exact:true}).click();
+    await expect.poll(()=>deletes).toBe(1);await expect(page.getByTestId("product-image-placeholder").first()).toBeVisible();await expect(page.getByRole("img",{name:`Foto de ${product.name}`})).toHaveCount(0);
+  });
+  test("revokes ObjectURLs on replacement and dialog teardown while preserving fields on upload failure",async({page})=>{
+    await page.addInitScript(()=>{const created:string[]=[];const revoked:string[]=[];let index=0;URL.createObjectURL=()=>{const value=`blob:synthetic-${++index}`;created.push(value);return value};URL.revokeObjectURL=value=>revoked.push(String(value));Object.assign(window,{__mediaUrls:{created,revoked}});});
+    await page.route("**/api/products/*/image",route=>route.fulfill({status:400,contentType:"application/json",body:JSON.stringify({error:"Imagem inválida."})}));
+    await prepare(page,{hasImage:true});await page.getByRole("button",{name:"Produtos"}).click();await page.getByRole("button",{name:"Editar"}).click();const dialog=page.getByRole("dialog");
+    const input=dialog.locator('input[type="file"]');await input.setInputFiles({name:"one.png",mimeType:"image/png",buffer:Buffer.from("one")});await input.setInputFiles({name:"two.png",mimeType:"image/png",buffer:Buffer.from("two")});
+    expect(await page.evaluate(()=>(window as any).__mediaUrls.revoked.length)).toBeGreaterThanOrEqual(1);await dialog.getByRole("button",{name:"Salvar",exact:true}).click();await expect(page.getByText("Imagem inválida.")).toBeVisible();await expect(dialog.getByLabel("Nome")).toHaveValue(product.name);
+    await page.keyboard.press("Escape");await expect(dialog).toBeHidden();expect(await page.evaluate(()=>(window as any).__mediaUrls.revoked.length)).toBeGreaterThanOrEqual(2);
   });
   test("registers a controlled stock movement with explicit confirmation", async ({
     page,
