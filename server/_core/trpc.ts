@@ -80,6 +80,15 @@ const requireTenant = t.middleware(async opts => {
 });
 export const megadeskProcedure = t.procedure.use(requireTenant);
 
+export const megadeskAdminProcedure = megadeskProcedure.use(
+  t.middleware(async opts => {
+    if (opts.ctx.operationalUserRole !== "admin") {
+      throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
+    }
+    return opts.next({ ctx: opts.ctx });
+  }),
+);
+
 export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;

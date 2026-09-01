@@ -1,38 +1,24 @@
 /**
  * tRPC router para gerenciar dados da empresa
  */
-import { router, adminProcedure } from "./_core/trpc";
+import { router, megadeskAdminProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { getCompanySettings, saveCompanySettings } from "./db-company";
-import { TRPCError } from "@trpc/server";
-
-/**
- * Validar que o cliente está liberado e ativo
- */
-async function getReleasedClientOrThrow(clientId: string) {
-  // Implementação simplificada - em produção, buscar do banco de dados
-  if (!clientId) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Cliente não identificado" });
-  }
-  // TODO: Buscar cliente do banco e validar status
-  return { clientId };
-}
 
 export const companyRouter = router({
   /**
    * Buscar configurações da empresa
    */
-  getSettings: adminProcedure
+  getSettings: megadeskAdminProcedure
     .input(z.object({ clientId: z.string() }))
     .query(async ({ input }) => {
-      await getReleasedClientOrThrow(input.clientId);
       return await getCompanySettings(input.clientId);
     }),
 
   /**
    * Salvar configurações da empresa
    */
-  saveSettings: adminProcedure
+  saveSettings: megadeskAdminProcedure
     .input(
       z.object({
         clientId: z.string(),
@@ -48,8 +34,6 @@ export const companyRouter = router({
     )
     .mutation(async ({ input: data }) => {
       const input = data;
-      await getReleasedClientOrThrow(input.clientId);
-
       const settings = await saveCompanySettings(input.clientId, {
         companyName: input.companyName,
         logoUrl: input.logoUrl,

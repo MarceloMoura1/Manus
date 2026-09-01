@@ -2,7 +2,7 @@
  * tRPC router para gerenciar configurações de WhatsApp
  * Apenas admins podem acessar estas procedures
  */
-import { router, protectedProcedure, adminProcedure } from "./_core/trpc";
+import { router, megadeskAdminProcedure } from "./_core/trpc";
 import { z } from "zod";
 import {
   getWhatsappConfig,
@@ -11,26 +11,12 @@ import {
   updateWebhookStatus,
   deleteWhatsappConfig,
 } from "./db-whatsapp";
-import { TRPCError } from "@trpc/server";
-
-/**
- * Validar que o cliente está liberado e ativo
- */
-async function getReleasedClientOrThrow(clientId: string) {
-  // Implementação simplificada - em produção, buscar do banco de dados
-  if (!clientId) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Cliente não identificado" });
-  }
-  // TODO: Buscar cliente do banco e validar status
-  return { clientId };
-}
 
 export const whatsappRouter = router({
   /**
    * Buscar configuração WhatsApp do cliente (admin)
    */
-  getConfig: adminProcedure.input(z.object({ clientId: z.string() })).query(async ({ input }) => {
-    await getReleasedClientOrThrow(input.clientId);
+  getConfig: megadeskAdminProcedure.input(z.object({ clientId: z.string() })).query(async ({ input }) => {
     const config = await getWhatsappConfig(input.clientId);
     
     // Não retornar accessToken completo por segurança
@@ -46,7 +32,7 @@ export const whatsappRouter = router({
   /**
    * Salvar configuração WhatsApp (admin)
    */
-  saveConfig: adminProcedure
+  saveConfig: megadeskAdminProcedure
     .input(
       z.object({
         clientId: z.string(),
@@ -60,8 +46,6 @@ export const whatsappRouter = router({
     )
     .mutation(async ({ input: data }) => {
       const input = data;
-      await getReleasedClientOrThrow(input.clientId);
-
       const config = await saveWhatsappConfig(input.clientId, {
         phoneNumberId: input.phoneNumberId,
         businessAccountId: input.businessAccountId,
@@ -80,11 +64,10 @@ export const whatsappRouter = router({
   /**
    * Testar conexão com WhatsApp (admin)
    */
-  testConnection: adminProcedure
+  testConnection: megadeskAdminProcedure
     .input(z.object({ clientId: z.string() }))
     .mutation(async ({ input: data }) => {
       const input = data;
-      await getReleasedClientOrThrow(input.clientId);
       const config = await getWhatsappConfig(input.clientId);
 
       if (!config) {
@@ -132,7 +115,7 @@ export const whatsappRouter = router({
   /**
    * Atualizar status do webhook (admin)
    */
-  updateWebhookStatus: adminProcedure
+  updateWebhookStatus: megadeskAdminProcedure
     .input(
       z.object({
         clientId: z.string(),
@@ -140,7 +123,6 @@ export const whatsappRouter = router({
       })
     )
     .mutation(async ({ input }) => {
-      await getReleasedClientOrThrow(input.clientId);
       const config = await updateWebhookStatus(input.clientId, input.status);
       return { success: true, config };
     }),
@@ -148,10 +130,9 @@ export const whatsappRouter = router({
   /**
    * Deletar configuração WhatsApp (admin)
    */
-  deleteConfig: adminProcedure
+  deleteConfig: megadeskAdminProcedure
     .input(z.object({ clientId: z.string() }))
     .mutation(async ({ input }) => {
-      await getReleasedClientOrThrow(input.clientId);
       await deleteWhatsappConfig(input.clientId);
       return { success: true, message: "Configuração WhatsApp deletada com sucesso" };
     }),
