@@ -101,11 +101,15 @@ describe("MegaDesk UI structure", () => {
     expect(homeSource).toContain('data-testid="conversation-chat-panel"');
     expect(homeSource).toContain('data-testid="conversation-composer"');
     expect(homeSource).toContain("['all', 'mine']");
-    for (const label of ["Filtro", "Todos", "Meus", "Novo atendimento", "BOT/Aguardando", "Abertas", "Encerradas", "Assumir", "Transferir", "Abrir detalhes da conversa", "Fechar detalhes da conversa"]) {
+    for (const label of ["Filtro", "Todos", "Meus", "Novo atendimento", "BOT/Aguardando", "Encerradas", "Assumir", "Transferir", "Abrir detalhes da conversa", "Fechar detalhes da conversa"]) {
       expect(homeSource).toContain(label);
     }
     expect(homeSource).toContain('data-testid="attendance-primary-controls"');
+    expect(homeSource).toContain('data-testid="attendance-action-controls"');
     expect(homeSource).toContain('data-testid="attendance-scope-controls"');
+    expect(homeSource).toContain('className="whitespace-nowrap">Novo atendimento</span>');
+    expect(homeSource).not.toContain('<span>Abertas</span>');
+    expect(homeSource).not.toContain('openCount');
     expect(homeSource).toContain('data-testid="new-attendance-composer"');
     expect(homeSource).toContain("<ActiveAttendancePage");
     expect(homeSource).toContain("embedded");

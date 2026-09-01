@@ -518,14 +518,14 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   }, [attendantScope, conversationFiltersStorageKey, inboxView]);
 
   const selectAttendantScope = React.useCallback((scope: 'all' | 'mine') => {
-    const nextInbox = inboxView === 'closed' ? 'open' : inboxView;
+    const nextInbox = 'open';
     const url = new URL(window.location.href);
     url.searchParams.set('conversationScope', scope);
     url.searchParams.set('conversationInbox', nextInbox);
     window.history.pushState({ ...window.history.state, megadeskRoute: 'conversations' }, '', url);
     setAttendantScope(scope);
-    if (inboxView === 'closed') setInboxView('open');
-  }, [inboxView]);
+    setInboxView(nextInbox);
+  }, []);
 
   const selectInboxView = React.useCallback((inbox: 'open' | 'bot' | 'closed') => {
     const url = new URL(window.location.href);
@@ -715,9 +715,6 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [selectedConversation, conversationMessages, optimisticMessages]);
-
-  const { data: countsData } = trpc.conversations.counts.useQuery(undefined, { enabled: !!clientId });
-  const openCount = attendantScope === 'mine' ? countsData?.mine ?? 0 : countsData?.active ?? 0;
 
   // Buscar todos os usuários ativos do cliente
   const { data: activeUsersData } = trpc.conversations.eligibleUsers.useQuery(undefined, { enabled: !!clientId });
@@ -1006,7 +1003,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
             </div>
           </div>
 
-          {/* Botão único de Filtros */}
+          {/* Primeira linha: filtro */}
           <div className="flex overflow-hidden rounded-xl border border-slate-200" data-testid="attendance-primary-controls">
             <button
               type="button"
@@ -1021,18 +1018,6 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
             >
               <Filter className="h-4 w-4" />
               <span>Filtro</span>
-            </button>
-            <button
-              type="button"
-              aria-pressed={inboxView === 'closed'}
-              onClick={() => selectInboxView('closed')}
-              className={cn(
-                'flex flex-1 items-center justify-center gap-2 border-l border-slate-200 px-3 py-2.5 text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500',
-                inboxView === 'closed' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
-              )}
-            >
-              <CheckCircle2 className="h-4 w-4" />
-              <span>Encerradas</span>
             </button>
           </div>
 
@@ -1143,28 +1128,9 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
           )}
         </div>
 
-        {/* Filtros de responsabilidade no layout compacto anterior */}
+        {/* Segunda linha: iniciar ou consultar atendimentos encerrados */}
         <div className="px-3 py-2 bg-white border-b border-slate-100">
-          <div className="flex overflow-hidden rounded-lg border border-slate-200" data-testid="attendance-scope-controls">
-            {(['all', 'mine'] as const).map((f, i) => (
-              <button
-                type="button"
-                key={f}
-                aria-pressed={inboxView !== 'closed' && attendantScope === f}
-                onClick={() => { 
-                  selectAttendantScope(f);
-                  setAttendantFilter('');
-                }}
-                className={cn(
-                  'flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:px-3',
-                  i > 0 && 'border-l border-slate-200',
-                  inboxView !== 'closed' && attendantScope === f ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
-                )}
-              >
-                {f === 'all' ? <MessageCircle className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
-                <span>{f === 'all' ? 'Todos' : 'Meus'}</span>
-              </button>
-            ))}
+          <div className="flex overflow-hidden rounded-lg border border-slate-200" data-testid="attendance-action-controls">
             <button
               type="button"
               aria-pressed={newAttendanceOpen}
@@ -1175,41 +1141,62 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                 setNewAttendanceOpen(true);
               }}
               className={cn(
-                'flex-[1.35] flex items-center justify-center gap-1.5 border-l border-slate-200 px-2 py-2 text-xs font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3',
+                'min-w-0 flex-1 flex items-center justify-center gap-1 px-2 py-2 text-xs font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-3',
                 newAttendanceOpen ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
               )}
             >
               <PhoneCall className="h-3.5 w-3.5" />
-              <span>Novo atendimento</span>
+              <span className="whitespace-nowrap">Novo atendimento</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={inboxView === 'closed'}
+              onClick={() => selectInboxView('closed')}
+              className={cn(
+                'min-w-0 flex-1 flex items-center justify-center gap-1 border-l border-slate-200 px-2 py-2 text-xs font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:gap-1.5 sm:px-3',
+                inboxView === 'closed' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+              )}
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              <span>Encerradas</span>
             </button>
           </div>
         </div>
 
-        {/* Estados do atendimento no layout compacto anterior */}
+        {/* Terceira linha: escopo das conversas ativas */}
         <div className="px-3 py-2 bg-white border-b border-slate-100">
-          <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+          <div className="flex overflow-hidden rounded-lg border border-slate-200" data-testid="attendance-scope-controls">
+            {(['all', 'mine'] as const).map((scope, index) => (
+              <button
+                type="button"
+                key={scope}
+                aria-pressed={inboxView === 'open' && attendantScope === scope}
+                onClick={() => {
+                  selectAttendantScope(scope);
+                  setAttendantFilter('');
+                }}
+                className={cn(
+                  'min-w-0 flex-1 flex items-center justify-center gap-1 px-2 py-2 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:gap-1.5 sm:px-3',
+                  index > 0 && 'border-l border-slate-200',
+                  inboxView === 'open' && attendantScope === scope ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                )}
+              >
+                {scope === 'all' ? <MessageCircle className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+                <span>{scope === 'all' ? 'Todos' : 'Meus'}</span>
+              </button>
+            ))}
             <button
-              aria-pressed={inboxView === 'open'}
-              onClick={() => selectInboxView('open')}
-              className={cn(
-                'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all duration-200',
-                inboxView === 'open' ? 'bg-emerald-500 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
-              )}
-            >
-              <span className={cn('w-1.5 h-1.5 rounded-full', inboxView === 'open' ? 'bg-white' : 'bg-emerald-500')} />
-              <span>Abertas</span>
-              <span className={cn('text-xs font-bold', inboxView === 'open' ? 'text-blue-100' : 'text-slate-400')}>{openCount}</span>
-            </button>
-            <button
+              type="button"
               aria-label="BOT/Aguardando"
               aria-pressed={inboxView === 'bot'}
               onClick={() => selectInboxView('bot')}
               className={cn(
-                'flex-1 px-3 py-1.5 text-xs font-medium transition-all duration-150 border-l border-slate-200',
+                'min-w-0 flex-1 flex items-center justify-center gap-1 border-l border-slate-200 px-2 py-2 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:gap-1.5 sm:px-3',
                 inboxView === 'bot' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
               )}
             >
-              BOT
+              <Bot className="h-3.5 w-3.5" />
+              <span>BOT</span>
             </button>
           </div>
         </div>

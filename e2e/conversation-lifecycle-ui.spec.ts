@@ -93,66 +93,54 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(page.getByText("Mensagem legada").last()).toBeVisible();
     await expect(page.getByTestId("conversation-list-panel").getByText(conversation.publicCode, { exact: true })).toHaveCount(0);
     await expect(page.getByText(conversation.publicCode, { exact: true })).toBeHidden();
-    for (const label of ["Filtro", "Encerradas", "Todos", "Meus", "Novo atendimento", "Abertas", "BOT/Aguardando"]) {
+    for (const label of ["Filtro", "Encerradas", "Todos", "Meus", "Novo atendimento", "BOT/Aguardando"]) {
       await expect(page.getByRole("button", { name: new RegExp(label) })).toBeVisible();
     }
     await expect(page.getByTestId("attendance-header").getByText("Atendimento", { exact: true })).toBeVisible();
     await expect(page.getByTestId("attendance-header").locator("svg")).toBeVisible();
-    await expect(page.getByTestId("attendance-primary-controls").locator("button")).toHaveCount(2);
+    await expect(page.getByTestId("attendance-primary-controls").locator("button")).toHaveCount(1);
+    await expect(page.getByTestId("attendance-action-controls").locator("button")).toHaveCount(2);
     await expect(page.getByTestId("attendance-scope-controls").locator("button")).toHaveCount(3);
     await expect(page.getByTestId("conversation-list-panel")).toHaveClass(/min-\[900px\]:w-\[420px\]/);
     await expect(page.locator(".fixed.inset-0.z-40")).toHaveCount(0);
     const all = page.getByRole("button", { name: "Todos" });
     await expect(all.locator("xpath=following-sibling::button[1]")).toHaveAccessibleName("Meus");
-    await expect(page.getByTestId("attendance-primary-controls").getByRole("button", { name: "Encerradas" })).toBeVisible();
-    const open = page.getByRole("button", { name: /Abertas/ });
-    await expect(open.locator("xpath=following-sibling::button[1]")).toHaveAccessibleName("BOT/Aguardando");
+    await expect(page.getByTestId("attendance-action-controls").getByRole("button", { name: "Novo atendimento" })).toBeVisible();
+    await expect(page.getByTestId("attendance-action-controls").getByRole("button", { name: "Encerradas" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Abertas/ })).toHaveCount(0);
     const mine = page.getByRole("button", { name: "Meus" });
-    const closed = page.getByRole("button", { name: "Encerradas", exact: true });
+    const closed = page.getByTestId("attendance-action-controls").getByRole("button", { name: "Encerradas", exact: true });
     const bot = page.getByRole("button", { name: "BOT/Aguardando" });
     await expect(closed).toHaveText("Encerradas");
-    await expect(open).toContainText("3");
     await expect(all).toHaveAttribute("aria-pressed", "true");
-    await expect(open).toHaveAttribute("aria-pressed", "true");
+    await expect(bot).toHaveAttribute("aria-pressed", "false");
     await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "all", status: "active" });
 
     await mine.click();
     await expect(mine).toHaveAttribute("aria-pressed", "true");
-    await expect(open).toContainText("1");
+    await expect(all).toHaveAttribute("aria-pressed", "false");
     await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "mine", status: "active" });
     await bot.click();
-    await expect(mine).toHaveAttribute("aria-pressed", "true");
+    await expect(mine).toHaveAttribute("aria-pressed", "false");
     await expect(bot).toHaveAttribute("aria-pressed", "true");
-    await expect(open).toHaveAttribute("aria-pressed", "false");
     await expect(page).toHaveURL(/conversationScope=mine.*conversationInbox=bot/);
     await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "waiting", status: "active" });
 
-    await open.click();
-    await expect(mine).toHaveAttribute("aria-pressed", "true");
-    await expect(open).toHaveAttribute("aria-pressed", "true");
-    await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "mine", status: "active" });
     await closed.click();
     await expect(closed).toHaveAttribute("aria-pressed", "true");
     await expect(mine).toHaveAttribute("aria-pressed", "false");
-    await expect(open).toHaveAttribute("aria-pressed", "false");
+    await expect(bot).toHaveAttribute("aria-pressed", "false");
     await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "all", status: "closed" });
     await all.click();
     await expect(all).toHaveAttribute("aria-pressed", "true");
-    await expect(open).toHaveAttribute("aria-pressed", "true");
     await expect(closed).toHaveAttribute("aria-pressed", "false");
     await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "all", status: "active" });
 
     await closed.click();
     await mine.click();
     await expect(mine).toHaveAttribute("aria-pressed", "true");
-    await expect(open).toHaveAttribute("aria-pressed", "true");
     await expect(closed).toHaveAttribute("aria-pressed", "false");
     await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "mine", status: "active" });
-
-    await closed.click();
-    await open.click();
-    await expect(mine).toHaveAttribute("aria-pressed", "true");
-    await expect(open).toHaveAttribute("aria-pressed", "true");
 
     await page.getByRole("button", { name: "Filtro" }).click();
     await page.getByPlaceholder("Nome, empresa ou telefone...").fill(conversation.publicCode);
@@ -180,19 +168,19 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
 
     await page.reload();
     await expect(page.getByRole("button", { name: "Meus" })).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByRole("button", { name: /Abertas/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "BOT/Aguardando" })).toHaveAttribute("aria-pressed", "false");
     await page.getByRole("navigation").first().getByRole("button", { name: "Home", exact: true }).click();
     await expect(page.getByRole("heading", { name: "MegaDesk" })).toBeVisible();
     const openRemountStart = listInputs.length;
     await page.getByRole("button", { name: "Atendimento Central de atendimento" }).click();
     await expect(page.getByRole("button", { name: "Meus" })).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByRole("button", { name: /Abertas/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "BOT/Aguardando" })).toHaveAttribute("aria-pressed", "false");
     await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "mine", status: "active" });
     expect(listInputs.slice(openRemountStart).some(input => input.viewMode === "all")).toBe(false);
 
     await page.getByRole("button", { name: "BOT/Aguardando" }).click();
     await page.goBack();
-    await expect(page.getByRole("button", { name: /Abertas/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "BOT/Aguardando" })).toHaveAttribute("aria-pressed", "false");
     await expect(page.getByRole("button", { name: "Meus" })).toHaveAttribute("aria-pressed", "true");
     await page.goForward();
     await expect(page.getByRole("button", { name: "BOT/Aguardando" })).toHaveAttribute("aria-pressed", "true");
@@ -200,7 +188,7 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(page.getByRole("heading", { name: "MegaDesk" })).toBeVisible();
     const botRemountStart = listInputs.length;
     await page.getByRole("button", { name: "Atendimento Central de atendimento" }).click();
-    await expect(page.getByRole("button", { name: "Meus" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "Meus" })).toHaveAttribute("aria-pressed", "false");
     await expect(page.getByRole("button", { name: "BOT/Aguardando" })).toHaveAttribute("aria-pressed", "true");
     await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "waiting", status: "active" });
     expect(listInputs.slice(botRemountStart).some(input => input.viewMode === "all")).toBe(false);
@@ -245,11 +233,12 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(page.getByTestId("conversation-list-panel")).toBeVisible();
   });
 
-  test("falls back invalid persisted filters to Todos and Abertas", async ({ page }) => {
+  test("falls back invalid persisted filters to Todos ativos", async ({ page }) => {
     await mockedPage(page);
     await page.goto("/?conversationScope=invalid&conversationInbox=invalid");
     await expect(page.getByRole("button", { name: "Todos" })).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByRole("button", { name: /Abertas/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "BOT/Aguardando" })).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByRole("button", { name: /Abertas/ })).toHaveCount(0);
     await expect(page).toHaveURL(/conversationScope=all.*conversationInbox=open/);
   });
 
@@ -295,8 +284,11 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
       await page.setViewportSize(viewport);
       const { calls } = await mockedPage(page);
       await expect(page.getByTestId("attendance-primary-controls")).toBeVisible();
+      await expect(page.getByTestId("attendance-action-controls")).toBeVisible();
       await expect(page.getByTestId("attendance-scope-controls")).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      const newAttendance = page.getByTestId("attendance-action-controls").getByRole("button", { name: "Novo atendimento" });
+      await expect(newAttendance.locator("span")).toHaveCSS("white-space", "nowrap");
       await page.getByText("Cliente UI").click();
       await expect(page.getByTestId("conversation-composer")).toBeVisible();
       await page.locator('button[aria-controls="conversation-details-panel"]').click();
