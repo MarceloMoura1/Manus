@@ -5,6 +5,7 @@ export type ProductRow = RowDataPacket & {
   id: number; public_id: string; client_id: string; name: string; sku: string; barcode: string | null;
   description: string | null; category: string | null; unit: "unit" | "kg" | "liter" | "meter";
   cost_price_cents: number; sale_price_cents: number; minimum_stock: string; active: number;
+  primary_media_id: number | null;
   created_by: string; updated_by: string | null; created_at: string; updated_at: string; quantity: string;
 };
 
