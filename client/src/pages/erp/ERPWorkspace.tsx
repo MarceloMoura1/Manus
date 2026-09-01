@@ -152,7 +152,7 @@ function Products() {
   const reset = () => { setSearch("");setActive("all");setCategory("");setStock("all");setSort("name");setDirection("asc");setPage(1); };
   const canWrite=query.data?.canWrite===true;
   return <div className="space-y-5" data-testid="erp-products-page">
-    <header className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-bold">Produtos</h1><p className="text-sm text-slate-600">Cadastro e consulta isolados por tenant.</p></div>{canWrite&&<Button onClick={()=>setForm({...emptyProduct})}>Novo produto</Button>}</header>
+    <header className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-bold">Produtos</h1><p className="text-sm text-slate-600">Cadastro e consulta isolados por tenant.</p></div>{canWrite&&<Button onClick={()=>{clearPhoto();setForm({...emptyProduct})}}>Novo produto</Button>}</header>
     {message&&<p role="status" className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">{message}</p>}
     <div className="grid gap-3 rounded-2xl border bg-white p-4 sm:grid-cols-2 xl:grid-cols-4">
       <label className="relative sm:col-span-2"><span className="sr-only">Pesquisar produtos</span><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400"/><Input className="pl-9" value={search} onChange={e=>{setSearch(e.target.value);resetPage()}} placeholder="Nome, SKU ou código de barras"/></label>
