@@ -13,6 +13,7 @@ import { SettingsPage as SettingsPageComponent } from "./SettingsPage";
 import { AdminSettingsPage } from "./AdminSettingsPage";
 import { BotConfigPage } from "./BotConfigPage";
 import { ERPWorkspace, getErpTopbarItems, type ErpSection } from "./erp/ERPWorkspace";
+import { NotificationsModernPage } from "./NotificationsModernPage";
 import type { CrmWhatsAppIntent } from "../../../shared/crm";
 import { normalizeContactPhone } from "../../../shared/contact-phone";
 import { trpcProcedureUrl } from "@/lib/trpc-url";
@@ -3888,7 +3889,7 @@ function Shell() {
           {active === "bot-config" && <BotConfigPage />}
           {active === "whatsapp-config" && <WhatsAppConfigPage />}
           {active === "ai-assistant" && <AIAssistantPage />}
-          {active === "notifications" && <NotificationsPage />}
+          {active === "notifications" && <NotificationsModernPage />}
           {active === "active-attendance" && <ActiveAttendancePage initialPhone={activeAttendancePhone} onNavigate={(nav) => {
             if (typeof nav === 'string') {
               navigateToRoute(nav as RouteId);

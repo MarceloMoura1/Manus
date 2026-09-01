@@ -6,7 +6,7 @@ import { Home } from "./pages/Home";
 import AdminPanel from "./pages/AdminPanel";
 import { SettingsPage } from "./pages/SettingsPage";
 import { BotConfigPage } from "./pages/BotConfigPage";
-import { NotificationsPage } from "./pages/NotificationsPage";
+import { NotificationsModernPage } from "./pages/NotificationsModernPage";
 import { WhatsAppBaileysPage } from "./pages/WhatsAppBaileysPage";
 import { AIAssistant } from "./components/AIAssistant";
 import { trpc } from "./lib/trpc";
@@ -84,7 +84,7 @@ export default function App() {
       <trpc.Provider client={trpcClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
           <ErrorBoundary>
-            {isAdminRoute() ? <AdminPanel /> : isBotConfigRoute() ? <BotConfigPage /> : isNotificationsRoute() ? <NotificationsPage /> : isWhatsAppBaileysRoute() ? <WhatsAppBaileysPage /> : isSettingsRoute() ? <SettingsPage /> : <Home />}
+            {isAdminRoute() ? <AdminPanel /> : isBotConfigRoute() ? <BotConfigPage /> : isNotificationsRoute() ? <NotificationsModernPage /> : isWhatsAppBaileysRoute() ? <WhatsAppBaileysPage /> : isSettingsRoute() ? <SettingsPage /> : <Home />}
           </ErrorBoundary>
 
           <AIAssistant
