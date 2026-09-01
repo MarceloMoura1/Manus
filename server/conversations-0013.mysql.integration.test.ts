@@ -15,6 +15,7 @@ const integrationB = "audit-evolution-instance-b";
 const phone = "5511999990001";
 const concurrentPhone = "5511999990002";
 const activePhone = "5511999990003";
+const directOutboundConcurrentPhone = "5511999990004";
 const closedA = "conv-a-closed-fixture";
 const closedB = "conv-b-closed-fixture";
 
@@ -200,17 +201,36 @@ physical.sequential("Conversations 0013 physical lifecycle", () => {
       .toMatchObject({ conversation_id:inboundA,public_code:inboundCode,status:"open",assigned_user_id:"audit-agent-a" });
   });
 
-  it("starts outbound attendance once without automatically creating a message", async () => {
-    await getPool().execute("INSERT INTO megadesk_domain_customers (customerId,clientId,name,phone,company) VALUES ('customer-active',?,'Synthetic Active',?,'Synthetic Company')",[tenantA,activePhone]);
-    const input = { customerId:"customer-active",customerName:"Synthetic Active",phone:activePhone,company:"Synthetic Company",clientId:tenantA };
+  it("starts outbound attendance for an unregistered number without creating a customer", async () => {
+    const input = { phone: activePhone };
     const first = await appCaller(tenantA,"audit-agent-a").megadesk.createConversation(input);
     outboundId = first.conversationId;
     const second = await appCaller(tenantA,"audit-agent-a").megadesk.createConversation(input);
     expect(second.conversationId).toBe(first.conversationId);
-    const created = (await rows("SELECT conversation_id,public_code,status,assigned_user_id FROM megadesk_domain_conversations WHERE conversation_id=? AND client_id=?",[first.conversationId,tenantA]))[0];
-    expect(created).toMatchObject({ status:"open",assigned_user_id:"audit-agent-a" });
+    expect(second.existing).toBe(true);
+    const created = (await rows("SELECT conversation_id,public_code,status,assigned_user_id,customer_name,crm_client_id FROM megadesk_domain_conversations WHERE conversation_id=? AND client_id=?",[first.conversationId,tenantA]))[0];
+    expect(created).toMatchObject({ status:"open",assigned_user_id:"audit-agent-a",customer_name:activePhone,crm_client_id:null });
     expect(created.public_code).toMatch(/^CV-/);
     expect(await scalar("SELECT COUNT(*) value FROM megadesk_domain_conversations_messages WHERE client_id=? AND conversation_id=?",[tenantA,first.conversationId])).toBe(0);
+    expect(await scalar("SELECT COUNT(*) value FROM megadesk_domain_customers WHERE clientId=? AND phone=?",[tenantA,activePhone])).toBe(0);
+    expect((await caller(tenantA,"audit-agent-a").list({ viewMode:"mine",status:"active",search:"",limit:30,offset:0 })).some(item => item.id === first.conversationId)).toBe(true);
+    expect((await caller(tenantA,"audit-agent-a").list({ viewMode:"waiting",status:"active",search:"",limit:30,offset:0 })).some(item => item.id === first.conversationId)).toBe(false);
+    const lookup = await appCaller(tenantA,"audit-agent-a").megadesk.attendanceRecipient({ query:"(11) 99999-0003" });
+    expect(lookup.canonicalPhone).toBe(activePhone);
+    expect(lookup.activeConversation?.id).toBe(first.conversationId);
+  });
+
+  it("serializes concurrent direct outbound starts into exactly one assigned attendance", async () => {
+    const [first, second] = await Promise.all([
+      appCaller(tenantA,"audit-agent-a").megadesk.createConversation({ phone: directOutboundConcurrentPhone }),
+      appCaller(tenantA,"audit-agent-b").megadesk.createConversation({ phone: directOutboundConcurrentPhone }),
+    ]);
+    expect(first.conversationId).toBe(second.conversationId);
+    expect([first.existing, second.existing].filter(Boolean)).toHaveLength(1);
+    expect(await scalar("SELECT COUNT(*) value FROM megadesk_domain_conversations WHERE client_id=? AND phone=? AND status IN ('open','bot')",[tenantA,directOutboundConcurrentPhone])).toBe(1);
+    const created = (await rows("SELECT assigned_user_id,status FROM megadesk_domain_conversations WHERE client_id=? AND phone=? AND status IN ('open','bot')",[tenantA,directOutboundConcurrentPhone]))[0];
+    expect(created).toMatchObject({ status:"open" });
+    expect(["audit-agent-a","audit-agent-b"]).toContain(created.assigned_user_id);
   });
 
   it("tracks outbound provider outcomes physically without blind retry or cross-tenant attempts", async () => {

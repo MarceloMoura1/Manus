@@ -35,6 +35,7 @@ import { normalizeEvolutionRecipient } from "./evolution/client";
 import { loadOutboundConversation, resolveOutboundRecipient, safeOutboundProviderMessage } from "./evolution/outbound-recipient";
 import { assertOperationalCsrf, clearOperationalSessionCookie, createOperationalSession, revokeOperationalSession } from "./_core/megadesk-session";
 import { erpRouter } from "./modules/erp/router";
+import { normalizeContactPhone } from "../shared/contact-phone";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -1045,6 +1046,50 @@ export const appRouter = router({
           return [];
         }
       }),
+    attendanceRecipient: megadeskProcedure
+      .input(z.object({ query: z.string().trim().max(120) }).strict())
+      .query(async ({ input, ctx }) => {
+        if (!ctx.operationalPermissions?.includes("active-attendance") ||
+            !ctx.operationalUserRole || !["admin", "manager", "agent"].includes(ctx.operationalUserRole)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Operador sem acesso ao Atendimento Ativo." });
+        }
+
+        const term = input.query.trim();
+        const normalized = normalizeContactPhone(term);
+        const canonicalPhone = normalized.status === "valid" ? normalized.value : null;
+        const textSearch = `%${term}%`;
+        const digits = term.replace(/\D/g, "");
+        const digitSearch = `%${digits}%`;
+        const [candidates] = await getPool().execute(
+          `SELECT crm_client_id AS crmClientId, company_name AS companyName,
+                  responsible_name AS responsibleName, phone, whatsapp, email
+             FROM megadesk_crm_clients
+            WHERE client_id = ? AND lifecycle_state = 'active'
+              AND (company_name LIKE ? OR responsible_name LIKE ?
+                   OR (? <> '' AND (phone LIKE ? OR whatsapp LIKE ?)))
+            ORDER BY company_name, crm_client_id LIMIT 10`,
+          [ctx.tenantId, textSearch, textSearch, digits, digitSearch, digitSearch],
+        ) as any[];
+
+        let activeConversation: { id: string; customerName: string; phone: string } | null = null;
+        if (canonicalPhone) {
+          const { getSession } = await import("./evolution/session-store");
+          const session = await getSession(ctx.tenantId);
+          if (session) {
+            const [activeRows] = await getPool().execute(
+              `SELECT conversation_id AS id, customer_name AS customerName, phone
+                 FROM megadesk_domain_conversations
+                WHERE client_id = ? AND provider = 'evolution' AND integration_id = ? AND phone = ?
+                  AND status IN ('open', 'bot')
+                ORDER BY created_at DESC LIMIT 1`,
+              [ctx.tenantId, session.instanceName, canonicalPhone],
+            ) as any[];
+            activeConversation = activeRows[0] ?? null;
+          }
+        }
+
+        return { canonicalPhone, candidates, activeConversation };
+      }),
     searchCustomer: megadeskProcedure
       .input(z.object({ phone: z.string().min(1), clientId: z.string().min(1) }))
       .mutation(async ({ input, ctx }) => {
@@ -1197,17 +1242,24 @@ export const appRouter = router({
         }
       }),
     createConversation: megadeskProcedure
-      .input(z.object({ customerId: z.string(), customerName: z.string(), phone: z.string(), company: z.string(), clientId: z.string().min(1), fromCrm: z.boolean().optional(), crmClientId: z.string().optional() }))
+      .input(z.object({
+        phone: z.string().min(1),
+        customerId: z.string().optional(),
+        customerName: z.string().trim().max(180).optional(),
+        company: z.string().trim().max(255).optional(),
+        clientId: z.string().min(1).optional(),
+        fromCrm: z.boolean().optional(),
+        crmClientId: z.string().optional(),
+      }).strict())
       .mutation(async ({ input, ctx }) => {
         try {
           if (!ctx.operationalPermissions?.includes("active-attendance") ||
               !ctx.operationalUserRole || !["admin", "manager", "agent"].includes(ctx.operationalUserRole)) {
             throw new TRPCError({ code: "FORBIDDEN", message: "Operador sem acesso ao Atendimento Ativo." });
           }
-          if (input.clientId !== ctx.tenantId) {
+          if (input.clientId && input.clientId !== ctx.tenantId) {
             throw new TRPCError({ code: "FORBIDDEN", message: "Tenant inválido." });
           }
-          const { createCustomer: createCustomerDb, searchCustomerByPhone } = await import("./db");
           await hydrateSyncState();
           const client = getReleasedClientOrThrow(ctx.tenantId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
@@ -1223,31 +1275,19 @@ export const appRouter = router({
           }
           const operator = operatorRows[0] as { user_id: string; name: string };
 
-          // Se veio do CRM, garantir que o contato existe em megadesk_domain_customers
-          // Busca por telefone OU por customerId para evitar duplicata
-          if (input.fromCrm) {
-            const existing = await searchCustomerByPhone(canonicalPhone, client.clientId)
-              ?? await searchCustomerByPhone(canonicalPhone.slice(2), client.clientId);
-            if (!existing) {
-              const customerId = input.customerId || `cust-${Date.now()}`;
-              try {
-                await createCustomerDb({
-                  customerId,
-                  clientId: client.clientId,
-                  name: input.customerName,
-                  phone: canonicalPhone,
-                  company: input.company,
-                });
-              } catch (insertErr: any) {
-                // Ignorar erro de chave duplicada — o cliente já existe com outro telefone ou id
-                if (insertErr?.cause?.code !== 'ER_DUP_ENTRY' && insertErr?.code !== 'ER_DUP_ENTRY') {
-                  throw insertErr;
-                }
-                // Cliente já existe, continuar normalmente
-              }
-            }
-          }
-          
+          const [crmRows] = await getPool().execute(
+            `SELECT crm_client_id, company_name, responsible_name
+               FROM megadesk_crm_clients
+              WHERE client_id = ? AND lifecycle_state = 'active' AND (phone = ? OR whatsapp = ?)
+              ORDER BY crm_client_id LIMIT 1`,
+            [ctx.tenantId, canonicalPhone, canonicalPhone],
+          ) as any[];
+          const crmCustomer = crmRows[0] as { crm_client_id: string; company_name: string; responsible_name: string } | undefined;
+          const customerName = crmCustomer?.responsible_name?.trim() || crmCustomer?.company_name?.trim()
+            || canonicalPhone;
+          const company = crmCustomer?.company_name?.trim() || "";
+          const crmClientId = crmCustomer?.crm_client_id ?? null;
+
           const { getSession } = await import("./evolution/session-store");
           const evolutionSession = await getSession(ctx.tenantId);
           if (!evolutionSession) {
@@ -1256,6 +1296,7 @@ export const appRouter = router({
           const integrationId = evolutionSession.instanceName;
           const connection = await getPool().getConnection();
           let conversationId = "";
+          let existingConversation = false;
           let attendanceLock: string | null = null;
           let transactionStarted = false;
           try {
@@ -1271,7 +1312,7 @@ export const appRouter = router({
                (contact_id, client_id, display_name, canonical_phone, channel, provider, external_identity, crm_client_id)
                VALUES (?, ?, ?, ?, 'whatsapp', 'evolution', ?, ?)
                ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), crm_client_id = COALESCE(VALUES(crm_client_id), crm_client_id)`,
-              [contactId, ctx.tenantId, input.customerName, canonicalPhone, canonicalPhone, input.crmClientId ?? null],
+              [contactId, ctx.tenantId, customerName, canonicalPhone, canonicalPhone, crmClientId],
             );
             const [contactRows] = await connection.execute(
               `SELECT contact_id FROM megadesk_conversation_contacts WHERE client_id = ? AND channel = 'whatsapp'
@@ -1286,6 +1327,7 @@ export const appRouter = router({
             ) as any[];
             if (activeRows.length) {
               conversationId = activeRows[0].conversation_id;
+              existingConversation = true;
             } else {
               conversationId = `conv-${randomUUID()}`;
               await withPublicCodeRetry(async (publicCode) => {
@@ -1295,8 +1337,8 @@ export const appRouter = router({
                       integration_id, active_key, customer_name, phone, company, status, last_message, time_label, messages_json,
                       assigned_user_id, assigned_user_name, opened_at)
                      VALUES (?, ?, ?, ?, ?, 'outbound', 'whatsapp', 'evolution', ?, ?, ?, ?, ?, 'open', '', '', '[]', ?, ?, NOW())`,
-                    [conversationId, ctx.tenantId, input.crmClientId ?? null, publicCode, canonicalContactId, integrationId, activeKey,
-                      input.customerName, canonicalPhone, input.company, operator.user_id, operator.name],
+                    [conversationId, ctx.tenantId, crmClientId, publicCode, canonicalContactId, integrationId, activeKey,
+                      customerName, canonicalPhone, company, operator.user_id, operator.name],
                   );
                   return publicCode;
               });
@@ -1317,19 +1359,19 @@ export const appRouter = router({
           const newConversation: any = {
             id: conversationId,
             clientId: client.clientId,
-            name: input.customerName,
+            name: customerName,
             phone: canonicalPhone,
-            company: input.company,
+            company,
             status: "open" as const,
             lastMessage: "",
             time: new Date().toLocaleString('pt-BR'),
             messages: [],
           };
           if (!conversations.some((item) => item.id === conversationId && item.clientId === ctx.tenantId)) conversations.push(newConversation);
-          audit("MegaDesk", `Conversa iniciada com ${input.customerName}`, client.clientId);
+          audit("MegaDesk", `Conversa iniciada com ${customerName}`, client.clientId);
           // Não chamar persistSyncState() aqui — a conversa já foi salva diretamente no banco
           // via createConversationDb acima. persistSyncState faz DELETE+INSERT em massa e é muito lento.
-          return { ok: true, conversationId };
+          return { ok: true, conversationId, existing: existingConversation };
         } catch (error) {
           console.error("Erro ao criar conversa:", error);
           if (error instanceof TRPCError) throw error;
