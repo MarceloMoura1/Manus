@@ -3,6 +3,7 @@ import { Phone, User, Building2, CheckCircle, AlertCircle, Loader2, ArrowRight, 
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
 import type { CrmWhatsAppIntent } from '../../../shared/crm';
+import { NewAttendanceFlow } from './NewAttendanceFlow';
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
 
@@ -12,7 +13,7 @@ type InitialCrmCustomer = CrmWhatsAppIntent & {
   email?: string;
 };
 
-export function ActiveAttendancePage({ onNavigate, initialPhone, initialCrmCustomer, embedded = false, onCancel }: {
+function LegacyActiveAttendancePage({ onNavigate, initialPhone, initialCrmCustomer, embedded = false, onCancel }: {
   onNavigate?: (route: any) => void;
   initialPhone?: string;
   initialCrmCustomer?: InitialCrmCustomer;
@@ -560,4 +561,14 @@ export function ActiveAttendancePage({ onNavigate, initialPhone, initialCrmCusto
       `}</style>
     </div>
   );
+}
+
+export function ActiveAttendancePage(props: {
+  onNavigate?: (route: any) => void;
+  initialPhone?: string;
+  initialCrmCustomer?: InitialCrmCustomer;
+  embedded?: boolean;
+  onCancel?: () => void;
+}) {
+  return <NewAttendanceFlow {...props} />;
 }

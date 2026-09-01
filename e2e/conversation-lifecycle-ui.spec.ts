@@ -8,9 +8,10 @@ const conversation = { id: "conv-ui", publicCode: "CV-260829000000-TEST", contac
   lastMessageAt: new Date().toISOString(), unreadCount: 1, status: "open", assignedUserId: "user-ui",
   assignedUserName: "Agent", lastMessageFrom: "customer" };
 
-async function mockedPage(page: Page, deepLink = false, options: { session?: typeof session; conversation?: typeof conversation } = {}) {
+async function mockedPage(page: Page, deepLink = false, options: { session?: typeof session; conversation?: typeof conversation; attendanceActive?: { id: string; customerName: string; phone: string } | null } = {}) {
   const activeSession = options.session ?? session;
   const activeConversation = options.conversation ?? conversation;
+  const attendanceActive = options.attendanceActive ?? null;
   const calls: string[] = [];
   const listInputs: Array<{ viewMode: string; status: string; search?: string }> = [];
   await page.addInitScript(value => {
@@ -42,8 +43,10 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
       : name.includes("conversations.history") ? [{ id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: conversation.id, publicCode: conversation.publicCode, status: "open", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }]
       : name.includes("conversations.linkedTickets") ? []
       : name.includes("conversations.updateContact") ? { contactId: conversation.contactId, displayName: "Cliente Editado", companyText: "Empresa Informada", canonicalPhone: conversation.customerPhone, crmClientId: conversation.crmClientId }
-      : name.includes("megadesk.searchCustomer") ? { found: true, id: "contact-ui", name: "Cliente UI", company: "Empresa CRM UI", phone: "5541999999999", exists: true, source: "contact" }
-      : name.includes("megadesk.createConversation") ? { conversationId: conversation.id }
+      : name.includes("megadesk.attendanceRecipient") ? { canonicalPhone: "5541999999999", candidates: [{ crmClientId: "crm-ui", companyName: "Empresa CRM UI", responsibleName: "Cliente UI", phone: "5541999999999", whatsapp: "5541999999999", email: "cliente@example.test" }], activeConversation: attendanceActive }
+      : name.includes("crm.create") ? { success: true, crmClientId: "crm-created-ui" }
+      : name.includes("megadesk.createConversation") ? { conversationId: conversation.id, existing: false }
+      : name.includes("megadesk.sendMessage") ? { ok: true, conversationId: conversation.id }
       : { ok: true };
     const body = names.map(name => ({ result: { data: { json: result(name) } } }));
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(url.searchParams.get("batch") === "1" ? body : body[0]) });
@@ -197,8 +200,8 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     expect(calls.some(name => name.includes("megadesk.getConversations"))).toBe(false);
   });
 
-  test("unifies navigation and reuses the active attendance flow in the chat area", async ({ page }) => {
-    await mockedPage(page, true);
+  test("starts an attendance from an unregistered number without creating a CRM client", async ({ page }) => {
+    const { calls } = await mockedPage(page, true);
     await page.getByTitle("Abrir menu").click();
     const navigation = page.getByRole("navigation").first();
     await expect(navigation.getByRole("button", { name: /^Atendimento/ })).toBeVisible();
@@ -206,17 +209,68 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(navigation.getByRole("button", { name: "Atendimento Ativo", exact: true })).toHaveCount(0);
 
     await page.getByRole("button", { name: "Novo atendimento" }).click();
-    const composer = page.getByTestId("new-attendance-composer");
-    await expect(composer).toBeVisible();
-    await expect(composer.getByRole("heading", { name: "Novo atendimento" })).toBeVisible();
-    const phone = composer.getByPlaceholder(/Digite o n.mero/);
+    const flow = page.getByTestId("new-attendance-flow");
+    await expect(flow).toBeVisible();
+    await expect(flow.getByRole("heading", { name: "Novo atendimento" })).toBeVisible();
+    const phone = flow.getByLabel("Para", { exact: true });
     await phone.fill("5541999999999");
-    await composer.getByRole("button", { name: "Buscar cliente" }).click();
-    await expect(composer.getByRole("button", { name: "Iniciar Conversa no WhatsApp" })).toBeVisible();
-    await composer.getByRole("button", { name: "Iniciar Conversa no WhatsApp" }).click();
-    await expect(composer.getByText(/Conversa iniciada com Cliente UI/)).toBeVisible();
-    await expect(composer).toHaveCount(0, { timeout: 3_000 });
+    await expect(flow.getByText("Usar este número", { exact: true })).toBeVisible();
+    expect(calls.some(name => name.includes("megadesk.createConversation"))).toBe(false);
+    await flow.getByText("Usar este número", { exact: true }).click();
+    await expect(flow.getByTestId("unregistered-number-card")).toBeVisible();
+    const message = flow.getByLabel("Mensagem", { exact: true });
+    await expect(message).toBeEnabled();
+    await message.fill("Olá, preciso de atendimento.");
+    await flow.getByRole("button", { name: "Enviar mensagem" }).click();
+    await expect.poll(() => calls.some(name => name.includes("megadesk.createConversation"))).toBe(true);
+    await expect.poll(() => calls.some(name => name.includes("megadesk.sendMessage"))).toBe(true);
+    expect(calls.some(name => name.includes("crm.create"))).toBe(false);
+    await expect(page.getByTestId("new-attendance-composer")).toHaveCount(0, { timeout: 3_000 });
     await expect(page.getByTestId("conversation-chat-panel").getByText("Mensagem legada")).toBeVisible();
+  });
+
+  test("shows CRM data in the blue customer card", async ({ page }) => {
+    await mockedPage(page);
+    await page.getByRole("button", { name: "Novo atendimento" }).click();
+    const flow = page.getByTestId("new-attendance-flow");
+    await flow.getByLabel("Para", { exact: true }).fill("5541999999999");
+    await flow.getByRole("button", { name: /Cliente UI/ }).click();
+    const customerCard = flow.getByTestId("existing-customer-card");
+    await expect(customerCard).toBeVisible();
+    await expect(customerCard).toContainText("Cliente UI");
+    await expect(customerCard).toContainText("Empresa CRM UI");
+    await expect(customerCard).toContainText("+5541999999999");
+  });
+
+  test("keeps optional CRM creation inside the new attendance flow and preserves the message", async ({ page }) => {
+    const { calls } = await mockedPage(page);
+    await page.getByRole("button", { name: "Novo atendimento" }).click();
+    const flow = page.getByTestId("new-attendance-flow");
+    await flow.getByLabel("Para", { exact: true }).fill("5541999999999");
+    await flow.getByText("Usar este número", { exact: true }).click();
+    const message = flow.getByLabel("Mensagem", { exact: true });
+    await message.fill("Mensagem preservada");
+    await flow.getByRole("button", { name: "Cadastrar cliente" }).click();
+    const form = flow.getByTestId("optional-customer-form");
+    await form.getByLabel("Nome").fill("Cliente criado no fluxo");
+    await form.getByRole("button", { name: "Salvar cliente" }).click();
+    await expect(flow.getByTestId("existing-customer-card")).toBeVisible();
+    await expect(message).toHaveValue("Mensagem preservada");
+    await expect.poll(() => calls.some(name => name.includes("crm.create"))).toBe(true);
+    expect(calls.some(name => name.includes("megadesk.createConversation"))).toBe(false);
+  });
+
+  test("blocks a new attendance when a server-side lookup finds an active one", async ({ page }) => {
+    await mockedPage(page, false, { attendanceActive: { id: "conv-active-ui", customerName: "Cliente em atendimento", phone: "5541999999999" } });
+    await page.getByRole("button", { name: "Novo atendimento" }).click();
+    const flow = page.getByTestId("new-attendance-flow");
+    await flow.getByLabel("Para", { exact: true }).fill("5541999999999");
+    await flow.getByText("Usar este número", { exact: true }).click();
+    await expect(flow.getByTestId("active-attendance-warning")).toBeVisible();
+    await expect(flow.getByLabel("Mensagem", { exact: true })).toBeDisabled();
+    await flow.getByRole("button", { name: "Abrir atendimento" }).click();
+    await expect(page.getByTestId("new-attendance-composer")).toHaveCount(0);
+    await expect(page.getByTestId("conversation-chat-panel")).toBeVisible();
   });
 
   test("routes the legacy active-attendance intent into the unified composer", async ({ page }) => {
@@ -225,11 +279,11 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await page.evaluate(() => window.dispatchEvent(new CustomEvent("megadesk-navigate", {
       detail: { route: "active-attendance", phone: "5541999999999" },
     })));
-    const composer = page.getByTestId("new-attendance-composer");
-    await expect(composer).toBeVisible();
-    await expect(composer.getByPlaceholder(/Digite o n.mero/)).toHaveValue("5541999999999");
-    await composer.getByRole("button", { name: "Cancelar novo atendimento" }).click();
-    await expect(composer).toHaveCount(0);
+    const flow = page.getByTestId("new-attendance-flow");
+    await expect(flow).toBeVisible();
+    await expect(flow.getByLabel("Para", { exact: true })).toHaveValue("5541999999999");
+    await flow.getByRole("button", { name: "Fechar novo atendimento" }).click();
+    await expect(flow).toHaveCount(0);
     await expect(page.getByTestId("conversation-list-panel")).toBeVisible();
   });
 
