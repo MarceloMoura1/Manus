@@ -34,3 +34,27 @@ export function sameContactPhone(a: string | null | undefined, b: string | null 
   const right = normalizeContactPhone(b);
   return left.status === "valid" && right.status === "valid" && left.value === right.value;
 }
+
+/**
+ * Produz as representações somente-numéricas que podem existir em cadastros
+ * legados. A identidade continua sendo definida exclusivamente por
+ * normalizeContactPhone; estas variantes existem apenas para localizar linhas
+ * ainda armazenadas com máscara, sem DDI ou sem o nono dígito histórico.
+ */
+export function contactPhoneStorageDigitsVariants(input: string | null | undefined): string[] {
+  const normalized = normalizeContactPhone(input);
+  if (normalized.status !== "valid") return [];
+
+  const variants = new Set([normalized.value]);
+  if (normalized.country === "BR") {
+    variants.add(normalized.value.slice(2));
+    // O normalizador já reconhece cadastros brasileiros antigos sem o nono
+    // dígito. Incluímos essas formas somente para encontrá-los no banco.
+    if (normalized.value.length === 13 && normalized.value[4] === "9") {
+      const legacyWithDdi = `${normalized.value.slice(0, 4)}${normalized.value.slice(5)}`;
+      variants.add(legacyWithDdi);
+      variants.add(legacyWithDdi.slice(2));
+    }
+  }
+  return [...variants];
+}

@@ -36,6 +36,7 @@ import { loadOutboundConversation, resolveOutboundRecipient, safeOutboundProvide
 import { assertOperationalCsrf, clearOperationalSessionCookie, createOperationalSession, revokeOperationalSession } from "./_core/megadesk-session";
 import { erpRouter } from "./modules/erp/router";
 import { normalizeContactPhone } from "../shared/contact-phone";
+import { findAttendanceRecipientByPhone, searchAttendanceRecipients } from "./attendance-recipients";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -1054,22 +1055,8 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "Operador sem acesso ao Atendimento Ativo." });
         }
 
-        const term = input.query.trim();
-        const normalized = normalizeContactPhone(term);
-        const canonicalPhone = normalized.status === "valid" ? normalized.value : null;
-        const textSearch = `%${term}%`;
-        const digits = term.replace(/\D/g, "");
-        const digitSearch = `%${digits}%`;
-        const [candidates] = await getPool().execute(
-          `SELECT crm_client_id AS crmClientId, company_name AS companyName,
-                  responsible_name AS responsibleName, phone, whatsapp, email
-             FROM megadesk_crm_clients
-            WHERE client_id = ? AND lifecycle_state = 'active'
-              AND (company_name LIKE ? OR responsible_name LIKE ?
-                   OR (? <> '' AND (phone LIKE ? OR whatsapp LIKE ?)))
-            ORDER BY company_name, crm_client_id LIMIT 10`,
-          [ctx.tenantId, textSearch, textSearch, digits, digitSearch, digitSearch],
-        ) as any[];
+        const lookup = await searchAttendanceRecipients(getPool(), ctx.tenantId, input.query);
+        const { canonicalPhone, candidates } = lookup;
 
         let activeConversation: { id: string; customerName: string; phone: string } | null = null;
         if (canonicalPhone) {
@@ -1275,18 +1262,11 @@ export const appRouter = router({
           }
           const operator = operatorRows[0] as { user_id: string; name: string };
 
-          const [crmRows] = await getPool().execute(
-            `SELECT crm_client_id, company_name, responsible_name
-               FROM megadesk_crm_clients
-              WHERE client_id = ? AND lifecycle_state = 'active' AND (phone = ? OR whatsapp = ?)
-              ORDER BY crm_client_id LIMIT 1`,
-            [ctx.tenantId, canonicalPhone, canonicalPhone],
-          ) as any[];
-          const crmCustomer = crmRows[0] as { crm_client_id: string; company_name: string; responsible_name: string } | undefined;
-          const customerName = crmCustomer?.responsible_name?.trim() || crmCustomer?.company_name?.trim()
+          const crmCustomer = await findAttendanceRecipientByPhone(getPool(), ctx.tenantId, canonicalPhone);
+          const customerName = crmCustomer?.responsibleName?.trim() || crmCustomer?.companyName?.trim()
             || canonicalPhone;
-          const company = crmCustomer?.company_name?.trim() || "";
-          const crmClientId = crmCustomer?.crm_client_id ?? null;
+          const company = crmCustomer?.companyName?.trim() || "";
+          const crmClientId = crmCustomer?.crmClientId ?? null;
 
           const { getSession } = await import("./evolution/session-store");
           const evolutionSession = await getSession(ctx.tenantId);

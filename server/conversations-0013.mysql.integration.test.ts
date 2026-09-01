@@ -17,6 +17,7 @@ const concurrentPhone = "5511999990002";
 const activePhone = "5511999990003";
 const directOutboundConcurrentPhone = "5511999990004";
 const crmPhone = "5511999990005";
+const crmLegacyStoredPhone = "(11) 99999-0005";
 const brazilianActivePhoneVariants = [
   "11999990003",
   "(11) 99999-0003",
@@ -96,7 +97,7 @@ physical.sequential("Conversations 0013 physical lifecycle", () => {
       `INSERT INTO megadesk_crm_clients
        (crm_client_id,client_id,customer_type,company_name,responsible_name,phone,whatsapp,status,origin)
        VALUES ('crm-mask-a',?,'person','Masked CRM Customer','Masked CRM Customer',?,?,'ativo','whatsapp')`,
-      [tenantA, crmPhone, crmPhone],
+       [tenantA, crmLegacyStoredPhone, crmLegacyStoredPhone],
     );
     await pool.execute(
       `INSERT INTO megadesk_domain_client_users
