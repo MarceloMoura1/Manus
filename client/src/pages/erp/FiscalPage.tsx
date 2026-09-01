@@ -3,6 +3,7 @@ import { AlertCircle, RefreshCw } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ErpPageHeader } from "@/components/erp/ErpPageHeader";
 import {
   Dialog,
   DialogContent,
@@ -97,15 +98,10 @@ export function FiscalPage() {
   const canWrite = summary.data?.canWrite === true;
   return (
     <div data-testid="erp-fiscal-page" className="min-w-0 space-y-5">
-      <header>
-        <h1 className="text-2xl font-bold">Fiscal</h1>
-        <p className="text-sm text-slate-600">
-          Fundação fiscal e documentos internos do tenant.
-        </p>
-      </header>
+      <ErpPageHeader title="Fiscal" />
       <div
         role="alert"
-        className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-900"
+        className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-900 shadow-sm"
       >
         <strong>Emissão fiscal eletrônica ainda não configurada.</strong>
         <p className="text-sm">
@@ -113,7 +109,7 @@ export function FiscalPage() {
           validade fiscal.
         </p>
       </div>
-      <nav aria-label="Seções fiscais" className="flex flex-wrap gap-2">
+      <nav aria-label="Seções fiscais" className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-2 shadow-sm">
         {[
           ["summary", "Resumo fiscal"],
           ["settings", "Configuração fiscal"],
@@ -122,6 +118,7 @@ export function FiscalPage() {
         ].map(([id, label]) => (
           <Button
             key={id}
+            className="rounded-xl"
             variant={tab === id ? "default" : "outline"}
             onClick={() => setTab(id as typeof tab)}
           >
@@ -139,7 +136,7 @@ export function FiscalPage() {
           ].map(([label, value]) => (
             <article
               key={String(label)}
-              className="rounded-2xl border bg-white p-4"
+              className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
             >
               <p className="text-sm text-slate-500">{label}</p>
               <strong className="text-2xl">{Number(value ?? 0)}</strong>

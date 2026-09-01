@@ -3,6 +3,7 @@ import { Download, RefreshCw } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ErpPageHeader } from "@/components/erp/ErpPageHeader";
 type Section =
   | "executive"
   | "sales"
@@ -126,18 +127,13 @@ export function ReportsPage() {
         : [];
   return (
     <div data-testid="erp-reports-page" className="min-w-0 space-y-5">
-      <header>
-        <h1 className="text-2xl font-bold">Relatórios essenciais</h1>
-        <p className="text-sm text-slate-600">
-          Indicadores operacionais do período. Não substituem BI, contabilidade
-          ou apuração fiscal.
-        </p>
-      </header>
-      <nav aria-label="Seções de relatórios" className="flex flex-wrap gap-2">
+      <ErpPageHeader title="Relatórios essenciais" />
+      <nav aria-label="Seções de relatórios" className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-2 shadow-sm">
         {sections.map(([id, label]) => (
           <Button
             key={id}
             aria-current={section === id ? "page" : undefined}
+            className="rounded-xl"
             variant={section === id ? "default" : "outline"}
             onClick={e => {
               setSection(id);
@@ -152,7 +148,7 @@ export function ReportsPage() {
       </nav>
       <section
         aria-label="Filtros"
-        className="grid gap-3 rounded-2xl border bg-white p-4 sm:grid-cols-2 lg:grid-cols-4"
+          className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4"
       >
         <label className="text-sm">
           Data inicial
@@ -254,7 +250,7 @@ export function ReportsPage() {
           className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
         >
           {cards.map(c => (
-            <article key={c.key} className="rounded-2xl border bg-white p-4">
+            <article key={c.key} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-sm text-slate-500">{c.label}</p>
               <strong className="text-xl">{display(c.key, c.value)}</strong>
             </article>
