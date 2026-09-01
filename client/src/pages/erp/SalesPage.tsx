@@ -121,12 +121,7 @@ export function SalesPage() {
   return (
     <div className="min-w-0 space-y-5" data-testid="erp-sales-page">
       <header className="flex flex-wrap justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Vendas</h1>
-          <p className="text-sm text-slate-600">
-            Pedidos, aprovaÃ§Ã£o e conclusão integral.
-          </p>
-        </div>
+        <h1 className="text-2xl font-bold">Vendas</h1>
         {canWrite && (
           <Button onClick={() => setForm(blank())}>Novo pedido</Button>
         )}

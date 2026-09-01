@@ -40,7 +40,7 @@ export function SuppliersPage() {
   const submit=(event:React.FormEvent)=>{event.preventDefault();if(!form||pending)return;const {publicId,...input}=form;if(publicId)update.mutate({publicId,...input});else create.mutate(input);};
   const totalPages=query.data?.totalPages??0;
   return <div className="space-y-5" data-testid="erp-suppliers-page">
-    <header className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-bold">Fornecedores</h1><p className="text-sm text-slate-600">Cadastro e consulta isolados por tenant.</p></div>{canWrite&&<Button onClick={()=>setForm({...emptySupplier})}>Novo fornecedor</Button>}</header>
+    <header className="flex flex-wrap items-end justify-between gap-3"><h1 className="text-2xl font-bold">Fornecedores</h1>{canWrite&&<Button onClick={()=>setForm({...emptySupplier})}>Novo fornecedor</Button>}</header>
     {message&&<p role="status" className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">{message}</p>}
     {query.data&&<section aria-label="Resumo de fornecedores" className="grid grid-cols-3 gap-3">{[["Total",query.data.total],["Ativos",query.data.activeCount],["Inativos",query.data.inactiveCount]].map(([label,value])=><article key={label} className="rounded-2xl border bg-white p-4"><p className="text-xs text-slate-500">{label}</p><p className="text-xl font-bold">{value}</p></article>)}</section>}
     <section aria-label="Filtros de fornecedores" className="grid gap-3 rounded-2xl border bg-white p-4 sm:grid-cols-2 xl:grid-cols-4">

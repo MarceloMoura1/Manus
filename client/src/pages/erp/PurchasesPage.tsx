@@ -125,12 +125,7 @@ export function PurchasesPage() {
   return (
     <div className="min-w-0 space-y-5" data-testid="erp-purchases-page">
       <header className="flex flex-wrap justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Compras</h1>
-          <p className="text-sm text-slate-600">
-            Pedidos, aprovação e recebimento integral.
-          </p>
-        </div>
+        <h1 className="text-2xl font-bold">Compras</h1>
         {canWrite && (
           <Button onClick={() => setForm(blank())}>Novo pedido</Button>
         )}
