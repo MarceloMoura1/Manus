@@ -77,8 +77,11 @@ const supplier = {
 function result(json: unknown) {
   return { result: { data: { json } } };
 }
+function erpModules(page: Page) {
+  return page.getByRole("navigation", { name: "Módulos do ERP", exact: true });
+}
 async function prepareClosedMobileDrawer(page: Page) {
-  const drawer = page.getByLabel("Menu principal");
+  const drawer = page.getByLabel("Menu principal",{exact:true});
   const overlay = page.getByRole("button", { name: "Fechar menu lateral" });
   const trigger = page.locator("header").getByTitle("Abrir menu");
   await expect(
@@ -231,15 +234,15 @@ test.describe("ERP products and stock", () => {
   }) => {
     await prepare(page);
     await expect(
-      page.getByRole("button", { name: "Fornecedores", exact: true })
+      erpModules(page).getByRole("button", { name: "Fornecedores", exact: true })
     ).toBeEnabled();
     await expect(
-      page.getByRole("button", { name: "Compras", exact: true })
+      erpModules(page).getByRole("button", { name: "Compras", exact: true })
     ).toBeEnabled();
-    await page.getByRole("button", { name: "Produtos" }).click();
+    await erpModules(page).getByRole("button", { name: "Produtos", exact: true }).click();
     await expect(page).toHaveURL(/\/erp\/produtos$/);
     await expect(page.getByTestId("erp-products-page")).toBeVisible();
-    await page.getByRole("button", { name: "Estoque" }).click();
+    await erpModules(page).getByRole("button", { name: "Estoque", exact: true }).click();
     await expect(page).toHaveURL(/\/erp\/estoque$/);
     await expect(page.getByTestId("erp-stock-page")).toBeVisible();
   });
@@ -247,7 +250,7 @@ test.describe("ERP products and stock", () => {
     page,
   }) => {
     await prepare(page, { empty: true });
-    await page.getByRole("button", { name: "Produtos" }).click();
+    await erpModules(page).getByRole("button", { name: "Produtos", exact: true }).click();
     await page.getByRole("button", { name: "Novo produto" }).click();
     await page.getByLabel("Nome").fill("Produto novo");
     await page.getByLabel("SKU").fill("novo-1");
@@ -259,13 +262,13 @@ test.describe("ERP products and stock", () => {
   for(const viewport of [{width:390,height:844},{width:768,height:1024},{width:1024,height:768},{width:1440,height:900}])test(`renders private product thumbnails safely at ${viewport.width}px`,async({browser})=>{
     const context=await browser.newContext({viewport});const page=await context.newPage();let imageRequests=0;
     await page.route("**/api/products/*/image?variant=thumbnail*",async route=>{imageRequests++;await route.fulfill({status:200,contentType:"image/webp",body:Buffer.from("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEALmk0mk0iIiIiIgBoSygABc6zbAAA","base64")});});
-    await prepare(page,{hasImage:true});if(viewport.width<1024)await prepareClosedMobileDrawer(page);await page.getByRole("button",{name:"Produtos"}).click();
+    await prepare(page,{hasImage:true});if(viewport.width<1024)await prepareClosedMobileDrawer(page);await erpModules(page).getByRole("button",{name:"Produtos",exact:true}).click();
     const image=page.getByRole("img",{name:`Foto de ${product.name}`});await expect(image).toBeVisible();await expect(image).toHaveAttribute("loading","lazy");await expect.poll(()=>imageRequests).toBeGreaterThan(0);
     expect(await image.evaluate(element=>getComputedStyle(element).objectFit)).toBe("cover");expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(viewport.width);
     await context.close();
   });
   test("uses a stable placeholder and performs no image fetch without a reference",async({page})=>{
-    let imageRequests=0;await page.route("**/api/products/*/image**",route=>{imageRequests++;return route.abort();});await prepare(page);await page.getByRole("button",{name:"Produtos"}).click();
+    let imageRequests=0;await page.route("**/api/products/*/image**",route=>{imageRequests++;return route.abort();});await prepare(page);await erpModules(page).getByRole("button",{name:"Produtos",exact:true}).click();
     await expect(page.getByTestId("product-image-placeholder").first()).toBeVisible();expect(imageRequests).toBe(0);
   });
   test("uploads, reloads, replaces and removes a private product image",async({page})=>{
@@ -276,7 +279,7 @@ test.describe("ERP products and stock", () => {
       if(method==="DELETE"){deletes++;state.hasImage=false;await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({ok:true})});return;}
       gets++;await route.fulfill({status:200,contentType:"image/webp",body:Buffer.from("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEALmk0mk0iIiIiIgBoSygABc6zbAAA","base64")});
     });
-    await prepare(page,state);await page.getByRole("button",{name:"Produtos"}).click();
+    await prepare(page,state);await erpModules(page).getByRole("button",{name:"Produtos",exact:true}).click();
     await expect(page.getByTestId("product-image-placeholder").first()).toBeVisible();
     await page.getByRole("button",{name:"Editar"}).click();let dialog=page.getByRole("dialog");let input=dialog.locator('input[type="file"]');
     await input.setInputFiles({name:"first.png",mimeType:"image/png",buffer:Buffer.from("first")});await dialog.getByRole("button",{name:"Salvar",exact:true}).click();
@@ -291,7 +294,7 @@ test.describe("ERP products and stock", () => {
   test("revokes ObjectURLs on replacement and dialog teardown while preserving fields on upload failure",async({page})=>{
     await page.addInitScript(()=>{const created:string[]=[];const revoked:string[]=[];let index=0;URL.createObjectURL=()=>{const value=`blob:synthetic-${++index}`;created.push(value);return value};URL.revokeObjectURL=value=>revoked.push(String(value));Object.assign(window,{__mediaUrls:{created,revoked}});});
     await page.route("**/api/products/*/image",route=>route.fulfill({status:400,contentType:"application/json",body:JSON.stringify({error:"Imagem inválida."})}));
-    await prepare(page,{hasImage:true});await page.getByRole("button",{name:"Produtos"}).click();await page.getByRole("button",{name:"Editar"}).click();const dialog=page.getByRole("dialog");
+    await prepare(page,{hasImage:true});await erpModules(page).getByRole("button",{name:"Produtos",exact:true}).click();await page.getByRole("button",{name:"Editar"}).click();const dialog=page.getByRole("dialog");
     const input=dialog.locator('input[type="file"]');await input.setInputFiles({name:"one.png",mimeType:"image/png",buffer:Buffer.from("one")});await input.setInputFiles({name:"two.png",mimeType:"image/png",buffer:Buffer.from("two")});
     expect(await page.evaluate(()=>(window as any).__mediaUrls.revoked.length)).toBeGreaterThanOrEqual(1);await dialog.getByRole("button",{name:"Salvar",exact:true}).click();await expect(page.getByText("Imagem inválida.")).toBeVisible();await expect(dialog.getByLabel("Nome")).toHaveValue(product.name);
     await page.keyboard.press("Escape");await expect(dialog).toBeHidden();expect(await page.evaluate(()=>(window as any).__mediaUrls.revoked.length)).toBeGreaterThanOrEqual(2);
@@ -300,7 +303,7 @@ test.describe("ERP products and stock", () => {
     page,
   }) => {
     await prepare(page);
-    await page.getByRole("button", { name: "Estoque", exact: true }).click();
+    await erpModules(page).getByRole("button", { name: "Estoque", exact: true }).click();
     await page.getByRole("button", { name: "Nova movimentação" }).click();
     await page
       .getByRole("dialog")
@@ -324,15 +327,12 @@ test.describe("ERP products and stock", () => {
         () => document.documentElement.scrollWidth <= window.innerWidth
       )
     ).toBe(true);
-    const workspace = page.getByTestId("erp-workspace");
-    await workspace.getByRole("button", { name: "Produtos" }).click();
+    await erpModules(page).getByRole("button", { name: "Produtos", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "Novo produto" })
     ).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Editar" })).toHaveCount(0);
-    await workspace
-      .getByRole("button", { name: "Estoque", exact: true })
-      .click();
+    await erpModules(page).getByRole("button", { name: "Estoque", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "Nova movimentação" })
     ).toHaveCount(0);
@@ -385,10 +385,7 @@ test.describe("ERP products and stock", () => {
       await expect(drawer).toBeHidden();
       await expect(overlay).toHaveCount(0);
       await expect(page.locator("main")).toBeFocused();
-      await page
-        .getByTestId("erp-workspace")
-        .getByRole("button", { name: "Produtos", exact: true })
-        .click();
+      await erpModules(page).getByRole("button", { name: "Produtos", exact: true }).click();
       await expect(page).toHaveURL(/\/erp\/produtos$/);
       await expect(page.getByTestId("erp-products-page")).toBeVisible();
     });
