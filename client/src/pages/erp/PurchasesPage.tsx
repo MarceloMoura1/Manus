@@ -2,6 +2,7 @@ import React from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ErpPageHeader } from "@/components/erp/ErpPageHeader";
 import {
   Dialog,
   DialogContent,
@@ -123,19 +124,20 @@ export function PurchasesPage() {
       });
     };
   return (
-    <div className="min-w-0 space-y-5" data-testid="erp-purchases-page">
-      <header className="flex flex-wrap justify-between gap-3">
-        <h1 className="text-2xl font-bold">Compras</h1>
-        {canWrite && (
+    <div className="min-w-0 space-y-6" data-testid="erp-purchases-page">
+      <ErpPageHeader
+        title="Compras"
+        eyebrow="Suprimentos"
+        actions={canWrite && (
           <Button onClick={() => setForm(blank())}>Novo pedido</Button>
         )}
-      </header>
+      />
       {message && (
-        <p role="status" className="rounded-lg bg-green-50 p-3">
+        <p role="status" className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-900">
           {message}
         </p>
       )}
-      <div className="grid gap-3 rounded-2xl border bg-white p-4 sm:grid-cols-2">
+      <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 shadow-sm sm:grid-cols-2">
         <Input
           aria-label="Pesquisar compras"
           placeholder="Número ou fornecedor"
@@ -147,7 +149,7 @@ export function PurchasesPage() {
         />
         <select
           aria-label="Filtrar status de compra"
-          className="rounded-lg border px-3"
+          className="min-h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm"
           value={status}
           onChange={e => setStatus(e.target.value as typeof status)}
         >
@@ -174,26 +176,29 @@ export function PurchasesPage() {
           }
         />
       ) : (
-        <div className="grid gap-3">
+        <div className="grid gap-3 lg:grid-cols-2">
           {list.data.items.map(
             (o: NonNullable<typeof list.data>["items"][number]) => (
               <article
-                className="rounded-2xl border bg-white p-4"
+                className="group relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
                 key={o.publicId}
               >
-                <div className="flex flex-wrap justify-between gap-2">
-                  <div>
-                    <h2 className="font-semibold">{o.orderNumber}</h2>
-                    <p>{o.supplierName}</p>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Pedido de compra</p>
+                    <h2 className="mt-1 text-lg font-bold tracking-tight text-slate-950">{o.orderNumber}</h2>
+                    <p className="mt-1 truncate text-sm font-medium text-slate-600">{o.supplierName}</p>
                   </div>
-                  <div>
-                    <p className="font-bold">
+                  <div className="text-right">
+                    <p className="text-lg font-bold tracking-tight text-slate-950">
                       {money.format(o.totalCents / 100)}
                     </p>
-                    <p>{label(o.status)}</p>
+                    <span className={o.status === "received" ? "mt-2 inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700" : o.status === "cancelled" ? "mt-2 inline-flex rounded-full bg-rose-50 px-2.5 py-1 text-xs font-bold text-rose-700" : o.status === "approved" ? "mt-2 inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700" : "mt-2 inline-flex rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700"}>{label(o.status)}</span>
                   </div>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+                  <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Fluxo de suprimentos</span>
+                  <div className="flex flex-wrap gap-2">
                   <Button
                     variant="outline"
                     onClick={() => setDetail(o.publicId)}
@@ -244,6 +249,7 @@ export function PurchasesPage() {
                       Receber
                     </Button>
                   )}
+                  </div>
                 </div>
               </article>
             )
