@@ -1,2 +1,3 @@
 drizzle/main-migrations/*.sql text eol=lf
 drizzle/main-migrations/meta/*_snapshot.json text eol=lf
+drizzle/schema.ts text eol=lf
