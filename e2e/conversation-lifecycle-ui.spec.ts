@@ -49,7 +49,7 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
       : name.includes("conversations.history") ? [{ id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: conversation.id, publicCode: conversation.publicCode, status: "open", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }]
       : name.includes("conversations.linkedTickets") ? []
       : name.includes("conversations.updateContact") ? { contactId: conversation.contactId, displayName: "Cliente Editado", companyText: "Empresa Informada", canonicalPhone: conversation.customerPhone, crmClientId: conversation.crmClientId }
-      : name.includes("megadesk.attendanceRecipient") ? { canonicalPhone: "5541999999999", candidates: [{ crmClientId: "crm-ui", companyName: "Empresa CRM UI", responsibleName: "Cliente UI", phone: "5541999999999", whatsapp: "5541999999999", email: "cliente@example.test" }], activeConversation: attendanceActive }
+      : name.includes("megadesk.attendanceRecipient") ? { canonicalPhone: "5541999999999", candidates: [{ crmClientId: "crm-ui", companyName: "Empresa CRM UI", responsibleName: "Cliente UI", phone: "5541999999999", whatsapp: "5541999999999", recipientPhone: "5541999999999", email: "cliente@example.test" }], activeConversation: attendanceActive }
       : name.includes("crm.create") ? { success: true, crmClientId: "crm-created-ui" }
       : name.includes("megadesk.createConversation") ? { conversationId: conversation.id, existing: false }
       : name.includes("megadesk.sendMessage") ? { ok: true, conversationId: conversation.id }
@@ -276,6 +276,57 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     expect(calls.some(name => name.includes("megadesk.createConversation"))).toBe(false);
   });
 
+  test("sends the first attachment through the official outbound endpoint", async ({ page }) => {
+    const { calls } = await mockedPage(page);
+    await page.getByRole("button", { name: "Novo atendimento" }).click();
+    const flow = page.getByTestId("new-attendance-flow");
+    await flow.getByLabel("Para", { exact: true }).fill("5541999999999");
+    await flow.getByText("Usar este número", { exact: true }).click();
+    await flow.locator('input[type="file"]').setInputFiles({
+      name: "primeiro-contato.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("anexo controlado"),
+    });
+    await expect(flow.getByText("primeiro-contato.txt", { exact: true })).toBeVisible();
+    await flow.getByRole("button", { name: "Enviar mensagem" }).click();
+    await expect.poll(() => calls.some(name => name.includes("megadesk.createConversation"))).toBe(true);
+    await expect.poll(() => calls.some(name => name.includes("megadesk.sendAttachment"))).toBe(true);
+    expect(calls.some(name => name.includes("megadesk.sendMessage"))).toBe(false);
+  });
+
+  test("records and sends the first audio through the official outbound endpoint", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: {
+        getUserMedia: async () => ({ getTracks: () => [{ stop: () => undefined }] }),
+      } });
+      class FakeMediaRecorder {
+        static isTypeSupported() { return true; }
+        mimeType = "audio/webm;codecs=opus";
+        state: "inactive" | "recording" = "inactive";
+        ondataavailable: ((event: BlobEvent) => unknown) | null = null;
+        onstop: ((event: Event) => unknown) | null = null;
+        onerror: ((event: ErrorEvent) => unknown) | null = null;
+        start() { this.state = "recording"; }
+        stop() {
+          this.state = "inactive";
+          this.ondataavailable?.({ data: new Blob(["audio controlado"], { type: this.mimeType }) } as BlobEvent);
+          queueMicrotask(() => this.onstop?.(new Event("stop")));
+        }
+      }
+      Object.defineProperty(window, "MediaRecorder", { configurable: true, value: FakeMediaRecorder });
+    });
+    const { calls } = await mockedPage(page);
+    await page.getByRole("button", { name: "Novo atendimento" }).click();
+    const flow = page.getByTestId("new-attendance-flow");
+    await flow.getByLabel("Para", { exact: true }).fill("5541999999999");
+    await flow.getByText("Usar este número", { exact: true }).click();
+    await flow.getByRole("button", { name: "Gravar áudio" }).click();
+    await expect(flow.getByRole("button", { name: "Enviar áudio" })).toBeVisible();
+    await flow.getByRole("button", { name: "Enviar áudio" }).click();
+    await expect.poll(() => calls.some(name => name.includes("megadesk.createConversation"))).toBe(true);
+    await expect.poll(() => calls.some(name => name.includes("megadesk.sendAttachment"))).toBe(true);
+  });
+
   test("blocks a new attendance when a server-side lookup finds an active one", async ({ page }) => {
     await mockedPage(page, false, { attendanceActive: { id: "conv-active-ui", customerName: "Cliente em atendimento", phone: "5541999999999" } });
     await page.getByRole("button", { name: "Novo atendimento" }).click();
@@ -359,6 +410,18 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       const newAttendance = page.getByTestId("attendance-action-controls").getByRole("button", { name: "Novo atendimento" });
       await expect(newAttendance.locator("span")).toHaveCSS("white-space", "nowrap");
+      await newAttendance.click();
+      const newAttendanceFlow = page.getByTestId("new-attendance-flow");
+      const newAttendanceComposer = page.getByTestId("new-attendance-message-composer");
+      await expect(newAttendanceFlow).toBeVisible();
+      await expect(newAttendanceComposer).toBeVisible();
+      const [flowBox, chatBox] = await Promise.all([newAttendanceFlow.boundingBox(), page.getByTestId("conversation-chat-panel").boundingBox()]);
+      expect(flowBox).not.toBeNull();
+      expect(chatBox).not.toBeNull();
+      expect(flowBox!.x).toBe(chatBox!.x);
+      expect(flowBox!.width).toBe(chatBox!.width);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await newAttendanceFlow.getByRole("button", { name: "Fechar novo atendimento" }).click();
       await page.getByText("Cliente UI").click();
       await expect(page.getByTestId("conversation-composer")).toBeVisible();
       await page.locator('button[aria-controls="conversation-details-panel"]').click();
@@ -375,12 +438,10 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
       await expect(page.getByText("Digite para buscar um cadastro.")).toBeVisible();
       expect(candidateCalls()).toBe(0);
       await search.fill(" ");
-      await page.waitForTimeout(350);
-      expect(candidateCalls()).toBe(0);
+      await expect.poll(candidateCalls).toBe(0);
       await search.fill("E");
       await expect(page.getByText("Digite pelo menos 2 caracteres.")).toBeVisible();
-      await page.waitForTimeout(350);
-      expect(candidateCalls()).toBe(0);
+      await expect.poll(candidateCalls).toBe(0);
       await search.fill("Em");
       await expect.poll(candidateCalls).toBe(1);
       await expect(page.locator("#crm-link-search").getByText("Empresa CRM UI", { exact: true })).toBeVisible();

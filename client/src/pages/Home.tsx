@@ -31,6 +31,7 @@ import {
   type AudioRecordingPhase,
   type PreparedRecordedAudio,
 } from "@/lib/audioRecordingController";
+import { outboundAttachmentAccept, prepareOutboundAttachment, type PreparedOutboundAttachment } from "@/lib/outboundAttachment";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -411,7 +412,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   const [crmHandoffState, setCrmHandoffState] = React.useState<'idle' | 'resolving' | 'composer' | 'error'>(() => crmIntent ? 'resolving' : 'idle');
   const [conversations, setConversations] = React.useState<any[]>([]);
   const [messageInput, setMessageInput] = React.useState('');
-  const [attachment, setAttachment] = React.useState<{ kind: 'image' | 'video' | 'audio' | 'document' | 'sticker'; dataUrl: string; mimeType: string; fileName: string } | null>(null);
+  const [attachment, setAttachment] = React.useState<PreparedOutboundAttachment | null>(null);
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
   const [optimisticMessages, setOptimisticMessages] = React.useState<any[]>([]);
   const [audioRecordingPhase, setAudioRecordingPhase] = React.useState<AudioRecordingPhase>('idle');
@@ -805,18 +806,9 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   React.useEffect(() => () => audioControllerRef.current?.dispose(), []);
 
   const prepareAttachment = React.useCallback((file: File) => {
-    const kind = file.type === 'image/webp' ? 'sticker' : file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'document';
-    const limits = { image: 8_000_000, sticker: 8_000_000, audio: 12_000_000, video: 20_000_000, document: 12_000_000 };
-    if (file.size > limits[kind]) {
-      showToast('Arquivo excede o limite permitido para este tipo.', 'error');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setAttachment({ kind, dataUrl: String(reader.result), mimeType: file.type || 'application/octet-stream', fileName: file.name });
-    };
-    reader.onerror = () => showToast('Não foi possível ler o arquivo.', 'error');
-    reader.readAsDataURL(file);
+    void prepareOutboundAttachment(file).then(setAttachment).catch(error => {
+      showToast(error instanceof Error ? error.message : 'Não foi possível ler o arquivo.', 'error');
+    });
   }, []);
 
   const getAudioController = React.useCallback(() => {
@@ -1502,7 +1494,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                 </div>
               )}
               <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:gap-3">
-                <input ref={attachmentInputRef} type="file" className="hidden" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" onChange={(e) => { const file = e.target.files?.[0]; if (file) prepareAttachment(file); e.currentTarget.value = ''; }} />
+                <input ref={attachmentInputRef} type="file" className="hidden" accept={outboundAttachmentAccept} onChange={(e) => { const file = e.target.files?.[0]; if (file) prepareAttachment(file); e.currentTarget.value = ''; }} />
                 <button type="button" title="Adicionar anexo" disabled={waConnected === false || isSendingMessage || isAudioBusy || isRecordingAudio} onClick={() => attachmentInputRef.current?.click()} className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl border border-slate-200 text-slate-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50"><Paperclip className="h-5 w-5" /></button>
                 {isRecordingAudio ? (
                   <div className="order-first flex w-full items-center gap-2 sm:order-none sm:w-auto" role="group" aria-label="Controles da gravação de áudio">
