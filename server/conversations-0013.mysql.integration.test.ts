@@ -16,6 +16,21 @@ const phone = "5511999990001";
 const concurrentPhone = "5511999990002";
 const activePhone = "5511999990003";
 const directOutboundConcurrentPhone = "5511999990004";
+const crmPhone = "5511999990005";
+const brazilianActivePhoneVariants = [
+  "11999990003",
+  "(11) 99999-0003",
+  "11 99999-0003",
+  "5511999990003",
+  "+5511999990003",
+];
+const brazilianCrmPhoneVariants = [
+  "11999990005",
+  "(11) 99999-0005",
+  "11 99999-0005",
+  "5511999990005",
+  "+5511999990005",
+];
 const closedA = "conv-a-closed-fixture";
 const closedB = "conv-b-closed-fixture";
 
@@ -55,6 +70,7 @@ async function reset() {
   await pool.execute("DELETE FROM megadesk_domain_conversations WHERE client_id IN (?,?)", [tenantA, tenantB]);
   await pool.execute("DELETE FROM megadesk_conversation_contacts WHERE client_id IN (?,?)", [tenantA, tenantB]);
   await pool.execute("DELETE FROM megadesk_domain_customers WHERE clientId IN (?,?)", [tenantA, tenantB]);
+  await pool.execute("DELETE FROM megadesk_crm_clients WHERE client_id IN (?,?)", [tenantA, tenantB]);
   await pool.execute("DELETE FROM megadesk_evolution_sessions WHERE client_id IN (?,?)", [tenantA, tenantB]);
   await pool.execute("DELETE FROM megadesk_domain_client_users WHERE client_id IN (?,?)", [tenantA, tenantB]);
   await pool.execute("DELETE FROM megadesk_domain_clients WHERE client_id IN (?,?)", [tenantA, tenantB]);
@@ -75,6 +91,12 @@ physical.sequential("Conversations 0013 physical lifecycle", () => {
        VALUES (?,?,?,?,?,?,?,?, 'active','test',1,?,?,?), (?,?,?,?,?,?,?,?, 'active','test',1,?,?,?)`,
       [tenantA,"audit-internal-a","audit_db_a","Synthetic Tenant A","Synthetic","tenant-a@example.invalid","00000000001","audit","token-a",'["conversations","active-attendance"]','{}',
        tenantB,"audit-internal-b","audit_db_b","Synthetic Tenant B","Synthetic","tenant-b@example.invalid","00000000002","audit","token-b",'["conversations","active-attendance"]','{}'],
+    );
+    await pool.execute(
+      `INSERT INTO megadesk_crm_clients
+       (crm_client_id,client_id,customer_type,company_name,responsible_name,phone,whatsapp,status,origin)
+       VALUES ('crm-mask-a',?,'person','Masked CRM Customer','Masked CRM Customer',?,?,'ativo','whatsapp')`,
+      [tenantA, crmPhone, crmPhone],
     );
     await pool.execute(
       `INSERT INTO megadesk_domain_client_users
@@ -201,13 +223,25 @@ physical.sequential("Conversations 0013 physical lifecycle", () => {
       .toMatchObject({ conversation_id:inboundA,public_code:inboundCode,status:"open",assigned_user_id:"audit-agent-a" });
   });
 
-  it("starts outbound attendance for an unregistered number without creating a customer", async () => {
-    const input = { phone: activePhone };
+  it("finds the same CRM customer for equivalent Brazilian phone presentations", async () => {
+    for (const query of brazilianCrmPhoneVariants) {
+      const lookup = await appCaller(tenantA,"audit-agent-a").megadesk.attendanceRecipient({ query });
+      expect(lookup.canonicalPhone).toBe(crmPhone);
+      expect(lookup.candidates).toContainEqual(expect.objectContaining({
+        crmClientId: "crm-mask-a", phone: crmPhone, whatsapp: crmPhone,
+      }));
+    }
+  });
+
+  it("starts outbound attendance once for every equivalent Brazilian presentation without creating a customer", async () => {
+    const input = { phone: brazilianActivePhoneVariants[0] };
     const first = await appCaller(tenantA,"audit-agent-a").megadesk.createConversation(input);
     outboundId = first.conversationId;
-    const second = await appCaller(tenantA,"audit-agent-a").megadesk.createConversation(input);
-    expect(second.conversationId).toBe(first.conversationId);
-    expect(second.existing).toBe(true);
+    for (const phoneVariant of brazilianActivePhoneVariants.slice(1)) {
+      const duplicate = await appCaller(tenantA,"audit-agent-a").megadesk.createConversation({ phone: phoneVariant });
+      expect(duplicate.conversationId).toBe(first.conversationId);
+      expect(duplicate.existing).toBe(true);
+    }
     const created = (await rows("SELECT conversation_id,public_code,status,assigned_user_id,customer_name,crm_client_id FROM megadesk_domain_conversations WHERE conversation_id=? AND client_id=?",[first.conversationId,tenantA]))[0];
     expect(created).toMatchObject({ status:"open",assigned_user_id:"audit-agent-a",customer_name:activePhone,crm_client_id:null });
     expect(created.public_code).toMatch(/^CV-/);
@@ -215,9 +249,11 @@ physical.sequential("Conversations 0013 physical lifecycle", () => {
     expect(await scalar("SELECT COUNT(*) value FROM megadesk_domain_customers WHERE clientId=? AND phone=?",[tenantA,activePhone])).toBe(0);
     expect((await caller(tenantA,"audit-agent-a").list({ viewMode:"mine",status:"active",search:"",limit:30,offset:0 })).some(item => item.id === first.conversationId)).toBe(true);
     expect((await caller(tenantA,"audit-agent-a").list({ viewMode:"waiting",status:"active",search:"",limit:30,offset:0 })).some(item => item.id === first.conversationId)).toBe(false);
-    const lookup = await appCaller(tenantA,"audit-agent-a").megadesk.attendanceRecipient({ query:"(11) 99999-0003" });
-    expect(lookup.canonicalPhone).toBe(activePhone);
-    expect(lookup.activeConversation?.id).toBe(first.conversationId);
+    for (const query of brazilianActivePhoneVariants) {
+      const lookup = await appCaller(tenantA,"audit-agent-a").megadesk.attendanceRecipient({ query });
+      expect(lookup.canonicalPhone).toBe(activePhone);
+      expect(lookup.activeConversation?.id).toBe(first.conversationId);
+    }
   });
 
   it("serializes concurrent direct outbound starts into exactly one assigned attendance", async () => {

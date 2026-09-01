@@ -43,4 +43,21 @@ describe("normalização compartilhada de contato", () => {
     expect(normalizeContactPhone("+1 415 555 2671")).toMatchObject({ status: "valid", value: "14155552671", country: "international" });
     expect(sameContactPhone("(41) 99548-4515", "+55 41 99548-4515")).toBe(true);
   });
+
+  it.each([
+    "11999998888",
+    "(11) 99999-8888",
+    "11 99999-8888",
+    "5511999998888",
+    "+5511999998888",
+  ])("normaliza a apresentação brasileira %s para uma identidade única", input => {
+    expect(normalizeContactPhone(input)).toEqual({ status: "valid", value: "5511999998888", country: "BR" });
+    expect(sameContactPhone(input, "+55 11 99999-8888")).toBe(true);
+  });
+
+  it("preserva DDI internacional explícito sem acrescentar 55", () => {
+    expect(normalizeContactPhone("+1 415 555 2671")).toEqual({ status: "valid", value: "14155552671", country: "international" });
+    expect(normalizeContactPhone("+351 21 123 4567")).toEqual({ status: "valid", value: "351211234567", country: "international" });
+    expect(normalizeContactPhone("+54 11 5555 8888")).toEqual({ status: "valid", value: "541155558888", country: "international" });
+  });
 });

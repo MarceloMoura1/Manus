@@ -14,6 +14,7 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
   const attendanceActive = options.attendanceActive ?? null;
   const calls: string[] = [];
   const listInputs: Array<{ viewMode: string; status: string; search?: string }> = [];
+  const attendanceQueries: string[] = [];
   await page.addInitScript(value => {
     localStorage.setItem("megadesk_session_v1", JSON.stringify(value));
     localStorage.setItem("megadesk_active_page_v1", "conversations");
@@ -31,6 +32,11 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
       if (!name.includes("conversations.list")) return;
       const input = (parsedInput[index]?.json ?? parsedInput.json) as { viewMode: string; status: string; search?: string } | undefined;
       if (input) listInputs.push(input);
+    });
+    names.forEach((name, index) => {
+      if (!name.includes("megadesk.attendanceRecipient")) return;
+      const input = (parsedInput[index]?.json ?? parsedInput.json) as { query?: string } | undefined;
+      if (input?.query) attendanceQueries.push(input.query);
     });
     const result = (name: string) => name.includes("refreshSession") ? { ok: true, session: activeSession }
       : name.includes("conversations.list") ? [activeConversation]
@@ -52,7 +58,7 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(url.searchParams.get("batch") === "1" ? body : body[0]) });
   });
   await page.goto(deepLink ? "/?conversationId=conv-ui" : "/", { waitUntil: "domcontentloaded" });
-  return { calls, listInputs };
+  return { calls, listInputs, attendanceQueries };
 }
 
 test.describe("restored conversation layout with WIP lifecycle", () => {
@@ -227,6 +233,16 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     expect(calls.some(name => name.includes("crm.create"))).toBe(false);
     await expect(page.getByTestId("new-attendance-composer")).toHaveCount(0, { timeout: 3_000 });
     await expect(page.getByTestId("conversation-chat-panel").getByText("Mensagem legada")).toBeVisible();
+  });
+
+  test("accepts DDD plus Brazilian number without requiring +55 in the new attendance flow", async ({ page }) => {
+    const { attendanceQueries } = await mockedPage(page);
+    await page.getByRole("button", { name: "Novo atendimento" }).click();
+    const flow = page.getByTestId("new-attendance-flow");
+    await flow.getByLabel("Para", { exact: true }).fill("11999998888");
+    await expect.poll(() => attendanceQueries).toContain("11999998888");
+    await flow.getByText("Usar este número", { exact: true }).click();
+    await expect(flow.getByTestId("unregistered-number-card")).toBeVisible();
   });
 
   test("shows CRM data in the blue customer card", async ({ page }) => {
