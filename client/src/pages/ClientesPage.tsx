@@ -1156,16 +1156,22 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
   }, [initialSelectedId, clients, selectedClient]);
 
   return (
-    <div data-testid="clients-page" className="flex h-full min-w-0 flex-col gap-0 overflow-hidden lg:flex-row">
+    <div data-testid="clients-page" className="flex h-full min-w-0 flex-col gap-0 overflow-hidden rounded-[28px] border border-slate-200 bg-slate-100/70 shadow-sm lg:flex-row">
       {/* ─── Lista de Clientes (esquerda) ─── */}
       <div className={cn(
-        "flex min-h-0 min-w-0 flex-col border-r border-slate-200 bg-white transition-all duration-200",
+        "flex min-h-0 min-w-0 flex-col bg-white transition-all duration-200 lg:border-r lg:border-slate-200",
         selectedClient ? "max-h-[45%] w-full flex-shrink-0 lg:max-h-none lg:w-80" : "flex-1"
       )}>
         {/* Header da lista */}
-        <div className="p-4 border-b border-slate-200">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-bold text-slate-900">Clientes</h2>
+        <div className="border-b border-slate-200 bg-slate-50/80 p-4 sm:p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-blue-700">Relacionamento</p>
+              <div className="mt-1 flex items-center gap-2">
+                <h2 className="text-lg font-bold tracking-tight text-slate-950">Clientes</h2>
+                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-800">{filteredClients.length}</span>
+              </div>
+            </div>
             <div className="flex items-center gap-1.5">
               {/* Botão de importar CSV */}
               <input
@@ -1224,7 +1230,7 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
         </div>
 
         {/* Lista */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 space-y-2 overflow-y-auto p-2">
           {isLoading ? (
             <div className="flex items-center justify-center h-32">
               <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
@@ -1254,35 +1260,34 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
                 key={client.crmClientId}
                 onClick={() => setSelectedClientId(client.crmClientId)}
                 className={cn(
-                  "w-full text-left p-4 border-b border-slate-100 transition-all duration-150",
+                  "group w-full rounded-2xl border p-4 text-left shadow-sm transition-all duration-150",
                   selectedClientId === client.crmClientId
-                    ? "bg-blue-50 border-l-4 border-l-blue-500"
-                    : "hover:bg-slate-50 border-l-4 border-l-transparent"
+                    ? "border-blue-200 bg-blue-50 ring-1 ring-blue-200"
+                    : "border-transparent bg-white hover:border-slate-200 hover:bg-slate-50"
                 )}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-slate-900">{client.companyName}</p>
+                    <p className="truncate text-base font-bold tracking-tight text-slate-950">{client.companyName}</p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
                         {client.customerType === "person" ? "Pessoa" : client.customerType === "company" ? "Empresa" : "Cadastro legado"}
                       </span>
                       <span className={cn(
-                        "rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                        "rounded-full px-2.5 py-1 text-[11px] font-bold",
                         client.lifecycleState === "active"
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : client.lifecycleState === "inactive"
-                            ? "border-slate-200 bg-slate-100 text-slate-700"
-                            : "border-amber-200 bg-amber-50 text-amber-800",
+                          ? "bg-emerald-50 text-emerald-700"
+                        : client.lifecycleState === "inactive"
+                            ? "bg-slate-100 text-slate-700"
+                            : "bg-amber-50 text-amber-800",
                       )}>
                         {client.lifecycleState === "archived" ? "Arquivado" : client.lifecycleState === "inactive" ? "Inativo" : "Ativo"}
                       </span>
                       <StatusBadge status={client.status} />
                     </div>
-                    {client.responsibleName && <p className="mt-1.5 truncate text-xs text-slate-500">{client.responsibleName}</p>}
-                    {client.phone && <p className="mt-0.5 truncate text-xs text-slate-400">{client.phone}</p>}
+                    {client.responsibleName && <p className="mt-3 truncate text-xs font-medium text-slate-500">Responsável: {client.responsibleName}</p>}
                   </div>
-                  <ChevronRight className="mt-1 h-4 w-4 flex-shrink-0 text-slate-300" />
+                  <ChevronRight className="mt-1 h-4 w-4 flex-shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5" />
                 </div>
               </button>
             ))
@@ -1291,7 +1296,7 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
 
         {/* Contador */}
         {filteredClients.length > 0 && (
-          <div className="p-3 border-t border-slate-100 bg-slate-50">
+          <div className="border-t border-slate-200 bg-slate-50 p-3">
             <p className="text-xs text-slate-400 text-center">
               {filteredClients.length} cliente{filteredClients.length !== 1 ? "s" : ""}
             </p>
