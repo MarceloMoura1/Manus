@@ -676,15 +676,31 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
       { id: "outbound-audio", sender: "agent", from: "agent", type: "audio", mediaData: "data:audio/ogg;base64,T2dnUw==", fileName: "audio.ogg", text: "[Áudio]", agentName: "Marcelo Moura", status: "read", timestamp: new Date().toISOString() },
       { id: "outbound-pending", sender: "agent", from: "agent", type: "text", text: "Aguardando confirmação", agentName: "Marcelo Moura", status: "pending", timestamp: new Date().toISOString() },
       { id: "outbound-failed", sender: "agent", from: "agent", type: "text", text: "Falhou", agentName: "Marcelo Moura", status: "failed", timestamp: new Date().toISOString() },
+      { id: "outbound-unknown", sender: "agent", from: "agent", type: "text", text: "Status desconhecido", agentName: "Marcelo Moura", status: "provider_future_status", timestamp: new Date().toISOString() },
     ] });
     const chat = page.getByTestId("conversation-chat-panel");
-    await expect(chat.getByTestId("conversation-message").getByText("Marcelo Moura", { exact: true })).toHaveCount(5);
+    await expect(chat.getByTestId("conversation-message").getByText("Marcelo Moura", { exact: true })).toHaveCount(6);
     await expect(chat.getByText("marcelo@gmail.com", { exact: true })).toHaveCount(0);
     await expect(chat.getByLabel("Enviada")).toBeVisible();
     await expect(chat.getByLabel("Entregue")).toBeVisible();
     await expect(chat.getByLabel("Lida")).toBeVisible();
     await expect(chat.getByLabel("Enviando")).toBeVisible();
     await expect(chat.getByLabel("Falha no envio")).toBeVisible();
+    await expect(chat.getByLabel("Enviada")).toHaveAttribute("data-status", "sent");
+    await expect(chat.getByLabel("Enviada")).toHaveAttribute("data-icon", "check");
+    await expect(chat.getByLabel("Enviada")).toHaveClass(/text-slate-100\/90/);
+    await expect(chat.getByLabel("Entregue")).toHaveAttribute("data-status", "delivered");
+    await expect(chat.getByLabel("Entregue")).toHaveAttribute("data-icon", "double-check");
+    await expect(chat.getByLabel("Entregue")).toHaveClass(/text-slate-200/);
+    await expect(chat.getByLabel("Lida")).toHaveAttribute("data-status", "read");
+    await expect(chat.getByLabel("Lida")).toHaveAttribute("data-icon", "double-check");
+    await expect(chat.getByLabel("Lida")).toHaveClass(/text-sky-200/);
+    await expect(chat.getByLabel("Enviando")).toHaveAttribute("data-status", "pending");
+    await expect(chat.getByLabel("Falha no envio")).toHaveAttribute("data-status", "failed");
+    await expect(chat.getByLabel("Falha no envio")).toHaveClass(/text-rose-200/);
+    const unknownReceipt = chat.getByTestId("conversation-message").filter({ hasText: "Status desconhecido" });
+    await expect(unknownReceipt.getByTestId("conversation-message-receipt")).toHaveCount(0);
+    await expect(unknownReceipt.getByTestId("conversation-message-metadata")).toContainText(/^\d{2}:\d{2}$/);
     await expect(chat.locator("video[controls]")).toBeVisible();
 
     const inbound = chat.getByRole("button", { name: "Abrir entrada.png em tamanho ampliado" });

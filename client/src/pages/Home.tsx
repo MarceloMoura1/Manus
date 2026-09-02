@@ -205,21 +205,21 @@ type ClientUser = {
 
 const cn = (...classes: any[]) => classes.filter(Boolean).join(" ");
 
-function outboundReceipt(status: unknown, pending: boolean): { label: string; tone: string; icon: "pending" | "sent" | "delivered" | "read" | "failed" } | null {
-  if (pending || String(status ?? "").trim().toLowerCase() === "pending") return { label: "Enviando", tone: "text-blue-100", icon: "pending" };
+function outboundReceipt(status: unknown, pending: boolean): { status: "pending" | "sent" | "delivered" | "read" | "failed"; label: string; tone: string; icon: "clock" | "check" | "double-check" | "alert" } | null {
+  if (pending || String(status ?? "").trim().toLowerCase() === "pending") return { status: "pending", label: "Enviando", tone: "text-slate-200/70", icon: "clock" };
   switch (String(status ?? "").trim().toLowerCase()) {
     case "sent":
     case "server_ack":
-      return { label: "Enviada", tone: "text-blue-100", icon: "sent" };
+      return { status: "sent", label: "Enviada", tone: "text-slate-100/90", icon: "check" };
     case "delivered":
     case "delivery_ack":
-      return { label: "Entregue", tone: "text-blue-100", icon: "delivered" };
+      return { status: "delivered", label: "Entregue", tone: "text-slate-200", icon: "double-check" };
     case "read":
     case "played":
-      return { label: "Lida", tone: "text-sky-200", icon: "read" };
+      return { status: "read", label: "Lida", tone: "text-sky-200", icon: "double-check" };
     case "failed":
     case "error":
-      return { label: "Falha no envio", tone: "text-rose-200", icon: "failed" };
+      return { status: "failed", label: "Falha no envio", tone: "text-rose-200", icon: "alert" };
     default:
       return null;
   }
@@ -1398,13 +1398,13 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                         }`}>
                           {isAgent && <p className="mb-1.5 text-xs font-bold text-white">{operatorDisplayName(msg)}</p>}
                           {renderContent()}
-                          <div data-testid="conversation-message-metadata" className={`mt-2 flex items-center justify-end gap-1 text-xs ${isAgent ? 'text-blue-100' : 'text-slate-400'}`}>
+                          <div data-testid="conversation-message-metadata" className={`mt-2 flex items-center justify-end gap-1.5 text-xs ${isAgent ? 'text-blue-100' : 'text-slate-400'}`}>
                             <span>{msgTime}</span>
-                            {receipt && <span data-testid="conversation-message-receipt" aria-label={receipt.label} title={receipt.label} className={`inline-flex items-center ${receipt.tone}`}>
-                              {receipt.icon === 'pending' && <Clock className="h-3.5 w-3.5" aria-hidden="true" />}
-                              {receipt.icon === 'sent' && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
-                              {(receipt.icon === 'delivered' || receipt.icon === 'read') && <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />}
-                              {receipt.icon === 'failed' && <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />}
+                            {receipt && <span data-testid="conversation-message-receipt" data-status={receipt.status} data-icon={receipt.icon} aria-label={receipt.label} title={receipt.label} className={`inline-flex items-center ${receipt.tone}`}>
+                              {receipt.icon === 'clock' && <Clock className="h-4 w-4" aria-hidden="true" />}
+                              {receipt.icon === 'check' && <Check className="h-4 w-4" aria-hidden="true" />}
+                              {receipt.icon === 'double-check' && <CheckCheck className="h-4 w-4" aria-hidden="true" />}
+                              {receipt.icon === 'alert' && <AlertCircle className="h-4 w-4" aria-hidden="true" />}
                             </span>}
                           </div>
                         </div>
