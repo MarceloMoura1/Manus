@@ -5,6 +5,7 @@ const session = { clientId: "tenant-ui", company: "UI", permissions: ["conversat
   expiresAt: Date.now() + 3_600_000 };
 const conversation = { id: "conv-ui", publicCode: "CV-260829000000-TEST", contactId: "contact-ui", crmClientId: "crm-ui",
   customerName: "Cliente UI", customerPhone: "5541999999999", companyText: null, companyName: "Empresa CRM UI", lastMessage: "Mensagem legada",
+  customerType: "company" as "person" | "company", crmResponsibleName: "Cliente UI", crmPhone: "5541999999999", crmWhatsapp: "5541999999999", crmEmail: "cliente@example.test",
   lastMessageAt: new Date().toISOString(), unreadCount: 1, status: "open", assignedUserId: "user-ui",
   assignedUserName: "Agent", lastMessageFrom: "customer" };
 
@@ -267,6 +268,15 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(customerCard).toContainText("Cliente UI");
     await expect(customerCard).toContainText("Empresa CRM UI");
     await expect(customerCard).toContainText("+55 41 99999-9999");
+  });
+
+  test("renders a linked person without company labels", async ({ page }) => {
+    await mockedPage(page, true, { conversation: { ...conversation, customerName: "Pessoa UI", companyName: "Pessoa UI", customerType: "person", crmResponsibleName: "Pessoa UI" } });
+    await page.locator('button[aria-controls="conversation-details-panel"]').click();
+    const clientSection = page.locator("#client-content");
+    await expect(clientSection.getByText("Pessoa física", { exact: true })).toBeVisible();
+    await expect(clientSection.getByText("Pessoa UI", { exact: true })).toBeVisible();
+    await expect(clientSection.getByText("Empresa / nome fantasia", { exact: true })).toHaveCount(0);
   });
 
   test("does not expose automatic CRM creation for a new lightweight contact", async ({ page }) => {
