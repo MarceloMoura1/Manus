@@ -16,7 +16,6 @@ import { ERPWorkspace, getErpTopbarItems, type ErpSection } from "./erp/ERPWorks
 import { NotificationsModernPage } from "./NotificationsModernPage";
 import type { CrmWhatsAppIntent } from "../../../shared/crm";
 import { normalizeContactPhone } from "../../../shared/contact-phone";
-import { trpcProcedureUrl } from "@/lib/trpc-url";
 import { ConversationMedia } from "@/components/ConversationMedia";
 import { ConversationDetailsPanel } from "@/components/ConversationDetailsPanel";
 import {
@@ -459,6 +458,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   const reopenConversationMutation = trpc.conversations.reopen.useMutation();
   const claimConversationMutation = trpc.conversations.claim.useMutation();
   const transferConversationMutation = trpc.conversations.transfer.useMutation();
+  const sendMessageMutation = trpc.megadesk.sendMessage.useMutation();
+  const sendAttachmentMutation = trpc.megadesk.sendAttachment.useMutation();
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ message, type });
@@ -867,24 +868,15 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
       pending: true,
     }]);
     try {
-      const res = await fetch(trpcProcedureUrl('megadesk.sendAttachment'), {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ json: {
-          conversationId: audio.conversationId,
-          kind: 'audio',
-          dataUrl: audio.dataUrl,
-          mimeType: audio.mimeType,
-          fileName: audio.fileName,
-          userEmail: audio.userEmail,
-          clientAttemptId: crypto.randomUUID(),
-        } }),
+      await sendAttachmentMutation.mutateAsync({
+        conversationId: audio.conversationId,
+        kind: 'audio',
+        dataUrl: audio.dataUrl,
+        mimeType: audio.mimeType,
+        fileName: audio.fileName,
+        userEmail: audio.userEmail,
+        clientAttemptId: crypto.randomUUID(),
       });
-      if (!res.ok) {
-        const payload = await res.json().catch(() => null) as any;
-        throw new Error(payload?.error?.json?.message || 'Não foi possível enviar o áudio pelo WhatsApp.');
-      }
       await refetchMessages();
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
     } catch (error) {
@@ -917,31 +909,24 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     setAttachment(null);
     setIsSendingMessage(true);
     try {
-      const endpoint = trpcProcedureUrl(attachmentToSend ? 'megadesk.sendAttachment' : 'megadesk.sendMessage');
-      const json = attachmentToSend ? {
-        conversationId: selectedConv.id,
-        kind: attachmentToSend.kind,
-        dataUrl: attachmentToSend.dataUrl,
-        mimeType: attachmentToSend.mimeType,
-        fileName: attachmentToSend.fileName,
-        caption: textToSend || undefined,
-        userEmail: sessionData?.userEmail ?? '',
-        clientAttemptId,
-      } : {
-        conversationId: selectedConv.id,
-        message: textToSend,
-        userEmail: sessionData?.userEmail ?? '',
-        clientAttemptId,
-      };
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ json }),
-      });
-      if (!res.ok) {
-        const payload = await res.json().catch(() => null) as any;
-        throw new Error(payload?.error?.json?.message || (attachmentToSend ? 'Não foi possível enviar o anexo pelo WhatsApp.' : 'Não foi possível enviar a mensagem pelo WhatsApp.'));
+      if (attachmentToSend) {
+        await sendAttachmentMutation.mutateAsync({
+          conversationId: selectedConv.id,
+          kind: attachmentToSend.kind,
+          dataUrl: attachmentToSend.dataUrl,
+          mimeType: attachmentToSend.mimeType,
+          fileName: attachmentToSend.fileName,
+          caption: textToSend || undefined,
+          userEmail: sessionData?.userEmail ?? '',
+          clientAttemptId,
+        });
+      } else {
+        await sendMessageMutation.mutateAsync({
+          conversationId: selectedConv.id,
+          message: textToSend,
+          userEmail: sessionData?.userEmail ?? '',
+          clientAttemptId,
+        });
       }
       await refetchMessages();
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
@@ -953,7 +938,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     } finally {
       setIsSendingMessage(false);
     }
-  }, [attachment, clientId, isSendingMessage, messageInput, refetchMessages, selectedConv, sessionData?.userEmail, waConnected]);
+  }, [attachment, clientId, isSendingMessage, messageInput, refetchMessages, selectedConv, sendAttachmentMutation, sendMessageMutation, sessionData?.userEmail, waConnected]);
 
   const formatTime = (ts: any) => {
     if (!ts) return '';
@@ -1274,6 +1259,9 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                 name: String(crmCustomerQuery.data.client.responsibleName || crmCustomerQuery.data.client.companyName || ''),
                 company: String(crmCustomerQuery.data.client.companyName || ''),
                 email: String(crmCustomerQuery.data.client.email || ''),
+                customerType: crmCustomerQuery.data.client.customerType === 'person' || crmCustomerQuery.data.client.customerType === 'company'
+                  ? crmCustomerQuery.data.client.customerType
+                  : null,
               }}
               onCancel={cancelCrmHandoff}
               onNavigate={(navigation) => {

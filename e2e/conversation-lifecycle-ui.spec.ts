@@ -42,6 +42,7 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
       : name.includes("conversations.list") ? [activeConversation]
       : name.includes("conversations.counts") ? { active: 3, closed: 4, waiting: 2, mine: 1 }
       : name.includes("conversations.eligibleUsers") ? [{ id: "user-ui", name: "Agent", email: "agent@example.test", role: "agent" }]
+      : name.includes("evolution.getStatus") ? { status: "connected", providerReachable: true }
       : name.includes("conversations.messages") ? { source: "legacy_json", messages: [{ id: "legacy-1", from: "customer", text: "Mensagem legada", type: "text", timestamp: new Date().toISOString() }] }
       : name.includes("conversations.companyCandidates") ? { items: [{ id: "crm-ui", name: "Empresa CRM UI", document: "12345678000190", customerType: "company" }], hasMore: false }
       : name.includes("conversations.phoneCandidates") ? { items: [{ id: "crm-phone", name: "Cliente localizado", document: "52998224725", phone: "5541999999999", customerType: "person" }] }
@@ -49,7 +50,11 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
       : name.includes("conversations.history") ? [{ id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: conversation.id, publicCode: conversation.publicCode, status: "open", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }]
       : name.includes("conversations.linkedTickets") ? []
       : name.includes("conversations.updateContact") ? { contactId: conversation.contactId, displayName: "Cliente Editado", companyText: "Empresa Informada", canonicalPhone: conversation.customerPhone, crmClientId: conversation.crmClientId }
-      : name.includes("megadesk.attendanceRecipient") ? { canonicalPhone: "5541999999999", candidates: [{ crmClientId: "crm-ui", companyName: "Empresa CRM UI", responsibleName: "Cliente UI", phone: "5541999999999", whatsapp: "5541999999999", recipientPhone: "5541999999999", email: "cliente@example.test" }], activeConversation: attendanceActive }
+      : name.includes("megadesk.attendanceRecipient") ? (() => {
+        const canonicalPhone = attendanceQueries.at(-1) === "11999998888" ? "5511999998888" : attendanceQueries.at(-1) ?? "";
+        const isCrmPhone = canonicalPhone === "5541999999999";
+        return { canonicalPhone, candidates: isCrmPhone ? [{ source: "crm", crmClientId: "crm-ui", customerType: "company", companyName: "Empresa CRM UI", responsibleName: "Cliente UI", phone: canonicalPhone, whatsapp: canonicalPhone, recipientPhone: canonicalPhone, email: "cliente@example.test" }] : [], activeConversation: attendanceActive };
+      })()
       : name.includes("crm.create") ? { success: true, crmClientId: "crm-created-ui" }
       : name.includes("megadesk.createConversation") ? { conversationId: conversation.id, existing: false }
       : name.includes("megadesk.sendMessage") ? { ok: true, conversationId: conversation.id }
@@ -159,7 +164,7 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await detailsToggle.click();
     await expect(page.getByTestId("conversation-details-panel")).toBeVisible();
     await expect(page.locator('[data-testid^="details-section-"]')).toHaveCount(5);
-    await expect(page.getByText("Cliente vinculado")).toBeVisible();
+    await expect(page.getByText("Dados do cliente")).toBeVisible();
     await expect(page.locator("#client-content").getByRole("button", { name: "Cadastrar cliente" })).toHaveCount(0);
     await expect(page.locator("#client-content").getByText("Empresa CRM UI", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Fechar detalhes da conversa" }).first()).toHaveAttribute("aria-expanded", "true");
@@ -170,6 +175,10 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await copyId.click();
     await expect.poll(() => page.evaluate(() => (window as typeof window & { __copiedConversationId?: string }).__copiedConversationId)).toBe(conversation.publicCode);
     await expect(copyId).toContainText("Copiado");
+    const copyPhone = page.getByRole("button", { name: "Copiar telefone" });
+    await copyPhone.click();
+    await expect.poll(() => page.evaluate(() => (window as typeof window & { __copiedConversationId?: string }).__copiedConversationId)).toBe("+5541999999999");
+    await expect(copyPhone).toContainText("Copiado");
 
     await expect(page.getByRole("button", { name: "+ Adicionar empresa" })).toHaveCount(0);
     await expect(page.getByLabel("Nome da empresa")).toHaveCount(0);
@@ -206,7 +215,7 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     expect(calls.some(name => name.includes("megadesk.getConversations"))).toBe(false);
   });
 
-  test("starts an attendance from an unregistered number without creating a CRM client", async ({ page }) => {
+  test("requires a name and starts an attendance from a new lightweight contact without creating a CRM client", async ({ page }) => {
     const { calls } = await mockedPage(page, true);
     await page.getByTitle("Abrir menu").click();
     const navigation = page.getByRole("navigation").first();
@@ -219,12 +228,14 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(flow).toBeVisible();
     await expect(flow.getByRole("heading", { name: "Novo atendimento" })).toBeVisible();
     const phone = flow.getByLabel("Para", { exact: true });
-    await phone.fill("5541999999999");
+    await phone.fill("5541988888888");
     await expect(flow.getByText("Usar este número", { exact: true })).toBeVisible();
     expect(calls.some(name => name.includes("megadesk.createConversation"))).toBe(false);
     await flow.getByText("Usar este número", { exact: true }).click();
-    await expect(flow.getByTestId("unregistered-number-card")).toBeVisible();
+    await expect(flow.getByTestId("new-contact-card")).toBeVisible();
     const message = flow.getByLabel("Mensagem", { exact: true });
+    await expect(message).toBeDisabled();
+    await flow.getByLabel("Nome", { exact: true }).fill("João Victor");
     await expect(message).toBeEnabled();
     await message.fill("Olá, preciso de atendimento.");
     await flow.getByRole("button", { name: "Enviar mensagem" }).click();
@@ -242,7 +253,7 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await flow.getByLabel("Para", { exact: true }).fill("11999998888");
     await expect.poll(() => attendanceQueries).toContain("11999998888");
     await flow.getByText("Usar este número", { exact: true }).click();
-    await expect(flow.getByTestId("unregistered-number-card")).toBeVisible();
+    await expect(flow.getByTestId("new-contact-card")).toBeVisible();
   });
 
   test("shows CRM data in the blue customer card", async ({ page }) => {
@@ -255,24 +266,19 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(customerCard).toBeVisible();
     await expect(customerCard).toContainText("Cliente UI");
     await expect(customerCard).toContainText("Empresa CRM UI");
-    await expect(customerCard).toContainText("+5541999999999");
+    await expect(customerCard).toContainText("+55 41 99999-9999");
   });
 
-  test("keeps optional CRM creation inside the new attendance flow and preserves the message", async ({ page }) => {
+  test("does not expose automatic CRM creation for a new lightweight contact", async ({ page }) => {
     const { calls } = await mockedPage(page);
     await page.getByRole("button", { name: "Novo atendimento" }).click();
     const flow = page.getByTestId("new-attendance-flow");
-    await flow.getByLabel("Para", { exact: true }).fill("5541999999999");
+    await flow.getByLabel("Para", { exact: true }).fill("5541988888888");
     await flow.getByText("Usar este número", { exact: true }).click();
-    const message = flow.getByLabel("Mensagem", { exact: true });
-    await message.fill("Mensagem preservada");
-    await flow.getByRole("button", { name: "Cadastrar cliente" }).click();
-    const form = flow.getByTestId("optional-customer-form");
-    await form.getByLabel("Nome").fill("Cliente criado no fluxo");
-    await form.getByRole("button", { name: "Salvar cliente" }).click();
-    await expect(flow.getByTestId("existing-customer-card")).toBeVisible();
-    await expect(message).toHaveValue("Mensagem preservada");
-    await expect.poll(() => calls.some(name => name.includes("crm.create"))).toBe(true);
+    await expect(flow.getByRole("button", { name: "Cadastrar cliente" })).toHaveCount(0);
+    await flow.getByLabel("Nome", { exact: true }).fill("Contato leve");
+    await expect(flow.getByLabel("Mensagem", { exact: true })).toBeEnabled();
+    expect(calls.some(name => name.includes("crm.create"))).toBe(false);
     expect(calls.some(name => name.includes("megadesk.createConversation"))).toBe(false);
   });
 
@@ -280,8 +286,9 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     const { calls } = await mockedPage(page);
     await page.getByRole("button", { name: "Novo atendimento" }).click();
     const flow = page.getByTestId("new-attendance-flow");
-    await flow.getByLabel("Para", { exact: true }).fill("5541999999999");
+    await flow.getByLabel("Para", { exact: true }).fill("5541988888888");
     await flow.getByText("Usar este número", { exact: true }).click();
+    await flow.getByLabel("Nome", { exact: true }).fill("Contato com anexo");
     await flow.locator('input[type="file"]').setInputFiles({
       name: "primeiro-contato.txt",
       mimeType: "text/plain",
@@ -318,8 +325,9 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     const { calls } = await mockedPage(page);
     await page.getByRole("button", { name: "Novo atendimento" }).click();
     const flow = page.getByTestId("new-attendance-flow");
-    await flow.getByLabel("Para", { exact: true }).fill("5541999999999");
+    await flow.getByLabel("Para", { exact: true }).fill("5541988888888");
     await flow.getByText("Usar este número", { exact: true }).click();
+    await flow.getByLabel("Nome", { exact: true }).fill("Contato com áudio");
     await flow.getByRole("button", { name: "Gravar áudio" }).click();
     await expect(flow.getByRole("button", { name: "Enviar áudio" })).toBeVisible();
     await flow.getByRole("button", { name: "Enviar áudio" }).click();
@@ -327,11 +335,46 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect.poll(() => calls.some(name => name.includes("megadesk.sendAttachment"))).toBe(true);
   });
 
+  test("sends an attachment and recorded audio from the active attendance composer", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: {
+        getUserMedia: async () => ({ getTracks: () => [{ stop: () => undefined }] }),
+      } });
+      class FakeMediaRecorder {
+        static isTypeSupported() { return true; }
+        mimeType = "audio/webm;codecs=opus";
+        state: "inactive" | "recording" = "inactive";
+        ondataavailable: ((event: BlobEvent) => unknown) | null = null;
+        onstop: ((event: Event) => unknown) | null = null;
+        onerror: ((event: ErrorEvent) => unknown) | null = null;
+        start() { this.state = "recording"; }
+        stop() {
+          this.state = "inactive";
+          this.ondataavailable?.({ data: new Blob(["audio controlado"], { type: this.mimeType }) } as BlobEvent);
+          queueMicrotask(() => this.onstop?.(new Event("stop")));
+        }
+      }
+      Object.defineProperty(window, "MediaRecorder", { configurable: true, value: FakeMediaRecorder });
+    });
+    const { calls } = await mockedPage(page);
+    await page.getByText("Cliente UI", { exact: true }).first().click();
+    const composer = page.getByTestId("conversation-composer");
+    await composer.locator('input[type="file"]').setInputFiles({ name: "ativo.txt", mimeType: "text/plain", buffer: Buffer.from("anexo ativo") });
+    await expect(composer.getByText("ativo.txt", { exact: true })).toBeVisible();
+    await composer.locator("button").last().click();
+    await expect.poll(() => calls.some(name => name.includes("megadesk.sendAttachment"))).toBe(true);
+
+    await composer.getByRole("button", { name: "Gravar áudio" }).click();
+    await expect(composer.getByRole("button", { name: "Enviar áudio" })).toBeVisible();
+    await composer.getByRole("button", { name: "Enviar áudio" }).click();
+    await expect.poll(() => calls.filter(name => name.includes("megadesk.sendAttachment")).length).toBeGreaterThanOrEqual(2);
+  });
+
   test("blocks a new attendance when a server-side lookup finds an active one", async ({ page }) => {
-    await mockedPage(page, false, { attendanceActive: { id: "conv-active-ui", customerName: "Cliente em atendimento", phone: "5541999999999" } });
+    await mockedPage(page, false, { attendanceActive: { id: "conv-active-ui", customerName: "Cliente em atendimento", phone: "5541988888888" } });
     await page.getByRole("button", { name: "Novo atendimento" }).click();
     const flow = page.getByTestId("new-attendance-flow");
-    await flow.getByLabel("Para", { exact: true }).fill("5541999999999");
+    await flow.getByLabel("Para", { exact: true }).fill("5541988888888");
     await flow.getByText("Usar este número", { exact: true }).click();
     await expect(flow.getByTestId("active-attendance-warning")).toBeVisible();
     await expect(flow.getByLabel("Mensagem", { exact: true })).toBeDisabled();

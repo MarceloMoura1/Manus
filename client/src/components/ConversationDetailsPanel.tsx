@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { ConversationMedia } from "@/components/ConversationMedia";
 import { ClientFormModal } from "@/pages/ClientesPage";
 import { useDebounce } from "@/hooks/useDebounce";
+import { formatContactPhone, hasHumanContactName, normalizeContactPhone } from "../../../shared/contact-phone";
 
 type Conversation = {
   id: string;
@@ -16,6 +17,11 @@ type Conversation = {
   company?: string | null;
   companyText?: string | null;
   companyName?: string | null;
+  customerType?: "person" | "company" | null;
+  crmResponsibleName?: string | null;
+  crmPhone?: string | null;
+  crmWhatsapp?: string | null;
+  crmEmail?: string | null;
   status?: string | null;
   assignedTo?: string | null;
   createdAt?: string | Date | null;
@@ -55,6 +61,7 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
   const [name, setName] = React.useState(conversation.name ?? "");
   const [formError, setFormError] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
+  const [copiedPhone, setCopiedPhone] = React.useState(false);
   const [linking, setLinking] = React.useState(false);
   const [crmSearch, setCrmSearch] = React.useState("");
   const [crmOffset, setCrmOffset] = React.useState(0);
@@ -84,6 +91,7 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
   React.useEffect(() => {
     setEditingName(false); setFormError(null);
     setName(conversation.name ?? "");
+    setCopied(false); setCopiedPhone(false);
     setLinking(false); setCrmSearch(""); setCrmOffset(0); setPendingCrm(null);
   }, [conversation.id, conversation.name, conversation.companyText]);
   React.useEffect(() => {
@@ -132,8 +140,18 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
     if (event.key === "Enter") { event.preventDefault(); submit(); }
   };
   const copyId = async () => {
-    await navigator.clipboard.writeText(conversation.publicCode ?? "");
-    setCopied(true); window.setTimeout(() => setCopied(false), 1600);
+    try {
+      await navigator.clipboard.writeText(conversation.publicCode ?? "");
+      setCopied(true); window.setTimeout(() => setCopied(false), 1600);
+    } catch { onToast("Não foi possível copiar o ID da conversa.", "error"); }
+  };
+  const copyPhone = async () => {
+    const normalized = normalizeContactPhone(conversation.phone);
+    if (normalized.status !== "valid" || !normalized.value) { onToast("Telefone indisponível para cópia.", "error"); return; }
+    try {
+      await navigator.clipboard.writeText(`+${normalized.value}`);
+      setCopiedPhone(true); window.setTimeout(() => setCopiedPhone(false), 1600);
+    } catch { onToast("Não foi possível copiar o telefone.", "error"); }
   };
   const applyCrm = async (crmClientId: string | null, companyName?: string | null) => {
     if (!conversation.contactId || linkCrm.isPending) return false;
@@ -164,6 +182,8 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
   }, [open, onClose]);
 
   if (!open) return null;
+  const contactName = hasHumanContactName(conversation.name, conversation.phone) ? conversation.name!.trim() : "Contato sem nome";
+  const contactPhone = formatContactPhone(conversation.phone);
   const panel = <aside id="conversation-details-panel" aria-label="Detalhes da conversa" data-testid="conversation-details-panel"
     className="absolute inset-y-0 right-0 z-50 flex w-full max-w-[340px] flex-col overflow-hidden border-l border-slate-200 bg-slate-50 shadow-2xl min-[1280px]:relative min-[1280px]:z-auto min-[1280px]:w-[clamp(300px,24vw,340px)] min-[1280px]:flex-none min-[1280px]:shadow-none"
     style={{ paddingRight: "env(safe-area-inset-right)" }}>
@@ -178,18 +198,18 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
         <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-2 text-xs"><dt>Status</dt><dd className="text-right font-medium text-slate-800">{status}</dd><dt>Responsável</dt><dd className="text-right font-medium text-slate-800">{conversation.assignedTo || "Não atribuído"}</dd><dt>Início</dt><dd className="text-right">{dateTime(conversation.createdAt)}</dd>{conversation.closedAt && <><dt>Encerramento</dt><dd className="text-right">{dateTime(conversation.closedAt)}</dd></>}</dl>
       </Section>
       <Section id="contact" title="Contato" open={sections.has("contact")} onToggle={() => toggle("contact")}>
-        {editingName ? <div onKeyDown={event => keys(event, () => void save({ displayName: name }), () => { setName(conversation.name ?? ""); setEditingName(false); setFormError(null); })}>
+        {editingName && !conversation.crmClientId ? <div onKeyDown={event => keys(event, () => void save({ displayName: name }), () => { setName(conversation.name ?? ""); setEditingName(false); setFormError(null); })}>
           <label htmlFor="contact-name" className="mb-1 block text-xs font-medium">Nome</label>
           <input ref={nameInputRef} id="contact-name" value={name} maxLength={180} disabled={updateContact.isPending} onChange={event => setName(event.target.value)} className="min-h-10 w-full rounded-lg border border-slate-200 px-3 text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
           <div className="mt-2 flex gap-2"><button type="button" disabled={updateContact.isPending || !name.trim()} onClick={() => void save({ displayName: name })} className="inline-flex min-h-9 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-semibold text-white disabled:opacity-60"><Check className="h-3.5 w-3.5" />{updateContact.isPending ? "Salvando…" : "Salvar"}</button><button type="button" disabled={updateContact.isPending} onClick={() => { setName(conversation.name ?? ""); setEditingName(false); setFormError(null); }} className="min-h-9 rounded-lg px-2.5 text-xs font-semibold hover:bg-slate-100">Cancelar</button></div>
-        </div> : <div className="flex min-w-0 items-start justify-between gap-2"><div className="min-w-0"><strong className="block truncate text-slate-800">{conversation.name || "Contato sem nome"}</strong><span className="block text-xs">{conversation.phone || "Telefone indisponível"}</span></div><button type="button" onClick={() => setEditingName(true)} className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"><Pencil className="h-3.5 w-3.5" />Editar</button></div>}
+        </div> : <div className="space-y-3"><div className="flex min-w-0 items-start justify-between gap-2"><div className="min-w-0"><span className="block text-[11px] font-medium text-slate-500">Nome</span><strong className="block truncate text-slate-800">{contactName}</strong>{conversation.crmClientId && <span className="block text-[11px] text-slate-500">Gerenciado pelo perfil do Cliente ERP.</span>}</div>{!conversation.crmClientId && <button type="button" onClick={() => setEditingName(true)} className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"><Pencil className="h-3.5 w-3.5" />Editar</button>}</div><div><span className="block text-[11px] font-medium text-slate-500">Contato</span><div className="mt-1 flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 break-all text-sm font-medium text-slate-800">{contactPhone}</span><button type="button" aria-label="Copiar telefone" title="Copiar telefone" onClick={() => void copyPhone()} className="flex min-h-9 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><Copy className="h-3.5 w-3.5" />{copiedPhone ? "Copiado" : "Copiar"}</button></div><span className="sr-only" role="status" aria-live="polite">{copiedPhone ? "Telefone copiado" : ""}</span></div></div>}
         {conversation.companyText && <div className="border-t border-slate-100 pt-3"><span className="block text-[11px] font-medium text-slate-500">Empresa informada</span><span className="block truncate text-slate-800">{conversation.companyText}</span><p className="text-[11px] text-slate-500">Informação preservada do contato</p></div>}
         {conversation.crmClientId && <div className="rounded-lg bg-blue-50 px-2.5 py-2 text-xs text-blue-800"><span className="block font-semibold">Cliente vinculado</span><span className="block truncate">{conversation.companyName || conversation.company || "Cadastro CRM vinculado"}</span></div>}
         {formError && <p role="alert" className="text-xs text-red-600">{formError}</p>}
       </Section>
       <Section id="client" title="Cliente" open={sections.has("client")} onToggle={() => toggle("client")}>
         {conversation.crmClientId ? <div className="space-y-3">
-          <div className="rounded-lg bg-blue-50 p-2.5"><strong className="block truncate text-blue-900">{conversation.companyName || "Cliente vinculado"}</strong><span className="text-xs text-blue-700">Vinculado ao CRM</span></div>
+          <div className="rounded-xl border border-blue-200 bg-blue-700 p-3 text-white"><div className="flex items-center justify-between gap-2"><strong className="text-xs uppercase tracking-wide">Dados do cliente</strong><span className="rounded-full border border-blue-300 bg-blue-600 px-2 py-0.5 text-[10px] font-semibold uppercase">{conversation.customerType === "company" ? "Empresa" : "Pessoa física"}</span></div>{conversation.customerType === "company" ? <div className="mt-3 space-y-2 text-xs"><div><span className="block text-blue-100">Empresa / nome fantasia</span><strong className="block break-words">{conversation.companyName || "—"}</strong></div>{conversation.crmResponsibleName && <div><span className="block text-blue-100">Contato principal</span><strong className="block break-words">{conversation.crmResponsibleName}</strong></div>}<div><span className="block text-blue-100">Telefone</span><strong className="block break-all">{formatContactPhone(conversation.crmWhatsapp || conversation.crmPhone || conversation.phone)}</strong></div>{conversation.crmEmail && <div><span className="block text-blue-100">E-mail</span><strong className="block break-all">{conversation.crmEmail}</strong></div>}</div> : <div className="mt-3 space-y-2 text-xs"><div><span className="block text-blue-100">Nome</span><strong className="block break-words">{conversation.crmResponsibleName || conversation.companyName || contactName}</strong></div><div><span className="block text-blue-100">Telefone</span><strong className="block break-all">{formatContactPhone(conversation.crmWhatsapp || conversation.crmPhone || conversation.phone)}</strong></div>{conversation.crmEmail && <div><span className="block text-blue-100">E-mail</span><strong className="block break-all">{conversation.crmEmail}</strong></div>}</div>}</div>
           <button type="button" onClick={() => navigate("erp-clients", { crmClientId: conversation.crmClientId })} className="flex min-h-10 w-full items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Visualizar perfil</button>
           <button ref={crmLinkButtonRef} type="button" aria-expanded={linking} aria-controls="crm-link-search" onClick={toggleCrmSearch} className="flex min-h-10 w-full items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><span className="inline-flex items-center gap-2"><Link2 className="h-4 w-4" aria-hidden="true" />Vincular contato</span><ChevronDown className={cn("h-4 w-4 transition-transform", linking && "rotate-180")} aria-hidden="true" /></button>
           <button type="button" onClick={() => setConfirmUnlink(true)} className="min-h-9 w-full rounded-lg px-3 text-xs font-semibold text-red-600 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500">Remover vínculo</button>

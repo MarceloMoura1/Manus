@@ -106,13 +106,14 @@ export const conversationsRouter = router({
     const values: unknown[] = [ctx.tenantId];
     if (input.status === "active" && input.viewMode === "mine") { conditions.push("c.assigned_user_id = ?"); values.push(ctx.operationalUserId); }
     if (input.search) {
-      conditions.push("(UPPER(c.public_code) = UPPER(?) OR c.customer_name LIKE ? OR c.company LIKE ? OR c.phone LIKE ?)");
-      values.push(input.search, `%${input.search}%`, `%${input.search}%`, `%${input.search.replace(/\D/g, "")}%`);
+      conditions.push("(UPPER(c.public_code) = UPPER(?) OR c.customer_name LIKE ? OR contact.display_name LIKE ? OR c.company LIKE ? OR c.phone LIKE ?)");
+      values.push(input.search, `%${input.search}%`, `%${input.search}%`, `%${input.search}%`, `%${input.search.replace(/\D/g, "")}%`);
     }
     const [rows] = await getPool().execute(
       `SELECT c.conversation_id AS id, c.public_code AS publicCode, c.contact_id AS contactId,
-       COALESCE(contact.display_name, c.customer_name) AS customerName, c.phone AS customerPhone,
-       contact.company_text AS companyText, crm.company_name AS companyName,
+       COALESCE(crm.responsible_name, crm.company_name, contact.display_name, c.customer_name) AS customerName, c.phone AS customerPhone,
+       contact.company_text AS companyText, crm.company_name AS companyName, crm.customer_type AS customerType,
+       crm.responsible_name AS crmResponsibleName, crm.phone AS crmPhone, crm.whatsapp AS crmWhatsapp, crm.email AS crmEmail,
        c.last_message AS lastMessage, c.updated_at AS lastMessageAt, c.unread_count AS unreadCount,
        CASE WHEN c.status = 'bot' THEN 'pending' ELSE c.status END AS status,
        c.assigned_user_id AS assignedUserId, c.assigned_user_name AS assignedUserName,
