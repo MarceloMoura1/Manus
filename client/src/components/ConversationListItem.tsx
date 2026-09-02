@@ -25,8 +25,8 @@ export function ConversationListItem({ name, lastMessage, timestamp, unreadCount
     data-selected={selected ? "true" : "false"}
     onClick={onSelect}
     className={cn(
-      "relative flex w-full min-w-0 items-center gap-3 border-b border-slate-100 px-4 py-3 text-left transition-colors duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500",
-      selected ? "border-l-2 border-l-blue-600 bg-blue-50/80" : "border-l-2 border-l-transparent bg-white hover:bg-slate-50",
+      "relative flex w-full min-w-0 items-center gap-3 border-l-2 px-4 py-3 text-left transition-colors duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500",
+      selected ? "border-l-violet-600 bg-violet-50/70" : "border-l-transparent bg-white hover:bg-slate-50",
       closed && !selected && "bg-slate-50/50",
     )}
   >
@@ -43,8 +43,9 @@ export function ConversationListItem({ name, lastMessage, timestamp, unreadCount
       </span>
       <span className="mt-0.5 flex min-w-0 items-center gap-2">
         <span data-testid="conversation-list-preview" className={cn("min-w-0 flex-1 truncate text-xs leading-5", unread > 0 ? "font-medium text-slate-600" : "text-slate-500")}>{lastMessage || "Sem mensagens"}</span>
-        {unread > 0 && <span data-testid="conversation-unread-badge" aria-label={`${unread} mensagem${unread === 1 ? "" : "ens"} não lida${unread === 1 ? "" : "s"}`} className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 px-1.5 text-[11px] font-bold tabular-nums text-white">{unread}</span>}
+        {unread > 0 && <span data-testid="conversation-unread-badge" aria-label={`${unread} mensagem${unread === 1 ? "" : "ens"} não lida${unread === 1 ? "" : "s"}`} className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-violet-600 px-1.5 text-[11px] font-bold tabular-nums text-white">{unread}</span>}
       </span>
     </span>
+    <span data-testid="conversation-list-divider" aria-hidden="true" className="pointer-events-none absolute bottom-0 left-[4.25rem] right-4 h-px bg-slate-200/90" />
   </button>;
 }

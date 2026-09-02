@@ -9,9 +9,10 @@ const conversation = { id: "conv-ui", publicCode: "CV-260829000000-TEST", contac
   lastMessageAt: new Date().toISOString(), unreadCount: 1, status: "open", assignedUserId: "user-ui",
   assignedUserName: "Agent", lastMessageFrom: "customer", provider: "evolution", channel: "whatsapp" };
 
-async function mockedPage(page: Page, deepLink = false, options: { session?: typeof session; conversation?: typeof conversation; attendanceActive?: { id: string; customerName: string; phone: string } | null } = {}) {
+async function mockedPage(page: Page, deepLink = false, options: { session?: typeof session; conversation?: typeof conversation; conversations?: Array<typeof conversation>; attendanceActive?: { id: string; customerName: string; phone: string } | null } = {}) {
   const activeSession = options.session ?? session;
   const activeConversation = options.conversation ?? conversation;
+  const activeConversations = options.conversations ?? [activeConversation];
   const attendanceActive = options.attendanceActive ?? null;
   const calls: string[] = [];
   const listInputs: Array<{ viewMode: string; status: string; search?: string }> = [];
@@ -40,7 +41,7 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
       if (input?.query) attendanceQueries.push(input.query);
     });
     const result = (name: string) => name.includes("refreshSession") ? { ok: true, session: activeSession }
-      : name.includes("conversations.list") ? [activeConversation]
+      : name.includes("conversations.list") ? activeConversations
       : name.includes("conversations.counts") ? { active: 3, closed: 4, waiting: 2, mine: 1 }
       : name.includes("conversations.eligibleUsers") ? [{ id: "user-ui", name: "Agent", email: "agent@example.test", role: "agent" }]
       : name.includes("evolution.getStatus") ? { status: "connected", providerReachable: true }
@@ -111,7 +112,9 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     for (const label of ["Filtro", "Encerradas", "Todos", "Meus", "Novo atendimento", "BOT/Aguardando"]) {
       await expect(page.getByRole("button", { name: new RegExp(label) })).toBeVisible();
     }
-    await expect(page.getByTestId("attendance-header").getByText("Conversas ativas", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("attendance-header").getByText("Atendimento", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("attendance-header").locator("svg")).toBeVisible();
+    await expect(page.getByTestId("conversation-list-heading").getByText("Conversas ativas", { exact: true })).toBeVisible();
     await expect(page.getByTestId("conversation-list-count")).toHaveText("1");
     await expect(page.getByTestId("attendance-primary-controls").locator("button")).toHaveCount(1);
     await expect(page.getByTestId("attendance-action-controls").locator("button")).toHaveCount(2);
@@ -230,6 +233,37 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(item).toHaveAttribute("data-selected", "true");
   });
 
+  test("orders the real list locally and exposes only working list-menu actions", async ({ page }) => {
+    const older = { ...conversation, id: "conv-ui-older", customerName: "Conversa antiga", lastMessageAt: "2025-01-01T09:00:00.000Z" };
+    const newer = { ...conversation, id: "conv-ui-newer", customerName: "Conversa recente", lastMessageAt: "2025-01-02T09:00:00.000Z" };
+    await mockedPage(page, false, { conversations: [older, newer] });
+
+    const items = page.getByTestId("conversation-list-item");
+    await expect(page.getByTestId("conversation-list-heading").getByText("Conversas ativas", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("conversation-list-count")).toHaveText("2");
+    await expect(items).toHaveCount(2);
+    await expect(page.getByTestId("conversation-list-divider")).toHaveCount(2);
+    await expect(items.first()).toContainText("Conversa recente");
+
+    const sort = page.getByTestId("conversation-sort-button");
+    await expect(sort).toHaveAccessibleName("Ordenação: mais recentes primeiro");
+    await sort.click();
+    await expect(sort).toHaveAccessibleName("Ordenação: mais antigas primeiro");
+    await expect(items.first()).toContainText("Conversa antiga");
+
+    const menuToggle = page.getByTestId("conversation-list-menu-toggle");
+    await menuToggle.click();
+    const menu = page.getByRole("menu", { name: "Opções da lista de conversas" });
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Abrir filtros" })).toBeVisible();
+    await menu.getByRole("menuitemradio", { name: "Mais recentes primeiro" }).click();
+    await expect(items.first()).toContainText("Conversa recente");
+
+    await menuToggle.click();
+    await page.getByRole("menuitem", { name: "Abrir filtros" }).click();
+    await expect(page.getByPlaceholder("Nome, empresa ou telefone...")).toBeVisible();
+  });
+
   test("does not invent a WhatsApp badge when the provider metadata is absent", async ({ page }) => {
     await mockedPage(page, false, { conversation: { ...conversation, provider: null, channel: null, unreadCount: 0 } });
     const item = page.getByTestId("conversation-list-item");
@@ -240,7 +274,8 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
   test("keeps the same list language for closed conversations", async ({ page }) => {
     await mockedPage(page, false, { conversation: { ...conversation, status: "closed", unreadCount: 0 } });
     await page.getByRole("button", { name: "Encerradas", exact: true }).click();
-    await expect(page.getByTestId("attendance-header").getByText("Conversas encerradas", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("conversation-list-heading").getByText("Conversas encerradas", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("conversation-list-count")).toHaveText("1");
     await expect(page.getByTestId("conversation-list-item")).toContainText("Cliente UI");
   });
 
@@ -488,6 +523,30 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
       await expect(page.getByTestId("attendance-primary-controls")).toBeVisible();
       await expect(page.getByTestId("attendance-action-controls")).toBeVisible();
       await expect(page.getByTestId("attendance-scope-controls")).toBeVisible();
+      await expect(page.getByTestId("conversation-list-heading")).toBeVisible();
+      const [panelBox, headerBox, filterBox, actionsBox, scopesBox, listHeadingBox] = await Promise.all([
+        page.getByTestId("conversation-list-panel").boundingBox(),
+        page.getByTestId("attendance-header").boundingBox(),
+        page.getByTestId("attendance-primary-controls").boundingBox(),
+        page.getByTestId("attendance-action-controls").boundingBox(),
+        page.getByTestId("attendance-scope-controls").boundingBox(),
+        page.getByTestId("conversation-list-heading").boundingBox(),
+      ]);
+      expect(panelBox).not.toBeNull();
+      expect(headerBox).not.toBeNull();
+      expect(filterBox).not.toBeNull();
+      expect(actionsBox).not.toBeNull();
+      expect(scopesBox).not.toBeNull();
+      expect(listHeadingBox).not.toBeNull();
+      expect(filterBox!.y).toBeGreaterThan(headerBox!.y);
+      expect(actionsBox!.y).toBeGreaterThan(filterBox!.y);
+      expect(scopesBox!.y).toBeGreaterThan(actionsBox!.y);
+      expect(listHeadingBox!.y).toBeGreaterThan(scopesBox!.y);
+      expect(filterBox!.width).toBeGreaterThanOrEqual(panelBox!.width - 33);
+      const actionWidths = await page.getByTestId("attendance-action-controls").locator("button").evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().width));
+      const scopeWidths = await page.getByTestId("attendance-scope-controls").locator("button").evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().width));
+      expect(Math.abs(actionWidths[0] - actionWidths[1])).toBeLessThanOrEqual(2);
+      expect(Math.max(...scopeWidths) - Math.min(...scopeWidths)).toBeLessThanOrEqual(2);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       const newAttendance = page.getByTestId("attendance-action-controls").getByRole("button", { name: "Novo atendimento" });
       await expect(newAttendance.locator("span")).toHaveCSS("white-space", "nowrap");

@@ -40,6 +40,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   ArrowRight,
   ArrowLeft,
+  ArrowDownUp,
   Bell,
   Bot,
   CheckCircle2,
@@ -405,6 +406,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   const [dateFilterOpen, setDateFilterOpen] = React.useState(false);
   const [dateFrom, setDateFrom] = React.useState<string>('');
   const [dateTo, setDateTo] = React.useState<string>('');
+  const [conversationSortOrder, setConversationSortOrder] = React.useState<'recent' | 'oldest'>('recent');
+  const [conversationListMenuOpen, setConversationListMenuOpen] = React.useState(false);
   const [selectedConversation, setSelectedConversation] = React.useState<string | null>(null);
   const [newAttendanceOpen, setNewAttendanceOpen] = React.useState(false);
   const [newAttendancePhone, setNewAttendancePhone] = React.useState('');
@@ -787,8 +790,24 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     return matchesSearch && matchesOwner;
   });
 
+  const orderedConversations = React.useMemo(() => [...filteredConversations].sort((left, right) => {
+    const leftTimestamp = convToDate(left)?.getTime() ?? 0;
+    const rightTimestamp = convToDate(right)?.getTime() ?? 0;
+    return conversationSortOrder === 'recent'
+      ? rightTimestamp - leftTimestamp
+      : leftTimestamp - rightTimestamp;
+  }), [conversationSortOrder, filteredConversations]);
+  const hasListFilters = hasDateFilter || Boolean(searchTerm || historySearch || attendantFilter);
+  const clearConversationFilters = () => {
+    setDateFrom('');
+    setDateTo('');
+    setSearchTerm('');
+    setHistorySearch('');
+    setAttendantFilter('');
+  };
+
   const selectedConv = conversations.find(c => c.id === selectedConversation);
-  const conversationListTitle = inboxView === 'closed' ? 'Conversas encerradas' : inboxView === 'bot' ? 'Conversas aguardando' : 'Conversas ativas';
+  const conversationSectionTitle = inboxView === 'closed' ? 'Conversas encerradas' : 'Conversas ativas';
   const isRecordingAudio = audioRecordingPhase === 'recording';
   const isAudioBusy = audioRecordingPhase === 'requesting_permission'
     || audioRecordingPhase === 'stopping'
@@ -965,28 +984,28 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
 
         {/* Header */}
         <div className="border-b border-slate-100 bg-white px-4 py-3">
-          {/* Lista atual e o controle de filtro já existente. */}
-          <div className="flex items-center justify-between gap-3" data-testid="attendance-header">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <h2 className="truncate text-base font-bold tracking-tight text-slate-900">{conversationListTitle}</h2>
-              <span data-testid="conversation-list-count" className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-100 px-1.5 text-[11px] font-semibold tabular-nums text-slate-500">{filteredConversations.length}</span>
-            </div>
-            <div className="flex shrink-0" data-testid="attendance-primary-controls">
-              <button
+          <div className="flex items-center gap-2.5" data-testid="attendance-header">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700" aria-hidden="true">
+              <MessageCircle className="h-4 w-4" />
+            </span>
+            <h2 className="truncate text-base font-bold tracking-tight text-slate-900">Atendimento</h2>
+          </div>
+          <div className="mt-3" data-testid="attendance-primary-controls">
+            <button
               type="button"
               aria-expanded={dateFilterOpen}
               onClick={() => setDateFilterOpen(o => !o)}
               className={cn(
-                'flex h-9 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
-                (dateFilterOpen || hasDateFilter || searchTerm || historySearch || attendantFilter)
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-600 hover:bg-slate-100'
+                'flex w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500',
+                (dateFilterOpen || hasListFilters)
+                  ? 'border-violet-200 bg-violet-50 text-violet-700'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
               )}
             >
               <Filter className="h-4 w-4" />
               <span>Filtro</span>
-              </button>
-            </div>
+              <ChevronDown className={cn('ml-auto h-4 w-4 transition-transform', dateFilterOpen && 'rotate-180')} />
+            </button>
           </div>
 
           {/* Painel de filtros unificado */}
@@ -1080,9 +1099,9 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
               )}
 
               {/* Limpar filtros */}
-              {(hasDateFilter || searchTerm || historySearch || attendantFilter) && (
+              {hasListFilters && (
                 <button
-                  onClick={() => { setDateFrom(''); setDateTo(''); setSearchTerm(''); setHistorySearch(''); setAttendantFilter(''); }}
+                  onClick={clearConversationFilters}
                   className="w-full text-xs text-indigo-600 hover:text-indigo-800 font-medium py-1 text-center underline"
                 >Limpar todos os filtros</button>
               )}
@@ -1110,7 +1129,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
               }}
               className={cn(
                 'min-w-0 flex-1 flex items-center justify-center gap-1 px-2 py-2 text-xs font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-3',
-                newAttendanceOpen ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                newAttendanceOpen ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
               )}
             >
               <PhoneCall className="h-3.5 w-3.5" />
@@ -1122,7 +1141,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
               onClick={() => selectInboxView('closed')}
               className={cn(
                 'min-w-0 flex-1 flex items-center justify-center gap-1 border-l border-slate-200 px-2 py-2 text-xs font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:gap-1.5 sm:px-3',
-                inboxView === 'closed' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                inboxView === 'closed' ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
               )}
             >
               <CheckCircle2 className="h-3.5 w-3.5" />
@@ -1146,7 +1165,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                 className={cn(
                   'min-w-0 flex-1 flex items-center justify-center gap-1 px-2 py-2 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:gap-1.5 sm:px-3',
                   index > 0 && 'border-l border-slate-200',
-                  inboxView === 'open' && attendantScope === scope ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                  inboxView === 'open' && attendantScope === scope ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
                 )}
               >
                 {scope === 'all' ? <MessageCircle className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
@@ -1160,7 +1179,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
               onClick={() => selectInboxView('bot')}
               className={cn(
                 'min-w-0 flex-1 flex items-center justify-center gap-1 border-l border-slate-200 px-2 py-2 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:gap-1.5 sm:px-3',
-                inboxView === 'bot' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                inboxView === 'bot' ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
               )}
             >
               <Bot className="h-3.5 w-3.5" />
@@ -1169,12 +1188,64 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
           </div>
         </div>
 
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3" data-testid="conversation-list-heading">
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="truncate text-sm font-bold text-slate-900">{conversationSectionTitle}</h3>
+            <span data-testid="conversation-list-count" className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-100 px-1.5 text-[11px] font-semibold tabular-nums text-violet-700">{orderedConversations.length}</span>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              data-testid="conversation-sort-button"
+              data-order={conversationSortOrder}
+              aria-label={`Ordenação: ${conversationSortOrder === 'recent' ? 'mais recentes primeiro' : 'mais antigas primeiro'}`}
+              title={`Ordenação: ${conversationSortOrder === 'recent' ? 'mais recentes primeiro' : 'mais antigas primeiro'}`}
+              onClick={() => setConversationSortOrder(order => order === 'recent' ? 'oldest' : 'recent')}
+              className="flex h-8 items-center gap-1 rounded-md px-1.5 text-slate-600 transition-colors hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+            >
+              <ArrowDownUp className={cn('h-4 w-4 transition-transform', conversationSortOrder === 'oldest' && 'rotate-180')} />
+              <span className="text-[11px] font-semibold">{conversationSortOrder === 'recent' ? 'Recentes' : 'Antigas'}</span>
+            </button>
+            <div className="relative">
+              <button
+                type="button"
+                data-testid="conversation-list-menu-toggle"
+                aria-label="Opções da lista"
+                aria-haspopup="menu"
+                aria-expanded={conversationListMenuOpen}
+                onClick={() => setConversationListMenuOpen(open => !open)}
+                className="flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition-colors hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+              >
+                <Menu className="h-4 w-4" />
+              </button>
+              {conversationListMenuOpen && (
+                <div role="menu" aria-label="Opções da lista de conversas" className="absolute right-0 top-full z-20 mt-1 w-52 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                  <button type="button" role="menuitemradio" aria-checked={conversationSortOrder === 'recent'} onClick={() => { setConversationSortOrder('recent'); setConversationListMenuOpen(false); }} className="flex w-full items-center px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">
+                    Mais recentes primeiro
+                  </button>
+                  <button type="button" role="menuitemradio" aria-checked={conversationSortOrder === 'oldest'} onClick={() => { setConversationSortOrder('oldest'); setConversationListMenuOpen(false); }} className="flex w-full items-center px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">
+                    Mais antigas primeiro
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => { setDateFilterOpen(true); setConversationListMenuOpen(false); }} className="flex w-full items-center px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">
+                    Abrir filtros
+                  </button>
+                  {hasListFilters && (
+                    <button type="button" role="menuitem" onClick={() => { clearConversationFilters(); setConversationListMenuOpen(false); }} className="flex w-full items-center px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">
+                      Limpar filtros
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* Lista */}
         <div className="flex-1 overflow-y-auto">
           {conversationsLoading ? (
             <div className="flex h-48 items-center justify-center text-sm text-slate-500" role="status">Carregando conversas...</div>
-          ) : filteredConversations.length > 0 ? (
-            filteredConversations.map(conv => <ConversationListItem
+          ) : orderedConversations.length > 0 ? (
+            orderedConversations.map(conv => <ConversationListItem
               key={conv.id}
               name={conv.name}
               lastMessage={conv.lastMessage}
