@@ -7,7 +7,7 @@ const conversation = { id: "conv-ui", publicCode: "CV-260829000000-TEST", contac
   customerName: "Cliente UI", customerPhone: "5541999999999", companyText: null, companyName: "Empresa CRM UI", lastMessage: "Mensagem legada",
   customerType: "company" as "person" | "company", crmResponsibleName: "Cliente UI", crmPhone: "5541999999999", crmWhatsapp: "5541999999999", crmEmail: "cliente@example.test",
   lastMessageAt: new Date().toISOString(), unreadCount: 1, status: "open", assignedUserId: "user-ui",
-  assignedUserName: "Agent", lastMessageFrom: "customer" };
+  assignedUserName: "Agent", lastMessageFrom: "customer", provider: "evolution", channel: "whatsapp" };
 
 async function mockedPage(page: Page, deepLink = false, options: { session?: typeof session; conversation?: typeof conversation; attendanceActive?: { id: string; customerName: string; phone: string } | null } = {}) {
   const activeSession = options.session ?? session;
@@ -111,8 +111,8 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     for (const label of ["Filtro", "Encerradas", "Todos", "Meus", "Novo atendimento", "BOT/Aguardando"]) {
       await expect(page.getByRole("button", { name: new RegExp(label) })).toBeVisible();
     }
-    await expect(page.getByTestId("attendance-header").getByText("Atendimento", { exact: true })).toBeVisible();
-    await expect(page.getByTestId("attendance-header").locator("svg")).toBeVisible();
+    await expect(page.getByTestId("attendance-header").getByText("Conversas ativas", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("conversation-list-count")).toHaveText("1");
     await expect(page.getByTestId("attendance-primary-controls").locator("button")).toHaveCount(1);
     await expect(page.getByTestId("attendance-action-controls").locator("button")).toHaveCount(2);
     await expect(page.getByTestId("attendance-scope-controls").locator("button")).toHaveCount(3);
@@ -214,6 +214,34 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(page.getByTestId("conversation-chat-panel")).toBeVisible();
     expect(calls.some(name => name.includes("conversations.list"))).toBe(true);
     expect(calls.some(name => name.includes("megadesk.getConversations"))).toBe(false);
+  });
+
+  test("renders a continuous conversation row from real channel metadata", async ({ page }) => {
+    await mockedPage(page);
+    const item = page.getByTestId("conversation-list-item");
+    await expect(item).toHaveCount(1);
+    await expect(item).toContainText("Cliente UI");
+    await expect(item.getByTestId("conversation-list-preview")).toHaveText("Mensagem legada");
+    await expect(item.getByTestId("conversation-list-timestamp")).toHaveText(/^\d{2}:\d{2}$/);
+    await expect(item.getByTestId("conversation-channel-badge")).toHaveAttribute("aria-label", "Canal WhatsApp");
+    await expect(item.getByTestId("conversation-unread-badge")).toHaveText("1");
+    await expect(item).toHaveAttribute("data-selected", "false");
+    await item.click();
+    await expect(item).toHaveAttribute("data-selected", "true");
+  });
+
+  test("does not invent a WhatsApp badge when the provider metadata is absent", async ({ page }) => {
+    await mockedPage(page, false, { conversation: { ...conversation, provider: null, channel: null, unreadCount: 0 } });
+    const item = page.getByTestId("conversation-list-item");
+    await expect(item.getByTestId("conversation-channel-badge")).toHaveCount(0);
+    await expect(item.getByTestId("conversation-unread-badge")).toHaveCount(0);
+  });
+
+  test("keeps the same list language for closed conversations", async ({ page }) => {
+    await mockedPage(page, false, { conversation: { ...conversation, status: "closed", unreadCount: 0 } });
+    await page.getByRole("button", { name: "Encerradas", exact: true }).click();
+    await expect(page.getByTestId("attendance-header").getByText("Conversas encerradas", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("conversation-list-item")).toContainText("Cliente UI");
   });
 
   test("requires a name and starts an attendance from a new lightweight contact without creating a CRM client", async ({ page }) => {

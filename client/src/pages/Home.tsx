@@ -18,6 +18,7 @@ import type { CrmWhatsAppIntent } from "../../../shared/crm";
 import { normalizeContactPhone } from "../../../shared/contact-phone";
 import { ConversationMedia } from "@/components/ConversationMedia";
 import { ConversationDetailsPanel } from "@/components/ConversationDetailsPanel";
+import { ConversationListItem } from "@/components/ConversationListItem";
 import {
   conversationFilterStorageKey,
   readConversationFilters,
@@ -787,6 +788,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   });
 
   const selectedConv = conversations.find(c => c.id === selectedConversation);
+  const conversationListTitle = inboxView === 'closed' ? 'Conversas encerradas' : inboxView === 'bot' ? 'Conversas aguardando' : 'Conversas ativas';
   const isRecordingAudio = audioRecordingPhase === 'recording';
   const isAudioBusy = audioRecordingPhase === 'requesting_permission'
     || audioRecordingPhase === 'stopping'
@@ -947,12 +949,6 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   };
 
-  const formatDate = (ts: any) => {
-    if (!ts) return '';
-    if (typeof ts === 'string' && ts.includes(':')) return new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-    return new Date(ts).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-  };
-
   const getInitials = (name: string) => name?.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() || '?';
 
   const avatarColors = ['bg-violet-500', 'bg-blue-500', 'bg-emerald-500', 'bg-orange-500', 'bg-pink-500', 'bg-teal-500'];
@@ -967,35 +963,30 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
         selectedConv || newAttendanceOpen || crmHandoffState === 'composer' ? 'hidden' : 'flex',
       )} data-testid="conversation-list-panel">
 
-                {/* Header */}
-        <div className="px-4 pt-4 pb-3 bg-white border-b border-slate-100">
-          {/* Linha 1: Ícone + Título */}
-          <div className="flex items-center gap-3 mb-3" data-testid="attendance-header">
-            <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center shadow-lg flex-shrink-0">
-              <MessageCircle className="w-9 h-9 text-white" />
+        {/* Header */}
+        <div className="border-b border-slate-100 bg-white px-4 py-3">
+          {/* Lista atual e o controle de filtro já existente. */}
+          <div className="flex items-center justify-between gap-3" data-testid="attendance-header">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <h2 className="truncate text-base font-bold tracking-tight text-slate-900">{conversationListTitle}</h2>
+              <span data-testid="conversation-list-count" className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-100 px-1.5 text-[11px] font-semibold tabular-nums text-slate-500">{filteredConversations.length}</span>
             </div>
-            <div>
-              <h2 className="text-3xl font-bold text-slate-900 leading-tight" style={{textShadow: '0 2px 8px rgba(99,102,241,0.25), 0 1px 3px rgba(0,0,0,0.12)'}}>Atendimento</h2>
-
-            </div>
-          </div>
-
-          {/* Primeira linha: filtro */}
-          <div className="flex overflow-hidden rounded-xl border border-slate-200" data-testid="attendance-primary-controls">
-            <button
+            <div className="flex shrink-0" data-testid="attendance-primary-controls">
+              <button
               type="button"
               aria-expanded={dateFilterOpen}
               onClick={() => setDateFilterOpen(o => !o)}
               className={cn(
-                'flex flex-1 items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500',
+                'flex h-9 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
                 (dateFilterOpen || hasDateFilter || searchTerm || historySearch || attendantFilter)
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'bg-white text-slate-600 hover:bg-slate-50'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-600 hover:bg-slate-100'
               )}
             >
               <Filter className="h-4 w-4" />
               <span>Filtro</span>
-            </button>
+              </button>
+            </div>
           </div>
 
           {/* Painel de filtros unificado */}
@@ -1183,51 +1174,23 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
           {conversationsLoading ? (
             <div className="flex h-48 items-center justify-center text-sm text-slate-500" role="status">Carregando conversas...</div>
           ) : filteredConversations.length > 0 ? (
-            filteredConversations.map(conv => (
-              <button
-                key={conv.id}
-                onClick={() => {
-                  audioControllerRef.current?.invalidate('Gravação cancelada porque a conversa foi alterada.');
-                  setSelectedConversation(conv.id);
-                }}
-                className={cn(
-                  'w-full text-left px-4 py-3 border-b border-slate-100 transition-all duration-150 relative',
-                  selectedConversation === conv.id
-                    ? 'bg-blue-50 border-l-4 border-l-blue-500'
-                    : 'hover:bg-white border-l-4 border-l-transparent'
-                )}
-              >
-                <div className="flex items-start gap-3">
-                  {/* Avatar */}
-                  <div className={cn('w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white text-sm font-bold', getAvatarColor(conv.id))}>
-                    {getInitials(conv.name)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-0.5">
-                      <p className={cn('text-sm font-semibold truncate', conv.isUnread ? 'text-slate-900' : 'text-slate-700')}>{conv.name}</p>
-                      <span className="text-xs text-slate-400 flex-shrink-0 ml-2">{formatDate(conv.timestamp)}</span>
-                    </div>
-                    <p className="text-xs text-slate-500 truncate mb-1">{conv.company || conv.phone}</p>
-                    <div className="flex items-center gap-1.5">
-                      {isHistoryMode && (
-                        <span className={cn(
-                          'text-xs px-1.5 py-0.5 rounded-full font-medium flex-shrink-0',
-                          conv.status === 'open' ? 'bg-emerald-100 text-emerald-700' :
-                          conv.status === 'bot' ? 'bg-violet-100 text-violet-700' :
-                          'bg-slate-100 text-slate-500'
-                        )}>
-                          {conv.status === 'open' ? 'Aberta' : conv.status === 'bot' ? 'BOT' : 'Fechada'}
-                        </span>
-                      )}
-                      <p className={cn('text-xs truncate', conv.isUnread ? 'font-semibold text-slate-800' : 'text-slate-500')}>
-                        {conv.lastMessage || 'Sem mensagens'}
-                      </p>
-                    </div>
-                  </div>
-                  {conv.isUnread && <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 mt-1" />}
-                </div>
-              </button>
-            ))
+            filteredConversations.map(conv => <ConversationListItem
+              key={conv.id}
+              name={conv.name}
+              lastMessage={conv.lastMessage}
+              timestamp={conv.timestamp}
+              unreadCount={conv.unreadCount}
+              provider={conv.provider}
+              channel={conv.channel}
+              selected={selectedConversation === conv.id}
+              closed={conv.status === 'closed'}
+              avatarColor={getAvatarColor(conv.id)}
+              initials={getInitials(conv.name)}
+              onSelect={() => {
+                audioControllerRef.current?.invalidate('Gravação cancelada porque a conversa foi alterada.');
+                setSelectedConversation(conv.id);
+              }}
+            />)
           ) : (
             <div className="flex flex-col items-center justify-center h-48 text-center px-6">
               <MessageCircle className="w-10 h-10 text-slate-200 mb-3" />
