@@ -77,13 +77,17 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
   const [creatingClient, setCreatingClient] = React.useState(false);
   const [createdButUnlinked, setCreatedButUnlinked] = React.useState<{ id: string; name: string } | null>(null);
   const [historyId, setHistoryId] = React.useState<string | null>(null);
+  const [historyBrowserOpen, setHistoryBrowserOpen] = React.useState(false);
+  const [historyPageOffset, setHistoryPageOffset] = React.useState(0);
+  const [historyPageItems, setHistoryPageItems] = React.useState<any[]>([]);
   const utils = trpc.useUtils();
   const updateContact = trpc.conversations.updateContact.useMutation();
   const linkCrm = trpc.conversations.linkCrm.useMutation();
   const candidates = trpc.conversations.companyCandidates.useQuery({ search: normalizedCrmSearch, limit: 10, offset: crmOffset }, { enabled: open && linking && crmSearchIsReady });
   const phoneCandidates = trpc.conversations.phoneCandidates.useQuery({ phone: conversation.phone ?? "" }, { enabled: open && !conversation.crmClientId && !!conversation.phone });
-  const historyDetail = trpc.conversations.historyDetail.useQuery({ conversationId: historyId ?? "" }, { enabled: !!historyId });
-  const history = trpc.conversations.history.useQuery({ contactId: conversation.contactId ?? "" }, { enabled: open && !!conversation.contactId });
+  const historyDetail = trpc.conversations.historyDetail.useQuery({ contactId: conversation.contactId ?? "", conversationId: historyId ?? "" }, { enabled: !!historyId && !!conversation.contactId });
+  const history = trpc.conversations.history.useQuery({ contactId: conversation.contactId ?? "", currentConversationId: conversation.id }, { enabled: open && !!conversation.contactId });
+  const historyPage = trpc.conversations.historyPage.useQuery({ contactId: conversation.contactId ?? "", currentConversationId: conversation.id, offset: historyPageOffset }, { enabled: open && historyBrowserOpen && !!conversation.contactId });
   const tickets = trpc.conversations.linkedTickets.useQuery({ conversationId: conversation.id }, { enabled: open });
   const toggle = (id: string) => setSections(current => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next; });
   const status = conversation.status === "bot" ? "BOT/Aguardando" : conversation.status === "closed" ? "Encerrada" : "Aberta";
@@ -94,12 +98,19 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
     setName(conversation.name ?? "");
     setCopied(false); setCopiedPhone(false);
     setLinking(false); setCrmSearch(""); setCrmOffset(0); setPendingCrm(null);
+    setHistoryId(null); setHistoryBrowserOpen(false); setHistoryPageOffset(0); setHistoryPageItems([]);
   }, [conversation.id, conversation.name, conversation.companyText]);
   React.useEffect(() => {
     if (!open) { setLinking(false); setCrmSearch(""); setCrmOffset(0); setPendingCrm(null); }
   }, [open]);
   React.useEffect(() => { if (editingName) nameInputRef.current?.focus(); }, [editingName]);
   React.useEffect(() => { if (linking) requestAnimationFrame(() => crmSearchInputRef.current?.focus()); }, [linking]);
+  React.useEffect(() => {
+    if (!historyBrowserOpen || !historyPage.data) return;
+    setHistoryPageItems(current => historyPageOffset === 0
+      ? historyPage.data.items
+      : [...current, ...historyPage.data.items.filter((item: any) => !current.some(existing => existing.id === item.id))]);
+  }, [historyBrowserOpen, historyPage.data, historyPageOffset]);
 
   const closeCrmSearch = (restoreFocus = true) => {
     setLinking(false);
@@ -173,6 +184,11 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
     const key = (event: KeyboardEvent) => { if (event.key === "Escape") setHistoryId(null); };
     document.addEventListener("keydown", key); return () => document.removeEventListener("keydown", key);
   }, [historyId]);
+  React.useEffect(() => {
+    if (!historyBrowserOpen) return;
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") setHistoryBrowserOpen(false); };
+    document.addEventListener("keydown", key); return () => document.removeEventListener("keydown", key);
+  }, [historyBrowserOpen]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -185,6 +201,11 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
   if (!open) return null;
   const contactName = hasHumanContactName(conversation.name, conversation.phone) ? conversation.name!.trim() : "Contato sem nome";
   const contactPhone = formatContactPhone(conversation.phone);
+  const openHistoryBrowser = () => {
+    setHistoryPageItems([]);
+    setHistoryPageOffset(0);
+    setHistoryBrowserOpen(true);
+  };
   const panel = <aside id="conversation-details-panel" aria-label="Detalhes da conversa" data-testid="conversation-details-panel"
     className="absolute inset-y-0 right-0 z-50 flex w-full max-w-[340px] flex-col overflow-hidden border-l border-slate-200 bg-slate-50 shadow-2xl min-[1280px]:relative min-[1280px]:z-auto min-[1280px]:w-[clamp(300px,24vw,340px)] min-[1280px]:flex-none min-[1280px]:shadow-none"
     style={{ paddingRight: "env(safe-area-inset-right)" }}>
@@ -229,10 +250,11 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
         <QueryState loading={tickets.isLoading} error={tickets.isError} empty={!tickets.data?.length} emptyText="Nenhum chamado vinculado."><ul className="space-y-2">{tickets.data?.map((ticket: any) => <li key={ticket.id}><button type="button" onClick={() => navigate("tickets", { ticketId: ticket.id })} className="w-full rounded-lg border border-slate-200 p-2 text-left hover:bg-slate-50"><strong className="block text-xs text-slate-800">CH-{ticket.number} · {ticket.title}</strong><span className="text-xs">{ticket.status}</span></button></li>)}</ul></QueryState>
       </Section>
       <Section id="history" title="Histórico de conversas" open={sections.has("history")} onToggle={() => toggle("history")}>
-        <QueryState loading={history.isLoading} error={history.isError} empty={!history.data?.length} emptyText="Nenhum atendimento anterior."><ol className="space-y-2">{history.data?.map((item: any) => <li key={item.id}><button type="button" aria-current={item.id === conversation.id ? "true" : undefined} disabled={item.id === conversation.id} onClick={() => setHistoryId(item.id)} className={cn("w-full rounded-lg border p-3 text-left", item.id === conversation.id ? "border-blue-300 bg-blue-50" : "border-slate-200 hover:bg-slate-50")}><strong className="block text-xs">{item.publicCode}</strong><span className="text-xs">{dateTime(item.startedAt)} · {item.status}</span>{item.id === conversation.id && <span className="block text-xs font-semibold text-blue-700">Conversa atual</span>}</button></li>)}</ol></QueryState>
+        <QueryState loading={history.isLoading} error={history.isError} empty={!history.data?.items.length} emptyText="Nenhum atendimento anterior."><ol className="space-y-2">{history.data?.items.map((item: any) => <li key={item.id}><button type="button" onClick={() => setHistoryId(item.id)} className="w-full rounded-lg border border-slate-200 p-3 text-left hover:bg-slate-50"><strong className="block text-xs">{item.publicCode}</strong><span className="text-xs">{dateTime(item.startedAt)} · {item.status}</span></button></li>)}</ol>{history.data?.hasMore && <button type="button" onClick={openHistoryBrowser} className="min-h-9 text-xs font-semibold text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Ver todos os atendimentos</button>}</QueryState>
       </Section>
     </div>
   </aside>;
   const historyModal = historyId && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/40 p-0 sm:p-4" onMouseDown={e => { if (e.currentTarget === e.target) setHistoryId(null); }}><div role="dialog" aria-modal="true" aria-labelledby="history-title" className="flex h-full w-full flex-col overflow-hidden bg-white sm:h-[88vh] sm:max-w-5xl sm:rounded-2xl"><header className="flex justify-between border-b p-4"><div><span className="text-xs font-semibold text-blue-700">Somente leitura</span><h2 id="history-title" className="text-lg font-semibold">{historyDetail.data?.conversation.customerName || "Conversa anterior"}</h2><p className="text-xs">{historyDetail.data?.conversation.publicCode} · {historyDetail.data?.conversation.status} · {dateTime(historyDetail.data?.conversation.startedAt)}</p><p className="text-xs">Responsável: {historyDetail.data?.conversation.assignedUserName || "Não atribuído"}</p></div><button autoFocus aria-label="Fechar histórico" onClick={() => setHistoryId(null)}><X /></button></header><div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4"><QueryState loading={historyDetail.isLoading} error={historyDetail.isError} empty={!historyDetail.data?.messages.length} emptyText="Nenhuma mensagem."><div className="space-y-3">{historyDetail.data?.messages.map((msg: any, i: number) => { const out = msg.direction === "outbound" || msg.from === "agent"; const senderName = out ? operatorDisplayName(msg) : msg.sender; return <div key={msg.id || i} className={cn("flex", out ? "justify-end" : "justify-start")}><div className={cn("max-w-[85%] rounded-2xl p-3", out ? "bg-blue-600 text-white" : "bg-slate-100")}>{msg.type === "text" || !msg.type ? <p>{msg.text}</p> : <ConversationMedia conversationId={historyId} message={msg} fallback={<span>{msg.text || "Mídia indisponível"}</span>} />}<span className="block text-[10px] opacity-70">{senderName} · {dateTime(msg.timestamp)}</span></div></div>; })}</div></QueryState></div><footer className="border-t p-3 text-right"><button onClick={() => setHistoryId(null)} className="rounded bg-slate-900 px-4 py-2 text-white">Voltar para o atendimento</button></footer></div></div>;
-  return <>{<button type="button" aria-label="Fechar detalhes da conversa" onClick={onClose} className="absolute inset-0 z-40 bg-slate-950/20 min-[1280px]:hidden" />}{panel}{historyModal}{creatingClient && <ClientFormModal initialData={{ companyName: conversation.name ?? "", phone: conversation.phone ?? "", whatsapp: conversation.phone ?? "" }} onClose={() => setCreatingClient(false)} onUseExisting={client => { setCreatingClient(false); setPendingCrm({ id: client.crmClientId, name: client.companyName }); }} onViewExisting={client => { setCreatingClient(false); navigate("erp-clients", { crmClientId: client.crmClientId }); }} onSaved={async crmClientId => { if (!crmClientId) return; const linked = await applyCrm(crmClientId, conversation.name); if (!linked) { setCreatedButUnlinked({ id: crmClientId, name: conversation.name ?? "Cliente" }); throw new Error("Cliente criado, mas não foi possível vincular o contato"); } setCreatedButUnlinked(null); await utils.crm.list.invalidate(); }} />}</>;
+  const historyBrowserModal = historyBrowserOpen && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/40 p-0 sm:p-4" onMouseDown={event => { if (event.currentTarget === event.target) setHistoryBrowserOpen(false); }}><div role="dialog" aria-modal="true" aria-labelledby="history-browser-title" className="flex h-full w-full flex-col overflow-hidden bg-white sm:h-[80vh] sm:max-w-2xl sm:rounded-2xl"><header className="flex items-start justify-between border-b p-4"><div><span className="text-xs font-semibold text-blue-700">Atendimentos anteriores</span><h2 id="history-browser-title" className="text-lg font-semibold">Histórico de {contactName}</h2><p className="text-xs text-slate-500">Selecione um atendimento para abrir em modo somente leitura.</p></div><button autoFocus aria-label="Fechar todos os atendimentos" onClick={() => setHistoryBrowserOpen(false)}><X /></button></header><div className="min-h-0 flex-1 overflow-y-auto p-4"><QueryState loading={historyPage.isLoading && !historyPageItems.length} error={historyPage.isError} empty={!historyPageItems.length} emptyText="Nenhum atendimento anterior."><ol className="space-y-2">{historyPageItems.map(item => <li key={item.id}><button type="button" onClick={() => { setHistoryBrowserOpen(false); setHistoryId(item.id); }} className="w-full rounded-lg border border-slate-200 p-3 text-left hover:bg-slate-50"><strong className="block text-sm text-slate-800">{item.publicCode}</strong><span className="block text-xs text-slate-600">{dateTime(item.startedAt)} · {item.status}</span><span className="block text-xs text-slate-500">Responsável: {item.assignedUserName || "Não atribuído"}</span></button></li>)}</ol>{historyPage.data?.hasMore && <button type="button" disabled={historyPage.isFetching} onClick={() => setHistoryPageOffset(offset => offset + 20)} className="mt-3 min-h-10 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-blue-700 disabled:opacity-50">{historyPage.isFetching ? "Carregando…" : "Carregar mais"}</button>}</QueryState></div><footer className="border-t p-3 text-right"><button onClick={() => setHistoryBrowserOpen(false)} className="rounded bg-slate-900 px-4 py-2 text-white">Voltar para o atendimento</button></footer></div></div>;
+  return <>{<button type="button" aria-label="Fechar detalhes da conversa" onClick={onClose} className="absolute inset-0 z-40 bg-slate-950/20 min-[1280px]:hidden" />}{panel}{historyBrowserModal}{historyModal}{creatingClient && <ClientFormModal initialData={{ companyName: conversation.name ?? "", phone: conversation.phone ?? "", whatsapp: conversation.phone ?? "" }} onClose={() => setCreatingClient(false)} onUseExisting={client => { setCreatingClient(false); setPendingCrm({ id: client.crmClientId, name: client.companyName }); }} onViewExisting={client => { setCreatingClient(false); navigate("erp-clients", { crmClientId: client.crmClientId }); }} onSaved={async crmClientId => { if (!crmClientId) return; const linked = await applyCrm(crmClientId, conversation.name); if (!linked) { setCreatedButUnlinked({ id: crmClientId, name: conversation.name ?? "Cliente" }); throw new Error("Cliente criado, mas não foi possível vincular o contato"); } setCreatedButUnlinked(null); await utils.crm.list.invalidate(); }} />}</>;
 }

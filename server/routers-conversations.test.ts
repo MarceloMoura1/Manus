@@ -115,6 +115,16 @@ describe("Conversations authorization, filters and lifecycle", () => {
     expect(sql).toContain("crm.company_name AS companyName");
     expect(sql).toContain("crm.crm_client_id AS crmClientId");
     expect(sql).toContain("crm.crm_client_id = contact.crm_client_id");
+    expect(sql).toContain("NULLIF(TRIM(contact.display_name), '')");
+    expect(sql).toContain("NULLIF(TRIM(crm.responsible_name), '')");
+    expect(sql.indexOf("contact.display_name")).toBeLessThan(sql.indexOf("crm.responsible_name"));
+  });
+
+  it("keeps Pedro as the canonical attendance identity when a linked company has Marcelo as responsible", async () => {
+    mocks.execute.mockResolvedValue([[{ id: "conv-pedro", customerName: "Pedro Ferrari", companyName: "Empresa Exemplo", crmResponsibleName: "Marcelo Moura", customerType: "company" }]]);
+    const result = await conversationsRouter.createCaller(context()).list({ viewMode: "all", status: "active", search: "", limit: 30, offset: 0 });
+    expect(result).toMatchObject([{ customerName: "Pedro Ferrari", companyName: "Empresa Exemplo", crmResponsibleName: "Marcelo Moura" }]);
+    expect(mocks.execute.mock.calls[0][1][0]).toBe("tenant-a");
   });
 
   it("exposes the stored channel metadata without changing tenant-scoped listing semantics", async () => {
@@ -173,41 +183,107 @@ describe("Conversations authorization, filters and lifecycle", () => {
     expect(values).toEqual(["tenant-a", "conv-a"]);
   });
 
-  it("reads historical messages tenant-scoped without lifecycle writes", async () => {
+  it("reads historical messages scoped to the same tenant and contact without lifecycle writes", async () => {
     mocks.execute
       .mockResolvedValueOnce([[{ id: "conv-old", publicCode: "CV-9", messagesJson: "[]" }]])
       .mockResolvedValueOnce([[{ id: "msg-1", text: "Histórico", mediaReference: null }]]);
-    const result = await conversationsRouter.createCaller(context()).historyDetail({ conversationId: "conv-old" });
+    const result = await conversationsRouter.createCaller(context()).historyDetail({ contactId: "contact-a", conversationId: "conv-old" });
     expect(mocks.execute.mock.calls).toHaveLength(2);
-    expect(mocks.execute.mock.calls[0][1]).toEqual(["tenant-a", "conv-old"]);
+    expect(mocks.execute.mock.calls[0][1]).toEqual(["tenant-a", "contact-a", "conv-old"]);
     expect(mocks.execute.mock.calls[1][1]).toEqual(["tenant-a", "conv-old"]);
     expect(mocks.execute.mock.calls.every(([sql]) => /^\s*SELECT/i.test(sql as string))).toBe(true);
     expect(result.messages).toHaveLength(1);
   });
 
-  it("links and unlinks only the canonical contact CRM id while preserving contact fields", async () => {
+  it.each([0, 1, 2, 3, 4, 10])("limits the sidebar history preview for %i prior attendances", async count => {
+    const rows = Array.from({ length: Math.min(count, 4) }, (_, index) => ({ id: `conv-${index}`, publicCode: `CV-${10 - index}`, startedAt: `2026-01-0${4 - index}T00:00:00.000Z` }));
+    mocks.execute.mockResolvedValueOnce([rows]);
+    const result = await conversationsRouter.createCaller(context()).history({ contactId: "contact-pedro", currentConversationId: "conv-current" });
+    const [sql, values] = mocks.execute.mock.calls[0];
+    expect(sql).toContain("contact_id = ? AND conversation_id <> ?");
+    expect(sql).toContain("ORDER BY created_at DESC, conversation_id DESC LIMIT 4");
+    expect(values).toEqual(["tenant-a", "contact-pedro", "conv-current"]);
+    expect(result.items).toHaveLength(Math.min(count, 3));
+    expect(result.hasMore).toBe(count > 3);
+    expect(result.items).toEqual(rows.slice(0, 3));
+  });
+
+  it("pages complete contact history in batches of twenty with metadata only", async () => {
+    const rows = Array.from({ length: 21 }, (_, index) => ({ id: `conv-${index}`, publicCode: `CV-${index}`, status: "closed", startedAt: "2026-01-01T00:00:00.000Z", assignedUserName: "Agent" }));
+    mocks.execute.mockResolvedValueOnce([rows]);
+    const result = await conversationsRouter.createCaller(context()).historyPage({ contactId: "contact-pedro", currentConversationId: "conv-current", offset: 20 });
+    const [sql, values] = mocks.execute.mock.calls[0];
+    expect(sql).toContain("LIMIT 21 OFFSET 20");
+    expect(sql).toContain("contact_id = ? AND conversation_id <> ?");
+    expect(sql).not.toContain("messages_json");
+    expect(values).toEqual(["tenant-a", "contact-pedro", "conv-current"]);
+    expect(result.items).toHaveLength(20);
+    expect(result.hasMore).toBe(true);
+  });
+
+  it("links a company and atomically adds the canonical contact phone without inventing a person name", async () => {
     const linked = connection([
-      [[{ contact_id: "contact-a" }]],
-      [[{ crm_client_id: "crm-a" }]],
+      [[{ contact_id: "contact-a", canonicalPhone: "5511999999999" }]],
+      [[{ crm_client_id: "crm-a", customerType: "company", contactsJson: "[]" }]],
+      [{ affectedRows: 1 }],
       [{ affectedRows: 1 }],
     ]);
     mocks.getConnection.mockResolvedValueOnce(linked);
     await conversationsRouter.createCaller(context()).linkCrm({ contactId: "contact-a", crmClientId: "crm-a" });
-    const [writeSql, writeValues] = linked.execute.mock.calls[2];
+    const [contactsSql, contactsValues] = linked.execute.mock.calls[2];
+    expect(contactsSql).toContain("UPDATE megadesk_crm_clients SET contacts_json = ?");
+    expect(contactsValues.slice(1)).toEqual(["crm-a", "tenant-a"]);
+    expect(JSON.parse(contactsValues[0])).toEqual([{ phone: "5511999999999", whatsapp: "5511999999999" }]);
+    expect(contactsValues[0]).not.toContain("description");
+    const [writeSql, writeValues] = linked.execute.mock.calls[3];
     expect(writeSql).toContain("SET crm_client_id = ?, updated_at = NOW()");
     expect(writeSql).not.toMatch(/display_name|canonical_phone|company_text|megadesk_domain_conversations/i);
     expect(writeValues).toEqual(["crm-a", "contact-a", "tenant-a"]);
     expect(linked.commit).toHaveBeenCalledOnce();
 
-    const unlinked = connection([[[{ contact_id: "contact-a" }]], [{ affectedRows: 1 }]]);
+    const unlinked = connection([[[{ contact_id: "contact-a", canonicalPhone: "5511999999999" }]], [{ affectedRows: 1 }]]);
     mocks.getConnection.mockResolvedValueOnce(unlinked);
     await conversationsRouter.createCaller(context()).linkCrm({ contactId: "contact-a", crmClientId: null });
     expect(unlinked.execute.mock.calls[1][1]).toEqual([null, "contact-a", "tenant-a"]);
     expect(unlinked.execute).toHaveBeenCalledTimes(2);
   });
 
+  it("reuses an equivalent formatted additional phone and keeps person links out of contacts_json", async () => {
+    const company = connection([
+      [[{ contact_id: "contact-a", canonicalPhone: "5511999999999" }]],
+      [[{ crm_client_id: "crm-a", customerType: "company", contactsJson: '[{"whatsapp":"+55 (11) 99999-9999"}]' }]],
+      [{ affectedRows: 1 }],
+    ]);
+    mocks.getConnection.mockResolvedValueOnce(company);
+    await conversationsRouter.createCaller(context()).linkCrm({ contactId: "contact-a", crmClientId: "crm-a" });
+    expect(company.execute).toHaveBeenCalledTimes(3);
+    expect(company.execute.mock.calls[2][0]).toContain("UPDATE megadesk_conversation_contacts");
+
+    const person = connection([
+      [[{ contact_id: "contact-a", canonicalPhone: "5511999999999" }]],
+      [[{ crm_client_id: "crm-person", customerType: "person", contactsJson: "[]" }]],
+      [{ affectedRows: 1 }],
+    ]);
+    mocks.getConnection.mockResolvedValueOnce(person);
+    await conversationsRouter.createCaller(context()).linkCrm({ contactId: "contact-a", crmClientId: "crm-person" });
+    expect(person.execute).toHaveBeenCalledTimes(3);
+    expect(person.execute.mock.calls[2][0]).toContain("UPDATE megadesk_conversation_contacts");
+  });
+
+  it("refuses a malformed company contacts_json before any link write", async () => {
+    const db = connection([
+      [[{ contact_id: "contact-a", canonicalPhone: "5511999999999" }]],
+      [[{ crm_client_id: "crm-a", customerType: "company", contactsJson: "{}" }]],
+    ]);
+    mocks.getConnection.mockResolvedValueOnce(db);
+    await expect(conversationsRouter.createCaller(context()).linkCrm({ contactId: "contact-a", crmClientId: "crm-a" }))
+      .rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(db.execute).toHaveBeenCalledTimes(2);
+    expect(db.rollback).toHaveBeenCalledOnce();
+  });
+
   it("rejects a missing or cross-tenant CRM candidate without updating the contact", async () => {
-    const db = connection([[[{ contact_id: "contact-a" }]], [[]]]);
+    const db = connection([[[{ contact_id: "contact-a", canonicalPhone: "5511999999999" }]], [[]]]);
     mocks.getConnection.mockResolvedValue(db);
     await expect(conversationsRouter.createCaller(context()).linkCrm({ contactId: "contact-a", crmClientId: "crm-b" }))
       .rejects.toMatchObject({ code: "BAD_REQUEST" });

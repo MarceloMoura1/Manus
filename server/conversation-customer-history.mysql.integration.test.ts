@@ -103,7 +103,7 @@ physical.sequential("canonical customer, tickets and read-only history", () => {
   it("reads prior normalized history without changing conversation or message rows", async () => {
     const before = await rows("SELECT conversation_id,status,last_message,messages_json FROM megadesk_domain_conversations WHERE client_id=? ORDER BY conversation_id", [tenantA]);
     const messageBefore = await rows("SELECT message_id,message,direction FROM megadesk_domain_conversations_messages WHERE client_id=?", [tenantA]);
-    const detail = await caller().historyDetail({ conversationId: "conv-old" });
+    const detail = await caller().historyDetail({ contactId: "contact-a", conversationId: "conv-old" });
     expect(detail.conversation).toMatchObject({ id: "conv-old", publicCode: "CV-OLD", status: "closed" });
     expect(detail.messages).toMatchObject([{ id: "history-message", text: "Historical text", direction: "inbound" }]);
     expect(await rows("SELECT conversation_id,status,last_message,messages_json FROM megadesk_domain_conversations WHERE client_id=? ORDER BY conversation_id", [tenantA])).toEqual(before);

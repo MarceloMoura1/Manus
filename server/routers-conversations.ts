@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
-import { normalizeContactPhone } from "../shared/contact-phone";
+import { normalizeContactPhone, sameContactPhone } from "../shared/contact-phone";
 import { z } from "zod";
 import { router, megadeskProcedure } from "./_core/trpc";
 import { getPool } from "./db";
@@ -111,7 +111,8 @@ export const conversationsRouter = router({
     }
     const [rows] = await getPool().execute(
       `SELECT c.conversation_id AS id, c.public_code AS publicCode, c.contact_id AS contactId,
-       COALESCE(crm.responsible_name, crm.company_name, contact.display_name, c.customer_name) AS customerName, c.phone AS customerPhone,
+        COALESCE(NULLIF(TRIM(contact.display_name), ''), NULLIF(TRIM(c.customer_name), ''),
+          NULLIF(TRIM(crm.responsible_name), ''), crm.company_name) AS customerName, c.phone AS customerPhone,
        contact.company_text AS companyText, crm.company_name AS companyName, crm.customer_type AS customerType,
        crm.responsible_name AS crmResponsibleName, crm.phone AS crmPhone, crm.whatsapp AS crmWhatsapp, crm.email AS crmEmail,
        c.last_message AS lastMessage, c.updated_at AS lastMessageAt, c.unread_count AS unreadCount,
@@ -289,25 +290,44 @@ export const conversationsRouter = router({
       catch { return { source: "legacy_json" as const, messages: [] }; }
     }),
 
-  history: megadeskProcedure.input(z.object({ contactId: id })).query(async ({ input, ctx }) => {
+  history: megadeskProcedure.input(z.object({ contactId: id, currentConversationId: id })).query(async ({ input, ctx }) => {
     requireConversationAccess(ctx);
     const [rows] = await getPool().execute(
       `SELECT conversation_id AS id, public_code AS publicCode, status, customer_name AS customerName,
-       assigned_user_name AS assignedUserName, last_message AS summary, created_at AS startedAt, closed_at AS closedAt
-       FROM megadesk_domain_conversations WHERE client_id = ? AND contact_id = ? ORDER BY created_at DESC LIMIT 100`,
-      [ctx.tenantId, input.contactId],
+        assigned_user_name AS assignedUserName, created_at AS startedAt, closed_at AS closedAt
+        FROM megadesk_domain_conversations
+        WHERE client_id = ? AND contact_id = ? AND conversation_id <> ?
+        ORDER BY created_at DESC, conversation_id DESC LIMIT 4`,
+       [ctx.tenantId, input.contactId, input.currentConversationId],
     );
-    return rows as any[];
+    const items = rows as any[];
+    return { items: items.slice(0, 3), hasMore: items.length > 3 };
   }),
 
-  historyDetail: megadeskProcedure.input(z.object({ conversationId: id })).query(async ({ input, ctx }) => {
+  historyPage: megadeskProcedure.input(z.object({ contactId: id, currentConversationId: id, offset: z.number().int().min(0).default(0) }))
+    .query(async ({ input, ctx }) => {
+      requireConversationAccess(ctx);
+      const [rows] = await getPool().execute(
+        `SELECT conversation_id AS id, public_code AS publicCode, status, customer_name AS customerName,
+          assigned_user_name AS assignedUserName, created_at AS startedAt, closed_at AS closedAt
+          FROM megadesk_domain_conversations
+          WHERE client_id = ? AND contact_id = ? AND conversation_id <> ?
+          ORDER BY created_at DESC, conversation_id DESC LIMIT 21 OFFSET ${input.offset}`,
+        [ctx.tenantId, input.contactId, input.currentConversationId],
+      );
+      const items = rows as any[];
+      return { items: items.slice(0, 20), hasMore: items.length > 20 };
+    }),
+
+  historyDetail: megadeskProcedure.input(z.object({ contactId: id, conversationId: id })).query(async ({ input, ctx }) => {
     requireConversationAccess(ctx);
     const [conversations] = await getPool().execute(
       `SELECT conversation_id AS id, public_code AS publicCode, status,
        customer_name AS customerName, assigned_user_name AS assignedUserName,
        created_at AS startedAt, closed_at AS closedAt, messages_json AS messagesJson
-       FROM megadesk_domain_conversations WHERE client_id = ? AND conversation_id = ? LIMIT 1`,
-      [ctx.tenantId, input.conversationId],
+        FROM megadesk_domain_conversations
+        WHERE client_id = ? AND contact_id = ? AND conversation_id = ? LIMIT 1`,
+       [ctx.tenantId, input.contactId, input.conversationId],
     ) as any[];
     if (!conversations.length) throw new TRPCError({ code: "NOT_FOUND", message: "Atendimento não encontrado." });
     const [rows] = await getPool().execute(
@@ -395,16 +415,46 @@ export const conversationsRouter = router({
       try {
         await connection.beginTransaction();
         const [contacts] = await connection.execute(
-          `SELECT contact_id FROM megadesk_conversation_contacts WHERE contact_id = ? AND client_id = ? LIMIT 1 FOR UPDATE`,
+           `SELECT contact_id, canonical_phone AS canonicalPhone
+            FROM megadesk_conversation_contacts WHERE contact_id = ? AND client_id = ? LIMIT 1 FOR UPDATE`,
           [input.contactId, ctx.tenantId],
         ) as any[];
         if (!contacts.length) throw new TRPCError({ code: "NOT_FOUND", message: "Contato não encontrado." });
         if (input.crmClientId) {
           const [crm] = await connection.execute(
-            `SELECT crm_client_id FROM megadesk_crm_clients WHERE crm_client_id = ? AND client_id = ? AND lifecycle_state = 'active' LIMIT 1`,
+             `SELECT crm_client_id, customer_type AS customerType, contacts_json AS contactsJson
+              FROM megadesk_crm_clients
+              WHERE crm_client_id = ? AND client_id = ? AND lifecycle_state = 'active' LIMIT 1 FOR UPDATE`,
             [input.crmClientId, ctx.tenantId],
           ) as any[];
-          if (!crm.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Cliente indisponível para vínculo." });
+           if (!crm.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Cliente indisponível para vínculo." });
+           const normalizedPhone = normalizeContactPhone(contacts[0].canonicalPhone);
+           if (crm[0].customerType === "company" && normalizedPhone.status === "valid") {
+             let additionalContacts: unknown[] = [];
+             if (crm[0].contactsJson) {
+               try {
+                 const parsed = JSON.parse(crm[0].contactsJson);
+                 if (!Array.isArray(parsed)) throw new Error("contacts_json is not an array");
+                 additionalContacts = parsed;
+               } catch {
+                 throw new TRPCError({ code: "BAD_REQUEST", message: "Contatos adicionais do Cliente ERP estão inválidos para atualização segura." });
+               }
+             }
+             const hasEquivalentPhone = additionalContacts.some(contact => {
+               if (!contact || typeof contact !== "object") return false;
+               const item = contact as { phone?: unknown; whatsapp?: unknown };
+               return (typeof item.phone === "string" && sameContactPhone(item.phone, normalizedPhone.value))
+                 || (typeof item.whatsapp === "string" && sameContactPhone(item.whatsapp, normalizedPhone.value));
+             });
+             if (!hasEquivalentPhone) {
+               additionalContacts.push({ phone: normalizedPhone.value, whatsapp: normalizedPhone.value });
+               await connection.execute(
+                 `UPDATE megadesk_crm_clients SET contacts_json = ?, updated_at = NOW()
+                  WHERE crm_client_id = ? AND client_id = ?`,
+                 [JSON.stringify(additionalContacts), input.crmClientId, ctx.tenantId],
+               );
+             }
+           }
         }
         const [updated] = await connection.execute(
           `UPDATE megadesk_conversation_contacts SET crm_client_id = ?, updated_at = NOW() WHERE contact_id = ? AND client_id = ?`,
