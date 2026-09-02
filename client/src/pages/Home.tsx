@@ -19,6 +19,9 @@ import { normalizeContactPhone } from "../../../shared/contact-phone";
 import { ConversationMedia } from "@/components/ConversationMedia";
 import { ConversationDetailsPanel } from "@/components/ConversationDetailsPanel";
 import { ConversationListItem } from "@/components/ConversationListItem";
+import { ConversationActivityEvent } from "@/components/ConversationActivityEvent";
+import { mergeConversationTimeline } from "@/lib/conversationTimeline";
+import { useDebounce } from "@/hooks/useDebounce";
 import {
   conversationFilterStorageKey,
   readConversationFilters,
@@ -407,6 +410,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   ), [conversationFiltersStorageKey]);
 
   const [searchTerm, setSearchTerm] = React.useState('');
+  const debouncedSearchTerm = useDebounce(searchTerm, 300);
   const [crmIntent, setCrmIntent] = React.useState<CrmWhatsAppIntent | null>(() => {
     try {
       const raw = sessionStorage.getItem("megadesk-crm-whatsapp-intent");
@@ -422,9 +426,6 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     : inboxView === 'closed'
       ? 'all'
       : attendantScope;
-  const [attendantFilter, setAttendantFilter] = React.useState<string>('');
-  const [historySearch, setHistorySearch] = React.useState<string>('');
-  const [attendantDropdownOpen, setAttendantDropdownOpen] = React.useState(false);
   // Filtro por data
   const [dateFilterOpen, setDateFilterOpen] = React.useState(false);
   const [dateFrom, setDateFrom] = React.useState<string>('');
@@ -480,6 +481,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     { enabled: !!selectedConversation && !!clientId, refetchInterval: 3000 }
   );
   const conversationMessages = conversationMessageResult?.messages ?? [];
+  const conversationEvents = conversationMessageResult?.events ?? [];
   const timelineMessages = React.useMemo(() => {
     const persisted = Array.isArray(conversationMessages) ? conversationMessages : [];
     const persistedAttempts = new Set(
@@ -487,8 +489,11 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
         .map((message: any) => String(message.clientAttemptId ?? "").trim())
         .filter(Boolean),
     );
-    return [...persisted, ...optimisticMessages.filter(message => !persistedAttempts.has(message.clientAttemptId))];
-  }, [conversationMessages, optimisticMessages]);
+    return mergeConversationTimeline(
+      [...persisted, ...optimisticMessages.filter(message => !persistedAttempts.has(message.clientAttemptId))],
+      Array.isArray(conversationEvents) ? conversationEvents : [],
+    );
+  }, [conversationEvents, conversationMessages, optimisticMessages]);
 
   // Mutations tRPC
   const closeConversationMutation = trpc.conversations.close.useMutation();
@@ -611,7 +616,9 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     {
       viewMode: ownerFilter === 'mine' ? 'mine' : ownerFilter === 'waiting' ? 'waiting' : 'all',
       status: selectedFilter,
-      search: searchTerm || historySearch,
+      search: debouncedSearchTerm,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
       limit: 100,
       offset: 0,
     },
@@ -625,6 +632,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     companyText: conversation.companyText,
     companyName: conversation.companyName,
     timestamp: conversation.lastMessageAt,
+    createdAt: conversation.attendanceStartedAt ?? conversation.openedAt ?? conversation.createdAt,
     status: conversation.status === 'pending' ? 'bot' : conversation.status,
     assignedTo: conversation.assignedUserName,
     isUnread: Number(conversation.unreadCount ?? 0) > 0 && conversation.lastMessageFrom === 'customer',
@@ -698,43 +706,9 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     });
     // Nova conversa criada pelo Baileys
     // Usa os mesmos campos que a API getConversations retorna (id, name, etc.)
-    socket.on('conversation:new', (data: { conversation: any }) => {
-      const c = data.conversation;
-      setConversations(prev => {
-        const exists = prev.find(x => x.id === c.id);
-        if (exists) return prev;
-        return [{
-          id: c.id,
-          name: c.name,
-          phone: c.phone,
-          company: c.company ?? '',
-          lastMessage: c.lastMessage,
-          status: c.status || 'bot',
-          unreadCount: c.unreadCount || 1,
-          isUnread: true,
-          lastMessageFrom: c.lastMessageFrom || 'customer',
-          timestamp: c.createdAt ? new Date(c.createdAt).getTime() : Date.now(),
-          assignedTo: null,
-          assignedUserId: null,
-        }, ...prev];
-      });
-    });
+    socket.on('conversation:new', () => { void utils.conversations.list.invalidate(); });
     // Conversa atualizada (nova mensagem)
-    socket.on('conversation:updated', (data: any) => {
-      setConversations(prev => prev.map(conv => {
-        if (conv.id === data.conversationId) {
-          return {
-            ...conv,
-            lastMessage: data.lastMessage,
-            lastMessageFrom: data.lastMessageFrom,
-            status: data.status || conv.status,
-            unreadCount: data.unreadCount ?? conv.unreadCount,
-            isUnread: data.lastMessageFrom === 'customer',
-          };
-        }
-        return conv;
-      }));
-    });
+    socket.on('conversation:updated', () => { void utils.conversations.list.invalidate(); });
     // LID foi resolvido para numero real
     socket.on('lid-resolved', (data: { oldPhone: string; newPhone: string; lidId: string }) => {
       console.log(`[Socket.IO] LID resolvido: ${data.oldPhone} -> ${data.newPhone}`);
@@ -749,7 +723,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
       socket.emit('wa:leave_client', clientId);
       socket.disconnect();
     };
-  }, [clientId]);
+  }, [clientId, utils]);
 
   const updateMessageFollowState = React.useCallback((element: HTMLDivElement) => {
     isNearMessageBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96;
@@ -774,17 +748,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     if (isNearMessageBottomRef.current) element.scrollTop = element.scrollHeight;
   }, [selectedConversation, timelineMessages]);
 
-  // Buscar todos os usuários ativos do cliente
+  // Usuários elegíveis também alimentam o diálogo de transferência.
   const { data: activeUsersData } = trpc.conversations.eligibleUsers.useQuery(undefined, { enabled: !!clientId });
-
-  // Lista de atendentes (todos os usuários ativos)
-  const attendants = React.useMemo(() => {
-    if (!activeUsersData) return [];
-    return activeUsersData.map(u => u.name).filter(Boolean);
-  }, [activeUsersData]);
-
-  // Modo Histórico: busca em TODAS as conversas (abertas + fechadas + bot), sem filtro de status
-  const isHistoryMode = (ownerFilter as string) === 'history';
 
   // Helper: converte timestamp de conversa para Date
   const convToDate = (conv: any): Date | null => {
@@ -800,47 +765,9 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   // Verifica se o filtro por data está ativo
   const hasDateFilter = dateFrom !== '' || dateTo !== '';
 
-  const filteredConversations = conversations.filter(conv => {
-    // Filtro por data (aplica em todos os modos)
-    if (hasDateFilter) {
-      const d = convToDate(conv);
-      if (!d) return false;
-      const convDate = d.toISOString().slice(0, 10);
-      if (dateFrom && convDate < dateFrom) return false;
-      if (dateTo && convDate > dateTo) return false;
-      // Dentro do periodo: aplica busca adicional
-      const q = searchTerm.toLowerCase();
-      if (searchTerm.trim() === '') return true;
-      return (
-        conv.name?.toLowerCase().includes(q) ||
-        conv.company?.toLowerCase().includes(q) ||
-        conv.phone?.includes(searchTerm)
-      );
-    }
-
-    if (isHistoryMode) {
-      // Histórico: ignora filtro de status, busca em tudo pelo termo de histórico
-      // Filtro por atendente (se selecionado)
-      if (attendantFilter && conv.assignedTo !== attendantFilter) return false;
-      
-      if (historySearch.trim() === '') return true;
-      const q = historySearch.toLowerCase();
-      return (
-        conv.name?.toLowerCase().includes(q) ||
-        conv.company?.toLowerCase().includes(q) ||
-        conv.phone?.includes(historySearch)
-      );
-    }
-    const matchesSearch = searchTerm === '' ||
-      conv.phone?.includes(searchTerm) ||
-      conv.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      conv.company?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesOwner =
-      ownerFilter === 'all' ? true :
-      ownerFilter === 'mine' ? (conv.assignedTo === userName || conv.assignedTo === sessionData?.userId) :
-      true;
-    return matchesSearch && matchesOwner;
-  });
+  // Escopo, busca e período são resolvidos pelo contrato conversations.list. A
+  // interface só ordena as linhas que o backend já autorizou e filtrou.
+  const filteredConversations = conversations;
 
   const orderedConversations = React.useMemo(() => [...filteredConversations].sort((left, right) => {
     const leftTimestamp = convToDate(left)?.getTime() ?? 0;
@@ -849,13 +776,11 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
       ? rightTimestamp - leftTimestamp
       : leftTimestamp - rightTimestamp;
   }), [conversationSortOrder, filteredConversations]);
-  const hasListFilters = hasDateFilter || Boolean(searchTerm || historySearch || attendantFilter);
+  const hasListFilters = hasDateFilter || Boolean(searchTerm);
   const clearConversationFilters = () => {
     setDateFrom('');
     setDateTo('');
     setSearchTerm('');
-    setHistorySearch('');
-    setAttendantFilter('');
   };
 
   const selectedConv = conversations.find(c => c.id === selectedConversation);
@@ -1077,13 +1002,13 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                   <input
                     type="text"
                     placeholder="Nome, empresa ou telefone..."
-                    value={searchTerm || historySearch}
-                    onChange={e => { setSearchTerm(e.target.value); setHistorySearch(e.target.value); }}
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
                     className="w-full pl-8 pr-8 py-2 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent transition-all"
                   />
-                  {(searchTerm || historySearch) && (
+                  {searchTerm && (
                     <button
-                      onClick={() => { setSearchTerm(''); setHistorySearch(''); }}
+                      onClick={() => setSearchTerm('')}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                     >
                       <X className="w-3.5 h-3.5" />
@@ -1117,44 +1042,6 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                 </div>
               </div>
 
-              {/* Filtro por Atendente (apenas no modo Histórico) */}
-              {isHistoryMode && attendants.length > 0 && (
-                <div>
-                  <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Atendentes</label>
-                  <div className="relative">
-                    <button
-                      onClick={() => setAttendantDropdownOpen(!attendantDropdownOpen)}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 text-left flex items-center justify-between hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                    >
-                      <span>{attendantFilter ? attendantFilter : 'Selecione um atendente'}</span>
-                      <ChevronDown className={cn('w-4 h-4 transition-transform', attendantDropdownOpen && 'rotate-180')} />
-                    </button>
-                    {attendantDropdownOpen && (
-                      <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
-                        <button
-                          onClick={() => { setAttendantFilter(''); setAttendantDropdownOpen(false); }}
-                          className="w-full px-3 py-2 text-xs text-left hover:bg-slate-100 text-slate-700"
-                        >
-                          Todos os atendentes
-                        </button>
-                        {attendants.map(att => (
-                          <button
-                            key={att}
-                            onClick={() => { setAttendantFilter(att); setAttendantDropdownOpen(false); }}
-                            className={cn(
-                              'w-full px-3 py-2 text-xs text-left hover:bg-slate-100',
-                              attendantFilter === att ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-700'
-                            )}
-                          >
-                            {att}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
               {/* Limpar filtros */}
               {hasListFilters && (
                 <button
@@ -1163,9 +1050,9 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                 >Limpar todos os filtros</button>
               )}
 
-              {(hasDateFilter || searchTerm || historySearch) && (
+              {(hasDateFilter || searchTerm) && (
                 <p className="text-xs text-slate-500 text-center">
-                  {filteredConversations.length} resultado{filteredConversations.length !== 1 ? 's' : ''}
+                  {orderedConversations.length} resultado{orderedConversations.length !== 1 ? 's' : ''}
                 </p>
               )}
             </div>
@@ -1215,10 +1102,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                 type="button"
                 key={scope}
                 aria-pressed={inboxView === 'open' && attendantScope === scope}
-                onClick={() => {
-                  selectAttendantScope(scope);
-                  setAttendantFilter('');
-                }}
+                onClick={() => selectAttendantScope(scope)}
                 className={cn(
                   'min-w-0 flex-1 flex items-center justify-center gap-1 px-2 py-2 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:gap-1.5 sm:px-3',
                   index > 0 && 'border-l border-slate-200',
@@ -1291,14 +1175,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
           ) : (
             <div className="flex flex-col items-center justify-center h-48 text-center px-6">
               <MessageCircle className="w-10 h-10 text-slate-200 mb-3" />
-              <p className="text-sm font-medium text-slate-500">
-                {isHistoryMode ? 'Nenhum resultado' : 'Nenhuma conversa'}
-              </p>
-              <p className="text-xs text-slate-400 mt-1">
-                {isHistoryMode
-                  ? 'Digite um nome, empresa ou telefone para buscar'
-                  : 'Tente outro filtro ou busca'}
-              </p>
+              <p className="text-sm font-medium text-slate-500">Nenhuma conversa</p>
+              <p className="text-xs text-slate-400 mt-1">Tente outro filtro ou busca</p>
             </div>
           )}
         </div>
@@ -1444,11 +1322,15 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                   );
                 }
                 return msgs.map((msg: any, idx: number) => {
+                  if (msg.kind === 'activity') {
+                    return <ConversationActivityEvent key={msg.id ?? `activity-${idx}`} event={msg} />;
+                  }
                   const isAgent = msg.sender === 'agent' || msg.from === 'agent';
                   const msgText = msg.text || msg.message || '';
                   const msgTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
                   const msgType = msg.type || 'text';
                   const receipt = isAgent ? outboundReceipt(msg.status, msg.pending === true) : null;
+                  const isShortText = msgType === 'text' && msgText.trim().length <= 72;
                   
                   // Renderização de mídia
                   const renderContent = () => {
@@ -1508,15 +1390,15 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                   
                   return (
                     <div key={msg.id ?? msg.clientAttemptId ?? `message-${idx}`} data-testid="conversation-message" className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
-                      <div className="min-w-0 max-w-[85%] md:max-w-xs lg:max-w-md">
-                        <div className={`rounded-2xl px-4 py-2.5 shadow-sm ${msg.pending ? 'opacity-70' : ''} ${
+                      <div className={cn("min-w-0 max-w-[85%] md:max-w-xs lg:max-w-md", isShortText && "min-w-[9rem] sm:min-w-[10rem]")}>
+                        <div data-testid="conversation-message-bubble" className={`rounded-2xl px-4 py-3 ${msg.pending ? 'opacity-70' : ''} ${
                           isAgent
-                            ? 'bg-gradient-to-br from-blue-500 to-violet-600 text-white rounded-tr-sm'
-                            : 'bg-white border border-slate-100 text-slate-800 rounded-tl-sm'
+                            ? 'rounded-tr-sm bg-gradient-to-br from-blue-500 to-violet-600 text-white shadow-[0_1px_2px_rgba(15,23,42,0.14)]'
+                            : 'rounded-tl-sm border border-slate-100 bg-white text-slate-800 shadow-sm'
                         }`}>
-                          {isAgent && <p className="mb-1 text-xs font-bold text-white">{operatorDisplayName(msg)}</p>}
+                          {isAgent && <p className="mb-1.5 text-xs font-bold text-white">{operatorDisplayName(msg)}</p>}
                           {renderContent()}
-                          <p className={`mt-1 flex items-center justify-end gap-1 text-xs ${isAgent ? 'text-blue-100' : 'text-slate-400'}`}>
+                          <div data-testid="conversation-message-metadata" className={`mt-2 flex items-center justify-end gap-1 text-xs ${isAgent ? 'text-blue-100' : 'text-slate-400'}`}>
                             <span>{msgTime}</span>
                             {receipt && <span data-testid="conversation-message-receipt" aria-label={receipt.label} title={receipt.label} className={`inline-flex items-center ${receipt.tone}`}>
                               {receipt.icon === 'pending' && <Clock className="h-3.5 w-3.5" aria-hidden="true" />}
@@ -1524,7 +1406,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                               {(receipt.icon === 'delivered' || receipt.icon === 'read') && <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />}
                               {receipt.icon === 'failed' && <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />}
                             </span>}
-                          </p>
+                          </div>
                         </div>
                       </div>
                     </div>

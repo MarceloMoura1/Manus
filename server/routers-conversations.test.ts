@@ -42,6 +42,33 @@ describe("Conversations authorization, filters and lifecycle", () => {
     expect(mocks.execute.mock.calls[0][0]).not.toContain("c.assigned_user_id = ?");
   });
 
+  it("filters canonical identity, CRM context, equivalent phones and local calendar dates in SQL", async () => {
+    mocks.execute.mockResolvedValue([[]]);
+    await conversationsRouter.createCaller(context()).list({
+      viewMode: "all", status: "active", search: "+55 (41) 99999-9999",
+      dateFrom: "2026-08-01", dateTo: "2026-08-31", limit: 30, offset: 0,
+    });
+    const [sql, values] = mocks.execute.mock.calls[0];
+    expect(sql).toContain("contact.display_name LIKE ?");
+    expect(sql).toContain("crm.company_name LIKE ?");
+    expect(sql).toContain("crm.responsible_name LIKE ?");
+    expect(sql).toContain("REGEXP_REPLACE(COALESCE(c.phone, ''), '[^0-9]', '')");
+    expect(sql).toContain("REGEXP_REPLACE(COALESCE(crm.whatsapp, ''), '[^0-9]', '')");
+    expect(sql).toContain("COALESCE(c.opened_at, c.created_at) >= CAST(? AS DATETIME)");
+    expect(sql).toContain("COALESCE(c.opened_at, c.created_at) < DATE_ADD(CAST(? AS DATETIME), INTERVAL 1 DAY)");
+    expect(values).toContain("5541999999999");
+    expect(values).toContain("2026-08-01 00:00:00");
+    expect(values).toContain("2026-08-31 00:00:00");
+    expect(values[0]).toBe("tenant-a");
+  });
+
+  it("rejects an inverted local calendar period before accessing the database", async () => {
+    await expect(conversationsRouter.createCaller(context()).list({
+      viewMode: "all", status: "active", search: "", dateFrom: "2026-09-02", dateTo: "2026-09-01", limit: 30, offset: 0,
+    })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
   it("counts the same disjoint open, mine, bot and closed inboxes used by listing", async () => {
     mocks.execute.mockResolvedValue([[{ active: 3, mine: 1, waiting: 2, closed: 4 }]]);
     const result = await conversationsRouter.createCaller(context()).counts();
@@ -186,13 +213,34 @@ describe("Conversations authorization, filters and lifecycle", () => {
   it("reads historical messages scoped to the same tenant and contact without lifecycle writes", async () => {
     mocks.execute
       .mockResolvedValueOnce([[{ id: "conv-old", publicCode: "CV-9", messagesJson: "[]" }]])
-      .mockResolvedValueOnce([[{ id: "msg-1", text: "Histórico", mediaReference: null }]]);
+      .mockResolvedValueOnce([[{ id: "msg-1", text: "Histórico", mediaReference: null }]])
+      .mockResolvedValueOnce([[{ id: "event-1", eventType: "closed", actorName: "Agent", timestamp: "2026-08-30T12:00:00.000Z" }]]);
     const result = await conversationsRouter.createCaller(context()).historyDetail({ contactId: "contact-a", conversationId: "conv-old" });
-    expect(mocks.execute.mock.calls).toHaveLength(2);
+    expect(mocks.execute.mock.calls).toHaveLength(3);
     expect(mocks.execute.mock.calls[0][1]).toEqual(["tenant-a", "contact-a", "conv-old"]);
     expect(mocks.execute.mock.calls[1][1]).toEqual(["tenant-a", "conv-old"]);
     expect(mocks.execute.mock.calls.every(([sql]) => /^\s*SELECT/i.test(sql as string))).toBe(true);
     expect(result.messages).toHaveLength(1);
+    expect(result.events).toEqual([{ id: "event-1", eventType: "closed", actorName: "Agent", timestamp: "2026-08-30T12:00:00.000Z" }]);
+    expect(mocks.execute.mock.calls[2][0]).toContain("megadesk_conversation_events e");
+    expect(mocks.execute.mock.calls[2][1]).toEqual(["tenant-a", "conv-old"]);
+  });
+
+  it("reads normalized messages and activity in two tenant-scoped queries without per-event lookups", async () => {
+    mocks.execute
+      .mockResolvedValueOnce([[{ id: "msg-1", text: "Olá", mediaReference: null }]])
+      .mockResolvedValueOnce([[{ id: "event-transfer", eventType: "transferred", actorName: "Ana", fromUserName: "Ana", toUserName: "Bia" }]]);
+    const result = await conversationsRouter.createCaller(context()).messages({ conversationId: "conv-a", limit: 100 });
+    expect(result).toMatchObject({
+      source: "normalized",
+      messages: [{ id: "msg-1", text: "Olá" }],
+      events: [{ id: "event-transfer", eventType: "transferred", actorName: "Ana", fromUserName: "Ana", toUserName: "Bia" }],
+    });
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+    const [eventsSql, eventsValues] = mocks.execute.mock.calls[1];
+    expect(eventsSql).toContain("LEFT JOIN megadesk_domain_client_users actor");
+    expect(eventsSql).toContain("LEFT JOIN megadesk_domain_client_users target");
+    expect(eventsValues).toEqual(["tenant-a", "conv-a"]);
   });
 
   it.each([0, 1, 2, 3, 4, 10])("limits the sidebar history preview for %i prior attendances", async count => {

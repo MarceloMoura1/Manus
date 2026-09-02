@@ -1,17 +1,25 @@
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
-import { normalizeContactPhone, sameContactPhone } from "../shared/contact-phone";
+import { contactPhoneStorageDigitsVariants, normalizeContactPhone, sameContactPhone } from "../shared/contact-phone";
 import { z } from "zod";
 import { router, megadeskProcedure } from "./_core/trpc";
 import { getPool } from "./db";
 
 const id = z.string().min(1).max(80);
+const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inv\u00e1lida.");
+
 const listInput = z.object({
   viewMode: z.enum(["all", "mine", "waiting"]).default("all"),
   status: z.enum(["active", "closed"]).default("active"),
   search: z.string().trim().max(120).default(""),
+  dateFrom: calendarDate.optional(),
+  dateTo: calendarDate.optional(),
   limit: z.number().int().min(1).max(100).default(30),
   offset: z.number().int().min(0).default(0),
+}).superRefine((input, issue) => {
+  if (input.dateFrom && input.dateTo && input.dateFrom > input.dateTo) {
+    issue.addIssue({ code: "custom", path: ["dateTo"], message: "A data final deve ser igual ou posterior \u00e0 inicial." });
+  }
 });
 
 const CONVERSATION_ROLES = new Set(["admin", "manager", "agent"]);
@@ -33,6 +41,45 @@ function attendanceEvent(connection: any, tenantId: string, conversationId: stri
      VALUES (?, ?, ?, ?, ?, ?)`,
     [`event-${randomUUID()}`, tenantId, conversationId, eventType, operatorUserId, JSON.stringify(metadata)],
   );
+}
+
+function eventMetadataValue(path: string) {
+  const safeMetadata = "CASE WHEN JSON_VALID(e.metadata_json) THEN e.metadata_json ELSE '{}' END";
+  return `NULLIF(JSON_UNQUOTE(JSON_EXTRACT(${safeMetadata}, '${path}')), '')`;
+}
+
+type ConversationEventRow = {
+  id: string;
+  eventType: string;
+  operatorUserId: string | null;
+  timestamp: string;
+  actorName: string | null;
+  fromUserName: string | null;
+  toUserName: string | null;
+};
+
+async function conversationEvents(connection: { execute: (sql: string, values: unknown[]) => Promise<any> }, tenantId: string,
+  conversationId: string, limit = 200) {
+  const targetUserId = eventMetadataValue("$.toUserId");
+  const fromUserId = eventMetadataValue("$.fromUserId");
+  const [rows] = await connection.execute(
+    `SELECT e.event_id AS id, e.event_type AS eventType, e.operator_user_id AS operatorUserId,
+      e.created_at AS timestamp,
+      NULLIF(TRIM(actor.name), '') AS actorName,
+      NULLIF(TRIM(source.name), '') AS fromUserName,
+      NULLIF(TRIM(target.name), '') AS toUserName
+     FROM megadesk_conversation_events e
+     LEFT JOIN megadesk_domain_client_users actor
+       ON actor.client_id = e.client_id AND actor.user_id = e.operator_user_id
+     LEFT JOIN megadesk_domain_client_users source
+       ON source.client_id = e.client_id AND source.user_id = ${fromUserId}
+     LEFT JOIN megadesk_domain_client_users target
+       ON target.client_id = e.client_id AND target.user_id = ${targetUserId}
+     WHERE e.client_id = ? AND e.conversation_id = ?
+     ORDER BY e.created_at ASC, e.event_id ASC LIMIT ${limit}`,
+    [tenantId, conversationId],
+  ) as any[];
+  return rows as ConversationEventRow[];
 }
 
 export function normalizedMessage(row: Record<string, any>) {
@@ -106,8 +153,37 @@ export const conversationsRouter = router({
     const values: unknown[] = [ctx.tenantId];
     if (input.status === "active" && input.viewMode === "mine") { conditions.push("c.assigned_user_id = ?"); values.push(ctx.operationalUserId); }
     if (input.search) {
-      conditions.push("(UPPER(c.public_code) = UPPER(?) OR c.customer_name LIKE ? OR contact.display_name LIKE ? OR c.company LIKE ? OR c.phone LIKE ?)");
-      values.push(input.search, `%${input.search}%`, `%${input.search}%`, `%${input.search}%`, `%${input.search.replace(/\D/g, "")}%`);
+      const textSearch = `%${input.search}%`;
+      const searchConditions = [
+        "UPPER(c.public_code) = UPPER(?)",
+        "c.customer_name LIKE ?",
+        "contact.display_name LIKE ?",
+        "c.company LIKE ?",
+        "contact.company_text LIKE ?",
+        "crm.company_name LIKE ?",
+        "crm.responsible_name LIKE ?",
+      ];
+      const searchValues: unknown[] = [input.search, textSearch, textSearch, textSearch, textSearch, textSearch, textSearch];
+      const phoneVariants = contactPhoneStorageDigitsVariants(input.search);
+      if (phoneVariants.length) {
+        const placeholders = phoneVariants.map(() => "?").join(", ");
+        const digitsOnly = (column: string) => `REGEXP_REPLACE(COALESCE(${column}, ''), '[^0-9]', '') IN (${placeholders})`;
+        searchConditions.push(digitsOnly("c.phone"), digitsOnly("contact.canonical_phone"), digitsOnly("crm.phone"), digitsOnly("crm.whatsapp"));
+        searchValues.push(...phoneVariants, ...phoneVariants, ...phoneVariants, ...phoneVariants);
+      }
+      conditions.push(`(${searchConditions.join(" OR ")})`);
+      values.push(...searchValues);
+    }
+    // As datas chegam como dias de calend\u00e1rio locais (YYYY-MM-DD). A compara\u00e7\u00e3o \u00e9
+    // inclusiva no in\u00edcio e exclusiva no dia seguinte, sem convers\u00e3o UTC no servidor.
+    const attendanceStartedAt = "COALESCE(c.opened_at, c.created_at)";
+    if (input.dateFrom) {
+      conditions.push(`${attendanceStartedAt} >= CAST(? AS DATETIME)`);
+      values.push(`${input.dateFrom} 00:00:00`);
+    }
+    if (input.dateTo) {
+      conditions.push(`${attendanceStartedAt} < DATE_ADD(CAST(? AS DATETIME), INTERVAL 1 DAY)`);
+      values.push(`${input.dateTo} 00:00:00`);
     }
     const [rows] = await getPool().execute(
       `SELECT c.conversation_id AS id, c.public_code AS publicCode, c.contact_id AS contactId,
@@ -120,7 +196,8 @@ export const conversationsRouter = router({
        CASE WHEN c.status = 'bot' THEN 'pending' ELSE c.status END AS status,
        c.assigned_user_id AS assignedUserId, c.assigned_user_name AS assignedUserName,
        c.last_message_from AS lastMessageFrom, crm.crm_client_id AS crmClientId, c.origin,
-       c.created_at AS createdAt, c.closed_at AS closedAt
+        c.created_at AS createdAt, c.opened_at AS openedAt,
+        COALESCE(c.opened_at, c.created_at) AS attendanceStartedAt, c.closed_at AS closedAt
        FROM megadesk_domain_conversations c
        LEFT JOIN megadesk_conversation_contacts contact
          ON contact.contact_id = c.contact_id AND contact.client_id = c.client_id
@@ -280,14 +357,18 @@ export const conversationsRouter = router({
          WHERE m.client_id = ? AND m.conversation_id = ? ORDER BY m.timestamp ASC, m.message_id ASC LIMIT ${input.limit}`,
         [ctx.tenantId, input.conversationId],
       ) as any[];
-      if (rows.length) return { source: "normalized" as const, messages: rows.map(normalizedMessage) };
+       if (rows.length) {
+         const events = await conversationEvents(getPool(), ctx.tenantId, input.conversationId, input.limit);
+         return { source: "normalized" as const, messages: rows.map(normalizedMessage), events };
+       }
       const [legacy] = await getPool().execute(
         `SELECT messages_json FROM megadesk_domain_conversations WHERE client_id = ? AND conversation_id = ? LIMIT 1`,
         [ctx.tenantId, input.conversationId],
       ) as any[];
       if (!legacy.length) throw new TRPCError({ code: "NOT_FOUND", message: "Atendimento não encontrado." });
-      try { return { source: "legacy_json" as const, messages: JSON.parse(legacy[0].messages_json || "[]") }; }
-      catch { return { source: "legacy_json" as const, messages: [] }; }
+       const events = await conversationEvents(getPool(), ctx.tenantId, input.conversationId, input.limit);
+       try { return { source: "legacy_json" as const, messages: JSON.parse(legacy[0].messages_json || "[]"), events }; }
+       catch { return { source: "legacy_json" as const, messages: [], events }; }
     }),
 
   history: megadeskProcedure.input(z.object({ contactId: id, currentConversationId: id })).query(async ({ input, ctx }) => {
@@ -344,8 +425,9 @@ export const conversationsRouter = router({
     if (!messages.length) {
       try { messages = JSON.parse(conversations[0].messagesJson || "[]").slice(0, 200); } catch { messages = []; }
     }
+    const events = await conversationEvents(getPool(), ctx.tenantId, input.conversationId);
     const { messagesJson: _private, ...conversation } = conversations[0];
-    return { conversation, messages };
+    return { conversation, messages, events };
   }),
 
   linkedTickets: megadeskProcedure.input(z.object({ conversationId: id })).query(async ({ input, ctx }) => {

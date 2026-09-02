@@ -11,7 +11,7 @@ const conversation = { id: "conv-ui", publicCode: "CV-260829000000-TEST", contac
 
 type TimelineMessage = Record<string, unknown>;
 
-async function mockedPage(page: Page, deepLink = false, options: { session?: typeof session; conversation?: typeof conversation; conversations?: Array<typeof conversation>; attendanceActive?: { id: string; customerName: string; phone: string } | null; transferError?: boolean; transferDelayMs?: number; sendDelayMs?: number; messages?: TimelineMessage[] } = {}) {
+async function mockedPage(page: Page, deepLink = false, options: { session?: typeof session; conversation?: typeof conversation; conversations?: Array<typeof conversation>; attendanceActive?: { id: string; customerName: string; phone: string } | null; transferError?: boolean; transferDelayMs?: number; sendDelayMs?: number; messages?: TimelineMessage[]; events?: TimelineMessage[] } = {}) {
   const activeSession = options.session ?? session;
   const activeConversation = options.conversation ?? conversation;
   const activeConversations = options.conversations ?? [activeConversation];
@@ -19,9 +19,10 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
   const transferDelayMs = options.transferDelayMs ?? 0;
   const sendDelayMs = options.sendDelayMs ?? 0;
   const messageState: TimelineMessage[] = [...(options.messages ?? [{ id: "legacy-1", from: "customer", text: "Mensagem legada", type: "text", timestamp: new Date().toISOString() }])];
+  const eventState: TimelineMessage[] = [...(options.events ?? [])];
   let sentMessageCount = 0;
   const calls: string[] = [];
-  const listInputs: Array<{ viewMode: string; status: string; search?: string }> = [];
+  const listInputs: Array<{ viewMode: string; status: string; search?: string; dateFrom?: string; dateTo?: string }> = [];
   const attendanceQueries: string[] = [];
   await page.addInitScript(value => {
     localStorage.setItem("megadesk_session_v1", JSON.stringify(value));
@@ -38,7 +39,7 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
     const parsedInput = rawInput ? JSON.parse(rawInput) : {};
     names.forEach((name, index) => {
       if (!name.includes("conversations.list")) return;
-      const input = (parsedInput[index]?.json ?? parsedInput.json) as { viewMode: string; status: string; search?: string } | undefined;
+      const input = (parsedInput[index]?.json ?? parsedInput.json) as { viewMode: string; status: string; search?: string; dateFrom?: string; dateTo?: string } | undefined;
       if (input) listInputs.push(input);
     });
     names.forEach((name, index) => {
@@ -73,10 +74,10 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
       : name.includes("conversations.counts") ? { active: 3, closed: 4, waiting: 2, mine: 1 }
       : name.includes("conversations.eligibleUsers") ? [{ id: "user-ui", name: "Agent", email: "agent@example.test", role: "agent" }]
       : name.includes("evolution.getStatus") ? { status: "connected", providerReachable: true }
-      : name.includes("conversations.messages") ? { source: "normalized", messages: messageState }
+      : name.includes("conversations.messages") ? { source: "normalized", messages: messageState, events: eventState }
       : name.includes("conversations.companyCandidates") ? { items: [{ id: "crm-ui", name: "Empresa CRM UI", document: "12345678000190", customerType: "company" }], hasMore: false }
       : name.includes("conversations.phoneCandidates") ? { items: [{ id: "crm-phone", name: "Cliente localizado", document: "52998224725", phone: "5541999999999", customerType: "person" }] }
-      : name.includes("conversations.historyDetail") ? { conversation: { id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, messages: [{ id: "history-message", from: "customer", type: "text", text: "Mensagem histórica", timestamp: new Date().toISOString() }] }
+      : name.includes("conversations.historyDetail") ? { conversation: { id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, messages: [{ id: "history-message", from: "customer", type: "text", text: "Mensagem histórica", timestamp: new Date().toISOString() }], events: eventState }
       : name.includes("conversations.historyPage") ? { items: [{ id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: "conv-hist-2", publicCode: "CV-HIST-2", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: "conv-hist-3", publicCode: "CV-HIST-3", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: "conv-hist-4", publicCode: "CV-HIST-4", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }], hasMore: false }
       : name.includes("conversations.history") ? { items: [{ id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: "conv-hist-2", publicCode: "CV-HIST-2", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: "conv-hist-3", publicCode: "CV-HIST-3", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }], hasMore: true }
       : name.includes("conversations.linkedTickets") ? []
@@ -248,6 +249,58 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(page.getByTestId("conversation-chat-panel")).toBeVisible();
     expect(calls.some(name => name.includes("conversations.list"))).toBe(true);
     expect(calls.some(name => name.includes("megadesk.getConversations"))).toBe(false);
+  });
+
+  test("sends text and local calendar filters to the backend while preserving inbox scope", async ({ page }) => {
+    const { listInputs } = await mockedPage(page, true);
+    await page.getByRole("button", { name: "Filtro" }).click();
+    const filter = page.getByPlaceholder("Nome, empresa ou telefone...");
+    await filter.fill("Cliente UI");
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({
+      viewMode: "all",
+      status: "active",
+      search: "Cliente UI",
+    });
+    const dates = page.locator('input[type="date"]');
+    await dates.nth(0).fill("2026-08-01");
+    await dates.nth(1).fill("2026-08-31");
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({
+      viewMode: "all",
+      status: "active",
+      search: "Cliente UI",
+      dateFrom: "2026-08-01",
+      dateTo: "2026-08-31",
+    });
+    await page.getByRole("button", { name: "Limpar todos os filtros" }).click();
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "all", status: "active", search: "" });
+  });
+
+  test("renders persisted activity with canonical names and a refined outbound bubble", async ({ page }) => {
+    await mockedPage(page, true, {
+      messages: [
+        { id: "short-outbound", sender: "agent", from: "agent", text: "Ok", type: "text", agentName: "Ana", status: "read", timestamp: "2026-08-30T12:01:00.000Z" },
+        { id: "inbound-media", from: "customer", text: "Recebido", type: "text", timestamp: "2026-08-30T12:02:00.000Z" },
+      ],
+      events: [
+        { id: "event-start", eventType: "created_inbound", timestamp: "2026-08-30T12:00:00.000Z" },
+        { id: "event-claim", eventType: "claimed", actorName: "Ana", timestamp: "2026-08-30T12:00:30.000Z" },
+        { id: "event-transfer", eventType: "transferred", actorName: "Ana", fromUserName: "Ana", toUserName: "Bia", timestamp: "2026-08-30T12:01:30.000Z" },
+        { id: "event-close", eventType: "closed", actorName: "Bia", timestamp: "2026-08-30T12:03:00.000Z" },
+      ],
+    });
+    const chat = page.getByTestId("conversation-chat-panel");
+    await expect(chat.getByText("Atendimento iniciado pelo WhatsApp.")).toBeVisible();
+    await expect(chat.getByText("BOT assumido por Ana.")).toBeVisible();
+    await expect(chat.getByText("Atendimento transferido de Ana para Bia.")).toBeVisible();
+    await expect(chat.getByText("Atendimento encerrado por Bia.")).toBeVisible();
+    await expect(chat.getByTestId("conversation-activity-event")).toHaveCount(4);
+    await expect(chat.getByText("agent@example.test", { exact: true })).toHaveCount(0);
+
+    const outbound = chat.getByTestId("conversation-message").filter({ hasText: "Ok" });
+    await expect(outbound.locator('[data-testid="conversation-message-bubble"]')).not.toHaveClass(/border/);
+    await expect(outbound.locator(':scope > div')).toHaveClass(/min-w-\[9rem\]/);
+    await expect(outbound.getByTestId("conversation-message-metadata")).toBeVisible();
+    await expect(outbound.getByLabel("Lida")).toBeVisible();
   });
 
   test("renders a continuous conversation row from real channel metadata", async ({ page }) => {
@@ -581,13 +634,16 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
   });
 
   test("opens prior history read-only without changing the operational conversation", async ({ page }) => {
-    const { calls } = await mockedPage(page, true);
+    const { calls } = await mockedPage(page, true, { events: [
+      { id: "history-activity", eventType: "closed", actorName: "Agent", timestamp: new Date().toISOString() },
+    ] });
     await page.locator('button[aria-controls="conversation-details-panel"]').click();
     await page.getByRole("button", { name: /CV-HIST-1/ }).click();
     const modal = page.getByRole("dialog", { name: /Cliente UI/ });
     await expect(modal).toBeVisible();
     await expect(modal.getByText("Somente leitura")).toBeVisible();
     await expect(modal.getByText("Mensagem histórica", { exact: true })).toBeVisible();
+    await expect(modal.getByText("Atendimento encerrado por Agent.")).toBeVisible();
     await expect(modal.getByTestId("conversation-composer")).toHaveCount(0);
     await expect(page.getByTestId("conversation-chat-panel").getByText("Mensagem legada")).toBeVisible();
     expect(calls.some(name => name.includes("conversations.claim") || name.includes("conversations.transfer") || name.includes("conversations.close") || name.includes("conversations.reopen"))).toBe(false);
