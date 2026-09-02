@@ -11,6 +11,7 @@ type InitialCrmCustomer = CrmWhatsAppIntent & {
   name: string;
   company: string;
   email?: string;
+  customerType?: 'person' | 'company' | null;
 };
 
 function LegacyActiveAttendancePage({ onNavigate, initialPhone, initialCrmCustomer, embedded = false, onCancel }: {

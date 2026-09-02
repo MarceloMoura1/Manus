@@ -35,8 +35,9 @@ import { normalizeEvolutionRecipient } from "./evolution/client";
 import { loadOutboundConversation, resolveOutboundRecipient, safeOutboundProviderMessage } from "./evolution/outbound-recipient";
 import { assertOperationalCsrf, clearOperationalSessionCookie, createOperationalSession, revokeOperationalSession } from "./_core/megadesk-session";
 import { erpRouter } from "./modules/erp/router";
-import { normalizeContactPhone } from "../shared/contact-phone";
+import { hasHumanContactName, normalizeContactPhone } from "../shared/contact-phone";
 import { findCrmClientForAttendance, searchCrmClientsForAttendance } from "./db-crm";
+import { findConversationContactByPhone, searchLightweightContactsForAttendance } from "./conversation-contact";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -1055,8 +1056,22 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "Operador sem acesso ao Atendimento Ativo." });
         }
 
-        const lookup = await searchCrmClientsForAttendance(ctx.tenantId, input.query);
-        const { canonicalPhone, candidates } = lookup;
+        const [crmLookup, contactLookup] = await Promise.all([
+          searchCrmClientsForAttendance(ctx.tenantId, input.query),
+          searchLightweightContactsForAttendance(ctx.tenantId, input.query),
+        ]);
+        const { canonicalPhone, candidates: crmCandidates } = crmLookup;
+        const crmMatchesPhone = Boolean(canonicalPhone && crmCandidates.some(candidate => candidate.recipientPhone === canonicalPhone));
+        const candidates = [
+          ...crmCandidates.map(candidate => ({ ...candidate, source: "crm" as const })),
+          ...(crmMatchesPhone ? [] : contactLookup.contacts).map(contact => ({
+            source: "contact" as const,
+            contactId: contact.contactId,
+            displayName: contact.displayName,
+            canonicalPhone: contact.canonicalPhone,
+            recipientPhone: contact.canonicalPhone,
+          })),
+        ];
 
         let activeConversation: { id: string; customerName: string; phone: string } | null = null;
         if (canonicalPhone) {
@@ -1064,12 +1079,15 @@ export const appRouter = router({
           const session = await getSession(ctx.tenantId);
           if (session) {
             const [activeRows] = await getPool().execute(
-              `SELECT conversation_id AS id, customer_name AS customerName, phone
-                 FROM megadesk_domain_conversations
-                WHERE client_id = ? AND provider = 'evolution' AND integration_id = ? AND phone = ?
-                  AND status IN ('open', 'bot')
-                ORDER BY created_at DESC LIMIT 1`,
-              [ctx.tenantId, session.instanceName, canonicalPhone],
+              `SELECT c.conversation_id AS id, COALESCE(contact.display_name, c.customer_name) AS customerName, c.phone
+                 FROM megadesk_domain_conversations c
+                 LEFT JOIN megadesk_conversation_contacts contact
+                   ON contact.client_id = c.client_id AND contact.contact_id = c.contact_id
+                WHERE c.client_id = ? AND c.provider = 'evolution' AND c.integration_id = ?
+                  AND (c.phone = ? OR contact.canonical_phone = ? OR contact.external_identity = ?)
+                   AND c.status IN ('open', 'bot')
+                 ORDER BY c.created_at DESC LIMIT 1`,
+              [ctx.tenantId, session.instanceName, canonicalPhone, canonicalPhone, canonicalPhone],
             ) as any[];
             activeConversation = activeRows[0] ?? null;
           }
@@ -1233,6 +1251,7 @@ export const appRouter = router({
         phone: z.string().min(1),
         customerId: z.string().optional(),
         customerName: z.string().trim().max(180).optional(),
+        contactName: z.string().trim().max(180).optional(),
         company: z.string().trim().max(255).optional(),
         clientId: z.string().min(1).optional(),
         fromCrm: z.boolean().optional(),
@@ -1262,9 +1281,16 @@ export const appRouter = router({
           }
           const operator = operatorRows[0] as { user_id: string; name: string };
 
-          const crmCustomer = await findCrmClientForAttendance(ctx.tenantId, canonicalPhone);
+          const [crmCustomer, existingContact] = await Promise.all([
+            findCrmClientForAttendance(ctx.tenantId, canonicalPhone),
+            findConversationContactByPhone(ctx.tenantId, canonicalPhone),
+          ]);
+          const submittedContactName = input.contactName?.trim() || input.customerName?.trim() || "";
+          if (!crmCustomer && !existingContact && !hasHumanContactName(submittedContactName, canonicalPhone)) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Informe o nome do novo contato antes de enviar a primeira mensagem." });
+          }
           const customerName = crmCustomer?.responsibleName?.trim() || crmCustomer?.companyName?.trim()
-            || canonicalPhone;
+            || (hasHumanContactName(existingContact?.displayName, canonicalPhone) ? existingContact!.displayName.trim() : submittedContactName);
           const company = crmCustomer?.companyName?.trim() || "";
           const crmClientId = crmCustomer?.crmClientId ?? null;
 
@@ -1291,7 +1317,12 @@ export const appRouter = router({
               `INSERT INTO megadesk_conversation_contacts
                (contact_id, client_id, display_name, canonical_phone, channel, provider, external_identity, crm_client_id)
                VALUES (?, ?, ?, ?, 'whatsapp', 'evolution', ?, ?)
-               ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), crm_client_id = COALESCE(VALUES(crm_client_id), crm_client_id)`,
+                ON DUPLICATE KEY UPDATE
+                  display_name = CASE
+                    WHEN (display_name = canonical_phone OR display_name = external_identity) AND VALUES(display_name) <> '' THEN VALUES(display_name)
+                    ELSE display_name
+                  END,
+                  crm_client_id = COALESCE(VALUES(crm_client_id), crm_client_id)`,
               [contactId, ctx.tenantId, customerName, canonicalPhone, canonicalPhone, crmClientId],
             );
             const [contactRows] = await connection.execute(

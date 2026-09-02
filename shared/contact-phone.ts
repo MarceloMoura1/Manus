@@ -35,6 +35,29 @@ export function sameContactPhone(a: string | null | undefined, b: string | null 
   return left.status === "valid" && right.status === "valid" && left.value === right.value;
 }
 
+/** A phone-like legacy value is not a person's display name. */
+export function hasHumanContactName(value: string | null | undefined, phone?: string | null): boolean {
+  const name = value?.trim() ?? "";
+  if (!name) return false;
+  const normalizedName = normalizeContactPhone(name);
+  if (normalizedName.status !== "valid") return true;
+  if (!phone) return false;
+  return !sameContactPhone(normalizedName.value, phone);
+}
+
+export function formatContactPhone(value: string | null | undefined): string {
+  const normalized = normalizeContactPhone(value);
+  if (normalized.status !== "valid" || !normalized.value) return value?.trim() || "Telefone indisponível";
+  const phone = normalized.value;
+  if (normalized.country === "BR") {
+    const local = phone.slice(2);
+    return local.length === 11
+      ? `+55 ${local.slice(0, 2)} ${local.slice(2, 7)}-${local.slice(7)}`
+      : `+55 ${local.slice(0, 2)} ${local.slice(2, 6)}-${local.slice(6)}`;
+  }
+  return `+${phone}`;
+}
+
 /**
  * Produz as representações somente-numéricas que podem existir em cadastros
  * legados. A identidade continua sendo definida exclusivamente por

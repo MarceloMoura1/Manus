@@ -24,6 +24,7 @@ type SqlExecutor = {
 
 type CrmAttendanceRow = {
   crmClientId: string;
+  customerType: CustomerType | null;
   companyName: string;
   responsibleName: string;
   phone: string | null;
@@ -34,6 +35,7 @@ type CrmAttendanceRow = {
 
 export type CrmAttendanceRecipient = {
   crmClientId: string;
+  customerType: CustomerType | null;
   companyName: string;
   responsibleName: string;
   phone: string | null;
@@ -78,6 +80,7 @@ function selectAttendanceRecipient(row: CrmAttendanceRow, term: string, canonica
   if (!normalizedPhone || (!matchesText && !matchedPhone)) return null;
   return {
     crmClientId: row.crmClientId,
+    customerType: row.customerType,
     companyName: row.companyName,
     responsibleName: row.responsibleName,
     phone: canonicalStoredPhone(row.phone),
@@ -112,7 +115,7 @@ export async function searchCrmClientsForAttendance(
   }
 
   const [rows] = await executor.execute(
-    `SELECT crm_client_id AS crmClientId, company_name AS companyName,
+    `SELECT crm_client_id AS crmClientId, customer_type AS customerType, company_name AS companyName,
             responsible_name AS responsibleName, phone, whatsapp, email,
             contacts_json AS contactsJson
        FROM megadesk_crm_clients

@@ -234,8 +234,8 @@ physical.sequential("Conversations 0013 physical lifecycle", () => {
     }
   });
 
-  it("starts outbound attendance once for every equivalent Brazilian presentation without creating a customer", async () => {
-    const input = { phone: brazilianActivePhoneVariants[0] };
+  it("starts outbound attendance once for every equivalent Brazilian presentation with one lightweight contact and no CRM customer", async () => {
+    const input = { phone: brazilianActivePhoneVariants[0], contactName: "Synthetic Lightweight Contact" };
     const first = await appCaller(tenantA,"audit-agent-a").megadesk.createConversation(input);
     outboundId = first.conversationId;
     for (const phoneVariant of brazilianActivePhoneVariants.slice(1)) {
@@ -244,10 +244,11 @@ physical.sequential("Conversations 0013 physical lifecycle", () => {
       expect(duplicate.existing).toBe(true);
     }
     const created = (await rows("SELECT conversation_id,public_code,status,assigned_user_id,customer_name,crm_client_id FROM megadesk_domain_conversations WHERE conversation_id=? AND client_id=?",[first.conversationId,tenantA]))[0];
-    expect(created).toMatchObject({ status:"open",assigned_user_id:"audit-agent-a",customer_name:activePhone,crm_client_id:null });
+    expect(created).toMatchObject({ status:"open",assigned_user_id:"audit-agent-a",customer_name:"Synthetic Lightweight Contact",crm_client_id:null });
     expect(created.public_code).toMatch(/^CV-/);
     expect(await scalar("SELECT COUNT(*) value FROM megadesk_domain_conversations_messages WHERE client_id=? AND conversation_id=?",[tenantA,first.conversationId])).toBe(0);
     expect(await scalar("SELECT COUNT(*) value FROM megadesk_domain_customers WHERE clientId=? AND phone=?",[tenantA,activePhone])).toBe(0);
+    expect(await scalar("SELECT COUNT(*) value FROM megadesk_conversation_contacts WHERE client_id=? AND canonical_phone=? AND display_name=? AND crm_client_id IS NULL",[tenantA,activePhone,"Synthetic Lightweight Contact"])).toBe(1);
     expect((await caller(tenantA,"audit-agent-a").list({ viewMode:"mine",status:"active",search:"",limit:30,offset:0 })).some(item => item.id === first.conversationId)).toBe(true);
     expect((await caller(tenantA,"audit-agent-a").list({ viewMode:"waiting",status:"active",search:"",limit:30,offset:0 })).some(item => item.id === first.conversationId)).toBe(false);
     for (const query of brazilianActivePhoneVariants) {
@@ -259,8 +260,8 @@ physical.sequential("Conversations 0013 physical lifecycle", () => {
 
   it("serializes concurrent direct outbound starts into exactly one assigned attendance", async () => {
     const [first, second] = await Promise.all([
-      appCaller(tenantA,"audit-agent-a").megadesk.createConversation({ phone: directOutboundConcurrentPhone }),
-      appCaller(tenantA,"audit-agent-b").megadesk.createConversation({ phone: directOutboundConcurrentPhone }),
+      appCaller(tenantA,"audit-agent-a").megadesk.createConversation({ phone: directOutboundConcurrentPhone, contactName: "Synthetic Concurrent Contact" }),
+      appCaller(tenantA,"audit-agent-b").megadesk.createConversation({ phone: directOutboundConcurrentPhone, contactName: "Synthetic Concurrent Contact" }),
     ]);
     expect(first.conversationId).toBe(second.conversationId);
     expect([first.existing, second.existing].filter(Boolean)).toHaveLength(1);
