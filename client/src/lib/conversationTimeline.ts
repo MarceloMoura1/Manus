@@ -23,13 +23,33 @@ function timestampValue(value: string | Date | null | undefined) {
   return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
 }
 
-function itemPriority(item: ConversationTimelineItem) {
-  if (item.kind === "message") return 1;
-  return item.eventType.startsWith("created_") ? 0 : 2;
-}
-
 function timelineItemId(item: ConversationTimelineItem) {
   return item.kind === "message" ? String(item.id ?? item.clientAttemptId ?? "") : item.id;
+}
+
+function compareTimelineItemIds(left: ConversationTimelineItem, right: ConversationTimelineItem) {
+  const leftId = timelineItemId(left);
+  const rightId = timelineItemId(right);
+  if (leftId < rightId) return -1;
+  if (leftId > rightId) return 1;
+  return 0;
+}
+
+/** Removes optimistic attempts only after their canonical counterpart has arrived. */
+export function reconcileConversationMessages(
+  persisted: ConversationTimelineMessage[],
+  optimistic: ConversationTimelineMessage[],
+) {
+  const persistedAttempts = new Set(
+    persisted
+      .map(message => String(message.clientAttemptId ?? "").trim())
+      .filter(Boolean),
+  );
+
+  return [
+    ...persisted,
+    ...optimistic.filter(message => !persistedAttempts.has(String(message.clientAttemptId ?? "").trim())),
+  ];
 }
 
 /** Merges canonical messages and persisted activity with a stable, deterministic order. */
@@ -40,8 +60,6 @@ export function mergeConversationTimeline(messages: ConversationTimelineMessage[
   ].sort((left, right) => {
     const timeDifference = timestampValue(left.timestamp) - timestampValue(right.timestamp);
     if (timeDifference) return timeDifference;
-    const priorityDifference = itemPriority(left) - itemPriority(right);
-    if (priorityDifference) return priorityDifference;
-    return timelineItemId(left).localeCompare(timelineItemId(right));
+    return compareTimelineItemIds(left, right);
   });
 }
