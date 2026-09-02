@@ -1,5 +1,6 @@
 import type { PoolConnection } from "mysql2/promise";
 import { isDuplicateConstraint } from "./conversation-public-code";
+import { normalizeProviderMessageReference, type ProviderMessageReference } from "./conversation-provider-reference";
 
 export type CanonicalMessageWrite = {
   messageId: string;
@@ -9,6 +10,8 @@ export type CanonicalMessageWrite = {
   provider: string;
   integrationId: string;
   clientAttemptId?: string | null;
+  replyToMessageId?: string | null;
+  providerMessageReference?: ProviderMessageReference | null;
   direction: "inbound" | "outbound" | "system";
   messageType: string;
   sender: "customer" | "agent" | "bot" | "system";
@@ -36,11 +39,13 @@ export async function persistCanonicalMessage(connection: PoolConnection, input:
   try {
     await connection.execute(
     `INSERT INTO megadesk_domain_conversations_messages
-     (message_id, conversation_id, client_id, external_message_id, provider, integration_id, client_attempt_id, direction, message_type,
-      sender_user_id, sender_name_snapshot, media_reference, sender, message, timestamp, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (message_id, conversation_id, client_id, external_message_id, provider, integration_id, client_attempt_id, reply_to_message_id, provider_message_reference, direction, message_type,
+       sender_user_id, sender_name_snapshot, media_reference, sender, message, timestamp, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [input.messageId, input.conversationId, input.clientId, input.externalMessageId ?? null, input.provider,
-      input.integrationId, input.clientAttemptId ?? null, input.direction, input.messageType,
+      input.integrationId, input.clientAttemptId ?? null, input.replyToMessageId ?? null,
+      (() => { const reference = normalizeProviderMessageReference(input.providerMessageReference); return reference ? JSON.stringify(reference) : null; })(),
+      input.direction, input.messageType,
       input.senderUserId ?? null, input.senderNameSnapshot ?? null,
       input.mediaReference == null ? null : JSON.stringify(input.mediaReference),
       input.sender, input.text, input.timestamp, input.status],

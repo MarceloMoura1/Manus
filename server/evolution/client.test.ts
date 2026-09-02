@@ -2,6 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EvolutionApiError, evoCreateInstance, evoGetMediaBase64, evoSendAttachment, evoSendText, normalizeEvolutionRecipient, sanitizeEvolutionErrorDetail } from "./client";
 
+const providerResponse = {
+  key: { id: "message-1", remoteJid: "5541995484515@s.whatsapp.net", fromMe: true },
+  message: { conversation: "Resposta controlada" }, status: "PENDING",
+};
+
 beforeEach(() => {
   vi.stubEnv("EVOLUTION_API_URL", "http://evolution.test");
   vi.stubEnv("EVOLUTION_API_KEY", "test-api-key");
@@ -57,7 +62,7 @@ describe("Evolution API errors", () => {
 
 describe("evoSendText", () => {
   it.each([200, 201])("aceita confirmação HTTP %i com message id", async status => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ key: { id: "message-1" }, status: "PENDING" }), { status }));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(providerResponse), { status }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(evoSendText("tenant-1", "+55 41 99548-4515", "Resposta controlada")).resolves.toMatchObject({ key: { id: "message-1" } });
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -74,6 +79,15 @@ describe("evoSendText", () => {
     await expect(evoSendText("tenant-1", "5541995484515", "Resposta controlada")).rejects.toThrow("não confirmou");
   });
 
+  it("sends the Evolution quoted envelope unchanged", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(providerResponse), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const quoted = { key: { id: "original-1", remoteJid: "5541995484515@s.whatsapp.net", fromMe: false }, message: { conversation: "Original" } };
+    await evoSendText("tenant-1", "5541995484515", "Resposta", quoted);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({ quoted });
+  });
+
   it("propaga timeout sem persistir sucesso", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError")));
     await expect(evoSendText("tenant-1", "5541995484515", "Resposta controlada")).rejects.toMatchObject({ name: "TimeoutError" });
@@ -88,7 +102,7 @@ describe("evoSendAttachment", () => {
     ["audio", "/message/sendWhatsAppAudio/tenant-1", "audio"],
     ["sticker", "/message/sendSticker/tenant-1", "sticker"],
   ] as const)("envia %s pelo endpoint correto", async (kind, path, contentField) => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ key: { id: "msg-1" } }), { status: 200 }));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...providerResponse, key: { ...providerResponse.key, id: "msg-1" } }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     await evoSendAttachment({
       instanceName: "tenant-1", number: "(41) 99548-4515", kind,
@@ -104,7 +118,7 @@ describe("evoSendAttachment", () => {
   });
 
   it("remove parâmetros de codec da Data URI de áudio", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ key: { id: "audio-1" } }), { status: 200 }));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...providerResponse, key: { ...providerResponse.key, id: "audio-1" } }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     await evoSendAttachment({
       instanceName: "tenant-1", number: "5541995484515", kind: "audio",

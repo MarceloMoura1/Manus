@@ -55,18 +55,25 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
     }
     names.forEach((name, index) => {
       const input = (parsedInput[index]?.json ?? parsedInput.json) as Record<string, unknown> | undefined;
+      const replyToMessageId = typeof input?.replyToMessageId === "string" ? input.replyToMessageId : "";
+      const original = replyToMessageId ? messageState.find(message => message.id === replyToMessageId) : undefined;
+      const replyTo = original ? {
+        messageId: replyToMessageId, senderName: original.agentName ?? null, sender: original.sender ?? original.from ?? null,
+        direction: original.direction ?? null, type: original.type ?? "text", textPreview: original.text ?? "",
+        mediaLabel: original.type === "image" ? "Foto" : original.type === "video" ? "Vídeo" : original.type === "audio" ? "Áudio" : original.type === "document" ? original.fileName ?? "Documento" : original.type === "sticker" ? "Figurinha" : null, available: true,
+      } : null;
       if (name.includes("megadesk.sendMessage") && input) {
         sentMessageCount += 1;
         messageState.push({ id: `outbound-${sentMessageCount}`, sender: "agent", from: "agent", text: input.message,
           type: "text", timestamp: new Date().toISOString(), agentName: activeSession.userName,
-          clientAttemptId: input.clientAttemptId, status: "sent" });
+          clientAttemptId: input.clientAttemptId, status: "sent", replyTo });
       }
       if (name.includes("megadesk.sendAttachment") && input) {
         sentMessageCount += 1;
         messageState.push({ id: `outbound-${sentMessageCount}`, sender: "agent", from: "agent", text: input.caption || "[Documento]",
           type: input.kind, mediaData: input.dataUrl, mimeType: input.mimeType, fileName: input.fileName,
           timestamp: new Date().toISOString(), agentName: activeSession.userName,
-          clientAttemptId: input.clientAttemptId, status: "sent" });
+          clientAttemptId: input.clientAttemptId, status: "sent", replyTo });
       }
     });
     const result = (name: string) => name.includes("refreshSession") ? { ok: true, session: activeSession }
@@ -77,7 +84,7 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
       : name.includes("conversations.messages") ? { source: "normalized", messages: messageState, events: eventState }
       : name.includes("conversations.companyCandidates") ? { items: [{ id: "crm-ui", name: "Empresa CRM UI", document: "12345678000190", customerType: "company" }], hasMore: false }
       : name.includes("conversations.phoneCandidates") ? { items: [{ id: "crm-phone", name: "Cliente localizado", document: "52998224725", phone: "5541999999999", customerType: "person" }] }
-      : name.includes("conversations.historyDetail") ? { conversation: { id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, messages: [{ id: "history-message", from: "customer", type: "text", text: "Mensagem histórica", timestamp: new Date().toISOString() }], events: eventState }
+      : name.includes("conversations.historyDetail") ? { conversation: { id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, messages: [{ id: "history-original", from: "customer", type: "text", text: "Mensagem histórica", timestamp: new Date().toISOString() }, { id: "history-message", from: "agent", type: "text", text: "Resposta histórica", agentName: "Agent", timestamp: new Date().toISOString(), replyTo: { messageId: "history-original", sender: "customer", type: "text", textPreview: "Mensagem histórica", available: true } }], events: eventState }
       : name.includes("conversations.historyPage") ? { items: [{ id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: "conv-hist-2", publicCode: "CV-HIST-2", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: "conv-hist-3", publicCode: "CV-HIST-3", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: "conv-hist-4", publicCode: "CV-HIST-4", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }], hasMore: false }
       : name.includes("conversations.history") ? { items: [{ id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: "conv-hist-2", publicCode: "CV-HIST-2", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: "conv-hist-3", publicCode: "CV-HIST-3", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }], hasMore: true }
       : name.includes("conversations.linkedTickets") ? []
@@ -301,6 +308,47 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(outbound.locator(':scope > div')).toHaveClass(/min-w-\[9rem\]/);
     await expect(outbound.getByTestId("conversation-message-metadata")).toBeVisible();
     await expect(outbound.getByLabel("Lida")).toBeVisible();
+  });
+
+  test("keeps a selected quote through optimistic send, refetch, replacement and cancellation", async ({ page }) => {
+    const { messageState } = await mockedPage(page, true, { messages: [
+      { id: "inbound-original", sender: "customer", from: "customer", text: "Pergunta original", type: "text", timestamp: new Date().toISOString() },
+      { id: "outbound-original", sender: "agent", from: "agent", agentName: "Agent", text: "Resposta anterior", type: "text", timestamp: new Date().toISOString(), status: "read" },
+      { id: "image-original", sender: "customer", from: "customer", text: "[Imagem]", type: "image", timestamp: new Date().toISOString() },
+      { id: "video-original", sender: "customer", from: "customer", text: "[Vídeo]", type: "video", timestamp: new Date().toISOString() },
+      { id: "audio-original", sender: "customer", from: "customer", text: "[Áudio]", type: "audio", timestamp: new Date().toISOString() },
+      { id: "document-original", sender: "customer", from: "customer", text: "[Documento]", type: "document", fileName: "pedido.pdf", timestamp: new Date().toISOString() },
+      { id: "sticker-original", sender: "customer", from: "customer", text: "[Figurinha]", type: "sticker", timestamp: new Date().toISOString() },
+    ] });
+    const chat = page.getByTestId("conversation-chat-panel");
+    const original = chat.locator('[data-message-id="inbound-original"]');
+    await original.getByTestId("conversation-reply-action").click();
+    const composer = chat.getByTestId("conversation-composer");
+    await expect(composer.getByTestId("conversation-composer-quote")).toContainText("Pergunta original");
+
+    const other = chat.getByTestId("conversation-message").filter({ hasText: "Resposta anterior" });
+    await other.getByTestId("conversation-reply-action").click();
+    await expect(composer.getByTestId("conversation-composer-quote")).toContainText("Resposta anterior");
+    await composer.getByLabel("Cancelar resposta").click();
+    await expect(composer.getByTestId("conversation-composer-quote")).toHaveCount(0);
+
+    await original.getByTestId("conversation-reply-action").click();
+    await composer.getByPlaceholder("Digite sua mensagem...").fill("Minha resposta citada");
+    await composer.getByRole("button", { name: "Enviar mensagem" }).click();
+    await expect.poll(() => messageState.find(message => message.text === "Minha resposta citada")).toMatchObject({
+      replyTo: { messageId: "inbound-original", textPreview: "Pergunta original" },
+    });
+    const quoted = chat.getByTestId("conversation-message").filter({ hasText: "Minha resposta citada" });
+    await expect(quoted.getByTestId("conversation-message-quote")).toContainText("Pergunta original");
+    await quoted.getByTestId("conversation-message-quote").click();
+    await expect(original.locator('[data-testid="conversation-message-bubble"]')).toHaveClass(/ring-violet-400/);
+    for (const label of ["Foto", "Vídeo", "Áudio", "pedido.pdf", "Figurinha"]) {
+      messageState.push({ id: `quoted-${label}`, sender: "agent", from: "agent", text: "Mídia citada", type: "text", timestamp: new Date().toISOString(), replyTo: { messageId: "media", sender: "customer", type: "image", textPreview: "", mediaLabel: label, available: true } });
+    }
+    await page.waitForTimeout(3_100);
+    for (const label of ["Foto", "Vídeo", "Áudio", "pedido.pdf", "Figurinha"]) {
+      await expect(chat.getByTestId("conversation-message-quote").filter({ hasText: label }).first()).toBeVisible();
+    }
   });
 
   test("renders a continuous conversation row from real channel metadata", async ({ page }) => {
@@ -642,7 +690,8 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     const modal = page.getByRole("dialog", { name: /Cliente UI/ });
     await expect(modal).toBeVisible();
     await expect(modal.getByText("Somente leitura")).toBeVisible();
-    await expect(modal.getByText("Mensagem histórica", { exact: true })).toBeVisible();
+    await expect(modal.getByRole("paragraph").filter({ hasText: "Mensagem histórica" })).toBeVisible();
+    await expect(modal.getByTestId("history-message-quote")).toContainText("Mensagem histórica");
     await expect(modal.getByText("Atendimento encerrado por Agent.")).toBeVisible();
     await expect(modal.getByTestId("conversation-composer")).toHaveCount(0);
     await expect(page.getByTestId("conversation-chat-panel").getByText("Mensagem legada")).toBeVisible();

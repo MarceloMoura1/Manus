@@ -5,7 +5,7 @@ vi.mock("../db", () => ({ getPool: () => ({ execute: webhookMocks.poolExecute, g
 vi.mock("./config", () => ({ getEvolutionWebhookSecret: () => "webhook-secret" }));
 vi.mock("./session-store", () => ({ upsertSession: webhookMocks.upsertSession, instanceNameFor: (clientId: string) => `megadesk-${clientId}` }));
 
-import { canonicalEvolutionReceiptStatus, evolutionPhoneCandidates, extractEvolutionProviderName, handleEvolutionWebhook, normalizeEvolutionEvent, parseEvolutionIncomingMessage, parseEvolutionMessageStatusUpdates, saveIncomingMessage, selectInboundContactName } from "./webhook";
+import { canonicalEvolutionReceiptStatus, evolutionPhoneCandidates, extractEvolutionProviderName, extractEvolutionQuotedExternalMessageId, handleEvolutionWebhook, normalizeEvolutionEvent, parseEvolutionIncomingMessage, parseEvolutionMessageStatusUpdates, saveIncomingMessage, selectInboundContactName } from "./webhook";
 
 function responseDouble() {
   const response: any = { statusCode: 200, body: undefined };
@@ -104,6 +104,16 @@ describe("Evolution incoming content", () => {
     expect(selectInboundContactName("Maria Santos", "Maria dos Santos do Rosario", "5511999999999")).toBe("Maria Santos");
     expect(selectInboundContactName("Cliente ERP", "Nome WhatsApp", "5511999999999")).toBe("Cliente ERP");
     expect(selectInboundContactName(null, "", "5511999999999")).toBe("Contato sem nome");
+  });
+
+  it("reads quoted stanzaId from the prepared Evolution context", () => {
+    expect(extractEvolutionQuotedExternalMessageId({
+      contextInfo: { stanzaId: "original-prepared", participant: "5541999999999@s.whatsapp.net" },
+      message: { conversation: "Resposta" },
+    })).toBe("original-prepared");
+    expect(extractEvolutionQuotedExternalMessageId({
+      message: { extendedTextMessage: { text: "Resposta", contextInfo: { stanzaId: "original-raw" } } },
+    })).toBe("original-raw");
   });
 });
 
@@ -218,6 +228,33 @@ describe("Evolution inbound attendance lifecycle", () => {
     expect(sql).toContain("status IN ('open', 'bot')");
     expect(sql).not.toContain("INSERT INTO megadesk_domain_conversations\n          (");
     expect(connection.commit).toHaveBeenCalledOnce();
+  });
+
+  it("links an inbound quoted message only inside the same tenant and attendance", async () => {
+    const providerReference = { key: { id: "event-reply", remoteJid: "5541999999999@s.whatsapp.net", fromMe: false }, message: { conversation: "Resposta" } };
+    const connection = {
+      beginTransaction: vi.fn(), commit: vi.fn(), rollback: vi.fn(), release: vi.fn(),
+      execute: vi.fn()
+        .mockResolvedValueOnce([[{ acquired: 1 }]])
+        .mockResolvedValueOnce([[]])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([[{ contact_id: "contact-a" }]])
+        .mockResolvedValueOnce([[{ conversation_id: "conv-active", messages_json: "[]", customer_name: "Known" }]])
+        .mockResolvedValueOnce([[{ message_id: "original-a" }]])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([[{ messages_json: "[]" }]])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([{}]),
+    };
+    webhookMocks.getConnection.mockResolvedValue(connection);
+    await expect(saveIncomingMessage("tenant-a", "instance-a", "event-reply", ["5541999999999"], "Known", "Resposta", new Date(), {}, {
+      quotedExternalMessageId: "original-external", providerMessageReference: providerReference,
+    })).resolves.toBe("persisted");
+    const lookup = connection.execute.mock.calls.find(call => String(call[0]).includes("conversation_id = ? AND provider = 'evolution'"));
+    expect(lookup?.[1]).toEqual(["tenant-a", "conv-active", "instance-a", "original-external"]);
+    const insert = connection.execute.mock.calls.find(call => String(call[0]).includes("INSERT INTO megadesk_domain_conversations_messages"));
+    expect(insert?.[1][7]).toBe("original-a");
+    expect(insert?.[1][8]).toContain("event-reply");
   });
 
   it("creates a new unassigned bot attendance when only closed history exists", async () => {

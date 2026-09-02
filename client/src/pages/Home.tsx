@@ -21,6 +21,7 @@ import { ConversationDetailsPanel } from "@/components/ConversationDetailsPanel"
 import { ConversationListItem } from "@/components/ConversationListItem";
 import { ConversationActivityEvent } from "@/components/ConversationActivityEvent";
 import { mergeConversationTimeline } from "@/lib/conversationTimeline";
+import { messageReplyPreview, replyAuthor, replyPreview, type ConversationReplyPreview } from "@/lib/conversationQuote";
 import { useDebounce } from "@/hooks/useDebounce";
 import {
   conversationFilterStorageKey,
@@ -93,6 +94,7 @@ import {
   MapPin as MapPinIcon,
   Phone as PhoneIcon,
   Paperclip,
+  Reply,
 } from "lucide-react";
 
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
@@ -441,6 +443,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   const [attachment, setAttachment] = React.useState<PreparedOutboundAttachment | null>(null);
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
   const [optimisticMessages, setOptimisticMessages] = React.useState<any[]>([]);
+  const [replyTarget, setReplyTarget] = React.useState<ConversationReplyPreview | null>(null);
   const [audioRecordingPhase, setAudioRecordingPhase] = React.useState<AudioRecordingPhase>('idle');
   const [recordingSeconds, setRecordingSeconds] = React.useState(0);
   const attachmentInputRef = React.useRef<HTMLInputElement>(null);
@@ -467,6 +470,12 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   const messageScrollRef = React.useRef<HTMLDivElement>(null);
   const isNearMessageBottomRef = React.useRef(true);
   const initialMessageScrollConversationRef = React.useRef<string | null>(null);
+  const messageElementRefs = React.useRef(new Map<string, HTMLDivElement>());
+  const [highlightedMessageId, setHighlightedMessageId] = React.useState<string | null>(null);
+  const replyTargetRef = React.useRef<ConversationReplyPreview | null>(null);
+
+  React.useEffect(() => { replyTargetRef.current = replyTarget; }, [replyTarget]);
+  React.useEffect(() => { setReplyTarget(null); }, [selectedConversation]);
 
   React.useEffect(() => {
     if (!attendanceLaunch || attendanceLaunch === handledAttendanceLaunch.current) return;
@@ -851,6 +860,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
 
   sendRecordedAudioRef.current = async audio => {
     if (waConnected === false) throw new Error('WhatsApp disconnected');
+    const replyTo = replyTargetRef.current;
     const clientAttemptId = crypto.randomUUID();
     const optimisticId = `pending-${clientAttemptId}`;
     setOptimisticMessages(previous => [...previous, {
@@ -864,6 +874,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
       mediaData: audio.dataUrl,
       mimeType: audio.mimeType,
       fileName: audio.fileName,
+      replyTo,
       timestamp: new Date().toISOString(),
       time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       pending: true,
@@ -877,9 +888,11 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
         fileName: audio.fileName,
         userEmail: audio.userEmail,
         clientAttemptId,
+        replyToMessageId: replyTo?.messageId,
       });
       await refetchMessages();
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
+      setReplyTarget(null);
     } catch (error) {
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
       throw error;
@@ -891,6 +904,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     if (waConnected === false) { showToast('WhatsApp desconectado. Reconecte em Configurações.', 'error'); return; }
     const textToSend = messageInput.trim();
     const attachmentToSend = attachment;
+    const replyTo = replyTarget;
     const clientAttemptId = crypto.randomUUID();
     const optimisticId = `pending-${clientAttemptId}`;
     setOptimisticMessages(previous => [...previous, {
@@ -904,6 +918,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
       mediaData: attachmentToSend?.dataUrl,
       mimeType: attachmentToSend?.mimeType,
       fileName: attachmentToSend?.fileName,
+      replyTo,
       timestamp: new Date().toISOString(),
       time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       pending: true,
@@ -922,6 +937,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
           caption: textToSend || undefined,
           userEmail: sessionData?.userEmail ?? '',
           clientAttemptId,
+          replyToMessageId: replyTo?.messageId,
         });
       } else {
         await sendMessageMutation.mutateAsync({
@@ -929,10 +945,12 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
           message: textToSend,
           userEmail: sessionData?.userEmail ?? '',
           clientAttemptId,
+          replyToMessageId: replyTo?.messageId,
         });
       }
       await refetchMessages();
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
+      setReplyTarget(null);
     } catch (error) {
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
       setMessageInput(textToSend);
@@ -941,7 +959,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     } finally {
       setIsSendingMessage(false);
     }
-  }, [attachment, clientId, isSendingMessage, messageInput, refetchMessages, selectedConv, sendAttachmentMutation, sendMessageMutation, sessionData?.userEmail, sessionData?.userName, waConnected]);
+  }, [attachment, clientId, isSendingMessage, messageInput, refetchMessages, replyTarget, selectedConv, sendAttachmentMutation, sendMessageMutation, sessionData?.userEmail, sessionData?.userName, waConnected]);
 
   const formatTime = (ts: any) => {
     if (!ts) return '';
@@ -951,6 +969,19 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   };
 
   const getInitials = (name: string) => name?.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() || '?';
+
+  const selectReplyTarget = React.useCallback((message: Record<string, any>) => {
+    const preview = messageReplyPreview(message);
+    if (preview) setReplyTarget(preview);
+  }, []);
+
+  const jumpToQuotedMessage = React.useCallback((messageId: string) => {
+    const element = messageElementRefs.current.get(messageId);
+    if (!element) return;
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedMessageId(messageId);
+    window.setTimeout(() => setHighlightedMessageId(current => current === messageId ? null : current), 1800);
+  }, []);
 
   const avatarColors = ['bg-violet-500', 'bg-blue-500', 'bg-emerald-500', 'bg-orange-500', 'bg-pink-500', 'bg-teal-500'];
   const getAvatarColor = (id: string) => avatarColors[id?.charCodeAt(0) % avatarColors.length] || 'bg-slate-500';
@@ -1331,6 +1362,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                   const msgType = msg.type || 'text';
                   const receipt = isAgent ? outboundReceipt(msg.status, msg.pending === true) : null;
                   const isShortText = msgType === 'text' && msgText.trim().length <= 72;
+                  const messageId = typeof msg.id === 'string' ? msg.id : '';
+                  const canReply = Boolean(messageId) && !msg.pending;
                   
                   // Renderização de mídia
                   const renderContent = () => {
@@ -1389,13 +1422,24 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                   };
                   
                   return (
-                    <div key={msg.id ?? msg.clientAttemptId ?? `message-${idx}`} data-testid="conversation-message" className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
-                      <div className={cn("min-w-0 max-w-[85%] md:max-w-xs lg:max-w-md", isShortText && "min-w-[9rem] sm:min-w-[10rem]")}>
-                        <div data-testid="conversation-message-bubble" className={`rounded-2xl px-4 py-3 ${msg.pending ? 'opacity-70' : ''} ${
+                    <div key={msg.id ?? msg.clientAttemptId ?? `message-${idx}`} data-message-id={messageId || undefined} ref={node => {
+                      if (!messageId) return;
+                      if (node) messageElementRefs.current.set(messageId, node);
+                      else messageElementRefs.current.delete(messageId);
+                    }} data-testid="conversation-message" className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
+                      <div className={cn("group min-w-0 max-w-[85%] md:max-w-xs lg:max-w-md", isShortText && "min-w-[9rem] sm:min-w-[10rem]")}>
+                        <div data-testid="conversation-message-bubble" className={`rounded-2xl px-4 py-3 transition-shadow ${msg.pending ? 'opacity-70' : ''} ${highlightedMessageId === messageId ? 'ring-2 ring-violet-400 ring-offset-2' : ''} ${
                           isAgent
                             ? 'rounded-tr-sm bg-gradient-to-br from-blue-500 to-violet-600 text-white shadow-[0_1px_2px_rgba(15,23,42,0.14)]'
                             : 'rounded-tl-sm border border-slate-100 bg-white text-slate-800 shadow-sm'
                         }`}>
+                          {msg.replyTo && <button type="button" data-testid="conversation-message-quote" disabled={!msg.replyTo.available} onClick={() => {
+                            if (msg.replyTo?.available) jumpToQuotedMessage(msg.replyTo.messageId);
+                          }} className={cn('mb-2 block w-full rounded-lg border-l-2 px-2.5 py-2 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 disabled:cursor-default disabled:opacity-70',
+                            isAgent ? 'border-blue-100 bg-white/15 text-blue-50 hover:bg-white/20 focus-visible:ring-white' : 'border-violet-400 bg-slate-50 text-slate-600 hover:bg-violet-50 focus-visible:ring-violet-500')}>
+                            <span className="block truncate font-bold">{replyAuthor(msg.replyTo)}</span>
+                            <span className="block truncate opacity-90">{replyPreview(msg.replyTo)}</span>
+                          </button>}
                           {isAgent && <p className="mb-1.5 text-xs font-bold text-white">{operatorDisplayName(msg)}</p>}
                           {renderContent()}
                           <div data-testid="conversation-message-metadata" className={`mt-2 flex items-center justify-end gap-1.5 text-xs ${isAgent ? 'text-blue-100' : 'text-slate-400'}`}>
@@ -1408,6 +1452,11 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                             </span>}
                           </div>
                         </div>
+                        {canReply && <div className={cn('mt-1 flex', isAgent ? 'justify-end' : 'justify-start')}>
+                          <button type="button" data-testid="conversation-reply-action" onClick={() => selectReplyTarget(msg)} className="inline-flex min-h-8 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-slate-500 opacity-100 transition hover:bg-white hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 md:opacity-0 md:group-hover:opacity-100">
+                            <Reply className="h-3.5 w-3.5" aria-hidden="true" />Responder
+                          </button>
+                        </div>}
                       </div>
                     </div>
                   );
@@ -1422,6 +1471,16 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                 <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 text-xs text-red-700">
                   <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0"></span>
                   <span>WhatsApp desconectado. Vá em <strong>Configurações → WhatsApp</strong> para reconectar.</span>
+                </div>
+              )}
+              {replyTarget && (
+                <div data-testid="conversation-composer-quote" className="mb-3 flex items-center gap-3 rounded-xl border border-violet-200 bg-violet-50 p-3 text-slate-700">
+                  <Reply className="h-4 w-4 shrink-0 text-violet-700" aria-hidden="true" />
+                  <div className="min-w-0 flex-1 border-l-2 border-violet-400 pl-2.5">
+                    <p className="truncate text-xs font-bold text-violet-800">Respondendo a {replyAuthor(replyTarget)}</p>
+                    <p className="truncate text-xs text-slate-600">{replyPreview(replyTarget)}</p>
+                  </div>
+                  <button type="button" onClick={() => setReplyTarget(null)} aria-label="Cancelar resposta" title="Cancelar resposta" className="rounded-full p-1 text-slate-500 hover:bg-white hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"><X className="h-4 w-4" /></button>
                 </div>
               )}
               {attachment && (
@@ -1471,6 +1530,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                 <button
                   disabled={waConnected === false || isSendingMessage || isAudioBusy || isRecordingAudio || (!messageInput.trim() && !attachment)}
                   onClick={sendCurrentMessage}
+                  aria-label="Enviar mensagem"
+                  title="Enviar mensagem"
                   className={cn(
                     'w-11 h-11 text-white rounded-2xl flex items-center justify-center transition-all duration-200 flex-shrink-0',
                     waConnected === false

@@ -38,11 +38,23 @@ import { erpRouter } from "./modules/erp/router";
 import { hasHumanContactName, normalizeContactPhone } from "../shared/contact-phone";
 import { findCrmClientForAttendance, searchCrmClientsForAttendance } from "./db-crm";
 import { findConversationContactByPhone, searchLightweightContactsForAttendance } from "./conversation-contact";
+import { ConversationReplyResolutionError, resolveConversationReplyReference } from "./conversation-reply-resolution";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
 type ClientStatus = "provisioning" | "active" | "setup" | "failed" | "paused";
 type OperationalRecordType = "conversation" | "ticket" | "tracking" | "erp";
+
+async function resolveOutboundReplyReference(input: Parameters<typeof resolveConversationReplyReference>[1]) {
+  try {
+    return await resolveConversationReplyReference(getPool(), input);
+  } catch (error) {
+    if (error instanceof ConversationReplyResolutionError) {
+      throw new TRPCError({ code: error.code, message: error.message });
+    }
+    throw error;
+  }
+}
 
 const invalidTenantCredentialHash = bcrypt.hash(randomUUID(), 12);
 
@@ -866,13 +878,15 @@ export const appRouter = router({
       return { ok: true, clientId: input.clientId, tenantDatabaseName: client.tenantDatabaseName, modules: client.modules, user: { email: user.email, role: user.role, permissions: user.permissions }, tokenHint: tokenHint(input.token), message: "Token validado no backend sincronizado MegaAdmin → MegaDesk para este cliente." };
     }),
     sendMessage: megadeskProcedure.input(z.object({ conversationId: z.string(), message: z.string().min(1),
-      userEmail: z.string().email(), clientAttemptId: z.string().uuid() })).mutation(async ({ input, ctx }) => {
+      userEmail: z.string().email(), clientAttemptId: z.string().uuid(), replyToMessageId: z.string().min(1).max(100).optional() })).mutation(async ({ input, ctx }) => {
       await hydrateSyncState();
       const outboundConversation = await loadOutboundConversation(getPool(), ctx.tenantId, input.conversationId);
       if (!outboundConversation) throw new TRPCError({ code: "NOT_FOUND", message: "Conversa não encontrada." });
       const conversation = conversations.find((item) => item.id === input.conversationId && item.clientId === ctx.tenantId);
       const client = getReleasedClientOrThrow(outboundConversation.clientId);
       assertClientUserPermission(client, "conversations", input.userEmail);
+      const replyReference = await resolveOutboundReplyReference({ clientId: ctx.tenantId, conversationId: input.conversationId,
+        integrationId: outboundConversation.integrationId, replyToMessageId: input.replyToMessageId });
 
       const time = nowLabel();
       const operatorName = await conversationOperatorName(ctx.tenantId, ctx.operationalUserId);
@@ -892,9 +906,9 @@ export const appRouter = router({
           clientId: ctx.tenantId, provider: "evolution", integrationId: outboundConversation.integrationId,
           messageType: "text",
           sender: "agent", senderUserId: ctx.operationalUserId, senderNameSnapshot: operatorName,
-          text: input.message, timestamp: new Date(), legacyMessage: outgoingMessage },
+          text: input.message, timestamp: new Date(), legacyMessage: outgoingMessage, replyToMessageId: input.replyToMessageId ?? null },
           () => evoSendText(instanceNameFor(outboundConversation.clientId),
-            resolveOutboundRecipient(outboundConversation), input.message));
+            resolveOutboundRecipient(outboundConversation), input.message, replyReference));
       } catch (error) {
         throw new TRPCError({ code: "BAD_GATEWAY", message: safeOutboundProviderMessage(error) });
       }
@@ -918,6 +932,7 @@ export const appRouter = router({
       caption: z.string().max(2000).optional(),
       userEmail: z.string().email(),
       clientAttemptId: z.string().uuid(),
+      replyToMessageId: z.string().min(1).max(100).optional(),
     })).mutation(async ({ input, ctx }) => {
       await hydrateSyncState();
       const outboundConversation = await loadOutboundConversation(getPool(), ctx.tenantId, input.conversationId);
@@ -927,6 +942,8 @@ export const appRouter = router({
       const conversation = conversations.find((item) => item.id === input.conversationId && item.clientId === ctx.tenantId);
       const client = getReleasedClientOrThrow(ctx.tenantId);
       assertClientUserPermission(client, "conversations", input.userEmail);
+      const replyReference = await resolveOutboundReplyReference({ clientId: ctx.tenantId, conversationId: input.conversationId,
+        integrationId: outboundConversation.integrationId, replyToMessageId: input.replyToMessageId });
 
       const { parseMediaDataUrl } = await import("./evolution/media-data");
       const media = parseMediaDataUrl(input.dataUrl, input.mimeType);
@@ -963,12 +980,13 @@ export const appRouter = router({
           conversationId: input.conversationId, clientId: ctx.tenantId, provider: "evolution",
           integrationId: outboundConversation.integrationId,
           messageType: input.kind, sender: "agent",
-          senderUserId: ctx.operationalUserId, senderNameSnapshot: operatorName, text: summary,
-          timestamp: new Date(), legacyMessage: outgoingMessage,
-          mediaReference: { mediaData: input.dataUrl, mimeType: input.mimeType, fileName: input.fileName ?? null } },
-          () => evoSendAttachment({ instanceName: instanceNameFor(ctx.tenantId),
+           senderUserId: ctx.operationalUserId, senderNameSnapshot: operatorName, text: summary,
+           timestamp: new Date(), legacyMessage: outgoingMessage,
+           replyToMessageId: input.replyToMessageId ?? null,
+           mediaReference: { mediaData: input.dataUrl, mimeType: input.mimeType, fileName: input.fileName ?? null } },
+           () => evoSendAttachment({ instanceName: instanceNameFor(ctx.tenantId),
             number: resolveOutboundRecipient(outboundConversation), kind: input.kind, dataUrl: input.dataUrl,
-            mimeType: input.mimeType, fileName: input.fileName, caption: input.caption }));
+            mimeType: input.mimeType, fileName: input.fileName, caption: input.caption, quoted: replyReference }));
       } catch (error) {
         throw new TRPCError({ code: "BAD_GATEWAY", message: safeOutboundProviderMessage(error) });
       }

@@ -7,6 +7,11 @@ const input = {
   timestamp: new Date("2026-08-29T12:00:00Z"), legacyMessage: { from: "agent", text: "hello" },
 };
 
+const providerReference = {
+  key: { id: "provider-1", remoteJid: "5541999999999@s.whatsapp.net", fromMe: true },
+  message: { conversation: "hello" },
+};
+
 function pool(options: { insertError?: Error; reconciliationError?: Error; existing?: any } = {}) {
   const connection = {
     beginTransaction: vi.fn().mockResolvedValue(undefined), commit: vi.fn().mockResolvedValue(undefined),
@@ -31,10 +36,10 @@ describe("outbound tracked workflow", () => {
     const db = pool();
     const send = vi.fn(async () => {
       expect(db.connection.commit).toHaveBeenCalledOnce();
-      return { key: { id: "provider-1" } };
+      return providerReference;
     });
     await expect(executeOutboundAttempt(db.value, input, send)).resolves.toMatchObject({ status: "sent", externalMessageId: "provider-1" });
-    expect(db.execute.mock.calls[0][1]).toEqual(["sent", "provider-1", "local-1", "conv-1", "tenant-a", "evolution", "instance-a"]);
+    expect(db.execute.mock.calls[0][1]).toEqual(["sent", "provider-1", JSON.stringify(providerReference), "local-1", "conv-1", "tenant-a", "evolution", "instance-a"]);
   });
 
   it("never calls provider when initial persistence fails", async () => {
@@ -53,7 +58,7 @@ describe("outbound tracked workflow", () => {
 
   it("leaves a reconcilable pending row when post-provider update fails", async () => {
     const db = pool({ reconciliationError: new Error("update failed") });
-    await expect(executeOutboundAttempt(db.value, input, async () => ({ key: { id: "provider-1" } })))
+    await expect(executeOutboundAttempt(db.value, input, async () => providerReference))
       .rejects.toBeInstanceOf(OutboundReconciliationError);
     expect(db.connection.commit).toHaveBeenCalledOnce();
   });
@@ -70,5 +75,12 @@ describe("outbound tracked workflow", () => {
     const send = vi.fn();
     await expect(executeOutboundAttempt(db.value, input, send)).rejects.toBeInstanceOf(OutboundAttemptAlreadyRecordedError);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("persists the quote relation in the pending row before calling the provider", async () => {
+    const db = pool();
+    await executeOutboundAttempt(db.value, { ...input, replyToMessageId: "original-1" }, async () => providerReference);
+    const insert = db.connection.execute.mock.calls.find(call => String(call[0]).includes("INSERT INTO megadesk_domain_conversations_messages"));
+    expect(insert?.[1][7]).toBe("original-1");
   });
 });

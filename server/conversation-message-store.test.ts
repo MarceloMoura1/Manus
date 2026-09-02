@@ -28,6 +28,22 @@ describe("canonical message store", () => {
     expect(db.execute.mock.calls[1][0]).toContain("FOR UPDATE");
   });
 
+  it("persists the internal quote relation and compact provider reference", async () => {
+    const db = connection();
+    await persistCanonicalMessage(db, {
+      ...base,
+      replyToMessageId: "original-1",
+      providerMessageReference: {
+        key: { id: "external-1", remoteJid: "5541999999999@s.whatsapp.net", fromMe: false },
+        message: { imageMessage: { caption: "Pedido", base64: "A".repeat(500) } },
+      },
+    });
+    expect(db.execute.mock.calls[0][0]).toContain("reply_to_message_id");
+    expect(db.execute.mock.calls[0][1][7]).toBe("original-1");
+    expect(db.execute.mock.calls[0][1][8]).toContain('"external-1"');
+    expect(db.execute.mock.calls[0][1][8]).not.toContain("A".repeat(100));
+  });
+
   it("returns duplicate only for the external-message constraint and never touches JSON", async () => {
     const duplicate = { code: "ER_DUP_ENTRY", sqlMessage: "Duplicate entry for key 'uq_mdcm_external'" };
     const db = { execute: vi.fn(async () => { throw duplicate; }) } as any;
@@ -51,6 +67,17 @@ describe("canonical message store", () => {
     expect(row.type).toBe(type);
     if (type === "contact") expect(row.contact).toEqual({ name: "A", vcard: "VCARD" });
     else expect(row.mediaData).toBe(mediaData);
+  });
+
+  it("returns a lightweight quote preview without original media", () => {
+    const row = normalizedMessage({
+      id: "reply", type: "text", mediaReference: null, replyToMessageId: "original",
+      replyMessageId: "original", replySender: "customer", replyDirection: "inbound",
+      replyText: "Mensagem original", replyType: "image", replyMediaLabel: "Foto",
+    });
+    expect(row.replyTo).toEqual({ messageId: "original", senderName: null, sender: "customer", direction: "inbound",
+      type: "image", textPreview: "Mensagem original", mediaLabel: "Foto", available: true });
+    expect(JSON.stringify(row.replyTo)).not.toContain("base64");
   });
 
   it("keeps heavy media only in the normalized reference", () => {

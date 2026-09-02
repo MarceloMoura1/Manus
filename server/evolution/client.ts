@@ -14,6 +14,7 @@
 
 import { getEvolutionConfig, getEvolutionWebhookSecret } from "./config";
 import { normalizeContactPhone } from "../../shared/contact-phone";
+import { normalizeProviderMessageReference, type ProviderMessageReference } from "../conversation-provider-reference";
 
 export class EvolutionApiError extends Error {
   constructor(
@@ -274,18 +275,19 @@ export function normalizeEvolutionRecipient(number: string): string {
 export async function evoSendText(
   instanceName: string,
   number: string,
-  text: string
-): Promise<{ key: { id: string } }> {
+  text: string,
+  quoted?: ProviderMessageReference,
+): Promise<ProviderMessageReference> {
   const normalizedNumber = normalizeEvolutionRecipient(number);
   const response = await request<any>("POST", `/message/sendText/${instanceName}`, {
     number: normalizedNumber,
     text,
     delay: 500,
+    ...(quoted ? { quoted } : {}),
   });
-  if (!response?.key || typeof response.key.id !== "string" || !response.key.id) {
-    throw new Error("A Evolution não confirmou o envio da mensagem.");
-  }
-  return response;
+  const reference = normalizeProviderMessageReference(response);
+  if (!reference) throw new Error("A Evolution não confirmou a referência completa da mensagem.");
+  return reference;
 }
 
 export type EvolutionAttachmentKind = "image" | "video" | "audio" | "document" | "sticker";
@@ -298,35 +300,43 @@ export async function evoSendAttachment(input: {
   mimeType: string;
   fileName?: string;
   caption?: string;
-}): Promise<{ key: { id: string } }> {
+  quoted?: ProviderMessageReference;
+}): Promise<ProviderMessageReference> {
   const number = normalizeEvolutionRecipient(input.number);
   // Evolution 2.3.x expects the media field as raw base64 (or a public URL),
   // not as a browser data URI.
   const media = input.dataUrl.replace(/^data:[^,]+;base64,/i, "");
+  let response: unknown;
   if (input.kind === "audio") {
-    return request("POST", `/message/sendWhatsAppAudio/${input.instanceName}`, {
+    response = await request("POST", `/message/sendWhatsAppAudio/${input.instanceName}`, {
       number,
       audio: media,
       encoding: true,
       delay: 500,
+      ...(input.quoted ? { quoted: input.quoted } : {}),
     });
-  }
-  if (input.kind === "sticker") {
-    return request("POST", `/message/sendSticker/${input.instanceName}`, {
+  } else if (input.kind === "sticker") {
+    response = await request("POST", `/message/sendSticker/${input.instanceName}`, {
       number,
       sticker: media,
       delay: 500,
+      ...(input.quoted ? { quoted: input.quoted } : {}),
+    });
+  } else {
+    response = await request("POST", `/message/sendMedia/${input.instanceName}`, {
+      number,
+      mediatype: input.kind,
+      mimetype: input.mimeType,
+      media,
+      fileName: input.fileName,
+      caption: input.caption || "",
+      delay: 500,
+      ...(input.quoted ? { quoted: input.quoted } : {}),
     });
   }
-  return request("POST", `/message/sendMedia/${input.instanceName}`, {
-    number,
-    mediatype: input.kind,
-    mimetype: input.mimeType,
-    media,
-    fileName: input.fileName,
-    caption: input.caption || "",
-    delay: 500,
-  });
+  const reference = normalizeProviderMessageReference(response);
+  if (!reference) throw new Error("A Evolution não confirmou a referência completa da mensagem.");
+  return reference;
 }
 
 export async function evoGetMediaBase64(

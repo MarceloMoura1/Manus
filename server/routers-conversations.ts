@@ -87,7 +87,22 @@ export function normalizedMessage(row: Record<string, any>) {
   if (typeof row.mediaReference === "string" && row.mediaReference) {
     try { media = JSON.parse(row.mediaReference); } catch { media = {}; }
   }
-  return { ...row, ...media, mediaReference: row.mediaReference ?? null };
+  const replyTo = typeof row.replyToMessageId === "string" && row.replyToMessageId
+    ? {
+      messageId: row.replyToMessageId,
+      senderName: row.replySenderName ?? null,
+      sender: row.replySender ?? null,
+      direction: row.replyDirection ?? null,
+      type: row.replyType ?? null,
+      textPreview: String(row.replyText ?? "").trim().slice(0, 180),
+      mediaLabel: row.replyMediaLabel ?? null,
+      available: Boolean(row.replyMessageId),
+    }
+    : null;
+  const { replyMessageId: _replyMessageId, replySenderName: _replySenderName, replySender: _replySender,
+    replyDirection: _replyDirection, replyType: _replyType, replyText: _replyText, replyMediaLabel: _replyMediaLabel,
+    ...message } = row;
+  return { ...message, ...media, mediaReference: row.mediaReference ?? null, replyTo };
 }
 
 async function eligibleUser(tenantId: string, userId: string) {
@@ -351,9 +366,19 @@ export const conversationsRouter = router({
         `SELECT m.message_id AS id, m.sender, m.message AS text, m.timestamp, m.status, m.direction,
          m.message_type AS type, m.client_attempt_id AS clientAttemptId, m.external_message_id AS externalMessageId,
          COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(m.sender_name_snapshot), '')) AS agentName,
-         m.media_reference AS mediaReference
+         m.media_reference AS mediaReference, m.reply_to_message_id AS replyToMessageId,
+         q.message_id AS replyMessageId, q.sender AS replySender, q.direction AS replyDirection,
+         COALESCE(NULLIF(TRIM(replyUser.name), ''), NULLIF(TRIM(q.sender_name_snapshot), '')) AS replySenderName,
+         q.message AS replyText, q.message_type AS replyType,
+         CASE q.message_type WHEN 'image' THEN 'Foto' WHEN 'video' THEN 'VÃ­deo' WHEN 'audio' THEN 'Ãudio'
+           WHEN 'sticker' THEN 'Figurinha' WHEN 'document' THEN COALESCE(
+             NULLIF(JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(q.media_reference) THEN q.media_reference ELSE '{}' END, '$.fileName')), ''),
+             'Documento') ELSE NULL END AS replyMediaLabel
          FROM megadesk_domain_conversations_messages m
          LEFT JOIN megadesk_domain_client_users u ON u.client_id = m.client_id AND u.user_id = m.sender_user_id
+         LEFT JOIN megadesk_domain_conversations_messages q
+           ON q.message_id = m.reply_to_message_id AND q.client_id = m.client_id AND q.conversation_id = m.conversation_id
+         LEFT JOIN megadesk_domain_client_users replyUser ON replyUser.client_id = q.client_id AND replyUser.user_id = q.sender_user_id
          WHERE m.client_id = ? AND m.conversation_id = ? ORDER BY m.timestamp ASC, m.message_id ASC LIMIT ${input.limit}`,
         [ctx.tenantId, input.conversationId],
       ) as any[];
@@ -415,9 +440,19 @@ export const conversationsRouter = router({
       `SELECT m.message_id AS id, m.sender, m.message AS text, m.timestamp, m.status, m.direction,
        m.message_type AS type, m.client_attempt_id AS clientAttemptId, m.external_message_id AS externalMessageId,
        COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(m.sender_name_snapshot), '')) AS agentName,
-       m.media_reference AS mediaReference
+       m.media_reference AS mediaReference, m.reply_to_message_id AS replyToMessageId,
+       q.message_id AS replyMessageId, q.sender AS replySender, q.direction AS replyDirection,
+       COALESCE(NULLIF(TRIM(replyUser.name), ''), NULLIF(TRIM(q.sender_name_snapshot), '')) AS replySenderName,
+       q.message AS replyText, q.message_type AS replyType,
+       CASE q.message_type WHEN 'image' THEN 'Foto' WHEN 'video' THEN 'VÃ­deo' WHEN 'audio' THEN 'Ãudio'
+         WHEN 'sticker' THEN 'Figurinha' WHEN 'document' THEN COALESCE(
+           NULLIF(JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(q.media_reference) THEN q.media_reference ELSE '{}' END, '$.fileName')), ''),
+           'Documento') ELSE NULL END AS replyMediaLabel
        FROM megadesk_domain_conversations_messages m
        LEFT JOIN megadesk_domain_client_users u ON u.client_id = m.client_id AND u.user_id = m.sender_user_id
+       LEFT JOIN megadesk_domain_conversations_messages q
+         ON q.message_id = m.reply_to_message_id AND q.client_id = m.client_id AND q.conversation_id = m.conversation_id
+       LEFT JOIN megadesk_domain_client_users replyUser ON replyUser.client_id = q.client_id AND replyUser.user_id = q.sender_user_id
        WHERE m.client_id = ? AND m.conversation_id = ? ORDER BY m.timestamp ASC, m.message_id ASC LIMIT 200`,
       [ctx.tenantId, input.conversationId],
     ) as any[];

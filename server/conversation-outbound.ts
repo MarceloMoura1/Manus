@@ -1,6 +1,7 @@
 import type { Pool, PoolConnection } from "mysql2/promise";
 import { createHash } from "node:crypto";
 import { persistCanonicalMessage, type CanonicalMessageWrite } from "./conversation-message-store";
+import { normalizeProviderMessageReference, type ProviderMessageReference } from "./conversation-provider-reference";
 
 export type OutboundAttemptInput = Omit<CanonicalMessageWrite, "direction" | "status" | "externalMessageId" | "clientAttemptId"> & {
   clientAttemptId: string;
@@ -16,19 +17,23 @@ export class OutboundAttemptAlreadyRecordedError extends Error {
   constructor(public readonly status: string) { super("OUTBOUND_ATTEMPT_ALREADY_RECORDED"); }
 }
 
-async function updateDelivery(pool: Pool, input: OutboundAttemptInput, status: "sent" | "failed", externalMessageId?: string) {
+async function updateDelivery(pool: Pool, input: OutboundAttemptInput, status: "sent" | "failed", externalMessageId?: string,
+  providerMessageReference?: ProviderMessageReference | null) {
+  const reference = normalizeProviderMessageReference(providerMessageReference);
   await pool.execute(
     `UPDATE megadesk_domain_conversations_messages
-     SET status = ?, external_message_id = COALESCE(?, external_message_id), updated_at = NOW()
+     SET status = ?, external_message_id = COALESCE(?, external_message_id),
+       provider_message_reference = COALESCE(?, provider_message_reference), updated_at = NOW()
      WHERE message_id = ? AND conversation_id = ? AND client_id = ? AND provider = ? AND integration_id = ?`,
-    [status, externalMessageId ?? null, input.messageId, input.conversationId, input.clientId, input.provider, input.integrationId],
+     [status, externalMessageId ?? null, reference ? JSON.stringify(reference) : null,
+       input.messageId, input.conversationId, input.clientId, input.provider, input.integrationId],
   );
 }
 
 export async function executeOutboundAttempt(
   pool: Pool,
   input: OutboundAttemptInput,
-  sendProvider: () => Promise<{ key: { id: string } }>,
+  sendProvider: () => Promise<ProviderMessageReference>,
 ): Promise<{ messageId: string; externalMessageId: string; status: "sent" }> {
   const connection = await pool.getConnection();
   let existing: { message_id: string; status: string; external_message_id: string | null } | undefined;
@@ -62,17 +67,18 @@ export async function executeOutboundAttempt(
   }
   if (existing) throw new OutboundAttemptAlreadyRecordedError(existing.status);
 
-  let response: { key: { id: string } };
+  let response: ProviderMessageReference;
   try {
     response = await sendProvider();
-    if (!response?.key?.id) throw new Error("PROVIDER_MESSAGE_ID_MISSING");
+    response = normalizeProviderMessageReference(response) as ProviderMessageReference;
+    if (!response) throw new Error("PROVIDER_MESSAGE_REFERENCE_MISSING");
   } catch (error) {
     await updateDelivery(pool, input, "failed").catch(() => undefined);
     throw error;
   }
 
   try {
-    await updateDelivery(pool, input, "sent", response.key.id);
+    await updateDelivery(pool, input, "sent", response.key.id, response);
   } catch (error) {
     throw new OutboundReconciliationError(input.messageId, error);
   }

@@ -12,6 +12,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { getPool } from "../db";
 import { generateConversationPublicCode, withPublicCodeRetry } from "../conversation-public-code";
 import { persistCanonicalMessage } from "../conversation-message-store";
+import { normalizeProviderMessageReference, type ProviderMessageReference } from "../conversation-provider-reference";
 import { getEvolutionWebhookSecret } from "./config";
 import { evoGetMediaBase64, normalizeEvolutionRecipient } from "./client";
 
@@ -290,7 +291,10 @@ async function handleMessagesUpsert(
 
     const externalMessageId = msg?.key?.id;
     if (!externalMessageId || typeof externalMessageId !== "string") continue;
-    await saveIncomingMessage(clientId, instanceName, externalMessageId, phoneCandidates, pushName, text, now, payload);
+    await saveIncomingMessage(clientId, instanceName, externalMessageId, phoneCandidates, pushName, text, now, payload, {
+      providerMessageReference: normalizeProviderMessageReference({ key: msg.key, message: msg.message }),
+      quotedExternalMessageId: extractEvolutionQuotedExternalMessageId(msg),
+    });
   }
 }
 
@@ -333,6 +337,21 @@ export function extractEvolutionProviderName(msg: Record<string, any>): string {
   return value.trim().replace(/\s+/g, " ").slice(0, 180);
 }
 
+/** Evolution 2.3.7 prepares contextInfo at the message root; raw fixtures may retain it inside the typed message. */
+export function extractEvolutionQuotedExternalMessageId(msg: Record<string, any>): string | null {
+  const message = msg?.message && typeof msg.message === "object" ? msg.message : {};
+  const contexts = [
+    msg?.contextInfo,
+    msg?.message?.extendedTextMessage?.contextInfo,
+    ...Object.values(message as Record<string, any>).map((value: any) => value?.contextInfo),
+  ];
+  for (const context of contexts) {
+    const stanzaId = typeof context?.stanzaId === "string" ? context.stanzaId.trim() : "";
+    if (stanzaId) return stanzaId;
+  }
+  return null;
+}
+
 /**
  * Manual/ERP names are authoritative. A provider name can only fill an empty
  * lightweight contact (including the historical phone/placeholder values).
@@ -355,6 +374,7 @@ export async function saveIncomingMessage(
   text: string,
   at: Date,
   payload: Record<string, unknown> = {},
+  references: { providerMessageReference?: ProviderMessageReference | null; quotedExternalMessageId?: string | null } = {},
 ): Promise<"persisted" | "duplicate"> {
   const phone = phoneCandidates[0];
   const pool = getPool();
@@ -422,15 +442,28 @@ export async function saveIncomingMessage(
       ...payload,
     };
 
+    const resolveReplyToMessageId = async (conversationId: string): Promise<string | null> => {
+      if (!references.quotedExternalMessageId) return null;
+      const [rows] = await connection.execute(
+        `SELECT message_id FROM megadesk_domain_conversations_messages
+         WHERE client_id = ? AND conversation_id = ? AND provider = 'evolution'
+           AND integration_id = ? AND external_message_id = ? LIMIT 1`,
+        [clientId, conversationId, integrationId, references.quotedExternalMessageId],
+      ) as any[];
+      return typeof rows[0]?.message_id === "string" ? rows[0].message_id : null;
+    };
+
     if (convRows && convRows.length > 0) {
       // ─── Conversa existente: adiciona mensagem ───────────────────────────
       const conv      = convRows[0];
       const convId    = conv.conversation_id;
+      const replyToMessageId = await resolveReplyToMessageId(convId);
       const inserted = await persistCanonicalMessage(connection, {
         messageId: externalMessageId, externalMessageId, conversationId: convId, clientId,
         provider: "evolution", integrationId, direction: "inbound", messageType: String(payload.type ?? "text"),
         sender: "customer", text, status: "received", timestamp: at, legacyMessage: newMsg,
         mediaReference: payload.type === "text" ? null : payload,
+        replyToMessageId, providerMessageReference: references.providerMessageReference ?? null,
         incrementUnread: true,
       });
       if (!inserted) {
@@ -469,6 +502,7 @@ export async function saveIncomingMessage(
         provider: "evolution", integrationId, direction: "inbound", messageType: String(payload.type ?? "text"),
         sender: "customer", text, status: "received", timestamp: at, legacyMessage: newMsg,
         mediaReference: payload.type === "text" ? null : payload,
+        providerMessageReference: references.providerMessageReference ?? null,
         incrementUnread: true,
       });
       if (!inserted) {
