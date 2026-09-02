@@ -40,6 +40,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   ArrowRight,
   ArrowLeft,
+  ArrowRightLeft,
   ArrowDownUp,
   Bell,
   Bot,
@@ -71,7 +72,6 @@ import {
   Zap,
   AlertCircle,
   X,
-  Edit2,
   Smartphone,
   Tag,
   ChevronDown,
@@ -1327,7 +1327,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
         ) : selectedConv ? (
           <>
             {/* Header do Chat */}
-            <div className="flex min-w-0 flex-shrink-0 items-center justify-between gap-2 border-b border-slate-100 bg-white px-3 py-3 md:px-6 md:py-4">
+            <div data-testid="active-conversation-header" className="flex min-w-0 flex-shrink-0 items-center justify-between gap-2 border-b border-slate-200/80 bg-white px-3 py-2.5 sm:px-4 md:px-6 md:py-3">
               <div className="flex min-w-0 items-center gap-2 md:gap-3">
                 <button
                   type="button"
@@ -1356,7 +1356,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                   <p className="truncate text-xs text-slate-500">{selectedConv.phone} {selectedConv.company ? `• ${selectedConv.company}` : ''}</p>
                 </div>
               </div>
-              <div className="flex flex-shrink-0 items-center gap-1 md:gap-2">
+              <div className="flex flex-shrink-0 items-center gap-1.5 sm:gap-2">
                 {selectedConv.status === 'bot' && !selectedConv.assignedUserId && (
                   <button type="button" onClick={() => claimConversationMutation.mutate({ conversationId: selectedConv.id }, {
                     onSuccess: async () => {
@@ -1367,28 +1367,29 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                   })} className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Assumir</button>
                 )}
                 <button
+                  type="button"
+                  data-testid="transfer-conversation-button"
                   onClick={() => setTransferOpen(true)}
-                  className="hidden rounded-xl px-3 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-50 lg:block"
+                  aria-label="Transferir atendimento"
+                  title="Transferir atendimento"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
                 >
-                  Transferir
+                  <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />
                 </button>
                 <button
-                  onClick={() => setConversationDetailsOpen(true)}
-                  className="hidden h-10 w-10 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 sm:flex"
-                  title="Editar contato no painel"
-                >
-                  <Edit2 className="w-4 h-4" />
-                </button>
-                <button
+                  type="button"
                   onClick={() => selectedConv.status === 'closed' ? setReopenConfirmOpen(true) : setCloseConfirmOpen(true)}
+                  aria-label={selectedConv.status === 'closed' ? 'Reabrir atendimento' : 'Encerrar atendimento'}
                   className={cn(
-                    'hidden rounded-xl px-3 py-2 text-sm font-medium transition-all sm:block md:px-4',
+                    'inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 sm:px-3 sm:text-sm',
                     selectedConv.status === 'closed'
-                      ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                      : 'bg-red-50 text-red-600 hover:bg-red-100'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 focus-visible:ring-emerald-500'
+                      : 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100 focus-visible:ring-rose-500'
                   )}
                 >
-                  {selectedConv.status === 'closed' ? 'Reabrir' : 'Encerrar'}
+                  <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span className="hidden sm:inline">{selectedConv.status === 'closed' ? 'Reabrir' : 'Encerrar atendimento'}</span>
+                  <span className="sm:hidden">{selectedConv.status === 'closed' ? 'Reabrir' : 'Encerrar'}</span>
                 </button>
                 <button type="button" aria-expanded={conversationDetailsOpen} aria-controls="conversation-details-panel"
                   aria-label={conversationDetailsOpen ? "Fechar detalhes da conversa" : "Abrir detalhes da conversa"}
@@ -1599,17 +1600,17 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
       />}
 
       {transferOpen && selectedConv && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-labelledby="transfer-conversation-title" onMouseDown={(event) => {
+        <div data-testid="transfer-conversation-dialog" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-labelledby="transfer-conversation-title" onMouseDown={(event) => {
           if (event.currentTarget === event.target) setTransferOpen(false);
         }}>
-          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 id="transfer-conversation-title" className="font-semibold text-slate-900">Transferir conversa</h3>
-              <button type="button" onClick={() => setTransferOpen(false)} aria-label="Fechar transferência" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><X className="h-4 w-4" /></button>
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-xl sm:p-5">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="min-w-0"><h3 id="transfer-conversation-title" className="font-semibold text-slate-900">Transferir conversa</h3>{transferConversationMutation.isPending && <span role="status" className="mt-0.5 block text-xs text-violet-700">Transferindo atendimento…</span>}</div>
+              <button type="button" onClick={() => setTransferOpen(false)} disabled={transferConversationMutation.isPending} aria-label="Fechar transferência" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-50"><X className="h-4 w-4" /></button>
             </div>
-            <div className="max-h-64 space-y-2 overflow-y-auto">
+            <div className="max-h-64 space-y-1 overflow-y-auto pr-1">
               {(activeUsersData ?? []).map((user) => (
-                <button key={user.id} type="button" disabled={transferConversationMutation.isPending} onClick={() => transferConversationMutation.mutate({
+                <button key={user.id} type="button" data-testid="transfer-user-option" data-current={user.id === selectedConv.assignedUserId ? 'true' : 'false'} disabled={transferConversationMutation.isPending} onClick={() => transferConversationMutation.mutate({
                   conversationId: selectedConv.id,
                   targetUserId: user.id,
                   expectedAssignedUserId: selectedConv.assignedUserId ?? null,
@@ -1620,9 +1621,10 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                     showToast('Conversa transferida com sucesso!', 'success');
                   },
                   onError: () => showToast('Não foi possível transferir a conversa', 'error'),
-                })} className="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-sm font-semibold text-blue-700">{user.name.charAt(0).toUpperCase()}</span>
-                  <span className="min-w-0"><span className="block truncate text-sm font-medium text-slate-800">{user.name}</span><span className="block truncate text-xs text-slate-500">{user.email}</span></span>
+                })} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-violet-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-50">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">{getInitials(user.name)}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{user.name}</span>
+                  {user.id === selectedConv.assignedUserId && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">Atual</span>}
                 </button>
               ))}
             </div>

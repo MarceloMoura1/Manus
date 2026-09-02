@@ -9,11 +9,12 @@ const conversation = { id: "conv-ui", publicCode: "CV-260829000000-TEST", contac
   lastMessageAt: new Date().toISOString(), unreadCount: 1, status: "open", assignedUserId: "user-ui",
   assignedUserName: "Agent", lastMessageFrom: "customer", provider: "evolution", channel: "whatsapp" };
 
-async function mockedPage(page: Page, deepLink = false, options: { session?: typeof session; conversation?: typeof conversation; conversations?: Array<typeof conversation>; attendanceActive?: { id: string; customerName: string; phone: string } | null } = {}) {
+async function mockedPage(page: Page, deepLink = false, options: { session?: typeof session; conversation?: typeof conversation; conversations?: Array<typeof conversation>; attendanceActive?: { id: string; customerName: string; phone: string } | null; transferError?: boolean; transferDelayMs?: number } = {}) {
   const activeSession = options.session ?? session;
   const activeConversation = options.conversation ?? conversation;
   const activeConversations = options.conversations ?? [activeConversation];
   const attendanceActive = options.attendanceActive ?? null;
+  const transferDelayMs = options.transferDelayMs ?? 0;
   const calls: string[] = [];
   const listInputs: Array<{ viewMode: string; status: string; search?: string }> = [];
   const attendanceQueries: string[] = [];
@@ -40,6 +41,9 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
       const input = (parsedInput[index]?.json ?? parsedInput.json) as { query?: string } | undefined;
       if (input?.query) attendanceQueries.push(input.query);
     });
+    if (transferDelayMs > 0 && names.some(name => name.includes("conversations.transfer"))) {
+      await new Promise(resolve => setTimeout(resolve, transferDelayMs));
+    }
     const result = (name: string) => name.includes("refreshSession") ? { ok: true, session: activeSession }
       : name.includes("conversations.list") ? activeConversations
       : name.includes("conversations.counts") ? { active: 3, closed: 4, waiting: 2, mine: 1 }
@@ -61,7 +65,9 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
       : name.includes("megadesk.createConversation") ? { conversationId: conversation.id, existing: false }
       : name.includes("megadesk.sendMessage") ? { ok: true, conversationId: conversation.id }
       : { ok: true };
-    const body = names.map(name => ({ result: { data: { json: result(name) } } }));
+    const body = names.map(name => options.transferError && name.includes("conversations.transfer")
+      ? { error: { json: { message: "Não foi possível transferir a conversa", code: -32603, data: { code: "INTERNAL_SERVER_ERROR", httpStatus: 500, path: "conversations.transfer" } } } }
+      : { result: { data: { json: result(name) } } });
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(url.searchParams.get("batch") === "1" ? body : body[0]) });
   });
   await page.goto(deepLink ? "/?conversationId=conv-ui" : "/", { waitUntil: "domcontentloaded" });
@@ -231,6 +237,64 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(item).toHaveAttribute("data-selected", "false");
     await item.click();
     await expect(item).toHaveAttribute("data-selected", "true");
+  });
+
+  test("refines the active header without replacing its real transfer or close flows", async ({ page }) => {
+    const { calls } = await mockedPage(page, true);
+    const header = page.getByTestId("active-conversation-header");
+    await expect(header).toBeVisible();
+    await expect(header.getByRole("button", { name: "Transferir", exact: true })).toHaveCount(0);
+    await expect(header.locator('[title="Editar contato no painel"]')).toHaveCount(0);
+    const transfer = header.getByRole("button", { name: "Transferir atendimento", exact: true });
+    await expect(transfer).toHaveAttribute("title", "Transferir atendimento");
+    await expect(header.getByRole("button", { name: "Encerrar atendimento", exact: true })).toBeVisible();
+
+    await transfer.click();
+    const dialog = page.getByTestId("transfer-conversation-dialog");
+    await expect(dialog).toBeVisible();
+    const currentUser = dialog.getByTestId("transfer-user-option");
+    await expect(currentUser).toContainText("Agent");
+    await expect(currentUser).toContainText("Atual");
+    await expect(dialog.getByText("agent@example.test", { exact: true })).toHaveCount(0);
+    await currentUser.click();
+    await expect.poll(() => calls.some(name => name.includes("conversations.transfer"))).toBe(true);
+    await expect(dialog).toHaveCount(0);
+
+    const close = header.getByRole("button", { name: "Encerrar atendimento", exact: true });
+    await close.click();
+    await expect(page.getByText("Encerrar conversa?", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Não", exact: true }).click();
+    await expect(page.getByText("Encerrar conversa?", { exact: true })).toHaveCount(0);
+    await close.click();
+    await page.getByRole("button", { name: "Sim", exact: true }).click();
+    await expect.poll(() => calls.some(name => name.includes("conversations.close"))).toBe(true);
+  });
+
+  test("keeps transfer loading and error feedback while suppressing duplicate submits", async ({ page }) => {
+    const { calls } = await mockedPage(page, true, { transferDelayMs: 500 });
+    await page.getByRole("button", { name: "Transferir atendimento", exact: true }).click();
+    const dialog = page.getByTestId("transfer-conversation-dialog");
+    const user = dialog.getByTestId("transfer-user-option");
+    await user.click();
+    await expect(dialog.getByRole("status")).toHaveText("Transferindo atendimento…");
+    await expect(user).toBeDisabled();
+    expect(calls.filter(name => name.includes("conversations.transfer"))).toHaveLength(1);
+    await expect(dialog).toHaveCount(0);
+
+    await mockedPage(page, true, { transferError: true });
+    await page.getByRole("button", { name: "Transferir atendimento", exact: true }).click();
+    const failingDialog = page.getByTestId("transfer-conversation-dialog");
+    await failingDialog.getByTestId("transfer-user-option").click();
+    await expect(page.getByText("Não foi possível transferir a conversa", { exact: true })).toBeVisible();
+    await expect(failingDialog).toBeVisible();
+  });
+
+  test("keeps contact-name editing available from the details sidebar", async ({ page }) => {
+    await mockedPage(page, true, { conversation: { ...conversation, crmClientId: null, companyName: null } });
+    await page.locator('button[aria-controls="conversation-details-panel"]').click();
+    const details = page.getByTestId("conversation-details-panel");
+    await details.getByRole("button", { name: "Editar", exact: true }).click();
+    await expect(details.getByLabel("Nome", { exact: true })).toBeVisible();
   });
 
   test("orders the real list locally and exposes only working list-menu actions", async ({ page }) => {
@@ -484,7 +548,7 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     const all = page.getByRole("button", { name: "Todos" });
     await all.focus();
     await expect(all).toBeFocused();
-    await expect(page.getByRole("button", { name: "Transferir" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Transferir atendimento" })).toBeVisible();
     const details = page.locator('button[aria-controls="conversation-details-panel"]');
     await expect(details).toBeVisible();
     await details.focus();
@@ -564,6 +628,18 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
       await newAttendanceFlow.getByRole("button", { name: "Fechar novo atendimento" }).click();
       await page.getByText("Cliente UI").click();
       await expect(page.getByTestId("conversation-composer")).toBeVisible();
+      const activeHeader = page.getByTestId("active-conversation-header");
+      const transfer = activeHeader.getByRole("button", { name: "Transferir atendimento", exact: true });
+      const close = activeHeader.getByRole("button", { name: "Encerrar atendimento", exact: true });
+      await expect(transfer).toBeVisible();
+      await expect(close).toBeVisible();
+      const [activeHeaderBox, transferBox, closeBox] = await Promise.all([activeHeader.boundingBox(), transfer.boundingBox(), close.boundingBox()]);
+      expect(activeHeaderBox).not.toBeNull();
+      expect(transferBox).not.toBeNull();
+      expect(closeBox).not.toBeNull();
+      expect(transferBox!.x + transferBox!.width).toBeLessThanOrEqual(activeHeaderBox!.x + activeHeaderBox!.width);
+      expect(closeBox!.x + closeBox!.width).toBeLessThanOrEqual(activeHeaderBox!.x + activeHeaderBox!.width);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       await page.locator('button[aria-controls="conversation-details-panel"]').click();
       await expect(page.getByTestId("conversation-details-panel")).toBeVisible();
       await expect(page.getByTestId("conversation-composer")).toBeVisible();
