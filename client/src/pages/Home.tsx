@@ -32,6 +32,7 @@ import {
   type PreparedRecordedAudio,
 } from "@/lib/audioRecordingController";
 import { outboundAttachmentAccept, prepareOutboundAttachment, type PreparedOutboundAttachment } from "@/lib/outboundAttachment";
+import { operatorDisplayName } from "@/lib/conversation-operator-name";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +45,8 @@ import {
   ArrowDownUp,
   Bell,
   Bot,
+  Check,
+  CheckCheck,
   CheckCircle2,
   Clock,
   ClipboardList,
@@ -198,6 +201,26 @@ type ClientUser = {
 };
 
 const cn = (...classes: any[]) => classes.filter(Boolean).join(" ");
+
+function outboundReceipt(status: unknown, pending: boolean): { label: string; tone: string; icon: "pending" | "sent" | "delivered" | "read" | "failed" } | null {
+  if (pending || String(status ?? "").trim().toLowerCase() === "pending") return { label: "Enviando", tone: "text-blue-100", icon: "pending" };
+  switch (String(status ?? "").trim().toLowerCase()) {
+    case "sent":
+    case "server_ack":
+      return { label: "Enviada", tone: "text-blue-100", icon: "sent" };
+    case "delivered":
+    case "delivery_ack":
+      return { label: "Entregue", tone: "text-blue-100", icon: "delivered" };
+    case "read":
+    case "played":
+      return { label: "Lida", tone: "text-sky-200", icon: "read" };
+    case "failed":
+    case "error":
+      return { label: "Falha no envio", tone: "text-rose-200", icon: "failed" };
+    default:
+      return null;
+  }
+}
 
 function LoadingSpinner() {
   return (
@@ -441,7 +464,9 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     : whatsappStatusQuery.isError
       ? false
       : null;
-  const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  const messageScrollRef = React.useRef<HTMLDivElement>(null);
+  const isNearMessageBottomRef = React.useRef(true);
+  const initialMessageScrollConversationRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     if (!attendanceLaunch || attendanceLaunch === handledAttendanceLaunch.current) return;
@@ -456,6 +481,15 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     { enabled: !!selectedConversation && !!clientId, refetchInterval: 3000 }
   );
   const conversationMessages = conversationMessageResult?.messages ?? [];
+  const timelineMessages = React.useMemo(() => {
+    const persisted = Array.isArray(conversationMessages) ? conversationMessages : [];
+    const persistedAttempts = new Set(
+      persisted
+        .map((message: any) => String(message.clientAttemptId ?? "").trim())
+        .filter(Boolean),
+    );
+    return [...persisted, ...optimisticMessages.filter(message => !persistedAttempts.has(message.clientAttemptId))];
+  }, [conversationMessages, optimisticMessages]);
 
   // Mutations tRPC
   const closeConversationMutation = trpc.conversations.close.useMutation();
@@ -718,9 +752,28 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     };
   }, [clientId]);
 
-  React.useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [selectedConversation, conversationMessages, optimisticMessages]);
+  const updateMessageFollowState = React.useCallback((element: HTMLDivElement) => {
+    isNearMessageBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96;
+  }, []);
+
+  const handleMessageScroll = React.useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    updateMessageFollowState(event.currentTarget);
+  }, [updateMessageFollowState]);
+
+  React.useLayoutEffect(() => {
+    const element = messageScrollRef.current;
+    if (!element || !selectedConversation) {
+      initialMessageScrollConversationRef.current = null;
+      return;
+    }
+    if (initialMessageScrollConversationRef.current !== selectedConversation) {
+      element.scrollTop = element.scrollHeight;
+      initialMessageScrollConversationRef.current = selectedConversation;
+      isNearMessageBottomRef.current = true;
+      return;
+    }
+    if (isNearMessageBottomRef.current) element.scrollTop = element.scrollHeight;
+  }, [selectedConversation, timelineMessages]);
 
   // Buscar todos os usuários ativos do cliente
   const { data: activeUsersData } = trpc.conversations.eligibleUsers.useQuery(undefined, { enabled: !!clientId });
@@ -874,11 +927,14 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
 
   sendRecordedAudioRef.current = async audio => {
     if (waConnected === false) throw new Error('WhatsApp disconnected');
-    const optimisticId = `pending-audio-${audio.generation}`;
+    const clientAttemptId = crypto.randomUUID();
+    const optimisticId = `pending-${clientAttemptId}`;
     setOptimisticMessages(previous => [...previous, {
       id: optimisticId,
+      clientAttemptId,
       sender: 'agent',
       from: 'agent',
+      agentName: sessionData?.userName || 'Operador',
       text: '[Áudio]',
       type: 'audio',
       mediaData: audio.dataUrl,
@@ -896,7 +952,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
         mimeType: audio.mimeType,
         fileName: audio.fileName,
         userEmail: audio.userEmail,
-        clientAttemptId: crypto.randomUUID(),
+        clientAttemptId,
       });
       await refetchMessages();
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
@@ -915,8 +971,10 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     const optimisticId = `pending-${clientAttemptId}`;
     setOptimisticMessages(previous => [...previous, {
       id: optimisticId,
+      clientAttemptId,
       sender: 'agent',
       from: 'agent',
+      agentName: sessionData?.userName || 'Operador',
       text: textToSend || (attachmentToSend?.kind === 'audio' ? '[Áudio]' : attachmentToSend?.kind === 'video' ? '[Vídeo]' : attachmentToSend?.kind === 'image' ? '[Imagem]' : attachmentToSend?.kind === 'sticker' ? '[Figurinha]' : '[Documento]'),
       type: attachmentToSend?.kind || 'text',
       mediaData: attachmentToSend?.dataUrl,
@@ -959,7 +1017,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     } finally {
       setIsSendingMessage(false);
     }
-  }, [attachment, clientId, isSendingMessage, messageInput, refetchMessages, selectedConv, sendAttachmentMutation, sendMessageMutation, sessionData?.userEmail, waConnected]);
+  }, [attachment, clientId, isSendingMessage, messageInput, refetchMessages, selectedConv, sendAttachmentMutation, sendMessageMutation, sessionData?.userEmail, sessionData?.userName, waConnected]);
 
   const formatTime = (ts: any) => {
     if (!ts) return '';
@@ -1402,10 +1460,9 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
             </div>
 
             {/* Área de Mensagens */}
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-4 md:px-6" style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)' }}>
+            <div ref={messageScrollRef} onScroll={handleMessageScroll} data-testid="conversation-message-scroll-region" aria-label="Mensagens da conversa" className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-4 md:px-6" style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)' }}>
               {(() => {
-                const persistedMessages: any[] = Array.isArray(conversationMessages) ? conversationMessages : [];
-                const msgs: any[] = [...persistedMessages, ...optimisticMessages];
+                const msgs: any[] = timelineMessages;
                 if (msgs.length === 0) {
                   return (
                     <div className="flex justify-start">
@@ -1423,6 +1480,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                   const msgText = msg.text || msg.message || '';
                   const msgTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
                   const msgType = msg.type || 'text';
+                  const receipt = isAgent ? outboundReceipt(msg.status, msg.pending === true) : null;
                   
                   // Renderização de mídia
                   const renderContent = () => {
@@ -1481,23 +1539,30 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                   };
                   
                   return (
-                    <div key={msg.id || idx} className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
+                    <div key={msg.id ?? msg.clientAttemptId ?? `message-${idx}`} data-testid="conversation-message" className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
                       <div className="min-w-0 max-w-[85%] md:max-w-xs lg:max-w-md">
                         <div className={`rounded-2xl px-4 py-2.5 shadow-sm ${msg.pending ? 'opacity-70' : ''} ${
                           isAgent
                             ? 'bg-gradient-to-br from-blue-500 to-violet-600 text-white rounded-tr-sm'
                             : 'bg-white border border-slate-100 text-slate-800 rounded-tl-sm'
                         }`}>
-                          {isAgent && msg.agentName && <p className="mb-1 text-xs font-bold text-white">{msg.agentName}</p>}
+                          {isAgent && <p className="mb-1 text-xs font-bold text-white">{operatorDisplayName(msg)}</p>}
                           {renderContent()}
-                          <p className={`text-xs mt-1 text-right ${isAgent ? 'text-blue-100' : 'text-slate-400'}`}>{msgTime}</p>
+                          <p className={`mt-1 flex items-center justify-end gap-1 text-xs ${isAgent ? 'text-blue-100' : 'text-slate-400'}`}>
+                            <span>{msgTime}</span>
+                            {receipt && <span data-testid="conversation-message-receipt" aria-label={receipt.label} title={receipt.label} className={`inline-flex items-center ${receipt.tone}`}>
+                              {receipt.icon === 'pending' && <Clock className="h-3.5 w-3.5" aria-hidden="true" />}
+                              {receipt.icon === 'sent' && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
+                              {(receipt.icon === 'delivered' || receipt.icon === 'read') && <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />}
+                              {receipt.icon === 'failed' && <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />}
+                            </span>}
+                          </p>
                         </div>
                       </div>
                     </div>
                   );
                 });
               })()}
-              <div ref={messagesEndRef} />
             </div>
 
             {/* Input de Mensagem */}

@@ -41,6 +41,6 @@ describe("canonical attendance architecture", () => {
   });
 
   it("orders equal timestamps by immutable message id", () => {
-    expect(router).toContain("ORDER BY timestamp ASC, message_id ASC");
+    expect(router).toContain("ORDER BY m.timestamp ASC, m.message_id ASC");
   });
 });

@@ -139,7 +139,8 @@ describe("MegaDesk UI structure", () => {
     expect(clientsPageSource).toContain('const message = "Não foi possível salvar o cliente. Tente novamente."');
     expect(clientsPageSource).not.toContain("error instanceof Error ? error.message");
     expect(homeSource).toContain("<ConversationMedia");
-    expect(homeSource).toContain("isAgent && msg.agentName");
+    expect(homeSource).toContain("isAgent && <p");
+    expect(homeSource).toContain("operatorDisplayName(msg)");
     expect(homeSource).not.toContain("!isAgent && <p className=\"text-xs text-slate-400 mt-1 ml-1\"");
   });
 

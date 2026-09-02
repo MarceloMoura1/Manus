@@ -5,7 +5,7 @@ vi.mock("../db", () => ({ getPool: () => ({ execute: webhookMocks.poolExecute, g
 vi.mock("./config", () => ({ getEvolutionWebhookSecret: () => "webhook-secret" }));
 vi.mock("./session-store", () => ({ upsertSession: webhookMocks.upsertSession, instanceNameFor: (clientId: string) => `megadesk-${clientId}` }));
 
-import { evolutionPhoneCandidates, extractEvolutionProviderName, handleEvolutionWebhook, normalizeEvolutionEvent, parseEvolutionIncomingMessage, saveIncomingMessage, selectInboundContactName } from "./webhook";
+import { canonicalEvolutionReceiptStatus, evolutionPhoneCandidates, extractEvolutionProviderName, handleEvolutionWebhook, normalizeEvolutionEvent, parseEvolutionIncomingMessage, parseEvolutionMessageStatusUpdates, saveIncomingMessage, selectInboundContactName } from "./webhook";
 
 function responseDouble() {
   const response: any = { statusCode: 200, body: undefined };
@@ -18,6 +18,20 @@ function responseDouble() {
 describe("Evolution webhook normalization", () => {
   it("normaliza o evento real com ponto", () => {
     expect(normalizeEvolutionEvent("messages.upsert")).toBe("MESSAGES_UPSERT");
+  });
+
+  it("mapeia somente receipts reais da Evolution para estados canônicos", () => {
+    expect(canonicalEvolutionReceiptStatus("SERVER_ACK")).toBe("sent");
+    expect(canonicalEvolutionReceiptStatus("DELIVERY_ACK")).toBe("delivered");
+    expect(canonicalEvolutionReceiptStatus("READ")).toBe("read");
+    expect(canonicalEvolutionReceiptStatus("UNKNOWN")).toBeNull();
+    expect(parseEvolutionMessageStatusUpdates([
+      { keyId: "provider-delivered", status: "DELIVERY_ACK" },
+      { key: { id: "provider-read" }, update: { status: "READ" } },
+    ])).toEqual([
+      { externalMessageId: "provider-delivered", status: "delivered" },
+      { externalMessageId: "provider-read", status: "read" },
+    ]);
   });
 
   it("associa número brasileiro canônico e legado sem 55", () => {
@@ -112,6 +126,20 @@ describe("Evolution webhook HTTP contract", () => {
     await handleEvolutionWebhook({ headers: { "x-megadesk-webhook-secret": "webhook-secret" }, body: { event: "PRESENCE_UPDATE", instance: "megadesk-tenant-a", data: {} } } as any, res);
     expect(res.statusCode).toBe(204);
     expect(res.json).not.toHaveBeenCalledWith({ ok: true });
+  });
+
+  it("persists an outbound MESSAGES_UPDATE receipt without touching inbound rows", async () => {
+    webhookMocks.poolExecute
+      .mockResolvedValueOnce([[{ clientId: "tenant-a" }]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
+    const res = responseDouble();
+    await handleEvolutionWebhook({ headers: { "x-megadesk-webhook-secret": "webhook-secret" }, body: {
+      event: "messages.update", instance: "megadesk-tenant-a", data: { keyId: "provider-read", status: "READ" },
+    } } as any, res);
+    expect(res.statusCode).toBe(200);
+    const [sql, values] = webhookMocks.poolExecute.mock.calls[1];
+    expect(String(sql)).toContain("external_message_id = ? AND direction = 'outbound'");
+    expect(values).toEqual(["read", "read", "read", "read", "read", "tenant-a", "megadesk-tenant-a", "provider-read"]);
   });
 
   it("returns 200 for a duplicate without appending it again", async () => {

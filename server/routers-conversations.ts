@@ -270,10 +270,13 @@ export const conversationsRouter = router({
     .query(async ({ input, ctx }) => {
       requireConversationAccess(ctx);
       const [rows] = await getPool().execute(
-        `SELECT message_id AS id, sender, message AS text, timestamp, status, direction,
-         message_type AS type, sender_name_snapshot AS agentName, media_reference AS mediaReference
-         FROM megadesk_domain_conversations_messages
-         WHERE client_id = ? AND conversation_id = ? ORDER BY timestamp ASC, message_id ASC LIMIT ${input.limit}`,
+        `SELECT m.message_id AS id, m.sender, m.message AS text, m.timestamp, m.status, m.direction,
+         m.message_type AS type, m.client_attempt_id AS clientAttemptId, m.external_message_id AS externalMessageId,
+         COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(m.sender_name_snapshot), '')) AS agentName,
+         m.media_reference AS mediaReference
+         FROM megadesk_domain_conversations_messages m
+         LEFT JOIN megadesk_domain_client_users u ON u.client_id = m.client_id AND u.user_id = m.sender_user_id
+         WHERE m.client_id = ? AND m.conversation_id = ? ORDER BY m.timestamp ASC, m.message_id ASC LIMIT ${input.limit}`,
         [ctx.tenantId, input.conversationId],
       ) as any[];
       if (rows.length) return { source: "normalized" as const, messages: rows.map(normalizedMessage) };
@@ -308,10 +311,13 @@ export const conversationsRouter = router({
     ) as any[];
     if (!conversations.length) throw new TRPCError({ code: "NOT_FOUND", message: "Atendimento não encontrado." });
     const [rows] = await getPool().execute(
-      `SELECT message_id AS id, sender, message AS text, timestamp, status, direction,
-       message_type AS type, sender_name_snapshot AS agentName, media_reference AS mediaReference
-       FROM megadesk_domain_conversations_messages
-       WHERE client_id = ? AND conversation_id = ? ORDER BY timestamp ASC, message_id ASC LIMIT 200`,
+      `SELECT m.message_id AS id, m.sender, m.message AS text, m.timestamp, m.status, m.direction,
+       m.message_type AS type, m.client_attempt_id AS clientAttemptId, m.external_message_id AS externalMessageId,
+       COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(m.sender_name_snapshot), '')) AS agentName,
+       m.media_reference AS mediaReference
+       FROM megadesk_domain_conversations_messages m
+       LEFT JOIN megadesk_domain_client_users u ON u.client_id = m.client_id AND u.user_id = m.sender_user_id
+       WHERE m.client_id = ? AND m.conversation_id = ? ORDER BY m.timestamp ASC, m.message_id ASC LIMIT 200`,
       [ctx.tenantId, input.conversationId],
     ) as any[];
     let messages = rows.map(normalizedMessage);

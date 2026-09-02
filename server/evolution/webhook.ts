@@ -51,6 +51,40 @@ export function normalizeEvolutionEvent(event: string): string {
   return event.trim().toUpperCase().replace(/[.\-\s]+/g, "_");
 }
 
+const EVOLUTION_RECEIPT_STATUS: Record<string, "pending" | "sent" | "delivered" | "read" | "played" | "failed"> = {
+  PENDING: "pending",
+  SERVER_ACK: "sent",
+  SENT: "sent",
+  DELIVERY_ACK: "delivered",
+  DELIVERED: "delivered",
+  READ: "read",
+  PLAYED: "played",
+  ERROR: "failed",
+  FAILED: "failed",
+};
+
+export function canonicalEvolutionReceiptStatus(value: unknown): "pending" | "sent" | "delivered" | "read" | "played" | "failed" | null {
+  if (typeof value !== "string") return null;
+  return EVOLUTION_RECEIPT_STATUS[value.trim().toUpperCase()] ?? null;
+}
+
+/** Supports Evolution's webhook (`keyId` + `status`) and native (`key.id` + `update.status`) update shapes. */
+export function parseEvolutionMessageStatusUpdates(data: Record<string, any> | Record<string, any>[]): Array<{ externalMessageId: string; status: "pending" | "sent" | "delivered" | "read" | "played" | "failed" }> {
+  const candidates = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.updates)
+      ? data.updates
+      : Array.isArray(data?.messages)
+        ? data.messages
+        : [data];
+  return candidates.flatMap((item: Record<string, any>) => {
+    const externalMessageId = [item?.keyId, item?.messageId, item?.key?.id, item?.id]
+      .find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim();
+    const status = canonicalEvolutionReceiptStatus(item?.status ?? item?.update?.status);
+    return externalMessageId && status ? [{ externalMessageId, status }] : [];
+  });
+}
+
 export function evolutionPhoneCandidates(key: Record<string, any> | undefined): string[] {
   const primary = typeof key?.remoteJid === "string" ? key.remoteJid : "";
   const alternative = typeof key?.remoteJidAlt === "string" ? key.remoteJidAlt : "";
@@ -112,6 +146,10 @@ export async function handleEvolutionWebhook(req: Request, res: Response): Promi
         await handleMessagesUpsert(clientId, payload.instance, payload.data);
         break;
 
+      case "MESSAGES_UPDATE":
+        await handleMessagesUpdate(clientId, payload.instance, payload.data);
+        break;
+
       default:
         res.status(204).send();
         return;
@@ -120,6 +158,32 @@ export async function handleEvolutionWebhook(req: Request, res: Response): Promi
   } catch (err) {
     console.error("[Evolution Webhook] event processing failed");
     res.status(503).json({ error: "Webhook processing failed" });
+  }
+}
+
+async function handleMessagesUpdate(
+  clientId: string,
+  integrationId: string,
+  data: Record<string, any> | Record<string, any>[],
+): Promise<void> {
+  for (const update of parseEvolutionMessageStatusUpdates(data)) {
+    await getPool().execute(
+      `UPDATE megadesk_domain_conversations_messages
+       SET status = CASE
+         WHEN status = 'failed' THEN status
+         WHEN status = 'played' THEN status
+         WHEN status = 'read' AND ? <> 'played' THEN status
+         WHEN status IN ('delivered', 'read', 'played') AND ? = 'failed' THEN status
+         WHEN status = 'delivered' AND ? IN ('pending', 'sent') THEN status
+         WHEN status = 'sent' AND ? = 'pending' THEN status
+         ELSE ?
+       END,
+       updated_at = NOW()
+       WHERE client_id = ? AND provider = 'evolution' AND integration_id = ?
+         AND external_message_id = ? AND direction = 'outbound'`,
+      [update.status, update.status, update.status, update.status, update.status,
+        clientId, integrationId, update.externalMessageId],
+    );
   }
 }
 

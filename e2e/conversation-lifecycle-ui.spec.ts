@@ -9,12 +9,17 @@ const conversation = { id: "conv-ui", publicCode: "CV-260829000000-TEST", contac
   lastMessageAt: new Date().toISOString(), unreadCount: 1, status: "open", assignedUserId: "user-ui",
   assignedUserName: "Agent", lastMessageFrom: "customer", provider: "evolution", channel: "whatsapp" };
 
-async function mockedPage(page: Page, deepLink = false, options: { session?: typeof session; conversation?: typeof conversation; conversations?: Array<typeof conversation>; attendanceActive?: { id: string; customerName: string; phone: string } | null; transferError?: boolean; transferDelayMs?: number } = {}) {
+type TimelineMessage = Record<string, unknown>;
+
+async function mockedPage(page: Page, deepLink = false, options: { session?: typeof session; conversation?: typeof conversation; conversations?: Array<typeof conversation>; attendanceActive?: { id: string; customerName: string; phone: string } | null; transferError?: boolean; transferDelayMs?: number; sendDelayMs?: number; messages?: TimelineMessage[] } = {}) {
   const activeSession = options.session ?? session;
   const activeConversation = options.conversation ?? conversation;
   const activeConversations = options.conversations ?? [activeConversation];
   const attendanceActive = options.attendanceActive ?? null;
   const transferDelayMs = options.transferDelayMs ?? 0;
+  const sendDelayMs = options.sendDelayMs ?? 0;
+  const messageState: TimelineMessage[] = [...(options.messages ?? [{ id: "legacy-1", from: "customer", text: "Mensagem legada", type: "text", timestamp: new Date().toISOString() }])];
+  let sentMessageCount = 0;
   const calls: string[] = [];
   const listInputs: Array<{ viewMode: string; status: string; search?: string }> = [];
   const attendanceQueries: string[] = [];
@@ -29,7 +34,7 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
     const url = new URL(route.request().url());
     const names = decodeURIComponent(url.pathname).replace(/^.*\/api\/trpc\//, "").split(",");
     calls.push(...names);
-    const rawInput = url.searchParams.get("input");
+    const rawInput = url.searchParams.get("input") ?? route.request().postData();
     const parsedInput = rawInput ? JSON.parse(rawInput) : {};
     names.forEach((name, index) => {
       if (!name.includes("conversations.list")) return;
@@ -44,12 +49,31 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
     if (transferDelayMs > 0 && names.some(name => name.includes("conversations.transfer"))) {
       await new Promise(resolve => setTimeout(resolve, transferDelayMs));
     }
+    if (sendDelayMs > 0 && names.some(name => name.includes("megadesk.sendMessage") || name.includes("megadesk.sendAttachment"))) {
+      await new Promise(resolve => setTimeout(resolve, sendDelayMs));
+    }
+    names.forEach((name, index) => {
+      const input = (parsedInput[index]?.json ?? parsedInput.json) as Record<string, unknown> | undefined;
+      if (name.includes("megadesk.sendMessage") && input) {
+        sentMessageCount += 1;
+        messageState.push({ id: `outbound-${sentMessageCount}`, sender: "agent", from: "agent", text: input.message,
+          type: "text", timestamp: new Date().toISOString(), agentName: activeSession.userName,
+          clientAttemptId: input.clientAttemptId, status: "sent" });
+      }
+      if (name.includes("megadesk.sendAttachment") && input) {
+        sentMessageCount += 1;
+        messageState.push({ id: `outbound-${sentMessageCount}`, sender: "agent", from: "agent", text: input.caption || "[Documento]",
+          type: input.kind, mediaData: input.dataUrl, mimeType: input.mimeType, fileName: input.fileName,
+          timestamp: new Date().toISOString(), agentName: activeSession.userName,
+          clientAttemptId: input.clientAttemptId, status: "sent" });
+      }
+    });
     const result = (name: string) => name.includes("refreshSession") ? { ok: true, session: activeSession }
       : name.includes("conversations.list") ? activeConversations
       : name.includes("conversations.counts") ? { active: 3, closed: 4, waiting: 2, mine: 1 }
       : name.includes("conversations.eligibleUsers") ? [{ id: "user-ui", name: "Agent", email: "agent@example.test", role: "agent" }]
       : name.includes("evolution.getStatus") ? { status: "connected", providerReachable: true }
-      : name.includes("conversations.messages") ? { source: "legacy_json", messages: [{ id: "legacy-1", from: "customer", text: "Mensagem legada", type: "text", timestamp: new Date().toISOString() }] }
+      : name.includes("conversations.messages") ? { source: "normalized", messages: messageState }
       : name.includes("conversations.companyCandidates") ? { items: [{ id: "crm-ui", name: "Empresa CRM UI", document: "12345678000190", customerType: "company" }], hasMore: false }
       : name.includes("conversations.phoneCandidates") ? { items: [{ id: "crm-phone", name: "Cliente localizado", document: "52998224725", phone: "5541999999999", customerType: "person" }] }
       : name.includes("conversations.historyDetail") ? { conversation: { id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, messages: [{ id: "history-message", from: "customer", type: "text", text: "Mensagem histórica", timestamp: new Date().toISOString() }] }
@@ -71,7 +95,7 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(url.searchParams.get("batch") === "1" ? body : body[0]) });
   });
   await page.goto(deepLink ? "/?conversationId=conv-ui" : "/", { waitUntil: "domcontentloaded" });
-  return { calls, listInputs, attendanceQueries };
+  return { calls, listInputs, attendanceQueries, messageState };
 }
 
 test.describe("restored conversation layout with WIP lifecycle", () => {
@@ -580,7 +604,109 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(page.getByTestId("conversation-chat-panel").getByText("Mensagem legada")).toBeVisible();
   });
 
+  test("opens inbound and outbound images safely, preserves video controls, and never renders an operator email", async ({ page }) => {
+    const marcelo = { ...session, userName: "Marcelo Moura", userEmail: "marcelo@gmail.com" };
+    const image = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+    await mockedPage(page, true, { session: marcelo, messages: [
+      { id: "inbound-image", from: "customer", type: "image", mediaData: image, fileName: "entrada.png", text: "Imagem recebida", timestamp: new Date().toISOString() },
+      { id: "outbound-image", sender: "agent", from: "agent", type: "image", mediaData: image, fileName: "saida.png", text: "Imagem enviada", agentName: "Marcelo Moura", status: "sent", timestamp: new Date().toISOString() },
+      { id: "outbound-video", sender: "agent", from: "agent", type: "video", mediaData: "data:video/mp4;base64,AAAA", fileName: "video.mp4", text: "Vídeo enviado", agentName: "Marcelo Moura", status: "delivered", timestamp: new Date().toISOString() },
+      { id: "outbound-audio", sender: "agent", from: "agent", type: "audio", mediaData: "data:audio/ogg;base64,T2dnUw==", fileName: "audio.ogg", text: "[Áudio]", agentName: "Marcelo Moura", status: "read", timestamp: new Date().toISOString() },
+      { id: "outbound-pending", sender: "agent", from: "agent", type: "text", text: "Aguardando confirmação", agentName: "Marcelo Moura", status: "pending", timestamp: new Date().toISOString() },
+      { id: "outbound-failed", sender: "agent", from: "agent", type: "text", text: "Falhou", agentName: "Marcelo Moura", status: "failed", timestamp: new Date().toISOString() },
+    ] });
+    const chat = page.getByTestId("conversation-chat-panel");
+    await expect(chat.getByTestId("conversation-message").getByText("Marcelo Moura", { exact: true })).toHaveCount(5);
+    await expect(chat.getByText("marcelo@gmail.com", { exact: true })).toHaveCount(0);
+    await expect(chat.getByLabel("Enviada")).toBeVisible();
+    await expect(chat.getByLabel("Entregue")).toBeVisible();
+    await expect(chat.getByLabel("Lida")).toBeVisible();
+    await expect(chat.getByLabel("Enviando")).toBeVisible();
+    await expect(chat.getByLabel("Falha no envio")).toBeVisible();
+    await expect(chat.locator("video[controls]")).toBeVisible();
+
+    const inbound = chat.getByRole("button", { name: "Abrir entrada.png em tamanho ampliado" });
+    await inbound.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("dialog").getByRole("img", { name: "entrada.png" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+
+    await chat.getByRole("button", { name: "Abrir saida.png em tamanho ampliado" }).click();
+    await expect(page.getByRole("dialog").getByRole("img", { name: "saida.png" })).toBeVisible();
+    await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  });
+
+  test("reconciles each outbound attempt to one canonical bubble without merging equal messages", async ({ page }) => {
+    const { messageState } = await mockedPage(page, true, { sendDelayMs: 350 });
+    const composer = page.getByTestId("conversation-composer");
+    const input = composer.getByPlaceholder("Digite sua mensagem...");
+    await input.fill("Ok");
+    await input.press("Enter");
+    await expect(page.getByTestId("conversation-chat-panel").getByText("Ok", { exact: true })).toHaveCount(1);
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId("conversation-chat-panel").getByText("Ok", { exact: true })).toHaveCount(1);
+    await expect(page.getByTestId("conversation-chat-panel").getByLabel("Enviada")).toBeVisible();
+    expect(messageState.filter(message => message.text === "Ok")).toHaveLength(1);
+
+    await input.fill("Ok");
+    await input.press("Enter");
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId("conversation-chat-panel").getByText("Ok", { exact: true })).toHaveCount(2);
+    expect(messageState.filter(message => message.text === "Ok")).toHaveLength(2);
+  });
+
+  test("keeps a reader above the newest message through polling, receipt updates, and new inbound messages", async ({ page }) => {
+    const messages: TimelineMessage[] = [
+      { id: "receipt-target", sender: "agent", from: "agent", type: "text", text: "Mensagem enviada", agentName: "Agent", status: "sent", timestamp: new Date().toISOString() },
+      ...Array.from({ length: 54 }, (_, index) => ({ id: `history-${index}`, from: "customer", type: "text", text: `Histórico ${index}`, timestamp: new Date(Date.now() + index * 1_000).toISOString() })),
+    ];
+    const { messageState } = await mockedPage(page, true, { messages });
+    const scroll = page.getByTestId("conversation-message-scroll-region");
+    await expect.poll(() => scroll.evaluate(element => element.scrollTop > 0)).toBe(true);
+    await scroll.evaluate(element => {
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await page.waitForTimeout(1_200);
+    await expect.poll(() => scroll.evaluate(element => element.scrollTop)).toBeLessThan(8);
+
+    messageState[0] = { ...messageState[0], status: "read" };
+    await page.waitForTimeout(3_300);
+    await expect(page.locator('[data-testid="conversation-message-receipt"][aria-label="Lida"]')).toBeVisible();
+    await expect.poll(() => scroll.evaluate(element => element.scrollTop)).toBeLessThan(8);
+
+    messageState.push({ id: "incoming-after-scroll", from: "customer", type: "text", text: "Chegou enquanto lia", timestamp: new Date().toISOString() });
+    await page.waitForTimeout(3_300);
+    await expect(page.getByText("Chegou enquanto lia", { exact: true })).toBeVisible();
+    await expect.poll(() => scroll.evaluate(element => element.scrollTop)).toBeLessThan(8);
+
+    await scroll.evaluate(element => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    messageState.push({ id: "incoming-at-bottom", from: "customer", type: "text", text: "Chegou no fim", timestamp: new Date().toISOString() });
+    await page.waitForTimeout(3_300);
+    await expect(page.getByText("Chegou no fim", { exact: true })).toBeVisible();
+    await expect.poll(() => scroll.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(96);
+  });
+
   for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 1024, height: 768 }, { width: 1440, height: 900 }]) {
+    test(`keeps the media lightbox usable at ${viewport.width}px`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await mockedPage(page, true, { messages: [{
+        id: `image-${viewport.width}`, from: "customer", type: "image", fileName: "responsiva.png",
+        mediaData: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==", text: "Imagem responsiva", timestamp: new Date().toISOString(),
+      }] });
+      await page.getByRole("button", { name: "Abrir responsiva.png em tamanho ampliado" }).click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog.getByRole("img", { name: "responsiva.png" })).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+    });
+
     test(`remains usable at ${viewport.width}px`, async ({ page }) => {
       await page.setViewportSize(viewport);
       const { calls } = await mockedPage(page);

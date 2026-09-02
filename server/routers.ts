@@ -156,6 +156,16 @@ function nowLabel() {
   return new Date().toLocaleString("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+async function conversationOperatorName(clientId: string, userId: string): Promise<string> {
+  const [rows] = await getPool().execute(
+    `SELECT name FROM megadesk_domain_client_users
+     WHERE client_id = ? AND user_id = ? AND status = 'active' LIMIT 1`,
+    [clientId, userId],
+  ) as any[];
+  const name = String(rows[0]?.name ?? "").trim();
+  return name || "Operador";
+}
+
 function audit(platform: "MegaAdmin" | "MegaDesk", action: string, clientId: string | undefined, success = true) {
   auditLogs.unshift({ id: `audit-${Date.now()}-${auditLogs.length}`, platform, action, clientId, success, eventPhase: null, createdAt: new Date().toISOString() });
   if (auditLogs.length > 30) auditLogs.pop();
@@ -865,11 +875,7 @@ export const appRouter = router({
       assertClientUserPermission(client, "conversations", input.userEmail);
 
       const time = nowLabel();
-      const [operatorRows] = await getPool().execute(
-        `SELECT name FROM megadesk_domain_client_users WHERE client_id = ? AND user_id = ? AND status = 'active' LIMIT 1`,
-        [ctx.tenantId, ctx.operationalUserId],
-      ) as any[];
-      const operatorName = operatorRows[0]?.name ?? ctx.userEmail;
+      const operatorName = await conversationOperatorName(ctx.tenantId, ctx.operationalUserId);
       const outgoingMessage = {
         from: "agent" as const,
         text: input.message,
@@ -936,6 +942,7 @@ export const appRouter = router({
       const labels = { image: "[Imagem]", video: "[Vídeo]", audio: "[Áudio]", document: "[Documento]", sticker: "[Figurinha]" };
       const summary = input.caption?.trim() || labels[input.kind];
       const time = nowLabel();
+      const operatorName = await conversationOperatorName(ctx.tenantId, ctx.operationalUserId);
       const outgoingMessage = {
         from: "agent" as const,
         type: input.kind,
@@ -945,7 +952,7 @@ export const appRouter = router({
         fileName: input.fileName || null,
         time,
         timestamp: new Date().toISOString(),
-        agentName: ctx.userEmail,
+        agentName: operatorName,
       };
       const messageId = `msg-${randomUUID()}`;
       try {
@@ -956,7 +963,7 @@ export const appRouter = router({
           conversationId: input.conversationId, clientId: ctx.tenantId, provider: "evolution",
           integrationId: outboundConversation.integrationId,
           messageType: input.kind, sender: "agent",
-          senderUserId: ctx.operationalUserId, senderNameSnapshot: ctx.userEmail, text: summary,
+          senderUserId: ctx.operationalUserId, senderNameSnapshot: operatorName, text: summary,
           timestamp: new Date(), legacyMessage: outgoingMessage,
           mediaReference: { mediaData: input.dataUrl, mimeType: input.mimeType, fileName: input.fileName ?? null } },
           () => evoSendAttachment({ instanceName: instanceNameFor(ctx.tenantId),
