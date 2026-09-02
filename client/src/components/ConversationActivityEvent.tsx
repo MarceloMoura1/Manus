@@ -19,11 +19,11 @@ function activityPresentation(event: ConversationActivity): ActivityPresentation
     case "created_outbound":
       return { icon: MessageCircle, label: `Atendimento iniciado por ${actor}.`, tone: "border-sky-200 bg-sky-50 text-sky-800" };
     case "claimed":
-      return { icon: Bot, label: `BOT assumido por ${actor}.`, tone: "border-violet-200 bg-violet-50 text-violet-800" };
+      return { icon: Bot, label: `Conversa assumida por ${actor}.`, tone: "border-violet-200 bg-violet-50 text-violet-800" };
     case "transferred":
       return {
         icon: ArrowRightLeft,
-        label: `Atendimento transferido de ${event.fromUserName?.trim() || "N\u00e3o atribu\u00eddo"} para ${event.toUserName?.trim() || "atendente"}.`,
+        label: `${event.fromUserName?.trim() || actor} transferiu a conversa para ${event.toUserName?.trim() || "atendente"}.`,
         tone: "border-amber-200 bg-amber-50 text-amber-900",
       };
     case "closed":

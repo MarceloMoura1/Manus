@@ -20,7 +20,7 @@ import { ConversationMedia } from "@/components/ConversationMedia";
 import { ConversationDetailsPanel } from "@/components/ConversationDetailsPanel";
 import { ConversationListItem } from "@/components/ConversationListItem";
 import { ConversationActivityEvent } from "@/components/ConversationActivityEvent";
-import { mergeConversationTimeline } from "@/lib/conversationTimeline";
+import { mergeConversationTimeline, reconcileConversationMessages } from "@/lib/conversationTimeline";
 import { messageReplyPreview, replyAuthor, replyPreview, type ConversationReplyPreview } from "@/lib/conversationQuote";
 import { useDebounce } from "@/hooks/useDebounce";
 import {
@@ -207,7 +207,7 @@ type ClientUser = {
 
 const cn = (...classes: any[]) => classes.filter(Boolean).join(" ");
 
-function outboundReceipt(status: unknown, pending: boolean): { status: "pending" | "sent" | "delivered" | "read" | "failed"; label: string; tone: string; icon: "clock" | "check" | "double-check" | "alert" } | null {
+function outboundReceipt(status: unknown, pending: boolean): { status: "pending" | "sent" | "delivered" | "read" | "played" | "failed"; label: string; tone: string; icon: "clock" | "check" | "double-check" | "alert" } | null {
   if (pending || String(status ?? "").trim().toLowerCase() === "pending") return { status: "pending", label: "Enviando", tone: "text-slate-200/70", icon: "clock" };
   switch (String(status ?? "").trim().toLowerCase()) {
     case "sent":
@@ -217,8 +217,9 @@ function outboundReceipt(status: unknown, pending: boolean): { status: "pending"
     case "delivery_ack":
       return { status: "delivered", label: "Entregue", tone: "text-slate-200", icon: "double-check" };
     case "read":
-    case "played":
       return { status: "read", label: "Lida", tone: "text-sky-200", icon: "double-check" };
+    case "played":
+      return { status: "played", label: "Reproduzida", tone: "text-slate-100/90", icon: "double-check" };
     case "failed":
     case "error":
       return { status: "failed", label: "Falha no envio", tone: "text-rose-200", icon: "alert" };
@@ -493,13 +494,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   const conversationEvents = conversationMessageResult?.events ?? [];
   const timelineMessages = React.useMemo(() => {
     const persisted = Array.isArray(conversationMessages) ? conversationMessages : [];
-    const persistedAttempts = new Set(
-      persisted
-        .map((message: any) => String(message.clientAttemptId ?? "").trim())
-        .filter(Boolean),
-    );
     return mergeConversationTimeline(
-      [...persisted, ...optimisticMessages.filter(message => !persistedAttempts.has(message.clientAttemptId))],
+      reconcileConversationMessages(persisted, optimisticMessages),
       Array.isArray(conversationEvents) ? conversationEvents : [],
     );
   }, [conversationEvents, conversationMessages, optimisticMessages]);
@@ -1427,8 +1423,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                       if (node) messageElementRefs.current.set(messageId, node);
                       else messageElementRefs.current.delete(messageId);
                     }} data-testid="conversation-message" className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
-                      <div className={cn("group min-w-0 max-w-[85%] md:max-w-xs lg:max-w-md", isShortText && "min-w-[9rem] sm:min-w-[10rem]")}>
-                        <div data-testid="conversation-message-bubble" className={`rounded-2xl px-4 py-3 transition-shadow ${msg.pending ? 'opacity-70' : ''} ${highlightedMessageId === messageId ? 'ring-2 ring-violet-400 ring-offset-2' : ''} ${
+                      <div className={cn("group min-w-0 max-w-[85%]", isAgent ? "md:max-w-sm lg:max-w-lg" : "md:max-w-xs lg:max-w-md", isShortText && "min-w-[9rem] sm:min-w-[10rem]")}>
+                        <div data-testid="conversation-message-bubble" className={`rounded-2xl px-4 transition-shadow ${isAgent ? 'py-2.5' : 'py-3'} ${highlightedMessageId === messageId ? 'ring-2 ring-inset ring-violet-400' : ''} ${
                           isAgent
                             ? 'rounded-tr-sm bg-gradient-to-br from-blue-500 to-violet-600 text-white shadow-[0_1px_2px_rgba(15,23,42,0.14)]'
                             : 'rounded-tl-sm border border-slate-100 bg-white text-slate-800 shadow-sm'

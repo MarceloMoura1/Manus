@@ -24,13 +24,19 @@ describe("Evolution webhook normalization", () => {
     expect(canonicalEvolutionReceiptStatus("SERVER_ACK")).toBe("sent");
     expect(canonicalEvolutionReceiptStatus("DELIVERY_ACK")).toBe("delivered");
     expect(canonicalEvolutionReceiptStatus("READ")).toBe("read");
+    expect(canonicalEvolutionReceiptStatus("PLAYED")).toBe("played");
+    expect(canonicalEvolutionReceiptStatus("ERROR")).toBe("failed");
     expect(canonicalEvolutionReceiptStatus("UNKNOWN")).toBeNull();
     expect(parseEvolutionMessageStatusUpdates([
       { keyId: "provider-delivered", status: "DELIVERY_ACK" },
       { key: { id: "provider-read" }, update: { status: "READ" } },
+      { messageId: "provider-played", update: { status: "PLAYED" } },
+      { id: "provider-failed", status: "ERROR" },
     ])).toEqual([
       { externalMessageId: "provider-delivered", status: "delivered" },
       { externalMessageId: "provider-read", status: "read" },
+      { externalMessageId: "provider-played", status: "played" },
+      { externalMessageId: "provider-failed", status: "failed" },
     ]);
   });
 
@@ -149,6 +155,8 @@ describe("Evolution webhook HTTP contract", () => {
     expect(res.statusCode).toBe(200);
     const [sql, values] = webhookMocks.poolExecute.mock.calls[1];
     expect(String(sql)).toContain("external_message_id = ? AND direction = 'outbound'");
+    expect(String(sql)).toContain("WHEN status = 'read' AND ? <> 'played' THEN status");
+    expect(String(sql)).toContain("WHEN status = 'delivered' AND ? IN ('pending', 'sent') THEN status");
     expect(values).toEqual(["read", "read", "read", "read", "read", "tenant-a", "megadesk-tenant-a", "provider-read"]);
   });
 

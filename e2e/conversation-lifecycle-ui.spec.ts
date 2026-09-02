@@ -282,7 +282,7 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "all", status: "active", search: "" });
   });
 
-  test("renders persisted activity with canonical names and a refined outbound bubble", async ({ page }) => {
+  test("renders activities chronologically with canonical names and a refined outbound bubble", async ({ page }) => {
     await mockedPage(page, true, {
       messages: [
         { id: "short-outbound", sender: "agent", from: "agent", text: "Ok", type: "text", agentName: "Ana", status: "read", timestamp: "2026-08-30T12:01:00.000Z" },
@@ -297,17 +297,29 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     });
     const chat = page.getByTestId("conversation-chat-panel");
     await expect(chat.getByText("Atendimento iniciado pelo WhatsApp.")).toBeVisible();
-    await expect(chat.getByText("BOT assumido por Ana.")).toBeVisible();
-    await expect(chat.getByText("Atendimento transferido de Ana para Bia.")).toBeVisible();
+    await expect(chat.getByText("Conversa assumida por Ana.")).toBeVisible();
+    await expect(chat.getByText("Ana transferiu a conversa para Bia.")).toBeVisible();
+    await expect(chat.getByText("BOT assumido por Ana.")).toHaveCount(0);
+    await expect(chat.getByText("Atendimento transferido de Ana para Bia.")).toHaveCount(0);
     await expect(chat.getByText("Atendimento encerrado por Bia.")).toBeVisible();
     await expect(chat.getByTestId("conversation-activity-event")).toHaveCount(4);
     await expect(chat.getByText("agent@example.test", { exact: true })).toHaveCount(0);
 
     const outbound = chat.getByTestId("conversation-message").filter({ hasText: "Ok" });
     await expect(outbound.locator('[data-testid="conversation-message-bubble"]')).not.toHaveClass(/border/);
+    await expect(outbound.locator('[data-testid="conversation-message-bubble"]')).not.toHaveClass(/ring-offset-2/);
     await expect(outbound.locator(':scope > div')).toHaveClass(/min-w-\[9rem\]/);
+    await expect(outbound.locator(':scope > div')).toHaveClass(/lg:max-w-lg/);
     await expect(outbound.getByTestId("conversation-message-metadata")).toBeVisible();
     await expect(outbound.getByLabel("Lida")).toBeVisible();
+    await expect(chat.locator('[data-testid="conversation-message"], [data-testid="conversation-activity-event"]')).toHaveText([
+      /Atendimento iniciado pelo WhatsApp/,
+      /Conversa assumida por Ana/,
+      /Ok/,
+      /Ana transferiu a conversa para Bia/,
+      /Recebido/,
+      /Atendimento encerrado por Bia/,
+    ]);
   });
 
   test("keeps a selected quote through optimistic send, refetch, replacement and cancellation", async ({ page }) => {
@@ -723,16 +735,18 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
       { id: "outbound-image", sender: "agent", from: "agent", type: "image", mediaData: image, fileName: "saida.png", text: "Imagem enviada", agentName: "Marcelo Moura", status: "sent", timestamp: new Date().toISOString() },
       { id: "outbound-video", sender: "agent", from: "agent", type: "video", mediaData: "data:video/mp4;base64,AAAA", fileName: "video.mp4", text: "Vídeo enviado", agentName: "Marcelo Moura", status: "delivered", timestamp: new Date().toISOString() },
       { id: "outbound-audio", sender: "agent", from: "agent", type: "audio", mediaData: "data:audio/ogg;base64,T2dnUw==", fileName: "audio.ogg", text: "[Áudio]", agentName: "Marcelo Moura", status: "read", timestamp: new Date().toISOString() },
+      { id: "outbound-played", sender: "agent", from: "agent", type: "audio", mediaData: "data:audio/ogg;base64,T2dnUw==", fileName: "ouvido.ogg", text: "[Áudio reproduzido]", agentName: "Marcelo Moura", status: "played", timestamp: new Date().toISOString() },
       { id: "outbound-pending", sender: "agent", from: "agent", type: "text", text: "Aguardando confirmação", agentName: "Marcelo Moura", status: "pending", timestamp: new Date().toISOString() },
       { id: "outbound-failed", sender: "agent", from: "agent", type: "text", text: "Falhou", agentName: "Marcelo Moura", status: "failed", timestamp: new Date().toISOString() },
       { id: "outbound-unknown", sender: "agent", from: "agent", type: "text", text: "Status desconhecido", agentName: "Marcelo Moura", status: "provider_future_status", timestamp: new Date().toISOString() },
     ] });
     const chat = page.getByTestId("conversation-chat-panel");
-    await expect(chat.getByTestId("conversation-message").getByText("Marcelo Moura", { exact: true })).toHaveCount(6);
+    await expect(chat.getByTestId("conversation-message").getByText("Marcelo Moura", { exact: true })).toHaveCount(7);
     await expect(chat.getByText("marcelo@gmail.com", { exact: true })).toHaveCount(0);
     await expect(chat.getByLabel("Enviada")).toBeVisible();
     await expect(chat.getByLabel("Entregue")).toBeVisible();
     await expect(chat.getByLabel("Lida")).toBeVisible();
+    await expect(chat.getByLabel("Reproduzida")).toBeVisible();
     await expect(chat.getByLabel("Enviando")).toBeVisible();
     await expect(chat.getByLabel("Falha no envio")).toBeVisible();
     await expect(chat.getByLabel("Enviada")).toHaveAttribute("data-status", "sent");
@@ -744,6 +758,9 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(chat.getByLabel("Lida")).toHaveAttribute("data-status", "read");
     await expect(chat.getByLabel("Lida")).toHaveAttribute("data-icon", "double-check");
     await expect(chat.getByLabel("Lida")).toHaveClass(/text-sky-200/);
+    await expect(chat.getByLabel("Reproduzida")).toHaveAttribute("data-status", "played");
+    await expect(chat.getByLabel("Reproduzida")).toHaveAttribute("data-icon", "double-check");
+    await expect(chat.getByLabel("Reproduzida")).not.toHaveClass(/text-sky-200/);
     await expect(chat.getByLabel("Enviando")).toHaveAttribute("data-status", "pending");
     await expect(chat.getByLabel("Falha no envio")).toHaveAttribute("data-status", "failed");
     await expect(chat.getByLabel("Falha no envio")).toHaveClass(/text-rose-200/);
@@ -772,6 +789,7 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await input.fill("Ok");
     await input.press("Enter");
     await expect(page.getByTestId("conversation-chat-panel").getByText("Ok", { exact: true })).toHaveCount(1);
+    await expect(page.getByTestId("conversation-chat-panel").getByTestId("conversation-message").filter({ hasText: "Ok" }).getByTestId("conversation-message-bubble")).not.toHaveClass(/opacity-70/);
     await page.waitForTimeout(500);
     await expect(page.getByTestId("conversation-chat-panel").getByText("Ok", { exact: true })).toHaveCount(1);
     await expect(page.getByTestId("conversation-chat-panel").getByLabel("Enviada")).toBeVisible();
