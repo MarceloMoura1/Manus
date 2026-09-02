@@ -115,6 +115,7 @@ export const conversationsRouter = router({
        contact.company_text AS companyText, crm.company_name AS companyName, crm.customer_type AS customerType,
        crm.responsible_name AS crmResponsibleName, crm.phone AS crmPhone, crm.whatsapp AS crmWhatsapp, crm.email AS crmEmail,
        c.last_message AS lastMessage, c.updated_at AS lastMessageAt, c.unread_count AS unreadCount,
+       c.provider AS provider, c.channel AS channel,
        CASE WHEN c.status = 'bot' THEN 'pending' ELSE c.status END AS status,
        c.assigned_user_id AS assignedUserId, c.assigned_user_name AS assignedUserName,
        c.last_message_from AS lastMessageFrom, crm.crm_client_id AS crmClientId, c.origin,

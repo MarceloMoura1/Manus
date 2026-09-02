@@ -117,6 +117,24 @@ describe("Conversations authorization, filters and lifecycle", () => {
     expect(sql).toContain("crm.crm_client_id = contact.crm_client_id");
   });
 
+  it("exposes the stored channel metadata without changing tenant-scoped listing semantics", async () => {
+    mocks.execute.mockResolvedValue([[{
+      id: "conv-a", customerName: "Contato", provider: "evolution", channel: "whatsapp", unreadCount: 2,
+    }, {
+      id: "conv-b", customerName: "Sem provider", provider: null, channel: null, unreadCount: 0,
+    }]]);
+    const result = await conversationsRouter.createCaller(context()).list({ viewMode: "all", status: "active", search: "", limit: 30, offset: 0 });
+    const [sql, values] = mocks.execute.mock.calls[0];
+    expect(sql).toContain("c.provider AS provider");
+    expect(sql).toContain("c.channel AS channel");
+    expect(sql).toContain("c.client_id = ?");
+    expect(values[0]).toBe("tenant-a");
+    expect(result).toEqual([
+      { id: "conv-a", customerName: "Contato", provider: "evolution", channel: "whatsapp", unreadCount: 2 },
+      { id: "conv-b", customerName: "Sem provider", provider: null, channel: null, unreadCount: 0 },
+    ]);
+  });
+
   it("lists tenant-scoped person, company and legacy CRM candidates with bounded pagination", async () => {
     mocks.execute.mockResolvedValue([[{ id: "crm-a", name: "Empresa A", document: "1234", customerType: "company" }]]);
     const result = await conversationsRouter.createCaller(context()).companyCandidates({ search: "Empresa", limit: 10, offset: 20 });
