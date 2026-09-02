@@ -5,7 +5,7 @@ vi.mock("../db", () => ({ getPool: () => ({ execute: webhookMocks.poolExecute, g
 vi.mock("./config", () => ({ getEvolutionWebhookSecret: () => "webhook-secret" }));
 vi.mock("./session-store", () => ({ upsertSession: webhookMocks.upsertSession, instanceNameFor: (clientId: string) => `megadesk-${clientId}` }));
 
-import { evolutionPhoneCandidates, handleEvolutionWebhook, normalizeEvolutionEvent, parseEvolutionIncomingMessage, saveIncomingMessage } from "./webhook";
+import { evolutionPhoneCandidates, extractEvolutionProviderName, handleEvolutionWebhook, normalizeEvolutionEvent, parseEvolutionIncomingMessage, saveIncomingMessage, selectInboundContactName } from "./webhook";
 
 function responseDouble() {
   const response: any = { statusCode: 200, body: undefined };
@@ -82,6 +82,14 @@ describe("Evolution incoming content", () => {
       text: "[Contato]",
       payload: { type: "contact", contact: { name: "Gerente", vcard: "BEGIN:VCARD\nTEL:+5541999999999\nEND:VCARD" } },
     });
+  });
+  it("audita o pushName do payload real e preserva nomes manuais/ERP", () => {
+    expect(extractEvolutionProviderName({ pushName: " Maria   dos Santos " })).toBe("Maria dos Santos");
+    expect(selectInboundContactName(null, "Maria dos Santos", "5511999999999")).toBe("Maria dos Santos");
+    expect(selectInboundContactName("Contato sem nome", "Maria dos Santos", "5511999999999")).toBe("Maria dos Santos");
+    expect(selectInboundContactName("Maria Santos", "Maria dos Santos do Rosario", "5511999999999")).toBe("Maria Santos");
+    expect(selectInboundContactName("Cliente ERP", "Nome WhatsApp", "5511999999999")).toBe("Cliente ERP");
+    expect(selectInboundContactName(null, "", "5511999999999")).toBe("Contato sem nome");
   });
 });
 
@@ -195,12 +203,12 @@ describe("Evolution inbound attendance lifecycle", () => {
         .mockResolvedValueOnce([[]])
         .mockResolvedValueOnce([{ affectedRows: 1 }])
         .mockResolvedValueOnce([{ affectedRows: 1 }])
-        .mockResolvedValueOnce([{ affectedRows: 1 }])
         .mockResolvedValueOnce([[{ messages_json: "[]" }]])
         .mockResolvedValueOnce([{ affectedRows: 1 }])
         .mockResolvedValueOnce([{ affectedRows: 1 }])
         .mockResolvedValueOnce([{ affectedRows: 1 }])
-        .mockResolvedValueOnce([{}]),
+        .mockResolvedValueOnce([{}])
+        .mockResolvedValue([{}]),
     };
     webhookMocks.getConnection.mockResolvedValue(connection);
     await expect(saveIncomingMessage("tenant-a", "instance-a", "event-new", ["5541999999999"], "Known", "Nova", new Date()))

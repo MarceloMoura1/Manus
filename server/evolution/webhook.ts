@@ -218,7 +218,10 @@ async function handleMessagesUpsert(
       }
     }
 
-    const pushName: string = msg?.pushName || "";
+    // Evolution entrega o nome de perfil do remetente no campo oficial
+     // `pushName` do item de messages.upsert. Não fazemos nenhuma consulta
+     // paralela ao provider para obter esse dado.
+     const pushName = extractEvolutionProviderName(msg);
     const now = new Date();
 
     const externalMessageId = msg?.key?.id;
@@ -260,6 +263,23 @@ export function parseEvolutionIncomingMessage(msg: Record<string, any>): { text:
   } };
 }
 
+/** Nome de perfil já entregue pelo payload inbound oficial da Evolution. */
+export function extractEvolutionProviderName(msg: Record<string, any>): string {
+  const value = typeof msg?.pushName === "string" ? msg.pushName : "";
+  return value.trim().replace(/\s+/g, " ").slice(0, 180);
+}
+
+/**
+ * Manual/ERP names are authoritative. A provider name can only fill an empty
+ * lightweight contact (including the historical phone/placeholder values).
+ */
+export function selectInboundContactName(existingDisplayName: string | null | undefined, providerName: string, phone: string): string {
+  const existing = String(existingDisplayName ?? "").trim();
+  const normalizedProvider = providerName.trim().replace(/\s+/g, " ").slice(0, 180);
+  if (existing && existing !== `+${phone}` && existing !== "Contato sem nome") return existing;
+  return normalizedProvider || existing || "Contato sem nome";
+}
+
 // ─── Salvar mensagem recebida no banco ───────────────────────────────────────
 
 export async function saveIncomingMessage(
@@ -298,12 +318,18 @@ export async function saveIncomingMessage(
       transactionStarted = false;
       return "duplicate";
     }
-    const contactName = pushName || `+${phone}`;
+    const contactName = pushName || "Contato sem nome";
     await connection.execute(
       `INSERT INTO megadesk_conversation_contacts
        (contact_id, client_id, display_name, canonical_phone, channel, provider, external_identity)
        VALUES (?, ?, ?, ?, 'whatsapp', 'evolution', ?)
-       ON DUPLICATE KEY UPDATE display_name = COALESCE(NULLIF(VALUES(display_name), ''), display_name)`,
+       ON DUPLICATE KEY UPDATE display_name = CASE
+         WHEN crm_client_id IS NULL AND (display_name IS NULL OR TRIM(display_name) = ''
+           OR display_name = CONCAT('+', canonical_phone)
+           OR display_name = 'Contato sem nome')
+         THEN VALUES(display_name)
+         ELSE display_name
+       END`,
       [`contact-${randomUUID()}`, clientId, contactName, phone, phone],
     );
     const [contactRows] = await connection.execute(
@@ -359,14 +385,6 @@ export async function saveIncomingMessage(
       const customerName = contactName;
       const conversationId = `conv-${randomUUID()}`;
       let publicCode = "";
-
-      // Garante que o contato existe
-      await connection.execute(
-        `INSERT INTO megadesk_domain_customers (customerId, clientId, name, phone, company)
-         VALUES (?, ?, ?, ?, '')
-         ON DUPLICATE KEY UPDATE name = COALESCE(NULLIF(VALUES(name), ''), name)`,
-        [`cust-${randomUUID()}`, clientId, customerName, phone],
-      );
 
       publicCode = await withPublicCodeRetry(async (candidate) => {
           publicCode = candidate;
