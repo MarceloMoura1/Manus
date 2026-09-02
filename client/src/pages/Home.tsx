@@ -430,7 +430,6 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   const [dateFrom, setDateFrom] = React.useState<string>('');
   const [dateTo, setDateTo] = React.useState<string>('');
   const [conversationSortOrder, setConversationSortOrder] = React.useState<'recent' | 'oldest'>('recent');
-  const [conversationListMenuOpen, setConversationListMenuOpen] = React.useState(false);
   const [selectedConversation, setSelectedConversation] = React.useState<string | null>(null);
   const [newAttendanceOpen, setNewAttendanceOpen] = React.useState(false);
   const [newAttendancePhone, setNewAttendancePhone] = React.useState('');
@@ -1264,37 +1263,6 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
               <ArrowDownUp className={cn('h-4 w-4 transition-transform', conversationSortOrder === 'oldest' && 'rotate-180')} />
               <span className="text-[11px] font-semibold">{conversationSortOrder === 'recent' ? 'Recentes' : 'Antigas'}</span>
             </button>
-            <div className="relative">
-              <button
-                type="button"
-                data-testid="conversation-list-menu-toggle"
-                aria-label="Opções da lista"
-                aria-haspopup="menu"
-                aria-expanded={conversationListMenuOpen}
-                onClick={() => setConversationListMenuOpen(open => !open)}
-                className="flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition-colors hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
-              >
-                <Menu className="h-4 w-4" />
-              </button>
-              {conversationListMenuOpen && (
-                <div role="menu" aria-label="Opções da lista de conversas" className="absolute right-0 top-full z-20 mt-1 w-52 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-                  <button type="button" role="menuitemradio" aria-checked={conversationSortOrder === 'recent'} onClick={() => { setConversationSortOrder('recent'); setConversationListMenuOpen(false); }} className="flex w-full items-center px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">
-                    Mais recentes primeiro
-                  </button>
-                  <button type="button" role="menuitemradio" aria-checked={conversationSortOrder === 'oldest'} onClick={() => { setConversationSortOrder('oldest'); setConversationListMenuOpen(false); }} className="flex w-full items-center px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">
-                    Mais antigas primeiro
-                  </button>
-                  <button type="button" role="menuitem" onClick={() => { setDateFilterOpen(true); setConversationListMenuOpen(false); }} className="flex w-full items-center px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">
-                    Abrir filtros
-                  </button>
-                  {hasListFilters && (
-                    <button type="button" role="menuitem" onClick={() => { clearConversationFilters(); setConversationListMenuOpen(false); }} className="flex w-full items-center px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">
-                      Limpar filtros
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
         </div>
 

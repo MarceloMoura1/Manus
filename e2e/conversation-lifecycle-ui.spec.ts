@@ -77,7 +77,8 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
       : name.includes("conversations.companyCandidates") ? { items: [{ id: "crm-ui", name: "Empresa CRM UI", document: "12345678000190", customerType: "company" }], hasMore: false }
       : name.includes("conversations.phoneCandidates") ? { items: [{ id: "crm-phone", name: "Cliente localizado", document: "52998224725", phone: "5541999999999", customerType: "person" }] }
       : name.includes("conversations.historyDetail") ? { conversation: { id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, messages: [{ id: "history-message", from: "customer", type: "text", text: "Mensagem histórica", timestamp: new Date().toISOString() }] }
-      : name.includes("conversations.history") ? [{ id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: conversation.id, publicCode: conversation.publicCode, status: "open", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }]
+      : name.includes("conversations.historyPage") ? { items: [{ id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: "conv-hist-2", publicCode: "CV-HIST-2", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: "conv-hist-3", publicCode: "CV-HIST-3", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: "conv-hist-4", publicCode: "CV-HIST-4", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }], hasMore: false }
+      : name.includes("conversations.history") ? { items: [{ id: "conv-old", publicCode: "CV-HIST-1", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: "conv-hist-2", publicCode: "CV-HIST-2", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }, { id: "conv-hist-3", publicCode: "CV-HIST-3", status: "closed", customerName: conversation.customerName, assignedUserName: "Agent", startedAt: new Date().toISOString() }], hasMore: true }
       : name.includes("conversations.linkedTickets") ? []
       : name.includes("conversations.updateContact") ? { contactId: conversation.contactId, displayName: "Cliente Editado", companyText: "Empresa Informada", canonicalPhone: conversation.customerPhone, crmClientId: conversation.crmClientId }
       : name.includes("megadesk.attendanceRecipient") ? (() => {
@@ -321,7 +322,7 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(details.getByLabel("Nome", { exact: true })).toBeVisible();
   });
 
-  test("orders the real list locally and exposes only working list-menu actions", async ({ page }) => {
+  test("orders the real list locally without a conversation-list menu", async ({ page }) => {
     const older = { ...conversation, id: "conv-ui-older", customerName: "Conversa antiga", lastMessageAt: "2025-01-01T09:00:00.000Z" };
     const newer = { ...conversation, id: "conv-ui-newer", customerName: "Conversa recente", lastMessageAt: "2025-01-02T09:00:00.000Z" };
     await mockedPage(page, false, { conversations: [older, newer] });
@@ -339,17 +340,8 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(sort).toHaveAccessibleName("Ordenação: mais antigas primeiro");
     await expect(items.first()).toContainText("Conversa antiga");
 
-    const menuToggle = page.getByTestId("conversation-list-menu-toggle");
-    await menuToggle.click();
-    const menu = page.getByRole("menu", { name: "Opções da lista de conversas" });
-    await expect(menu).toBeVisible();
-    await expect(menu.getByRole("menuitem", { name: "Abrir filtros" })).toBeVisible();
-    await menu.getByRole("menuitemradio", { name: "Mais recentes primeiro" }).click();
-    await expect(items.first()).toContainText("Conversa recente");
-
-    await menuToggle.click();
-    await page.getByRole("menuitem", { name: "Abrir filtros" }).click();
-    await expect(page.getByPlaceholder("Nome, empresa ou telefone...")).toBeVisible();
+    await expect(page.getByTestId("conversation-list-menu-toggle")).toHaveCount(0);
+    await expect(page.getByRole("menu", { name: "Opções da lista de conversas" })).toHaveCount(0);
   });
 
   test("does not invent a WhatsApp badge when the provider metadata is absent", async ({ page }) => {
@@ -602,6 +594,20 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await page.keyboard.press("Escape");
     await expect(modal).toHaveCount(0);
     await expect(page.getByTestId("conversation-chat-panel").getByText("Mensagem legada")).toBeVisible();
+  });
+
+  test("opens all prior attendances contextually without rendering the current conversation", async ({ page }) => {
+    await mockedPage(page, true);
+    await page.locator('button[aria-controls="conversation-details-panel"]').click();
+    const details = page.getByTestId("conversation-details-panel");
+    await expect(details.getByRole("button", { name: /CV-260829000000-TEST/ })).toHaveCount(0);
+    await expect(details.getByRole("button", { name: "Ver todos os atendimentos" })).toBeVisible();
+    await details.getByRole("button", { name: "Ver todos os atendimentos" }).click();
+    const browser = page.getByRole("dialog", { name: /Histórico de Cliente UI/ });
+    await expect(browser).toBeVisible();
+    await expect(browser.getByRole("button", { name: /CV-HIST-4/ })).toBeVisible();
+    await browser.getByRole("button", { name: /CV-HIST-2/ }).click();
+    await expect(page.getByRole("dialog", { name: "Cliente UI", exact: true })).toBeVisible();
   });
 
   test("opens inbound and outbound images safely, preserves video controls, and never renders an operator email", async ({ page }) => {
