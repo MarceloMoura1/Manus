@@ -1,0 +1,2 @@
+ALTER TABLE `megadesk_domain_conversations_messages` ADD `reply_to_message_id` varchar(100);--> statement-breakpoint
+ALTER TABLE `megadesk_domain_conversations_messages` ADD `provider_message_reference` longtext;

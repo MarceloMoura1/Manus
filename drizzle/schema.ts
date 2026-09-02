@@ -768,6 +768,8 @@ export const megadeskConversationMessages = mysqlTable(
     provider: varchar({ length: 40 }),
     integrationId: varchar("integration_id", { length: 120 }),
     clientAttemptId: varchar("client_attempt_id", { length: 80 }),
+    replyToMessageId: varchar("reply_to_message_id", { length: 100 }),
+    providerMessageReference: longtext("provider_message_reference"),
     direction: mysqlEnum(["inbound", "outbound", "system"]),
     messageType: varchar("message_type", { length: 40 }),
     senderUserId: varchar("sender_user_id", { length: 80 }),
