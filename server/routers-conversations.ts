@@ -4,6 +4,7 @@ import { contactPhoneStorageDigitsVariants, normalizeContactPhone, sameContactPh
 import { z } from "zod";
 import { router, megadeskProcedure } from "./_core/trpc";
 import { getPool } from "./db";
+import { readConversationHistory } from "./conversation-legacy-history";
 
 const id = z.string().min(1).max(80);
 const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inv\u00e1lida.");
@@ -374,26 +375,28 @@ export const conversationsRouter = router({
            WHEN 'sticker' THEN 'Figurinha' WHEN 'document' THEN COALESCE(
              NULLIF(JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(q.media_reference) THEN q.media_reference ELSE '{}' END, '$.fileName')), ''),
              'Documento') ELSE NULL END AS replyMediaLabel
-         FROM megadesk_domain_conversations_messages m
+          FROM megadesk_domain_conversations_messages m
+          JOIN megadesk_domain_conversations c ON c.conversation_id = m.conversation_id AND c.client_id = ?
          LEFT JOIN megadesk_domain_client_users u ON u.client_id = m.client_id AND u.user_id = m.sender_user_id
          LEFT JOIN megadesk_domain_conversations_messages q
-           ON q.message_id = m.reply_to_message_id AND q.client_id = m.client_id AND q.conversation_id = m.conversation_id
+            ON q.message_id = m.reply_to_message_id AND q.client_id <=> m.client_id AND q.conversation_id = m.conversation_id
          LEFT JOIN megadesk_domain_client_users replyUser ON replyUser.client_id = q.client_id AND replyUser.user_id = q.sender_user_id
-         WHERE m.client_id = ? AND m.conversation_id = ? ORDER BY m.timestamp ASC, m.message_id ASC LIMIT ${input.limit}`,
-        [ctx.tenantId, input.conversationId],
-      ) as any[];
-       if (rows.length) {
-         const events = await conversationEvents(getPool(), ctx.tenantId, input.conversationId, input.limit);
-         return { source: "normalized" as const, messages: rows.map(normalizedMessage), events };
-       }
+          WHERE m.conversation_id = ? AND (m.client_id = c.client_id OR m.client_id IS NULL)
+          ORDER BY m.timestamp ASC, m.message_id ASC LIMIT ${input.limit}`,
+         [ctx.tenantId, input.conversationId],
+       ) as any[];
       const [legacy] = await getPool().execute(
         `SELECT messages_json FROM megadesk_domain_conversations WHERE client_id = ? AND conversation_id = ? LIMIT 1`,
         [ctx.tenantId, input.conversationId],
       ) as any[];
       if (!legacy.length) throw new TRPCError({ code: "NOT_FOUND", message: "Atendimento não encontrado." });
-       const events = await conversationEvents(getPool(), ctx.tenantId, input.conversationId, input.limit);
-       try { return { source: "legacy_json" as const, messages: JSON.parse(legacy[0].messages_json || "[]"), events }; }
-       catch { return { source: "legacy_json" as const, messages: [], events }; }
+      const history = readConversationHistory(rows.map(normalizedMessage), legacy[0].messages_json, input.limit);
+      const events = await conversationEvents(getPool(), ctx.tenantId, input.conversationId, input.limit);
+      return {
+        source: rows.length ? "normalized" as const : "legacy_json" as const,
+        ...history,
+        events,
+      };
     }),
 
   history: megadeskProcedure.input(z.object({ contactId: id, currentConversationId: id })).query(async ({ input, ctx }) => {
@@ -448,21 +451,20 @@ export const conversationsRouter = router({
          WHEN 'sticker' THEN 'Figurinha' WHEN 'document' THEN COALESCE(
            NULLIF(JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(q.media_reference) THEN q.media_reference ELSE '{}' END, '$.fileName')), ''),
            'Documento') ELSE NULL END AS replyMediaLabel
-       FROM megadesk_domain_conversations_messages m
+        FROM megadesk_domain_conversations_messages m
+        JOIN megadesk_domain_conversations c ON c.conversation_id = m.conversation_id AND c.client_id = ?
        LEFT JOIN megadesk_domain_client_users u ON u.client_id = m.client_id AND u.user_id = m.sender_user_id
        LEFT JOIN megadesk_domain_conversations_messages q
-         ON q.message_id = m.reply_to_message_id AND q.client_id = m.client_id AND q.conversation_id = m.conversation_id
+          ON q.message_id = m.reply_to_message_id AND q.client_id <=> m.client_id AND q.conversation_id = m.conversation_id
        LEFT JOIN megadesk_domain_client_users replyUser ON replyUser.client_id = q.client_id AND replyUser.user_id = q.sender_user_id
-       WHERE m.client_id = ? AND m.conversation_id = ? ORDER BY m.timestamp ASC, m.message_id ASC LIMIT 200`,
-      [ctx.tenantId, input.conversationId],
-    ) as any[];
-    let messages = rows.map(normalizedMessage);
-    if (!messages.length) {
-      try { messages = JSON.parse(conversations[0].messagesJson || "[]").slice(0, 200); } catch { messages = []; }
-    }
+        WHERE m.conversation_id = ? AND (m.client_id = c.client_id OR m.client_id IS NULL)
+        ORDER BY m.timestamp ASC, m.message_id ASC LIMIT 200`,
+       [ctx.tenantId, input.conversationId],
+     ) as any[];
+    const history = readConversationHistory(rows.map(normalizedMessage), conversations[0].messagesJson, 200);
     const events = await conversationEvents(getPool(), ctx.tenantId, input.conversationId);
     const { messagesJson: _private, ...conversation } = conversations[0];
-    return { conversation, messages, events };
+    return { conversation, ...history, events };
   }),
 
   linkedTickets: megadeskProcedure.input(z.object({ conversationId: id })).query(async ({ input, ctx }) => {

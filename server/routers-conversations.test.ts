@@ -229,6 +229,7 @@ describe("Conversations authorization, filters and lifecycle", () => {
   it("reads normalized messages and activity in two tenant-scoped queries without per-event lookups", async () => {
     mocks.execute
       .mockResolvedValueOnce([[{ id: "msg-1", text: "Olá", mediaReference: null }]])
+      .mockResolvedValueOnce([[{ messages_json: "[]" }]])
       .mockResolvedValueOnce([[{ id: "event-transfer", eventType: "transferred", actorName: "Ana", fromUserName: "Ana", toUserName: "Bia" }]]);
     const result = await conversationsRouter.createCaller(context()).messages({ conversationId: "conv-a", limit: 100 });
     expect(result).toMatchObject({
@@ -236,8 +237,10 @@ describe("Conversations authorization, filters and lifecycle", () => {
       messages: [{ id: "msg-1", text: "Olá" }],
       events: [{ id: "event-transfer", eventType: "transferred", actorName: "Ana", fromUserName: "Ana", toUserName: "Bia" }],
     });
-    expect(mocks.execute).toHaveBeenCalledTimes(2);
-    const [eventsSql, eventsValues] = mocks.execute.mock.calls[1];
+    expect(mocks.execute).toHaveBeenCalledTimes(3);
+    expect(mocks.execute.mock.calls[1][1]).toEqual(["tenant-a", "conv-a"]);
+    expect(mocks.execute.mock.calls[0][0]).toContain("JOIN megadesk_domain_conversations c ON c.conversation_id = m.conversation_id AND c.client_id = ?");
+    const [eventsSql, eventsValues] = mocks.execute.mock.calls[2];
     expect(eventsSql).toContain("LEFT JOIN megadesk_domain_client_users actor");
     expect(eventsSql).toContain("LEFT JOIN megadesk_domain_client_users target");
     expect(eventsValues).toEqual(["tenant-a", "conv-a"]);
