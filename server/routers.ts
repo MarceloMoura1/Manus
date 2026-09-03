@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createHash, randomUUID } from "node:crypto";
 import { withPublicCodeRetry } from "./conversation-public-code";
 import { executeOutboundAttempt } from "./conversation-outbound";
+import { canonicalMessageMirror } from "./conversation-message-store";
 
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure, megadeskProcedure } from "./_core/trpc";
@@ -882,13 +883,14 @@ export const appRouter = router({
       const replyReference = await resolveOutboundReplyReference({ clientId: ctx.tenantId, conversationId: input.conversationId,
         integrationId: outboundConversation.integrationId, replyToMessageId: input.replyToMessageId });
 
+      const sentAt = new Date();
       const time = nowLabel();
       const operatorName = await conversationOperatorName(ctx.tenantId, ctx.operationalUserId);
       const outgoingMessage = {
         from: "agent" as const,
         text: input.message,
         time,
-        timestamp: new Date().toISOString(),
+        timestamp: sentAt.toISOString(),
         agentName: operatorName,
       };
       const messageId = `msg-${randomUUID()}`;
@@ -896,21 +898,24 @@ export const appRouter = router({
         const [{ evoSendText }, { instanceNameFor }] = await Promise.all([
           import("./evolution/client"), import("./evolution/session-store"),
         ]);
-        await executeOutboundAttempt(getPool(), { messageId, clientAttemptId: input.clientAttemptId, conversationId: input.conversationId,
+        const sent = await executeOutboundAttempt(getPool(), { messageId, clientAttemptId: input.clientAttemptId, conversationId: input.conversationId,
           clientId: ctx.tenantId, provider: "evolution", integrationId: outboundConversation.integrationId,
           messageType: "text",
           sender: "agent", senderUserId: ctx.operationalUserId, senderNameSnapshot: operatorName,
-          text: input.message, timestamp: new Date(), legacyMessage: outgoingMessage, replyToMessageId: input.replyToMessageId ?? null },
+          text: input.message, timestamp: sentAt, legacyMessage: outgoingMessage, replyToMessageId: input.replyToMessageId ?? null },
           () => evoSendText(instanceNameFor(outboundConversation.clientId),
             resolveOutboundRecipient(outboundConversation), input.message, replyReference));
+        if (conversation) {
+          conversation.messages.push(canonicalMessageMirror({ messageId: sent.messageId, externalMessageId: sent.externalMessageId,
+            clientAttemptId: input.clientAttemptId, conversationId: input.conversationId, clientId: ctx.tenantId,
+            provider: "evolution", integrationId: outboundConversation.integrationId, direction: "outbound", messageType: "text",
+            sender: "agent", senderUserId: ctx.operationalUserId, senderNameSnapshot: operatorName, text: input.message,
+            status: sent.status, timestamp: sentAt, legacyMessage: outgoingMessage, replyToMessageId: input.replyToMessageId ?? null }) as Conversation["messages"][number]);
+          conversation.lastMessage = input.message;
+          conversation.time = time;
+        }
       } catch (error) {
         throw new TRPCError({ code: "BAD_GATEWAY", message: safeOutboundProviderMessage(error) });
-      }
-
-      if (conversation) {
-        conversation.messages.push(outgoingMessage);
-        conversation.lastMessage = input.message;
-        conversation.time = time;
       }
       audit("MegaDesk", "Mensagem enviada e sincronizada", outboundConversation.clientId);
       await recordMegaDeskMetric(outboundConversation.clientId, "message_sent", 1, { conversationId: input.conversationId });
@@ -952,6 +957,7 @@ export const appRouter = router({
 
       const labels = { image: "[Imagem]", video: "[Vídeo]", audio: "[Áudio]", document: "[Documento]", sticker: "[Figurinha]" };
       const summary = input.caption?.trim() || labels[input.kind];
+      const sentAt = new Date();
       const time = nowLabel();
       const operatorName = await conversationOperatorName(ctx.tenantId, ctx.operationalUserId);
       const outgoingMessage = {
@@ -962,7 +968,7 @@ export const appRouter = router({
         mimeType: input.mimeType,
         fileName: input.fileName || null,
         time,
-        timestamp: new Date().toISOString(),
+        timestamp: sentAt.toISOString(),
         agentName: operatorName,
       };
       const messageId = `msg-${randomUUID()}`;
@@ -970,24 +976,29 @@ export const appRouter = router({
         const [{ evoSendAttachment }, { instanceNameFor }] = await Promise.all([
           import("./evolution/client"), import("./evolution/session-store"),
         ]);
-        await executeOutboundAttempt(getPool(), { messageId, clientAttemptId: input.clientAttemptId,
+        const sent = await executeOutboundAttempt(getPool(), { messageId, clientAttemptId: input.clientAttemptId,
           conversationId: input.conversationId, clientId: ctx.tenantId, provider: "evolution",
           integrationId: outboundConversation.integrationId,
           messageType: input.kind, sender: "agent",
-           senderUserId: ctx.operationalUserId, senderNameSnapshot: operatorName, text: summary,
-           timestamp: new Date(), legacyMessage: outgoingMessage,
-           replyToMessageId: input.replyToMessageId ?? null,
-           mediaReference: { mediaData: input.dataUrl, mimeType: input.mimeType, fileName: input.fileName ?? null } },
-           () => evoSendAttachment({ instanceName: instanceNameFor(ctx.tenantId),
+          senderUserId: ctx.operationalUserId, senderNameSnapshot: operatorName, text: summary,
+          timestamp: sentAt, legacyMessage: outgoingMessage,
+          replyToMessageId: input.replyToMessageId ?? null,
+          mediaReference: { mediaData: input.dataUrl, mimeType: input.mimeType, fileName: input.fileName ?? null } },
+          () => evoSendAttachment({ instanceName: instanceNameFor(ctx.tenantId),
             number: resolveOutboundRecipient(outboundConversation), kind: input.kind, dataUrl: input.dataUrl,
             mimeType: input.mimeType, fileName: input.fileName, caption: input.caption, quoted: replyReference }));
+        if (conversation) {
+          conversation.messages.push(canonicalMessageMirror({ messageId: sent.messageId, externalMessageId: sent.externalMessageId,
+            clientAttemptId: input.clientAttemptId, conversationId: input.conversationId, clientId: ctx.tenantId,
+            provider: "evolution", integrationId: outboundConversation.integrationId, direction: "outbound", messageType: input.kind,
+            sender: "agent", senderUserId: ctx.operationalUserId, senderNameSnapshot: operatorName, text: summary,
+            status: sent.status, timestamp: sentAt, legacyMessage: outgoingMessage, replyToMessageId: input.replyToMessageId ?? null,
+            mediaReference: { mediaData: input.dataUrl, mimeType: input.mimeType, fileName: input.fileName ?? null } }) as Conversation["messages"][number]);
+          conversation.lastMessage = summary;
+          conversation.time = time;
+        }
       } catch (error) {
         throw new TRPCError({ code: "BAD_GATEWAY", message: safeOutboundProviderMessage(error) });
-      }
-      if (conversation) {
-        conversation.messages.push(outgoingMessage);
-        conversation.lastMessage = summary;
-        conversation.time = time;
       }
       return { ok: true, conversationId: input.conversationId, kind: input.kind };
     }),
