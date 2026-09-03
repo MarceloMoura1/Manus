@@ -468,6 +468,21 @@ export async function loadMegaDeskStructuredState(defaultState: MegaDeskStructur
   }
 }
 
+/**
+ * A global-state sync may update conversation summaries, but message payloads
+ * remain owned by the canonical message writer after a conversation exists.
+ */
+export async function upsertConversationStateSnapshot(
+  connection: Pick<mysql.PoolConnection, "execute">,
+  conversation: MegaDeskStructuredState["conversations"][number],
+): Promise<void> {
+  await connection.execute(
+    "INSERT INTO megadesk_domain_conversations (conversation_id, client_id, customer_name, phone, company, status, last_message, time_label, messages_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE customer_name=VALUES(customer_name), phone=VALUES(phone), company=VALUES(company), status=VALUES(status), last_message=VALUES(last_message), time_label=VALUES(time_label)",
+    [conversation.id, conversation.clientId, conversation.name, conversation.phone, conversation.company, conversation.status,
+      conversation.lastMessage, conversation.time, JSON.stringify(conversation.messages ?? [])],
+  );
+}
+
 export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState): Promise<void> {
   if (!hasConfiguredDatabase()) {
     assertStorageConfigured();
@@ -510,7 +525,7 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
         // Pular conversas do Baileys (prefixo 'conv-baileys-') — elas são gerenciadas diretamente pelo Baileys
         // e não devem ser sobrescritas pelo estado em memória (que pode estar desatualizado)
         if (conversation.id && String(conversation.id).startsWith('conv-baileys-')) continue;
-        await connection.execute("INSERT INTO megadesk_domain_conversations (conversation_id, client_id, customer_name, phone, company, status, last_message, time_label, messages_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE customer_name=VALUES(customer_name), phone=VALUES(phone), company=VALUES(company), status=VALUES(status), last_message=VALUES(last_message), time_label=VALUES(time_label), messages_json=VALUES(messages_json)", [conversation.id, conversation.clientId, conversation.name, conversation.phone, conversation.company, conversation.status, conversation.lastMessage, conversation.time, JSON.stringify(conversation.messages ?? [])]);
+        await upsertConversationStateSnapshot(connection, conversation);
       }
       // Tickets/Chamados são criados via createTicket, não via saveMegaDeskStructuredState
       // Pular inserção de tickets aqui para evitar conflito com tabela megadesk_domain_chamados

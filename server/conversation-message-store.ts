@@ -34,6 +34,25 @@ export function lightweightLegacyMessage(input: CanonicalMessageWrite): Record<s
   };
 }
 
+/** The compatibility JSON must carry the same identity as its normalized source. */
+export function canonicalMessageMirror(input: CanonicalMessageWrite): Record<string, unknown> {
+  const providerMessageReference = normalizeProviderMessageReference(input.providerMessageReference);
+  return {
+    ...lightweightLegacyMessage(input),
+    id: input.messageId,
+    ...(input.externalMessageId ? { externalMessageId: input.externalMessageId } : {}),
+    ...(input.clientAttemptId ? { clientAttemptId: input.clientAttemptId } : {}),
+    ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}),
+    ...(providerMessageReference ? { providerMessageReference } : {}),
+    from: input.sender,
+    direction: input.direction,
+    type: input.messageType,
+    text: input.text,
+    timestamp: input.timestamp.toISOString(),
+    status: input.status,
+  };
+}
+
 /** Transitional single writer. The normalized row wins; JSON is updated only after that insert. */
 export async function persistCanonicalMessage(connection: PoolConnection, input: CanonicalMessageWrite): Promise<boolean> {
   try {
@@ -63,8 +82,7 @@ export async function persistCanonicalMessage(connection: PoolConnection, input:
   try { messages = JSON.parse(rows[0].messages_json || "[]"); } catch { messages = []; }
   if (!messages.some((item: any) => item?.id === input.messageId ||
     (input.externalMessageId != null && item?.externalMessageId === input.externalMessageId))) {
-    messages.push({ id: input.messageId, externalMessageId: input.externalMessageId ?? undefined,
-      ...lightweightLegacyMessage(input) });
+    messages.push(canonicalMessageMirror(input));
   }
   await connection.execute(
     `UPDATE megadesk_domain_conversations SET messages_json = ?, last_message = ?,
