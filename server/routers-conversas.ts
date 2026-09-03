@@ -17,7 +17,6 @@ import {
   getConversationWithMessages,
   listConversations,
   updateConversation,
-  addMessageToConversation,
   searchConversationByPhone,
   type ConversationWithMessages,
 } from "./db-conversas";
@@ -273,7 +272,7 @@ export const conversasRouter = router({
     }),
 
   /**
-   * Adicionar mensagem a uma conversa
+   * Compatibilidade: não permite mais criar mensagens somente no JSON legado.
    */
   addMessage: megadeskProcedure
     .input(
@@ -283,53 +282,11 @@ export const conversasRouter = router({
         text: MessageSchema,
       })
     )
-    .mutation(async ({ input, ctx }) => {
-      try {
-        const clientId = ctx.tenantId;
-        
-        if (!clientId || clientId.trim() === '') {
-          throw new TRPCError({
-            code: "UNAUTHORIZED",
-            message: "Identificação de cliente inválida",
-          });
-        }
-
-        checkRateLimit(clientId);
-
-        if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Adding message to conversa:', input.conversationId);
-
-        await addMessageToConversation(
-          input.conversationId,
-          clientId,
-          input.from,
-          input.text
-        );
-
-        const conversa = await getConversationWithMessages(input.conversationId, clientId);
-        
-        if (!conversa) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "Conversa não encontrada ou acesso negado",
-          });
-        }
-        
-        console.log('[SUCCESS] Message added to conversa:', input.conversationId);
-        
-        return { 
-          conversa,
-          message: "Mensagem registrada com sucesso",
-        };
-      } catch (error) {
-        console.error('[ERROR] Failed to add message:', error);
-        
-        if (error instanceof TRPCError) throw error;
-        
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: `Erro ao adicionar mensagem: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
-        });
-      }
+    .mutation(() => {
+      throw new TRPCError({
+        code: "METHOD_NOT_SUPPORTED",
+        message: "Envio legado indisponível. Use o fluxo canônico de atendimento.",
+      });
     }),
 
   /**

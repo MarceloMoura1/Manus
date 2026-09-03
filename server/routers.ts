@@ -740,19 +740,13 @@ export const appRouter = router({
       return { client: sanitizeClient(client), observability: await readMegaDeskTenantObservability(client.clientId), iaStatus };
     }),
     pushOperationalRecord: adminProcedure.input(z.object({ clientId: z.string(), type: z.enum(["conversation", "ticket", "tracking", "erp"]), ownerPhone: z.string().min(8), title: z.string().min(2), status: z.string().min(2), payload: z.record(z.string(), z.unknown()).default({}) })).mutation(async ({ input }) => {
+      if (input.type === "conversation") {
+        throw new TRPCError({ code: "METHOD_NOT_SUPPORTED", message: "Criação sintética de conversa indisponível. Use o fluxo canônico de atendimento." });
+      }
       await hydrateSyncState();
       const client = getClientOrThrow(input.clientId);
       const record: OperationalRecord = { id: `op-${Date.now()}`, clientId: client.clientId, tenantDatabaseName: client.tenantDatabaseName, type: input.type, ownerPhone: input.ownerPhone, title: input.title, status: input.status, payload: input.payload, createdAt: new Date().toISOString() };
       operationalRecords.unshift(record);
-      if (input.type === "conversation") {
-        const newConv = { id: `conv-${randomUUID()}`, clientId: client.clientId, name: client.contact, phone: input.ownerPhone, company: client.company, status: "open" as ConversationStatus, lastMessage: input.title, time: nowLabel(), messages: [{ from: "customer" as const, text: input.title, time: nowLabel() }], createdAt: new Date().toISOString(), lastMessageFrom: "customer" as const, unreadCount: 1 };
-        conversations.unshift(newConv);
-        try {
-          const { getSocketIO } = await import("./modules/whatsapp/socket/whatsapp.socket");
-          const io = getSocketIO();
-          if (io) io.to(`client:${client.clientId}`).emit("conversation:new", { conversation: newConv });
-        } catch {}
-      }
       if (input.type === "ticket") {
         tickets.unshift({ id: `MD-${String(tickets.length + 1).padStart(4, "0")}`, clientId: client.clientId, company: client.company, customer: client.contact, problem: input.title, category: "🛠️ Suporte", status: "open", createdAt: nowLabel(), description: String(input.payload.description ?? input.title) });
       }
@@ -1216,22 +1210,7 @@ export const appRouter = router({
             phone: canonicalPhone,
             company: input.company,
           });
-          
-          const conversationId = `conv-${randomUUID()}`;
-          const newConversation: Conversation = {
-            id: conversationId,
-            clientId: client.clientId,
-            name: input.name,
-            phone: canonicalPhone,
-            company: input.company,
-            status: "open",
-            lastMessage: "Conversa iniciada",
-            time: new Date().toLocaleTimeString('pt-BR'),
-            messages: [{ from: "customer", text: "Olá, gostaria de atendimento", time: new Date().toLocaleTimeString('pt-BR') }],
-          };
-          conversations.push(newConversation);
           audit("MegaDesk", `Cliente criado: ${input.name}`, client.clientId);
-          await persistSyncState();
           return { id: customerId, name: input.name, company: input.company, phone: canonicalPhone };
         } catch (error) {
           console.error("Erro ao criar cliente:", error);
