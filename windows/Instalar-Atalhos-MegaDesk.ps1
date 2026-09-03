@@ -9,7 +9,7 @@ $shell = New-Object -ComObject WScript.Shell
 
 $shortcuts = @(
   @{ Name = 'Iniciar MegaDesk.lnk'; Script = 'Iniciar-MegaDesk.ps1'; Description = 'Iniciar MegaDesk com MySQL e Cloudflare Tunnel' },
-  @{ Name = 'Atualizar MegaDesk.lnk'; Script = 'Atualizar-MegaDesk.ps1'; Description = 'Validar, compilar e atualizar MegaDesk localmente' },
+  @{ Name = 'Atualizar MegaDesk.lnk'; Script = 'Atualizar-MegaDesk.ps1'; Description = 'Preparar release imutavel e atualizar MegaDesk com health e rollback' },
   @{ Name = 'Parar MegaDesk.lnk'; Script = 'Parar-MegaDesk.ps1'; Description = 'Parar somente processos controlados do MegaDesk' }
 )
 

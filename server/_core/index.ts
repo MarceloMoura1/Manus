@@ -44,6 +44,14 @@ async function findAvailablePort(startPort = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  const releaseSha = process.env.MEGADESK_RELEASE_SHA?.trim() || null;
+
+  app.get("/healthz", (_req, res) => {
+    res.status(200).json({
+      status: "healthy",
+      release: { sha: releaseSha },
+    });
+  });
 
   const trustedProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? "0");
   if (Number.isInteger(trustedProxyHops) && trustedProxyHops > 0) app.set("trust proxy", trustedProxyHops);
