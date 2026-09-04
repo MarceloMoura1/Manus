@@ -9,6 +9,496 @@ function Get-IsolatedTestPort {
   throw 'Nenhuma porta temporaria livre para o teste do updater.'
 }
 
+function New-BootstrapReleaseRuntimeFixture {
+  param([string]$ReleaseRoot, [string]$Sha)
+  $releasePath = Join-Path $ReleaseRoot $Sha
+  New-Item -ItemType Directory -Path (Join-Path $releasePath 'dist\public') -Force | Out-Null
+  Set-Content -LiteralPath (Join-Path $releasePath 'dist\index.js') -Value 'export {}' -NoNewline
+  New-Item -ItemType Directory -Path (Join-Path $releasePath 'node_modules\dotenv') -Force | Out-Null
+  [ordered]@{ name = 'bootstrap-fixture'; dependencies = [ordered]@{ dotenv = '1.0.0' } } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $releasePath 'package.json') -Encoding UTF8 -NoNewline
+  [ordered]@{ sha = $Sha; buildStatus = 'ready'; runtime = [ordered]@{ strategy = 'pnpm-deploy-legacy-prod'; dependenciesPath = 'node_modules' } } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $releasePath 'release.json') -Encoding UTF8 -NoNewline
+  return $releasePath
+}
+
+Describe 'MegaDesk Bootstrap Zero' {
+  BeforeEach {
+    $script:port = Get-IsolatedTestPort
+    $script:runtimeRoot = Join-Path $TestDrive 'bootstrap-runtime'
+    $script:projectRoot = Join-Path $TestDrive 'bootstrap-project'
+    New-Item -ItemType Directory -Path $script:projectRoot -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $script:projectRoot '.env.local') -Value '' -NoNewline
+    & (Get-Module $moduleName) { param($runtimeRoot, $projectRoot, $port) Set-MegaDeskAutomationPaths -RuntimeRoot $runtimeRoot -ProjectRoot $projectRoot -Port $port } $script:runtimeRoot $script:projectRoot $script:port
+  }
+
+  It 'accepts only an empty V2 state for a new Bootstrap Zero operation' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $global:MegaDeskBootstrapCandidate = $candidate
+    $global:MegaDeskBootstrapBaseline = $baseline
+    InModuleScope $moduleName {
+      $state = Get-MegaDeskState
+      (Assert-MegaDeskBootstrapZeroState -State $state -CandidateSha $global:MegaDeskBootstrapCandidate -MigrationBaselineSha $global:MegaDeskBootstrapBaseline).status | Should Be 'EMPTY'
+    }
+  }
+
+  It 'rejects active or orphaned previous releases before Bootstrap Zero' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $global:MegaDeskBootstrapCandidate = $candidate
+    $global:MegaDeskBootstrapBaseline = $baseline
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCandidate
+      $baseline = $global:MegaDeskBootstrapBaseline
+      $active = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $candidate }; previousRelease = $null; operation = $null }
+      { Assert-MegaDeskBootstrapZeroState -State $active -CandidateSha $candidate -MigrationBaselineSha $baseline } | Should Throw
+      $orphanedPrevious = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = [pscustomobject]@{ sha = $baseline }; operation = $null }
+      { Assert-MegaDeskBootstrapZeroState -State $orphanedPrevious -CandidateSha $candidate -MigrationBaselineSha $baseline } | Should Throw
+    }
+  }
+
+  It 'rejects malformed candidate and baseline SHAs before any Git resolution' {
+    InModuleScope $moduleName {
+      Mock Invoke-MegaDeskGit { throw 'Git nao deveria ser chamado.' }
+      { Resolve-MegaDeskCommitSha -Sha 'nao-e-um-sha' -Label 'CandidateSha' } | Should Throw
+      Assert-MockCalled Invoke-MegaDeskGit -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'requires distinct, canonical and ancestral Bootstrap SHAs' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $global:MegaDeskBootstrapCandidate = $candidate
+    $global:MegaDeskBootstrapBaseline = $baseline
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCandidate
+      $baseline = $global:MegaDeskBootstrapBaseline
+      $global:MegaDeskMergeBaseMode = 'ANCESTRAL'
+      Mock Resolve-MegaDeskCommitSha { param($Sha) $Sha.ToLowerInvariant() }
+      Mock Invoke-MegaDeskGit {
+        param($Arguments)
+        if ($Arguments[0] -eq 'merge-base' -and $global:MegaDeskMergeBaseMode -eq 'NON_ANCESTRAL') { throw 'nao ancestral' }
+      }
+      (Assert-MegaDeskBootstrapZeroInputs -CandidateSha $candidate -MigrationBaselineSha $baseline -CurrentHeadSha $candidate).candidateSha | Should Be $candidate
+      { Assert-MegaDeskBootstrapZeroInputs -CandidateSha $candidate -MigrationBaselineSha $candidate -CurrentHeadSha $candidate } | Should Throw
+      { Assert-MegaDeskBootstrapZeroInputs -CandidateSha $candidate -MigrationBaselineSha $baseline -CurrentHeadSha 'cccccccccccccccccccccccccccccccccccccccc' } | Should Throw
+      $global:MegaDeskMergeBaseMode = 'NON_ANCESTRAL'
+      { Assert-MegaDeskBootstrapZeroInputs -CandidateSha $candidate -MigrationBaselineSha $baseline -CurrentHeadSha $candidate } | Should Throw
+    }
+  }
+
+  It 'blocks main, tenant and canonical migration paths for Bootstrap Zero' {
+    $global:MegaDeskMigrationCases = @('drizzle/main-migrations/0001.sql', 'drizzle/tenant-migrations/0001.sql', 'scripts/canonical-migrations.ts', 'server/_core/canonical-migrations.ts')
+    InModuleScope $moduleName {
+      foreach ($path in $global:MegaDeskMigrationCases) {
+        Mock Invoke-MegaDeskGit { @($path) }
+        @(Get-MegaDeskMigrationChanges -FromSha 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' -ToSha 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb') | Should Be @($path)
+      }
+    }
+  }
+
+  It 'revalidates a READY artifact and never promotes it merely for being prepared' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $releasePath = New-BootstrapReleaseRuntimeFixture -ReleaseRoot (Join-Path $script:runtimeRoot 'releases') -Sha $candidate
+    $global:MegaDeskBootstrapCandidate = $candidate
+    $global:MegaDeskBootstrapBaseline = $baseline
+    $global:MegaDeskBootstrapReleasePath = $releasePath
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCandidate
+      $baseline = $global:MegaDeskBootstrapBaseline
+      $state = [pscustomobject]@{
+        schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null
+        operation = [pscustomobject]@{ kind = 'BOOTSTRAP_ZERO'; status = 'READY'; candidateSha = $candidate; baselineSha = $baseline }
+      }
+      $resolution = Resolve-MegaDeskBootstrapZeroOperation -State $state -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' })
+      $resolution.status | Should Be 'READY'
+      $state.activeRelease | Should Be $null
+      $state.previousRelease | Should Be $null
+    }
+  }
+
+  It 'fails closed for PREPARING, FAILED and ambiguous SWITCHING Bootstrap states' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $global:MegaDeskBootstrapCandidate = $candidate
+    $global:MegaDeskBootstrapBaseline = $baseline
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCandidate
+      $baseline = $global:MegaDeskBootstrapBaseline
+      foreach ($status in @('PREPARING', 'FAILED')) {
+        $state = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = [pscustomobject]@{ kind = 'BOOTSTRAP_ZERO'; status = $status; candidateSha = $candidate; baselineSha = $baseline } }
+        { Resolve-MegaDeskBootstrapZeroOperation -State $state -CandidateSha $candidate -MigrationBaselineSha $baseline } | Should Throw
+      }
+      $switching = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = [pscustomobject]@{ kind = 'BOOTSTRAP_ZERO'; status = 'SWITCHING'; candidateSha = $candidate; baselineSha = $baseline } }
+      Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $candidate; path = 'C:\isolated\candidate' } }
+      { Resolve-MegaDeskBootstrapZeroOperation -State $switching -CandidateSha $candidate -MigrationBaselineSha $baseline } | Should Throw
+    }
+  }
+
+  It 'promotes the first release only after managed identity and health checks succeed' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $release = [pscustomobject]@{ sha = $candidate; path = 'C:\isolated\candidate' }
+    $global:MegaDeskBootstrapCandidate = $candidate
+    $global:MegaDeskBootstrapBaseline = $baseline
+    $global:MegaDeskBootstrapRelease = $release
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCandidate
+      $baseline = $global:MegaDeskBootstrapBaseline
+      $release = $global:MegaDeskBootstrapRelease
+      $script:testState = [pscustomobject]@{
+        schemaVersion = 2; cloudflared = $null; activeRelease = $null; previousRelease = $null
+        node = [pscustomobject]@{ pid = 4242; releaseSha = $candidate }
+        operation = [pscustomobject]@{ kind = 'BOOTSTRAP_ZERO'; status = 'SWITCHING'; candidateSha = $candidate; baselineSha = $baseline }
+      }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Get-MegaDeskRelease { $release }
+      Mock Test-ManagedProcess { $true }
+      Mock Wait-MegaDeskLocal { }
+      Mock Wait-MegaDeskPublicEndpoints { }
+      Resolve-MegaDeskBootstrapZeroOperation -State $script:testState -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) | Out-Null
+      $script:testState.activeRelease.sha | Should Be $candidate
+      $script:testState.previousRelease | Should Be $null
+      $script:testState.operation.status | Should Be 'ACTIVE'
+      Assert-MockCalled Wait-MegaDeskLocal -Times 1 -Exactly
+      Assert-MockCalled Wait-MegaDeskPublicEndpoints -Times 1 -Exactly
+    }
+  }
+
+  It 'marks Bootstrap Zero FAILED without inventing rollback when candidate health fails' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $release = [pscustomobject]@{ sha = $candidate; path = 'C:\isolated\candidate' }
+    $global:MegaDeskBootstrapCandidate = $candidate
+    $global:MegaDeskBootstrapBaseline = $baseline
+    $global:MegaDeskBootstrapRelease = $release
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCandidate
+      $baseline = $global:MegaDeskBootstrapBaseline
+      $release = $global:MegaDeskBootstrapRelease
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+      Mock Assert-MegaDeskToolchain { }
+      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskBootstrapCandidate } }
+      Mock Assert-MegaDeskBootstrapZeroInputs { [pscustomobject]@{ candidateSha = $global:MegaDeskBootstrapCandidate; baselineSha = $global:MegaDeskBootstrapBaseline } }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Test-MegaDeskDependencyDiff { $false }
+      Mock Invoke-MegaDeskBootstrapQualityGates { }
+      Mock Invoke-MegaDeskIsolatedBuild { $release }
+      Mock Assert-MegaDeskNoSourceMutation { }
+      Mock Read-Host { 'INICIALIZAR' }
+      Mock Get-MegaDeskRelease { $release }
+      Mock Assert-MegaDeskPortFree { }
+      Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\node.exe' } }
+      Mock Test-Path { $true }
+      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 4242 } }
+      Mock New-ManagedProcessRecord { [pscustomobject]@{ pid = 4242; releaseSha = $candidate; executablePath = 'C:\runtime\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); port = 32120 } }
+      Mock Wait-MegaDeskLocal { throw 'health SHA divergente' }
+      Mock Undo-MegaDeskInvocation {
+        $script:testState.node = $null
+      }
+      { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'wip/conversations-0013-lifecycle' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } | Should Throw
+      $script:testState.activeRelease | Should Be $null
+      $script:testState.previousRelease | Should Be $null
+      $script:testState.operation.status | Should Be 'FAILED'
+      Assert-MockCalled Undo-MegaDeskInvocation -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'does not bypass public readiness during Bootstrap Start' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $global:MegaDeskBootstrapCandidate = $candidate
+    $global:MegaDeskBootstrapBaseline = $baseline
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCandidate
+      $baseline = $global:MegaDeskBootstrapBaseline
+      $state = [pscustomobject]@{ schemaVersion = 2; node = [pscustomobject]@{ pid = 4242; releaseSha = $candidate }; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = [pscustomobject]@{ kind = 'BOOTSTRAP_ZERO'; status = 'SWITCHING'; candidateSha = $candidate; baselineSha = $baseline } }
+      Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $candidate; path = 'C:\isolated\candidate' } }
+      Mock Get-MegaDeskState { $state }
+      Mock Test-ManagedProcess { $true }
+      Mock Wait-MegaDeskLocal { }
+      Mock Wait-MegaDeskPublicEndpoints { throw 'Cloudflared gerenciado ausente.' }
+      { Resolve-MegaDeskBootstrapZeroOperation -State $state -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } | Should Throw
+      Assert-MockCalled Wait-MegaDeskPublicEndpoints -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'declares CandidateSha and MigrationBaselineSha as mandatory Bootstrap inputs' {
+    $command = Get-Command Invoke-MegaDeskBootstrapZero
+    foreach ($name in @('CandidateSha', 'MigrationBaselineSha')) {
+      @($command.Parameters[$name].Attributes | Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] -and $_.Mandatory }).Count | Should Be 1
+    }
+  }
+
+  It 'fails Bootstrap Start before launching a candidate when port ownership is unknown' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $release = [pscustomobject]@{ sha = $candidate; path = 'C:\isolated\candidate' }
+    $global:MegaDeskBootstrapCandidate = $candidate
+    $global:MegaDeskBootstrapBaseline = $baseline
+    $global:MegaDeskBootstrapRelease = $release
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCandidate
+      $baseline = $global:MegaDeskBootstrapBaseline
+      $release = $global:MegaDeskBootstrapRelease
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+      Mock Assert-MegaDeskToolchain { }
+      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskBootstrapCandidate } }
+      Mock Assert-MegaDeskBootstrapZeroInputs { [pscustomobject]@{ candidateSha = $global:MegaDeskBootstrapCandidate; baselineSha = $global:MegaDeskBootstrapBaseline } }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Test-MegaDeskDependencyDiff { $false }
+      Mock Invoke-MegaDeskBootstrapQualityGates { }
+      Mock Invoke-MegaDeskIsolatedBuild { $release }
+      Mock Assert-MegaDeskNoSourceMutation { }
+      Mock Read-Host { 'INICIALIZAR' }
+      Mock Get-MegaDeskRelease { $release }
+      Mock Assert-MegaDeskPortFree { throw 'ownership UNKNOWN' }
+      Mock Start-MegaDeskProcess { throw 'nao deve iniciar' }
+      { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'wip/conversations-0013-lifecycle' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } | Should Throw
+      $script:testState.activeRelease | Should Be $null
+      $script:testState.previousRelease | Should Be $null
+      $script:testState.operation.status | Should Be 'FAILED'
+      Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'compensates the exact Node candidate locally when state persistence fails after start' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $record = [pscustomobject]@{ pid = 4242; releaseSha = $candidate; executablePath = 'C:\runtime\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); port = 32120 }
+    $global:MegaDeskBootstrapCandidate = $candidate
+    $global:MegaDeskBootstrapRecord = $record
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCandidate
+      $record = $global:MegaDeskBootstrapRecord
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Assert-MegaDeskPortFree { }
+      Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\node.exe' } }
+      Mock Get-MegaDeskRelease { [pscustomobject]@{ path = 'C:\isolated\candidate' } }
+      Mock Test-Path { $true }
+      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 4242 } }
+      Mock New-ManagedProcessRecord { $record }
+      Mock Save-MegaDeskState { throw 'state write failed' }
+      Mock Stop-MegaDeskExactManagedProcess { }
+      { Start-MegaDeskNode -ReleaseSha $candidate -Port 32120 } | Should Throw
+      Assert-MockCalled Stop-MegaDeskExactManagedProcess -Times 1 -Exactly -Scope It
+      Assert-MockCalled Stop-MegaDeskExactManagedProcess -ParameterFilter { $Record -eq $global:MegaDeskBootstrapRecord -and $Kind -eq 'node' } -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'does not stop by PID when strong identity capture fails after process start' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $global:MegaDeskBootstrapCandidate = $candidate
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCandidate
+      Mock Get-MegaDeskState { [pscustomobject]@{ node = $null } }
+      Mock Assert-MegaDeskPortFree { }
+      Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\node.exe' } }
+      Mock Get-MegaDeskRelease { [pscustomobject]@{ path = 'C:\isolated\candidate' } }
+      Mock Test-Path { $true }
+      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 4242 } }
+      Mock New-ManagedProcessRecord { throw 'creation time indisponivel' }
+      Mock Stop-Process { }
+      $failure = $null
+      try { Start-MegaDeskNode -ReleaseSha $candidate -Port 32120 } catch { $failure = $_.Exception.Message }
+      $failure | Should Match 'identidade do Node iniciado nao pode ser comprovada'
+      Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'refuses to kill an ambiguous candidate after state persistence fails' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $record = [pscustomobject]@{ pid = 4242; releaseSha = $candidate; executablePath = 'C:\runtime\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); port = 32120 }
+    $global:MegaDeskBootstrapCandidate = $candidate
+    $global:MegaDeskBootstrapRecord = $record
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCandidate
+      $record = $global:MegaDeskBootstrapRecord
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Assert-MegaDeskPortFree { }
+      Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\node.exe' } }
+      Mock Get-MegaDeskRelease { [pscustomobject]@{ path = 'C:\isolated\candidate' } }
+      Mock Test-Path { $true }
+      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 4242 } }
+      Mock New-ManagedProcessRecord { $record }
+      Mock Save-MegaDeskState { throw 'state write failed' }
+      Mock Stop-MegaDeskExactManagedProcess { throw 'identidade nao comprovada' }
+      $failure = $null
+      try { Start-MegaDeskNode -ReleaseSha $candidate -Port 32120 } catch { $failure = $_.Exception.Message }
+      $failure | Should Match 'state do Node iniciado nao pode ser persistido'
+      $failure | Should Match 'identidade nao comprovada'
+      Assert-MockCalled Stop-MegaDeskExactManagedProcess -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'never stops a process when local compensation cannot prove its managed identity' {
+    $record = [pscustomobject]@{ pid = 4242; port = 32120 }
+    $global:MegaDeskBootstrapRecord = $record
+    InModuleScope $moduleName {
+      Mock Get-ProcessSnapshot { [pscustomobject]@{ ProcessId = 4242 } }
+      Mock Test-ManagedProcess { $false }
+      Mock Stop-Process { }
+      { Stop-MegaDeskExactManagedProcess -Record $global:MegaDeskBootstrapRecord -Kind node } | Should Throw
+      Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'keeps a committed Bootstrap promotion ACTIVE when post-commit logging fails' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $release = [pscustomobject]@{ sha = $candidate; path = 'C:\isolated\candidate' }
+    $global:MegaDeskBootstrapCandidate = $candidate
+    $global:MegaDeskBootstrapBaseline = $baseline
+    $global:MegaDeskBootstrapRelease = $release
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCandidate
+      $baseline = $global:MegaDeskBootstrapBaseline
+      $release = $global:MegaDeskBootstrapRelease
+      $script:testState = [pscustomobject]@{
+        schemaVersion = 2; node = [pscustomobject]@{ pid = 4242; releaseSha = $candidate }; cloudflared = $null; activeRelease = $null; previousRelease = $null
+        operation = [pscustomobject]@{ kind = 'BOOTSTRAP_ZERO'; status = 'SWITCHING'; candidateSha = $candidate; baselineSha = $baseline }
+      }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Test-ManagedProcess { $true }
+      Mock Write-MegaDeskLog { throw 'log indisponivel' }
+      Mock Undo-MegaDeskInvocation { }
+      { Complete-MegaDeskBootstrapZeroActivation -CandidateRelease $release -MigrationBaselineSha $baseline } | Should Not Throw
+      $script:testState.activeRelease.sha | Should Be $candidate
+      $script:testState.previousRelease | Should Be $null
+      $script:testState.operation.status | Should Be 'ACTIVE'
+      Assert-MockCalled Undo-MegaDeskInvocation -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'treats final activeRelease persistence failure as a real failure before commit' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $release = [pscustomobject]@{ sha = $candidate; path = 'C:\isolated\candidate' }
+    $global:MegaDeskBootstrapCandidate = $candidate
+    $global:MegaDeskBootstrapBaseline = $baseline
+    $global:MegaDeskBootstrapRelease = $release
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCandidate
+      $baseline = $global:MegaDeskBootstrapBaseline
+      $release = $global:MegaDeskBootstrapRelease
+      $script:testState = [pscustomobject]@{
+        schemaVersion = 2; node = [pscustomobject]@{ pid = 4242; releaseSha = $candidate }; cloudflared = $null; activeRelease = $null; previousRelease = $null
+        operation = [pscustomobject]@{ kind = 'BOOTSTRAP_ZERO'; status = 'SWITCHING'; candidateSha = $candidate; baselineSha = $baseline }
+      }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Test-ManagedProcess { $true }
+      Mock Save-MegaDeskState { throw 'state final write failed' }
+      Mock Write-MegaDeskLog { }
+      { Complete-MegaDeskBootstrapZeroActivation -CandidateRelease $release -MigrationBaselineSha $baseline } | Should Throw
+      Assert-MockCalled Write-MegaDeskLog -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'keeps Bootstrap Zero ACTIVE when post-commit logging fails through the external flow' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $release = [pscustomobject]@{ sha = $candidate; path = (Join-Path $script:runtimeRoot 'releases\candidate') }
+    $record = [pscustomobject]@{ pid = 4242; releaseSha = $candidate; executablePath = 'C:\runtime\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); port = 32120 }
+    $global:MegaDeskBootstrapCandidate = $candidate
+    $global:MegaDeskBootstrapBaseline = $baseline
+    $global:MegaDeskBootstrapRelease = $release
+    $global:MegaDeskBootstrapRecord = $record
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCandidate
+      $baseline = $global:MegaDeskBootstrapBaseline
+      $release = $global:MegaDeskBootstrapRelease
+      $record = $global:MegaDeskBootstrapRecord
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+      $script:finalStateSaved = $false
+      $script:healthLocalPassed = $false
+      $script:publicReadinessPassed = $false
+      $script:capturedScriptPath = $null
+      $script:postCommitLogFailed = $false
+      $script:logMessages = @()
+
+      Mock Assert-MegaDeskToolchain { }
+      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskBootstrapCandidate } }
+      Mock Assert-MegaDeskBootstrapZeroInputs {
+        param($CandidateSha, $MigrationBaselineSha, $CurrentHeadSha)
+        if ($CandidateSha -cne $global:MegaDeskBootstrapCandidate -or $MigrationBaselineSha -cne $global:MegaDeskBootstrapBaseline -or $CurrentHeadSha -cne $global:MegaDeskBootstrapCandidate) { throw 'Bootstrap inputs inesperados.' }
+        [pscustomobject]@{ candidateSha = $global:MegaDeskBootstrapCandidate; baselineSha = $global:MegaDeskBootstrapBaseline }
+      }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState {
+        param($State)
+        $script:testState = $State
+        if ([string]$State.operation.status -eq 'ACTIVE') { $script:finalStateSaved = $true }
+      }
+      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Test-MegaDeskDependencyDiff { $false }
+      Mock Invoke-MegaDeskBootstrapQualityGates { }
+      Mock Invoke-MegaDeskIsolatedBuild { $global:MegaDeskBootstrapRelease }
+      Mock Assert-MegaDeskNoSourceMutation { }
+      Mock Read-Host { 'INICIALIZAR' }
+      Mock Get-MegaDeskRelease { $global:MegaDeskBootstrapRelease }
+      Mock Assert-MegaDeskPortFree { }
+      Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\node.exe' } }
+      Mock Test-Path { $true }
+      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 4242 } }
+      Mock New-ManagedProcessRecord {
+        param($Process, $ExecutablePath, $Kind, $ConfigPath, $ScriptPath, $EnvironmentPath, $ReleaseSha, $Port)
+        $script:capturedScriptPath = $ScriptPath
+        $global:MegaDeskBootstrapRecord
+      }
+      Mock Test-ManagedProcess { $true }
+      Mock Wait-MegaDeskLocal {
+        param($ExpectedReleaseSha, $Port)
+        if ($ExpectedReleaseSha -cne $candidate -or $Port -ne 32120) { throw 'Health local recebeu parametros inesperados.' }
+        $script:healthLocalPassed = $true
+      }
+      Mock Wait-MegaDeskPublicEndpoints {
+        param($ExpectedReleaseSha, $Checks)
+        if ($ExpectedReleaseSha -cne $candidate -or $Checks.Count -ne 1) { throw 'Readiness publico recebeu parametros inesperados.' }
+        $script:publicReadinessPassed = $true
+      }
+      Mock Write-MegaDeskLog {
+        param($Message)
+        $script:logMessages += [string]$Message
+        if ($script:finalStateSaved) {
+          $script:postCommitLogFailed = $true
+          throw 'falha de logging pos-commit'
+        }
+      }
+      Mock Undo-MegaDeskInvocation { throw 'rollback inesperado apos commit' }
+      Mock Stop-MegaDeskExactManagedProcess { throw 'compensacao inesperada apos commit' }
+      Mock Stop-Process { throw 'Stop-Process inesperado apos commit' }
+
+      $result = Invoke-MegaDeskBootstrapZero -ExpectedBranch 'wip/conversations-0013-lifecycle' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' })
+
+      $result.sha | Should Be $candidate
+      $script:healthLocalPassed | Should Be $true
+      $script:publicReadinessPassed | Should Be $true
+      $script:finalStateSaved | Should Be $true
+      $script:postCommitLogFailed | Should Be $true
+      $script:capturedScriptPath | Should Be (Join-Path $release.path 'dist\index.js')
+      $script:capturedScriptPath | Should Not Be (Join-Path $script:projectRoot 'dist\index.js')
+      $script:testState.schemaVersion | Should Be 2
+      $script:testState.activeRelease.sha | Should Be $candidate
+      $script:testState.previousRelease | Should Be $null
+      $script:testState.operation.kind | Should Be 'BOOTSTRAP_ZERO'
+      $script:testState.operation.status | Should Be 'ACTIVE'
+      $script:testState.operation.candidateSha | Should Be $candidate
+      $script:testState.operation.baselineSha | Should Be $baseline
+      Assert-MockCalled Undo-MegaDeskInvocation -Times 0 -Exactly -Scope It
+      Assert-MockCalled Stop-MegaDeskExactManagedProcess -Times 0 -Exactly -Scope It
+      Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
+    }
+  }
+
+}
+
 function New-DummyHealthServer {
   param([string]$Root, [int]$Port, [string]$Sha)
   $scriptPath = Join-Path $Root 'dummy-health.js'
