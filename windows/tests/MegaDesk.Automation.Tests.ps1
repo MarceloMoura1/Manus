@@ -147,7 +147,7 @@ Describe 'MegaDesk Bootstrap Zero' {
       $baseline = $global:MegaDeskBootstrapBaseline
       $release = $global:MegaDeskBootstrapRelease
       $script:testState = [pscustomobject]@{
-        schemaVersion = 2; cloudflared = $null; activeRelease = $null; previousRelease = $null
+        schemaVersion = 2; cloudflared = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }; activeRelease = $null; previousRelease = $null
         node = [pscustomobject]@{ pid = 4242; releaseSha = $candidate }
         operation = [pscustomobject]@{ kind = 'BOOTSTRAP_ZERO'; status = 'SWITCHING'; candidateSha = $candidate; baselineSha = $baseline }
       }
@@ -179,6 +179,7 @@ Describe 'MegaDesk Bootstrap Zero' {
       $release = $global:MegaDeskBootstrapRelease
       $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
       Mock Assert-MegaDeskToolchain { }
+      Mock Assert-CloudflaredConfig { }
       Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskBootstrapCandidate } }
       Mock Assert-MegaDeskBootstrapZeroInputs { [pscustomobject]@{ candidateSha = $global:MegaDeskBootstrapCandidate; baselineSha = $global:MegaDeskBootstrapBaseline } }
       Mock Get-MegaDeskState { $script:testState }
@@ -246,6 +247,7 @@ Describe 'MegaDesk Bootstrap Zero' {
       $release = $global:MegaDeskBootstrapRelease
       $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
       Mock Assert-MegaDeskToolchain { }
+      Mock Assert-CloudflaredConfig { }
       Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskBootstrapCandidate } }
       Mock Assert-MegaDeskBootstrapZeroInputs { [pscustomobject]@{ candidateSha = $global:MegaDeskBootstrapCandidate; baselineSha = $global:MegaDeskBootstrapBaseline } }
       Mock Get-MegaDeskState { $script:testState }
@@ -349,6 +351,165 @@ Describe 'MegaDesk Bootstrap Zero' {
     }
   }
 
+  It 'persists a managed Cloudflared record and ignores post-save logging failure' {
+    $record = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+    $global:MegaDeskBootstrapTunnelRecord = $record
+    InModuleScope $moduleName {
+      $record = $global:MegaDeskBootstrapTunnelRecord
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Test-ManagedProcess { $false }
+      Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\cloudflared.exe' } }
+      Mock Get-CimInstance { $null }
+      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 5252 } }
+      Mock New-ManagedProcessRecord { $record }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Write-MegaDeskLog { throw 'log indisponivel' }
+
+      $result = Start-MegaDeskTunnel
+
+      $result | Should Be $record
+      $script:testState.cloudflared | Should Be $record
+      $result.port | Should Be $null
+      Assert-MockCalled Start-MegaDeskProcess -Times 1 -Exactly -Scope It
+      Assert-MockCalled Save-MegaDeskState -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'does not stop Cloudflared by PID when strong identity capture fails' {
+    InModuleScope $moduleName {
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Test-ManagedProcess { $false }
+      Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\cloudflared.exe' } }
+      Mock Get-CimInstance { $null }
+      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 5252 } }
+      Mock New-ManagedProcessRecord { throw 'creation time indisponivel' }
+      Mock Stop-Process { }
+
+      $failure = $null
+      try { Start-MegaDeskTunnel } catch { $failure = $_.Exception.Message }
+
+      $failure | Should Match 'identidade do Cloudflared iniciado nao pode ser comprovada'
+      Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'compensates the in-memory Cloudflared record when its state save fails' {
+    $record = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+    $global:MegaDeskBootstrapTunnelRecord = $record
+    InModuleScope $moduleName {
+      $record = $global:MegaDeskBootstrapTunnelRecord
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Test-ManagedProcess { $false }
+      Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\cloudflared.exe' } }
+      Mock Get-CimInstance { $null }
+      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 5252 } }
+      Mock New-ManagedProcessRecord { $record }
+      Mock Save-MegaDeskState { throw 'state tunnel write failed' }
+      Mock Stop-MegaDeskExactManagedProcess { }
+
+      $failure = $null
+      try { Start-MegaDeskTunnel } catch { $failure = $_.Exception.Message }
+
+      $failure | Should Match 'state do Cloudflared iniciado nao pode ser persistido'
+      Assert-MockCalled Stop-MegaDeskExactManagedProcess -ParameterFilter { $Record -eq $global:MegaDeskBootstrapTunnelRecord -and $Kind -eq 'cloudflared' } -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'preserves the state and cleanup causes when Cloudflared persistence compensation fails' {
+    $record = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+    $global:MegaDeskBootstrapTunnelRecord = $record
+    InModuleScope $moduleName {
+      $record = $global:MegaDeskBootstrapTunnelRecord
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Test-ManagedProcess { $false }
+      Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\cloudflared.exe' } }
+      Mock Get-CimInstance { $null }
+      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 5252 } }
+      Mock New-ManagedProcessRecord { $record }
+      Mock Save-MegaDeskState { throw 'state tunnel write failed' }
+      Mock Stop-MegaDeskExactManagedProcess { throw 'identidade do tunnel nao comprovada' }
+
+      $failure = $null
+      try { Start-MegaDeskTunnel } catch { $failure = $_.Exception.Message }
+
+      $failure | Should Match 'state tunnel write failed'
+      $failure | Should Match 'identidade do tunnel nao comprovada'
+    }
+  }
+
+  It 'blocks an unrecorded external Cloudflared without adopting or stopping it' {
+    InModuleScope $moduleName {
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Test-ManagedProcess { $false }
+      Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\cloudflared.exe' } }
+      Mock Get-CimInstance { [pscustomobject]@{ ProcessId = 5252 } }
+      Mock Start-MegaDeskProcess { throw 'nao deve iniciar' }
+      Mock Stop-Process { }
+
+      { Start-MegaDeskTunnel } | Should Throw
+      Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
+      Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'reuses a strongly identified V2 Cloudflared without marking it as newly started' {
+    $record = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+    $global:MegaDeskBootstrapTunnelRecord = $record
+    InModuleScope $moduleName {
+      $record = $global:MegaDeskBootstrapTunnelRecord
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $record; activeRelease = $null; previousRelease = $null; operation = $null }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Test-ManagedProcess { $true }
+      Mock Start-MegaDeskProcess { throw 'tunnel preexistente nao deve iniciar outro processo' }
+      Mock Save-MegaDeskState { throw 'tunnel preexistente nao deve alterar state' }
+      Mock Write-MegaDeskLog { }
+
+      (Start-MegaDeskTunnel) | Should Be $null
+      $script:testState.cloudflared | Should Be $record
+      Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
+      Assert-MockCalled Save-MegaDeskState -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'clears a stale absent Cloudflared record through state save before starting its replacement' {
+    $stale = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow.AddMinutes(-1)).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+    $replacement = [pscustomobject]@{ pid = 5353; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+    $global:MegaDeskBootstrapStaleTunnelRecord = $stale
+    $global:MegaDeskBootstrapTunnelRecord = $replacement
+    InModuleScope $moduleName {
+      $stale = $global:MegaDeskBootstrapStaleTunnelRecord
+      $replacement = $global:MegaDeskBootstrapTunnelRecord
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $stale; activeRelease = $null; previousRelease = $null; operation = $null }
+      $script:saveCount = 0
+      $script:firstStaleRecordWasCleared = $false
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Test-ManagedProcess { $false }
+      Mock Save-MegaDeskState {
+        param($State)
+        $script:saveCount++
+        if ($script:saveCount -eq 1) { $script:firstStaleRecordWasCleared = $null -eq $State.cloudflared }
+        $script:testState = $State
+      }
+      Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\cloudflared.exe' } }
+      Mock Get-CimInstance { $null }
+      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 5353 } }
+      Mock New-ManagedProcessRecord { $replacement }
+      Mock Write-MegaDeskLog { }
+
+      $result = Start-MegaDeskTunnel
+
+      $result | Should Be $replacement
+      $script:firstStaleRecordWasCleared | Should Be $true
+      $script:testState.cloudflared | Should Be $replacement
+      Assert-MockCalled Save-MegaDeskState -Times 2 -Exactly -Scope It
+    }
+  }
+
   It 'keeps a committed Bootstrap promotion ACTIVE when post-commit logging fails' {
     $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
@@ -361,7 +522,7 @@ Describe 'MegaDesk Bootstrap Zero' {
       $baseline = $global:MegaDeskBootstrapBaseline
       $release = $global:MegaDeskBootstrapRelease
       $script:testState = [pscustomobject]@{
-        schemaVersion = 2; node = [pscustomobject]@{ pid = 4242; releaseSha = $candidate }; cloudflared = $null; activeRelease = $null; previousRelease = $null
+        schemaVersion = 2; node = [pscustomobject]@{ pid = 4242; releaseSha = $candidate }; cloudflared = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }; activeRelease = $null; previousRelease = $null
         operation = [pscustomobject]@{ kind = 'BOOTSTRAP_ZERO'; status = 'SWITCHING'; candidateSha = $candidate; baselineSha = $baseline }
       }
       Mock Get-MegaDeskState { $script:testState }
@@ -389,7 +550,7 @@ Describe 'MegaDesk Bootstrap Zero' {
       $baseline = $global:MegaDeskBootstrapBaseline
       $release = $global:MegaDeskBootstrapRelease
       $script:testState = [pscustomobject]@{
-        schemaVersion = 2; node = [pscustomobject]@{ pid = 4242; releaseSha = $candidate }; cloudflared = $null; activeRelease = $null; previousRelease = $null
+        schemaVersion = 2; node = [pscustomobject]@{ pid = 4242; releaseSha = $candidate }; cloudflared = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }; activeRelease = $null; previousRelease = $null
         operation = [pscustomobject]@{ kind = 'BOOTSTRAP_ZERO'; status = 'SWITCHING'; candidateSha = $candidate; baselineSha = $baseline }
       }
       Mock Get-MegaDeskState { $script:testState }
@@ -406,15 +567,18 @@ Describe 'MegaDesk Bootstrap Zero' {
     $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
     $release = [pscustomobject]@{ sha = $candidate; path = (Join-Path $script:runtimeRoot 'releases\candidate') }
     $record = [pscustomobject]@{ pid = 4242; releaseSha = $candidate; executablePath = 'C:\runtime\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); port = 32120 }
+    $tunnelRecord = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
     $global:MegaDeskBootstrapCandidate = $candidate
     $global:MegaDeskBootstrapBaseline = $baseline
     $global:MegaDeskBootstrapRelease = $release
     $global:MegaDeskBootstrapRecord = $record
+    $global:MegaDeskBootstrapTunnelRecord = $tunnelRecord
     InModuleScope $moduleName {
       $candidate = $global:MegaDeskBootstrapCandidate
       $baseline = $global:MegaDeskBootstrapBaseline
       $release = $global:MegaDeskBootstrapRelease
       $record = $global:MegaDeskBootstrapRecord
+      $tunnelRecord = $global:MegaDeskBootstrapTunnelRecord
       $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
       $script:finalStateSaved = $false
       $script:healthLocalPassed = $false
@@ -422,8 +586,10 @@ Describe 'MegaDesk Bootstrap Zero' {
       $script:capturedScriptPath = $null
       $script:postCommitLogFailed = $false
       $script:logMessages = @()
+      $script:bootstrapStartSequence = @()
 
       Mock Assert-MegaDeskToolchain { }
+      Mock Assert-CloudflaredConfig { }
       Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskBootstrapCandidate } }
       Mock Assert-MegaDeskBootstrapZeroInputs {
         param($CandidateSha, $MigrationBaselineSha, $CurrentHeadSha)
@@ -446,7 +612,7 @@ Describe 'MegaDesk Bootstrap Zero' {
       Mock Assert-MegaDeskPortFree { }
       Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\node.exe' } }
       Mock Test-Path { $true }
-      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 4242 } }
+      Mock Start-MegaDeskProcess { $script:bootstrapStartSequence += 'NODE'; [pscustomobject]@{ Id = 4242 } }
       Mock New-ManagedProcessRecord {
         param($Process, $ExecutablePath, $Kind, $ConfigPath, $ScriptPath, $EnvironmentPath, $ReleaseSha, $Port)
         $script:capturedScriptPath = $ScriptPath
@@ -457,11 +623,18 @@ Describe 'MegaDesk Bootstrap Zero' {
         param($ExpectedReleaseSha, $Port)
         if ($ExpectedReleaseSha -cne $candidate -or $Port -ne 32120) { throw 'Health local recebeu parametros inesperados.' }
         $script:healthLocalPassed = $true
+        $script:bootstrapStartSequence += 'LOCAL_HEALTH'
+      }
+      Mock Start-MegaDeskTunnel {
+        $script:testState.cloudflared = $global:MegaDeskBootstrapTunnelRecord
+        $script:bootstrapStartSequence += 'TUNNEL'
+        $global:MegaDeskBootstrapTunnelRecord
       }
       Mock Wait-MegaDeskPublicEndpoints {
         param($ExpectedReleaseSha, $Checks)
         if ($ExpectedReleaseSha -cne $candidate -or $Checks.Count -ne 1) { throw 'Readiness publico recebeu parametros inesperados.' }
         $script:publicReadinessPassed = $true
+        $script:bootstrapStartSequence += 'PUBLIC_READINESS'
       }
       Mock Write-MegaDeskLog {
         param($Message)
@@ -491,12 +664,456 @@ Describe 'MegaDesk Bootstrap Zero' {
       $script:testState.operation.status | Should Be 'ACTIVE'
       $script:testState.operation.candidateSha | Should Be $candidate
       $script:testState.operation.baselineSha | Should Be $baseline
+      $script:testState.cloudflared | Should Be $tunnelRecord
+      $script:bootstrapStartSequence | Should Be @('NODE', 'LOCAL_HEALTH', 'TUNNEL', 'PUBLIC_READINESS')
+      Assert-MockCalled Start-MegaDeskTunnel -Times 1 -Exactly -Scope It
       Assert-MockCalled Undo-MegaDeskInvocation -Times 0 -Exactly -Scope It
       Assert-MockCalled Stop-MegaDeskExactManagedProcess -Times 0 -Exactly -Scope It
       Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
     }
   }
 
+  It 'compensates the tunnel before the Node when public readiness returns HTTP 530' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $release = [pscustomobject]@{ sha = $candidate; path = (Join-Path $script:runtimeRoot 'releases\candidate') }
+    $nodeRecord = [pscustomobject]@{ pid = 4242; releaseSha = $candidate; executablePath = 'C:\runtime\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); port = 32120 }
+    $tunnelRecord = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+    $global:MegaDeskBootstrapCandidate = $candidate
+    $global:MegaDeskBootstrapBaseline = $baseline
+    $global:MegaDeskBootstrapRelease = $release
+    $global:MegaDeskBootstrapRecord = $nodeRecord
+    $global:MegaDeskBootstrapTunnelRecord = $tunnelRecord
+    $global:MegaDeskBootstrapFailureState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+    $global:MegaDeskBootstrapCleanupPids = [System.Collections.ArrayList]::new()
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCandidate
+      $baseline = $global:MegaDeskBootstrapBaseline
+      $release = $global:MegaDeskBootstrapRelease
+      $nodeRecord = $global:MegaDeskBootstrapRecord
+      $tunnelRecord = $global:MegaDeskBootstrapTunnelRecord
+      Mock Assert-MegaDeskToolchain { }
+      Mock Assert-CloudflaredConfig { }
+      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskBootstrapCandidate } }
+      Mock Assert-MegaDeskBootstrapZeroInputs { [pscustomobject]@{ candidateSha = $global:MegaDeskBootstrapCandidate; baselineSha = $global:MegaDeskBootstrapBaseline } }
+      Mock Get-MegaDeskState { $global:MegaDeskBootstrapFailureState }
+      Mock Save-MegaDeskState { param($State) $global:MegaDeskBootstrapFailureState = $State }
+      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Test-MegaDeskDependencyDiff { $false }
+      Mock Invoke-MegaDeskBootstrapQualityGates { }
+      Mock Invoke-MegaDeskIsolatedBuild { $global:MegaDeskBootstrapRelease }
+      Mock Assert-MegaDeskNoSourceMutation { }
+      Mock Read-Host { 'INICIALIZAR' }
+      Mock Get-MegaDeskRelease { $global:MegaDeskBootstrapRelease }
+      Mock Assert-MegaDeskPortFree { }
+      Mock Start-MegaDeskNode {
+        [void]($global:MegaDeskBootstrapFailureState.node = $global:MegaDeskBootstrapRecord)
+        return $global:MegaDeskBootstrapRecord
+      }
+      Mock Wait-MegaDeskLocal { }
+      Mock Start-MegaDeskTunnel {
+        [void]($global:MegaDeskBootstrapFailureState.cloudflared = $global:MegaDeskBootstrapTunnelRecord)
+        return $global:MegaDeskBootstrapTunnelRecord
+      }
+      Mock Wait-MegaDeskPublicEndpoints { throw 'HTTP 530' }
+      Mock Undo-MegaDeskInvocation {
+        param($StartedNodeRecord, $StartedTunnelRecord)
+        [void]$global:MegaDeskBootstrapCleanupPids.Add([int]$StartedTunnelRecord.pid)
+        [void]$global:MegaDeskBootstrapCleanupPids.Add([int]$StartedNodeRecord.pid)
+        [void]($global:MegaDeskBootstrapFailureState.cloudflared = $null)
+        [void]($global:MegaDeskBootstrapFailureState.node = $null)
+      }
+      Mock Write-MegaDeskLog { }
+      Mock Stop-Process { throw 'PID-only kill nao deve ocorrer' }
+
+      { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'wip/conversations-0013-lifecycle' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } | Should Throw
+
+      $global:MegaDeskBootstrapFailureState.activeRelease | Should Be $null
+      $global:MegaDeskBootstrapFailureState.previousRelease | Should Be $null
+      $global:MegaDeskBootstrapFailureState.operation.status | Should Be 'FAILED'
+      $global:MegaDeskBootstrapFailureState.cloudflared | Should Be $null
+      $global:MegaDeskBootstrapFailureState.node | Should Be $null
+      Assert-MockCalled Undo-MegaDeskInvocation -ParameterFilter { $StartedNodeRecord -eq $global:MegaDeskBootstrapRecord -and $StartedTunnelRecord -eq $global:MegaDeskBootstrapTunnelRecord } -Times 1 -Exactly -Scope It
+      $global:MegaDeskBootstrapCleanupPids.ToArray() | Should Be @(5252, 4242)
+      Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
+    }
+  }
+
+}
+
+Describe 'MegaDesk selective rollback' {
+  It 'cleans Cloudflared before Node through the real rollback implementation' {
+    $nodeRecord = [pscustomobject]@{ pid = 4242; executablePath = 'C:\runtime\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); releaseSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; port = 32120 }
+    $tunnelRecord = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+    $global:MegaDeskRollbackState = [pscustomobject]@{ schemaVersion = 2; node = $nodeRecord; cloudflared = $tunnelRecord; activeRelease = $null; previousRelease = $null; operation = $null }
+    $global:MegaDeskRollbackStopOrder = [System.Collections.ArrayList]::new()
+    $global:MegaDeskRollbackSnapshotReads = @{}
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskState { $global:MegaDeskRollbackState }
+      Mock Test-SameManagedProcessRecord { $true }
+      Mock Test-ManagedProcess { $true }
+      Mock Get-ProcessSnapshot {
+        param($ProcessId)
+        if (-not $global:MegaDeskRollbackSnapshotReads.ContainsKey($ProcessId)) { $global:MegaDeskRollbackSnapshotReads[$ProcessId] = 0 }
+        $global:MegaDeskRollbackSnapshotReads[$ProcessId]++
+        if ($global:MegaDeskRollbackSnapshotReads[$ProcessId] -eq 1) { return [pscustomobject]@{ ProcessId = $ProcessId } }
+        return $null
+      }
+      Mock Stop-Process { param($Id) [void]$global:MegaDeskRollbackStopOrder.Add([int](@($Id)[0])) }
+      Mock Wait-Process { }
+      Mock Save-MegaDeskState { param($State) $global:MegaDeskRollbackState = $State }
+      Mock Write-MegaDeskLog { }
+
+      Undo-MegaDeskInvocation -StartedNodeRecord $global:MegaDeskRollbackState.node -StartedTunnelRecord $global:MegaDeskRollbackState.cloudflared
+
+      $global:MegaDeskRollbackStopOrder.ToArray() | Should Be @(5252, 4242)
+      $global:MegaDeskRollbackState.cloudflared | Should Be $null
+      $global:MegaDeskRollbackState.node | Should Be $null
+      Assert-MockCalled Stop-Process -Times 2 -Exactly -Scope It
+    }
+  }
+
+  It 'preserves the Cloudflared cleanup cause and still attempts Node cleanup' {
+    $nodeRecord = [pscustomobject]@{ pid = 4242; executablePath = 'C:\runtime\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); releaseSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; port = 32120 }
+    $tunnelRecord = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+    $global:MegaDeskRollbackState = [pscustomobject]@{ schemaVersion = 2; node = $nodeRecord; cloudflared = $tunnelRecord; activeRelease = $null; previousRelease = $null; operation = $null }
+    $global:MegaDeskRollbackStopOrder = [System.Collections.ArrayList]::new()
+    $global:MegaDeskRollbackSnapshotReads = @{}
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskState { $global:MegaDeskRollbackState }
+      Mock Test-SameManagedProcessRecord { $true }
+      Mock Test-ManagedProcess { $true }
+      Mock Get-ProcessSnapshot {
+        param($ProcessId)
+        if (-not $global:MegaDeskRollbackSnapshotReads.ContainsKey($ProcessId)) { $global:MegaDeskRollbackSnapshotReads[$ProcessId] = 0 }
+        $global:MegaDeskRollbackSnapshotReads[$ProcessId]++
+        if ($global:MegaDeskRollbackSnapshotReads[$ProcessId] -eq 1) { return [pscustomobject]@{ ProcessId = $ProcessId } }
+        return $null
+      }
+      Mock Stop-Process {
+        param($Id)
+        $processId = [int](@($Id)[0])
+        [void]$global:MegaDeskRollbackStopOrder.Add($processId)
+        if ($processId -eq 5252) { throw 'tunnel cleanup exploded' }
+      }
+      Mock Wait-Process { }
+      Mock Save-MegaDeskState { param($State) $global:MegaDeskRollbackState = $State }
+      Mock Write-MegaDeskLog { }
+
+      $failure = $null
+      try { Undo-MegaDeskInvocation -StartedNodeRecord $global:MegaDeskRollbackState.node -StartedTunnelRecord $global:MegaDeskRollbackState.cloudflared } catch { $failure = $_.Exception.Message }
+
+      $failure | Should Match 'cloudflared: tunnel cleanup exploded'
+      $global:MegaDeskRollbackStopOrder.ToArray() | Should Be @(5252, 4242)
+      $global:MegaDeskRollbackState.cloudflared | Should Not Be $null
+      $global:MegaDeskRollbackState.node | Should Be $null
+    }
+  }
+
+  It 'preserves both cleanup causes when Cloudflared and Node cleanup fail' {
+    $nodeRecord = [pscustomobject]@{ pid = 4242; executablePath = 'C:\runtime\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); releaseSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; port = 32120 }
+    $tunnelRecord = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+    $global:MegaDeskRollbackState = [pscustomobject]@{ schemaVersion = 2; node = $nodeRecord; cloudflared = $tunnelRecord; activeRelease = $null; previousRelease = $null; operation = $null }
+    $global:MegaDeskRollbackStopOrder = [System.Collections.ArrayList]::new()
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskState { $global:MegaDeskRollbackState }
+      Mock Test-SameManagedProcessRecord { $true }
+      Mock Test-ManagedProcess { $true }
+      Mock Get-ProcessSnapshot { param($ProcessId) [pscustomobject]@{ ProcessId = $ProcessId } }
+      Mock Stop-Process {
+        param($Id)
+        $processId = [int](@($Id)[0])
+        [void]$global:MegaDeskRollbackStopOrder.Add($processId)
+        if ($processId -eq 5252) { throw 'tunnel cleanup exploded' }
+        throw 'node cleanup exploded'
+      }
+      Mock Wait-Process { }
+      Mock Save-MegaDeskState { param($State) $global:MegaDeskRollbackState = $State }
+      Mock Write-MegaDeskLog { }
+
+      $failure = $null
+      try { Undo-MegaDeskInvocation -StartedNodeRecord $global:MegaDeskRollbackState.node -StartedTunnelRecord $global:MegaDeskRollbackState.cloudflared } catch { $failure = $_.Exception.Message }
+
+      $failure | Should Match 'cloudflared: tunnel cleanup exploded'
+      $failure | Should Match 'node: node cleanup exploded'
+      $global:MegaDeskRollbackStopOrder.ToArray() | Should Be @(5252, 4242)
+    }
+  }
+
+  It 'refuses cleanup with invalid managed identity without PID-only termination' {
+    $tunnelRecord = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+    $global:MegaDeskRollbackState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $tunnelRecord; activeRelease = $null; previousRelease = $null; operation = $null }
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskState { $global:MegaDeskRollbackState }
+      Mock Test-SameManagedProcessRecord { $true }
+      Mock Get-ProcessSnapshot { [pscustomobject]@{ ProcessId = 5252 } }
+      Mock Test-ManagedProcess { $false }
+      Mock Stop-Process { throw 'PID-only termination must not occur' }
+      Mock Stop-MegaDeskExactManagedProcess { throw 'unexpected exact cleanup' }
+      Mock Save-MegaDeskState { param($State) $global:MegaDeskRollbackState = $State }
+      Mock Write-MegaDeskLog { }
+
+      $failure = $null
+      try { Undo-MegaDeskInvocation -StartedTunnelRecord $global:MegaDeskRollbackState.cloudflared } catch { $failure = $_.Exception.Message }
+
+      $failure | Should Match 'cloudflared: cleanup recusado: identidade gerenciada do processo nao pode ser comprovada'
+      $global:MegaDeskRollbackState.cloudflared | Should Not Be $null
+      Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
+      Assert-MockCalled Stop-MegaDeskExactManagedProcess -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'reports state divergence as incomplete cleanup without touching a process' {
+    $tunnelRecord = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+    $global:MegaDeskRollbackDivergentTunnelRecord = $tunnelRecord
+    $global:MegaDeskRollbackState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskState { $global:MegaDeskRollbackState }
+      Mock Get-ProcessSnapshot { throw 'snapshot must not be queried when state diverges' }
+      Mock Stop-Process { throw 'state-divergent process must not be stopped' }
+      Mock Save-MegaDeskState { throw 'state-divergent process must not be saved' }
+      Mock Write-MegaDeskLog { }
+
+      $failure = $null
+      try { Undo-MegaDeskInvocation -StartedTunnelRecord $global:MegaDeskRollbackDivergentTunnelRecord } catch { $failure = $_.Exception.Message }
+
+      $failure | Should Match 'cloudflared: cleanup recusado: o state nao pertence a esta invocacao'
+      Assert-MockCalled Get-ProcessSnapshot -Times 0 -Exactly -Scope It
+      Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
+      Assert-MockCalled Save-MegaDeskState -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'treats a proven absent managed process as idempotent cleanup' {
+    $tunnelRecord = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+    $global:MegaDeskRollbackState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $tunnelRecord; activeRelease = $null; previousRelease = $null; operation = $null }
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskState { $global:MegaDeskRollbackState }
+      Mock Test-SameManagedProcessRecord { $true }
+      Mock Get-ProcessSnapshot { $null }
+      Mock Test-ManagedProcess { throw 'identity must not be tested after confirmed absence' }
+      Mock Stop-Process { throw 'process is absent and must not be stopped' }
+      Mock Save-MegaDeskState { param($State) $global:MegaDeskRollbackState = $State }
+      Mock Write-MegaDeskLog { }
+
+      { Undo-MegaDeskInvocation -StartedTunnelRecord $global:MegaDeskRollbackState.cloudflared } | Should Not Throw
+
+      $global:MegaDeskRollbackState.cloudflared | Should Be $null
+      Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
+    }
+  }
+}
+
+Describe 'MegaDesk Bootstrap Zero rollback hardening' {
+  BeforeEach {
+    $script:port = Get-IsolatedTestPort
+    $script:runtimeRoot = Join-Path $TestDrive 'bootstrap-rollback-runtime'
+    $script:projectRoot = Join-Path $TestDrive 'bootstrap-rollback-project'
+    New-Item -ItemType Directory -Path $script:projectRoot -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $script:projectRoot '.env.local') -Value '' -NoNewline
+    & (Get-Module $moduleName) { param($runtimeRoot, $projectRoot, $port) Set-MegaDeskAutomationPaths -RuntimeRoot $runtimeRoot -ProjectRoot $projectRoot -Port $port } $script:runtimeRoot $script:projectRoot $script:port
+  }
+
+  It 'uses the real Undo to compensate Node when tunnel start fails before it is recorded' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $release = [pscustomobject]@{ sha = $candidate; path = (Join-Path $script:runtimeRoot 'releases\candidate') }
+    $nodeRecord = [pscustomobject]@{ pid = 4242; executablePath = 'C:\runtime\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); releaseSha = $candidate; port = $script:port }
+    $global:MegaDeskBootstrapRollbackCandidate = $candidate
+    $global:MegaDeskBootstrapRollbackBaseline = $baseline
+    $global:MegaDeskBootstrapRollbackRelease = $release
+    $global:MegaDeskBootstrapRollbackNodeRecord = $nodeRecord
+    $global:MegaDeskBootstrapRollbackState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+    $global:MegaDeskBootstrapRollbackStopOrder = [System.Collections.ArrayList]::new()
+    $global:MegaDeskBootstrapRollbackSnapshotReads = @{}
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapRollbackCandidate
+      $baseline = $global:MegaDeskBootstrapRollbackBaseline
+      Mock Assert-MegaDeskToolchain { }
+      Mock Assert-CloudflaredConfig { }
+      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskBootstrapRollbackCandidate } }
+      Mock Assert-MegaDeskBootstrapZeroInputs { [pscustomobject]@{ candidateSha = $global:MegaDeskBootstrapRollbackCandidate; baselineSha = $global:MegaDeskBootstrapRollbackBaseline } }
+      Mock Get-MegaDeskState { $global:MegaDeskBootstrapRollbackState }
+      Mock Save-MegaDeskState { param($State) $global:MegaDeskBootstrapRollbackState = $State }
+      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Test-MegaDeskDependencyDiff { $false }
+      Mock Invoke-MegaDeskBootstrapQualityGates { }
+      Mock Invoke-MegaDeskIsolatedBuild { $global:MegaDeskBootstrapRollbackRelease }
+      Mock Assert-MegaDeskNoSourceMutation { }
+      Mock Read-Host { 'INICIALIZAR' }
+      Mock Get-MegaDeskRelease { $global:MegaDeskBootstrapRollbackRelease }
+      Mock Assert-MegaDeskPortFree { }
+      Mock Start-MegaDeskNode {
+        $global:MegaDeskBootstrapRollbackState.node = $global:MegaDeskBootstrapRollbackNodeRecord
+        return $global:MegaDeskBootstrapRollbackNodeRecord
+      }
+      Mock Wait-MegaDeskLocal { }
+      Mock Start-MegaDeskTunnel { throw 'tunnel start failed' }
+      Mock Test-SameManagedProcessRecord { $true }
+      Mock Test-ManagedProcess { $true }
+      Mock Get-ProcessSnapshot {
+        param($ProcessId)
+        if (-not $global:MegaDeskBootstrapRollbackSnapshotReads.ContainsKey($ProcessId)) { $global:MegaDeskBootstrapRollbackSnapshotReads[$ProcessId] = 0 }
+        $global:MegaDeskBootstrapRollbackSnapshotReads[$ProcessId]++
+        if ($global:MegaDeskBootstrapRollbackSnapshotReads[$ProcessId] -eq 1) { return [pscustomobject]@{ ProcessId = $ProcessId } }
+        return $null
+      }
+      Mock Stop-Process { param($Id) [void]$global:MegaDeskBootstrapRollbackStopOrder.Add([int](@($Id)[0])) }
+      Mock Stop-MegaDeskExactManagedProcess { throw 'unexpected local compensation' }
+      Mock Wait-Process { }
+      Mock Write-MegaDeskLog { }
+
+      $failure = $null
+      try { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'wip/conversations-0013-lifecycle' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } catch { $failure = $_.Exception.Message }
+
+      $failure | Should Match 'tunnel start failed'
+      $global:MegaDeskBootstrapRollbackState.activeRelease | Should Be $null
+      $global:MegaDeskBootstrapRollbackState.previousRelease | Should Be $null
+      $global:MegaDeskBootstrapRollbackState.operation.status | Should Be 'FAILED'
+      $global:MegaDeskBootstrapRollbackState.node | Should Be $null
+      $global:MegaDeskBootstrapRollbackState.cloudflared | Should Be $null
+      $global:MegaDeskBootstrapRollbackStopOrder.ToArray() | Should Be @(4242)
+      Assert-MockCalled Stop-MegaDeskExactManagedProcess -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'uses the real Undo to clean tunnel then Node when the ACTIVE save fails' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $release = [pscustomobject]@{ sha = $candidate; path = (Join-Path $script:runtimeRoot 'releases\candidate') }
+    $nodeRecord = [pscustomobject]@{ pid = 4242; executablePath = 'C:\runtime\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); releaseSha = $candidate; port = $script:port }
+    $tunnelRecord = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+    $global:MegaDeskBootstrapCommitCandidate = $candidate
+    $global:MegaDeskBootstrapCommitBaseline = $baseline
+    $global:MegaDeskBootstrapCommitRelease = $release
+    $global:MegaDeskBootstrapCommitNodeRecord = $nodeRecord
+    $global:MegaDeskBootstrapCommitTunnelRecord = $tunnelRecord
+    $global:MegaDeskBootstrapCommitDurableState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+    $global:MegaDeskBootstrapCommitStopOrder = [System.Collections.ArrayList]::new()
+    $global:MegaDeskBootstrapCommitSnapshotReads = @{}
+    $global:MegaDeskBootstrapCommitActiveSaveAttempts = 0
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskBootstrapCommitCandidate
+      $baseline = $global:MegaDeskBootstrapCommitBaseline
+      Mock Assert-MegaDeskToolchain { }
+      Mock Assert-CloudflaredConfig { }
+      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskBootstrapCommitCandidate } }
+      Mock Assert-MegaDeskBootstrapZeroInputs { [pscustomobject]@{ candidateSha = $global:MegaDeskBootstrapCommitCandidate; baselineSha = $global:MegaDeskBootstrapCommitBaseline } }
+      Mock Get-MegaDeskState {
+        $serialized = $global:MegaDeskBootstrapCommitDurableState | ConvertTo-Json -Depth 8
+        return ($serialized | ConvertFrom-Json)
+      }
+      Mock Save-MegaDeskState {
+        param($State)
+        if ([string]$State.operation.status -eq 'ACTIVE') {
+          $global:MegaDeskBootstrapCommitActiveSaveAttempts++
+          throw 'active state write failed'
+        }
+        $serialized = $State | ConvertTo-Json -Depth 8
+        $global:MegaDeskBootstrapCommitDurableState = $serialized | ConvertFrom-Json
+      }
+      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Test-MegaDeskDependencyDiff { $false }
+      Mock Invoke-MegaDeskBootstrapQualityGates { }
+      Mock Invoke-MegaDeskIsolatedBuild { $global:MegaDeskBootstrapCommitRelease }
+      Mock Assert-MegaDeskNoSourceMutation { }
+      Mock Read-Host { 'INICIALIZAR' }
+      Mock Get-MegaDeskRelease { $global:MegaDeskBootstrapCommitRelease }
+      Mock Assert-MegaDeskPortFree { }
+      Mock Start-MegaDeskNode {
+        $serialized = $global:MegaDeskBootstrapCommitDurableState | ConvertTo-Json -Depth 8
+        $next = $serialized | ConvertFrom-Json
+        $next.node = $global:MegaDeskBootstrapCommitNodeRecord
+        $global:MegaDeskBootstrapCommitDurableState = $next
+        return $global:MegaDeskBootstrapCommitNodeRecord
+      }
+      Mock Wait-MegaDeskLocal { }
+      Mock Start-MegaDeskTunnel {
+        $serialized = $global:MegaDeskBootstrapCommitDurableState | ConvertTo-Json -Depth 8
+        $next = $serialized | ConvertFrom-Json
+        $next.cloudflared = $global:MegaDeskBootstrapCommitTunnelRecord
+        $global:MegaDeskBootstrapCommitDurableState = $next
+        return $global:MegaDeskBootstrapCommitTunnelRecord
+      }
+      Mock Wait-MegaDeskPublicEndpoints { }
+      Mock Test-SameManagedProcessRecord { $true }
+      Mock Test-ManagedProcess { $true }
+      Mock Get-ProcessSnapshot {
+        param($ProcessId)
+        if (-not $global:MegaDeskBootstrapCommitSnapshotReads.ContainsKey($ProcessId)) { $global:MegaDeskBootstrapCommitSnapshotReads[$ProcessId] = 0 }
+        $global:MegaDeskBootstrapCommitSnapshotReads[$ProcessId]++
+        if ($global:MegaDeskBootstrapCommitSnapshotReads[$ProcessId] -eq 1) { return [pscustomobject]@{ ProcessId = $ProcessId } }
+        return $null
+      }
+      Mock Stop-Process { param($Id) [void]$global:MegaDeskBootstrapCommitStopOrder.Add([int](@($Id)[0])) }
+      Mock Stop-MegaDeskExactManagedProcess { throw 'unexpected local compensation' }
+      Mock Wait-Process { }
+      Mock Write-MegaDeskLog { }
+
+      $failure = $null
+      try { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'wip/conversations-0013-lifecycle' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } catch { $failure = $_.Exception.Message }
+
+      $failure | Should Match 'active state write failed'
+      $global:MegaDeskBootstrapCommitActiveSaveAttempts | Should Be 1
+      $global:MegaDeskBootstrapCommitStopOrder.ToArray() | Should Be @(5252, 4242)
+      $global:MegaDeskBootstrapCommitDurableState.activeRelease | Should Be $null
+      $global:MegaDeskBootstrapCommitDurableState.previousRelease | Should Be $null
+      $global:MegaDeskBootstrapCommitDurableState.operation.status | Should Be 'FAILED'
+      $global:MegaDeskBootstrapCommitDurableState.cloudflared | Should Be $null
+      $global:MegaDeskBootstrapCommitDurableState.node | Should Be $null
+      Assert-MockCalled Stop-MegaDeskExactManagedProcess -Times 0 -Exactly -Scope It
+    }
+  }
+}
+
+Describe 'MegaDesk Bootstrap Zero readiness and stale process safety' {
+  BeforeEach {
+    $script:port = Get-IsolatedTestPort
+    $script:runtimeRoot = Join-Path $TestDrive 'bootstrap-readiness-runtime'
+    $script:projectRoot = Join-Path $TestDrive 'bootstrap-readiness-project'
+    New-Item -ItemType Directory -Path $script:projectRoot -Force | Out-Null
+    & (Get-Module $moduleName) { param($runtimeRoot, $projectRoot, $port) Set-MegaDeskAutomationPaths -RuntimeRoot $runtimeRoot -ProjectRoot $projectRoot -Port $port } $script:runtimeRoot $script:projectRoot $script:port
+  }
+
+  It 'rejects a divergent public health SHA before Bootstrap promotion' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $now = [DateTime]::UtcNow
+    $global:MegaDeskBootstrapReadinessTimes = [System.Collections.Generic.Queue[DateTime]]::new()
+    foreach ($time in @($now, $now, $now, $now, $now.AddSeconds(1))) { $global:MegaDeskBootstrapReadinessTimes.Enqueue($time) }
+    InModuleScope $moduleName {
+      $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+      Mock Get-Date { $global:MegaDeskBootstrapReadinessTimes.Dequeue() }
+      Mock Get-MegaDeskHealth { [pscustomobject]@{ status = 'healthy'; release = [pscustomobject]@{ sha = 'cccccccccccccccccccccccccccccccccccccccc' } } }
+      Mock Get-HttpStatusCode { 404 }
+      Mock Write-MegaDeskLog { }
+
+      { Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha $candidate -TestMode -TimeoutSeconds 1 -PollIntervalSeconds 0 } | Should Throw
+
+      Assert-MockCalled Get-MegaDeskHealth -Times 2 -Exactly -Scope It
+    }
+  }
+
+  It 'blocks a stale Cloudflared record with a present invalid process without adoption or termination' {
+    $stale = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow.AddMinutes(-1)).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+    $global:MegaDeskBootstrapStalePresentState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $stale; activeRelease = $null; previousRelease = $null; operation = $null }
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskState { $global:MegaDeskBootstrapStalePresentState }
+      Mock Test-ManagedProcess { $false }
+      Mock Save-MegaDeskState { param($State) $global:MegaDeskBootstrapStalePresentState = $State }
+      Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\cloudflared.exe' } }
+      Mock Get-CimInstance { param($ClassName, $Filter) [pscustomobject]@{ ProcessId = 5252 } }
+      Mock Start-MegaDeskProcess { throw 'a second tunnel must not start' }
+      Mock Stop-Process { throw 'an invalid process must not be terminated' }
+
+      $failure = $null
+      try { Start-MegaDeskTunnel } catch { $failure = $_.Exception.Message }
+
+      $failure | Should Match 'cloudflared nao controlado'
+      $global:MegaDeskBootstrapStalePresentState.cloudflared | Should Be $null
+      Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
+      Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
+    }
+  }
 }
 
 function New-DummyHealthServer {
@@ -1053,22 +1670,6 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
     }
   }
 
-  It 'validates real dummy health on an isolated port' {
-    $sha = '1111111111111111111111111111111111111111'
-    $process = New-DummyHealthServer -Root $TestDrive -Port $script:port -Sha $sha
-    try {
-      $health = $null
-      for ($attempt = 0; $attempt -lt 15 -and $null -eq $health; $attempt++) {
-        try { $health = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$script:port/healthz" -TimeoutSec 1 | Select-Object -ExpandProperty Content | ConvertFrom-Json } catch { Start-Sleep -Milliseconds 200 }
-      }
-      if ($null -eq $health) { throw 'Dummy health nao iniciou na porta temporaria.' }
-      $health.status | Should Be 'healthy'
-      $health.release.sha | Should Be $sha
-    } finally {
-      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-    }
-  }
-
   It 'marks the candidate active only after the switch health calls succeed' {
     $old = [pscustomobject]@{ sha = '2222222222222222222222222222222222222222'; path = 'C:\isolated\old' }
     $candidate = [pscustomobject]@{ sha = '3333333333333333333333333333333333333333'; path = 'C:\isolated\candidate' }
@@ -1113,6 +1714,28 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
       Mock Invoke-MegaDeskReleaseRollback { }
       { Invoke-MegaDeskReleaseSwitch -CandidateRelease $candidate -PreviousRelease $old -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) -TestMode } | Should Throw
       Assert-MockCalled Invoke-MegaDeskReleaseRollback -Times 1 -Exactly
+    }
+  }
+}
+
+Describe 'MegaDesk updater v2 real process health' -Tags @('ProcessReal') {
+  BeforeEach {
+    $script:port = Get-IsolatedTestPort
+  }
+
+  It 'validates real dummy health on an isolated port' {
+    $sha = '1111111111111111111111111111111111111111'
+    $process = New-DummyHealthServer -Root $TestDrive -Port $script:port -Sha $sha
+    try {
+      $health = $null
+      for ($attempt = 0; $attempt -lt 15 -and $null -eq $health; $attempt++) {
+        try { $health = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$script:port/healthz" -TimeoutSec 1 | Select-Object -ExpandProperty Content | ConvertFrom-Json } catch { Start-Sleep -Milliseconds 200 }
+      }
+      if ($null -eq $health) { throw 'Dummy health nao iniciou na porta temporaria.' }
+      $health.status | Should Be 'healthy'
+      $health.release.sha | Should Be $sha
+    } finally {
+      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
     }
   }
 }
