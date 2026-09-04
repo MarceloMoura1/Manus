@@ -60,4 +60,8 @@ O state registra `operation.kind = BOOTSTRAP_ZERO`, o SHA candidato e a baseline
 
 No Bootstrap Start nao existe `previousRelease`: se a candidata falhar, ela so pode ser encerrada quando a identidade managed for comprovada. Nao ha rollback ficticio, start pelo worktree ou importacao de `automation-state.json`. A release permanece para diagnostico.
 
-Assim como no updater normal, a promocao para `activeRelease` depende de health local com SHA esperado e readiness publico. A ausencia de Cloudflared gerenciado valido bloqueia esse readiness; o Bootstrap nao inicia Cloudflared como workaround.
+Assim como no updater normal, a promocao para `activeRelease` depende de health local com SHA esperado e readiness publico. No Bootstrap, a config do Cloudflared e validada antes de iniciar processos. Depois de iniciar e registrar o Node da release candidata e confirmar seu health local, o Bootstrap estabelece ou reutiliza somente um Cloudflared V2 com identidade forte e executa o readiness publico.
+
+Cloudflared criado pela invocacao atual e registrado no state ainda durante `SWITCHING`; isso nao o torna `activeRelease`. Se o readiness ou o save final falhar antes do commit point, o cleanup seletivo encerra primeiro apenas esse tunnel e depois apenas o Node criado pela mesma invocacao, sempre revalidando identidade forte. Um Cloudflared V2 preexistente e valido pode ser reutilizado, mas nunca e marcado como criado pela invocacao nem encerrado por sua compensacao. Processo externo, sem record V2, stale ambiguo ou identidade nao comprovada continuam bloqueados e nunca sao adotados ou mortos por PID.
+
+`Save-MegaDeskState` com `activeRelease` candidata, `previousRelease = null` e `operation.status = ACTIVE` e o commit point da primeira ativacao. Apos esse save, falha de logging nao encerra Node ou Cloudflared e nao reverte `ACTIVE`.

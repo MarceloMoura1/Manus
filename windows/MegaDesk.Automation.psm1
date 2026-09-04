@@ -826,7 +826,7 @@ function Start-MegaDeskNode {
 function Start-MegaDeskTunnel {
   $state = Get-MegaDeskState
   if ($null -ne $state.cloudflared -and (Test-ManagedProcess -Record $state.cloudflared -Kind cloudflared)) {
-    Write-MegaDeskLog 'Cloudflare Tunnel controlado ja esta ativo; nenhuma duplicata foi criada.'
+    try { Write-MegaDeskLog 'Cloudflare Tunnel controlado ja esta ativo; nenhuma duplicata foi criada.' } catch { }
     return $null
   }
   if ($null -ne $state.cloudflared) { $state.cloudflared = $null; Save-MegaDeskState $state }
@@ -842,16 +842,26 @@ function Start-MegaDeskTunnel {
   $psi.WorkingDirectory = $script:ProjectRoot
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true
-  $process = [System.Diagnostics.Process]::Start($psi)
+  $process = Start-MegaDeskProcess -StartInfo $psi
   try {
-    $state.cloudflared = New-ManagedProcessRecord -Process $process -ExecutablePath $cloudflared.Source -Kind cloudflared -ConfigPath $script:CloudflaredConfig
+    $record = New-ManagedProcessRecord -Process $process -ExecutablePath $cloudflared.Source -Kind cloudflared -ConfigPath $script:CloudflaredConfig
   } catch {
-    Stop-Process -Id $process.Id -ErrorAction SilentlyContinue
-    throw
+    throw ("CRITICO: identidade do Cloudflared iniciado nao pode ser comprovada: {0}. Nenhum encerramento por PID foi tentado; cleanup automatico inseguro foi recusado e intervencao manual pode ser necessaria." -f $_.Exception.Message)
   }
-  Save-MegaDeskState $state
-  Write-MegaDeskLog ("Cloudflare Tunnel iniciado e controlado (PID {0})." -f $process.Id)
-  return $state.cloudflared
+  try {
+    $state.cloudflared = $record
+    Save-MegaDeskState $state
+  } catch {
+    $stateFailure = $_.Exception.Message
+    try {
+      Stop-MegaDeskExactManagedProcess -Record $record -Kind cloudflared
+    } catch {
+      throw ("CRITICO: state do Cloudflared iniciado nao pode ser persistido: {0}. Compensacao automatica nao pode ser provada: {1}. Intervencao manual e necessaria." -f $stateFailure, $_.Exception.Message)
+    }
+    throw ("State do Cloudflared iniciado nao pode ser persistido; tunnel compensado localmente: {0}." -f $stateFailure)
+  }
+  try { Write-MegaDeskLog ("Cloudflare Tunnel iniciado e controlado (PID {0})." -f $process.Id) } catch { }
+  return $record
 }
 
 function Get-HttpStatusCode {
@@ -1016,13 +1026,17 @@ function Undo-MegaDeskInvocation {
       $state = Get-MegaDeskState
       $current = $state.($entry.Kind)
       if ($null -eq $current -or -not (Test-SameManagedProcessRecord -Left $current -Right $entry.Record)) {
-        Write-MegaDeskLog ("Rollback recusou {0}: o state nao pertence a esta invocacao." -f $entry.Kind)
+        $cause = 'cleanup recusado: o state nao pertence a esta invocacao.'
+        $rollbackErrors += ("{0}: {1}" -f $entry.Kind, $cause)
+        try { Write-MegaDeskLog ("Rollback incompleto para {0}: {1}" -f $entry.Kind, $cause) } catch { }
         continue
       }
       $snapshot = Get-ProcessSnapshot -ProcessId ([int]$current.pid)
       if ($null -ne $snapshot) {
         if (-not (Test-ManagedProcess -Record $current -Kind $entry.Kind)) {
-          Write-MegaDeskLog ("Rollback preservou {0}: identidade do processo nao confere." -f $entry.Kind)
+          $cause = 'cleanup recusado: identidade gerenciada do processo nao pode ser comprovada; processo preservado.'
+          $rollbackErrors += ("{0}: {1}" -f $entry.Kind, $cause)
+          try { Write-MegaDeskLog ("Rollback incompleto para {0}: {1}" -f $entry.Kind, $cause) } catch { }
           continue
         }
         Stop-Process -Id ([int]$current.pid) -ErrorAction Stop
@@ -1033,12 +1047,14 @@ function Undo-MegaDeskInvocation {
       }
       $state.($entry.Kind) = $null
       Save-MegaDeskState $state
-      Write-MegaDeskLog ("Rollback removeu somente {0} iniciado nesta invocacao." -f $entry.Kind)
+      try { Write-MegaDeskLog ("Rollback removeu somente {0} iniciado nesta invocacao." -f $entry.Kind) } catch { }
     } catch {
-      $rollbackErrors += $entry.Kind
+      $cause = $_.Exception.Message
+      $rollbackErrors += ("{0}: {1}" -f $entry.Kind, $cause)
+      try { Write-MegaDeskLog ("Rollback incompleto para {0}: {1}" -f $entry.Kind, $cause) } catch { }
     }
   }
-  if ($rollbackErrors.Count -gt 0) { throw ("Rollback seletivo incompleto para: {0}." -f ($rollbackErrors -join ', ')) }
+  if ($rollbackErrors.Count -gt 0) { throw ("Rollback seletivo incompleto: {0}." -f ($rollbackErrors -join ' | ')) }
 }
 
 function Stop-MegaDeskManagedProcess {
@@ -1208,6 +1224,9 @@ function Complete-MegaDeskBootstrapZeroActivation {
   if ($null -eq $state.node -or [string]$state.node.releaseSha -ne [string]$CandidateRelease.sha -or -not (Test-ManagedProcess -Record $state.node -Kind node)) {
     throw 'Bootstrap Zero nao pode promover candidate sem identidade Node gerenciada valida.'
   }
+  if ($null -eq $state.cloudflared -or -not (Test-ManagedProcess -Record $state.cloudflared -Kind cloudflared)) {
+    throw 'Bootstrap Zero nao pode promover candidate sem Cloudflared gerenciado valido.'
+  }
   $state.activeRelease = [pscustomobject]@{ sha = $CandidateRelease.sha; path = $CandidateRelease.path; activatedAt = (Get-Date).ToUniversalTime().ToString('o') }
   $state.previousRelease = $null
   $state.operation = New-MegaDeskOperationRecord -Status 'ACTIVE' -Kind 'BOOTSTRAP_ZERO' -CandidateSha $CandidateRelease.sha -BaselineSha $MigrationBaselineSha -Message 'Bootstrap Zero confirmado por health local e publico.'
@@ -1266,8 +1285,10 @@ function Invoke-MegaDeskBootstrapZero {
   if ($TestMode) { Assert-MegaDeskTestChecks -Checks $PublicChecks }
   $candidate = $null
   $startedCandidateRecord = $null
+  $startedTunnelRecord = $null
   try {
     Assert-MegaDeskToolchain -RequirePnpm
+    Assert-CloudflaredConfig
     $git = Assert-MegaDeskGitPreflight -ExpectedBranch $ExpectedBranch
     $input = Assert-MegaDeskBootstrapZeroInputs -CandidateSha $CandidateSha -MigrationBaselineSha $MigrationBaselineSha -CurrentHeadSha $git.sha
     $candidate = $input.candidateSha
@@ -1302,13 +1323,14 @@ function Invoke-MegaDeskBootstrapZero {
     $startedCandidateRecord = Start-MegaDeskNode -ReleaseSha $candidate -Port $script:RuntimePort
     if ($null -eq $startedCandidateRecord) { throw 'Bootstrap Start nao recebeu identidade do candidate iniciado.' }
     Wait-MegaDeskLocal -ExpectedReleaseSha $candidate -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds
+    $startedTunnelRecord = Start-MegaDeskTunnel
     Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha $candidate -Checks $PublicChecks -TestMode:$TestMode -TimeoutSeconds $PublicTimeoutSeconds
     Complete-MegaDeskBootstrapZeroActivation -CandidateRelease $candidateRelease -MigrationBaselineSha $baseline
     return $candidateRelease
   } catch {
     $failure = $_.Exception.Message
-    if ($null -ne $startedCandidateRecord) {
-      try { Undo-MegaDeskInvocation -StartedNodeRecord $startedCandidateRecord } catch { $failure = "$failure Encerramento seletivo do candidate falhou: $($_.Exception.Message)" }
+    if ($null -ne $startedCandidateRecord -or $null -ne $startedTunnelRecord) {
+      try { Undo-MegaDeskInvocation -StartedNodeRecord $startedCandidateRecord -StartedTunnelRecord $startedTunnelRecord } catch { $failure = "$failure Encerramento seletivo do candidate falhou: $($_.Exception.Message)" }
     }
     try {
       $current = Get-MegaDeskState
@@ -1317,7 +1339,7 @@ function Invoke-MegaDeskBootstrapZero {
         Set-MegaDeskOperationState -Status 'FAILED' -Kind 'BOOTSTRAP_ZERO' -CandidateSha $failedCandidateSha -BaselineSha $MigrationBaselineSha -Message 'Bootstrap Zero falhou; nao existe rollback automatico anterior.' | Out-Null
       }
     } catch { }
-    Write-MegaDeskLog ("Bootstrap Zero bloqueado ou falhou: {0}" -f $failure)
+    try { Write-MegaDeskLog ("Bootstrap Zero bloqueado ou falhou: {0}" -f $failure) } catch { }
     throw ("Bootstrap Zero falhou; nao existe rollback automatico anterior: {0}" -f $failure)
   }
 }
