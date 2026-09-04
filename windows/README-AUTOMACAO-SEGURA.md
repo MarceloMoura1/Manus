@@ -47,3 +47,17 @@ release candidata.
 `start-megadesk.bat`, `stop-megadesk.bat` e os instaladores de auto-start foram
 preservados apenas por compatibilidade historica. Eles nao possuem os guardrails
 desta automacao e nao devem ser usados para este fluxo.
+
+## Bootstrap Zero (primeira ativacao)
+
+`Atualizar-MegaDesk.ps1` continua sendo exclusivamente o launcher do updater normal. Ele exige uma `activeRelease` V2 valida e nunca executa Bootstrap Zero de forma implicita.
+
+O Bootstrap Zero e um comando one-shot separado, `Inicializar-UpdaterV2.ps1`. Ele exige `CandidateSha` e `MigrationBaselineSha` completos e explicitos. Nenhum SHA e inferido de `HEAD^`, state legado ou do parent Git. A baseline precisa ser autorizada operacionalmente antes de qualquer execucao real.
+
+O Bootstrap somente aceita state V2 inexistente ou vazio, sem `activeRelease` nem `previousRelease`. Ele prepara uma release imutavel usando o mesmo build isolado do updater, mas artefato preparado e somente `artifact-valid`: ele nao se torna `activeRelease` em disco.
+
+O state registra `operation.kind = BOOTSTRAP_ZERO`, o SHA candidato e a baseline explicita. A sequencia permitida e `PREPARING -> READY -> SWITCHING -> ACTIVE`, ou `FAILED`. `READY` reaproveita apenas uma release revalidada. `PREPARING`, `FAILED` e `SWITCHING` ambiguo permanecem fail-closed; nenhuma promocao ocorre apenas porque o state declara `SWITCHING`.
+
+No Bootstrap Start nao existe `previousRelease`: se a candidata falhar, ela so pode ser encerrada quando a identidade managed for comprovada. Nao ha rollback ficticio, start pelo worktree ou importacao de `automation-state.json`. A release permanece para diagnostico.
+
+Assim como no updater normal, a promocao para `activeRelease` depende de health local com SHA esperado e readiness publico. A ausencia de Cloudflared gerenciado valido bloqueia esse readiness; o Bootstrap nao inicia Cloudflared como workaround.

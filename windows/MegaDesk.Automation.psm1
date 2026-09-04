@@ -108,17 +108,42 @@ function Save-MegaDeskState {
   }
 }
 
+function New-MegaDeskOperationRecord {
+  param(
+    [Parameter(Mandatory = $true)][ValidateSet('PREPARING', 'READY', 'SWITCHING', 'ACTIVE', 'ROLLING_BACK', 'FAILED')][string]$Status,
+    [Parameter(Mandatory = $true)][ValidateSet('UPDATE', 'BOOTSTRAP_ZERO')][string]$Kind,
+    [string]$CandidateSha = '',
+    [AllowNull()][string]$BaselineSha = $null,
+    [string]$Message = ''
+  )
+  return [pscustomobject]@{
+    kind = $Kind
+    status = $Status
+    candidateSha = $CandidateSha
+    baselineSha = $BaselineSha
+    updatedAt = (Get-Date).ToUniversalTime().ToString('o')
+    message = $Message
+  }
+}
+
 function Set-MegaDeskOperationState {
   param(
     [Parameter(Mandatory = $true)][ValidateSet('PREPARING', 'READY', 'SWITCHING', 'ACTIVE', 'ROLLING_BACK', 'FAILED')][string]$Status,
     [string]$CandidateSha = '',
+    [ValidateSet('UPDATE', 'BOOTSTRAP_ZERO')][string]$Kind = '',
+    [AllowNull()][string]$BaselineSha = $null,
     [string]$Message = ''
   )
   $state = Get-MegaDeskState
   $previous = if ($null -eq $state.operation) { '' } else { [string]$state.operation.status }
   $allowed = @{ '' = @('PREPARING'); ACTIVE = @('PREPARING'); FAILED = @('PREPARING'); PREPARING = @('READY', 'FAILED'); READY = @('SWITCHING', 'FAILED'); SWITCHING = @('ACTIVE', 'ROLLING_BACK', 'FAILED'); ROLLING_BACK = @('ACTIVE', 'FAILED') }
   if (-not $allowed.ContainsKey($previous) -or $allowed[$previous] -notcontains $Status) { throw "Transicao de estado invalida: $previous -> $Status." }
-  $state.operation = [pscustomobject]@{ status = $Status; candidateSha = $CandidateSha; updatedAt = (Get-Date).ToUniversalTime().ToString('o'); message = $Message }
+  $resolvedKind = $Kind
+  if ([string]::IsNullOrWhiteSpace($resolvedKind)) {
+    $resolvedKind = if ($null -ne $state.operation -and $state.operation.PSObject.Properties.Name -contains 'kind' -and -not [string]::IsNullOrWhiteSpace([string]$state.operation.kind)) { [string]$state.operation.kind } else { 'UPDATE' }
+  }
+  $resolvedBaselineSha = if ($PSBoundParameters.ContainsKey('BaselineSha')) { $BaselineSha } elseif ($Kind -eq 'UPDATE') { $null } elseif ($null -ne $state.operation -and $state.operation.PSObject.Properties.Name -contains 'baselineSha') { $state.operation.baselineSha } else { $null }
+  $state.operation = New-MegaDeskOperationRecord -Status $Status -Kind $resolvedKind -CandidateSha $CandidateSha -BaselineSha $resolvedBaselineSha -Message $Message
   Save-MegaDeskState $state
   return $state
 }
@@ -710,6 +735,11 @@ function New-MegaDeskNodeLaunchSpec {
   }
 }
 
+function Start-MegaDeskProcess {
+  param([Parameter(Mandatory = $true)][System.Diagnostics.ProcessStartInfo]$StartInfo)
+  return [System.Diagnostics.Process]::Start($StartInfo)
+}
+
 function New-ManagedProcessRecord {
   param($Process, [string]$ExecutablePath, [ValidateSet('node', 'cloudflared')][string]$Kind, [string]$ConfigPath = '', [string]$ScriptPath = '', [string]$EnvironmentPath = '', [string]$ReleaseSha = '', [Nullable[int]]$Port = $null)
   if ($Kind -eq 'node' -and ($null -eq $Port -or $Port -lt 1 -or $Port -gt 65535)) { throw 'Node exige porta valida no record de identidade.' }
@@ -771,16 +801,26 @@ function Start-MegaDeskNode {
   $psi.EnvironmentVariables['TRUST_PROXY_HOPS'] = '1'
   $psi.EnvironmentVariables['MEGADESK_ALLOWED_ORIGINS'] = $script:AllowedOrigins
   if (-not [string]::IsNullOrWhiteSpace($ReleaseSha)) { $psi.EnvironmentVariables['MEGADESK_RELEASE_SHA'] = $ReleaseSha }
-  $process = [System.Diagnostics.Process]::Start($psi)
+  $process = Start-MegaDeskProcess -StartInfo $psi
   try {
-    $state.node = New-ManagedProcessRecord -Process $process -ExecutablePath $launch.executablePath -Kind node -ScriptPath $launch.scriptPath -EnvironmentPath $launch.environmentPath -ReleaseSha $ReleaseSha -Port $Port
+    $record = New-ManagedProcessRecord -Process $process -ExecutablePath $launch.executablePath -Kind node -ScriptPath $launch.scriptPath -EnvironmentPath $launch.environmentPath -ReleaseSha $ReleaseSha -Port $Port
   } catch {
-    Stop-Process -Id $process.Id -ErrorAction SilentlyContinue
-    throw
+    throw ("CRITICO: identidade do Node iniciado nao pode ser comprovada: {0}. Nenhum encerramento por PID foi tentado; intervencao manual e necessaria." -f $_.Exception.Message)
   }
-  Save-MegaDeskState $state
-  Write-MegaDeskLog ("MegaDesk Node iniciado e controlado (PID {0})." -f $process.Id)
-  return $state.node
+  try {
+    $state.node = $record
+    Save-MegaDeskState $state
+  } catch {
+    $stateFailure = $_.Exception.Message
+    try {
+      Stop-MegaDeskExactManagedProcess -Record $record -Kind node
+    } catch {
+      throw ("CRITICO: state do Node iniciado nao pode ser persistido: {0}. Compensacao automatica nao pode ser provada: {1}. Intervencao manual e necessaria." -f $stateFailure, $_.Exception.Message)
+    }
+    throw ("State do Node iniciado nao pode ser persistido; candidate compensada localmente: {0}." -f $stateFailure)
+  }
+  try { Write-MegaDeskLog ("MegaDesk Node iniciado e controlado (PID {0})." -f $process.Id) } catch { }
+  return $record
 }
 
 function Start-MegaDeskTunnel {
@@ -946,6 +986,23 @@ function Test-SameManagedProcessRecord {
   } catch { return $false }
 }
 
+function Stop-MegaDeskExactManagedProcess {
+  param(
+    [Parameter(Mandatory = $true)]$Record,
+    [Parameter(Mandatory = $true)][ValidateSet('node', 'cloudflared')][string]$Kind
+  )
+  $snapshot = Get-ProcessSnapshot -ProcessId ([int]$Record.pid)
+  if ($null -eq $snapshot) { return }
+  if (-not (Test-ManagedProcess -Record $Record -Kind $Kind)) {
+    throw "Identidade do processo $Kind iniciado nao pode ser comprovada; encerramento recusado."
+  }
+  Stop-Process -Id ([int]$Record.pid) -ErrorAction Stop
+  Wait-Process -Id ([int]$Record.pid) -Timeout 20 -ErrorAction SilentlyContinue
+  if ($null -ne (Get-ProcessSnapshot -ProcessId ([int]$Record.pid))) {
+    throw "Processo $Kind iniciado nao encerrou durante compensacao local."
+  }
+}
+
 function Undo-MegaDeskInvocation {
   param($StartedNodeRecord = $null, $StartedTunnelRecord = $null)
 
@@ -1084,6 +1141,187 @@ function Invoke-MegaDeskReleaseSwitch {
   }
 }
 
+function Resolve-MegaDeskCommitSha {
+  param([Parameter(Mandatory = $true)][string]$Sha, [Parameter(Mandatory = $true)][string]$Label)
+  if (-not (Test-MegaDeskFullSha $Sha)) { throw "$Label deve ser um SHA completo de 40 caracteres hexadecimais." }
+  $resolved = @(Invoke-MegaDeskGit -Arguments @('rev-parse', ("{0}^{{commit}}" -f $Sha)) -FailureMessage ("Nao foi possivel resolver o SHA de {0}." -f $Label) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+  if ($resolved.Count -ne 1 -or -not (Test-MegaDeskFullSha ([string]$resolved[0])) -or [string]::Compare([string]$resolved[0], $Sha, $true) -ne 0) {
+    throw "$Label nao resolve exatamente para o SHA informado."
+  }
+  return ([string]$resolved[0]).ToLowerInvariant()
+}
+
+function Assert-MegaDeskBootstrapZeroInputs {
+  param(
+    [Parameter(Mandatory = $true)][string]$CandidateSha,
+    [Parameter(Mandatory = $true)][string]$MigrationBaselineSha,
+    [Parameter(Mandatory = $true)][string]$CurrentHeadSha
+  )
+  $candidate = Resolve-MegaDeskCommitSha -Sha $CandidateSha -Label 'CandidateSha'
+  $baseline = Resolve-MegaDeskCommitSha -Sha $MigrationBaselineSha -Label 'MigrationBaselineSha'
+  if ($candidate -eq $baseline) { throw 'MigrationBaselineSha deve ser diferente de CandidateSha.' }
+  if ($candidate -ne $CurrentHeadSha.ToLowerInvariant()) { throw 'CandidateSha deve corresponder exatamente ao HEAD aprovado pelo preflight.' }
+  Invoke-MegaDeskGit -Arguments @('merge-base', '--is-ancestor', $baseline, $candidate) -FailureMessage 'MigrationBaselineSha nao e ancestral de CandidateSha; comparacao de migrations recusada.' | Out-Null
+  return [pscustomobject]@{ candidateSha = $candidate; baselineSha = $baseline }
+}
+
+function Assert-MegaDeskBootstrapZeroState {
+  param(
+    [Parameter(Mandatory = $true)]$State,
+    [Parameter(Mandatory = $true)][string]$CandidateSha,
+    [Parameter(Mandatory = $true)][string]$MigrationBaselineSha
+  )
+  if ($null -ne $State.activeRelease) { throw 'Bootstrap Zero recusado: ja existe activeRelease valida ou registrada.' }
+  if ($null -ne $State.previousRelease) { throw 'Bootstrap Zero recusado: previousRelease sem activeRelease e estado ambiguo.' }
+  if ($null -eq $State.operation) {
+    if ($null -ne $State.node) { throw 'Bootstrap Zero recusado: processo Node registrado sem activeRelease.' }
+    return [pscustomobject]@{ status = 'EMPTY'; release = $null }
+  }
+  if (-not ($State.operation.PSObject.Properties.Name -contains 'kind') -or [string]$State.operation.kind -ne 'BOOTSTRAP_ZERO') {
+    throw 'Bootstrap Zero recusado: existe operacao V2 incompativel ou ambigua.'
+  }
+  if ([string]$State.operation.candidateSha -ne $CandidateSha -or -not ($State.operation.PSObject.Properties.Name -contains 'baselineSha') -or [string]$State.operation.baselineSha -ne $MigrationBaselineSha) {
+    throw 'Bootstrap Zero recusado: parametros nao correspondem a operacao Bootstrap pendente.'
+  }
+  switch ([string]$State.operation.status) {
+    'READY' {
+      if ($null -ne $State.node) { throw 'Bootstrap Zero READY possui processo Node registrado; estado ambiguo.' }
+      return [pscustomobject]@{ status = 'READY'; release = (Get-MegaDeskRelease -Sha $CandidateSha) }
+    }
+    'SWITCHING' { return [pscustomobject]@{ status = 'SWITCHING'; release = (Get-MegaDeskRelease -Sha $CandidateSha) } }
+    'PREPARING' { throw 'Bootstrap Zero anterior ficou em PREPARING; release nao e presumida completa e a recuperacao manual e obrigatoria.' }
+    'FAILED' { throw 'Bootstrap Zero anterior falhou; nenhuma reinicializacao automatica e permitida.' }
+    'ACTIVE' { throw 'Bootstrap Zero ACTIVE sem activeRelease e estado ambiguo.' }
+    default { throw 'Bootstrap Zero possui status de operacao invalido.' }
+  }
+}
+
+function Complete-MegaDeskBootstrapZeroActivation {
+  param(
+    [Parameter(Mandatory = $true)]$CandidateRelease,
+    [Parameter(Mandatory = $true)][string]$MigrationBaselineSha
+  )
+  $state = Get-MegaDeskState
+  if ($null -ne $state.activeRelease -or $null -ne $state.previousRelease -or $null -eq $state.operation -or [string]$state.operation.kind -ne 'BOOTSTRAP_ZERO' -or [string]$state.operation.status -ne 'SWITCHING' -or [string]$state.operation.candidateSha -ne [string]$CandidateRelease.sha -or [string]$state.operation.baselineSha -ne $MigrationBaselineSha) {
+    throw 'Bootstrap Zero nao pode promover state divergente.'
+  }
+  if ($null -eq $state.node -or [string]$state.node.releaseSha -ne [string]$CandidateRelease.sha -or -not (Test-ManagedProcess -Record $state.node -Kind node)) {
+    throw 'Bootstrap Zero nao pode promover candidate sem identidade Node gerenciada valida.'
+  }
+  $state.activeRelease = [pscustomobject]@{ sha = $CandidateRelease.sha; path = $CandidateRelease.path; activatedAt = (Get-Date).ToUniversalTime().ToString('o') }
+  $state.previousRelease = $null
+  $state.operation = New-MegaDeskOperationRecord -Status 'ACTIVE' -Kind 'BOOTSTRAP_ZERO' -CandidateSha $CandidateRelease.sha -BaselineSha $MigrationBaselineSha -Message 'Bootstrap Zero confirmado por health local e publico.'
+  Save-MegaDeskState $state
+  try { Write-MegaDeskLog ("Bootstrap Zero marcou a release {0} como ativa." -f $CandidateRelease.sha) } catch { }
+}
+
+function Resolve-MegaDeskBootstrapZeroOperation {
+  param(
+    [Parameter(Mandatory = $true)]$State,
+    [Parameter(Mandatory = $true)][string]$CandidateSha,
+    [Parameter(Mandatory = $true)][string]$MigrationBaselineSha,
+    [object[]]$PublicChecks = @(),
+    [switch]$TestMode,
+    [ValidateRange(1, 90)][int]$LocalTimeoutSeconds = 90,
+    [ValidateRange(1, 60)][int]$PublicTimeoutSeconds = 60
+  )
+  $resolution = Assert-MegaDeskBootstrapZeroState -State $State -CandidateSha $CandidateSha -MigrationBaselineSha $MigrationBaselineSha
+  if ($resolution.status -ne 'SWITCHING') { return $resolution }
+
+  $current = Get-MegaDeskState
+  if ($null -eq $current.node -or [string]$current.node.releaseSha -ne $CandidateSha -or -not (Test-ManagedProcess -Record $current.node -Kind node)) {
+    throw 'Bootstrap Zero SWITCHING e ambiguo: a identidade do candidate nao foi comprovada.'
+  }
+  Wait-MegaDeskLocal -ExpectedReleaseSha $CandidateSha -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds
+  Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha $CandidateSha -Checks $PublicChecks -TestMode:$TestMode -TimeoutSeconds $PublicTimeoutSeconds
+  Complete-MegaDeskBootstrapZeroActivation -CandidateRelease $resolution.release -MigrationBaselineSha $MigrationBaselineSha
+  return [pscustomobject]@{ status = 'ACTIVE'; release = $resolution.release }
+}
+
+function Invoke-MegaDeskBootstrapQualityGates {
+  param([switch]$RunTests)
+  & git diff --check
+  if ($LASTEXITCODE -ne 0) { throw 'git diff --check falhou.' }
+  & pnpm check
+  if ($LASTEXITCODE -ne 0) { throw 'pnpm check falhou.' }
+  if ($RunTests) {
+    & pnpm test
+    if ($LASTEXITCODE -ne 0) { throw 'pnpm test falhou.' }
+  } else {
+    Write-MegaDeskLog 'Suite completa nao executada no Bootstrap Zero; use -RunTests para habilita-la explicitamente.'
+  }
+}
+
+function Invoke-MegaDeskBootstrapZero {
+  param(
+    [Parameter(Mandatory = $true)][string]$ExpectedBranch,
+    [Parameter(Mandatory = $true)][string]$CandidateSha,
+    [Parameter(Mandatory = $true)][string]$MigrationBaselineSha,
+    [switch]$RunTests,
+    [object[]]$PublicChecks = @(),
+    [switch]$TestMode,
+    [ValidateRange(1, 90)][int]$LocalTimeoutSeconds = 90,
+    [ValidateRange(1, 60)][int]$PublicTimeoutSeconds = 60
+  )
+  if ($TestMode) { Assert-MegaDeskTestChecks -Checks $PublicChecks }
+  $candidate = $null
+  $startedCandidateRecord = $null
+  try {
+    Assert-MegaDeskToolchain -RequirePnpm
+    $git = Assert-MegaDeskGitPreflight -ExpectedBranch $ExpectedBranch
+    $input = Assert-MegaDeskBootstrapZeroInputs -CandidateSha $CandidateSha -MigrationBaselineSha $MigrationBaselineSha -CurrentHeadSha $git.sha
+    $candidate = $input.candidateSha
+    $baseline = $input.baselineSha
+    $state = Get-MegaDeskState
+    $resolution = Resolve-MegaDeskBootstrapZeroOperation -State $state -CandidateSha $candidate -MigrationBaselineSha $baseline -PublicChecks $PublicChecks -TestMode:$TestMode -LocalTimeoutSeconds $LocalTimeoutSeconds -PublicTimeoutSeconds $PublicTimeoutSeconds
+    if ($resolution.status -eq 'ACTIVE') { return $resolution.release }
+
+    if ($resolution.status -eq 'EMPTY') {
+      Set-MegaDeskOperationState -Status 'PREPARING' -Kind 'BOOTSTRAP_ZERO' -CandidateSha $candidate -BaselineSha $baseline -Message 'Bootstrap Zero iniciou a preparacao da release candidata.' | Out-Null
+      $migrationChanges = @(Get-MegaDeskMigrationChanges -FromSha $baseline -ToSha $candidate | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+      if ($migrationChanges.Count -gt 0) { throw 'Bootstrap Zero bloqueado: candidate contem alteracao de banco.' }
+      if (Test-MegaDeskDependencyDiff -FromSha $baseline -ToSha $candidate) {
+        Write-MegaDeskLog 'Dependencias mudaram desde a baseline explicita; executando install frozen controlado.'
+        Invoke-MegaDeskFrozenInstall
+      }
+      Invoke-MegaDeskBootstrapQualityGates -RunTests:$RunTests
+      $candidateRelease = Invoke-MegaDeskIsolatedBuild -Sha $candidate
+      Assert-MegaDeskNoSourceMutation
+      Set-MegaDeskOperationState -Status 'READY' -Kind 'BOOTSTRAP_ZERO' -CandidateSha $candidate -BaselineSha $baseline -Message 'Bootstrap Zero preparou uma release artifact-valid; ainda nao esta ativa.' | Out-Null
+    } else {
+      $candidateRelease = $resolution.release
+    }
+
+    $confirmation = Read-Host 'Digite INICIALIZAR para iniciar a primeira release imutavel'
+    if ($confirmation -cne 'INICIALIZAR') { throw 'Bootstrap Zero cancelado; confirmacao exata nao recebida.' }
+    $candidateRelease = Get-MegaDeskRelease -Sha $candidate
+    Set-MegaDeskOperationState -Status 'SWITCHING' -Kind 'BOOTSTRAP_ZERO' -CandidateSha $candidate -BaselineSha $baseline -Message 'Bootstrap Start da primeira release iniciado.' | Out-Null
+    $current = Get-MegaDeskState
+    if ($null -ne $current.activeRelease -or $null -ne $current.previousRelease -or $null -ne $current.node) { throw 'Bootstrap Start recusado: state mudou antes do inicio do candidate.' }
+    Assert-MegaDeskPortFree -Port $script:RuntimePort -Operation 'Bootstrap Start' | Out-Null
+    $startedCandidateRecord = Start-MegaDeskNode -ReleaseSha $candidate -Port $script:RuntimePort
+    if ($null -eq $startedCandidateRecord) { throw 'Bootstrap Start nao recebeu identidade do candidate iniciado.' }
+    Wait-MegaDeskLocal -ExpectedReleaseSha $candidate -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds
+    Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha $candidate -Checks $PublicChecks -TestMode:$TestMode -TimeoutSeconds $PublicTimeoutSeconds
+    Complete-MegaDeskBootstrapZeroActivation -CandidateRelease $candidateRelease -MigrationBaselineSha $baseline
+    return $candidateRelease
+  } catch {
+    $failure = $_.Exception.Message
+    if ($null -ne $startedCandidateRecord) {
+      try { Undo-MegaDeskInvocation -StartedNodeRecord $startedCandidateRecord } catch { $failure = "$failure Encerramento seletivo do candidate falhou: $($_.Exception.Message)" }
+    }
+    try {
+      $current = Get-MegaDeskState
+      if ($null -ne $current.operation -and [string]$current.operation.kind -eq 'BOOTSTRAP_ZERO' -and [string]$current.operation.status -in @('PREPARING', 'READY', 'SWITCHING')) {
+        $failedCandidateSha = if ($null -eq $candidate) { $CandidateSha } else { $candidate }
+        Set-MegaDeskOperationState -Status 'FAILED' -Kind 'BOOTSTRAP_ZERO' -CandidateSha $failedCandidateSha -BaselineSha $MigrationBaselineSha -Message 'Bootstrap Zero falhou; nao existe rollback automatico anterior.' | Out-Null
+      }
+    } catch { }
+    Write-MegaDeskLog ("Bootstrap Zero bloqueado ou falhou: {0}" -f $failure)
+    throw ("Bootstrap Zero falhou; nao existe rollback automatico anterior: {0}" -f $failure)
+  }
+}
+
 function Invoke-MegaDeskUpdaterV2 {
   param(
     [Parameter(Mandatory = $true)][string]$ExpectedBranch,
@@ -1096,7 +1334,7 @@ function Invoke-MegaDeskUpdaterV2 {
     $state = Assert-MegaDeskRecoverableState
     $activeRelease = Assert-MegaDeskActiveRelease -State $state
     $candidateSha = $git.sha
-    Set-MegaDeskOperationState -Status 'PREPARING' -CandidateSha $candidateSha -Message 'Preflight do updater v2 iniciado.' | Out-Null
+    Set-MegaDeskOperationState -Status 'PREPARING' -Kind 'UPDATE' -CandidateSha $candidateSha -Message 'Preflight do updater v2 iniciado.' | Out-Null
 
     $migrationChanges = @(Get-MegaDeskMigrationChanges -FromSha $activeRelease.sha -ToSha $candidateSha | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ($migrationChanges.Count -gt 0) {
@@ -1176,5 +1414,5 @@ Export-ModuleMember -Function @(
   'Assert-MegaDeskArtifacts', 'Assert-DockerAndMySql', 'Assert-CloudflaredConfig',
   'Start-MegaDeskNode', 'Start-MegaDeskTunnel', 'Wait-MegaDeskLocal',
   'Wait-MegaDeskPublicEndpoints', 'Undo-MegaDeskInvocation', 'Stop-MegaDeskManagedProcess',
-  'Backup-MegaDeskDist', 'Restore-MegaDeskDist', 'Invoke-MegaDeskUpdaterV2'
+  'Backup-MegaDeskDist', 'Restore-MegaDeskDist', 'Invoke-MegaDeskUpdaterV2', 'Invoke-MegaDeskBootstrapZero'
 )
