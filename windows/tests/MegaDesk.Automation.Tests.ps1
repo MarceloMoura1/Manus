@@ -1403,6 +1403,27 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
     }
   }
 
+  It 'verifies static production imports only against a release-owned production runtime' {
+    $releasePath = New-ReleaseRuntimeFixture -ReleaseRoot (Join-Path $script:runtimeRoot 'releases') -Sha '1414141414141414141414141414141414141416' -Dependencies @('dotenv')
+    $checkerPath = Join-Path $PSScriptRoot '..\Assert-MegaDeskProductionRelease.mjs'
+    $serverEntry = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\..\server\_core\index.ts') -Raw
+    $serverEntry | Should Match 'import \{ serveStatic \} from "./static";'
+    $serverEntry | Should Match 'await import\(viteModuleSpecifier\)'
+    $serverEntry | Should Not Match 'import \{ serveStatic, setupVite \} from "./vite";'
+
+    $dotenvPath = Join-Path $releasePath 'node_modules\dotenv'
+    Set-Content -LiteralPath (Join-Path $releasePath 'dist\index.js') -Value 'import "http"; import "dotenv/config"; export {};' -NoNewline
+    @{ name = 'dotenv'; exports = @{ './config' = './config.js' } } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $dotenvPath 'package.json') -Encoding UTF8 -NoNewline
+    Set-Content -LiteralPath (Join-Path $dotenvPath 'config.js') -Value 'module.exports = {};' -NoNewline
+
+    & (Get-Command node -ErrorAction Stop).Source --no-warnings --experimental-vm-modules $checkerPath --release $releasePath | Out-Null
+    $LASTEXITCODE | Should Be 0
+
+    Set-Content -LiteralPath (Join-Path $releasePath 'dist\index.js') -Value 'import "vite"; export {};' -NoNewline
+    & (Get-Command node -ErrorAction Stop).Source --no-warnings --experimental-vm-modules $checkerPath --quiet --release $releasePath | Out-Null
+    $LASTEXITCODE | Should Be 1
+  }
+
   It 'removes environment files only from the validated staging runtime' {
     $sha = '1414141414141414141414141414141414141416'
     $stagePath = New-ReleaseRuntimeFixture -ReleaseRoot (Join-Path $script:runtimeRoot 'staging') -Sha $sha -Dependencies @('dotenv')

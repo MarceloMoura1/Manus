@@ -9,7 +9,7 @@ import { appRouter } from "../routers";
 import { registerMetricWebhook } from "../metricWebhook";
 import { registerIntegrationApi } from "../integrationApi";
 import { createContext } from "./context";
-import { serveStatic, setupVite } from "./vite";
+import { serveStatic } from "./static";
 import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
 import { handleEvolutionWebhook, ensureSessionTable } from "../evolution";
 import { operationalAllowedOrigins } from "./megadesk-session";
@@ -138,6 +138,8 @@ async function startServer() {
 
   // ─── Frontend ─────────────────────────────────────────────────────────────
   if (process.env.NODE_ENV === "development") {
+    const viteModuleSpecifier: string = "./vite";
+    const { setupVite } = await import(viteModuleSpecifier);
     await setupVite(app, server);
   } else {
     serveStatic(app);

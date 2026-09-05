@@ -513,6 +513,20 @@ function New-MegaDeskReleaseMetadata {
   } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $Destination 'release.json') -Encoding UTF8 -NoNewline
 }
 
+function Assert-MegaDeskProductionReleaseImports {
+  param(
+    [Parameter(Mandatory = $true)][string]$ReleasePath,
+    [Parameter(Mandatory = $true)][string]$AllowedRoot
+  )
+  $releasePath = Assert-MegaDeskPathInside -Path $ReleasePath -Root $AllowedRoot -Label 'Runtime da release'
+  $entryPath = Join-Path $releasePath 'dist\index.js'
+  if (-not (Test-Path -LiteralPath $entryPath -PathType Leaf)) { return }
+  $checkerPath = Join-Path $PSScriptRoot 'Assert-MegaDeskProductionRelease.mjs'
+  if (-not (Test-Path -LiteralPath $checkerPath -PathType Leaf)) { throw 'Verificador de imports production da release ausente.' }
+  $null = & node --no-warnings --experimental-vm-modules $checkerPath --release $releasePath
+  if ($LASTEXITCODE -ne 0) { throw 'Imports runtime production da release nao resolvem exclusivamente no node_modules da release.' }
+}
+
 function Assert-MegaDeskReleaseRuntime {
   param(
     [Parameter(Mandatory = $true)][string]$ReleasePath,
@@ -549,6 +563,7 @@ function Assert-MegaDeskReleaseRuntime {
       throw "Dependencia production resolve fisicamente fora do runtime: $dependency."
     }
   }
+  Assert-MegaDeskProductionReleaseImports -ReleasePath $releasePath -AllowedRoot $AllowedRoot
   return [pscustomobject]@{ nodeModulesPath = $nodeModulesPath; dependencyCount = $dependencies.Count; linkCount = $links.Count }
 }
 
