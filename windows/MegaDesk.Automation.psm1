@@ -714,12 +714,18 @@ function Get-MegaDeskPortOwnership {
     $ManagedRecord = $null,
     [ValidateSet('node', 'cloudflared')][string]$ManagedKind = 'node'
   )
+  $portErrors = @()
   try {
-    $connections = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop)
+    $connections = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue -ErrorVariable +portErrors)
   } catch {
     return [pscustomobject]@{ status = 'UNKNOWN'; port = $Port; process = $null; reason = 'Falha ao consultar listeners da porta.' }
   }
-  if ($connections.Count -eq 0) { return [pscustomobject]@{ status = 'FREE'; port = $Port; process = $null; reason = '' } }
+  if ($connections.Count -eq 0) {
+    $unexpectedErrors = @($portErrors | Where-Object { $_.CategoryInfo.Category -ne [System.Management.Automation.ErrorCategory]::ObjectNotFound -and $_.FullyQualifiedErrorId -notmatch 'ObjectNotFound' })
+    if ($unexpectedErrors.Count -ne 0) { return [pscustomobject]@{ status = 'UNKNOWN'; port = $Port; process = $null; reason = 'Falha ao consultar listeners da porta.' } }
+    return [pscustomobject]@{ status = 'FREE'; port = $Port; process = $null; reason = '' }
+  }
+  if ($portErrors.Count -ne 0) { return [pscustomobject]@{ status = 'UNKNOWN'; port = $Port; process = $null; reason = 'Falha parcial ao consultar listeners da porta.' } }
 
   $processIds = @($connections | ForEach-Object { [int]$_.OwningProcess } | Select-Object -Unique)
   if ($processIds.Count -ne 1 -or $processIds[0] -le 0) {

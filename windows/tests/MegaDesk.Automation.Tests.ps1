@@ -1724,6 +1724,22 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
     }
   }
 
+  It 'classifies the Windows no-listener ObjectNotFound response as FREE but preserves other query failures as UNKNOWN' {
+    InModuleScope $moduleName {
+      Mock Get-NetTCPConnection {
+        Write-Error -Message 'Nenhum listener' -Category ObjectNotFound -ErrorAction SilentlyContinue
+        return @()
+      }
+      (Get-MegaDeskPortOwnership -Port 32120).status | Should Be 'FREE'
+
+      Mock Get-NetTCPConnection {
+        Write-Error -Message 'Acesso negado' -Category PermissionDenied -ErrorAction SilentlyContinue
+        return @()
+      }
+      (Get-MegaDeskPortOwnership -Port 32120).status | Should Be 'UNKNOWN'
+    }
+  }
+
   It 'treats query failures and incomplete ownership as UNKNOWN and blocks before stopping anything' {
     $old = [pscustomobject]@{ sha = '1717171717171717171717171717171717171717'; path = 'C:\isolated\old' }
     $candidate = [pscustomobject]@{ sha = '1818181818181818181818181818181818181818'; path = 'C:\isolated\candidate' }
