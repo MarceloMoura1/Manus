@@ -30,6 +30,12 @@ Describe 'MegaDesk Bootstrap Zero' {
     & (Get-Module $moduleName) { param($runtimeRoot, $projectRoot, $port) Set-MegaDeskAutomationPaths -RuntimeRoot $runtimeRoot -ProjectRoot $projectRoot -Port $port } $script:runtimeRoot $script:projectRoot $script:port
   }
 
+  It 'launches Bootstrap Zero only for the approved release branch' {
+    $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Inicializar-UpdaterV2.ps1') -Raw
+    $launcher | Should Match "Invoke-MegaDeskBootstrapZero -ExpectedBranch 'release/updater-v2-bootstrap'"
+    $launcher | Should Not Match "Invoke-MegaDeskBootstrapZero -ExpectedBranch 'wip/conversations-0013-lifecycle'"
+  }
+
   It 'accepts only an empty V2 state for a new Bootstrap Zero operation' {
     $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
@@ -200,7 +206,7 @@ Describe 'MegaDesk Bootstrap Zero' {
       Mock Undo-MegaDeskInvocation {
         $script:testState.node = $null
       }
-      { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'wip/conversations-0013-lifecycle' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } | Should Throw
+      { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'release/updater-v2-bootstrap' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } | Should Throw
       $script:testState.activeRelease | Should Be $null
       $script:testState.previousRelease | Should Be $null
       $script:testState.operation.status | Should Be 'FAILED'
@@ -261,7 +267,7 @@ Describe 'MegaDesk Bootstrap Zero' {
       Mock Get-MegaDeskRelease { $release }
       Mock Assert-MegaDeskPortFree { throw 'ownership UNKNOWN' }
       Mock Start-MegaDeskProcess { throw 'nao deve iniciar' }
-      { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'wip/conversations-0013-lifecycle' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } | Should Throw
+      { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'release/updater-v2-bootstrap' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } | Should Throw
       $script:testState.activeRelease | Should Be $null
       $script:testState.previousRelease | Should Be $null
       $script:testState.operation.status | Should Be 'FAILED'
@@ -648,7 +654,7 @@ Describe 'MegaDesk Bootstrap Zero' {
       Mock Stop-MegaDeskExactManagedProcess { throw 'compensacao inesperada apos commit' }
       Mock Stop-Process { throw 'Stop-Process inesperado apos commit' }
 
-      $result = Invoke-MegaDeskBootstrapZero -ExpectedBranch 'wip/conversations-0013-lifecycle' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' })
+      $result = Invoke-MegaDeskBootstrapZero -ExpectedBranch 'release/updater-v2-bootstrap' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' })
 
       $result.sha | Should Be $candidate
       $script:healthLocalPassed | Should Be $true
@@ -726,7 +732,7 @@ Describe 'MegaDesk Bootstrap Zero' {
       Mock Write-MegaDeskLog { }
       Mock Stop-Process { throw 'PID-only kill nao deve ocorrer' }
 
-      { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'wip/conversations-0013-lifecycle' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } | Should Throw
+      { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'release/updater-v2-bootstrap' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } | Should Throw
 
       $global:MegaDeskBootstrapFailureState.activeRelease | Should Be $null
       $global:MegaDeskBootstrapFailureState.previousRelease | Should Be $null
@@ -964,7 +970,7 @@ Describe 'MegaDesk Bootstrap Zero rollback hardening' {
       Mock Write-MegaDeskLog { }
 
       $failure = $null
-      try { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'wip/conversations-0013-lifecycle' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } catch { $failure = $_.Exception.Message }
+      try { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'release/updater-v2-bootstrap' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } catch { $failure = $_.Exception.Message }
 
       $failure | Should Match 'tunnel start failed'
       $global:MegaDeskBootstrapRollbackState.activeRelease | Should Be $null
@@ -1051,7 +1057,7 @@ Describe 'MegaDesk Bootstrap Zero rollback hardening' {
       Mock Write-MegaDeskLog { }
 
       $failure = $null
-      try { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'wip/conversations-0013-lifecycle' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } catch { $failure = $_.Exception.Message }
+      try { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'release/updater-v2-bootstrap' -CandidateSha $candidate -MigrationBaselineSha $baseline -TestMode -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) } catch { $failure = $_.Exception.Message }
 
       $failure | Should Match 'active state write failed'
       $global:MegaDeskBootstrapCommitActiveSaveAttempts | Should Be 1
@@ -1269,7 +1275,7 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
         switch ($Arguments -join ' ') {
           'rev-parse --show-toplevel' { return $global:MegaDeskTestProjectRoot }
           'fetch' { return }
-          'branch --show-current' { return 'wip/conversations-0013-lifecycle' }
+          'branch --show-current' { return 'release/updater-v2-bootstrap' }
           'rev-parse @{u}' { return 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }
           'rev-parse HEAD' { return 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }
           'status --porcelain=v1' { return }
@@ -1277,9 +1283,25 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
           default { throw "Git mock inesperado: $($Arguments -join ' ')" }
         }
       }
-      $result = Assert-MegaDeskGitPreflight -ExpectedBranch 'wip/conversations-0013-lifecycle'
+      $result = Assert-MegaDeskGitPreflight -ExpectedBranch 'release/updater-v2-bootstrap'
       $result.behind | Should Be 0
       $result.ahead | Should Be 0
+    }
+  }
+
+  It 'rejects a branch different from the approved release branch' {
+    $global:MegaDeskTestProjectRoot = $script:projectRoot
+    InModuleScope $moduleName {
+      Mock Invoke-MegaDeskGit {
+        param($Arguments)
+        switch ($Arguments -join ' ') {
+          'rev-parse --show-toplevel' { return $global:MegaDeskTestProjectRoot }
+          'fetch' { return }
+          'branch --show-current' { return 'wip/conversations-0013-lifecycle' }
+          default { throw "Git mock inesperado: $($Arguments -join ' ')" }
+        }
+      }
+      { Assert-MegaDeskGitPreflight -ExpectedBranch 'release/updater-v2-bootstrap' } | Should Throw
     }
   }
 
@@ -1298,7 +1320,7 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
           switch ($Arguments -join ' ') {
             'rev-parse --show-toplevel' { return $global:MegaDeskTestProjectRoot }
             'fetch' { return }
-            'branch --show-current' { return 'wip/conversations-0013-lifecycle' }
+            'branch --show-current' { return 'release/updater-v2-bootstrap' }
             'rev-parse @{u}' { return 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' }
             'rev-parse HEAD' { return 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' }
             'status --porcelain=v1' { if ($global:MegaDeskGitCase.status) { return $global:MegaDeskGitCase.status }; return }
@@ -1306,7 +1328,7 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
             default { throw "Git mock inesperado: $($Arguments -join ' ')" }
           }
         }
-        { Assert-MegaDeskGitPreflight -ExpectedBranch 'wip/conversations-0013-lifecycle' } | Should Throw
+        { Assert-MegaDeskGitPreflight -ExpectedBranch 'release/updater-v2-bootstrap' } | Should Throw
       }
     }
   }
