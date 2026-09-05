@@ -1292,6 +1292,7 @@ function Assert-MegaDeskBootstrapZeroState {
   if ($null -ne $State.previousRelease) { throw 'Bootstrap Zero recusado: previousRelease sem activeRelease e estado ambiguo.' }
   if ($null -eq $State.operation) {
     if ($null -ne $State.node) { throw 'Bootstrap Zero recusado: processo Node registrado sem activeRelease.' }
+    if ($null -ne $State.cloudflared) { throw 'Bootstrap Zero recusado: processo Cloudflared registrado sem activeRelease.' }
     return [pscustomobject]@{ status = 'EMPTY'; release = $null }
   }
   if (-not ($State.operation.PSObject.Properties.Name -contains 'kind') -or [string]$State.operation.kind -ne 'BOOTSTRAP_ZERO') {
@@ -1311,6 +1312,62 @@ function Assert-MegaDeskBootstrapZeroState {
     'ACTIVE' { throw 'Bootstrap Zero ACTIVE sem activeRelease e estado ambiguo.' }
     default { throw 'Bootstrap Zero possui status de operacao invalido.' }
   }
+}
+
+function Assert-MegaDeskBootstrapFailedRecoveryState {
+  param([Parameter(Mandatory = $true)]$State)
+
+  if ($State.schemaVersion -isnot [int] -or [int]$State.schemaVersion -ne 2) { throw 'Recovery recusado: schemaVersion V2 invalido.' }
+  if ($null -ne $State.activeRelease) { throw 'Recovery recusado: activeRelease existe.' }
+  if ($null -ne $State.previousRelease) { throw 'Recovery recusado: previousRelease existe.' }
+  if ($null -ne $State.node) { throw 'Recovery recusado: processo Node ainda esta registrado.' }
+  if ($null -ne $State.cloudflared) { throw 'Recovery recusado: processo Cloudflared ainda esta registrado.' }
+  if ($null -eq $State.operation) { throw 'Recovery recusado: nao existe operacao Bootstrap Zero FAILED.' }
+
+  $operation = $State.operation
+  foreach ($property in @('kind', 'status', 'candidateSha', 'baselineSha')) {
+    if (-not ($operation.PSObject.Properties.Name -contains $property)) { throw "Recovery recusado: operacao FAILED sem $property." }
+  }
+  if ([string]$operation.kind -cne 'BOOTSTRAP_ZERO') { throw 'Recovery recusado: operacao nao e BOOTSTRAP_ZERO.' }
+  if ([string]$operation.status -cne 'FAILED') { throw 'Recovery recusado: status da operacao nao e FAILED.' }
+  if (-not (Test-MegaDeskFullSha ([string]$operation.candidateSha))) { throw 'Recovery recusado: CandidateSha falho invalido.' }
+  if (-not (Test-MegaDeskFullSha ([string]$operation.baselineSha))) { throw 'Recovery recusado: MigrationBaselineSha falho invalido.' }
+
+  $candidateSha = [string]$operation.candidateSha
+  $releasePath = Assert-MegaDeskPathInside -Path (Join-Path $script:ReleaseRoot $candidateSha) -Root $script:ReleaseRoot -Label 'Release candidata falha'
+  if (Test-MegaDeskPhysicalPathExists -Path $releasePath) { throw 'Recovery recusado: release candidata falha ainda existe.' }
+
+  if (Test-MegaDeskPhysicalPathExists -Path $script:StagingRoot) {
+    $stagingAttributes = Get-MegaDeskPhysicalPathAttributes -Path $script:StagingRoot
+    if (($stagingAttributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or ($stagingAttributes -band [IO.FileAttributes]::Directory) -eq 0) {
+      throw 'Recovery recusado: staging root invalido ou reparse point.'
+    }
+    $candidatePattern = '^{0}(?:-[0-9a-f]{{32}})?$' -f [regex]::Escape($candidateSha)
+    $residual = @(Get-MegaDeskPhysicalChildPaths -Path $script:StagingRoot | Where-Object { [IO.Path]::GetFileName($_) -match $candidatePattern })
+    if ($residual.Count -ne 0) { throw 'Recovery recusado: staging residual da CandidateSha falha existe.' }
+  }
+
+  $portOwnership = Get-MegaDeskPortOwnership -Port $script:RuntimePort
+  if ($portOwnership.status -eq 'UNKNOWN') { throw 'Recovery recusado: ownership da porta do runtime nao foi provado.' }
+  if ($portOwnership.status -eq 'OWNED_BY_MANAGED_PROCESS') { throw 'Recovery recusado: porta do runtime pertence a processo gerenciado.' }
+
+  return [pscustomobject]@{ candidateSha = $candidateSha; priorStatus = [string]$operation.status; portStatus = [string]$portOwnership.status }
+}
+
+function Invoke-MegaDeskBootstrapFailedRecovery {
+  $state = Get-MegaDeskState
+  $recovery = Assert-MegaDeskBootstrapFailedRecoveryState -State $state
+  Write-MegaDeskLog ("Recovery Bootstrap Zero iniciado para CandidateSha falho {0}; status anterior {1}." -f $recovery.candidateSha, $recovery.priorStatus)
+
+  $state.node = $null
+  $state.cloudflared = $null
+  $state.activeRelease = $null
+  $state.previousRelease = $null
+  $state.operation = $null
+  Save-MegaDeskState $state
+
+  Write-MegaDeskLog ("Recovery Bootstrap Zero concluido; state V2 retornou a EMPTY sem reutilizar CandidateSha {0}." -f $recovery.candidateSha)
+  return [pscustomobject]@{ status = 'EMPTY'; clearedCandidateSha = $recovery.candidateSha; portStatus = $recovery.portStatus }
 }
 
 function Complete-MegaDeskBootstrapZeroActivation {
@@ -1537,5 +1594,6 @@ Export-ModuleMember -Function @(
   'Assert-MegaDeskArtifacts', 'Assert-DockerAndMySql', 'Assert-CloudflaredConfig',
   'Start-MegaDeskNode', 'Start-MegaDeskTunnel', 'Wait-MegaDeskLocal',
   'Wait-MegaDeskPublicEndpoints', 'Undo-MegaDeskInvocation', 'Stop-MegaDeskManagedProcess',
-  'Backup-MegaDeskDist', 'Restore-MegaDeskDist', 'Invoke-MegaDeskUpdaterV2', 'Invoke-MegaDeskBootstrapZero'
+  'Backup-MegaDeskDist', 'Restore-MegaDeskDist', 'Invoke-MegaDeskUpdaterV2', 'Invoke-MegaDeskBootstrapZero',
+  'Invoke-MegaDeskBootstrapFailedRecovery'
 )

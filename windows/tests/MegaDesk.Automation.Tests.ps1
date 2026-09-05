@@ -1840,3 +1840,135 @@ Describe 'MegaDesk updater v2 real process health' -Tags @('ProcessReal') {
     }
   }
 }
+
+Describe 'MegaDesk failed Bootstrap Zero recovery' {
+  BeforeEach {
+    $script:port = Get-IsolatedTestPort
+    $script:runtimeRoot = Join-Path $TestDrive 'recovery-runtime'
+    $script:projectRoot = Join-Path $TestDrive 'recovery-project'
+    New-Item -ItemType Directory -Path $script:projectRoot -Force | Out-Null
+    & (Get-Module $moduleName) { param($runtimeRoot, $projectRoot, $port) Set-MegaDeskAutomationPaths -RuntimeRoot $runtimeRoot -ProjectRoot $projectRoot -Port $port } $script:runtimeRoot $script:projectRoot $script:port
+  }
+
+  It 'recovers only an unambiguous failed Bootstrap Zero state into semantic EMPTY' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $global:MegaDeskRecoveryState = [pscustomobject]@{
+      schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null
+      operation = [pscustomobject]@{ kind = 'BOOTSTRAP_ZERO'; status = 'FAILED'; candidateSha = $candidate; baselineSha = $baseline; message = 'falha sem segredo' }
+    }
+    InModuleScope $moduleName {
+      $script:testState = $global:MegaDeskRecoveryState
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Write-MegaDeskLog { }
+      Mock Get-MegaDeskPortOwnership { [pscustomobject]@{ status = 'FREE'; port = $script:RuntimePort; process = $null; reason = '' } }
+
+      $result = Invoke-MegaDeskBootstrapFailedRecovery
+
+      $result.status | Should Be 'EMPTY'
+      $result.clearedCandidateSha | Should Be 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+      $script:testState.operation | Should Be $null
+      $script:testState.activeRelease | Should Be $null
+      $script:testState.previousRelease | Should Be $null
+      $script:testState.node | Should Be $null
+      $script:testState.cloudflared | Should Be $null
+      (Assert-MegaDeskBootstrapZeroState -State $script:testState -CandidateSha 'cccccccccccccccccccccccccccccccccccccccc' -MigrationBaselineSha 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb').status | Should Be 'EMPTY'
+      Assert-MockCalled Save-MegaDeskState -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'refuses every Bootstrap state except FAILED and preserves it' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    foreach ($status in @('ACTIVE', 'PREPARING', 'READY', 'SWITCHING')) {
+      $global:MegaDeskRecoveryState = [pscustomobject]@{
+        schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null
+        operation = [pscustomobject]@{ kind = 'BOOTSTRAP_ZERO'; status = $status; candidateSha = $candidate; baselineSha = $baseline }
+      }
+      InModuleScope $moduleName {
+        $script:testState = $global:MegaDeskRecoveryState
+        Mock Get-MegaDeskState { $script:testState }
+        Mock Save-MegaDeskState { throw 'state nao pode ser alterado em recusa' }
+        Mock Write-MegaDeskLog { throw 'log nao pode ser escrito em recusa' }
+        Mock Get-MegaDeskPortOwnership { [pscustomobject]@{ status = 'FREE'; port = $script:RuntimePort; process = $null; reason = '' } }
+        { Invoke-MegaDeskBootstrapFailedRecovery } | Should Throw
+        Assert-MockCalled Save-MegaDeskState -Times 0 -Exactly -Scope It
+        Assert-MockCalled Write-MegaDeskLog -Times 0 -Exactly -Scope It
+      }
+    }
+  }
+
+  It 'refuses ambiguous failed Bootstrap state, managed records and residual candidate staging' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $cases = @(
+      [pscustomobject]@{ Name = 'active release'; Active = [pscustomobject]@{ sha = $candidate }; Previous = $null; Node = $null; Cloudflared = $null; Residual = $false },
+      [pscustomobject]@{ Name = 'previous release'; Active = $null; Previous = [pscustomobject]@{ sha = $baseline }; Node = $null; Cloudflared = $null; Residual = $false },
+      [pscustomobject]@{ Name = 'node record'; Active = $null; Previous = $null; Node = [pscustomobject]@{ pid = 4242 }; Cloudflared = $null; Residual = $false },
+      [pscustomobject]@{ Name = 'cloudflared record'; Active = $null; Previous = $null; Node = $null; Cloudflared = [pscustomobject]@{ pid = 5252 }; Residual = $false },
+      [pscustomobject]@{ Name = 'staging residual'; Active = $null; Previous = $null; Node = $null; Cloudflared = $null; Residual = $true }
+    )
+    foreach ($case in $cases) {
+      $global:MegaDeskRecoveryCase = $case
+      $global:MegaDeskRecoveryCandidate = $candidate
+      $global:MegaDeskRecoveryBaseline = $baseline
+      InModuleScope $moduleName {
+        $case = $global:MegaDeskRecoveryCase
+        $candidate = $global:MegaDeskRecoveryCandidate
+        $state = [pscustomobject]@{
+          schemaVersion = 2; node = $case.Node; cloudflared = $case.Cloudflared; activeRelease = $case.Active; previousRelease = $case.Previous
+          operation = [pscustomobject]@{ kind = 'BOOTSTRAP_ZERO'; status = 'FAILED'; candidateSha = $candidate; baselineSha = $global:MegaDeskRecoveryBaseline }
+        }
+        if ($case.Residual) { New-Item -ItemType Directory -Path (Join-Path $script:StagingRoot ($candidate + '-' + ('1' * 32))) -Force | Out-Null }
+        Mock Get-MegaDeskState { $state }
+        Mock Save-MegaDeskState { throw 'state nao pode ser alterado em recusa' }
+        Mock Write-MegaDeskLog { throw 'log nao pode ser escrito em recusa' }
+        Mock Get-MegaDeskPortOwnership { [pscustomobject]@{ status = 'FREE'; port = $script:RuntimePort; process = $null; reason = '' } }
+        { Invoke-MegaDeskBootstrapFailedRecovery } | Should Throw
+        Assert-MockCalled Save-MegaDeskState -Times 0 -Exactly -Scope It
+      }
+    }
+  }
+
+  It 'refuses a failed Bootstrap state with a materialized candidate release or uncertain managed port ownership' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $baseline = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $global:MegaDeskRecoveryCandidate = $candidate
+    $global:MegaDeskRecoveryBaseline = $baseline
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskRecoveryCandidate
+      $state = [pscustomobject]@{
+        schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null
+        operation = [pscustomobject]@{ kind = 'BOOTSTRAP_ZERO'; status = 'FAILED'; candidateSha = $candidate; baselineSha = $global:MegaDeskRecoveryBaseline }
+      }
+      New-Item -ItemType Directory -Path (Join-Path $script:ReleaseRoot $candidate) -Force | Out-Null
+      Mock Get-MegaDeskState { $state }
+      Mock Save-MegaDeskState { throw 'state nao pode ser alterado em recusa' }
+      Mock Write-MegaDeskLog { throw 'log nao pode ser escrito em recusa' }
+      Mock Get-MegaDeskPortOwnership { [pscustomobject]@{ status = 'FREE'; port = $script:RuntimePort; process = $null; reason = '' } }
+      { Invoke-MegaDeskBootstrapFailedRecovery } | Should Throw
+      Assert-MockCalled Save-MegaDeskState -Times 0 -Exactly -Scope It
+
+      Remove-Item -LiteralPath (Join-Path $script:ReleaseRoot $candidate) -Force
+      Mock Get-MegaDeskPortOwnership { [pscustomobject]@{ status = 'UNKNOWN'; port = $script:RuntimePort; process = $null; reason = 'indeterminado' } }
+      { Invoke-MegaDeskBootstrapFailedRecovery } | Should Throw
+      Assert-MockCalled Save-MegaDeskState -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'rejects an empty Bootstrap state with a stale Cloudflared record' {
+    InModuleScope $moduleName {
+      $state = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = [pscustomobject]@{ pid = 5252 }; activeRelease = $null; previousRelease = $null; operation = $null }
+      { Assert-MegaDeskBootstrapZeroState -State $state -CandidateSha 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' -MigrationBaselineSha 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' } | Should Throw
+    }
+  }
+
+  It 'keeps the recovery launcher separate from Bootstrap and runtime operations' {
+    $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Recuperar-UpdaterV2.ps1') -Raw
+    $launcher | Should Match 'Invoke-MegaDeskBootstrapFailedRecovery'
+    $launcher | Should Not Match 'Invoke-MegaDeskBootstrapZero'
+    $launcher | Should Not Match 'Invoke-MegaDeskUpdaterV2'
+    $launcher | Should Not Match 'docker|mysql|cloudflared|node.exe'
+  }
+}
