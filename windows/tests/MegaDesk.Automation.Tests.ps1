@@ -1502,6 +1502,13 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
     }
   }
 
+  It 'creates deploy output directly at the final release path and validates that final path' {
+    $moduleSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\MegaDesk.Automation.psm1') -Raw
+    $moduleSource | Should Match 'Invoke-MegaDeskReleaseDependencyDeploy -Destination \$releasePath -AllowedRoot \$script:ReleaseRoot'
+    $moduleSource | Should Match 'Assert-MegaDeskReleaseRuntime -ReleasePath \$releasePath -AllowedRoot \$script:ReleaseRoot'
+    $moduleSource | Should Not Match 'Move-Item -LiteralPath \$stagePath -Destination \$releasePath'
+  }
+
   It 'rejects dependency links that point to the worktree node_modules' {
     $sha = '1111111111111111111111111111111111111112'
     $releasePath = New-ReleaseRuntimeFixture -ReleaseRoot (Join-Path $script:runtimeRoot 'releases') -Sha $sha -Dependencies @('dotenv')
@@ -1520,51 +1527,84 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
     }
   }
 
-  It 'accepts only reparse points canonically inside the release runtime' {
-    $sha = '1111111111111111111111111111111111111113'
-    $releasePath = New-ReleaseRuntimeFixture -ReleaseRoot (Join-Path $script:runtimeRoot 'releases') -Sha $sha -Dependencies @('dotenv')
-    $global:MegaDeskTestReleasePath = $releasePath
-    $global:MegaDeskTestRuntimeLink = Join-Path $releasePath 'node_modules\valid-link'
-    InModuleScope $moduleName {
-      Mock Get-MegaDeskCanonicalPhysicalPath { param($Path) [System.IO.Path]::GetFullPath($Path) }
-      Mock Get-MegaDeskReparsePointsNoFollow { @($global:MegaDeskTestRuntimeLink) }
-      (Assert-MegaDeskReleaseRuntime -ReleasePath $global:MegaDeskTestReleasePath -AllowedRoot $script:ReleaseRoot).linkCount | Should Be 1
+  It 'keeps a final internal junction valid after its staging source disappears' {
+    $fixtureRoot = Join-Path $TestDrive 'relocatable-release-fixture'
+    $stagingRoot = Join-Path $fixtureRoot 'staging'
+    $releaseRoot = Join-Path $fixtureRoot 'release'
+    $stagingTarget = Join-Path $stagingRoot 'node_modules\.pnpm\fixture-package'
+    $stagingLink = Join-Path $stagingRoot 'node_modules\fixture-package'
+    $releaseTarget = Join-Path $releaseRoot 'node_modules\.pnpm\fixture-package'
+    $releaseLink = Join-Path $releaseRoot 'node_modules\fixture-package'
+    New-Item -ItemType Directory -Path $stagingTarget, $releaseTarget -Force | Out-Null
+    New-Item -ItemType Junction -Path $stagingLink -Target $stagingTarget -ErrorAction Stop | Out-Null
+    New-Item -ItemType Junction -Path $releaseLink -Target $releaseTarget -ErrorAction Stop | Out-Null
+    $global:MegaDeskRelocationFixtureRoot = $fixtureRoot
+    $global:MegaDeskRelocationAllowedRoot = $TestDrive
+    $global:MegaDeskRelocationStagingRoot = $stagingRoot
+    $global:MegaDeskRelocationStagingLink = $stagingLink
+    $global:MegaDeskRelocationReleaseRoot = $releaseRoot
+    $global:MegaDeskRelocationReleaseLink = $releaseLink
+    try {
+      InModuleScope $moduleName {
+        Remove-Item -LiteralPath $global:MegaDeskRelocationStagingLink -Force -ErrorAction Stop
+        Remove-Item -LiteralPath $global:MegaDeskRelocationStagingRoot -Recurse -Force -ErrorAction Stop
+        (Test-MegaDeskPhysicalPathExists -Path $global:MegaDeskRelocationReleaseLink) | Should Be $true
+        $link = Assert-MegaDeskReparsePointTargetInside -Path $global:MegaDeskRelocationReleaseLink -Root (Join-Path $global:MegaDeskRelocationReleaseRoot 'node_modules')
+        $link.canonicalTarget | Should Match ([regex]::Escape($global:MegaDeskRelocationReleaseRoot))
+        ([string](Get-Item -LiteralPath $global:MegaDeskRelocationReleaseLink -Force).Target) | Should Not Match ([regex]::Escape($global:MegaDeskRelocationStagingRoot))
+      }
+      (Test-Path -LiteralPath $stagingRoot) | Should Be $false
+    } finally {
+      if (Get-Item -LiteralPath $releaseLink -Force -ErrorAction SilentlyContinue) { Remove-Item -LiteralPath $releaseLink -Force -ErrorAction SilentlyContinue }
+      if (Get-Item -LiteralPath $stagingLink -Force -ErrorAction SilentlyContinue) { Remove-Item -LiteralPath $stagingLink -Force -ErrorAction SilentlyContinue }
+      if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue }
     }
   }
 
-  It 'blocks lexically internal reparse points with physical targets outside the release' {
-    $sha = '1111111111111111111111111111111111111114'
-    $releasePath = New-ReleaseRuntimeFixture -ReleaseRoot (Join-Path $script:runtimeRoot 'releases') -Sha $sha -Dependencies @('dotenv')
-    $global:MegaDeskTestReleasePath = $releasePath
-    $global:MegaDeskTestRuntimeLink = Join-Path $releasePath 'node_modules\internal-name'
-    InModuleScope $moduleName {
-      Mock Get-MegaDeskCanonicalPhysicalPath {
-        param($Path)
-        if ($Path -eq $global:MegaDeskTestRuntimeLink) { return 'C:\outside\runtime-link' }
-        return [System.IO.Path]::GetFullPath($Path)
+  It 'rejects a broken internal junction before runtime use' {
+    $fixtureRoot = Join-Path $TestDrive 'broken-junction-fixture'
+    $runtimeRoot = Join-Path $fixtureRoot 'release\node_modules'
+    $targetRoot = Join-Path $runtimeRoot '.pnpm\missing-package'
+    $linkPath = Join-Path $runtimeRoot 'missing-package'
+    New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
+    New-Item -ItemType Junction -Path $linkPath -Target $targetRoot -ErrorAction Stop | Out-Null
+    $global:MegaDeskBrokenJunctionFixtureRoot = $fixtureRoot
+    $global:MegaDeskBrokenJunctionAllowedRoot = $TestDrive
+    $global:MegaDeskBrokenJunctionRuntimeRoot = $runtimeRoot
+    $global:MegaDeskBrokenJunctionTargetRoot = $targetRoot
+    $global:MegaDeskBrokenJunctionLink = $linkPath
+    try {
+      InModuleScope $moduleName {
+        [IO.Directory]::Delete($global:MegaDeskBrokenJunctionTargetRoot, $false)
+        { Assert-MegaDeskReparsePointTargetInside -Path $global:MegaDeskBrokenJunctionLink -Root $global:MegaDeskBrokenJunctionRuntimeRoot } | Should Throw
       }
-      Mock Get-MegaDeskReparsePointsNoFollow { @($global:MegaDeskTestRuntimeLink) }
-      { Assert-MegaDeskReleaseRuntime -ReleasePath $global:MegaDeskTestReleasePath -AllowedRoot $script:ReleaseRoot } | Should Throw
+    } finally {
+      if (Get-Item -LiteralPath $linkPath -Force -ErrorAction SilentlyContinue) { Remove-Item -LiteralPath $linkPath -Force -ErrorAction SilentlyContinue }
+      if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue }
     }
   }
 
-  It 'blocks explicit external reparse targets and canonicalization failures' {
-    $sha = '1111111111111111111111111111111111111115'
-    $releasePath = New-ReleaseRuntimeFixture -ReleaseRoot (Join-Path $script:runtimeRoot 'releases') -Sha $sha -Dependencies @('dotenv')
-    $global:MegaDeskTestReleasePath = $releasePath
-    $global:MegaDeskTestRuntimeLink = Join-Path $releasePath 'node_modules\external-link'
-    InModuleScope $moduleName {
-      Mock Get-MegaDeskCanonicalPhysicalPath {
-        param($Path)
-        if ($Path -eq $global:MegaDeskTestRuntimeLink) { return 'C:\outside\runtime-link' }
-        return [System.IO.Path]::GetFullPath($Path)
+  It 'rejects a junction whose physical target escapes the release runtime' {
+    $fixtureRoot = Join-Path $TestDrive 'escaping-junction-fixture'
+    $runtimeRoot = Join-Path $fixtureRoot 'release\node_modules'
+    $externalRoot = Join-Path $fixtureRoot 'external-target'
+    $linkPath = Join-Path $runtimeRoot 'external-package'
+    New-Item -ItemType Directory -Path $runtimeRoot, $externalRoot -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $externalRoot 'must-remain.txt') -Value 'external' -NoNewline
+    New-Item -ItemType Junction -Path $linkPath -Target $externalRoot -ErrorAction Stop | Out-Null
+    $global:MegaDeskEscapingJunctionFixtureRoot = $fixtureRoot
+    $global:MegaDeskEscapingJunctionAllowedRoot = $TestDrive
+    $global:MegaDeskEscapingJunctionRuntimeRoot = $runtimeRoot
+    $global:MegaDeskEscapingJunctionExternalRoot = $externalRoot
+    $global:MegaDeskEscapingJunctionLink = $linkPath
+    try {
+      InModuleScope $moduleName {
+        { Assert-MegaDeskReparsePointTargetInside -Path $global:MegaDeskEscapingJunctionLink -Root $global:MegaDeskEscapingJunctionRuntimeRoot } | Should Throw
       }
-      Mock Get-MegaDeskReparsePointsNoFollow { @($global:MegaDeskTestRuntimeLink) }
-      { Assert-MegaDeskReleaseRuntime -ReleasePath $global:MegaDeskTestReleasePath -AllowedRoot $script:ReleaseRoot } | Should Throw
-
-      Mock Get-MegaDeskCanonicalPhysicalPath { throw 'canonicalizacao indisponivel' }
-      Mock Get-MegaDeskReparsePointsNoFollow { @() }
-      { Assert-MegaDeskReleaseRuntime -ReleasePath $global:MegaDeskTestReleasePath -AllowedRoot $script:ReleaseRoot } | Should Throw
+      (Test-Path -LiteralPath (Join-Path $externalRoot 'must-remain.txt')) | Should Be $true
+    } finally {
+      try { Remove-Item -LiteralPath $global:MegaDeskEscapingJunctionLink -Force -ErrorAction SilentlyContinue } catch { }
+      if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue }
     }
   }
 
@@ -1986,5 +2026,81 @@ Describe 'MegaDesk failed Bootstrap Zero recovery' {
     $launcher | Should Not Match 'Invoke-MegaDeskBootstrapZero'
     $launcher | Should Not Match 'Invoke-MegaDeskUpdaterV2'
     $launcher | Should Not Match 'docker|mysql|cloudflared|node.exe'
+  }
+}
+
+Describe 'MegaDesk pre-ACTIVE candidate release compensation' {
+  BeforeEach {
+    $script:port = Get-IsolatedTestPort
+    $script:runtimeRoot = Join-Path $TestDrive 'pre-active-compensation-runtime'
+    $script:projectRoot = Join-Path $TestDrive 'pre-active-compensation-project'
+    New-Item -ItemType Directory -Path $script:projectRoot -Force | Out-Null
+    & (Get-Module $moduleName) { param($runtimeRoot, $projectRoot, $port) Set-MegaDeskAutomationPaths -RuntimeRoot $runtimeRoot -ProjectRoot $projectRoot -Port $port } $script:runtimeRoot $script:projectRoot $script:port
+  }
+
+  It 'removes a materialized candidate release on pre-ACTIVE failure and records FAILED' {
+    $global:MegaDeskPreActiveCandidate = 'abababababababababababababababababababab'
+    $global:MegaDeskPreActiveBaseline = 'bcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbc'
+    InModuleScope $moduleName {
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+      Mock Assert-MegaDeskToolchain { }
+      Mock Assert-CloudflaredConfig { }
+      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreActiveCandidate } }
+      Mock Assert-MegaDeskBootstrapZeroInputs { [pscustomobject]@{ candidateSha = $global:MegaDeskPreActiveCandidate; baselineSha = $global:MegaDeskPreActiveBaseline } }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Test-MegaDeskDependencyDiff { $false }
+      Mock Invoke-MegaDeskBootstrapQualityGates { }
+      Mock Invoke-MegaDeskIsolatedBuild {
+        $path = Join-Path $script:ReleaseRoot $global:MegaDeskPreActiveCandidate
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+        [pscustomobject]@{ sha = $global:MegaDeskPreActiveCandidate; path = $path }
+      }
+      Mock Assert-MegaDeskNoSourceMutation { }
+      Mock Read-Host { 'CANCELAR' }
+      Mock Write-MegaDeskLog { }
+
+      { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'release/updater-v2-bootstrap' -CandidateSha $global:MegaDeskPreActiveCandidate -MigrationBaselineSha $global:MegaDeskPreActiveBaseline } | Should Throw
+      (Test-MegaDeskPhysicalPathExists -Path (Join-Path $script:ReleaseRoot $global:MegaDeskPreActiveCandidate)) | Should Be $false
+      $script:testState.operation.status | Should Be 'FAILED'
+      $script:testState.activeRelease | Should Be $null
+      $script:testState.previousRelease | Should Be $null
+      @(Get-MegaDeskPhysicalChildPaths -Path $script:StagingRoot).Count | Should Be 0
+    }
+  }
+
+  It 'preserves FAILED and aggregates a pre-ACTIVE candidate cleanup failure' {
+    $global:MegaDeskPreActiveCleanupFailureCandidate = 'cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd'
+    $global:MegaDeskPreActiveCleanupFailureBaseline = 'dedededededededededededededededededededede'
+    InModuleScope $moduleName {
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+      Mock Assert-MegaDeskToolchain { }
+      Mock Assert-CloudflaredConfig { }
+      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreActiveCleanupFailureCandidate } }
+      Mock Assert-MegaDeskBootstrapZeroInputs { [pscustomobject]@{ candidateSha = $global:MegaDeskPreActiveCleanupFailureCandidate; baselineSha = $global:MegaDeskPreActiveCleanupFailureBaseline } }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Test-MegaDeskDependencyDiff { $false }
+      Mock Invoke-MegaDeskBootstrapQualityGates { }
+      Mock Invoke-MegaDeskIsolatedBuild {
+        $path = Join-Path $script:ReleaseRoot $global:MegaDeskPreActiveCleanupFailureCandidate
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+        [pscustomobject]@{ sha = $global:MegaDeskPreActiveCleanupFailureCandidate; path = $path }
+      }
+      Mock Assert-MegaDeskNoSourceMutation { }
+      Mock Read-Host { 'CANCELAR' }
+      Mock Remove-MegaDeskTreeNoFollow { throw 'simulated candidate cleanup failure' }
+      Mock Write-MegaDeskLog { }
+
+      $failure = $null
+      try { Invoke-MegaDeskBootstrapZero -ExpectedBranch 'release/updater-v2-bootstrap' -CandidateSha $global:MegaDeskPreActiveCleanupFailureCandidate -MigrationBaselineSha $global:MegaDeskPreActiveCleanupFailureBaseline } catch { $failure = $_.Exception.Message }
+      $failure | Should Match 'Compensacao da release candidata falhou'
+      (Test-MegaDeskPhysicalPathExists -Path (Join-Path $script:ReleaseRoot $global:MegaDeskPreActiveCleanupFailureCandidate)) | Should Be $true
+      $script:testState.operation.status | Should Be 'FAILED'
+      $script:testState.activeRelease | Should Be $null
+      $script:testState.previousRelease | Should Be $null
+    }
   }
 }

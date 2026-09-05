@@ -338,10 +338,12 @@ function Remove-MegaDeskTreeNoFollow {
 }
 
 function Get-MegaDeskCanonicalPhysicalPath {
-  param([Parameter(Mandatory = $true)][string]$Path)
+  param([Parameter(Mandatory = $true)][string]$Path, [switch]$OpenReparsePoint)
   $full = ConvertFrom-MegaDeskExtendedPath -Path $Path
   if (-not (Test-MegaDeskPhysicalPathExists -Path $full)) { throw 'Caminho fisico a canonicalizar nao existe.' }
-  $handle = [MegaDeskUpdaterNative]::CreateFile((ConvertTo-MegaDeskExtendedPath -Path $full), [uint32]0, [uint32]7, [IntPtr]::Zero, [uint32]3, [uint32]0x02000000, [IntPtr]::Zero)
+  $flags = [uint32]0x02000000
+  if ($OpenReparsePoint) { $flags = $flags -bor [uint32]0x00200000 }
+  $handle = [MegaDeskUpdaterNative]::CreateFile((ConvertTo-MegaDeskExtendedPath -Path $full), [uint32]0, [uint32]7, [IntPtr]::Zero, [uint32]3, $flags, [IntPtr]::Zero)
   if ($handle.IsInvalid) { throw 'Nao foi possivel abrir handle para canonicalizacao fisica.' }
   try {
     $buffer = New-Object System.Text.StringBuilder 32768
@@ -358,6 +360,43 @@ function Test-MegaDeskPhysicalPathInside {
   $canonicalPath = Get-MegaDeskCanonicalPhysicalPath -Path $Path
   $canonicalRoot = Get-MegaDeskCanonicalPhysicalPath -Path $Root
   return $canonicalPath.StartsWith($canonicalRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-MegaDeskCanonicalPathInside {
+  param([Parameter(Mandatory = $true)][string]$CanonicalPath, [Parameter(Mandatory = $true)][string]$CanonicalRoot)
+  $path = $CanonicalPath.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+  $root = $CanonicalRoot.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+  return $path.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Assert-MegaDeskReparsePointTargetInside {
+  param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Root)
+  $linkPath = ConvertFrom-MegaDeskExtendedPath -Path $Path
+  $rootPath = ConvertFrom-MegaDeskExtendedPath -Path $Root
+  $attributes = Get-MegaDeskPhysicalPathAttributes -Path $linkPath
+  if (($attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { throw 'Entrada declarada como reparse point nao possui atributo ReparsePoint.' }
+
+  $canonicalRoot = Get-MegaDeskCanonicalPhysicalPath -Path $rootPath
+  $canonicalEntry = Get-MegaDeskCanonicalPhysicalPath -Path $linkPath -OpenReparsePoint
+  if (-not (Test-MegaDeskCanonicalPathInside -CanonicalPath $canonicalEntry -CanonicalRoot $canonicalRoot)) {
+    throw 'Entrada reparse point fisicamente fora do runtime da release.'
+  }
+
+  $item = Get-Item -LiteralPath $linkPath -Force -ErrorAction Stop
+  $linkType = [string]$item.LinkType
+  if ($linkType -notin @('Junction', 'SymbolicLink')) { throw 'Tipo de reparse point nao suportado para runtime da release.' }
+  $targets = @($item.Target | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+  if ($targets.Count -ne 1) { throw 'Reparse point do runtime deve possuir exatamente um target.' }
+
+  $targetPath = $targets[0]
+  if (-not [IO.Path]::IsPathRooted($targetPath)) { $targetPath = Join-Path ([IO.Path]::GetDirectoryName($linkPath)) $targetPath }
+  $targetPath = ConvertFrom-MegaDeskExtendedPath -Path $targetPath
+  if (-not (Test-MegaDeskPhysicalPathExists -Path $targetPath)) { throw 'Reparse point do runtime possui target inexistente.' }
+  $canonicalTarget = Get-MegaDeskCanonicalPhysicalPath -Path $targetPath
+  if (-not (Test-MegaDeskCanonicalPathInside -CanonicalPath $canonicalTarget -CanonicalRoot $canonicalRoot)) {
+    throw 'Reparse point do runtime possui target fisicamente fora da release.'
+  }
+  return [pscustomobject]@{ path = $linkPath; linkType = $linkType; targetPath = $targetPath; canonicalTarget = $canonicalTarget }
 }
 
 function Get-MegaDeskReparsePointsNoFollow {
@@ -454,16 +493,14 @@ function Assert-MegaDeskReleaseRuntime {
   if (-not (Test-MegaDeskPhysicalPathInside -Path $nodeModulesPath -Root $releasePath)) {
     throw 'Runtime da release possui node_modules fisicamente fora da release.'
   }
+  $links = @(Get-MegaDeskReparsePointsNoFollow -Root $nodeModulesPath)
+  foreach ($link in $links) {
+    Assert-MegaDeskReparsePointTargetInside -Path $link -Root $nodeModulesPath | Out-Null
+  }
   foreach ($dependency in $dependencies) {
     $dependencyPath = Join-Path $nodeModulesPath $dependency
     if (-not (Test-MegaDeskPhysicalPathInside -Path $dependencyPath -Root $nodeModulesPath)) {
       throw "Dependencia production resolve fisicamente fora do runtime: $dependency."
-    }
-  }
-  $links = @(Get-MegaDeskReparsePointsNoFollow -Root $nodeModulesPath)
-  foreach ($link in $links) {
-    if (-not (Test-MegaDeskPhysicalPathInside -Path $link -Root $nodeModulesPath)) {
-      throw 'Runtime da release possui reparse point fisicamente fora da propria release.'
     }
   }
   return [pscustomobject]@{ nodeModulesPath = $nodeModulesPath; dependencyCount = $dependencies.Count; linkCount = $links.Count }
@@ -482,34 +519,64 @@ function Remove-MegaDeskReleaseEnvironmentFiles {
 }
 
 function Invoke-MegaDeskReleaseDependencyDeploy {
-  param([Parameter(Mandatory = $true)][string]$Destination)
+  param([Parameter(Mandatory = $true)][string]$Destination, [Parameter(Mandatory = $true)][string]$AllowedRoot)
   if (Test-Path -LiteralPath $Destination) { throw 'Destino de dependencias da release ja existe.' }
   & pnpm --filter megadesk-platform --prod deploy --legacy $Destination
   if ($LASTEXITCODE -ne 0) { throw 'Preparacao isolada das dependencias production falhou; release candidata recusada.' }
-  Remove-MegaDeskReleaseEnvironmentFiles -ReleasePath $Destination -AllowedRoot $script:StagingRoot
-  Assert-MegaDeskReleaseRuntime -ReleasePath $Destination -AllowedRoot $script:StagingRoot | Out-Null
+  Remove-MegaDeskReleaseEnvironmentFiles -ReleasePath $Destination -AllowedRoot $AllowedRoot
+  Assert-MegaDeskReleaseRuntime -ReleasePath $Destination -AllowedRoot $AllowedRoot | Out-Null
+}
+
+function Invoke-MegaDeskReleaseArtifactBuild {
+  param([Parameter(Mandatory = $true)][string]$ReleasePath)
+  $releaseDist = Join-Path $ReleasePath 'dist'
+  & pnpm exec vite build --outDir (Join-Path $releaseDist 'public')
+  if ($LASTEXITCODE -ne 0) { throw 'Build isolado do frontend falhou.' }
+  & pnpm exec esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=$releaseDist
+  if ($LASTEXITCODE -ne 0) { throw 'Build isolado do backend falhou.' }
+  if (-not (Test-Path -LiteralPath (Join-Path $releaseDist 'index.js') -PathType Leaf) -or -not (Test-Path -LiteralPath (Join-Path $releaseDist 'public') -PathType Container)) { throw 'Build isolado nao produziu artefatos completos.' }
 }
 
 function Invoke-MegaDeskIsolatedBuild {
   param([Parameter(Mandatory = $true)][string]$Sha)
   $releasePath = Get-MegaDeskReleasePath -Sha $Sha
   if (Test-Path -LiteralPath $releasePath) { return (Get-MegaDeskRelease -Sha $Sha) }
-  $stagePath = Assert-MegaDeskPathInside -Path (Join-Path $script:StagingRoot ("{0}-{1}" -f $Sha, [guid]::NewGuid().ToString('N'))) -Root $script:StagingRoot -Label 'Staging'
-  $stageDist = Join-Path $stagePath 'dist'
+  $releasePrepared = $false
+  $preparationFailure = $null
   try {
-    Invoke-MegaDeskReleaseDependencyDeploy -Destination $stagePath
-    & pnpm exec vite build --outDir (Join-Path $stageDist 'public')
-    if ($LASTEXITCODE -ne 0) { throw 'Build isolado do frontend falhou.' }
-    & pnpm exec esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=$stageDist
-    if ($LASTEXITCODE -ne 0) { throw 'Build isolado do backend falhou.' }
-    if (-not (Test-Path -LiteralPath (Join-Path $stageDist 'index.js') -PathType Leaf) -or -not (Test-Path -LiteralPath (Join-Path $stageDist 'public') -PathType Container)) { throw 'Build isolado nao produziu artefatos completos.' }
-    Assert-MegaDeskReleaseRuntime -ReleasePath $stagePath -AllowedRoot $script:StagingRoot | Out-Null
-    New-MegaDeskReleaseMetadata -Sha $Sha -Destination $stagePath
-    Move-Item -LiteralPath $stagePath -Destination $releasePath
-    return (Get-MegaDeskRelease -Sha $Sha)
+    Invoke-MegaDeskReleaseDependencyDeploy -Destination $releasePath -AllowedRoot $script:ReleaseRoot
+    Invoke-MegaDeskReleaseArtifactBuild -ReleasePath $releasePath
+    Assert-MegaDeskReleaseRuntime -ReleasePath $releasePath -AllowedRoot $script:ReleaseRoot | Out-Null
+    New-MegaDeskReleaseMetadata -Sha $Sha -Destination $releasePath
+    $release = Get-MegaDeskRelease -Sha $Sha
+    $releasePrepared = $true
+    return $release
+  } catch {
+    $preparationFailure = $_.Exception.Message
+    throw
   } finally {
-    if (Test-MegaDeskPhysicalPathExists -Path $stagePath) { Remove-MegaDeskTreeNoFollow -Path $stagePath -AllowedRoot $script:StagingRoot -Label 'Staging da release' }
+    if (-not $releasePrepared -and (Test-MegaDeskPhysicalPathExists -Path $releasePath)) {
+      try {
+        Remove-MegaDeskTreeNoFollow -Path $releasePath -AllowedRoot $script:ReleaseRoot -Label 'Release candidata incompleta'
+      } catch {
+        if ($null -ne $preparationFailure) { throw ("{0} Compensacao da release candidata incompleta falhou: {1}" -f $preparationFailure, $_.Exception.Message) }
+        throw
+      }
+    }
   }
+}
+
+function Remove-MegaDeskFailedCandidateRelease {
+  param([Parameter(Mandatory = $true)][string]$CandidateSha, [Parameter(Mandatory = $true)]$State)
+  if (-not (Test-MegaDeskFullSha $CandidateSha)) { throw 'CandidateSha invalida para compensacao da release.' }
+  if ($null -ne $State.activeRelease -and [string]$State.activeRelease.sha -eq $CandidateSha) { throw 'Compensacao recusada: candidate ja e activeRelease.' }
+  if ($null -ne $State.previousRelease -and [string]$State.previousRelease.sha -eq $CandidateSha) { throw 'Compensacao recusada: candidate ja e previousRelease.' }
+
+  $releasePath = Assert-MegaDeskPathInside -Path (Join-Path $script:ReleaseRoot $CandidateSha) -Root $script:ReleaseRoot -Label 'Release candidata falha'
+  if (-not (Test-MegaDeskPhysicalPathExists -Path $releasePath)) { return $false }
+  Remove-MegaDeskTreeNoFollow -Path $releasePath -AllowedRoot $script:ReleaseRoot -Label 'Release candidata falha'
+  if (Test-MegaDeskPhysicalPathExists -Path $releasePath) { throw 'Release candidata falha permaneceu apos compensacao.' }
+  return $true
 }
 
 function Get-ProcessSnapshot {
@@ -1450,6 +1517,7 @@ function Invoke-MegaDeskBootstrapZero {
   $candidate = $null
   $startedCandidateRecord = $null
   $startedTunnelRecord = $null
+  $candidateReleaseCreated = $false
   try {
     Assert-MegaDeskToolchain -RequirePnpm
     Assert-CloudflaredConfig
@@ -1470,7 +1538,10 @@ function Invoke-MegaDeskBootstrapZero {
         Invoke-MegaDeskFrozenInstall
       }
       Invoke-MegaDeskBootstrapQualityGates -RunTests:$RunTests
+      $candidateReleasePath = Get-MegaDeskReleasePath -Sha $candidate
+      $candidateReleaseExistedBeforeBuild = Test-MegaDeskPhysicalPathExists -Path $candidateReleasePath
       $candidateRelease = Invoke-MegaDeskIsolatedBuild -Sha $candidate
+      $candidateReleaseCreated = -not $candidateReleaseExistedBeforeBuild
       Assert-MegaDeskNoSourceMutation
       Set-MegaDeskOperationState -Status 'READY' -Kind 'BOOTSTRAP_ZERO' -CandidateSha $candidate -BaselineSha $baseline -Message 'Bootstrap Zero preparou uma release artifact-valid; ainda nao esta ativa.' | Out-Null
     } else {
@@ -1495,6 +1566,12 @@ function Invoke-MegaDeskBootstrapZero {
     $failure = $_.Exception.Message
     if ($null -ne $startedCandidateRecord -or $null -ne $startedTunnelRecord) {
       try { Undo-MegaDeskInvocation -StartedNodeRecord $startedCandidateRecord -StartedTunnelRecord $startedTunnelRecord } catch { $failure = "$failure Encerramento seletivo do candidate falhou: $($_.Exception.Message)" }
+    }
+    if ($candidateReleaseCreated -and $null -ne $candidate) {
+      try {
+        $current = Get-MegaDeskState
+        Remove-MegaDeskFailedCandidateRelease -CandidateSha $candidate -State $current | Out-Null
+      } catch { $failure = "$failure Compensacao da release candidata falhou: $($_.Exception.Message)" }
     }
     try {
       $current = Get-MegaDeskState
