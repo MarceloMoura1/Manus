@@ -9,6 +9,8 @@ $script:LogPath = Join-Path $script:RuntimeRoot 'automation.log'
 $script:BackupRoot = Join-Path $script:RuntimeRoot 'backups'
 $script:ReleaseRoot = Join-Path $script:RuntimeRoot 'releases'
 $script:StagingRoot = Join-Path $script:RuntimeRoot 'staging'
+$script:DiagnosticsRoot = Join-Path $script:RuntimeRoot 'diagnostics'
+$script:NodeDiagnosticsRoot = Join-Path $script:DiagnosticsRoot 'node'
 $script:RuntimePort = 3000
 $script:CloudflaredConfig = Join-Path $env:USERPROFILE '.cloudflared\config.yml'
 $script:AllowedOrigins = 'http://127.0.0.1:3000,http://localhost:3000,https://app.megadesk.online,https://admin.megadesk.online,https://api.megadesk.online'
@@ -28,8 +30,49 @@ public static class MegaDeskUpdaterNative {
 '@
 }
 
+if ($null -eq ('MegaDeskNodeOutputCapture' -as [type])) {
+  Add-Type -TypeDefinition @'
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Text;
+using System.Threading.Tasks;
+
+public static class MegaDeskNodeOutputCapture {
+  private static async Task CopyAsync(StreamReader reader, string destination) {
+    try {
+      using (reader)
+      using (var stream = new FileStream(destination, FileMode.Append, FileAccess.Write, FileShare.Read))
+      using (var writer = new StreamWriter(stream, new UTF8Encoding(false))) {
+        writer.AutoFlush = true;
+        var buffer = new char[4096];
+        int count;
+        while ((count = await reader.ReadAsync(buffer, 0, buffer.Length)) > 0) {
+          await writer.WriteAsync(buffer, 0, count);
+        }
+      }
+    } catch {
+      // The operational log keeps only paths. A closed process stream must not expose output here.
+    }
+  }
+
+  public static void Start(Process process, string stdoutPath, string stderrPath) {
+    if (process == null) { throw new ArgumentNullException("process"); }
+    if (!process.StartInfo.RedirectStandardOutput || !process.StartInfo.RedirectStandardError) {
+      throw new InvalidOperationException("Process output redirection is required.");
+    }
+    if (String.IsNullOrWhiteSpace(stdoutPath) || String.IsNullOrWhiteSpace(stderrPath)) {
+      throw new ArgumentException("Diagnostic paths are required.");
+    }
+    Task.Run(async () => await CopyAsync(process.StandardOutput, stdoutPath));
+    Task.Run(async () => await CopyAsync(process.StandardError, stderrPath));
+  }
+}
+'@
+}
+
 function Initialize-MegaDeskRuntime {
-  foreach ($path in @($script:RuntimeRoot, $script:StateDirectory, $script:BackupRoot, $script:ReleaseRoot, $script:StagingRoot)) {
+  foreach ($path in @($script:RuntimeRoot, $script:StateDirectory, $script:BackupRoot, $script:ReleaseRoot, $script:StagingRoot, $script:DiagnosticsRoot, $script:NodeDiagnosticsRoot)) {
     if (-not (Test-Path -LiteralPath $path)) {
       New-Item -ItemType Directory -Path $path -Force | Out-Null
     }
@@ -51,6 +94,8 @@ function Set-MegaDeskAutomationPaths {
   $script:BackupRoot = Join-Path $script:RuntimeRoot 'backups'
   $script:ReleaseRoot = Join-Path $script:RuntimeRoot 'releases'
   $script:StagingRoot = Join-Path $script:RuntimeRoot 'staging'
+  $script:DiagnosticsRoot = Join-Path $script:RuntimeRoot 'diagnostics'
+  $script:NodeDiagnosticsRoot = Join-Path $script:DiagnosticsRoot 'node'
   $script:ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
   $script:RuntimePort = $Port
 }
@@ -61,6 +106,7 @@ function Get-MegaDeskRuntimeLayout {
     statePath = $script:StatePath
     releaseRoot = $script:ReleaseRoot
     stagingRoot = $script:StagingRoot
+    nodeDiagnosticsRoot = $script:NodeDiagnosticsRoot
     port = $script:RuntimePort
   }
 }
@@ -909,13 +955,47 @@ function New-MegaDeskNodeLaunchSpec {
   }
 }
 
+function New-MegaDeskNodeDiagnosticPaths {
+  param([string]$ReleaseSha = '')
+
+  if (-not [string]::IsNullOrWhiteSpace($ReleaseSha) -and -not (Test-MegaDeskFullSha $ReleaseSha)) {
+    throw 'SHA invalido para diagnostico do Node.'
+  }
+  Initialize-MegaDeskRuntime
+  $releaseIdentity = if ([string]::IsNullOrWhiteSpace($ReleaseSha)) { 'worktree' } else { $ReleaseSha }
+  $invocationId = [guid]::NewGuid().ToString('N')
+  $prefix = 'node-{0}-{1}' -f $releaseIdentity, $invocationId
+  $stdoutPath = Assert-MegaDeskPathInside -Path (Join-Path $script:NodeDiagnosticsRoot ($prefix + '.stdout.log')) -Root $script:NodeDiagnosticsRoot -Label 'Log stdout do Node'
+  $stderrPath = Assert-MegaDeskPathInside -Path (Join-Path $script:NodeDiagnosticsRoot ($prefix + '.stderr.log')) -Root $script:NodeDiagnosticsRoot -Label 'Log stderr do Node'
+  try {
+    New-Item -ItemType File -Path $stdoutPath -ErrorAction Stop | Out-Null
+    New-Item -ItemType File -Path $stderrPath -ErrorAction Stop | Out-Null
+  } catch {
+    if (Test-Path -LiteralPath $stdoutPath -PathType Leaf) { Remove-Item -LiteralPath $stdoutPath -Force -ErrorAction SilentlyContinue }
+    throw 'Nao foi possivel reservar arquivos exclusivos de diagnostico do Node.'
+  }
+  return [pscustomobject]@{ invocationId = $invocationId; stdoutPath = $stdoutPath; stderrPath = $stderrPath }
+}
+
+function Start-MegaDeskNodeDiagnosticCapture {
+  param(
+    [Parameter(Mandatory = $true)]$Process,
+    [Parameter(Mandatory = $true)][string]$StdoutPath,
+    [Parameter(Mandatory = $true)][string]$StderrPath
+  )
+
+  # Test doubles are not OS processes. Production always reaches the native capture below.
+  if ($Process -isnot [System.Diagnostics.Process]) { return }
+  [MegaDeskNodeOutputCapture]::Start($Process, $StdoutPath, $StderrPath)
+}
+
 function Start-MegaDeskProcess {
   param([Parameter(Mandatory = $true)][System.Diagnostics.ProcessStartInfo]$StartInfo)
   return [System.Diagnostics.Process]::Start($StartInfo)
 }
 
 function New-ManagedProcessRecord {
-  param($Process, [string]$ExecutablePath, [ValidateSet('node', 'cloudflared')][string]$Kind, [string]$ConfigPath = '', [string]$ScriptPath = '', [string]$EnvironmentPath = '', [string]$ReleaseSha = '', [Nullable[int]]$Port = $null)
+  param($Process, [string]$ExecutablePath, [ValidateSet('node', 'cloudflared')][string]$Kind, [string]$ConfigPath = '', [string]$ScriptPath = '', [string]$EnvironmentPath = '', [string]$ReleaseSha = '', [Nullable[int]]$Port = $null, [string]$StdoutPath = '', [string]$StderrPath = '', [string]$DiagnosticInvocationId = '')
   if ($Kind -eq 'node' -and ($null -eq $Port -or $Port -lt 1 -or $Port -gt 65535)) { throw 'Node exige porta valida no record de identidade.' }
   if ($Kind -eq 'cloudflared' -and $null -ne $Port) { throw 'Cloudflared nao pode registrar ownership da porta do Node.' }
   $snapshot = $null
@@ -935,6 +1015,9 @@ function New-ManagedProcessRecord {
     environmentPath = if ([string]::IsNullOrWhiteSpace($EnvironmentPath)) { '' } else { ConvertTo-MegaDeskCanonicalPath -Path $EnvironmentPath }
     releaseSha = $ReleaseSha
     port = if ($Kind -eq 'node') { [int]$Port } else { $null }
+    stdoutPath = if ([string]::IsNullOrWhiteSpace($StdoutPath)) { '' } else { ConvertTo-MegaDeskCanonicalPath -Path $StdoutPath }
+    stderrPath = if ([string]::IsNullOrWhiteSpace($StderrPath)) { '' } else { ConvertTo-MegaDeskCanonicalPath -Path $StderrPath }
+    diagnosticInvocationId = $DiagnosticInvocationId
   }
 }
 
@@ -969,17 +1052,34 @@ function Start-MegaDeskNode {
   $psi.WorkingDirectory = $workingDirectory
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $utf8 = New-Object System.Text.UTF8Encoding($false)
+  $psi.StandardOutputEncoding = $utf8
+  $psi.StandardErrorEncoding = $utf8
   $psi.EnvironmentVariables['NODE_ENV'] = 'production'
   $psi.EnvironmentVariables['HOST'] = '127.0.0.1'
   $psi.EnvironmentVariables['PORT'] = [string]$Port
   $psi.EnvironmentVariables['TRUST_PROXY_HOPS'] = '1'
   $psi.EnvironmentVariables['MEGADESK_ALLOWED_ORIGINS'] = $script:AllowedOrigins
   if (-not [string]::IsNullOrWhiteSpace($ReleaseSha)) { $psi.EnvironmentVariables['MEGADESK_RELEASE_SHA'] = $ReleaseSha }
+  $diagnostics = New-MegaDeskNodeDiagnosticPaths -ReleaseSha $ReleaseSha
   $process = Start-MegaDeskProcess -StartInfo $psi
   try {
-    $record = New-ManagedProcessRecord -Process $process -ExecutablePath $launch.executablePath -Kind node -ScriptPath $launch.scriptPath -EnvironmentPath $launch.environmentPath -ReleaseSha $ReleaseSha -Port $Port
+    $record = New-ManagedProcessRecord -Process $process -ExecutablePath $launch.executablePath -Kind node -ScriptPath $launch.scriptPath -EnvironmentPath $launch.environmentPath -ReleaseSha $ReleaseSha -Port $Port -StdoutPath $diagnostics.stdoutPath -StderrPath $diagnostics.stderrPath -DiagnosticInvocationId $diagnostics.invocationId
   } catch {
     throw ("CRITICO: identidade do Node iniciado nao pode ser comprovada: {0}. Nenhum encerramento por PID foi tentado; intervencao manual e necessaria." -f $_.Exception.Message)
+  }
+  try {
+    Start-MegaDeskNodeDiagnosticCapture -Process $process -StdoutPath $diagnostics.stdoutPath -StderrPath $diagnostics.stderrPath
+  } catch {
+    $diagnosticFailure = $_.Exception.Message
+    try {
+      Stop-MegaDeskExactManagedProcess -Record $record -Kind node
+    } catch {
+      throw ("CRITICO: captura diagnostica do Node nao iniciou: {0}. Compensacao automatica nao pode ser provada: {1}. Intervencao manual e necessaria." -f $diagnosticFailure, $_.Exception.Message)
+    }
+    throw ("Captura diagnostica do Node nao iniciou; candidate compensada localmente: {0}." -f $diagnosticFailure)
   }
   try {
     $state.node = $record
@@ -993,7 +1093,8 @@ function Start-MegaDeskNode {
     }
     throw ("State do Node iniciado nao pode ser persistido; candidate compensada localmente: {0}." -f $stateFailure)
   }
-  try { Write-MegaDeskLog ("MegaDesk Node iniciado e controlado (PID {0})." -f $process.Id) } catch { }
+  Add-Member -InputObject $record -NotePropertyName processHandle -NotePropertyValue $process -Force
+  try { Write-MegaDeskLog ("MegaDesk Node iniciado e controlado (PID {0}); invocation={1}; stdout_path={2}; stderr_path={3}." -f $process.Id, $diagnostics.invocationId, $diagnostics.stdoutPath, $diagnostics.stderrPath) } catch { }
   return $record
 }
 
@@ -1062,26 +1163,120 @@ function Get-MegaDeskHealth {
   }
 }
 
-function Wait-MegaDeskLocal {
-  param([string]$ExpectedReleaseSha = '', [ValidateRange(1025, 65535)][int]$Port = $script:RuntimePort, [ValidateRange(1, 90)][int]$TimeoutSeconds = 90)
-  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-  do {
+function Get-MegaDeskNodeHealthProcessObservation {
+  param($NodeRecord = $null)
+
+  $observedAt = (Get-Date).ToUniversalTime().ToString('o')
+  if ($null -eq $NodeRecord) {
+    return [pscustomobject]@{ exited = $false; exitCode = $null; observedAt = $observedAt }
+  }
+
+  if ($NodeRecord.PSObject.Properties.Name -contains 'processHandle' -and $NodeRecord.processHandle -is [System.Diagnostics.Process]) {
     try {
-      if ([string]::IsNullOrWhiteSpace($ExpectedReleaseSha)) {
+      if ($NodeRecord.processHandle.HasExited) {
+        $exitCode = $null
+        try { $exitCode = [int]$NodeRecord.processHandle.ExitCode } catch { }
+        return [pscustomobject]@{ exited = $true; exitCode = $exitCode; observedAt = $observedAt }
+      }
+      return [pscustomobject]@{ exited = $false; exitCode = $null; observedAt = $observedAt }
+    } catch { }
+  }
+
+  try {
+    if ($NodeRecord.PSObject.Properties.Name -contains 'pid' -and $null -eq (Get-ProcessSnapshot -ProcessId ([int]$NodeRecord.pid))) {
+      return [pscustomobject]@{ exited = $true; exitCode = $null; observedAt = $observedAt }
+    }
+  } catch { }
+  return [pscustomobject]@{ exited = $false; exitCode = $null; observedAt = $observedAt }
+}
+
+function Get-MegaDeskLocalHealthAttempt {
+  param(
+    [Parameter(Mandatory = $true)][string]$Url,
+    [Parameter(Mandatory = $true)][string]$ExpectedReleaseSha,
+    [ValidateRange(1, 15)][int]$TimeoutSec = 3
+  )
+
+  try {
+    $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec -MaximumRedirection 0
+  } catch [System.Net.WebException] {
+    $exception = $_.Exception
+    if ($null -ne $exception.Response) {
+      return [pscustomobject]@{ success = $false; payload = $null; lastFailureClass = ('HTTP_STATUS_{0}' -f [int]$exception.Response.StatusCode); lastFailureSummary = ('http_status={0}' -f [int]$exception.Response.StatusCode) }
+    }
+    if ($exception.Status -eq [System.Net.WebExceptionStatus]::Timeout) {
+      return [pscustomobject]@{ success = $false; payload = $null; lastFailureClass = 'REQUEST_TIMEOUT'; lastFailureSummary = 'request_timeout' }
+    }
+    if ($exception.Status -eq [System.Net.WebExceptionStatus]::ConnectFailure -or ($exception.InnerException -is [System.Net.Sockets.SocketException] -and $exception.InnerException.SocketErrorCode -eq [System.Net.Sockets.SocketError]::ConnectionRefused)) {
+      return [pscustomobject]@{ success = $false; payload = $null; lastFailureClass = 'CONNECTION_REFUSED'; lastFailureSummary = 'connection_refused' }
+    }
+    return [pscustomobject]@{ success = $false; payload = $null; lastFailureClass = 'OTHER_HTTP_ERROR'; lastFailureSummary = 'http_request_error' }
+  } catch [System.TimeoutException] {
+    return [pscustomobject]@{ success = $false; payload = $null; lastFailureClass = 'REQUEST_TIMEOUT'; lastFailureSummary = 'request_timeout' }
+  } catch {
+    return [pscustomobject]@{ success = $false; payload = $null; lastFailureClass = 'OTHER_HTTP_ERROR'; lastFailureSummary = 'http_request_error' }
+  }
+
+  if ([int]$response.StatusCode -ne 200) {
+    return [pscustomobject]@{ success = $false; payload = $null; lastFailureClass = ('HTTP_STATUS_{0}' -f [int]$response.StatusCode); lastFailureSummary = ('http_status={0}' -f [int]$response.StatusCode) }
+  }
+  try {
+    $payload = $response.Content | ConvertFrom-Json -ErrorAction Stop
+  } catch {
+    return [pscustomobject]@{ success = $false; payload = $null; lastFailureClass = 'INVALID_JSON'; lastFailureSummary = 'health_payload_invalid_json' }
+  }
+  if ($null -eq $payload -or [string]$payload.status -cne 'healthy' -or $null -eq $payload.release -or [string]::IsNullOrWhiteSpace([string]$payload.release.sha)) {
+    return [pscustomobject]@{ success = $false; payload = $null; lastFailureClass = 'INVALID_RESPONSE'; lastFailureSummary = 'health_payload_not_healthy' }
+  }
+  if ([string]$payload.release.sha -cne $ExpectedReleaseSha) {
+    return [pscustomobject]@{ success = $false; payload = $payload; lastFailureClass = 'SHA_MISMATCH'; lastFailureSummary = ('expected_sha={0}; observed_sha={1}' -f $ExpectedReleaseSha, [string]$payload.release.sha) }
+  }
+  return [pscustomobject]@{ success = $true; payload = $payload; lastFailureClass = ''; lastFailureSummary = '' }
+}
+
+function Wait-MegaDeskLocal {
+  param(
+    [string]$ExpectedReleaseSha = '',
+    [ValidateRange(1025, 65535)][int]$Port = $script:RuntimePort,
+    [ValidateRange(1, 90)][int]$TimeoutSeconds = 90,
+    $NodeRecord = $null
+  )
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $lastFailureClass = 'OTHER_HTTP_ERROR'
+  $lastFailureSummary = 'no_health_response'
+  do {
+    if ($null -ne $NodeRecord) {
+      $processObservation = Get-MegaDeskNodeHealthProcessObservation -NodeRecord $NodeRecord
+      if ($processObservation.exited) {
+        $exitCode = if ($null -eq $processObservation.exitCode) { 'unavailable' } else { [string]$processObservation.exitCode }
+        throw ('NODE_PROCESS_EXITED_BEFORE_HEALTH; processExited=YES; lastFailure=PROCESS_EXITED; exitCode={0}; observedAt={1}' -f $exitCode, $processObservation.observedAt)
+      }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ExpectedReleaseSha)) {
+      try {
         if ((Get-HttpStatusCode -Url ("http://127.0.0.1:{0}/" -f $Port) -TimeoutSec 3) -eq 200) {
           Write-MegaDeskLog 'MegaDesk local respondeu HTTP 200.'
           return
         }
-      } else {
-        $health = Get-MegaDeskHealth -Url ("http://127.0.0.1:{0}/healthz" -f $Port) -TimeoutSec 3
-        if ([string]$health.release.sha -ne $ExpectedReleaseSha) { throw 'Health local retornou SHA diferente da release candidata.' }
+        $lastFailureClass = 'OTHER_HTTP_ERROR'
+        $lastFailureSummary = 'unexpected_root_status'
+      } catch {
+        $lastFailureClass = 'OTHER_HTTP_ERROR'
+        $lastFailureSummary = 'http_request_error'
+      }
+    } else {
+      $attempt = Get-MegaDeskLocalHealthAttempt -Url ("http://127.0.0.1:{0}/healthz" -f $Port) -ExpectedReleaseSha $ExpectedReleaseSha -TimeoutSec 3
+      if ($attempt.success) {
         Write-MegaDeskLog ("Health local confirmou a release {0}." -f $ExpectedReleaseSha)
         return
       }
-    } catch { }
+      $lastFailureClass = [string]$attempt.lastFailureClass
+      $lastFailureSummary = [string]$attempt.lastFailureSummary
+    }
     Start-Sleep -Seconds 2
   } while ((Get-Date) -lt $deadline)
-  throw 'MegaDesk local nao respondeu HTTP 200 dentro do prazo.'
+  throw ('MegaDesk local nao ficou saudavel dentro do prazo. lastFailure={0}; lastFailureSummary={1}' -f $lastFailureClass, $lastFailureSummary)
 }
 
 function Wait-MegaDeskPublicEndpoints {
@@ -1206,6 +1401,7 @@ function Undo-MegaDeskInvocation {
         continue
       }
       $snapshot = Get-ProcessSnapshot -ProcessId ([int]$current.pid)
+      $processWasAlreadyAbsent = $null -eq $snapshot
       if ($null -ne $snapshot) {
         if (-not (Test-ManagedProcess -Record $current -Kind $entry.Kind)) {
           $cause = 'cleanup recusado: identidade gerenciada do processo nao pode ser comprovada; processo preservado.'
@@ -1221,7 +1417,11 @@ function Undo-MegaDeskInvocation {
       }
       $state.($entry.Kind) = $null
       Save-MegaDeskState $state
-      try { Write-MegaDeskLog ("Rollback removeu somente {0} iniciado nesta invocacao." -f $entry.Kind) } catch { }
+      if ($processWasAlreadyAbsent) {
+        try { Write-MegaDeskLog ("Rollback observou {0} iniciado nesta invocacao ja encerrado; nenhum processo foi terminado." -f $entry.Kind) } catch { }
+      } else {
+        try { Write-MegaDeskLog ("Rollback removeu somente {0} iniciado nesta invocacao." -f $entry.Kind) } catch { }
+      }
     } catch {
       $cause = $_.Exception.Message
       $rollbackErrors += ("{0}: {1}" -f $entry.Kind, $cause)
@@ -1272,8 +1472,8 @@ function Invoke-MegaDeskReleaseRollback {
     Set-MegaDeskOperationState -Status 'ROLLING_BACK' -CandidateSha ([string]$PreviousRelease.sha) -Message 'Rollback de codigo iniciado.' | Out-Null
     if ($null -ne $StartedCandidateRecord) { Undo-MegaDeskInvocation -StartedNodeRecord $StartedCandidateRecord }
     Assert-MegaDeskPortFree -Port $script:RuntimePort -Operation 'rollback' | Out-Null
-    Start-MegaDeskNode -ReleaseSha ([string]$PreviousRelease.sha) -Port $script:RuntimePort | Out-Null
-    Wait-MegaDeskLocal -ExpectedReleaseSha ([string]$PreviousRelease.sha) -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds
+    $rollbackNodeRecord = Start-MegaDeskNode -ReleaseSha ([string]$PreviousRelease.sha) -Port $script:RuntimePort
+    Wait-MegaDeskLocal -ExpectedReleaseSha ([string]$PreviousRelease.sha) -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds -NodeRecord $rollbackNodeRecord
     Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha ([string]$PreviousRelease.sha) -Checks $PublicChecks -TestMode:$TestMode -TimeoutSeconds $PublicTimeoutSeconds
     $state = Get-MegaDeskState
     $state.activeRelease = [pscustomobject]@{ sha = $PreviousRelease.sha; path = $PreviousRelease.path; activatedAt = (Get-Date).ToUniversalTime().ToString('o') }
@@ -1312,7 +1512,7 @@ function Invoke-MegaDeskReleaseSwitch {
     }
     Assert-MegaDeskPortFree -Port $script:RuntimePort -Operation 'switch apos parada do runtime gerenciado' | Out-Null
     $startedCandidateRecord = Start-MegaDeskNode -ReleaseSha ([string]$CandidateRelease.sha) -Port $script:RuntimePort
-    Wait-MegaDeskLocal -ExpectedReleaseSha ([string]$CandidateRelease.sha) -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds
+    Wait-MegaDeskLocal -ExpectedReleaseSha ([string]$CandidateRelease.sha) -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds -NodeRecord $startedCandidateRecord
     Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha ([string]$CandidateRelease.sha) -Checks $PublicChecks -TestMode:$TestMode -TimeoutSeconds $PublicTimeoutSeconds
     $state = Get-MegaDeskState
     $state.previousRelease = [pscustomobject]@{ sha = $PreviousRelease.sha; path = $PreviousRelease.path; activatedAt = $state.activeRelease.activatedAt }
@@ -1482,7 +1682,7 @@ function Resolve-MegaDeskBootstrapZeroOperation {
   if ($null -eq $current.node -or [string]$current.node.releaseSha -ne $CandidateSha -or -not (Test-ManagedProcess -Record $current.node -Kind node)) {
     throw 'Bootstrap Zero SWITCHING e ambiguo: a identidade do candidate nao foi comprovada.'
   }
-  Wait-MegaDeskLocal -ExpectedReleaseSha $CandidateSha -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds
+  Wait-MegaDeskLocal -ExpectedReleaseSha $CandidateSha -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds -NodeRecord $current.node
   Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha $CandidateSha -Checks $PublicChecks -TestMode:$TestMode -TimeoutSeconds $PublicTimeoutSeconds
   Complete-MegaDeskBootstrapZeroActivation -CandidateRelease $resolution.release -MigrationBaselineSha $MigrationBaselineSha
   return [pscustomobject]@{ status = 'ACTIVE'; release = $resolution.release }
@@ -1557,7 +1757,7 @@ function Invoke-MegaDeskBootstrapZero {
     Assert-MegaDeskPortFree -Port $script:RuntimePort -Operation 'Bootstrap Start' | Out-Null
     $startedCandidateRecord = Start-MegaDeskNode -ReleaseSha $candidate -Port $script:RuntimePort
     if ($null -eq $startedCandidateRecord) { throw 'Bootstrap Start nao recebeu identidade do candidate iniciado.' }
-    Wait-MegaDeskLocal -ExpectedReleaseSha $candidate -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds
+    Wait-MegaDeskLocal -ExpectedReleaseSha $candidate -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds -NodeRecord $startedCandidateRecord
     $startedTunnelRecord = Start-MegaDeskTunnel
     Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha $candidate -Checks $PublicChecks -TestMode:$TestMode -TimeoutSeconds $PublicTimeoutSeconds
     Complete-MegaDeskBootstrapZeroActivation -CandidateRelease $candidateRelease -MigrationBaselineSha $baseline

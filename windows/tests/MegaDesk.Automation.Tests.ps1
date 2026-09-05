@@ -2104,3 +2104,178 @@ Describe 'MegaDesk pre-ACTIVE candidate release compensation' {
     }
   }
 }
+
+Describe 'MegaDesk Node health diagnostics' {
+  BeforeEach {
+    $script:port = Get-IsolatedTestPort
+    $script:runtimeRoot = Join-Path $TestDrive 'node-diagnostics-runtime'
+    $script:projectRoot = Join-Path $TestDrive 'node-diagnostics-project'
+    New-Item -ItemType Directory -Path (Join-Path $script:projectRoot 'dist') -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $script:projectRoot 'dist\index.js') -Value 'process.exitCode = 0' -NoNewline
+    Set-Content -LiteralPath (Join-Path $script:projectRoot '.env.local') -Value 'MEGADESK_TEST_SECRET=not-copied-to-diagnostics' -NoNewline
+    & (Get-Module $moduleName) { param($runtimeRoot, $projectRoot, $port) Set-MegaDeskAutomationPaths -RuntimeRoot $runtimeRoot -ProjectRoot $projectRoot -Port $port } $script:runtimeRoot $script:projectRoot $script:port
+  }
+
+  It 'creates unique stdout and stderr paths outside the immutable release' {
+    $global:MegaDeskDiagnosticPathsCandidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    InModuleScope $moduleName {
+      $first = New-MegaDeskNodeDiagnosticPaths -ReleaseSha $global:MegaDeskDiagnosticPathsCandidate
+      $second = New-MegaDeskNodeDiagnosticPaths -ReleaseSha $global:MegaDeskDiagnosticPathsCandidate
+
+      $first.invocationId | Should Not Be $second.invocationId
+      $first.stdoutPath | Should Not Be $first.stderrPath
+      $first.stdoutPath | Should Not Match ([regex]::Escape($script:ReleaseRoot))
+      $first.stderrPath | Should Not Match ([regex]::Escape($script:ReleaseRoot))
+      $first.stdoutPath | Should Match ([regex]::Escape($script:NodeDiagnosticsRoot))
+      (Test-Path -LiteralPath $first.stdoutPath -PathType Leaf) | Should Be $true
+      (Test-Path -LiteralPath $first.stderrPath -PathType Leaf) | Should Be $true
+    }
+  }
+
+  It 'reserves empty diagnostic files without reading or copying env content' {
+    $global:MegaDeskDiagnosticEmptyPathsCandidate = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    InModuleScope $moduleName {
+      $paths = New-MegaDeskNodeDiagnosticPaths -ReleaseSha $global:MegaDeskDiagnosticEmptyPathsCandidate
+
+      (Get-Item -LiteralPath $paths.stdoutPath).Length | Should Be 0
+      (Get-Item -LiteralPath $paths.stderrPath).Length | Should Be 0
+      $paths.stdoutPath | Should Not Match ([regex]::Escape($script:ProjectRoot))
+      $paths.stderrPath | Should Not Match ([regex]::Escape($script:ProjectRoot))
+    }
+  }
+
+  It 'configures a Node process with redirected output and persists only diagnostic paths' {
+    $candidate = 'cccccccccccccccccccccccccccccccccccccccc'
+    $global:MegaDeskDiagnosticCandidate = $candidate
+    InModuleScope $moduleName {
+      $release = [pscustomobject]@{ sha = $global:MegaDeskDiagnosticCandidate; path = $script:ProjectRoot }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Assert-MegaDeskPortFree { }
+      Mock Get-MegaDeskRelease { $release }
+      Mock Get-Command { [pscustomobject]@{ Source = 'C:\\runtime\\node.exe' } }
+      Mock Start-MegaDeskProcess {
+        param($StartInfo)
+        $global:MegaDeskDiagnosticStartInfo = $StartInfo
+        return [pscustomobject]@{ Id = 4242 }
+      }
+      Mock New-ManagedProcessRecord {
+        [pscustomobject]@{ pid = 4242; executablePath = 'C:\\runtime\\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); releaseSha = $global:MegaDeskDiagnosticCandidate; port = $script:RuntimePort; stdoutPath = ''; stderrPath = ''; diagnosticInvocationId = '' }
+      }
+      Mock Start-MegaDeskNodeDiagnosticCapture { }
+      Mock Write-MegaDeskLog { }
+
+      $record = Start-MegaDeskNode -ReleaseSha $global:MegaDeskDiagnosticCandidate -Port $script:RuntimePort
+
+      $global:MegaDeskDiagnosticStartInfo.RedirectStandardOutput | Should Be $true
+      $global:MegaDeskDiagnosticStartInfo.RedirectStandardError | Should Be $true
+      Assert-MockCalled Start-MegaDeskNodeDiagnosticCapture -Times 1 -Exactly -Scope It
+      Assert-MockCalled Start-MegaDeskNodeDiagnosticCapture -ParameterFilter { $StdoutPath -match '^.+node-[0-9a-f]{40}-[0-9a-f]{32}\.stdout\.log$' -and $StderrPath -match '^.+node-[0-9a-f]{40}-[0-9a-f]{32}\.stderr\.log$' } -Times 1 -Exactly -Scope It
+      ($record.PSObject.Properties.Name -contains 'processHandle') | Should Be $true
+    }
+  }
+
+  It 'classifies connection refusal and retains it in the final timeout failure' {
+    $global:MegaDeskDiagnosticRefusedCandidate = 'dddddddddddddddddddddddddddddddddddddddd'
+    InModuleScope $moduleName {
+      Mock Invoke-WebRequest { throw [System.Net.WebException]::new('refused', [System.Net.WebExceptionStatus]::ConnectFailure) }
+      Mock Start-Sleep { }
+      $script:diagnosticClock = [DateTime]'2026-09-05T12:00:00Z'
+      Mock Get-Date { $script:diagnosticClock = $script:diagnosticClock.AddSeconds(2); return $script:diagnosticClock }
+
+      $failure = $null
+      try { Wait-MegaDeskLocal -ExpectedReleaseSha $global:MegaDeskDiagnosticRefusedCandidate -Port $script:RuntimePort -TimeoutSeconds 1 } catch { $failure = $_.Exception.Message }
+
+      $failure | Should Match 'lastFailure=CONNECTION_REFUSED'
+    }
+  }
+
+  It 'classifies HTTP status, SHA mismatch, invalid JSON and request timeout' {
+    $global:MegaDeskDiagnosticHealthCandidate = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+    InModuleScope $moduleName {
+      Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = 500; Content = '' } }
+      (Get-MegaDeskLocalHealthAttempt -Url 'http://127.0.0.1:32120/healthz' -ExpectedReleaseSha $global:MegaDeskDiagnosticHealthCandidate).lastFailureClass | Should Be 'HTTP_STATUS_500'
+
+      Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = 200; Content = '{"status":"healthy","release":{"sha":"ffffffffffffffffffffffffffffffffffffffff"}}' } }
+      (Get-MegaDeskLocalHealthAttempt -Url 'http://127.0.0.1:32120/healthz' -ExpectedReleaseSha $global:MegaDeskDiagnosticHealthCandidate).lastFailureClass | Should Be 'SHA_MISMATCH'
+
+      Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = 200; Content = '{' } }
+      (Get-MegaDeskLocalHealthAttempt -Url 'http://127.0.0.1:32120/healthz' -ExpectedReleaseSha $global:MegaDeskDiagnosticHealthCandidate).lastFailureClass | Should Be 'INVALID_JSON'
+
+      Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = 200; Content = '{"status":"unhealthy","release":{"sha":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}' } }
+      (Get-MegaDeskLocalHealthAttempt -Url 'http://127.0.0.1:32120/healthz' -ExpectedReleaseSha $global:MegaDeskDiagnosticHealthCandidate).lastFailureClass | Should Be 'INVALID_RESPONSE'
+
+      Mock Invoke-WebRequest { throw [System.TimeoutException]::new('test timeout') }
+      (Get-MegaDeskLocalHealthAttempt -Url 'http://127.0.0.1:32120/healthz' -ExpectedReleaseSha $global:MegaDeskDiagnosticHealthCandidate).lastFailureClass | Should Be 'REQUEST_TIMEOUT'
+
+      Mock Invoke-WebRequest { throw [System.Net.WebException]::new('other network error', [System.Net.WebExceptionStatus]::NameResolutionFailure) }
+      (Get-MegaDeskLocalHealthAttempt -Url 'http://127.0.0.1:32120/healthz' -ExpectedReleaseSha $global:MegaDeskDiagnosticHealthCandidate).lastFailureClass | Should Be 'OTHER_HTTP_ERROR'
+    }
+  }
+
+  It 'reports an early Node exit with the available exit code instead of a generic timeout' {
+    $global:MegaDeskDiagnosticExitedCandidate = 'ffffffffffffffffffffffffffffffffffffffff'
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskNodeHealthProcessObservation { [pscustomobject]@{ exited = $true; exitCode = 17; observedAt = '2026-09-05T12:00:00.0000000Z' } }
+      Mock Get-MegaDeskLocalHealthAttempt { throw 'health must not run after process exit' }
+
+      $failure = $null
+      try { Wait-MegaDeskLocal -ExpectedReleaseSha $global:MegaDeskDiagnosticExitedCandidate -Port $script:RuntimePort -TimeoutSeconds 1 -NodeRecord ([pscustomobject]@{ pid = 4242 }) } catch { $failure = $_.Exception.Message }
+
+      $failure | Should Match 'NODE_PROCESS_EXITED_BEFORE_HEALTH'
+      $failure | Should Match 'processExited=YES'
+      $failure | Should Match 'lastFailure=PROCESS_EXITED'
+      $failure | Should Match 'exitCode=17'
+      Assert-MockCalled Get-MegaDeskLocalHealthAttempt -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'continues to pass valid candidate health' {
+    $global:MegaDeskDiagnosticValidCandidate = '1212121212121212121212121212121212121212'
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskNodeHealthProcessObservation { [pscustomobject]@{ exited = $false; exitCode = $null; observedAt = '2026-09-05T12:00:00.0000000Z' } }
+      Mock Get-MegaDeskLocalHealthAttempt { [pscustomobject]@{ success = $true; payload = [pscustomobject]@{ status = 'healthy'; release = [pscustomobject]@{ sha = $global:MegaDeskDiagnosticValidCandidate } }; lastFailureClass = ''; lastFailureSummary = '' } }
+      Mock Write-MegaDeskLog { }
+
+      { Wait-MegaDeskLocal -ExpectedReleaseSha $global:MegaDeskDiagnosticValidCandidate -Port $script:RuntimePort -TimeoutSeconds 1 -NodeRecord ([pscustomobject]@{ pid = 4242 }) } | Should Not Throw
+    }
+  }
+
+  It 'preserves diagnostics and records an already exited process without stopping it during rollback' {
+    $candidate = '3434343434343434343434343434343434343434'
+    $global:MegaDeskDiagnosticRollbackState = [pscustomobject]@{
+      schemaVersion = 2; cloudflared = $null; activeRelease = $null; previousRelease = $null; operation = $null
+      node = [pscustomobject]@{ pid = 4242; executablePath = 'C:\\runtime\\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); releaseSha = $candidate; port = $script:port }
+    }
+    InModuleScope $moduleName {
+      $paths = New-MegaDeskNodeDiagnosticPaths -ReleaseSha $global:MegaDeskDiagnosticRollbackState.node.releaseSha
+      Set-Content -LiteralPath $paths.stdoutPath -Value 'normal output' -NoNewline
+      Set-Content -LiteralPath $paths.stderrPath -Value 'diagnostic error' -NoNewline
+      $global:MegaDeskDiagnosticRollbackState.node | Add-Member -NotePropertyName stdoutPath -NotePropertyValue $paths.stdoutPath
+      $global:MegaDeskDiagnosticRollbackState.node | Add-Member -NotePropertyName stderrPath -NotePropertyValue $paths.stderrPath
+      $global:MegaDeskDiagnosticLogMessages = New-Object 'System.Collections.Generic.List[string]'
+      Mock Get-MegaDeskState { $global:MegaDeskDiagnosticRollbackState }
+      Mock Test-SameManagedProcessRecord { $true }
+      Mock Get-ProcessSnapshot { $null }
+      Mock Test-ManagedProcess { throw 'identity must not be evaluated after confirmed absence' }
+      Mock Stop-Process { throw 'already exited process must not be stopped' }
+      Mock Save-MegaDeskState { param($State) $global:MegaDeskDiagnosticRollbackState = $State }
+      Mock Write-MegaDeskLog { param($Message) [void]$global:MegaDeskDiagnosticLogMessages.Add($Message) }
+
+      { Undo-MegaDeskInvocation -StartedNodeRecord $global:MegaDeskDiagnosticRollbackState.node } | Should Not Throw
+
+      (Get-Content -LiteralPath $paths.stdoutPath -Raw) | Should Be 'normal output'
+      (Get-Content -LiteralPath $paths.stderrPath -Raw) | Should Be 'diagnostic error'
+      $global:MegaDeskDiagnosticRollbackState.node | Should Be $null
+      ($global:MegaDeskDiagnosticLogMessages -join ' ') | Should Match 'ja encerrado'
+      Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'keeps diagnostics tests outside the ProcessReal tag' {
+    $tests = Get-Content -LiteralPath $PSCommandPath -Raw
+    $diagnosticsDescribe = [regex]::Match($tests, "Describe 'MegaDesk Node health diagnostics'.*", [System.Text.RegularExpressions.RegexOptions]::Singleline).Value
+    $diagnosticsDescribe | Should Not Match "-Tags @\('ProcessReal'\)"
+  }
+}
