@@ -1154,6 +1154,18 @@ function New-ReleaseRuntimeFixture {
   return $releasePath
 }
 
+function New-LongPathFixtureFile {
+  param([Parameter(Mandatory = $true)][string]$Root, [Parameter(Mandatory = $true)][string]$Name)
+  $directory = $Root
+  while ($directory.Length -le 270) {
+    $directory = Join-Path $directory ('segment-' + ('a' * 24))
+  }
+  [IO.Directory]::CreateDirectory('\\?\' + $directory) | Out-Null
+  $path = Join-Path $directory $Name
+  [IO.File]::WriteAllText('\\?\' + $path, 'fixture')
+  return $path
+}
+
 Describe 'MegaDesk updater v2 isolated lifecycle' {
   BeforeEach {
     $script:port = Get-IsolatedTestPort
@@ -1406,6 +1418,73 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
       }
     } finally {
       if (Test-Path -LiteralPath $stagePath) { Remove-Item -LiteralPath $stagePath -Recurse -Force }
+    }
+  }
+
+  It 'converts local and UNC paths to extended syntax without double-prefixing' {
+    InModuleScope $moduleName {
+      (ConvertTo-MegaDeskExtendedPath -Path 'C:\MegaDesk\runtime') | Should Be '\\?\C:\MegaDesk\runtime'
+      (ConvertTo-MegaDeskExtendedPath -Path '\\server\share\runtime') | Should Be '\\?\UNC\server\share\runtime'
+      (ConvertTo-MegaDeskExtendedPath -Path '\\?\C:\MegaDesk\runtime') | Should Be '\\?\C:\MegaDesk\runtime'
+      (ConvertFrom-MegaDeskExtendedPath -Path '\\?\C:\MegaDesk\runtime') | Should Be 'C:\MegaDesk\runtime'
+      (ConvertFrom-MegaDeskExtendedPath -Path '\\?\UNC\server\share\runtime') | Should Be '\\server\share\runtime'
+    }
+  }
+
+  It 'traverses and removes a long staging tree without following its junction target' {
+    $fixtureRoot = Join-Path $TestDrive 'long-path-fixture'
+    $treeRoot = Join-Path $fixtureRoot 'staging-tree'
+    $externalRoot = Join-Path $fixtureRoot 'external-target'
+    New-Item -ItemType Directory -Path $treeRoot, $externalRoot -Force | Out-Null
+    $longFile = New-LongPathFixtureFile -Root $treeRoot -Name 'supportsWebCrypto.d.ts'
+    Set-Content -LiteralPath (Join-Path $externalRoot 'must-remain.txt') -Value 'external' -NoNewline
+    $junctionPath = Join-Path $treeRoot 'external-junction'
+    New-Item -ItemType Junction -Path $junctionPath -Target $externalRoot -ErrorAction Stop | Out-Null
+    $global:MegaDeskLongPathFixtureRoot = $fixtureRoot
+    $global:MegaDeskLongPathTreeRoot = $treeRoot
+    $global:MegaDeskLongPathExternalRoot = $externalRoot
+    $global:MegaDeskLongPathFixtureFile = $longFile
+    $global:MegaDeskLongPathJunction = $junctionPath
+    try {
+      InModuleScope $moduleName {
+        (Test-MegaDeskPhysicalPathExists -Path $global:MegaDeskLongPathFixtureFile) | Should Be $true
+        (Get-MegaDeskCanonicalPhysicalPath -Path $global:MegaDeskLongPathFixtureFile).Length | Should BeGreaterThan 260
+        $links = @(Get-MegaDeskReparsePointsNoFollow -Root $global:MegaDeskLongPathTreeRoot)
+        ($links -contains $global:MegaDeskLongPathJunction) | Should Be $true
+        Remove-MegaDeskTreeNoFollow -Path $global:MegaDeskLongPathTreeRoot -AllowedRoot $global:MegaDeskLongPathFixtureRoot -Label 'Fixture long-path'
+      }
+      (Test-Path -LiteralPath $treeRoot) | Should Be $false
+      (Test-Path -LiteralPath (Join-Path $externalRoot 'must-remain.txt')) | Should Be $true
+    } finally {
+      if (Test-Path -LiteralPath $treeRoot) {
+        InModuleScope $moduleName {
+          Remove-MegaDeskTreeNoFollow -Path $global:MegaDeskLongPathTreeRoot -AllowedRoot $global:MegaDeskLongPathFixtureRoot -Label 'Fixture long-path cleanup'
+        }
+      }
+      if (Test-Path -LiteralPath $externalRoot) {
+        InModuleScope $moduleName {
+          Remove-MegaDeskTreeNoFollow -Path $global:MegaDeskLongPathExternalRoot -AllowedRoot $global:MegaDeskLongPathFixtureRoot -Label 'Fixture external cleanup'
+        }
+      }
+      if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Force -ErrorAction Stop }
+    }
+  }
+
+  It 'fails closed when long-path cleanup cannot remove an item' {
+    $fixtureRoot = Join-Path $TestDrive 'long-path-failure-fixture'
+    $treeRoot = Join-Path $fixtureRoot 'staging-tree'
+    New-Item -ItemType Directory -Path $treeRoot -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $treeRoot 'cannot-remove.txt') -Value 'fixture' -NoNewline
+    $global:MegaDeskLongPathFailureFixtureRoot = $fixtureRoot
+    $global:MegaDeskLongPathFailureTreeRoot = $treeRoot
+    try {
+      InModuleScope $moduleName {
+        Mock Remove-MegaDeskLongPathItem { throw 'simulated removal failure' }
+        { Remove-MegaDeskTreeNoFollow -Path $global:MegaDeskLongPathFailureTreeRoot -AllowedRoot $global:MegaDeskLongPathFailureFixtureRoot -Label 'Fixture forced failure' } | Should Throw
+      }
+      (Test-Path -LiteralPath $treeRoot) | Should Be $true
+    } finally {
+      if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction Stop }
     }
   }
 

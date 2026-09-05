@@ -233,20 +233,121 @@ function Assert-MegaDeskPathInside {
   return $fullPath
 }
 
+function ConvertTo-MegaDeskExtendedPath {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  if ($Path.StartsWith('\\?\')) { return $Path }
+  $full = [System.IO.Path]::GetFullPath($Path)
+  if ($full.StartsWith('\\')) { return '\\?\UNC\' + $full.Substring(2) }
+  if ($full -notmatch '^[A-Za-z]:\\') { throw 'Caminho local absoluto obrigatorio para operacao fisica.' }
+  return '\\?\' + $full
+}
+
+function ConvertFrom-MegaDeskExtendedPath {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  if ($Path.StartsWith('\\?\UNC\')) { return [System.IO.Path]::GetFullPath('\\' + $Path.Substring(8)) }
+  if ($Path.StartsWith('\\?\')) { return [System.IO.Path]::GetFullPath($Path.Substring(4)) }
+  return [System.IO.Path]::GetFullPath($Path)
+}
+
+function Test-MegaDeskPhysicalPathExists {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  $physical = ConvertTo-MegaDeskExtendedPath -Path $Path
+  return [IO.File]::Exists($physical) -or [IO.Directory]::Exists($physical)
+}
+
+function Get-MegaDeskPhysicalPathAttributes {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  return [IO.File]::GetAttributes((ConvertTo-MegaDeskExtendedPath -Path $Path))
+}
+
+function Get-MegaDeskPhysicalChildPaths {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  $physical = ConvertTo-MegaDeskExtendedPath -Path $Path
+  try {
+    return @([IO.Directory]::GetFileSystemEntries($physical) | ForEach-Object { ConvertFrom-MegaDeskExtendedPath -Path $_ })
+  } catch {
+    throw ("Nao foi possivel enumerar caminho fisico: {0}: {1}" -f $Path, $_.Exception.Message)
+  }
+}
+
+function Remove-MegaDeskLongPathItem {
+  param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][IO.FileAttributes]$Attributes)
+  $physical = ConvertTo-MegaDeskExtendedPath -Path $Path
+  try {
+    if (($Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0) {
+      [IO.File]::SetAttributes($physical, [IO.FileAttributes]($Attributes -bxor [IO.FileAttributes]::ReadOnly))
+    }
+    if (($Attributes -band [IO.FileAttributes]::Directory) -ne 0) {
+      [IO.Directory]::Delete($physical, $false)
+    } else {
+      [IO.File]::Delete($physical)
+    }
+  } catch {
+    throw ("Falha ao remover item sem seguir reparse point: {0}: {1}" -f $Path, $_.Exception.Message)
+  }
+}
+
+function Remove-MegaDeskTreeNoFollow {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$AllowedRoot,
+    [string]$Label = 'Arvore temporaria'
+  )
+  $root = Assert-MegaDeskPathInside -Path $Path -Root $AllowedRoot -Label $Label
+  if (-not (Test-MegaDeskPhysicalPathExists -Path $root)) { throw "$Label ausente antes do cleanup." }
+  $rootAttributes = Get-MegaDeskPhysicalPathAttributes -Path $root
+  if (($rootAttributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "$Label nao pode ser reparse point para cleanup." }
+  if (($rootAttributes -band [IO.FileAttributes]::Directory) -eq 0) { throw "$Label nao e um diretorio para cleanup." }
+  if (-not (Test-MegaDeskPhysicalPathInside -Path $root -Root $AllowedRoot)) { throw "$Label fisicamente fora do diretorio permitido." }
+
+  $pending = New-Object 'System.Collections.Generic.Stack[string]'
+  $directories = New-Object 'System.Collections.Generic.List[string]'
+  $pending.Push($root)
+  while ($pending.Count -gt 0) {
+    $current = $pending.Pop()
+    $currentAttributes = Get-MegaDeskPhysicalPathAttributes -Path $current
+    if (($currentAttributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+      Remove-MegaDeskLongPathItem -Path $current -Attributes $currentAttributes
+      continue
+    }
+    if (($currentAttributes -band [IO.FileAttributes]::Directory) -eq 0) {
+      Remove-MegaDeskLongPathItem -Path $current -Attributes $currentAttributes
+      continue
+    }
+    $directories.Add($current)
+    foreach ($child in @(Get-MegaDeskPhysicalChildPaths -Path $current)) {
+      $childPath = Assert-MegaDeskPathInside -Path $child -Root $root -Label $Label
+      $attributes = Get-MegaDeskPhysicalPathAttributes -Path $childPath
+      if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        Remove-MegaDeskLongPathItem -Path $childPath -Attributes $attributes
+        continue
+      }
+      if (($attributes -band [IO.FileAttributes]::Directory) -ne 0) {
+        $pending.Push($childPath)
+      } else {
+        Remove-MegaDeskLongPathItem -Path $childPath -Attributes $attributes
+      }
+    }
+  }
+  for ($index = $directories.Count - 1; $index -ge 0; $index--) {
+    $directory = $directories[$index]
+    $attributes = Get-MegaDeskPhysicalPathAttributes -Path $directory
+    Remove-MegaDeskLongPathItem -Path $directory -Attributes $attributes
+  }
+  if (Test-MegaDeskPhysicalPathExists -Path $root) { throw "$Label permaneceu apos cleanup: $root" }
+}
+
 function Get-MegaDeskCanonicalPhysicalPath {
   param([Parameter(Mandatory = $true)][string]$Path)
-  $full = [System.IO.Path]::GetFullPath($Path)
-  if (-not (Test-Path -LiteralPath $full)) { throw 'Caminho fisico a canonicalizar nao existe.' }
-  $handle = [MegaDeskUpdaterNative]::CreateFile($full, [uint32]0, [uint32]7, [IntPtr]::Zero, [uint32]3, [uint32]0x02000000, [IntPtr]::Zero)
+  $full = ConvertFrom-MegaDeskExtendedPath -Path $Path
+  if (-not (Test-MegaDeskPhysicalPathExists -Path $full)) { throw 'Caminho fisico a canonicalizar nao existe.' }
+  $handle = [MegaDeskUpdaterNative]::CreateFile((ConvertTo-MegaDeskExtendedPath -Path $full), [uint32]0, [uint32]7, [IntPtr]::Zero, [uint32]3, [uint32]0x02000000, [IntPtr]::Zero)
   if ($handle.IsInvalid) { throw 'Nao foi possivel abrir handle para canonicalizacao fisica.' }
   try {
     $buffer = New-Object System.Text.StringBuilder 32768
     $length = [MegaDeskUpdaterNative]::GetFinalPathNameByHandle($handle, $buffer, [uint32]$buffer.Capacity, [uint32]0)
     if ($length -eq 0 -or $length -ge $buffer.Capacity) { throw 'Canonicalizacao fisica do caminho falhou.' }
-    $canonical = $buffer.ToString()
-    if ($canonical.StartsWith('\\?\UNC\')) { $canonical = '\\' + $canonical.Substring(8) }
-    elseif ($canonical.StartsWith('\\?\')) { $canonical = $canonical.Substring(4) }
-    return [System.IO.Path]::GetFullPath($canonical).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    return (ConvertFrom-MegaDeskExtendedPath -Path $buffer.ToString()).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
   } finally {
     $handle.Dispose()
   }
@@ -262,15 +363,15 @@ function Test-MegaDeskPhysicalPathInside {
 function Get-MegaDeskReparsePointsNoFollow {
   param([Parameter(Mandatory = $true)][string]$Root)
   $root = [System.IO.Path]::GetFullPath($Root)
-  $rootAttributes = [IO.File]::GetAttributes($root)
+  $rootAttributes = Get-MegaDeskPhysicalPathAttributes -Path $root
   if (($rootAttributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Root de runtime nao pode ser reparse point.' }
   $pending = New-Object 'System.Collections.Generic.Stack[string]'
   $reparsePoints = New-Object 'System.Collections.Generic.List[string]'
   $pending.Push($root)
   while ($pending.Count -gt 0) {
     $current = $pending.Pop()
-    foreach ($child in @([IO.Directory]::GetFileSystemEntries($current))) {
-      $attributes = [IO.File]::GetAttributes($child)
+    foreach ($child in @(Get-MegaDeskPhysicalChildPaths -Path $current)) {
+      $attributes = Get-MegaDeskPhysicalPathAttributes -Path $child
       if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
         $reparsePoints.Add($child)
         continue
@@ -407,7 +508,7 @@ function Invoke-MegaDeskIsolatedBuild {
     Move-Item -LiteralPath $stagePath -Destination $releasePath
     return (Get-MegaDeskRelease -Sha $Sha)
   } finally {
-    if (Test-Path -LiteralPath $stagePath) { Remove-Item -LiteralPath $stagePath -Recurse -Force }
+    if (Test-MegaDeskPhysicalPathExists -Path $stagePath) { Remove-MegaDeskTreeNoFollow -Path $stagePath -AllowedRoot $script:StagingRoot -Label 'Staging da release' }
   }
 }
 
