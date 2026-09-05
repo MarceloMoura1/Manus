@@ -9,7 +9,7 @@ Set-Location -LiteralPath $projectRoot
 Import-Module (Join-Path $PSScriptRoot 'MegaDesk.Automation.psm1') -Force
 
 try {
-  Invoke-MegaDeskUpdaterV2 -ExpectedBranch 'wip/conversations-0013-lifecycle' -RunTests:$RunTests
+  Invoke-MegaDeskUpdaterV2 -ExpectedBranch 'release/updater-v2-bootstrap' -RunTests:$RunTests
 } catch {
   Write-Error $_.Exception.Message
   exit 1

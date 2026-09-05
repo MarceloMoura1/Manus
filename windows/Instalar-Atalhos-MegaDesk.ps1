@@ -18,7 +18,7 @@ foreach ($item in $shortcuts) {
   if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) { throw "Script ausente: $($item.Script)" }
   $shortcut = $shell.CreateShortcut((Join-Path $desktop $item.Name))
   $shortcut.TargetPath = $powershell
-  $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $scriptPath
+  $shortcut.Arguments = '-NoProfile -File "{0}"' -f $scriptPath
   $shortcut.WorkingDirectory = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
   $shortcut.Description = $item.Description
   $shortcut.Save()

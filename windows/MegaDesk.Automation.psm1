@@ -970,6 +970,23 @@ function New-MegaDeskNodeLaunchSpec {
   }
 }
 
+function Get-MegaDeskManagedProcessStatus {
+  param(
+    $Record = $null,
+    [Parameter(Mandatory = $true)][ValidateSet('node', 'cloudflared')][string]$Kind
+  )
+  if ($null -eq $Record) { return 'ABSENT' }
+  if (-not ($Record.PSObject.Properties.Name -contains 'pid') -or -not $Record.pid) { return 'AMBIGUOUS' }
+  if (Test-ManagedProcess -Record $Record -Kind $Kind) { return 'VALID' }
+  try {
+    $snapshot = Get-ProcessSnapshotStrict -ProcessId ([int]$Record.pid)
+  } catch {
+    return 'AMBIGUOUS'
+  }
+  if ($null -eq $snapshot) { return 'ABSENT' }
+  return 'AMBIGUOUS'
+}
+
 function New-MegaDeskNodeDiagnosticPaths {
   param([string]$ReleaseSha = '')
 
@@ -1038,11 +1055,20 @@ function New-ManagedProcessRecord {
 
 function Start-MegaDeskNode {
   param([string]$ReleaseSha = '', [ValidateRange(1025, 65535)][int]$Port = $script:RuntimePort)
+  $release = $null
+  if (-not [string]::IsNullOrWhiteSpace($ReleaseSha)) {
+    $release = Get-MegaDeskRelease -Sha $ReleaseSha
+  }
   $state = Get-MegaDeskState
-  if ($null -ne $state.node -and (Test-ManagedProcess -Record $state.node -Kind node)) {
+  $nodeStatus = Get-MegaDeskManagedProcessStatus -Record $state.node -Kind node
+  if ($nodeStatus -eq 'VALID') {
+    if (-not [string]::IsNullOrWhiteSpace($ReleaseSha) -and [string]$state.node.releaseSha -cne $ReleaseSha) {
+      throw 'Processo Node controlado nao corresponde a activeRelease; inicio recusado.'
+    }
     Write-MegaDeskLog 'Processo Node controlado ja esta ativo; nenhuma duplicata foi criada.'
     return $null
   }
+  if ($nodeStatus -eq 'AMBIGUOUS') { throw 'Identidade do processo Node registrada e ambigua; inicio recusado.' }
   if ($null -ne $state.node) { $state.node = $null; Save-MegaDeskState $state }
 
   Assert-MegaDeskPortFree -Port $Port -Operation 'inicio do Node' | Out-Null
@@ -1053,8 +1079,7 @@ function Start-MegaDeskNode {
   $psi.FileName = $node.Source
   $scriptPath = Join-Path $script:ProjectRoot 'dist\index.js'
   $workingDirectory = $script:ProjectRoot
-  if (-not [string]::IsNullOrWhiteSpace($ReleaseSha)) {
-    $release = Get-MegaDeskRelease -Sha $ReleaseSha
+  if ($null -ne $release) {
     $scriptPath = Join-Path $release.path 'dist\index.js'
     $workingDirectory = $release.path
   }
@@ -1115,10 +1140,12 @@ function Start-MegaDeskNode {
 
 function Start-MegaDeskTunnel {
   $state = Get-MegaDeskState
-  if ($null -ne $state.cloudflared -and (Test-ManagedProcess -Record $state.cloudflared -Kind cloudflared)) {
+  $tunnelStatus = Get-MegaDeskManagedProcessStatus -Record $state.cloudflared -Kind cloudflared
+  if ($tunnelStatus -eq 'VALID') {
     try { Write-MegaDeskLog 'Cloudflare Tunnel controlado ja esta ativo; nenhuma duplicata foi criada.' } catch { }
     return $null
   }
+  if ($tunnelStatus -eq 'AMBIGUOUS') { throw 'Identidade do processo Cloudflared registrada e ambigua; inicio recusado.' }
   if ($null -ne $state.cloudflared) { $state.cloudflared = $null; Save-MegaDeskState $state }
 
   $cloudflared = Get-Command cloudflared -ErrorAction SilentlyContinue
@@ -1888,7 +1915,7 @@ function Restore-MegaDeskDist {
 }
 
 Export-ModuleMember -Function @(
-  'Write-MegaDeskLog', 'Get-MegaDeskState', 'Test-ManagedProcess', 'Get-PortOwner', 'Assert-MegaDeskToolchain',
+  'Write-MegaDeskLog', 'Get-MegaDeskState', 'Test-ManagedProcess', 'Get-PortOwner', 'Assert-MegaDeskToolchain', 'Assert-MegaDeskActiveRelease',
   'Assert-MegaDeskArtifacts', 'Assert-DockerAndMySql', 'Assert-CloudflaredConfig',
   'Start-MegaDeskNode', 'Start-MegaDeskTunnel', 'Wait-MegaDeskLocal',
   'Wait-MegaDeskPublicEndpoints', 'Undo-MegaDeskInvocation', 'Stop-MegaDeskManagedProcess',

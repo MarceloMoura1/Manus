@@ -9,14 +9,26 @@ $startedNodeRecord = $null
 $startedTunnelRecord = $null
 try {
   Write-MegaDeskLog 'Inicio seguro do MegaDesk solicitado.'
+  $state = Get-MegaDeskState
+  if ($null -eq $state.operation -or [string]$state.operation.status -cne 'ACTIVE') {
+    throw 'Inicio recusado: state V2 nao esta ACTIVE.'
+  }
+  $activeRelease = Assert-MegaDeskActiveRelease -State $state
   Assert-MegaDeskToolchain
   Assert-DockerAndMySql
-  Assert-MegaDeskArtifacts
   Assert-CloudflaredConfig
-  $startedNodeRecord = Start-MegaDeskNode
-  Wait-MegaDeskLocal
+  $startedNodeRecord = Start-MegaDeskNode -ReleaseSha ([string]$activeRelease.sha)
+  $current = Get-MegaDeskState
+  if ($null -eq $current.node -or [string]$current.node.releaseSha -cne [string]$activeRelease.sha -or -not (Test-ManagedProcess -Record $current.node -Kind node)) {
+    throw 'Inicio recusado: Node gerenciado nao corresponde a activeRelease.'
+  }
+  Wait-MegaDeskLocal -ExpectedReleaseSha ([string]$activeRelease.sha) -NodeRecord $current.node
   $startedTunnelRecord = Start-MegaDeskTunnel
-  Wait-MegaDeskPublicEndpoints
+  $current = Get-MegaDeskState
+  if ($null -eq $current.cloudflared -or -not (Test-ManagedProcess -Record $current.cloudflared -Kind cloudflared)) {
+    throw 'Inicio recusado: Cloudflared gerenciado nao esta valido.'
+  }
+  Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha ([string]$activeRelease.sha)
   if (-not $NoBrowser) {
     Start-Process 'https://app.megadesk.online/'
     Start-Process 'https://admin.megadesk.online/'

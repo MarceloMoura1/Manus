@@ -20,6 +20,147 @@ function New-BootstrapReleaseRuntimeFixture {
   return $releasePath
 }
 
+Describe 'MegaDesk daily operational shortcuts' {
+  It 'starts only the active immutable release with exact health checks' {
+    $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Iniciar-MegaDesk.ps1') -Raw
+    $launcher | Should Match '\$activeRelease = Assert-MegaDeskActiveRelease -State \$state'
+    $launcher | Should Match 'Start-MegaDeskNode -ReleaseSha \(\[string\]\$activeRelease\.sha\)'
+    $launcher | Should Match 'Wait-MegaDeskLocal -ExpectedReleaseSha \(\[string\]\$activeRelease\.sha\)'
+    $launcher | Should Match 'Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha \(\[string\]\$activeRelease\.sha\)'
+    $launcher | Should Not Match 'Assert-MegaDeskArtifacts'
+    $launcher | Should Not Match 'Start-MegaDeskNode\s*(?:\r?\n|$)'
+  }
+
+  It 'targets the approved release branch for the daily updater' {
+    $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Atualizar-MegaDesk.ps1') -Raw
+    $launcher | Should Match "Invoke-MegaDeskUpdaterV2 -ExpectedBranch 'release/updater-v2-bootstrap'"
+    $launcher | Should Not Match "Invoke-MegaDeskUpdaterV2 -ExpectedBranch 'wip/conversations-0013-lifecycle'"
+  }
+
+  It 'installs only the three operational scripts without ExecutionPolicy overrides' {
+    $installer = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Instalar-Atalhos-MegaDesk.ps1') -Raw
+    foreach ($scriptName in @('Iniciar-MegaDesk.ps1', 'Atualizar-MegaDesk.ps1', 'Parar-MegaDesk.ps1')) {
+      $installer | Should Match ([regex]::Escape($scriptName))
+    }
+    $installer | Should Not Match 'ExecutionPolicy\s+Bypass'
+    $installer | Should Not Match 'Set-ExecutionPolicy'
+  }
+
+  It 'keeps Stop scoped to managed identities without changing activeRelease' {
+    $stop = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Parar-MegaDesk.ps1') -Raw
+    $stop | Should Match 'Stop-MegaDeskManagedProcess -Kind node'
+    $stop | Should Match 'Stop-MegaDeskManagedProcess -Kind cloudflared'
+    $stop | Should Not Match 'Stop-Process'
+    $stop | Should Not Match 'taskkill'
+  }
+}
+
+Describe 'MegaDesk ACTIVE runtime reconciliation' {
+  BeforeEach {
+    $script:port = Get-IsolatedTestPort
+    $script:runtimeRoot = Join-Path $TestDrive 'daily-runtime'
+    $script:projectRoot = Join-Path $TestDrive 'daily-project'
+    New-Item -ItemType Directory -Path $script:projectRoot -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $script:projectRoot '.env.local') -Value '' -NoNewline
+    & (Get-Module $moduleName) { param($runtimeRoot, $projectRoot, $port) Set-MegaDeskAutomationPaths -RuntimeRoot $runtimeRoot -ProjectRoot $projectRoot -Port $port } $script:runtimeRoot $script:projectRoot $script:port
+  }
+
+  It 'classifies a stale process record with an absent PID as safe to replace' {
+    InModuleScope $moduleName {
+      $record = [pscustomobject]@{ pid = 4242; releaseSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; port = $script:RuntimePort }
+      Mock Test-ManagedProcess { $false }
+      Mock Get-ProcessSnapshotStrict { $null }
+
+      (Get-MegaDeskManagedProcessStatus -Record $record -Kind node) | Should Be 'ABSENT'
+    }
+  }
+
+  It 'blocks PID reuse or an ambiguous recorded process before a replacement start' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $global:MegaDeskDailyCandidate = $candidate
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskDailyCandidate
+      $stale = [pscustomobject]@{ pid = 4242; releaseSha = $candidate; port = $script:RuntimePort }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $stale; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $candidate; path = 'C:\isolated\active-release' }; previousRelease = $null; operation = [pscustomobject]@{ status = 'ACTIVE' } }
+      Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $candidate; path = 'C:\isolated\active-release' } }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Test-ManagedProcess { $false }
+      Mock Get-ProcessSnapshotStrict { [pscustomobject]@{ ProcessId = 4242 } }
+      Mock Save-MegaDeskState { throw 'state must remain unchanged' }
+      Mock Start-MegaDeskProcess { throw 'replacement must not start' }
+
+      { Start-MegaDeskNode -ReleaseSha $candidate -Port $script:RuntimePort } | Should Throw
+      $script:testState.node | Should Be $stale
+      Assert-MockCalled Save-MegaDeskState -Times 0 -Exactly -Scope It
+      Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'restarts only the requested immutable release after an absent stale Node record' {
+    $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $global:MegaDeskDailyCandidate = $candidate
+    InModuleScope $moduleName {
+      $candidate = $global:MegaDeskDailyCandidate
+      $stale = [pscustomobject]@{ pid = 4242; releaseSha = $candidate; port = $script:RuntimePort }
+      $replacement = [pscustomobject]@{ pid = 4343; releaseSha = $candidate; executablePath = 'C:\runtime\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); port = $script:RuntimePort }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $stale; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $candidate; path = 'C:\isolated\active-release' }; previousRelease = $null; operation = [pscustomobject]@{ status = 'ACTIVE' } }
+      $script:firstSaveClearedStaleNode = $false
+      Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $candidate; path = 'C:\isolated\active-release' } }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Test-ManagedProcess { $false }
+      Mock Get-ProcessSnapshotStrict { $null }
+      Mock Save-MegaDeskState {
+        param($State)
+        if ($null -eq $State.node) { $script:firstSaveClearedStaleNode = $true }
+        $script:testState = $State
+      }
+      Mock Assert-MegaDeskPortFree { }
+      Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\node.exe' } }
+      Mock Test-Path { $true }
+      Mock New-MegaDeskNodeDiagnosticPaths { [pscustomobject]@{ invocationId = 'test'; stdoutPath = 'C:\isolated\node.stdout.log'; stderrPath = 'C:\isolated\node.stderr.log' } }
+      Mock Start-MegaDeskProcess {
+        param($StartInfo)
+        $script:nodeStartInfo = $StartInfo
+        [pscustomobject]@{ Id = 4343 }
+      }
+      Mock New-ManagedProcessRecord { $replacement }
+      Mock Start-MegaDeskNodeDiagnosticCapture { }
+      Mock Write-MegaDeskLog { }
+
+      $result = Start-MegaDeskNode -ReleaseSha $candidate -Port $script:RuntimePort
+
+      $result | Should Be $replacement
+      $script:firstSaveClearedStaleNode | Should Be $true
+      $script:testState.node | Should Be $replacement
+      $script:testState.activeRelease.sha | Should Be $candidate
+      $script:nodeStartInfo.Arguments | Should Match ([regex]::Escape('C:\isolated\active-release\dist\index.js'))
+      $script:nodeStartInfo.Arguments | Should Not Match ([regex]::Escape((Join-Path $script:ProjectRoot 'dist\index.js')))
+    }
+  }
+
+  It 'restarts a managed tunnel after its stale PID is confirmed absent' {
+    InModuleScope $moduleName {
+      $stale = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow.AddMinutes(-1)).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
+      $replacement = [pscustomobject]@{ pid = 5353; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow.ToString('o')); configPath = 'C:\runtime\config.yml'; port = $null }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $stale; activeRelease = $null; previousRelease = $null; operation = [pscustomobject]@{ status = 'ACTIVE' } }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Test-ManagedProcess { $false }
+      Mock Get-ProcessSnapshotStrict { $null }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\cloudflared.exe' } }
+      Mock Get-CimInstance { $null }
+      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 5353 } }
+      Mock New-ManagedProcessRecord { $replacement }
+      Mock Write-MegaDeskLog { }
+
+      $result = Start-MegaDeskTunnel
+
+      $result | Should Be $replacement
+      $script:testState.cloudflared | Should Be $replacement
+    }
+  }
+}
+
 Describe 'MegaDesk Bootstrap Zero' {
   BeforeEach {
     $script:port = Get-IsolatedTestPort
@@ -1099,7 +1240,7 @@ Describe 'MegaDesk Bootstrap Zero readiness and stale process safety' {
     }
   }
 
-  It 'blocks a stale Cloudflared record with a present invalid process without adoption or termination' {
+  It 'blocks an ambiguous Cloudflared record with a present invalid process without adoption, clearing or termination' {
     $stale = [pscustomobject]@{ pid = 5252; executablePath = 'C:\runtime\cloudflared.exe'; startedAtUtc = ([DateTime]::UtcNow.AddMinutes(-1)).ToString('o'); configPath = 'C:\runtime\config.yml'; port = $null }
     $global:MegaDeskBootstrapStalePresentState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $stale; activeRelease = $null; previousRelease = $null; operation = $null }
     InModuleScope $moduleName {
@@ -1114,8 +1255,9 @@ Describe 'MegaDesk Bootstrap Zero readiness and stale process safety' {
       $failure = $null
       try { Start-MegaDeskTunnel } catch { $failure = $_.Exception.Message }
 
-      $failure | Should Match 'cloudflared nao controlado'
-      $global:MegaDeskBootstrapStalePresentState.cloudflared | Should Be $null
+      $failure | Should Match 'identidade do processo Cloudflared registrada e ambigua'
+      $global:MegaDeskBootstrapStalePresentState.cloudflared.pid | Should Be 5252
+      Assert-MockCalled Save-MegaDeskState -Times 0 -Exactly -Scope It
       Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
       Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
     }
