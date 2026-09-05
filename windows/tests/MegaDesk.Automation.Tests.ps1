@@ -25,10 +25,13 @@ Describe 'MegaDesk daily operational shortcuts' {
     $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Iniciar-MegaDesk.ps1') -Raw
     $launcher | Should Match '\$activeRelease = Assert-MegaDeskActiveRelease -State \$state'
     $launcher | Should Match 'Start-MegaDeskNode -ReleaseSha \(\[string\]\$activeRelease\.sha\)'
+    $launcher | Should Match 'Test-MegaDeskStaticProcessIdentity -Record \$current\.node -Kind node'
     $launcher | Should Match 'Wait-MegaDeskLocal -ExpectedReleaseSha \(\[string\]\$activeRelease\.sha\)'
     $launcher | Should Match 'Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha \(\[string\]\$activeRelease\.sha\)'
     $launcher | Should Not Match 'Assert-MegaDeskArtifacts'
     $launcher | Should Not Match 'Start-MegaDeskNode\s*(?:\r?\n|$)'
+    ($launcher.IndexOf('Test-MegaDeskStaticProcessIdentity -Record $current.node -Kind node') -lt $launcher.IndexOf('Wait-MegaDeskLocal -ExpectedReleaseSha')) | Should Be $true
+    ($launcher.LastIndexOf('Test-ManagedProcess -Record $current.node -Kind node') -gt $launcher.IndexOf('Wait-MegaDeskLocal -ExpectedReleaseSha')) | Should Be $true
   }
 
   It 'targets the approved release branch for the daily updater' {
@@ -72,6 +75,47 @@ Describe 'MegaDesk ACTIVE runtime reconciliation' {
       Mock Get-ProcessSnapshotStrict { $null }
 
       (Get-MegaDeskManagedProcessStatus -Record $record -Kind node) | Should Be 'ABSENT'
+    }
+  }
+
+  It 'allows a strongly identified Node to continue toward health before its listener exists' {
+    InModuleScope $moduleName {
+      $record = [pscustomobject]@{ pid = 4242; releaseSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; port = $script:RuntimePort }
+      Mock Test-MegaDeskStaticProcessIdentity { $true }
+      Mock Test-MegaDeskPortOwnedByProcess { $false }
+
+      (Test-MegaDeskStaticProcessIdentity -Record $record -Kind node) | Should Be $true
+      (Test-ManagedProcess -Record $record -Kind node) | Should Be $false
+    }
+  }
+
+  It 'compensates a newly started Node only when its strong static identity is proved' {
+    InModuleScope $moduleName {
+      $record = [pscustomobject]@{ pid = 4242; releaseSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; port = $script:RuntimePort }
+      $script:snapshotReads = 0
+      Mock Get-ProcessSnapshot {
+        $script:snapshotReads++
+        if ($script:snapshotReads -eq 1) { return [pscustomobject]@{ ProcessId = 4242 } }
+        return $null
+      }
+      Mock Test-MegaDeskStaticProcessIdentity { $true }
+      Mock Stop-Process { }
+      Mock Wait-Process { }
+
+      { Stop-MegaDeskExactManagedProcess -Record $record -Kind node -AllowStaticIdentity } | Should Not Throw
+      Assert-MockCalled Stop-Process -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'refuses startup compensation when strong static identity is not proved' {
+    InModuleScope $moduleName {
+      $record = [pscustomobject]@{ pid = 4242; releaseSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; port = $script:RuntimePort }
+      Mock Get-ProcessSnapshot { [pscustomobject]@{ ProcessId = 4242 } }
+      Mock Test-MegaDeskStaticProcessIdentity { $false }
+      Mock Stop-Process { throw 'must not stop without static identity' }
+
+      { Stop-MegaDeskExactManagedProcess -Record $record -Kind node -AllowStaticIdentity } | Should Throw
+      Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
     }
   }
 

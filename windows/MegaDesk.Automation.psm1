@@ -1115,7 +1115,7 @@ function Start-MegaDeskNode {
   } catch {
     $diagnosticFailure = $_.Exception.Message
     try {
-      Stop-MegaDeskExactManagedProcess -Record $record -Kind node
+      Stop-MegaDeskExactManagedProcess -Record $record -Kind node -AllowStaticIdentity
     } catch {
       throw ("CRITICO: captura diagnostica do Node nao iniciou: {0}. Compensacao automatica nao pode ser provada: {1}. Intervencao manual e necessaria." -f $diagnosticFailure, $_.Exception.Message)
     }
@@ -1127,7 +1127,7 @@ function Start-MegaDeskNode {
   } catch {
     $stateFailure = $_.Exception.Message
     try {
-      Stop-MegaDeskExactManagedProcess -Record $record -Kind node
+      Stop-MegaDeskExactManagedProcess -Record $record -Kind node -AllowStaticIdentity
     } catch {
       throw ("CRITICO: state do Node iniciado nao pode ser persistido: {0}. Compensacao automatica nao pode ser provada: {1}. Intervencao manual e necessaria." -f $stateFailure, $_.Exception.Message)
     }
@@ -1410,12 +1410,19 @@ function Test-SameManagedProcessRecord {
 function Stop-MegaDeskExactManagedProcess {
   param(
     [Parameter(Mandatory = $true)]$Record,
-    [Parameter(Mandatory = $true)][ValidateSet('node', 'cloudflared')][string]$Kind
+    [Parameter(Mandatory = $true)][ValidateSet('node', 'cloudflared')][string]$Kind,
+    [switch]$AllowStaticIdentity
   )
   $snapshot = Get-ProcessSnapshot -ProcessId ([int]$Record.pid)
   if ($null -eq $snapshot) { return }
-  if (-not (Test-ManagedProcess -Record $Record -Kind $Kind)) {
-    throw "Identidade do processo $Kind iniciado nao pode ser comprovada; encerramento recusado."
+  $identityProved = if ($AllowStaticIdentity) {
+    Test-MegaDeskStaticProcessIdentity -Record $Record -Kind $Kind
+  } else {
+    Test-ManagedProcess -Record $Record -Kind $Kind
+  }
+  if (-not $identityProved) {
+    $scope = if ($AllowStaticIdentity) { 'estatica forte' } else { 'gerenciada' }
+    throw "Identidade $scope do processo $Kind iniciado nao pode ser comprovada; encerramento recusado."
   }
   Stop-Process -Id ([int]$Record.pid) -ErrorAction Stop
   Wait-Process -Id ([int]$Record.pid) -Timeout 20 -ErrorAction SilentlyContinue
@@ -1445,7 +1452,11 @@ function Undo-MegaDeskInvocation {
       $snapshot = Get-ProcessSnapshot -ProcessId ([int]$current.pid)
       $processWasAlreadyAbsent = $null -eq $snapshot
       if ($null -ne $snapshot) {
-        if (-not (Test-ManagedProcess -Record $current -Kind $entry.Kind)) {
+        $identityProved = Test-ManagedProcess -Record $current -Kind $entry.Kind
+        if (-not $identityProved -and $entry.Kind -eq 'node') {
+          $identityProved = Test-MegaDeskStaticProcessIdentity -Record $current -Kind $entry.Kind
+        }
+        if (-not $identityProved) {
           $cause = 'cleanup recusado: identidade gerenciada do processo nao pode ser comprovada; processo preservado.'
           $rollbackErrors += ("{0}: {1}" -f $entry.Kind, $cause)
           try { Write-MegaDeskLog ("Rollback incompleto para {0}: {1}" -f $entry.Kind, $cause) } catch { }
@@ -1915,7 +1926,7 @@ function Restore-MegaDeskDist {
 }
 
 Export-ModuleMember -Function @(
-  'Write-MegaDeskLog', 'Get-MegaDeskState', 'Test-ManagedProcess', 'Get-PortOwner', 'Assert-MegaDeskToolchain', 'Assert-MegaDeskActiveRelease',
+  'Write-MegaDeskLog', 'Get-MegaDeskState', 'Test-ManagedProcess', 'Test-MegaDeskStaticProcessIdentity', 'Get-PortOwner', 'Assert-MegaDeskToolchain', 'Assert-MegaDeskActiveRelease',
   'Assert-MegaDeskArtifacts', 'Assert-DockerAndMySql', 'Assert-CloudflaredConfig',
   'Start-MegaDeskNode', 'Start-MegaDeskTunnel', 'Wait-MegaDeskLocal',
   'Wait-MegaDeskPublicEndpoints', 'Undo-MegaDeskInvocation', 'Stop-MegaDeskManagedProcess',

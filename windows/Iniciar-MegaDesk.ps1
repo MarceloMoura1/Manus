@@ -19,10 +19,14 @@ try {
   Assert-CloudflaredConfig
   $startedNodeRecord = Start-MegaDeskNode -ReleaseSha ([string]$activeRelease.sha)
   $current = Get-MegaDeskState
-  if ($null -eq $current.node -or [string]$current.node.releaseSha -cne [string]$activeRelease.sha -or -not (Test-ManagedProcess -Record $current.node -Kind node)) {
-    throw 'Inicio recusado: Node gerenciado nao corresponde a activeRelease.'
+  if ($null -eq $current.node -or [string]$current.node.releaseSha -cne [string]$activeRelease.sha -or -not (Test-MegaDeskStaticProcessIdentity -Record $current.node -Kind node)) {
+    throw 'Inicio recusado: identidade estatica do Node nao corresponde a activeRelease.'
   }
   Wait-MegaDeskLocal -ExpectedReleaseSha ([string]$activeRelease.sha) -NodeRecord $current.node
+  $current = Get-MegaDeskState
+  if ($null -eq $current.node -or [string]$current.node.releaseSha -cne [string]$activeRelease.sha -or -not (Test-ManagedProcess -Record $current.node -Kind node)) {
+    throw 'Inicio recusado: Node gerenciado nao corresponde a activeRelease apos health local.'
+  }
   $startedTunnelRecord = Start-MegaDeskTunnel
   $current = Get-MegaDeskState
   if ($null -eq $current.cloudflared -or -not (Test-ManagedProcess -Record $current.cloudflared -Kind cloudflared)) {
