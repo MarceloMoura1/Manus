@@ -1837,6 +1837,68 @@ function Resolve-MegaDeskCommitSha {
   return ([string]$resolved[0]).ToLowerInvariant()
 }
 
+function Assert-MegaDeskPreparedReleaseMetadata {
+  param(
+    [Parameter(Mandatory = $true)]$Release,
+    [Parameter(Mandatory = $true)][string]$CandidateReleaseSha
+  )
+
+  $metadata = $Release.metadata
+  foreach ($field in @('sha', 'shortSha', 'createdAt', 'buildStatus', 'runtime', 'packageJsonBlob', 'pnpmLockBlob')) {
+    if ($null -eq $metadata -or -not ($metadata.PSObject.Properties.Name -contains $field) -or [string]::IsNullOrWhiteSpace([string]$metadata.$field)) {
+      throw "Metadata da release preparada sem campo obrigatorio: $field."
+    }
+  }
+  if ([string]$metadata.sha -cne $CandidateReleaseSha -or [string]$metadata.shortSha -cne $CandidateReleaseSha.Substring(0, 12) -or [string]$metadata.buildStatus -cne 'ready') {
+    throw 'Metadata da release preparada nao corresponde exatamente a CandidateReleaseSha.'
+  }
+  if ([string]$metadata.runtime.strategy -cne 'pnpm-deploy-legacy-prod' -or [string]$metadata.runtime.dependenciesPath -cne 'node_modules') {
+    throw 'Metadata da release preparada possui runtime incompativel.'
+  }
+  $createdAt = [DateTimeOffset]::MinValue
+  if (-not [DateTimeOffset]::TryParse([string]$metadata.createdAt, [ref]$createdAt)) { throw 'Metadata da release preparada possui createdAt invalido.' }
+
+  $expectedPackageBlob = (Invoke-MegaDeskGit -Arguments @('rev-parse', "${CandidateReleaseSha}:package.json") -FailureMessage 'Nao foi possivel validar package.json da release preparada.' | Select-Object -First 1).Trim()
+  $expectedLockBlob = (Invoke-MegaDeskGit -Arguments @('rev-parse', "${CandidateReleaseSha}:pnpm-lock.yaml") -FailureMessage 'Nao foi possivel validar pnpm-lock.yaml da release preparada.' | Select-Object -First 1).Trim()
+  if ([string]$metadata.packageJsonBlob -cne $expectedPackageBlob -or [string]$metadata.pnpmLockBlob -cne $expectedLockBlob) {
+    throw 'Metadata da release preparada possui blobs de dependencias divergentes.'
+  }
+}
+
+function Resolve-MegaDeskPreparedReleaseCandidate {
+  param(
+    [Parameter(Mandatory = $true)]$State,
+    [Parameter(Mandatory = $true)][string]$UpdaterHeadSha,
+    [Parameter(Mandatory = $true)]$ActiveRelease
+  )
+
+  $updaterHead = Resolve-MegaDeskCommitSha -Sha $UpdaterHeadSha -Label 'UpdaterHeadSha'
+  $candidateReleaseSha = $updaterHead
+  $source = 'HEAD preparado'
+
+  if ($null -ne $State.operation -and [string]$State.operation.status -eq 'FAILED') {
+    if (-not ($State.operation.PSObject.Properties.Name -contains 'kind') -or [string]$State.operation.kind -cne 'UPDATE') {
+      throw 'Operacao FAILED nao representa uma candidate UPDATE preparada; selecao ambigua recusada.'
+    }
+    if (-not ($State.operation.PSObject.Properties.Name -contains 'candidateSha') -or -not (Test-MegaDeskFullSha ([string]$State.operation.candidateSha))) {
+      throw 'Operacao UPDATE FAILED sem CandidateReleaseSha valido; selecao ambigua recusada.'
+    }
+    $candidateReleaseSha = Resolve-MegaDeskCommitSha -Sha ([string]$State.operation.candidateSha) -Label 'CandidateReleaseSha'
+    $source = 'operacao UPDATE preparada anteriormente'
+  }
+
+  if ($candidateReleaseSha -ceq [string]$ActiveRelease.sha) {
+    throw 'CandidateReleaseSha coincide com a release ativa; publicacao recusada.'
+  }
+  Invoke-MegaDeskGit -Arguments @('merge-base', '--is-ancestor', $candidateReleaseSha, $updaterHead) -FailureMessage 'CandidateReleaseSha nao e ancestral da branch operacional sincronizada; publicacao recusada.' | Out-Null
+
+  return [pscustomobject]@{
+    updaterHeadSha = $updaterHead
+    candidateReleaseSha = $candidateReleaseSha
+    source = $source
+  }
+}
+
 function Assert-MegaDeskBootstrapZeroInputs {
   param(
     [Parameter(Mandatory = $true)][string]$CandidateSha,
@@ -2156,14 +2218,16 @@ function Invoke-MegaDeskPreparedReleasePublish {
 
   try {
     # This preflight deliberately performs no package-manager, build, test, or
-    # release-materialization work. Get-MegaDeskRelease verifies only the
-    # immutable artifact that already exists on disk.
+    # release-materialization work. The updater HEAD validates this code;
+    # CandidateReleaseSha identifies the already prepared immutable release.
     Assert-CloudflaredConfig
     $git = Assert-MegaDeskGitPreflight -ExpectedBranch $ExpectedBranch
     $state = Assert-MegaDeskRecoverableState
     $activeRelease = Assert-MegaDeskActiveRelease -State $state
-    $candidateSha = [string]$git.sha
+    $selection = Resolve-MegaDeskPreparedReleaseCandidate -State $state -UpdaterHeadSha ([string]$git.sha) -ActiveRelease $activeRelease
+    $candidateSha = [string]$selection.candidateReleaseSha
     $candidateRelease = Get-MegaDeskRelease -Sha $candidateSha
+    Assert-MegaDeskPreparedReleaseMetadata -Release $candidateRelease -CandidateReleaseSha $candidateSha
 
     $migrationChanges = @(Get-MegaDeskMigrationChanges -FromSha ([string]$activeRelease.sha) -ToSha $candidateSha | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ($migrationChanges.Count -gt 0) {
@@ -2174,12 +2238,13 @@ function Invoke-MegaDeskPreparedReleasePublish {
     Write-Host '========================================'
     Write-Host 'MEGADESK - PUBLICACAO RAPIDA'
     Write-Host '========================================'
-    Write-Host ("Release ativa:     {0}" -f $activeRelease.sha)
-    Write-Host ("Release candidata: {0}" -f $candidateRelease.sha)
-    Write-Host ("Branch:             {0}" -f $git.branch)
-    Write-Host 'Migration delta:    NONE'
-    Write-Host 'Release preparada:  SIM'
-    Write-Host 'Runtime guard:      PASS'
+    Write-Host ("Updater:            {0}" -f $selection.updaterHeadSha)
+    Write-Host ("Release ativa:      {0}" -f $activeRelease.sha)
+    Write-Host ("Release preparada:  {0}" -f $candidateRelease.sha)
+    Write-Host ("Origem da candidate: {0}" -f $selection.source)
+    Write-Host 'Migration delta:     NONE'
+    Write-Host 'Release metadata:    PASS'
+    Write-Host 'Runtime guard:       PASS'
     $confirmation = Read-Host 'Digite "publicar" para ativar esta release. Digite qualquer outra coisa para cancelar'
     if ($confirmation -cne 'publicar') {
       Write-Host 'CANCELADO - NENHUMA ALTERACAO REALIZADA'
