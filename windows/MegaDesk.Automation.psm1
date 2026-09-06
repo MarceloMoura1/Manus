@@ -2141,6 +2141,71 @@ function Invoke-MegaDeskUpdaterV2 {
   }
 }
 
+function Invoke-MegaDeskPreparedReleasePublish {
+  param(
+    [Parameter(Mandatory = $true)][string]$ExpectedBranch,
+    [object[]]$PublicChecks = @(),
+    [switch]$TestMode,
+    [ValidateRange(1, 90)][int]$LocalTimeoutSeconds = 90,
+    [ValidateRange(1, 60)][int]$PublicTimeoutSeconds = 60
+  )
+
+  if ($TestMode) { Assert-MegaDeskTestChecks -Checks $PublicChecks }
+  $candidateSha = ''
+  $publishConfirmed = $false
+
+  try {
+    # This preflight deliberately performs no package-manager, build, test, or
+    # release-materialization work. Get-MegaDeskRelease verifies only the
+    # immutable artifact that already exists on disk.
+    Assert-CloudflaredConfig
+    $git = Assert-MegaDeskGitPreflight -ExpectedBranch $ExpectedBranch
+    $state = Assert-MegaDeskRecoverableState
+    $activeRelease = Assert-MegaDeskActiveRelease -State $state
+    $candidateSha = [string]$git.sha
+    $candidateRelease = Get-MegaDeskRelease -Sha $candidateSha
+
+    $migrationChanges = @(Get-MegaDeskMigrationChanges -FromSha ([string]$activeRelease.sha) -ToSha $candidateSha | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($migrationChanges.Count -gt 0) {
+      throw 'PUBLICACAO BLOQUEADA - RELEASE CONTEM MIGRATION DELTA. Use o fluxo seguro de migrations antes de publicar.'
+    }
+
+    Write-Host ''
+    Write-Host '========================================'
+    Write-Host 'MEGADESK - PUBLICACAO RAPIDA'
+    Write-Host '========================================'
+    Write-Host ("Release ativa:     {0}" -f $activeRelease.sha)
+    Write-Host ("Release candidata: {0}" -f $candidateRelease.sha)
+    Write-Host ("Branch:             {0}" -f $git.branch)
+    Write-Host 'Migration delta:    NONE'
+    Write-Host 'Release preparada:  SIM'
+    Write-Host 'Runtime guard:      PASS'
+    $confirmation = Read-Host 'Digite "publicar" para ativar esta release. Digite qualquer outra coisa para cancelar'
+    if ($confirmation -cne 'publicar') {
+      Write-Host 'CANCELADO - NENHUMA ALTERACAO REALIZADA'
+      return [pscustomobject]@{ status = 'CANCELLED'; candidateSha = $candidateRelease.sha; activeSha = $activeRelease.sha }
+    }
+
+    $publishConfirmed = $true
+    Set-MegaDeskOperationState -Status 'PREPARING' -Kind 'UPDATE' -CandidateSha $candidateSha -Message 'Publicacao rapida de release preparada iniciada.' | Out-Null
+    Invoke-MegaDeskReleaseSwitch -CandidateRelease $candidateRelease -PreviousRelease $activeRelease -PublicChecks $PublicChecks -TestMode:$TestMode -LocalTimeoutSeconds $LocalTimeoutSeconds -PublicTimeoutSeconds $PublicTimeoutSeconds
+    Write-MegaDeskLog ("Publicacao rapida confirmou a release {0}." -f $candidateRelease.sha)
+    return $candidateRelease
+  } catch {
+    $failure = $_.Exception.Message
+    if ($publishConfirmed) {
+      try {
+        $current = Get-MegaDeskState
+        if ($null -ne $current.operation -and [string]$current.operation.kind -eq 'UPDATE' -and [string]$current.operation.status -in @('PREPARING', 'READY')) {
+          Set-MegaDeskOperationState -Status 'FAILED' -CandidateSha $candidateSha -Kind 'UPDATE' -Message 'Publicacao rapida falhou apos confirmacao.' | Out-Null
+        }
+      } catch { }
+    }
+    try { Write-MegaDeskLog ("Publicacao rapida bloqueada ou falhou: {0}" -f $failure) } catch { }
+    throw $failure
+  }
+}
+
 function Backup-MegaDeskDist {
   $dist = Join-Path $script:ProjectRoot 'dist'
   if (-not (Test-Path -LiteralPath $dist)) { return $null }
@@ -2173,6 +2238,6 @@ Export-ModuleMember -Function @(
   'Assert-MegaDeskArtifacts', 'Assert-DockerAndMySql', 'Assert-CloudflaredConfig',
   'Start-MegaDeskNode', 'Start-MegaDeskTunnel', 'Wait-MegaDeskLocal', 'Write-MegaDeskNodeExitTelemetry',
   'Wait-MegaDeskPublicEndpoints', 'Undo-MegaDeskInvocation', 'Stop-MegaDeskManagedProcess',
-  'Backup-MegaDeskDist', 'Restore-MegaDeskDist', 'Invoke-MegaDeskUpdaterV2', 'Invoke-MegaDeskBootstrapZero',
+  'Backup-MegaDeskDist', 'Restore-MegaDeskDist', 'Invoke-MegaDeskUpdaterV2', 'Invoke-MegaDeskPreparedReleasePublish', 'Invoke-MegaDeskBootstrapZero',
   'Invoke-MegaDeskBootstrapFailedRecovery'
 )

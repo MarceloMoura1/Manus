@@ -40,13 +40,20 @@ Describe 'MegaDesk daily operational shortcuts' {
     $launcher | Should Not Match "Invoke-MegaDeskUpdaterV2 -ExpectedBranch 'wip/conversations-0013-lifecycle'"
   }
 
-  It 'installs only the three operational scripts without ExecutionPolicy overrides' {
+  It 'installs all four operational scripts without ExecutionPolicy overrides' {
     $installer = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Instalar-Atalhos-MegaDesk.ps1') -Raw
-    foreach ($scriptName in @('Iniciar-MegaDesk.ps1', 'Atualizar-MegaDesk.ps1', 'Parar-MegaDesk.ps1')) {
+    foreach ($scriptName in @('Iniciar-MegaDesk.ps1', 'Atualizar-MegaDesk.ps1', 'Publicar-MegaDesk.ps1', 'Parar-MegaDesk.ps1')) {
       $installer | Should Match ([regex]::Escape($scriptName))
     }
     $installer | Should Not Match 'ExecutionPolicy\s+Bypass'
     $installer | Should Not Match 'Set-ExecutionPolicy'
+  }
+
+  It 'keeps quick publish separate from the full updater and targets the approved branch' {
+    $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Publicar-MegaDesk.ps1') -Raw
+    $launcher | Should Match "Invoke-MegaDeskPreparedReleasePublish -ExpectedBranch 'release/updater-v2-bootstrap'"
+    $launcher | Should Not Match 'Invoke-MegaDeskUpdaterV2'
+    $launcher | Should Not Match 'ExecutionPolicy\s+Bypass'
   }
 
   It 'keeps Stop scoped to managed identities without changing activeRelease' {
@@ -2311,6 +2318,157 @@ Describe 'MegaDesk pre-ACTIVE candidate release compensation' {
       $script:testState.activeRelease | Should Be $null
       $script:testState.previousRelease | Should Be $null
     }
+  }
+}
+
+Describe 'MegaDesk prepared release publish' {
+  BeforeEach {
+    $script:port = Get-IsolatedTestPort
+    $script:runtimeRoot = Join-Path $TestDrive 'prepared-publish-runtime'
+    $script:projectRoot = Join-Path $TestDrive 'prepared-publish-project'
+    New-Item -ItemType Directory -Path $script:projectRoot -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $script:projectRoot '.env.local') -Value '' -NoNewline
+    & (Get-Module $moduleName) { param($runtimeRoot, $projectRoot, $port) Set-MegaDeskAutomationPaths -RuntimeRoot $runtimeRoot -ProjectRoot $projectRoot -Port $port } $script:runtimeRoot $script:projectRoot $script:port
+  }
+
+  It 'blocks a candidate that is not already materialized without preparing it' {
+    $global:MegaDeskPreparedCandidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $global:MegaDeskPreparedActive = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    InModuleScope $moduleName {
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active'; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = $null }
+      Mock Assert-CloudflaredConfig { }
+      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; branch = 'release/updater-v2-bootstrap' } }
+      Mock Assert-MegaDeskRecoverableState { $script:testState }
+      Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active' } }
+      Mock Get-MegaDeskRelease { throw 'Metadata da release ausente.' }
+      Mock Invoke-MegaDeskIsolatedBuild { throw 'materialization must not run' }
+      Mock Invoke-MegaDeskFrozenInstall { throw 'install must not run' }
+      Mock Set-MegaDeskOperationState { throw 'state must not change before confirmation' }
+      Mock Write-MegaDeskLog { }
+
+      { Invoke-MegaDeskPreparedReleasePublish -ExpectedBranch 'release/updater-v2-bootstrap' } | Should Throw 'Metadata da release ausente.'
+      Assert-MockCalled Invoke-MegaDeskIsolatedBuild -Times 0 -Exactly -Scope It
+      Assert-MockCalled Invoke-MegaDeskFrozenInstall -Times 0 -Exactly -Scope It
+      Assert-MockCalled Set-MegaDeskOperationState -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'blocks a divergent HEAD before inspecting any candidate release' {
+    InModuleScope $moduleName {
+      Mock Assert-CloudflaredConfig { }
+      Mock Assert-MegaDeskGitPreflight { throw 'Repositorio fora de sincronizacao (behind=1, ahead=0); atualizacao recusada.' }
+      Mock Get-MegaDeskRelease { throw 'candidate must not be inspected' }
+      Mock Write-MegaDeskLog { }
+
+      { Invoke-MegaDeskPreparedReleasePublish -ExpectedBranch 'release/updater-v2-bootstrap' } | Should Throw 'Repositorio fora de sincronizacao'
+      Assert-MockCalled Get-MegaDeskRelease -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'blocks migration delta before the prompt without a runtime mutation' {
+    $global:MegaDeskPreparedCandidate = 'cccccccccccccccccccccccccccccccccccccccc'
+    $global:MegaDeskPreparedActive = 'dddddddddddddddddddddddddddddddddddddddd'
+    InModuleScope $moduleName {
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active'; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = $null }
+      Mock Assert-CloudflaredConfig { }
+      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; branch = 'release/updater-v2-bootstrap' } }
+      Mock Assert-MegaDeskRecoverableState { $script:testState }
+      Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active' } }
+      Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate' } }
+      Mock Get-MegaDeskMigrationChanges { @('drizzle/main-migrations/0018_new.sql') }
+      Mock Read-Host { throw 'prompt must not be reached' }
+      Mock Set-MegaDeskOperationState { throw 'state must not change before confirmation' }
+      Mock Write-MegaDeskLog { }
+
+      { Invoke-MegaDeskPreparedReleasePublish -ExpectedBranch 'release/updater-v2-bootstrap' } | Should Throw 'MIGRATION DELTA'
+      Assert-MockCalled Read-Host -Times 0 -Exactly -Scope It
+      Assert-MockCalled Set-MegaDeskOperationState -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'blocks an invalid prepared release guard before the prompt' {
+    $global:MegaDeskPreparedCandidate = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+    $global:MegaDeskPreparedActive = 'ffffffffffffffffffffffffffffffffffffffff'
+    InModuleScope $moduleName {
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active'; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = $null }
+      Mock Assert-CloudflaredConfig { }
+      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; branch = 'release/updater-v2-bootstrap' } }
+      Mock Assert-MegaDeskRecoverableState { $script:testState }
+      Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active' } }
+      Mock Get-MegaDeskRelease { throw 'Imports runtime production da release nao resolvem exclusivamente no node_modules da release.' }
+      Mock Read-Host { throw 'prompt must not be reached' }
+      Mock Write-MegaDeskLog { }
+
+      { Invoke-MegaDeskPreparedReleasePublish -ExpectedBranch 'release/updater-v2-bootstrap' } | Should Throw 'Imports runtime production'
+      Assert-MockCalled Read-Host -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'cancels without state or runtime mutation and runs no heavyweight preparation' {
+    $global:MegaDeskPreparedCandidate = '1111111111111111111111111111111111111111'
+    $global:MegaDeskPreparedActive = '2222222222222222222222222222222222222222'
+    InModuleScope $moduleName {
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active'; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'FAILED'; candidateSha = $global:MegaDeskPreparedCandidate; message = 'prior failure' } }
+      Mock Assert-CloudflaredConfig { }
+      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; branch = 'release/updater-v2-bootstrap' } }
+      Mock Assert-MegaDeskRecoverableState { $script:testState }
+      Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active' } }
+      Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate' } }
+      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Read-Host { 'cancelar' }
+      Mock Invoke-MegaDeskIsolatedBuild { throw 'materialization must not run' }
+      Mock Invoke-MegaDeskFrozenInstall { throw 'install must not run' }
+      Mock Invoke-MegaDeskBootstrapQualityGates { throw 'tests must not run' }
+      Mock Invoke-MegaDeskReleaseSwitch { throw 'switch must not run' }
+      Mock Set-MegaDeskOperationState { throw 'state must not change on cancel' }
+      Mock Write-MegaDeskLog { }
+
+      $result = Invoke-MegaDeskPreparedReleasePublish -ExpectedBranch 'release/updater-v2-bootstrap'
+      $result.status | Should Be 'CANCELLED'
+      $script:testState.operation.status | Should Be 'FAILED'
+      Assert-MockCalled Invoke-MegaDeskIsolatedBuild -Times 0 -Exactly -Scope It
+      Assert-MockCalled Invoke-MegaDeskFrozenInstall -Times 0 -Exactly -Scope It
+      Assert-MockCalled Invoke-MegaDeskBootstrapQualityGates -Times 0 -Exactly -Scope It
+      Assert-MockCalled Invoke-MegaDeskReleaseSwitch -Times 0 -Exactly -Scope It
+      Assert-MockCalled Set-MegaDeskOperationState -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'moves a prior UPDATE FAILED state to PREPARING only after publicar and delegates the safe switch with the active release' {
+    $global:MegaDeskPreparedCandidate = '3333333333333333333333333333333333333333'
+    $global:MegaDeskPreparedActive = '4444444444444444444444444444444444444444'
+    InModuleScope $moduleName {
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active'; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'FAILED'; candidateSha = $global:MegaDeskPreparedCandidate; message = 'prior failure' } }
+      $script:capturedPrevious = $null
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Assert-CloudflaredConfig { }
+      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; branch = 'release/updater-v2-bootstrap' } }
+      Mock Assert-MegaDeskRecoverableState { $script:testState }
+      Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active' } }
+      Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate' } }
+      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Read-Host { 'publicar' }
+      Mock Invoke-MegaDeskReleaseSwitch { param($CandidateRelease, $PreviousRelease) $script:capturedPrevious = $PreviousRelease }
+      Mock Write-MegaDeskLog { }
+
+      $result = Invoke-MegaDeskPreparedReleasePublish -ExpectedBranch 'release/updater-v2-bootstrap'
+      $result.sha | Should Be $global:MegaDeskPreparedCandidate
+      $script:testState.operation.status | Should Be 'PREPARING'
+      $script:capturedPrevious.sha | Should Be $global:MegaDeskPreparedActive
+      Assert-MockCalled Invoke-MegaDeskReleaseSwitch -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'keeps the pre-prompt path free of tsc, tests, build, install and materialization calls' {
+    $moduleSource = Get-Content -LiteralPath $ExecutionContext.SessionState.Module.Path -Raw
+    $publishFunction = [regex]::Match($moduleSource, 'function Invoke-MegaDeskPreparedReleasePublish \{.*?(?=function Backup-MegaDeskDist)', [System.Text.RegularExpressions.RegexOptions]::Singleline).Value
+    $publishFunction | Should Not Match 'pnpm\s+(?:check|test|install|deploy)'
+    $publishFunction | Should Not Match 'Invoke-MegaDeskIsolatedBuild'
+    $publishFunction | Should Not Match 'Invoke-MegaDeskFrozenInstall'
+    $publishFunction | Should Not Match 'Invoke-MegaDeskBootstrapQualityGates'
+    $publishFunction | Should Match 'Get-MegaDeskRelease -Sha \$candidateSha'
+    $publishFunction | Should Match 'Get-MegaDeskMigrationChanges'
   }
 }
 

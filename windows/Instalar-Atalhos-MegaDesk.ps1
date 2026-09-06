@@ -10,6 +10,7 @@ $shell = New-Object -ComObject WScript.Shell
 $shortcuts = @(
   @{ Name = 'Iniciar MegaDesk.lnk'; Script = 'Iniciar-MegaDesk.ps1'; Description = 'Iniciar MegaDesk com MySQL e Cloudflare Tunnel' },
   @{ Name = 'Atualizar MegaDesk.lnk'; Script = 'Atualizar-MegaDesk.ps1'; Description = 'Preparar release imutavel e atualizar MegaDesk com health e rollback' },
+  @{ Name = 'Publicar MegaDesk.lnk'; Script = 'Publicar-MegaDesk.ps1'; Description = 'Ativar rapidamente uma release MegaDesk ja preparada e validada' },
   @{ Name = 'Parar MegaDesk.lnk'; Script = 'Parar-MegaDesk.ps1'; Description = 'Parar somente processos controlados do MegaDesk' }
 )
 
@@ -24,5 +25,5 @@ foreach ($item in $shortcuts) {
   $shortcut.Save()
 }
 
-Write-Host 'Atalhos Iniciar, Atualizar e Parar MegaDesk criados na Area de Trabalho.'
+Write-Host 'Atalhos Iniciar, Atualizar, Publicar e Parar MegaDesk criados na Area de Trabalho.'
 Write-Host 'Nenhum auto-start, servico ou tarefa agendada foi configurado.'
