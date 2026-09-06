@@ -2253,6 +2253,7 @@ function Invoke-MegaDeskPreparedReleasePublish {
 
     $publishConfirmed = $true
     Set-MegaDeskOperationState -Status 'PREPARING' -Kind 'UPDATE' -CandidateSha $candidateSha -Message 'Publicacao rapida de release preparada iniciada.' | Out-Null
+    Set-MegaDeskOperationState -Status 'READY' -Kind 'UPDATE' -CandidateSha $candidateSha -Message 'Publicacao rapida confirmou a release preparada; pronta para switch.' | Out-Null
     Invoke-MegaDeskReleaseSwitch -CandidateRelease $candidateRelease -PreviousRelease $activeRelease -PublicChecks $PublicChecks -TestMode:$TestMode -LocalTimeoutSeconds $LocalTimeoutSeconds -PublicTimeoutSeconds $PublicTimeoutSeconds
     Write-MegaDeskLog ("Publicacao rapida confirmou a release {0}." -f $candidateRelease.sha)
     return $candidateRelease

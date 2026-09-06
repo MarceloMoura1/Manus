@@ -1371,8 +1371,16 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
     & (Get-Module $moduleName) { param($runtimeRoot, $projectRoot, $port) Set-MegaDeskAutomationPaths -RuntimeRoot $runtimeRoot -ProjectRoot $projectRoot -Port $port } $script:runtimeRoot $script:projectRoot $script:port
   }
 
-  It 'rejects invalid operation transitions' {
-    { InModuleScope $moduleName { Set-MegaDeskOperationState -Status READY } } | Should Throw
+  It 'rejects invalid operation transitions, including PREPARING to SWITCHING' {
+    InModuleScope $moduleName {
+      try {
+        { Set-MegaDeskOperationState -Status READY } | Should Throw
+        Set-MegaDeskOperationState -Status PREPARING -Kind UPDATE -CandidateSha 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' | Out-Null
+        { Set-MegaDeskOperationState -Status SWITCHING -Kind UPDATE -CandidateSha 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' } | Should Throw
+      } finally {
+        Remove-Item -LiteralPath $script:StatePath -Force -ErrorAction SilentlyContinue
+      }
+    }
   }
 
   It 'uses only a temporary runtime root and a non-production port in test mode' {
@@ -2490,12 +2498,15 @@ Describe 'MegaDesk prepared release publish' {
     }
   }
 
-  It 'moves a prior UPDATE FAILED state to PREPARING only after publicar and delegates the safe switch with the active release' {
+  It 'moves a prior UPDATE FAILED state through READY before delegating the safe switch with the active release' {
     $global:MegaDeskPreparedCandidate = '3333333333333333333333333333333333333333'
     $global:MegaDeskPreparedActive = '4444444444444444444444444444444444444444'
     InModuleScope $moduleName {
       $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active'; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'FAILED'; candidateSha = $global:MegaDeskPreparedCandidate; message = 'prior failure' } }
       $script:capturedPrevious = $null
+      $script:transitionStatuses = @()
+      $script:transitionCandidates = @()
+      $script:statusAtSwitch = $null
       Mock Get-MegaDeskState { $script:testState }
       Mock Save-MegaDeskState { param($State) $script:testState = $State }
       Mock Assert-CloudflaredConfig { }
@@ -2509,15 +2520,23 @@ Describe 'MegaDesk prepared release publish' {
       Mock Read-Host { 'publicar' }
       Mock Set-MegaDeskOperationState {
         param($Status, $CandidateSha, $Kind, $Message)
+        $script:transitionStatuses += $Status
+        $script:transitionCandidates += $CandidateSha
         $script:testState.operation = [pscustomobject]@{ kind = $Kind; status = $Status; candidateSha = $CandidateSha; message = $Message }
         return $script:testState
       }
-      Mock Invoke-MegaDeskReleaseSwitch { param($CandidateRelease, $PreviousRelease) $script:capturedPrevious = $PreviousRelease }
+      Mock Invoke-MegaDeskReleaseSwitch { param($CandidateRelease, $PreviousRelease) $script:capturedPrevious = $PreviousRelease; $script:statusAtSwitch = $script:testState.operation.status }
       Mock Write-MegaDeskLog { }
 
       $result = Invoke-MegaDeskPreparedReleasePublish -ExpectedBranch 'release/updater-v2-bootstrap'
       $result.sha | Should Be $global:MegaDeskPreparedCandidate
-      $script:testState.operation.status | Should Be 'PREPARING'
+      $script:testState.operation.status | Should Be 'READY'
+      $script:transitionStatuses.Count | Should Be 2
+      $script:transitionStatuses[0] | Should Be 'PREPARING'
+      $script:transitionStatuses[1] | Should Be 'READY'
+      $script:transitionCandidates[0] | Should Be $global:MegaDeskPreparedCandidate
+      $script:transitionCandidates[1] | Should Be $global:MegaDeskPreparedCandidate
+      $script:statusAtSwitch | Should Be 'READY'
       $script:capturedPrevious.sha | Should Be $global:MegaDeskPreparedActive
       Assert-MockCalled Invoke-MegaDeskReleaseSwitch -Times 1 -Exactly -Scope It
     }
@@ -2531,19 +2550,22 @@ Describe 'MegaDesk prepared release publish' {
       $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active'; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'FAILED'; candidateSha = $global:MegaDeskPreparedCandidate; message = 'prior failure' } }
       $script:stateCandidate = ''
       $script:switchedCandidate = ''
+      $script:transitionStatuses = @()
+      $script:gates = @()
+      $script:statusAtSwitch = $null
       Mock Get-MegaDeskState { $script:testState }
       Mock Save-MegaDeskState { param($State) $script:testState = $State }
       Mock Assert-CloudflaredConfig { }
       Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreparedUpdaterHead; branch = 'release/updater-v2-bootstrap' } }
       Mock Assert-MegaDeskRecoverableState { $script:testState }
       Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active' } }
-      Mock Resolve-MegaDeskPreparedReleaseCandidate { [pscustomobject]@{ updaterHeadSha = $global:MegaDeskPreparedUpdaterHead; candidateReleaseSha = $global:MegaDeskPreparedCandidate; source = 'operacao UPDATE preparada anteriormente' } }
-      Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate'; metadata = [pscustomobject]@{} } }
-      Mock Assert-MegaDeskPreparedReleaseMetadata { }
-      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Resolve-MegaDeskPreparedReleaseCandidate { $script:gates += 'selection'; [pscustomobject]@{ updaterHeadSha = $global:MegaDeskPreparedUpdaterHead; candidateReleaseSha = $global:MegaDeskPreparedCandidate; source = 'operacao UPDATE preparada anteriormente' } }
+      Mock Get-MegaDeskRelease { $script:gates += 'metadata'; [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate'; metadata = [pscustomobject]@{} } }
+      Mock Assert-MegaDeskPreparedReleaseMetadata { $script:gates += 'runtime' }
+      Mock Get-MegaDeskMigrationChanges { $script:gates += 'migration'; @() }
       Mock Read-Host { 'publicar' }
-      Mock Set-MegaDeskOperationState { param($Status, $CandidateSha) $script:stateCandidate = $CandidateSha }
-      Mock Invoke-MegaDeskReleaseSwitch { param($CandidateRelease) $script:switchedCandidate = $CandidateRelease.sha }
+      Mock Set-MegaDeskOperationState { param($Status, $CandidateSha) $script:transitionStatuses += $Status; $script:stateCandidate = $CandidateSha; if ($Status -eq 'READY') { $script:gates += 'ready' } }
+      Mock Invoke-MegaDeskReleaseSwitch { param($CandidateRelease) $script:switchedCandidate = $CandidateRelease.sha; $script:statusAtSwitch = $script:transitionStatuses[$script:transitionStatuses.Count - 1]; $script:gates += 'switch' }
       Mock Write-MegaDeskLog { }
 
       $result = Invoke-MegaDeskPreparedReleasePublish -ExpectedBranch 'release/updater-v2-bootstrap'
@@ -2551,6 +2573,11 @@ Describe 'MegaDesk prepared release publish' {
       $script:stateCandidate | Should Be $global:MegaDeskPreparedCandidate
       $script:switchedCandidate | Should Be $global:MegaDeskPreparedCandidate
       $script:stateCandidate | Should Not Be $global:MegaDeskPreparedUpdaterHead
+      $script:transitionStatuses.Count | Should Be 2
+      $script:transitionStatuses[0] | Should Be 'PREPARING'
+      $script:transitionStatuses[1] | Should Be 'READY'
+      $script:statusAtSwitch | Should Be 'READY'
+      $script:gates | Should Be @('selection', 'metadata', 'runtime', 'migration', 'ready', 'switch')
     }
   }
 
