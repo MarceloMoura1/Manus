@@ -131,12 +131,12 @@ Describe 'MegaDesk ACTIVE runtime reconciliation' {
       Mock Test-ManagedProcess { $false }
       Mock Get-ProcessSnapshotStrict { [pscustomobject]@{ ProcessId = 4242 } }
       Mock Save-MegaDeskState { throw 'state must remain unchanged' }
-      Mock Start-MegaDeskProcess { throw 'replacement must not start' }
+      Mock Start-MegaDeskNativeNodeProcess { throw 'replacement must not start' }
 
       { Start-MegaDeskNode -ReleaseSha $candidate -Port $script:RuntimePort } | Should Throw
       $script:testState.node | Should Be $stale
       Assert-MockCalled Save-MegaDeskState -Times 0 -Exactly -Scope It
-      Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
+      Assert-MockCalled Start-MegaDeskNativeNodeProcess -Times 0 -Exactly -Scope It
     }
   }
 
@@ -161,14 +161,14 @@ Describe 'MegaDesk ACTIVE runtime reconciliation' {
       Mock Assert-MegaDeskPortFree { }
       Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\node.exe' } }
       Mock Test-Path { $true }
-      Mock New-MegaDeskNodeDiagnosticPaths { [pscustomobject]@{ invocationId = 'test'; stdoutPath = 'C:\isolated\node.stdout.log'; stderrPath = 'C:\isolated\node.stderr.log' } }
-      Mock Start-MegaDeskProcess {
-        param($StartInfo)
-        $script:nodeStartInfo = $StartInfo
+      Mock New-MegaDeskNodeDiagnosticPaths { [pscustomobject]@{ invocationId = '00000000000000000000000000000000'; stdoutPath = 'C:\isolated\node.stdout.log'; stderrPath = 'C:\isolated\node.stderr.log'; exitTelemetryPath = 'C:\isolated\node.exit.json'; observerRequestPath = 'C:\isolated\node.exit-observer.json' } }
+      Mock Start-MegaDeskNativeNodeProcess {
+        param($Launch, $WorkingDirectory, $EnvironmentOverrides, $StdoutPath, $StderrPath)
+        $script:nodeLaunch = $Launch
         [pscustomobject]@{ Id = 4343 }
       }
       Mock New-ManagedProcessRecord { $replacement }
-      Mock Start-MegaDeskNodeDiagnosticCapture { }
+      Mock Start-MegaDeskNodeExitObserver { }
       Mock Write-MegaDeskLog { }
 
       $result = Start-MegaDeskNode -ReleaseSha $candidate -Port $script:RuntimePort
@@ -177,8 +177,8 @@ Describe 'MegaDesk ACTIVE runtime reconciliation' {
       $script:firstSaveClearedStaleNode | Should Be $true
       $script:testState.node | Should Be $replacement
       $script:testState.activeRelease.sha | Should Be $candidate
-      $script:nodeStartInfo.Arguments | Should Match ([regex]::Escape('C:\isolated\active-release\dist\index.js'))
-      $script:nodeStartInfo.Arguments | Should Not Match ([regex]::Escape((Join-Path $script:ProjectRoot 'dist\index.js')))
+      $script:nodeLaunch.Arguments | Should Match ([regex]::Escape('C:\isolated\active-release\dist\index.js'))
+      $script:nodeLaunch.Arguments | Should Not Match ([regex]::Escape((Join-Path $script:ProjectRoot 'dist\index.js')))
     }
   }
 
@@ -385,8 +385,9 @@ Describe 'MegaDesk Bootstrap Zero' {
       Mock Assert-MegaDeskPortFree { }
       Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\node.exe' } }
       Mock Test-Path { $true }
-      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 4242 } }
+      Mock Start-MegaDeskNativeNodeProcess { [pscustomobject]@{ Id = 4242 } }
       Mock New-ManagedProcessRecord { [pscustomobject]@{ pid = 4242; releaseSha = $candidate; executablePath = 'C:\runtime\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); port = 32120 } }
+      Mock Start-MegaDeskNodeExitObserver { }
       Mock Wait-MegaDeskLocal { throw 'health SHA divergente' }
       Mock Undo-MegaDeskInvocation {
         $script:testState.node = $null
@@ -474,7 +475,7 @@ Describe 'MegaDesk Bootstrap Zero' {
       Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\node.exe' } }
       Mock Get-MegaDeskRelease { [pscustomobject]@{ path = 'C:\isolated\candidate' } }
       Mock Test-Path { $true }
-      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 4242 } }
+      Mock Start-MegaDeskNativeNodeProcess { [pscustomobject]@{ Id = 4242 } }
       Mock New-ManagedProcessRecord { $record }
       Mock Save-MegaDeskState { throw 'state write failed' }
       Mock Stop-MegaDeskExactManagedProcess { }
@@ -494,7 +495,7 @@ Describe 'MegaDesk Bootstrap Zero' {
       Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\node.exe' } }
       Mock Get-MegaDeskRelease { [pscustomobject]@{ path = 'C:\isolated\candidate' } }
       Mock Test-Path { $true }
-      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 4242 } }
+      Mock Start-MegaDeskNativeNodeProcess { [pscustomobject]@{ Id = 4242 } }
       Mock New-ManagedProcessRecord { throw 'creation time indisponivel' }
       Mock Stop-Process { }
       $failure = $null
@@ -518,7 +519,7 @@ Describe 'MegaDesk Bootstrap Zero' {
       Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\node.exe' } }
       Mock Get-MegaDeskRelease { [pscustomobject]@{ path = 'C:\isolated\candidate' } }
       Mock Test-Path { $true }
-      Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 4242 } }
+      Mock Start-MegaDeskNativeNodeProcess { [pscustomobject]@{ Id = 4242 } }
       Mock New-ManagedProcessRecord { $record }
       Mock Save-MegaDeskState { throw 'state write failed' }
       Mock Stop-MegaDeskExactManagedProcess { throw 'identidade nao comprovada' }
@@ -803,12 +804,13 @@ Describe 'MegaDesk Bootstrap Zero' {
       Mock Assert-MegaDeskPortFree { }
       Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\node.exe' } }
       Mock Test-Path { $true }
-      Mock Start-MegaDeskProcess { $script:bootstrapStartSequence += 'NODE'; [pscustomobject]@{ Id = 4242 } }
+      Mock Start-MegaDeskNativeNodeProcess { $script:bootstrapStartSequence += 'NODE'; [pscustomobject]@{ Id = 4242 } }
       Mock New-ManagedProcessRecord {
         param($Process, $ExecutablePath, $Kind, $ConfigPath, $ScriptPath, $EnvironmentPath, $ReleaseSha, $Port)
         $script:capturedScriptPath = $ScriptPath
-        $global:MegaDeskBootstrapRecord
+        return $global:MegaDeskBootstrapRecord
       }
+      Mock Start-MegaDeskNodeExitObserver { }
       Mock Test-ManagedProcess { $true }
       Mock Wait-MegaDeskLocal {
         param($ExpectedReleaseSha, $Port)
@@ -2351,7 +2353,7 @@ Describe 'MegaDesk Node health diagnostics' {
     }
   }
 
-  It 'configures a Node process with redirected output and persists only diagnostic paths' {
+  It 'launches a Node with direct diagnostic file handles and persistent exit telemetry' {
     $candidate = 'cccccccccccccccccccccccccccccccccccccccc'
     $global:MegaDeskDiagnosticCandidate = $candidate
     InModuleScope $moduleName {
@@ -2362,24 +2364,74 @@ Describe 'MegaDesk Node health diagnostics' {
       Mock Assert-MegaDeskPortFree { }
       Mock Get-MegaDeskRelease { $release }
       Mock Get-Command { [pscustomobject]@{ Source = 'C:\\runtime\\node.exe' } }
-      Mock Start-MegaDeskProcess {
-        param($StartInfo)
-        $global:MegaDeskDiagnosticStartInfo = $StartInfo
+      Mock Start-MegaDeskNativeNodeProcess {
+        param($Launch, $WorkingDirectory, $EnvironmentOverrides, $StdoutPath, $StderrPath)
+        $global:MegaDeskDiagnosticNativeLaunch = [pscustomobject]@{ launch = $Launch; workingDirectory = $WorkingDirectory; environmentOverrides = $EnvironmentOverrides; stdoutPath = $StdoutPath; stderrPath = $StderrPath }
         return [pscustomobject]@{ Id = 4242 }
       }
       Mock New-ManagedProcessRecord {
-        [pscustomobject]@{ pid = 4242; executablePath = 'C:\\runtime\\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); releaseSha = $global:MegaDeskDiagnosticCandidate; port = $script:RuntimePort; stdoutPath = ''; stderrPath = ''; diagnosticInvocationId = '' }
+        param($Process, $ExecutablePath, $Kind, $ConfigPath, $ScriptPath, $EnvironmentPath, $ReleaseSha, $Port, $StdoutPath, $StderrPath, $DiagnosticInvocationId, $ExitTelemetryPath)
+        [pscustomobject]@{ pid = 4242; executablePath = 'C:\\runtime\\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); releaseSha = $global:MegaDeskDiagnosticCandidate; port = $script:RuntimePort; stdoutPath = $StdoutPath; stderrPath = $StderrPath; diagnosticInvocationId = $DiagnosticInvocationId; exitTelemetryPath = $ExitTelemetryPath }
       }
-      Mock Start-MegaDeskNodeDiagnosticCapture { }
+      Mock Start-MegaDeskNodeExitObserver { }
       Mock Write-MegaDeskLog { }
 
       $record = Start-MegaDeskNode -ReleaseSha $global:MegaDeskDiagnosticCandidate -Port $script:RuntimePort
 
-      $global:MegaDeskDiagnosticStartInfo.RedirectStandardOutput | Should Be $true
-      $global:MegaDeskDiagnosticStartInfo.RedirectStandardError | Should Be $true
-      Assert-MockCalled Start-MegaDeskNodeDiagnosticCapture -Times 1 -Exactly -Scope It
-      Assert-MockCalled Start-MegaDeskNodeDiagnosticCapture -ParameterFilter { $StdoutPath -match '^.+node-[0-9a-f]{40}-[0-9a-f]{32}\.stdout\.log$' -and $StderrPath -match '^.+node-[0-9a-f]{40}-[0-9a-f]{32}\.stderr\.log$' } -Times 1 -Exactly -Scope It
+      $global:MegaDeskDiagnosticNativeLaunch.stdoutPath | Should Match '^.+node-[0-9a-f]{40}-[0-9a-f]{32}\.stdout\.log$'
+      $global:MegaDeskDiagnosticNativeLaunch.stderrPath | Should Match '^.+node-[0-9a-f]{40}-[0-9a-f]{32}\.stderr\.log$'
+      $global:MegaDeskDiagnosticNativeLaunch.environmentOverrides['MEGADESK_RELEASE_SHA'] | Should Be $global:MegaDeskDiagnosticCandidate
+      Assert-MockCalled Start-MegaDeskNodeExitObserver -ParameterFilter { $ExitTelemetryPath -match '^.+node-[0-9a-f]{40}-[0-9a-f]{32}\.exit\.json$' -and $RequestPath -match '^.+node-[0-9a-f]{40}-[0-9a-f]{32}\.exit-observer\.json$' } -Times 1 -Exactly -Scope It
       ($record.PSObject.Properties.Name -contains 'processHandle') | Should Be $true
+      $script:testState.activeRelease | Should Be $null
+    }
+  }
+
+  It 'uses direct inherited file handles without launcher-owned pipe readers or restart logic' {
+    InModuleScope $moduleName {
+      $moduleSource = Get-Content -LiteralPath $ExecutionContext.SessionState.Module.Path -Raw
+      $helperSource = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $ExecutionContext.SessionState.Module.Path) 'MegaDesk.NodeExitObserver.ps1') -Raw
+      $moduleSource | Should Match 'class MegaDeskNodeNativeLauncher'
+      $moduleSource | Should Match 'CreateProcess\('
+      $moduleSource | Should Match 'OpenAppendHandle'
+      $moduleSource | Should Match 'bInheritHandle = true'
+      $moduleSource | Should Not Match 'MegaDeskNodeOutputCapture'
+      $moduleSource | Should Not Match 'Task\.Run'
+      $moduleSource | Should Not Match 'StreamReader'
+      $helperSource | Should Match 'WaitForExit\('
+      $helperSource | Should Not Match 'Start-MegaDeskNode'
+      $helperSource | Should Not Match 'Stop-Process'
+      $helperSource | Should Not Match 'Restart'
+    }
+  }
+
+  It 'writes versioned exit telemetry with an exit code only when it is available' {
+    $candidate = 'abababababababababababababababababababab'
+    $global:MegaDeskExitTelemetryCandidate = $candidate
+    InModuleScope $moduleName {
+      $paths = New-MegaDeskNodeDiagnosticPaths -ReleaseSha $global:MegaDeskExitTelemetryCandidate
+      $creation = '2026-09-06T17:01:49.1937790Z'
+      $observed = '2026-09-06T17:10:00.0000000Z'
+      Write-MegaDeskNodeExitTelemetry -Path $paths.exitTelemetryPath -Pid 4242 -InvocationId $paths.invocationId -ReleaseSha $global:MegaDeskExitTelemetryCandidate -CreationTime $creation -ObservedExitTime $observed -ExitCode 23 -ExitCodeAvailable $true -Classification 'EXITED_WITH_CODE'
+      $withCode = Get-Content -LiteralPath $paths.exitTelemetryPath -Raw | ConvertFrom-Json
+
+      $withCode.schemaVersion | Should Be 1
+      $withCode.pid | Should Be 4242
+      $withCode.invocationId | Should Be $paths.invocationId
+      $withCode.releaseSha | Should Be $global:MegaDeskExitTelemetryCandidate
+      $withCode.creationTime | Should Be $creation
+      $withCode.observedExitTime | Should Be $observed
+      $withCode.exitCodeAvailable | Should Be $true
+      $withCode.exitCode | Should Be 23
+      $withCode.classification | Should Be 'EXITED_WITH_CODE'
+
+      $missingPaths = New-MegaDeskNodeDiagnosticPaths -ReleaseSha $global:MegaDeskExitTelemetryCandidate
+      Write-MegaDeskNodeExitTelemetry -Path $missingPaths.exitTelemetryPath -Pid 4243 -InvocationId $missingPaths.invocationId -ReleaseSha $global:MegaDeskExitTelemetryCandidate -CreationTime $creation -ObservedExitTime $observed -ExitCode $null -ExitCodeAvailable $false -Classification 'PROCESS_DISAPPEARED'
+      $withoutCode = Get-Content -LiteralPath $missingPaths.exitTelemetryPath -Raw | ConvertFrom-Json
+
+      $withoutCode.exitCodeAvailable | Should Be $false
+      $withoutCode.exitCode | Should Be $null
+      $withoutCode.classification | Should Be 'PROCESS_DISAPPEARED'
     }
   }
 

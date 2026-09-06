@@ -30,42 +30,195 @@ public static class MegaDeskUpdaterNative {
 '@
 }
 
-if ($null -eq ('MegaDeskNodeOutputCapture' -as [type])) {
+if ($null -eq ('MegaDeskNodeNativeLauncher' -as [type])) {
   Add-Type -TypeDefinition @'
 using System;
-using System.Diagnostics;
+using System.Collections;
+using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
-using System.Text;
-using System.Threading.Tasks;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
-public static class MegaDeskNodeOutputCapture {
-  private static async Task CopyAsync(StreamReader reader, string destination) {
-    try {
-      using (reader)
-      using (var stream = new FileStream(destination, FileMode.Append, FileAccess.Write, FileShare.Read))
-      using (var writer = new StreamWriter(stream, new UTF8Encoding(false))) {
-        writer.AutoFlush = true;
-        var buffer = new char[4096];
-        int count;
-        while ((count = await reader.ReadAsync(buffer, 0, buffer.Length)) > 0) {
-          await writer.WriteAsync(buffer, 0, count);
-        }
-      }
-    } catch {
-      // The operational log keeps only paths. A closed process stream must not expose output here.
-    }
+public static class MegaDeskNodeNativeLauncher {
+  private const uint FILE_APPEND_DATA = 0x00000004;
+  private const uint GENERIC_READ = 0x80000000;
+  private const uint SYNCHRONIZE = 0x00100000;
+  private const uint FILE_SHARE_READ = 0x00000001;
+  private const uint FILE_SHARE_WRITE = 0x00000002;
+  private const uint OPEN_EXISTING = 3;
+  private const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
+  private const uint STARTF_USESTDHANDLES = 0x00000100;
+  private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
+  private const uint CREATE_NO_WINDOW = 0x08000000;
+
+  [StructLayout(LayoutKind.Sequential)]
+  private struct SECURITY_ATTRIBUTES {
+    public int nLength;
+    public IntPtr lpSecurityDescriptor;
+    [MarshalAs(UnmanagedType.Bool)] public bool bInheritHandle;
   }
 
-  public static void Start(Process process, string stdoutPath, string stderrPath) {
-    if (process == null) { throw new ArgumentNullException("process"); }
-    if (!process.StartInfo.RedirectStandardOutput || !process.StartInfo.RedirectStandardError) {
-      throw new InvalidOperationException("Process output redirection is required.");
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  private struct STARTUPINFO {
+    public int cb;
+    public string lpReserved;
+    public string lpDesktop;
+    public string lpTitle;
+    public int dwX;
+    public int dwY;
+    public int dwXSize;
+    public int dwYSize;
+    public int dwXCountChars;
+    public int dwYCountChars;
+    public int dwFillAttribute;
+    public int dwFlags;
+    public short wShowWindow;
+    public short cbReserved2;
+    public IntPtr lpReserved2;
+    public IntPtr hStdInput;
+    public IntPtr hStdOutput;
+    public IntPtr hStdError;
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  private struct PROCESS_INFORMATION {
+    public IntPtr hProcess;
+    public IntPtr hThread;
+    public int dwProcessId;
+    public int dwThreadId;
+  }
+
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  [return: MarshalAs(UnmanagedType.Bool)]
+  private static extern bool CreateProcess(
+    string applicationName,
+    System.Text.StringBuilder commandLine,
+    IntPtr processAttributes,
+    IntPtr threadAttributes,
+    [MarshalAs(UnmanagedType.Bool)] bool inheritHandles,
+    uint creationFlags,
+    IntPtr environment,
+    string currentDirectory,
+    ref STARTUPINFO startupInfo,
+    out PROCESS_INFORMATION processInformation);
+
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern SafeFileHandle CreateFile(
+    string path,
+    uint access,
+    uint share,
+    ref SECURITY_ATTRIBUTES securityAttributes,
+    uint creation,
+    uint flags,
+    IntPtr template);
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  [return: MarshalAs(UnmanagedType.Bool)]
+  private static extern bool CloseHandle(IntPtr handle);
+
+  private static SECURITY_ATTRIBUTES InheritableSecurityAttributes() {
+    return new SECURITY_ATTRIBUTES {
+      nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES)),
+      lpSecurityDescriptor = IntPtr.Zero,
+      bInheritHandle = true
+    };
+  }
+
+  private static SafeFileHandle OpenAppendHandle(string path) {
+    SECURITY_ATTRIBUTES attributes = InheritableSecurityAttributes();
+    SafeFileHandle handle = CreateFile(path, FILE_APPEND_DATA | SYNCHRONIZE, FILE_SHARE_READ | FILE_SHARE_WRITE, ref attributes, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
+    if (handle == null || handle.IsInvalid) {
+      throw new Win32Exception(Marshal.GetLastWin32Error(), "Nao foi possivel abrir o log diagnostico do Node.");
     }
-    if (String.IsNullOrWhiteSpace(stdoutPath) || String.IsNullOrWhiteSpace(stderrPath)) {
-      throw new ArgumentException("Diagnostic paths are required.");
+    return handle;
+  }
+
+  private static SafeFileHandle OpenNullInputHandle() {
+    SECURITY_ATTRIBUTES attributes = InheritableSecurityAttributes();
+    SafeFileHandle handle = CreateFile("NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, ref attributes, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
+    if (handle == null || handle.IsInvalid) {
+      throw new Win32Exception(Marshal.GetLastWin32Error(), "Nao foi possivel abrir a entrada nula do Node.");
     }
-    Task.Run(async () => await CopyAsync(process.StandardOutput, stdoutPath));
-    Task.Run(async () => await CopyAsync(process.StandardError, stderrPath));
+    return handle;
+  }
+
+  private static string QuoteArgument(string value) {
+    var builder = new System.Text.StringBuilder();
+    builder.Append('"');
+    int slashCount = 0;
+    foreach (char character in value) {
+      if (character == '\\') {
+        slashCount++;
+        continue;
+      }
+      if (character == '"') {
+        builder.Append('\\', (slashCount * 2) + 1);
+        builder.Append('"');
+        slashCount = 0;
+        continue;
+      }
+      if (slashCount > 0) {
+        builder.Append('\\', slashCount);
+        slashCount = 0;
+      }
+      builder.Append(character);
+    }
+    if (slashCount > 0) { builder.Append('\\', slashCount * 2); }
+    builder.Append('"');
+    return builder.ToString();
+  }
+
+  private static IntPtr CreateEnvironmentBlock(string[] overrides) {
+    var values = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    foreach (DictionaryEntry entry in Environment.GetEnvironmentVariables()) {
+      string key = Convert.ToString(entry.Key);
+      if (!String.IsNullOrEmpty(key)) { values[key] = Convert.ToString(entry.Value) ?? String.Empty; }
+    }
+    if (overrides != null) {
+      foreach (string overrideValue in overrides) {
+        if (String.IsNullOrEmpty(overrideValue)) { continue; }
+        int separator = overrideValue.IndexOf('=');
+        if (separator <= 0) { throw new ArgumentException("Override de ambiente invalido."); }
+        values[overrideValue.Substring(0, separator)] = overrideValue.Substring(separator + 1);
+      }
+    }
+    var block = new System.Text.StringBuilder();
+    foreach (KeyValuePair<string, string> entry in values) {
+      block.Append(entry.Key).Append('=').Append(entry.Value).Append('\0');
+    }
+    block.Append('\0');
+    return Marshal.StringToHGlobalUni(block.ToString());
+  }
+
+  public static int Start(string executablePath, string arguments, string workingDirectory, string[] environmentOverrides, string stdoutPath, string stderrPath) {
+    if (String.IsNullOrWhiteSpace(executablePath) || String.IsNullOrWhiteSpace(workingDirectory)) { throw new ArgumentException("Especificacao de inicio do Node invalida."); }
+    if (String.IsNullOrWhiteSpace(stdoutPath) || String.IsNullOrWhiteSpace(stderrPath)) { throw new ArgumentException("Caminhos de log diagnostico obrigatorios."); }
+
+    using (SafeFileHandle stdout = OpenAppendHandle(stdoutPath))
+    using (SafeFileHandle stderr = OpenAppendHandle(stderrPath))
+    using (SafeFileHandle stdin = OpenNullInputHandle()) {
+      IntPtr environment = IntPtr.Zero;
+      PROCESS_INFORMATION processInformation = new PROCESS_INFORMATION();
+      try {
+        environment = CreateEnvironmentBlock(environmentOverrides);
+        STARTUPINFO startupInfo = new STARTUPINFO {
+          cb = Marshal.SizeOf(typeof(STARTUPINFO)),
+          dwFlags = (int)STARTF_USESTDHANDLES,
+          hStdInput = stdin.DangerousGetHandle(),
+          hStdOutput = stdout.DangerousGetHandle(),
+          hStdError = stderr.DangerousGetHandle()
+        };
+        string commandLine = QuoteArgument(executablePath) + (String.IsNullOrWhiteSpace(arguments) ? String.Empty : " " + arguments);
+        bool started = CreateProcess(executablePath, new System.Text.StringBuilder(commandLine), IntPtr.Zero, IntPtr.Zero, true, CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW, environment, workingDirectory, ref startupInfo, out processInformation);
+        if (!started) { throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateProcessW do Node falhou."); }
+        return processInformation.dwProcessId;
+      } finally {
+        if (processInformation.hThread != IntPtr.Zero) { CloseHandle(processInformation.hThread); }
+        if (processInformation.hProcess != IntPtr.Zero) { CloseHandle(processInformation.hProcess); }
+        if (environment != IntPtr.Zero) { Marshal.FreeHGlobal(environment); }
+      }
+    }
   }
 }
 '@
@@ -999,6 +1152,8 @@ function New-MegaDeskNodeDiagnosticPaths {
   $prefix = 'node-{0}-{1}' -f $releaseIdentity, $invocationId
   $stdoutPath = Assert-MegaDeskPathInside -Path (Join-Path $script:NodeDiagnosticsRoot ($prefix + '.stdout.log')) -Root $script:NodeDiagnosticsRoot -Label 'Log stdout do Node'
   $stderrPath = Assert-MegaDeskPathInside -Path (Join-Path $script:NodeDiagnosticsRoot ($prefix + '.stderr.log')) -Root $script:NodeDiagnosticsRoot -Label 'Log stderr do Node'
+  $exitTelemetryPath = Assert-MegaDeskPathInside -Path (Join-Path $script:NodeDiagnosticsRoot ($prefix + '.exit.json')) -Root $script:NodeDiagnosticsRoot -Label 'Telemetria de termino do Node'
+  $observerRequestPath = Assert-MegaDeskPathInside -Path (Join-Path $script:NodeDiagnosticsRoot ($prefix + '.exit-observer.json')) -Root $script:NodeDiagnosticsRoot -Label 'Solicitacao de observador do Node'
   try {
     New-Item -ItemType File -Path $stdoutPath -ErrorAction Stop | Out-Null
     New-Item -ItemType File -Path $stderrPath -ErrorAction Stop | Out-Null
@@ -1006,19 +1161,114 @@ function New-MegaDeskNodeDiagnosticPaths {
     if (Test-Path -LiteralPath $stdoutPath -PathType Leaf) { Remove-Item -LiteralPath $stdoutPath -Force -ErrorAction SilentlyContinue }
     throw 'Nao foi possivel reservar arquivos exclusivos de diagnostico do Node.'
   }
-  return [pscustomobject]@{ invocationId = $invocationId; stdoutPath = $stdoutPath; stderrPath = $stderrPath }
+  return [pscustomobject]@{ invocationId = $invocationId; stdoutPath = $stdoutPath; stderrPath = $stderrPath; exitTelemetryPath = $exitTelemetryPath; observerRequestPath = $observerRequestPath }
 }
 
-function Start-MegaDeskNodeDiagnosticCapture {
+function Write-MegaDeskNodeDiagnosticJson {
   param(
-    [Parameter(Mandatory = $true)]$Process,
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)]$Payload
+  )
+
+  Initialize-MegaDeskRuntime
+  $destination = Assert-MegaDeskPathInside -Path $Path -Root $script:NodeDiagnosticsRoot -Label 'Arquivo diagnostico do Node'
+  if (Test-Path -LiteralPath $destination -PathType Leaf) { throw 'Arquivo diagnostico do Node ja existe; sobrescrita recusada.' }
+  $temporary = Assert-MegaDeskPathInside -Path (Join-Path $script:NodeDiagnosticsRoot ('.{0}.{1}.tmp' -f [System.IO.Path]::GetFileName($destination), [guid]::NewGuid().ToString('N'))) -Root $script:NodeDiagnosticsRoot -Label 'Temporario diagnostico do Node'
+  try {
+    $json = $Payload | ConvertTo-Json -Depth 8
+    [System.IO.File]::WriteAllText($temporary, $json, (New-Object System.Text.UTF8Encoding($false)))
+    [System.IO.File]::Move($temporary, $destination)
+  } finally {
+    if (Test-Path -LiteralPath $temporary -PathType Leaf) { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+  }
+}
+
+function Write-MegaDeskNodeExitTelemetry {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][ValidateRange(1, [int]::MaxValue)][int]$Pid,
+    [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{32}$')][string]$InvocationId,
+    [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{40}$')][string]$ReleaseSha,
+    [Parameter(Mandatory = $true)][string]$CreationTime,
+    [Parameter(Mandatory = $true)][string]$ObservedExitTime,
+    [AllowNull()][Nullable[int]]$ExitCode = $null,
+    [Parameter(Mandatory = $true)][bool]$ExitCodeAvailable,
+    [Parameter(Mandatory = $true)][ValidateSet('EXITED_WITH_CODE', 'PROCESS_DISAPPEARED', 'IDENTITY_LOST', 'UNKNOWN')][string]$Classification
+  )
+
+  [void](ConvertTo-MegaDeskProcessStartUtc -Value $CreationTime)
+  [void](ConvertTo-MegaDeskProcessStartUtc -Value $ObservedExitTime)
+  if ($ExitCodeAvailable -and $null -eq $ExitCode) { throw 'Telemetria com exitCode disponivel exige um valor de exitCode.' }
+  if (-not $ExitCodeAvailable -and $null -ne $ExitCode) { throw 'Telemetria sem exitCode disponivel nao pode inventar um exitCode.' }
+  if ($Classification -eq 'EXITED_WITH_CODE' -and -not $ExitCodeAvailable) { throw 'EXITED_WITH_CODE exige exitCode disponivel.' }
+  $payload = [ordered]@{
+    schemaVersion = 1
+    pid = $Pid
+    invocationId = $InvocationId
+    releaseSha = $ReleaseSha
+    creationTime = $CreationTime
+    observedExitTime = $ObservedExitTime
+    exitCode = if ($ExitCodeAvailable) { [int]$ExitCode } else { $null }
+    exitCodeAvailable = $ExitCodeAvailable
+    classification = $Classification
+  }
+  Write-MegaDeskNodeDiagnosticJson -Path $Path -Payload $payload
+}
+
+function New-MegaDeskNodeExitObserverRequest {
+  param(
+    [Parameter(Mandatory = $true)]$Record,
+    [Parameter(Mandatory = $true)][string]$ExitTelemetryPath,
+    [Parameter(Mandatory = $true)][string]$RequestPath
+  )
+
+  foreach ($property in @('pid', 'diagnosticInvocationId', 'releaseSha', 'startedAtUtc', 'executablePath', 'scriptPath', 'environmentPath')) {
+    if (-not ($Record.PSObject.Properties.Name -contains $property) -or [string]::IsNullOrWhiteSpace([string]$Record.$property)) { throw "Record do Node sem $property para exit telemetry." }
+  }
+  $payload = [ordered]@{
+    schemaVersion = 1
+    pid = [int]$Record.pid
+    invocationId = [string]$Record.diagnosticInvocationId
+    releaseSha = [string]$Record.releaseSha
+    creationTime = [string]$Record.startedAtUtc
+    executablePath = [string]$Record.executablePath
+    scriptPath = [string]$Record.scriptPath
+    environmentPath = [string]$Record.environmentPath
+    exitTelemetryPath = Assert-MegaDeskPathInside -Path $ExitTelemetryPath -Root $script:NodeDiagnosticsRoot -Label 'Destino de exit telemetry do Node'
+  }
+  Write-MegaDeskNodeDiagnosticJson -Path $RequestPath -Payload $payload
+}
+
+function Start-MegaDeskNodeExitObserver {
+  param(
+    [Parameter(Mandatory = $true)]$Record,
+    [Parameter(Mandatory = $true)][string]$ExitTelemetryPath,
+    [Parameter(Mandatory = $true)][string]$RequestPath
+  )
+
+  $helperPath = Join-Path $PSScriptRoot 'MegaDesk.NodeExitObserver.ps1'
+  if (-not (Test-Path -LiteralPath $helperPath -PathType Leaf)) { throw 'Helper persistente de exit telemetry do Node ausente.' }
+  New-MegaDeskNodeExitObserverRequest -Record $Record -ExitTelemetryPath $ExitTelemetryPath -RequestPath $RequestPath
+  $powerShellPath = Join-Path $PSHOME 'powershell.exe'
+  if (-not (Test-Path -LiteralPath $powerShellPath -PathType Leaf)) { throw 'powershell.exe do launcher nao foi encontrado para exit telemetry.' }
+  $arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -File "{0}" -RequestPath "{1}"' -f $helperPath, $RequestPath
+  Start-Process -FilePath $powerShellPath -ArgumentList $arguments -WindowStyle Hidden -PassThru | Out-Null
+}
+
+function Start-MegaDeskNativeNodeProcess {
+  param(
+    [Parameter(Mandatory = $true)]$Launch,
+    [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+    [Parameter(Mandatory = $true)][hashtable]$EnvironmentOverrides,
     [Parameter(Mandatory = $true)][string]$StdoutPath,
     [Parameter(Mandatory = $true)][string]$StderrPath
   )
 
-  # Test doubles are not OS processes. Production always reaches the native capture below.
-  if ($Process -isnot [System.Diagnostics.Process]) { return }
-  [MegaDeskNodeOutputCapture]::Start($Process, $StdoutPath, $StderrPath)
+  $stdout = Assert-MegaDeskPathInside -Path $StdoutPath -Root $script:NodeDiagnosticsRoot -Label 'Log stdout do Node'
+  $stderr = Assert-MegaDeskPathInside -Path $StderrPath -Root $script:NodeDiagnosticsRoot -Label 'Log stderr do Node'
+  $overrides = @($EnvironmentOverrides.GetEnumerator() | Sort-Object Key | ForEach-Object { '{0}={1}' -f [string]$_.Key, [string]$_.Value })
+  $processId = [MegaDeskNodeNativeLauncher]::Start([string]$Launch.executablePath, [string]$Launch.arguments, $WorkingDirectory, [string[]]$overrides, $stdout, $stderr)
+  return [System.Diagnostics.Process]::GetProcessById($processId)
 }
 
 function Start-MegaDeskProcess {
@@ -1027,7 +1277,7 @@ function Start-MegaDeskProcess {
 }
 
 function New-ManagedProcessRecord {
-  param($Process, [string]$ExecutablePath, [ValidateSet('node', 'cloudflared')][string]$Kind, [string]$ConfigPath = '', [string]$ScriptPath = '', [string]$EnvironmentPath = '', [string]$ReleaseSha = '', [Nullable[int]]$Port = $null, [string]$StdoutPath = '', [string]$StderrPath = '', [string]$DiagnosticInvocationId = '')
+  param($Process, [string]$ExecutablePath, [ValidateSet('node', 'cloudflared')][string]$Kind, [string]$ConfigPath = '', [string]$ScriptPath = '', [string]$EnvironmentPath = '', [string]$ReleaseSha = '', [Nullable[int]]$Port = $null, [string]$StdoutPath = '', [string]$StderrPath = '', [string]$DiagnosticInvocationId = '', [string]$ExitTelemetryPath = '')
   if ($Kind -eq 'node' -and ($null -eq $Port -or $Port -lt 1 -or $Port -gt 65535)) { throw 'Node exige porta valida no record de identidade.' }
   if ($Kind -eq 'cloudflared' -and $null -ne $Port) { throw 'Cloudflared nao pode registrar ownership da porta do Node.' }
   $snapshot = $null
@@ -1050,6 +1300,7 @@ function New-ManagedProcessRecord {
     stdoutPath = if ([string]::IsNullOrWhiteSpace($StdoutPath)) { '' } else { ConvertTo-MegaDeskCanonicalPath -Path $StdoutPath }
     stderrPath = if ([string]::IsNullOrWhiteSpace($StderrPath)) { '' } else { ConvertTo-MegaDeskCanonicalPath -Path $StderrPath }
     diagnosticInvocationId = $DiagnosticInvocationId
+    exitTelemetryPath = if ([string]::IsNullOrWhiteSpace($ExitTelemetryPath)) { '' } else { ConvertTo-MegaDeskCanonicalPath -Path $ExitTelemetryPath }
   }
 }
 
@@ -1075,8 +1326,6 @@ function Start-MegaDeskNode {
 
   $node = Get-Command node -ErrorAction SilentlyContinue
   if ($null -eq $node) { throw 'node.exe nao foi encontrado no PATH.' }
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = $node.Source
   $scriptPath = Join-Path $script:ProjectRoot 'dist\index.js'
   $workingDirectory = $script:ProjectRoot
   if ($null -ne $release) {
@@ -1087,39 +1336,20 @@ function Start-MegaDeskNode {
   $environmentFile = Join-Path $script:ProjectRoot '.env.local'
   if (-not (Test-Path -LiteralPath $environmentFile -PathType Leaf)) { throw '.env.local obrigatorio ausente fora da release.' }
   $launch = New-MegaDeskNodeLaunchSpec -ExecutablePath $node.Source -EnvironmentPath $environmentFile -ScriptPath $scriptPath
-  $psi.FileName = $launch.executablePath
-  $psi.Arguments = $launch.arguments
-  $psi.WorkingDirectory = $workingDirectory
-  $psi.UseShellExecute = $false
-  $psi.CreateNoWindow = $true
-  $psi.RedirectStandardOutput = $true
-  $psi.RedirectStandardError = $true
-  $utf8 = New-Object System.Text.UTF8Encoding($false)
-  $psi.StandardOutputEncoding = $utf8
-  $psi.StandardErrorEncoding = $utf8
-  $psi.EnvironmentVariables['NODE_ENV'] = 'production'
-  $psi.EnvironmentVariables['HOST'] = '127.0.0.1'
-  $psi.EnvironmentVariables['PORT'] = [string]$Port
-  $psi.EnvironmentVariables['TRUST_PROXY_HOPS'] = '1'
-  $psi.EnvironmentVariables['MEGADESK_ALLOWED_ORIGINS'] = $script:AllowedOrigins
-  if (-not [string]::IsNullOrWhiteSpace($ReleaseSha)) { $psi.EnvironmentVariables['MEGADESK_RELEASE_SHA'] = $ReleaseSha }
+  $environmentOverrides = @{
+    NODE_ENV = 'production'
+    HOST = '127.0.0.1'
+    PORT = [string]$Port
+    TRUST_PROXY_HOPS = '1'
+    MEGADESK_ALLOWED_ORIGINS = $script:AllowedOrigins
+  }
+  if (-not [string]::IsNullOrWhiteSpace($ReleaseSha)) { $environmentOverrides['MEGADESK_RELEASE_SHA'] = $ReleaseSha }
   $diagnostics = New-MegaDeskNodeDiagnosticPaths -ReleaseSha $ReleaseSha
-  $process = Start-MegaDeskProcess -StartInfo $psi
+  $process = Start-MegaDeskNativeNodeProcess -Launch $launch -WorkingDirectory $workingDirectory -EnvironmentOverrides $environmentOverrides -StdoutPath $diagnostics.stdoutPath -StderrPath $diagnostics.stderrPath
   try {
-    $record = New-ManagedProcessRecord -Process $process -ExecutablePath $launch.executablePath -Kind node -ScriptPath $launch.scriptPath -EnvironmentPath $launch.environmentPath -ReleaseSha $ReleaseSha -Port $Port -StdoutPath $diagnostics.stdoutPath -StderrPath $diagnostics.stderrPath -DiagnosticInvocationId $diagnostics.invocationId
+    $record = New-ManagedProcessRecord -Process $process -ExecutablePath $launch.executablePath -Kind node -ScriptPath $launch.scriptPath -EnvironmentPath $launch.environmentPath -ReleaseSha $ReleaseSha -Port $Port -StdoutPath $diagnostics.stdoutPath -StderrPath $diagnostics.stderrPath -DiagnosticInvocationId $diagnostics.invocationId -ExitTelemetryPath $diagnostics.exitTelemetryPath
   } catch {
     throw ("CRITICO: identidade do Node iniciado nao pode ser comprovada: {0}. Nenhum encerramento por PID foi tentado; intervencao manual e necessaria." -f $_.Exception.Message)
-  }
-  try {
-    Start-MegaDeskNodeDiagnosticCapture -Process $process -StdoutPath $diagnostics.stdoutPath -StderrPath $diagnostics.stderrPath
-  } catch {
-    $diagnosticFailure = $_.Exception.Message
-    try {
-      Stop-MegaDeskExactManagedProcess -Record $record -Kind node -AllowStaticIdentity
-    } catch {
-      throw ("CRITICO: captura diagnostica do Node nao iniciou: {0}. Compensacao automatica nao pode ser provada: {1}. Intervencao manual e necessaria." -f $diagnosticFailure, $_.Exception.Message)
-    }
-    throw ("Captura diagnostica do Node nao iniciou; candidate compensada localmente: {0}." -f $diagnosticFailure)
   }
   try {
     $state.node = $record
@@ -1133,8 +1363,21 @@ function Start-MegaDeskNode {
     }
     throw ("State do Node iniciado nao pode ser persistido; candidate compensada localmente: {0}." -f $stateFailure)
   }
+  try {
+    Start-MegaDeskNodeExitObserver -Record $record -ExitTelemetryPath $diagnostics.exitTelemetryPath -RequestPath $diagnostics.observerRequestPath
+  } catch {
+    $telemetryFailure = $_.Exception.Message
+    try {
+      Stop-MegaDeskExactManagedProcess -Record $record -Kind node -AllowStaticIdentity
+      $state.node = $null
+      Save-MegaDeskState $state
+    } catch {
+      throw ("CRITICO: exit telemetry do Node nao iniciou: {0}. Compensacao automatica nao pode ser provada: {1}. Intervencao manual e necessaria." -f $telemetryFailure, $_.Exception.Message)
+    }
+    throw ("Exit telemetry do Node nao iniciou; candidate compensada localmente: {0}." -f $telemetryFailure)
+  }
   Add-Member -InputObject $record -NotePropertyName processHandle -NotePropertyValue $process -Force
-  try { Write-MegaDeskLog ("MegaDesk Node iniciado e controlado (PID {0}); invocation={1}; stdout_path={2}; stderr_path={3}." -f $process.Id, $diagnostics.invocationId, $diagnostics.stdoutPath, $diagnostics.stderrPath) } catch { }
+  try { Write-MegaDeskLog ("MegaDesk Node iniciado e controlado (PID {0}); invocation={1}; stdout_path={2}; stderr_path={3}; exit_telemetry_path={4}." -f $process.Id, $diagnostics.invocationId, $diagnostics.stdoutPath, $diagnostics.stderrPath, $diagnostics.exitTelemetryPath) } catch { }
   return $record
 }
 
@@ -1928,7 +2171,7 @@ function Restore-MegaDeskDist {
 Export-ModuleMember -Function @(
   'Write-MegaDeskLog', 'Get-MegaDeskState', 'Test-ManagedProcess', 'Test-MegaDeskStaticProcessIdentity', 'Get-PortOwner', 'Assert-MegaDeskToolchain', 'Assert-MegaDeskActiveRelease',
   'Assert-MegaDeskArtifacts', 'Assert-DockerAndMySql', 'Assert-CloudflaredConfig',
-  'Start-MegaDeskNode', 'Start-MegaDeskTunnel', 'Wait-MegaDeskLocal',
+  'Start-MegaDeskNode', 'Start-MegaDeskTunnel', 'Wait-MegaDeskLocal', 'Write-MegaDeskNodeExitTelemetry',
   'Wait-MegaDeskPublicEndpoints', 'Undo-MegaDeskInvocation', 'Stop-MegaDeskManagedProcess',
   'Backup-MegaDeskDist', 'Restore-MegaDeskDist', 'Invoke-MegaDeskUpdaterV2', 'Invoke-MegaDeskBootstrapZero',
   'Invoke-MegaDeskBootstrapFailedRecovery'
