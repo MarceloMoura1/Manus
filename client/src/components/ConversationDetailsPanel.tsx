@@ -7,7 +7,7 @@ import { ConversationActivityEvent } from "@/components/ConversationActivityEven
 import { ClientFormModal } from "@/pages/ClientesPage";
 import { useDebounce } from "@/hooks/useDebounce";
 import { operatorDisplayName } from "@/lib/conversation-operator-name";
-import { mergeConversationTimeline } from "@/lib/conversationTimeline";
+import { composeConversationTimeline } from "@/lib/conversationTimeline";
 import { replyAuthor, replyPreview, type ConversationReplyPreview } from "@/lib/conversationQuote";
 import { formatContactPhone, hasHumanContactName, normalizeContactPhone } from "../../../shared/contact-phone";
 
@@ -99,11 +99,16 @@ export function ConversationDetailsPanel({ conversation, open, canManageClients,
   const history = trpc.conversations.history.useQuery({ contactId: conversation.contactId ?? "", currentConversationId: conversation.id }, { enabled: open && !!conversation.contactId });
   const historyPage = trpc.conversations.historyPage.useQuery({ contactId: conversation.contactId ?? "", currentConversationId: conversation.id, offset: historyPageOffset }, { enabled: open && historyBrowserOpen && !!conversation.contactId });
   const tickets = trpc.conversations.linkedTickets.useQuery({ conversationId: conversation.id }, { enabled: open });
-  const historyTimeline = React.useMemo(() => mergeConversationTimeline(
+  const historyComposition = React.useMemo(() => composeConversationTimeline(
     historyDetail.data?.messages ?? [],
     historyDetail.data?.events ?? [],
   ), [historyDetail.data?.events, historyDetail.data?.messages]);
-  const historyIndeterminate = historyDetail.data?.indeterminateHistory ?? [];
+  const historyTimeline = historyComposition.timeline;
+  const serverIndeterminateHistory = historyDetail.data?.indeterminateHistory ?? [];
+  const historyIndeterminate = [
+    ...(Array.isArray(serverIndeterminateHistory) ? serverIndeterminateHistory : []),
+    ...historyComposition.indeterminateHistory.filter(item => item.kind === "message"),
+  ];
   const toggle = (id: string) => setSections(current => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next; });
   const status = conversation.status === "bot" ? "BOT/Aguardando" : conversation.status === "closed" ? "Encerrada" : "Aberta";
   const navigate = (route: string, detail: Record<string, unknown> = {}) => onNavigate(route, { conversationId: conversation.id, contactId: conversation.contactId, crmClientId: conversation.crmClientId, companyName: conversation.companyName, contactName: conversation.name, phone: conversation.phone, ...detail });

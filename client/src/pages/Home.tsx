@@ -20,7 +20,7 @@ import { ConversationMedia } from "@/components/ConversationMedia";
 import { ConversationDetailsPanel } from "@/components/ConversationDetailsPanel";
 import { ConversationListItem } from "@/components/ConversationListItem";
 import { ConversationActivityEvent } from "@/components/ConversationActivityEvent";
-import { mergeConversationTimeline, reconcileConversationMessages } from "@/lib/conversationTimeline";
+import { composeConversationTimeline, reconcileConversationMessages } from "@/lib/conversationTimeline";
 import { messageReplyPreview, replyAuthor, replyPreview, type ConversationReplyPreview } from "@/lib/conversationQuote";
 import { useDebounce } from "@/hooks/useDebounce";
 import {
@@ -492,14 +492,19 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   );
   const conversationMessages = conversationMessageResult?.messages ?? [];
   const conversationEvents = conversationMessageResult?.events ?? [];
-  const indeterminateConversationHistory = conversationMessageResult?.indeterminateHistory ?? [];
-  const timelineMessages = React.useMemo(() => {
+  const conversationTimeline = React.useMemo(() => {
     const persisted = Array.isArray(conversationMessages) ? conversationMessages : [];
-    return mergeConversationTimeline(
+    return composeConversationTimeline(
       reconcileConversationMessages(persisted, optimisticMessages),
       Array.isArray(conversationEvents) ? conversationEvents : [],
     );
   }, [conversationEvents, conversationMessages, optimisticMessages]);
+  const timelineMessages = conversationTimeline.timeline;
+  const serverIndeterminateHistory = conversationMessageResult?.indeterminateHistory ?? [];
+  const indeterminateConversationHistory = [
+    ...(Array.isArray(serverIndeterminateHistory) ? serverIndeterminateHistory : []),
+    ...conversationTimeline.indeterminateHistory,
+  ];
 
   // Mutations tRPC
   const closeConversationMutation = trpc.conversations.close.useMutation();
@@ -1337,7 +1342,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
             <div ref={messageScrollRef} onScroll={handleMessageScroll} data-testid="conversation-message-scroll-region" aria-label="Mensagens da conversa" className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-4 md:px-6" style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)' }}>
               {(() => {
                 const msgs: any[] = timelineMessages;
-                const indeterminate: any[] = Array.isArray(indeterminateConversationHistory) ? indeterminateConversationHistory : [];
+                const indeterminate: any[] = indeterminateConversationHistory;
                 if (msgs.length === 0 && indeterminate.length === 0) {
                   return (
                     <div className="flex justify-start">
@@ -1462,13 +1467,14 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                   })}
                   {indeterminate.length > 0 && <section data-testid="conversation-indeterminate-history" aria-label="Histórico anterior sem horário confirmado" className="space-y-3 border-t border-dashed border-slate-300 pt-4">
                     <h3 className="text-center text-xs font-semibold text-slate-500">Histórico anterior sem horário confirmado</h3>
-                    {indeterminate.map((msg: any, idx: number) => {
-                      const isAgent = msg.sender === 'agent' || msg.from === 'agent' || msg.direction === 'outbound';
-                      const text = msg.text || msg.message || '';
-                      const type = msg.type || 'text';
-                      return <div key={msg.id ?? `indeterminate-${idx}`} className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
+                    {indeterminate.map((item: any, idx: number) => {
+                      if (item.kind === 'activity') return <ConversationActivityEvent key={item.id ?? `indeterminate-activity-${idx}`} event={item} />;
+                      const isAgent = item.sender === 'agent' || item.from === 'agent' || item.direction === 'outbound';
+                      const text = item.text || item.message || '';
+                      const type = item.type || 'text';
+                      return <div key={item.id ?? `indeterminate-${idx}`} className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
                         <div className={cn("min-w-0 max-w-[85%] rounded-2xl px-4 py-3", isAgent ? "rounded-tr-sm bg-slate-600 text-white" : "rounded-tl-sm border border-slate-200 bg-white text-slate-800")}>
-                          {type === 'text' ? <p className="text-sm">{text}</p> : <ConversationMedia conversationId={selectedConv.id} message={msg} fallback={<span className="text-sm">{text || 'Mídia indisponível'}</span>} />}
+                          {type === 'text' ? <p className="text-sm">{text}</p> : <ConversationMedia conversationId={selectedConv.id} message={item} fallback={<span className="text-sm">{text || 'Mídia indisponível'}</span>} />}
                         </div>
                       </div>;
                     })}
