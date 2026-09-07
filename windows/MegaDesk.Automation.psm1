@@ -383,6 +383,17 @@ function Invoke-MegaDeskGit {
   return $output
 }
 
+function Invoke-MegaDeskNativeSideEffect {
+  param(
+    [Parameter(Mandatory = $true)][scriptblock]$Command,
+    [Parameter(Mandatory = $true)][string]$FailureMessage
+  )
+  $output = @(& $Command)
+  $exitCode = $LASTEXITCODE
+  foreach ($line in $output) { Write-Host $line }
+  if ($exitCode -ne 0) { throw $FailureMessage }
+}
+
 function Assert-MegaDeskGitPreflight {
   param([Parameter(Mandatory = $true)][string]$ExpectedBranch)
   $topLevel = (Invoke-MegaDeskGit -Arguments @('rev-parse', '--show-toplevel') -FailureMessage 'Repositorio Git nao identificado.' | Select-Object -First 1).Trim()
@@ -421,8 +432,7 @@ function Test-MegaDeskDependencyDiff {
 }
 
 function Invoke-MegaDeskFrozenInstall {
-  & pnpm install --frozen-lockfile
-  if ($LASTEXITCODE -ne 0) { throw 'pnpm install --frozen-lockfile falhou; atualizacao bloqueada.' }
+  Invoke-MegaDeskNativeSideEffect -Command { & pnpm install --frozen-lockfile } -FailureMessage 'pnpm install --frozen-lockfile falhou; atualizacao bloqueada.'
   Assert-MegaDeskNoSourceMutation
 }
 
@@ -742,8 +752,7 @@ function Remove-MegaDeskReleaseEnvironmentFiles {
 function Invoke-MegaDeskReleaseDependencyDeploy {
   param([Parameter(Mandatory = $true)][string]$Destination, [Parameter(Mandatory = $true)][string]$AllowedRoot)
   if (Test-Path -LiteralPath $Destination) { throw 'Destino de dependencias da release ja existe.' }
-  & pnpm --filter megadesk-platform --prod deploy --legacy $Destination
-  if ($LASTEXITCODE -ne 0) { throw 'Preparacao isolada das dependencias production falhou; release candidata recusada.' }
+  Invoke-MegaDeskNativeSideEffect -Command { & pnpm --filter megadesk-platform --prod deploy --legacy $Destination } -FailureMessage 'Preparacao isolada das dependencias production falhou; release candidata recusada.'
   Remove-MegaDeskReleaseEnvironmentFiles -ReleasePath $Destination -AllowedRoot $AllowedRoot
   Assert-MegaDeskReleaseRuntime -ReleasePath $Destination -AllowedRoot $AllowedRoot | Out-Null
 }
@@ -751,10 +760,8 @@ function Invoke-MegaDeskReleaseDependencyDeploy {
 function Invoke-MegaDeskReleaseArtifactBuild {
   param([Parameter(Mandatory = $true)][string]$ReleasePath)
   $releaseDist = Join-Path $ReleasePath 'dist'
-  & pnpm exec vite build --outDir (Join-Path $releaseDist 'public')
-  if ($LASTEXITCODE -ne 0) { throw 'Build isolado do frontend falhou.' }
-  & pnpm exec esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=$releaseDist
-  if ($LASTEXITCODE -ne 0) { throw 'Build isolado do backend falhou.' }
+  Invoke-MegaDeskNativeSideEffect -Command { & pnpm exec vite build --outDir (Join-Path $releaseDist 'public') } -FailureMessage 'Build isolado do frontend falhou.'
+  Invoke-MegaDeskNativeSideEffect -Command { & pnpm exec esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=$releaseDist } -FailureMessage 'Build isolado do backend falhou.'
   if (-not (Test-Path -LiteralPath (Join-Path $releaseDist 'index.js') -PathType Leaf) -or -not (Test-Path -LiteralPath (Join-Path $releaseDist 'public') -PathType Container)) { throw 'Build isolado nao produziu artefatos completos.' }
 }
 
@@ -2192,13 +2199,10 @@ function Invoke-MegaDeskUpdaterV2 {
       Write-MegaDeskLog 'Dependencias mudaram entre releases; executando install frozen controlado.'
       Invoke-MegaDeskFrozenInstall
     }
-    & git diff --check
-    if ($LASTEXITCODE -ne 0) { throw 'git diff --check falhou.' }
-    & pnpm check
-    if ($LASTEXITCODE -ne 0) { throw 'pnpm check falhou.' }
+    Invoke-MegaDeskNativeSideEffect -Command { & git diff --check } -FailureMessage 'git diff --check falhou.'
+    Invoke-MegaDeskNativeSideEffect -Command { & pnpm check } -FailureMessage 'pnpm check falhou.'
     if ($RunTests) {
-      & pnpm test
-      if ($LASTEXITCODE -ne 0) { throw 'pnpm test falhou.' }
+      Invoke-MegaDeskNativeSideEffect -Command { & pnpm test } -FailureMessage 'pnpm test falhou.'
     } else {
       Write-MegaDeskLog 'Suite completa nao executada; use -RunTests para habilita-la explicitamente.'
     }

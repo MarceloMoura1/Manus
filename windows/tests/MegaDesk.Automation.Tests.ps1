@@ -2732,6 +2732,57 @@ Describe 'MegaDesk prepared release publish' {
   }
 }
 
+Describe 'MegaDesk updater pipeline output isolation' {
+  It 'keeps successful native stdout out of the PowerShell pipeline' {
+    $global:MegaDeskPipelineEmitter = Join-Path $TestDrive 'pipeline-success.cmd'
+    Set-Content -LiteralPath $global:MegaDeskPipelineEmitter -Value "@echo simulated native stdout`r`n@exit /b 0" -Encoding Ascii -NoNewline
+    InModuleScope $moduleName {
+      $result = @(Invoke-MegaDeskNativeSideEffect -Command { & $global:MegaDeskPipelineEmitter } -FailureMessage 'simulated native failure')
+      $result.Count | Should Be 0
+    }
+  }
+
+  It 'preserves native command failures after capturing stdout' {
+    $global:MegaDeskPipelineEmitter = Join-Path $TestDrive 'pipeline-failure.cmd'
+    Set-Content -LiteralPath $global:MegaDeskPipelineEmitter -Value "@echo simulated native failure`r`n@exit /b 23" -Encoding Ascii -NoNewline
+    InModuleScope $moduleName {
+      { Invoke-MegaDeskNativeSideEffect -Command { & $global:MegaDeskPipelineEmitter } -FailureMessage 'simulated native failure' } | Should Throw 'simulated native failure'
+    }
+  }
+
+  It 'returns exactly one release object from isolated build after side-effect steps' {
+    $global:MegaDeskPipelineCandidate = 'abababababababababababababababababababab'
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskReleasePath { 'C:\isolated\candidate' }
+      Mock Test-Path { $false }
+      Mock Invoke-MegaDeskReleaseDependencyDeploy { }
+      Mock Invoke-MegaDeskReleaseArtifactBuild { }
+      Mock Assert-MegaDeskReleaseRuntime { }
+      Mock New-MegaDeskReleaseMetadata { }
+      Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPipelineCandidate; path = 'C:\isolated\candidate' } }
+
+      $result = @(Invoke-MegaDeskIsolatedBuild -Sha $global:MegaDeskPipelineCandidate)
+      $result.Count | Should Be 1
+      $result[0].sha | Should Be $global:MegaDeskPipelineCandidate
+    }
+  }
+
+  It 'routes every updater native side effect through the pipeline-isolating helper' {
+    $source = Get-Content -LiteralPath (Get-Module $moduleName).Path -Raw
+    foreach ($command in @(
+      'pnpm install --frozen-lockfile',
+      'git diff --check',
+      'pnpm check',
+      'pnpm test',
+      'pnpm --filter megadesk-platform --prod deploy --legacy',
+      'pnpm exec vite build',
+      'pnpm exec esbuild'
+    )) {
+      $source | Should Match ([regex]::Escape("Invoke-MegaDeskNativeSideEffect -Command { & $command"))
+    }
+  }
+}
+
 Describe 'MegaDesk Node health diagnostics' {
   BeforeEach {
     $script:port = Get-IsolatedTestPort
