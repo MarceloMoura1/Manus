@@ -1,4 +1,5 @@
 import { ArrowRightLeft, Bot, CheckCircle2, Link2, MessageCircle, RotateCcw } from "lucide-react";
+import { formatConversationDateTime } from "@/lib/conversationDateTime";
 import type { ConversationActivityEvent as ConversationActivity } from "@/lib/conversationTimeline";
 
 type ActivityPresentation = {
@@ -38,21 +39,19 @@ function activityPresentation(event: ConversationActivity): ActivityPresentation
 }
 
 function activityTime(value: string | Date | null | undefined) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  return formatConversationDateTime(value);
 }
 
 export function ConversationActivityEvent({ event, compact = false }: { event: ConversationActivity; compact?: boolean }) {
   const presentation = activityPresentation(event);
   const Icon = presentation.icon;
+  const time = activityTime(event.timestamp);
   return (
     <div data-testid="conversation-activity-event" className={compact ? "py-1" : "py-1.5"}>
       <div className={`mx-auto flex w-fit max-w-full items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium shadow-sm ${presentation.tone}`}>
         <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span>{presentation.label}</span>
-        {activityTime(event.timestamp) && <time className="shrink-0 text-[11px] opacity-70">{activityTime(event.timestamp)}</time>}
+        {time && <time className="shrink-0 text-[11px] opacity-70">{time}</time>}
       </div>
     </div>
   );

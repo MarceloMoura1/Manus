@@ -20,6 +20,7 @@ import { ConversationMedia } from "@/components/ConversationMedia";
 import { ConversationDetailsPanel } from "@/components/ConversationDetailsPanel";
 import { ConversationListItem } from "@/components/ConversationListItem";
 import { ConversationActivityEvent } from "@/components/ConversationActivityEvent";
+import { formatConversationTime } from "@/lib/conversationDateTime";
 import { composeConversationTimeline, reconcileConversationMessages } from "@/lib/conversationTimeline";
 import { messageReplyPreview, replyAuthor, replyPreview, type ConversationReplyPreview } from "@/lib/conversationQuote";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -878,7 +879,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
       fileName: audio.fileName,
       replyTo,
       timestamp: new Date().toISOString(),
-      time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+       time: formatConversationTime(new Date()),
       pending: true,
     }]);
     try {
@@ -922,7 +923,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
       fileName: attachmentToSend?.fileName,
       replyTo,
       timestamp: new Date().toISOString(),
-      time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+       time: formatConversationTime(new Date()),
       pending: true,
     }]);
     setMessageInput('');
@@ -965,9 +966,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
 
   const formatTime = (ts: any) => {
     if (!ts) return '';
-    if (typeof ts === 'string' && ts.includes(':')) return ts;
-    const d = new Date(ts);
-    return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    if (typeof ts === 'string' && /^\d{1,2}:\d{2}(?::\d{2})?$/.test(ts)) return ts;
+    return formatConversationTime(ts);
   };
 
   const getInitials = (name: string) => name?.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() || '?';
@@ -1362,7 +1362,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                   }
                   const isAgent = msg.sender === 'agent' || msg.from === 'agent';
                   const msgText = msg.text || msg.message || '';
-                  const msgTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+                  const msgTime = formatConversationTime(msg.timestamp);
                   const msgType = msg.type || 'text';
                   const receipt = isAgent ? outboundReceipt(msg.status, msg.pending === true) : null;
                   const isShortText = msgType === 'text' && msgText.trim().length <= 72;

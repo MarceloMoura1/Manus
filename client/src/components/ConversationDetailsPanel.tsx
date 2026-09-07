@@ -7,6 +7,7 @@ import { ConversationActivityEvent } from "@/components/ConversationActivityEven
 import { ClientFormModal } from "@/pages/ClientesPage";
 import { useDebounce } from "@/hooks/useDebounce";
 import { operatorDisplayName } from "@/lib/conversation-operator-name";
+import { formatConversationDateTime } from "@/lib/conversationDateTime";
 import { composeConversationTimeline } from "@/lib/conversationTimeline";
 import { replyAuthor, replyPreview, type ConversationReplyPreview } from "@/lib/conversationQuote";
 import { formatContactPhone, hasHumanContactName, normalizeContactPhone } from "../../../shared/contact-phone";
@@ -35,8 +36,7 @@ type Conversation = {
 const initialSections = ["attendance", "contact", "client", "history"];
 
 function dateTime(value?: string | Date | null) {
-  if (!value) return "—";
-  return new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  return formatConversationDateTime(value, "—");
 }
 
 function Section({ id, title, open, onToggle, children }: React.PropsWithChildren<{ id: string; title: string; open: boolean; onToggle: () => void }>) {
