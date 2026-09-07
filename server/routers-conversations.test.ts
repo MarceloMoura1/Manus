@@ -96,6 +96,7 @@ describe("Conversations authorization, filters and lifecycle", () => {
     const db = connection([
       [[{ assigned_user_id: "user-a" }]],
       [{ affectedRows: 1 }],
+      [[{ message_id: "message-a" }]],
       [{ affectedRows: 1 }],
     ]);
     mocks.getConnection.mockResolvedValue(db);
@@ -105,8 +106,30 @@ describe("Conversations authorization, filters and lifecycle", () => {
     expect(result).toMatchObject({ assignedUserId: "user-b" });
     expect(db.execute.mock.calls[1][0]).toContain("assigned_user_id <=> ?");
     expect(db.execute.mock.calls[1][1]).toEqual(expect.arrayContaining(["tenant-a", "user-a"]));
-    expect(db.execute.mock.calls[2][1][5]).toContain('"fromUserId":"user-a"');
+    expect(db.execute.mock.calls[2][0]).toContain("FROM megadesk_domain_conversations_messages");
+    expect(db.execute.mock.calls[2][0]).toContain("client_id = ? AND conversation_id = ?");
+    expect(db.execute.mock.calls[2][1]).toEqual(["tenant-a", "conv-a"]);
+    expect(db.execute.mock.calls[3][1][5]).toBe("message-a");
+    expect(db.execute.mock.calls[3][1][6]).toBe("message");
+    expect(db.execute.mock.calls[3][1][7]).toContain('"fromUserId":"user-a"');
     expect(db.commit).toHaveBeenCalledOnce();
+  });
+
+  it("records before_first only when this tenant conversation has no canonical message", async () => {
+    mocks.execute.mockResolvedValueOnce([[{ user_id: "user-a", name: "A" }]]);
+    const db = connection([
+      [{ affectedRows: 1 }],
+      [[]],
+      [{ affectedRows: 1 }],
+    ]);
+    mocks.getConnection.mockResolvedValue(db);
+
+    await conversationsRouter.createCaller(context()).claim({ conversationId: "conv-without-message" });
+
+    expect(db.execute.mock.calls[1][0]).toContain("WHERE client_id = ? AND conversation_id = ?");
+    expect(db.execute.mock.calls[1][1]).toEqual(["tenant-a", "conv-without-message"]);
+    expect(db.execute.mock.calls[2][1][5]).toBeNull();
+    expect(db.execute.mock.calls[2][1][6]).toBe("before_first");
   });
 
   it("rejects stale concurrent transfer and never writes the new owner", async () => {
@@ -214,15 +237,17 @@ describe("Conversations authorization, filters and lifecycle", () => {
     mocks.execute
       .mockResolvedValueOnce([[{ id: "conv-old", publicCode: "CV-9", messagesJson: "[]" }]])
       .mockResolvedValueOnce([[{ id: "msg-1", text: "Histórico", mediaReference: null }]])
-      .mockResolvedValueOnce([[{ id: "event-1", eventType: "closed", actorName: "Agent", timestamp: "2026-08-30T12:00:00.000Z" }]]);
+      .mockResolvedValueOnce([[{ id: "event-1", eventType: "closed", actorName: "Agent", timestamp: "2026-08-30T12:00:00.000Z", anchorMessageId: "msg-1", timelineAnchorKind: "message" }]]);
     const result = await conversationsRouter.createCaller(context()).historyDetail({ contactId: "contact-a", conversationId: "conv-old" });
     expect(mocks.execute.mock.calls).toHaveLength(3);
     expect(mocks.execute.mock.calls[0][1]).toEqual(["tenant-a", "contact-a", "conv-old"]);
     expect(mocks.execute.mock.calls[1][1]).toEqual(["tenant-a", "conv-old"]);
     expect(mocks.execute.mock.calls.every(([sql]) => /^\s*SELECT/i.test(sql as string))).toBe(true);
     expect(result.messages).toHaveLength(1);
-    expect(result.events).toEqual([{ id: "event-1", eventType: "closed", actorName: "Agent", timestamp: "2026-08-30T12:00:00.000Z" }]);
+    expect(result.events).toEqual([{ id: "event-1", eventType: "closed", actorName: "Agent", timestamp: "2026-08-30T12:00:00.000Z", anchorMessageId: "msg-1", timelineAnchorKind: "message" }]);
     expect(mocks.execute.mock.calls[2][0]).toContain("megadesk_conversation_events e");
+    expect(mocks.execute.mock.calls[2][0]).toContain("e.anchor_message_id AS anchorMessageId");
+    expect(mocks.execute.mock.calls[2][0]).toContain("e.timeline_anchor_kind AS timelineAnchorKind");
     expect(mocks.execute.mock.calls[2][1]).toEqual(["tenant-a", "conv-old"]);
   });
 

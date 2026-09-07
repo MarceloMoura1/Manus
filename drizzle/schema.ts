@@ -483,11 +483,14 @@ export const megadeskConversationEvents = mysqlTable(
     conversationId: varchar("conversation_id", { length: 80 }).notNull(),
     eventType: varchar("event_type", { length: 40 }).notNull(),
     operatorUserId: varchar("operator_user_id", { length: 80 }),
+    anchorMessageId: varchar("anchor_message_id", { length: 100 }),
+    timelineAnchorKind: mysqlEnum("timeline_anchor_kind", ["message", "before_first"]),
     metadataJson: text("metadata_json").default("{}").notNull(),
     createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
   },
   table => [
     index("idx_mce_tenant_conversation").on(table.clientId, table.conversationId, table.createdAt),
+    index("idx_mce_tenant_conversation_anchor").on(table.clientId, table.conversationId, table.anchorMessageId),
   ]
 );
 

@@ -522,9 +522,9 @@ export async function saveIncomingMessage(
       );
       await connection.execute(
         `INSERT INTO megadesk_conversation_events
-         (event_id, client_id, conversation_id, event_type, metadata_json)
-         VALUES (?, ?, ?, 'created_inbound', '{"queue":"bot"}')`,
-        [`event-${randomUUID()}`, clientId, conversationId],
+         (event_id, client_id, conversation_id, event_type, anchor_message_id, timeline_anchor_kind, metadata_json)
+         VALUES (?, ?, ?, 'created_inbound', ?, 'message', '{"queue":"bot"}')`,
+        [`event-${randomUUID()}`, clientId, conversationId, externalMessageId],
       );
 
       committedEvent = { name: "conversation:new", payload: {

@@ -34,13 +34,24 @@ export function requireConversationAccess(ctx: { operationalUserRole?: string; o
   }
 }
 
-function attendanceEvent(connection: any, tenantId: string, conversationId: string, eventType: string,
+async function attendanceEvent(connection: any, tenantId: string, conversationId: string, eventType: string,
   operatorUserId: string | null, metadata: Record<string, string> = {}) {
+  // Capture the anchor within the same lifecycle transaction. The query accepts
+  // no caller-provided message ID and is scoped to both tenant and conversation.
+  const [messages] = await connection.execute(
+    `SELECT message_id FROM megadesk_domain_conversations_messages
+     WHERE client_id = ? AND conversation_id = ?
+     ORDER BY timestamp DESC, message_id DESC LIMIT 1`,
+    [tenantId, conversationId],
+  ) as any[];
+  const anchorMessageId = typeof messages[0]?.message_id === "string" ? messages[0].message_id : null;
+  const timelineAnchorKind = anchorMessageId ? "message" : "before_first";
+
   return connection.execute(
     `INSERT INTO megadesk_conversation_events
-     (event_id, client_id, conversation_id, event_type, operator_user_id, metadata_json)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [`event-${randomUUID()}`, tenantId, conversationId, eventType, operatorUserId, JSON.stringify(metadata)],
+     (event_id, client_id, conversation_id, event_type, operator_user_id, anchor_message_id, timeline_anchor_kind, metadata_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [`event-${randomUUID()}`, tenantId, conversationId, eventType, operatorUserId, anchorMessageId, timelineAnchorKind, JSON.stringify(metadata)],
   );
 }
 
@@ -54,6 +65,8 @@ type ConversationEventRow = {
   eventType: string;
   operatorUserId: string | null;
   timestamp: string;
+  anchorMessageId: string | null;
+  timelineAnchorKind: "message" | "before_first" | null;
   actorName: string | null;
   fromUserName: string | null;
   toUserName: string | null;
@@ -65,7 +78,8 @@ async function conversationEvents(connection: { execute: (sql: string, values: u
   const fromUserId = eventMetadataValue("$.fromUserId");
   const [rows] = await connection.execute(
     `SELECT e.event_id AS id, e.event_type AS eventType, e.operator_user_id AS operatorUserId,
-      e.created_at AS timestamp,
+       e.created_at AS timestamp, e.anchor_message_id AS anchorMessageId,
+       e.timeline_anchor_kind AS timelineAnchorKind,
       NULLIF(TRIM(actor.name), '') AS actorName,
       NULLIF(TRIM(source.name), '') AS fromUserName,
       NULLIF(TRIM(target.name), '') AS toUserName

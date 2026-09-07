@@ -2,6 +2,10 @@ export type ConversationActivityEvent = {
   id: string;
   eventType: string;
   timestamp?: string | Date | null;
+  /** Canonical message immediately preceding this event when it was written. */
+  anchorMessageId?: string | null;
+  /** `before_first` is distinct from legacy rows that have no anchor metadata. */
+  timelineAnchorKind?: "message" | "before_first" | null;
   actorName?: string | null;
   fromUserName?: string | null;
   toUserName?: string | null;
@@ -76,33 +80,52 @@ export function composeConversationTimeline(
     (hasConfirmedTimelineTimestamp(candidate) ? chronological : indeterminate).push(candidate);
   }
 
-  const chronologicalMessages = chronological
-    .filter((candidate): candidate is TimelineCandidate & { kind: "message" } => candidate.kind === "message")
-    .sort(compareTimelineCandidates);
-  const lastMessageTimestamp = chronologicalMessages.length
-    ? timestampValue(chronologicalMessages[chronologicalMessages.length - 1].timestamp)
-    : null;
+  const canonicalMessageIds = new Set(
+    chronological
+      .filter((candidate): candidate is TimelineCandidate & { kind: "message" } => candidate.kind === "message")
+      .map(timelineItemId)
+      .filter(Boolean),
+  );
+  const anchoredAfterMessage = new Map<string, TimelineCandidate[]>();
+  const beforeFirstMessage: TimelineCandidate[] = [];
+  const unanchored = chronological.filter(candidate => {
+    if (candidate.kind !== "activity") return true;
 
-  // Messages are the presentation backbone. An interaction whose timestamp is
-  // at or beyond the last loaded message has no inter-source anchor, so keep it
-  // in the historical sequence immediately before that final message instead
-  // of allowing it to become a detached trailing item.
-  const trailingInteractions = lastMessageTimestamp === null
-    ? []
-    : chronological
-      .filter((candidate): candidate is TimelineCandidate & { kind: "activity" } => (
-        candidate.kind === "activity" && timestampValue(candidate.timestamp)! >= lastMessageTimestamp
-      ))
-      .sort(compareTimelineCandidates);
-  const trailingInteractionIds = new Set(trailingInteractions.map(interaction => interaction.id));
-  const orderedTimeline = chronological
-    .filter(candidate => candidate.kind !== "activity" || !trailingInteractionIds.has(candidate.id))
-    .sort(compareTimelineCandidates);
+    if (candidate.timelineAnchorKind === "before_first" && !candidate.anchorMessageId) {
+      beforeFirstMessage.push(candidate);
+      return false;
+    }
 
-  if (trailingInteractions.length > 0) {
-    const lastMessageIndex = orderedTimeline.length - 1;
-    orderedTimeline.splice(lastMessageIndex, 0, ...trailingInteractions);
+    const anchorMessageId = candidate.timelineAnchorKind === "message"
+      ? candidate.anchorMessageId?.trim()
+      : undefined;
+    if (!anchorMessageId || !canonicalMessageIds.has(anchorMessageId)) return true;
+
+    const anchoredEvents = anchoredAfterMessage.get(anchorMessageId) ?? [];
+    anchoredEvents.push(candidate);
+    anchoredAfterMessage.set(anchorMessageId, anchoredEvents);
+    return false;
+  }).sort(compareTimelineCandidates);
+
+  // An anchor is a durable structural fact captured at event creation. It takes
+  // precedence over timestamps, whose sources can differ. Events without a
+  // usable anchor retain the legacy chronological policy above.
+  for (const anchoredEvents of anchoredAfterMessage.values()) anchoredEvents.sort(compareTimelineCandidates);
+  beforeFirstMessage.sort(compareTimelineCandidates);
+
+  const orderedTimeline: TimelineCandidate[] = [];
+  let insertedBeforeFirstMessage = false;
+  for (const candidate of unanchored) {
+    if (!insertedBeforeFirstMessage && candidate.kind === "message") {
+      orderedTimeline.push(...beforeFirstMessage);
+      insertedBeforeFirstMessage = true;
+    }
+    orderedTimeline.push(candidate);
+    if (candidate.kind === "message") {
+      orderedTimeline.push(...(anchoredAfterMessage.get(timelineItemId(candidate)) ?? []));
+    }
   }
+  if (!insertedBeforeFirstMessage) orderedTimeline.unshift(...beforeFirstMessage);
 
   return {
     timeline: orderedTimeline.map(({ sourceOrder: _sourceOrder, ...item }) => item),

@@ -1370,8 +1370,8 @@ export const appRouter = router({
               });
               await connection.execute(
                 `INSERT INTO megadesk_conversation_events
-                 (event_id, client_id, conversation_id, event_type, operator_user_id, metadata_json)
-                 VALUES (?, ?, ?, 'created_outbound', ?, '{}')`,
+                 (event_id, client_id, conversation_id, event_type, operator_user_id, anchor_message_id, timeline_anchor_kind, metadata_json)
+                 VALUES (?, ?, ?, 'created_outbound', ?, NULL, 'before_first', '{}')`,
                 [`event-${randomUUID()}`, ctx.tenantId, conversationId, operator.user_id],
               );
             }

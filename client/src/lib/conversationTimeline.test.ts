@@ -45,8 +45,11 @@ describe("conversation timeline", () => {
     expect(reconcileConversationMessages(persisted, optimistic).map(message => message.id)).toEqual(["message-c", "message-d", "message-e"]);
   });
 
-  it("keeps an activity fixed between history messages through optimistic send and canonical reconciliation", () => {
-    const activityX = { id: "event-x", eventType: "claimed", timestamp: "2026-09-02T10:01:00.000Z" };
+  it("keeps an anchored activity fixed through optimistic send and canonical reconciliation", () => {
+    const activityX = {
+      id: "event-x", eventType: "claimed", timestamp: "2026-09-02T10:10:00.000Z",
+      anchorMessageId: "msg-a", timelineAnchorKind: "message" as const,
+    };
     const history = [
       { id: "msg-c", text: "C", timestamp: "2026-09-02T10:03:00.000Z" },
       { id: "msg-a", text: "A", timestamp: "2026-09-02T10:00:00.000Z" },
@@ -83,11 +86,17 @@ describe("conversation timeline", () => {
     ))).toEqual(["m1", "m2", "start", "m3", "transfer", "m4"]);
   });
 
-  it("keeps historical events fixed when multiple realtime messages arrive", () => {
-    const events = [{ id: "start", eventType: "claimed", timestamp: at(2) }, { id: "transfer", eventType: "transferred", timestamp: at(4) }];
-    const initial = [{ id: "m1", timestamp: at(0) }, { id: "m2", timestamp: at(1) }, { id: "m3", timestamp: at(3) }, { id: "m4", timestamp: at(5) }];
-    expect(ids(mergeConversationTimeline([...initial, { id: "m5", timestamp: at(6) }], events))).toEqual(["m1", "m2", "start", "m3", "transfer", "m4", "m5"]);
-    expect(ids(mergeConversationTimeline([...initial, { id: "m5", timestamp: at(6) }, { id: "m6", timestamp: at(7) }], events))).toEqual(["m1", "m2", "start", "m3", "transfer", "m4", "m5", "m6"]);
+  it("keeps a persisted interaction after its anchor while realtime messages arrive", () => {
+    const event = {
+      id: "transfer", eventType: "transferred", timestamp: "2026-09-06T13:00:00.000Z",
+      anchorMessageId: "m2", timelineAnchorKind: "message" as const,
+    };
+    const initial = [{ id: "m1", timestamp: at(0) }, { id: "m2", timestamp: at(1) }, { id: "m3", timestamp: at(2) }];
+    expect(ids(mergeConversationTimeline(initial, [event]))).toEqual(["m1", "m2", "transfer", "m3"]);
+    expect(ids(mergeConversationTimeline([...initial, { id: "m4", timestamp: at(3) }], [event])))
+      .toEqual(["m1", "m2", "transfer", "m3", "m4"]);
+    expect(ids(mergeConversationTimeline([...initial, { id: "m4", timestamp: at(3) }, { id: "m5", timestamp: at(4) }], [event])))
+      .toEqual(["m1", "m2", "transfer", "m3", "m4", "m5"]);
   });
 
   it("uses one chronology for incoming and outgoing messages and reload/realtime inputs", () => {
@@ -137,7 +146,7 @@ describe("conversation timeline", () => {
       [{ id: "m1", timestamp: at(0) }],
       [{ id: "transfer", eventType: "transferred", timestamp: at(1) }, { id: "transfer", eventType: "transferred", timestamp: at(1) }],
     );
-    expect(ids(timeline)).toEqual(["transfer", "m1"]);
+    expect(ids(timeline)).toEqual(["m1", "transfer"]);
     expect(timeline.filter(item => item.id === "transfer")).toHaveLength(1);
   });
 
@@ -148,39 +157,28 @@ describe("conversation timeline", () => {
     ))).toEqual(["m1", "transfer", "m2"]);
   });
 
-  it("anchors a historical interaction before the final message instead of leaving it at the bottom", () => {
-    const timeline = mergeConversationTimeline(
-      [
-        { id: "m1", timestamp: "2026-09-06T00:32:00.000Z" },
-        { id: "m2", timestamp: "2026-09-06T00:32:30.000Z" },
-        { id: "m3", timestamp: "2026-09-06T00:33:00.000Z" },
-        { id: "m4", timestamp: "2026-09-06T00:33:30.000Z" },
-      ],
-      [{ id: "transfer", eventType: "transferred", timestamp: "2026-09-06T03:33:00.000Z" }],
-    );
-
-    const eventIndex = timeline.findIndex(item => item.id === "transfer");
-    const lastMessageIndex = timeline.map(item => item.kind).lastIndexOf("message");
-    expect(timeline.map(item => item.id)).toEqual(["m1", "m2", "m3", "transfer", "m4"]);
-    expect(timeline[timeline.length - 1].kind).toBe("message");
-    expect(eventIndex).toBeLessThan(lastMessageIndex);
-  });
-
-  it("keeps the relative chronology of multiple interactions anchored before the final message", () => {
+  it("orders multiple events sharing an anchor deterministically by confirmed timestamp", () => {
     expect(ids(mergeConversationTimeline(
-      [{ id: "m1", timestamp: at(0) }, { id: "m2", timestamp: at(10) }],
+      [{ id: "m1", timestamp: at(0) }, { id: "m2", timestamp: at(10) }, { id: "m3", timestamp: at(20) }],
       [
-        { id: "event-a", eventType: "claimed", timestamp: "2026-09-06T11:00:00.000Z" },
-        { id: "event-b", eventType: "transferred", timestamp: "2026-09-06T11:05:00.000Z" },
+        { id: "event-b", eventType: "transferred", timestamp: at(16), anchorMessageId: "m2", timelineAnchorKind: "message" },
+        { id: "event-a", eventType: "claimed", timestamp: at(15), anchorMessageId: "m2", timelineAnchorKind: "message" },
       ],
-    ))).toEqual(["m1", "event-a", "event-b", "m2"]);
+    ))).toEqual(["m1", "m2", "event-a", "event-b", "m3"]);
   });
 
-  it("keeps an interaction before the first message in normal chronology", () => {
+  it("places a new before-first event before the first canonical message", () => {
     expect(ids(mergeConversationTimeline(
       [{ id: "m1", timestamp: at(10) }, { id: "m2", timestamp: at(20) }],
-      [{ id: "start", eventType: "claimed", timestamp: at(5) }],
+      [{ id: "start", eventType: "claimed", timestamp: at(30), anchorMessageId: null, timelineAnchorKind: "before_first" }],
     ))).toEqual(["start", "m1", "m2"]);
+  });
+
+  it("keeps legacy events without an anchor on the existing timestamp fallback", () => {
+    expect(ids(mergeConversationTimeline(
+      [{ id: "m1", timestamp: at(0) }, { id: "m2", timestamp: at(10) }],
+      [{ id: "legacy", eventType: "transferred", timestamp: at(5), anchorMessageId: null, timelineAnchorKind: null }],
+    ))).toEqual(["m1", "legacy", "m2"]);
   });
 
   it("keeps interactions without a timestamp in indeterminate history", () => {
