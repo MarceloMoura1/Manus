@@ -2404,6 +2404,100 @@ Describe 'MegaDesk prepared release candidate selection' {
   }
 }
 
+Describe 'MegaDesk verified MAIN migration gate' {
+  BeforeEach {
+    $global:MegaDeskMigrationGateFrom = '1111111111111111111111111111111111111111'
+    $global:MegaDeskMigrationGateTo = '2222222222222222222222222222222222222222'
+    $global:MegaDeskMigration0018 = [pscustomobject]@{ path = 'drizzle/main-migrations/0018_clean_union_jack.sql'; tag = '0018_clean_union_jack'; sha256 = ('a' * 64) }
+    $global:MegaDeskMigration0019 = [pscustomobject]@{ path = 'drizzle/main-migrations/0019_safe_followup.sql'; tag = '0019_safe_followup'; sha256 = ('b' * 64) }
+  }
+
+  It 'allows a delta without migration changes' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Get-MegaDeskAppliedMainMigrationJournal { throw 'journal must not be queried without a migration delta' }
+      $result = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
+      $result.status | Should Be 'NONE'
+      Assert-MockCalled Get-MegaDeskAppliedMainMigrationJournal -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'blocks a pending MAIN migration even when its Git delta is otherwise canonical' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @('drizzle/schema.ts', 'drizzle/main-migrations/0018_clean_union_jack.sql', 'drizzle/main-migrations/meta/_journal.json', 'drizzle/main-migrations/meta/0018_snapshot.json') }
+      Mock Invoke-MegaDeskGit { $global:MegaDeskMigrationGateTo }
+      Mock Get-MegaDeskMainMigrationIdentity { $global:MegaDeskMigration0018 }
+      Mock Get-MegaDeskAppliedMainMigrationJournal { [pscustomobject]@{ database = 'megadesk_local'; hashes = @() } }
+      $result = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
+      $result.status | Should Be 'PENDING'
+      { Assert-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo } | Should Throw 'PENDING'
+    }
+  }
+
+  It 'allows an applied migration only when the physical hash and structure both match' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @('drizzle/schema.ts', 'drizzle/main-migrations/0018_clean_union_jack.sql', 'drizzle/main-migrations/meta/_journal.json', 'drizzle/main-migrations/meta/0018_snapshot.json') }
+      Mock Invoke-MegaDeskGit { $global:MegaDeskMigrationGateTo }
+      Mock Get-MegaDeskMainMigrationIdentity { $global:MegaDeskMigration0018 }
+      Mock Get-MegaDeskAppliedMainMigrationJournal { [pscustomobject]@{ database = 'megadesk_local'; hashes = @($global:MegaDeskMigration0018.sha256) } }
+      Mock Test-MegaDeskKnownMainMigrationPhysicalStructure { $true }
+      $result = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
+      $result.status | Should Be 'APPLIED_MATCH'
+      { Assert-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo } | Should Not Throw
+    }
+  }
+
+  It 'blocks a journal match when the known migration structure is divergent or partial' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @('drizzle/main-migrations/0018_clean_union_jack.sql') }
+      Mock Invoke-MegaDeskGit { $global:MegaDeskMigrationGateTo }
+      Mock Get-MegaDeskMainMigrationIdentity { $global:MegaDeskMigration0018 }
+      Mock Get-MegaDeskAppliedMainMigrationJournal { [pscustomobject]@{ database = 'megadesk_local'; hashes = @($global:MegaDeskMigration0018.sha256) } }
+      Mock Test-MegaDeskKnownMainMigrationPhysicalStructure { $false }
+      (Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo).status | Should Be 'DIVERGENT'
+    }
+  }
+
+  It 'fails closed when the physical journal cannot be read' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @('drizzle/main-migrations/0018_clean_union_jack.sql') }
+      Mock Invoke-MegaDeskGit { $global:MegaDeskMigrationGateTo }
+      Mock Get-MegaDeskMainMigrationIdentity { $global:MegaDeskMigration0018 }
+      Mock Get-MegaDeskAppliedMainMigrationJournal { throw 'readonly journal unavailable' }
+      (Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo).status | Should Be 'UNKNOWN'
+    }
+  }
+
+  It 'allows multiple applied MAIN migrations and blocks the set if any one is pending' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @('drizzle/main-migrations/0018_clean_union_jack.sql', 'drizzle/main-migrations/0019_safe_followup.sql') }
+      Mock Invoke-MegaDeskGit { $global:MegaDeskMigrationGateTo }
+      Mock Get-MegaDeskMainMigrationIdentity {
+        param($RelativePath)
+        if ($RelativePath -match '0018') { return $global:MegaDeskMigration0018 }
+        return $global:MegaDeskMigration0019
+      }
+      $script:journalHashes = @($global:MegaDeskMigration0018.sha256, $global:MegaDeskMigration0019.sha256)
+      Mock Get-MegaDeskAppliedMainMigrationJournal { [pscustomobject]@{ database = 'megadesk_local'; hashes = $script:journalHashes } }
+      Mock Test-MegaDeskKnownMainMigrationPhysicalStructure { $true }
+      (Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo).status | Should Be 'APPLIED_MATCH'
+
+      $script:journalHashes = @($global:MegaDeskMigration0018.sha256)
+      (Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo).status | Should Be 'PENDING'
+    }
+  }
+
+  It 'uses the same asserted gate from updater and quick publish' {
+    $source = Get-Content -LiteralPath (Get-Module $moduleName).Path -Raw
+    $updater = [regex]::Match($source, 'function Invoke-MegaDeskUpdaterV2 \{.*?(?=function Invoke-MegaDeskPreparedReleasePublish)', [System.Text.RegularExpressions.RegexOptions]::Singleline).Value
+    $publish = [regex]::Match($source, 'function Invoke-MegaDeskPreparedReleasePublish \{.*?(?=function Backup-MegaDeskDist)', [System.Text.RegularExpressions.RegexOptions]::Singleline).Value
+    $updater | Should Match 'Assert-MegaDeskMigrationDeltaState'
+    $publish | Should Match 'Assert-MegaDeskMigrationDeltaState'
+    $updater | Should Not Match 'Get-MegaDeskMigrationChanges'
+    $publish | Should Not Match 'Get-MegaDeskMigrationChanges'
+  }
+}
+
 Describe 'MegaDesk update preparation only' {
   BeforeEach {
     $script:port = Get-IsolatedTestPort
@@ -2426,7 +2520,7 @@ Describe 'MegaDesk update preparation only' {
       Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskUpdateActive; path = 'C:\active' } }
       Mock Assert-MegaDeskCandidateDescendsFromActive { }
       Mock Set-MegaDeskOperationState { param($Status, $CandidateSha, $Kind, $Message) $script:transitions += $Status; $script:testState.operation = [pscustomobject]@{ kind = 'UPDATE'; status = $Status; candidateSha = $CandidateSha; message = $Message }; $script:testState }
-      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
       Mock Test-MegaDeskDependencyDiff { $false }
       Mock Invoke-MegaDeskIsolatedBuild { [pscustomobject]@{ sha = $global:MegaDeskUpdateCandidate; path = 'C:\candidate' } }
       Mock Assert-MegaDeskNoSourceMutation { }
@@ -2437,7 +2531,8 @@ Describe 'MegaDesk update preparation only' {
       Mock Stop-MegaDeskManagedProcess { throw 'Atualizar nao deve parar runtime.' }
       Mock Write-MegaDeskLog { }
 
-      $result = Invoke-MegaDeskUpdaterV2 -ExpectedBranch 'release/updater-v2-bootstrap'
+      $result = @(Invoke-MegaDeskUpdaterV2 -ExpectedBranch 'release/updater-v2-bootstrap')
+      $result.Count | Should Be 1
       $result.sha | Should Be $global:MegaDeskUpdateCandidate
       $script:testState.operation.status | Should Be 'READY'
       $script:transitions | Should Be @('PREPARING', 'READY')
@@ -2460,7 +2555,7 @@ Describe 'MegaDesk update preparation only' {
       Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskUpdateActive; path = 'C:\active' } }
       Mock Assert-MegaDeskCandidateDescendsFromActive { }
       Mock Set-MegaDeskOperationState { param($Status, $CandidateSha, $Kind, $Message) $script:transitions += $Status; $script:testState.operation = [pscustomobject]@{ kind = 'UPDATE'; status = $Status; candidateSha = $CandidateSha; message = $Message }; $script:testState }
-      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
       Mock Test-MegaDeskDependencyDiff { $false }
       Mock Invoke-MegaDeskIsolatedBuild { [pscustomobject]@{ sha = $global:MegaDeskUpdateCandidate; path = 'C:\candidate' } }
       Mock Assert-MegaDeskNoSourceMutation { }
@@ -2545,12 +2640,12 @@ Describe 'MegaDesk prepared release publish' {
       Mock Resolve-MegaDeskPreparedReleaseCandidate { [pscustomobject]@{ updaterHeadSha = $global:MegaDeskPreparedCandidate; candidateReleaseSha = $global:MegaDeskPreparedCandidate; source = 'HEAD preparado' } }
       Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate' } }
       Mock Assert-MegaDeskPreparedReleaseMetadata { }
-      Mock Get-MegaDeskMigrationChanges { @('drizzle/main-migrations/0018_new.sql') }
+      Mock Assert-MegaDeskMigrationDeltaState { throw 'Migration delta bloqueada (PENDING): 0018_new' }
       Mock Read-Host { throw 'prompt must not be reached' }
       Mock Set-MegaDeskOperationState { throw 'state must not change before confirmation' }
       Mock Write-MegaDeskLog { }
 
-      { Invoke-MegaDeskPreparedReleasePublish -ExpectedBranch 'release/updater-v2-bootstrap' } | Should Throw 'MIGRATION DELTA'
+      { Invoke-MegaDeskPreparedReleasePublish -ExpectedBranch 'release/updater-v2-bootstrap' } | Should Throw 'PENDING'
       Assert-MockCalled Read-Host -Times 0 -Exactly -Scope It
       Assert-MockCalled Set-MegaDeskOperationState -Times 0 -Exactly -Scope It
     }
@@ -2587,7 +2682,7 @@ Describe 'MegaDesk prepared release publish' {
       Mock Resolve-MegaDeskPreparedReleaseCandidate { [pscustomobject]@{ updaterHeadSha = $global:MegaDeskPreparedCandidate; candidateReleaseSha = $global:MegaDeskPreparedCandidate; source = 'operacao UPDATE preparada anteriormente' } }
       Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate' } }
       Mock Assert-MegaDeskPreparedReleaseMetadata { }
-      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
       Mock Read-Host { 'cancelar' }
       Mock Invoke-MegaDeskIsolatedBuild { throw 'materialization must not run' }
       Mock Invoke-MegaDeskFrozenInstall { throw 'install must not run' }
@@ -2621,7 +2716,7 @@ Describe 'MegaDesk prepared release publish' {
       Mock Resolve-MegaDeskPreparedReleaseCandidate { [pscustomobject]@{ updaterHeadSha = $global:MegaDeskPreparedCandidate; candidateReleaseSha = $global:MegaDeskPreparedCandidate; source = 'operacao UPDATE preparada anteriormente' } }
       Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate' } }
       Mock Assert-MegaDeskPreparedReleaseMetadata { }
-      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
       Mock Read-Host { 'publicar' }
       Mock Set-MegaDeskOperationState { param($Status) $script:transitions += $Status }
       Mock Invoke-MegaDeskReleaseSwitch { $script:statusAtSwitch = $script:testState.operation.status }
@@ -2653,7 +2748,7 @@ Describe 'MegaDesk prepared release publish' {
       Mock Resolve-MegaDeskPreparedReleaseCandidate { [pscustomobject]@{ updaterHeadSha = $global:MegaDeskPreparedCandidate; candidateReleaseSha = $global:MegaDeskPreparedCandidate; source = 'operacao UPDATE preparada anteriormente' } }
       Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate' } }
       Mock Assert-MegaDeskPreparedReleaseMetadata { }
-      Mock Get-MegaDeskMigrationChanges { @() }
+      Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
       Mock Read-Host { 'publicar' }
       Mock Set-MegaDeskOperationState {
         param($Status, $CandidateSha, $Kind, $Message)
@@ -2699,7 +2794,7 @@ Describe 'MegaDesk prepared release publish' {
       Mock Resolve-MegaDeskPreparedReleaseCandidate { $script:gates += 'selection'; [pscustomobject]@{ updaterHeadSha = $global:MegaDeskPreparedUpdaterHead; candidateReleaseSha = $global:MegaDeskPreparedCandidate; source = 'operacao UPDATE preparada anteriormente' } }
       Mock Get-MegaDeskRelease { $script:gates += 'metadata'; [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate'; metadata = [pscustomobject]@{} } }
       Mock Assert-MegaDeskPreparedReleaseMetadata { $script:gates += 'runtime' }
-      Mock Get-MegaDeskMigrationChanges { $script:gates += 'migration'; @() }
+      Mock Assert-MegaDeskMigrationDeltaState { $script:gates += 'migration'; [pscustomobject]@{ status = 'NONE' } }
       Mock Read-Host { 'publicar' }
       Mock Set-MegaDeskOperationState { param($Status, $CandidateSha) $script:transitionStatuses += $Status; $script:stateCandidate = $CandidateSha; if ($Status -eq 'READY') { $script:gates += 'ready' } }
       Mock Invoke-MegaDeskReleaseSwitch { param($CandidateRelease) $script:switchedCandidate = $CandidateRelease.sha; $script:statusAtSwitch = $script:transitionStatuses[$script:transitionStatuses.Count - 1]; $script:gates += 'switch' }
@@ -2728,7 +2823,7 @@ Describe 'MegaDesk prepared release publish' {
     $publishFunction | Should Match 'Resolve-MegaDeskPreparedReleaseCandidate'
     $publishFunction | Should Match 'Get-MegaDeskRelease -Sha \$candidateSha'
     $publishFunction | Should Match 'Assert-MegaDeskPreparedReleaseMetadata'
-    $publishFunction | Should Match 'Get-MegaDeskMigrationChanges'
+    $publishFunction | Should Match 'Assert-MegaDeskMigrationDeltaState'
   }
 }
 

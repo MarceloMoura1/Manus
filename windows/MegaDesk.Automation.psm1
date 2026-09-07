@@ -423,6 +423,116 @@ function Get-MegaDeskMigrationChanges {
   return @(Invoke-MegaDeskGit -Arguments (@('diff', '--name-only', "$FromSha..$ToSha", '--') + $paths) -FailureMessage 'Falha ao inspecionar alteracoes de banco.')
 }
 
+function Get-MegaDeskMainMigrationIdentity {
+  param([Parameter(Mandatory = $true)][string]$RelativePath)
+  if ($RelativePath -notmatch '^drizzle/main-migrations/([0-9]{4}_[A-Za-z0-9_]+)\.sql$') {
+    throw "Migration MAIN com caminho invalido: $RelativePath"
+  }
+
+  $tag = $Matches[1]
+  $migrationPath = Assert-MegaDeskPathInside -Path (Join-Path $script:ProjectRoot ($RelativePath -replace '/', '\')) -Root $script:ProjectRoot -Label 'Migration MAIN candidata'
+  if (-not (Test-Path -LiteralPath $migrationPath -PathType Leaf)) { throw "Migration MAIN candidata ausente: $RelativePath" }
+  $journalPath = Join-Path $script:ProjectRoot 'drizzle\main-migrations\meta\_journal.json'
+  $snapshotPath = Join-Path $script:ProjectRoot ('drizzle\main-migrations\meta\{0}_snapshot.json' -f $tag.Substring(0, 4))
+  try { $journal = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json } catch { throw 'Journal canonico MAIN invalido ou indisponivel.' }
+  if (@($journal.entries | Where-Object { [string]$_.tag -ceq $tag }).Count -ne 1) { throw "Journal canonico MAIN nao identifica exatamente a migration $tag." }
+  if (-not (Test-Path -LiteralPath $snapshotPath -PathType Leaf)) { throw "Snapshot canonico MAIN ausente para $tag." }
+
+  return [pscustomobject]@{
+    path = $RelativePath
+    tag = $tag
+    sha256 = (Get-FileHash -LiteralPath $migrationPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  }
+}
+
+function Invoke-MegaDeskMainMigrationReadOnlyQuery {
+  param([Parameter(Mandatory = $true)][string]$Sql)
+  if ($Sql -match '[\r\n"]') { throw 'Consulta de migration MAIN invalida.' }
+  Assert-DockerAndMySql
+  $image = @(& docker inspect --format '{{.Config.Image}}' megadesk-local-mysql 2>$null)
+  if ($LASTEXITCODE -ne 0 -or $image.Count -ne 1 -or $image[0].Trim() -ne 'mysql:8.0') { throw 'Identidade da imagem MySQL principal nao comprovada.' }
+
+  # Credentials remain inside the already identified container; only readonly
+  # query results cross the process boundary.
+  $command = 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -u"$MYSQL_USER" --database="$MYSQL_DATABASE" --batch --skip-column-names --execute="SELECT DATABASE(); ' + $Sql + '"'
+  $output = @(& docker exec megadesk-local-mysql sh -lc $command)
+  if ($LASTEXITCODE -ne 0 -or $output.Count -lt 1) { throw 'Consulta readonly do journal MAIN falhou.' }
+  if ($output[0].Trim() -ne 'megadesk_local') { throw 'Banco MAIN inesperado; verificacao de migration recusada.' }
+  return @($output | Select-Object -Skip 1 | ForEach-Object { $_.Trim() })
+}
+
+function Get-MegaDeskAppliedMainMigrationJournal {
+  $hashes = @(Invoke-MegaDeskMainMigrationReadOnlyQuery -Sql 'SELECT hash FROM __drizzle_migrations ORDER BY created_at;')
+  if ($hashes.Count -eq 0 -or @($hashes | Where-Object { $_ -notmatch '^[0-9a-f]{64}$' }).Count -ne 0) {
+    throw 'Journal fisico MAIN ausente ou possui identidade de migration invalida.'
+  }
+  return [pscustomobject]@{ database = 'megadesk_local'; hashes = $hashes }
+}
+
+function Test-MegaDeskKnownMainMigrationPhysicalStructure {
+  param([Parameter(Mandatory = $true)]$Migration)
+  if ([string]$Migration.tag -ne '0018_clean_union_jack') { return $true }
+
+  $sql = "SELECT column_name, column_type, is_nullable FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'megadesk_conversation_events' AND column_name IN ('anchor_message_id','timeline_anchor_kind') ORDER BY ordinal_position; SELECT index_name, non_unique, seq_in_index, column_name FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'megadesk_conversation_events' AND index_name = 'idx_mce_tenant_conversation_anchor' ORDER BY seq_in_index;"
+  $rows = @(Invoke-MegaDeskMainMigrationReadOnlyQuery -Sql $sql)
+  $tab = [string][char]9
+  $expected = @(
+    ('anchor_message_id' + $tab + 'varchar(100)' + $tab + 'YES'),
+    ("timeline_anchor_kind${tab}enum('message','before_first')${tab}YES"),
+    ('idx_mce_tenant_conversation_anchor' + $tab + '1' + $tab + '1' + $tab + 'client_id'),
+    ('idx_mce_tenant_conversation_anchor' + $tab + '1' + $tab + '2' + $tab + 'conversation_id'),
+    ('idx_mce_tenant_conversation_anchor' + $tab + '1' + $tab + '3' + $tab + 'anchor_message_id')
+  )
+  return (@($rows) -join "`n") -ceq ($expected -join "`n")
+}
+
+function Get-MegaDeskMigrationDeltaState {
+  param([Parameter(Mandatory = $true)][string]$FromSha, [Parameter(Mandatory = $true)][string]$ToSha)
+  try {
+    $changes = @(Get-MegaDeskMigrationChanges -FromSha $FromSha -ToSha $ToSha | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($changes.Count -eq 0) { return [pscustomobject]@{ status = 'NONE'; migrations = @(); message = 'Nenhuma alteracao de migration.' } }
+
+    $mainMigrations = @($changes | Where-Object { $_ -match '^drizzle/main-migrations/[0-9]{4}_[A-Za-z0-9_]+\.sql$' } | Sort-Object -Unique)
+    $unsupportedChanges = @($changes | Where-Object {
+      $_ -notmatch '^drizzle/main-migrations/[0-9]{4}_[A-Za-z0-9_]+\.sql$' -and
+      $_ -notmatch '^drizzle/main-migrations/meta/(?:_journal|[0-9]{4}_snapshot)\.json$' -and
+      $_ -ne 'drizzle/schema.ts'
+    })
+    if ($mainMigrations.Count -eq 0 -or $unsupportedChanges.Count -ne 0) {
+      return [pscustomobject]@{ status = 'DIVERGENT'; migrations = @(); message = 'Delta de banco nao representa exclusivamente migrations MAIN canonicas verificaveis.' }
+    }
+
+    $currentHead = (Invoke-MegaDeskGit -Arguments @('rev-parse', 'HEAD') -FailureMessage 'HEAD indisponivel para verificar migrations.' | Select-Object -First 1).Trim()
+    if ($currentHead -cne $ToSha) {
+      return [pscustomobject]@{ status = 'DIVERGENT'; migrations = @(); message = 'Candidate de migration nao corresponde ao HEAD local verificado.' }
+    }
+
+    $identities = @($mainMigrations | ForEach-Object { Get-MegaDeskMainMigrationIdentity -RelativePath $_ })
+    $journal = Get-MegaDeskAppliedMainMigrationJournal
+    if ([string]$journal.database -ne 'megadesk_local') {
+      return [pscustomobject]@{ status = 'DIVERGENT'; migrations = $identities; message = 'Identidade do banco MAIN divergiu.' }
+    }
+    $pending = @($identities | Where-Object { $journal.hashes -notcontains $_.sha256 })
+    if ($pending.Count -ne 0) {
+      return [pscustomobject]@{ status = 'PENDING'; migrations = $identities; message = ('Migration MAIN sem hash fisico correspondente: ' + (($pending | ForEach-Object { $_.tag }) -join ', ')) }
+    }
+    $invalidStructure = @($identities | Where-Object { -not (Test-MegaDeskKnownMainMigrationPhysicalStructure -Migration $_) })
+    if ($invalidStructure.Count -ne 0) {
+      return [pscustomobject]@{ status = 'DIVERGENT'; migrations = $identities; message = ('Estrutura fisica divergente para: ' + (($invalidStructure | ForEach-Object { $_.tag }) -join ', ')) }
+    }
+    return [pscustomobject]@{ status = 'APPLIED_MATCH'; migrations = $identities; message = 'Todas as migrations MAIN do delta possuem hash fisico correspondente e estrutura validada.' }
+  } catch {
+    return [pscustomobject]@{ status = 'UNKNOWN'; migrations = @(); message = ('Nao foi possivel comprovar migration MAIN: ' + $_.Exception.Message) }
+  }
+}
+
+function Assert-MegaDeskMigrationDeltaState {
+  param([Parameter(Mandatory = $true)][string]$FromSha, [Parameter(Mandatory = $true)][string]$ToSha)
+  $result = Get-MegaDeskMigrationDeltaState -FromSha $FromSha -ToSha $ToSha
+  if ([string]$result.status -in @('NONE', 'APPLIED_MATCH')) { return $result }
+  throw ('Migration delta bloqueada ({0}): {1}' -f $result.status, $result.message)
+}
+
 function Test-MegaDeskDependencyDiff {
   param([Parameter(Mandatory = $true)][string]$FromSha, [Parameter(Mandatory = $true)][string]$ToSha)
   & git diff --quiet "$FromSha..$ToSha" -- package.json pnpm-lock.yaml
@@ -2191,10 +2301,8 @@ function Invoke-MegaDeskUpdaterV2 {
     Assert-MegaDeskCandidateDescendsFromActive -ActiveReleaseSha ([string]$activeRelease.sha) -CandidateReleaseSha $candidateSha
     Set-MegaDeskOperationState -Status 'PREPARING' -Kind 'UPDATE' -CandidateSha $candidateSha -Message 'Preflight do updater v2 iniciado.' | Out-Null
 
-    $migrationChanges = @(Get-MegaDeskMigrationChanges -FromSha $activeRelease.sha -ToSha $candidateSha | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    if ($migrationChanges.Count -gt 0) {
-      throw 'Atualizacao contem alteracao de banco. Publicacao bloqueada ate execucao do fluxo seguro de migrations.'
-    }
+    $migrationGate = Assert-MegaDeskMigrationDeltaState -FromSha ([string]$activeRelease.sha) -ToSha $candidateSha
+    Write-MegaDeskLog ('Migration gate do updater: {0}.' -f $migrationGate.status)
     if (Test-MegaDeskDependencyDiff -FromSha $activeRelease.sha -ToSha $candidateSha) {
       Write-MegaDeskLog 'Dependencias mudaram entre releases; executando install frozen controlado.'
       Invoke-MegaDeskFrozenInstall
@@ -2254,10 +2362,8 @@ function Invoke-MegaDeskPreparedReleasePublish {
     $candidateRelease = Get-MegaDeskRelease -Sha $candidateSha
     Assert-MegaDeskPreparedReleaseMetadata -Release $candidateRelease -CandidateReleaseSha $candidateSha
 
-    $migrationChanges = @(Get-MegaDeskMigrationChanges -FromSha ([string]$activeRelease.sha) -ToSha $candidateSha | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    if ($migrationChanges.Count -gt 0) {
-      throw 'PUBLICACAO BLOQUEADA - RELEASE CONTEM MIGRATION DELTA. Use o fluxo seguro de migrations antes de publicar.'
-    }
+    $migrationGate = Assert-MegaDeskMigrationDeltaState -FromSha ([string]$activeRelease.sha) -ToSha $candidateSha
+    Write-MegaDeskLog ('Migration gate da publicacao: {0}.' -f $migrationGate.status)
 
     Write-Host ''
     Write-Host '========================================'
