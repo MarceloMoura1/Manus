@@ -12,9 +12,11 @@ import { AIAssistant } from "./components/AIAssistant";
 import { trpc } from "./lib/trpc";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { browserBrandForHostname } from "./lib/browser-branding";
 import { trpcBaseUrl } from "./lib/trpc-url";
 
 const hostname = typeof window !== "undefined" ? window.location.hostname : "localhost";
+const browserBrand = browserBrandForHostname(hostname);
 const IS_PROD = hostname.endsWith("megadesk.online");
 const TRPC_URL = trpcBaseUrl(hostname);
 // Canonical backend path remains /api/trpc; trpcBaseUrl only selects its origin.
@@ -71,6 +73,9 @@ export default function App() {
   );
 
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
+  useEffect(() => {
+    document.title = browserBrand.title;
+  }, []);
   useEffect(() => {
     const openAssistant = () => setIsAssistantOpen(true);
     window.addEventListener("megadesk-open-assistant", openAssistant);
