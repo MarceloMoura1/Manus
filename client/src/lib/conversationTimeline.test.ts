@@ -133,9 +133,62 @@ describe("conversation timeline", () => {
   });
 
   it("does not duplicate persisted events with the same strong event ID", () => {
-    expect(ids(mergeConversationTimeline(
+    const timeline = mergeConversationTimeline(
       [{ id: "m1", timestamp: at(0) }],
       [{ id: "transfer", eventType: "transferred", timestamp: at(1) }, { id: "transfer", eventType: "transferred", timestamp: at(1) }],
-    ))).toEqual(["m1", "transfer"]);
+    );
+    expect(ids(timeline)).toEqual(["transfer", "m1"]);
+    expect(timeline.filter(item => item.id === "transfer")).toHaveLength(1);
+  });
+
+  it("keeps an interaction between messages when its timestamp is within the loaded message range", () => {
+    expect(ids(mergeConversationTimeline(
+      [{ id: "m1", timestamp: at(0) }, { id: "m2", timestamp: at(10) }],
+      [{ id: "transfer", eventType: "transferred", timestamp: at(5) }],
+    ))).toEqual(["m1", "transfer", "m2"]);
+  });
+
+  it("anchors a historical interaction before the final message instead of leaving it at the bottom", () => {
+    const timeline = mergeConversationTimeline(
+      [
+        { id: "m1", timestamp: "2026-09-06T00:32:00.000Z" },
+        { id: "m2", timestamp: "2026-09-06T00:32:30.000Z" },
+        { id: "m3", timestamp: "2026-09-06T00:33:00.000Z" },
+        { id: "m4", timestamp: "2026-09-06T00:33:30.000Z" },
+      ],
+      [{ id: "transfer", eventType: "transferred", timestamp: "2026-09-06T03:33:00.000Z" }],
+    );
+
+    const eventIndex = timeline.findIndex(item => item.id === "transfer");
+    const lastMessageIndex = timeline.map(item => item.kind).lastIndexOf("message");
+    expect(timeline.map(item => item.id)).toEqual(["m1", "m2", "m3", "transfer", "m4"]);
+    expect(timeline[timeline.length - 1].kind).toBe("message");
+    expect(eventIndex).toBeLessThan(lastMessageIndex);
+  });
+
+  it("keeps the relative chronology of multiple interactions anchored before the final message", () => {
+    expect(ids(mergeConversationTimeline(
+      [{ id: "m1", timestamp: at(0) }, { id: "m2", timestamp: at(10) }],
+      [
+        { id: "event-a", eventType: "claimed", timestamp: "2026-09-06T11:00:00.000Z" },
+        { id: "event-b", eventType: "transferred", timestamp: "2026-09-06T11:05:00.000Z" },
+      ],
+    ))).toEqual(["m1", "event-a", "event-b", "m2"]);
+  });
+
+  it("keeps an interaction before the first message in normal chronology", () => {
+    expect(ids(mergeConversationTimeline(
+      [{ id: "m1", timestamp: at(10) }, { id: "m2", timestamp: at(20) }],
+      [{ id: "start", eventType: "claimed", timestamp: at(5) }],
+    ))).toEqual(["start", "m1", "m2"]);
+  });
+
+  it("keeps interactions without a timestamp in indeterminate history", () => {
+    const composition = composeConversationTimeline(
+      [{ id: "m1", timestamp: at(0) }, { id: "m2", timestamp: at(10) }],
+      [{ id: "event-untimed", eventType: "transferred" }],
+    );
+    expect(composition.timeline.map(item => item.id)).toEqual(["m1", "m2"]);
+    expect(composition.indeterminateHistory.map(item => item.id)).toEqual(["event-untimed"]);
   });
 });

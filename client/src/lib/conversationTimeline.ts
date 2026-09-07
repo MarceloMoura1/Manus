@@ -76,8 +76,36 @@ export function composeConversationTimeline(
     (hasConfirmedTimelineTimestamp(candidate) ? chronological : indeterminate).push(candidate);
   }
 
+  const chronologicalMessages = chronological
+    .filter((candidate): candidate is TimelineCandidate & { kind: "message" } => candidate.kind === "message")
+    .sort(compareTimelineCandidates);
+  const lastMessageTimestamp = chronologicalMessages.length
+    ? timestampValue(chronologicalMessages[chronologicalMessages.length - 1].timestamp)
+    : null;
+
+  // Messages are the presentation backbone. An interaction whose timestamp is
+  // at or beyond the last loaded message has no inter-source anchor, so keep it
+  // in the historical sequence immediately before that final message instead
+  // of allowing it to become a detached trailing item.
+  const trailingInteractions = lastMessageTimestamp === null
+    ? []
+    : chronological
+      .filter((candidate): candidate is TimelineCandidate & { kind: "activity" } => (
+        candidate.kind === "activity" && timestampValue(candidate.timestamp)! >= lastMessageTimestamp
+      ))
+      .sort(compareTimelineCandidates);
+  const trailingInteractionIds = new Set(trailingInteractions.map(interaction => interaction.id));
+  const orderedTimeline = chronological
+    .filter(candidate => candidate.kind !== "activity" || !trailingInteractionIds.has(candidate.id))
+    .sort(compareTimelineCandidates);
+
+  if (trailingInteractions.length > 0) {
+    const lastMessageIndex = orderedTimeline.length - 1;
+    orderedTimeline.splice(lastMessageIndex, 0, ...trailingInteractions);
+  }
+
   return {
-    timeline: chronological.sort(compareTimelineCandidates).map(({ sourceOrder: _sourceOrder, ...item }) => item),
+    timeline: orderedTimeline.map(({ sourceOrder: _sourceOrder, ...item }) => item),
     indeterminateHistory: indeterminate.map(({ sourceOrder: _sourceOrder, ...item }) => item),
   };
 }
