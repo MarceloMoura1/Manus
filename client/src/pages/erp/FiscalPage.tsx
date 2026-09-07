@@ -1,6 +1,7 @@
 import React from "react";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { formatDateTime } from "@/lib/conversationDateTime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ErpPageHeader } from "@/components/erp/ErpPageHeader";
@@ -812,7 +813,7 @@ function Detail({
                 <h3 className="font-bold">Histórico</h3>
                 {q.data.history.map((x: any, i: number) => (
                   <p key={i}>
-                    {x.toStatus} · {x.createdAt}
+                    {x.toStatus} · {formatDateTime(x.createdAt)}
                   </p>
                 ))}
               </section>

@@ -30,6 +30,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Toaster } from "sonner";
 import { trpc } from "@/lib/trpc";
+import { formatTime } from "@/lib/conversationDateTime";
 import { MODULE_LABELS } from "@shared/const";
 import { AdminsSection } from "./AdminsSection";
 import { AdminSettingsPage } from "./AdminSettingsPage";
@@ -1480,7 +1481,7 @@ function BackupsSection() {
                 </div>
                 <div>
                   <p className="text-gray-400">Hora</p>
-                  <p className="text-white">{new Date(backupInfoQuery.data.backupTimestamp).toLocaleTimeString()}</p>
+                  <p className="text-white">{formatTime(backupInfoQuery.data.backupTimestamp)}</p>
                 </div>
                 <div>
                   <p className="text-gray-400">Status</p>

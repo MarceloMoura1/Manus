@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { trpc } from '@/lib/trpc';
+import { formatTime } from '@/lib/conversationDateTime';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -456,10 +457,7 @@ export function BotConfigPage() {
                         >
                           <p className="text-sm">{msg.content}</p>
                           <p className="text-xs mt-1 opacity-70">
-                            {msg.timestamp.toLocaleTimeString('pt-BR', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
+                            {formatTime(msg.timestamp)}
                           </p>
                         </div>
                       </div>

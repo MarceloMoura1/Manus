@@ -1,5 +1,5 @@
 import { ArrowRightLeft, Bot, CheckCircle2, Link2, MessageCircle, RotateCcw } from "lucide-react";
-import { formatConversationDateTime } from "@/lib/conversationDateTime";
+import { formatTime } from "@/lib/conversationDateTime";
 import type { ConversationActivityEvent as ConversationActivity } from "@/lib/conversationTimeline";
 
 type ActivityPresentation = {
@@ -39,7 +39,7 @@ function activityPresentation(event: ConversationActivity): ActivityPresentation
 }
 
 function activityTime(value: string | Date | null | undefined) {
-  return formatConversationDateTime(value);
+  return formatTime(value);
 }
 
 export function ConversationActivityEvent({ event, compact = false }: { event: ConversationActivity; compact?: boolean }) {

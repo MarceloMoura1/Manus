@@ -26,6 +26,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
+import { formatDateTime } from "@/lib/conversationDateTime";
 import { MODULE_LABELS, normalizeModuleNamesToAdmin } from "@shared/const";
 
 function cn(...classes: Array<string | false | undefined | null>) {
@@ -672,7 +673,7 @@ function GeminiTokenUsagePanel({ clientId }: { clientId: string }) {
   ];
 
   const formatTokens = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-  const formatDate = (ts: number) => new Date(ts).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const formatDate = (ts: number) => formatDateTime(ts);
 
   return (
     <div className="rounded-2xl border border-purple-400/20 bg-purple-400/5 p-5 space-y-4">

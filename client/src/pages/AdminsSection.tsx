@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ShieldCheck, UserPlus, Pencil, Trash2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { formatDate } from "@/lib/conversationDateTime";
 
 function cn(...classes: Array<string | false | undefined | null>) {
   return classes.filter(Boolean).join(" ");
@@ -202,7 +203,7 @@ export function AdminsSection({ currentUserEmail }: { currentUserEmail: string }
                     <p className="font-semibold text-white">{admin.name}</p>
                     <p className="text-sm text-slate-400">{admin.email}</p>
                     <p className="mt-0.5 text-xs text-slate-500">
-                      Criado em {new Date(admin.createdAt).toLocaleDateString("pt-BR")}
+                      Criado em {formatDate(admin.createdAt)}
                       {admin.email === currentUserEmail && (
                         <span className="ml-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-0.5 text-cyan-300">
                           Você

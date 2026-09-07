@@ -20,7 +20,7 @@ import { ConversationMedia } from "@/components/ConversationMedia";
 import { ConversationDetailsPanel } from "@/components/ConversationDetailsPanel";
 import { ConversationListItem } from "@/components/ConversationListItem";
 import { ConversationActivityEvent } from "@/components/ConversationActivityEvent";
-import { formatConversationTime } from "@/lib/conversationDateTime";
+import { formatConversationTime, formatDate, formatTime } from "@/lib/conversationDateTime";
 import { composeConversationTimeline, reconcileConversationMessages } from "@/lib/conversationTimeline";
 import { messageReplyPreview, replyAuthor, replyPreview, type ConversationReplyPreview } from "@/lib/conversationQuote";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -2423,7 +2423,7 @@ export function TicketsPage() {
                 >
                   <td className="px-4 py-3 text-sm font-mono text-slate-600">#{String(chamado.number).padStart(4, '0')}</td>
                   <td className="px-4 py-3 text-sm text-slate-600">
-                    {new Date(chamado.createdAt).toLocaleDateString('pt-BR')}
+                    {formatDate(chamado.createdAt)}
                   </td>
                   <td className="px-4 py-3 text-sm">
                     <div className="font-medium text-slate-900">{chamado.customerName}</div>
@@ -3471,7 +3471,7 @@ function AIAssistantPage() {
                 </div>
               )}
               <p className="text-xs text-slate-400 mt-1 px-1">
-                {new Date(msg.timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                {formatTime(msg.timestamp)}
               </p>
             </div>
             {msg.role === "user" && (

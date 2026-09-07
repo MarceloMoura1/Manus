@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
+import { formatDateTime } from "@/lib/conversationDateTime";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -250,7 +251,7 @@ export function NotificationsPage() {
                           </div>
                           <p className="text-slate-700 text-sm mb-2">{notification.message}</p>
                           <p className="text-xs text-slate-500">
-                            {new Date(notification.createdAt).toLocaleString("pt-BR")}
+                            {formatDateTime(notification.createdAt)}
                           </p>
                         </div>
                       </div>

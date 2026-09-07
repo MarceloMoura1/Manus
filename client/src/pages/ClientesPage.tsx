@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
+import { formatDate, formatDateTime } from "@/lib/conversationDateTime";
 import { toast } from "sonner";
 import type { CustomerType, CrmWhatsAppIntent } from "../../../shared/crm";
 import { customerTypeToCsv } from "../../../shared/crm";
@@ -829,12 +830,12 @@ function ClientDetailPanel({
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   <Clock className="w-3.5 h-3.5" />
-                  <span>Cadastrado em {new Date(client.createdAt).toLocaleDateString("pt-BR")}</span>
+                  <span>Cadastrado em {formatDate(client.createdAt)}</span>
                 </div>
                 {client.lastInteractionAt && (
                   <div className="flex items-center gap-2 text-xs text-slate-500">
                     <Clock className="w-3.5 h-3.5" />
-                    <span>Última interação em {new Date(client.lastInteractionAt).toLocaleDateString("pt-BR")}</span>
+                    <span>Última interação em {formatDate(client.lastInteractionAt)}</span>
                   </div>
                 )}
               </div>
@@ -883,7 +884,7 @@ function ClientDetailPanel({
                       </span>
                     </div>
                   </div>
-                  <p className="text-xs text-slate-400 mt-1">{new Date(c.createdAt).toLocaleDateString("pt-BR")}</p>
+                  <p className="text-xs text-slate-400 mt-1">{formatDate(c.createdAt)}</p>
                 </div>
               ))
             )}
@@ -918,7 +919,7 @@ function ClientDetailPanel({
                       {c.status === "open" ? "Aberta" : "Fechada"}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-400 mt-1">{c.timeLabel ?? new Date(c.createdAt).toLocaleDateString("pt-BR")}</p>
+                  <p className="text-xs text-slate-400 mt-1">{c.timeLabel ?? formatDate(c.createdAt)}</p>
                 </div>
               ))
             )}
@@ -985,7 +986,7 @@ function ClientDetailPanel({
                     <div className="flex-1 pb-3">
                       <p className="text-sm text-slate-800">{entry.description}</p>
                       <p className="text-xs text-slate-400 mt-1">
-                        {entry.author} · {new Date(entry.createdAt).toLocaleString("pt-BR")}
+                        {entry.author} · {formatDateTime(entry.createdAt)}
                       </p>
                     </div>
                   </div>

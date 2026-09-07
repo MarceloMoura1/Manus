@@ -45,31 +45,14 @@ const getActionLabel = (actionType?: string) => {
   }
 };
 
-const formatDateTime = (date: number) => {
-  let d: Date;
-  
-  if (typeof date === 'number') {
-    d = new Date(date);
-  } else {
-    d = new Date();
-  }
-  
-  if (isNaN(d.getTime())) {
-    return {
-      date: 'Data inválida',
-      time: '--:--',
-    };
-  }
-  
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear();
-  const hours = String(d.getHours()).padStart(2, '0');
-  const minutes = String(d.getMinutes()).padStart(2, '0');
-  
+import { formatDate, formatTime } from '@/lib/conversationDateTime';
+
+const formatDateTime = (date: number | string | Date) => {
+  const formattedDate = formatDate(date, 'Data inválida');
+  const formattedTime = formatTime(date, '--:--');
   return {
-    date: `${day}/${month}/${year}`,
-    time: `${hours}:${minutes}`,
+    date: formattedDate,
+    time: formattedTime,
   };
 };
 

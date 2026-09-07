@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
+import { formatDate } from '@/lib/conversationDateTime';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 // Tabs removidos: layout agora usa lista lateral com condicionais
@@ -1292,7 +1293,7 @@ function TabBackup({ clientId, userRole }: { clientId: string; userRole: string 
 
           <div className="flex items-center justify-between pt-2 border-t border-slate-100">
             <div className="text-xs text-slate-500">
-              Formato: JSON • Exportado em: {new Date().toLocaleDateString('pt-BR')}
+              Formato: JSON • Exportado em: {formatDate(new Date())}
             </div>
             <Button
               onClick={handleExport}
