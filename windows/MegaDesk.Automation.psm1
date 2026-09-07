@@ -445,20 +445,58 @@ function Get-MegaDeskMainMigrationIdentity {
   }
 }
 
-function Invoke-MegaDeskMainMigrationReadOnlyQuery {
-  param([Parameter(Mandatory = $true)][string]$Sql)
-  if ($Sql -match '[\r\n"]') { throw 'Consulta de migration MAIN invalida.' }
-  Assert-DockerAndMySql
+function Get-MegaDeskMainMigrationContainerImage {
   $image = @(& docker inspect --format '{{.Config.Image}}' megadesk-local-mysql 2>$null)
   if ($LASTEXITCODE -ne 0 -or $image.Count -ne 1 -or $image[0].Trim() -ne 'mysql:8.0') { throw 'Identidade da imagem MySQL principal nao comprovada.' }
+  return $image[0].Trim()
+}
 
-  # Credentials remain inside the already identified container; only readonly
-  # query results cross the process boundary.
-  $command = 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -u"$MYSQL_USER" --database="$MYSQL_DATABASE" --batch --skip-column-names --execute="SELECT DATABASE(); ' + $Sql + '"'
-  $output = @(& docker exec megadesk-local-mysql sh -lc $command)
-  if ($LASTEXITCODE -ne 0 -or $output.Count -lt 1) { throw 'Consulta readonly do journal MAIN falhou.' }
-  if ($output[0].Trim() -ne 'megadesk_local') { throw 'Banco MAIN inesperado; verificacao de migration recusada.' }
-  return @($output | Select-Object -Skip 1 | ForEach-Object { $_.Trim() })
+function Invoke-MegaDeskMainMigrationReadOnlyQuery {
+  param([Parameter(Mandatory = $true)][string]$Sql)
+  Assert-DockerAndMySql
+  if ((Get-MegaDeskMainMigrationContainerImage) -ne 'mysql:8.0') { throw 'Identidade da imagem MySQL principal nao comprovada.' }
+
+  # SQL is carried only on stdin.  In particular, it is never embedded in a
+  # native command-line argument: Windows PowerShell 5.1 otherwise strips the
+  # nested quotes required by docker exec/sh -lc before mysql receives them.
+  # Credentials remain inside the identified container; only query results and
+  # diagnostic stderr cross the process boundary.
+  $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $startInfo.FileName = 'docker'
+  $startInfo.Arguments = 'exec -i megadesk-local-mysql sh -lc "MYSQL_PWD=$MYSQL_PASSWORD exec mysql -u$MYSQL_USER --database=$MYSQL_DATABASE --batch --skip-column-names"'
+  $startInfo.WorkingDirectory = $script:ProjectRoot
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $startInfo.RedirectStandardInput = $true
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+
+  $process = $null
+  try {
+    $process = Start-MegaDeskProcess -StartInfo $startInfo
+    $process.StandardInput.Write("SELECT DATABASE();`n")
+    $process.StandardInput.Write($Sql)
+    if (-not $Sql.EndsWith("`n")) { $process.StandardInput.Write("`n") }
+    $process.StandardInput.Close()
+
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $stdout = [string]$stdoutTask.Result
+    $stderr = [string]$stderrTask.Result
+    if ($process.ExitCode -ne 0) {
+      $diagnostic = $stderr.Trim()
+      if ([string]::IsNullOrWhiteSpace($diagnostic)) { $diagnostic = 'stderr vazio.' }
+      throw ('Consulta readonly do journal MAIN falhou (exit {0}): {1}' -f $process.ExitCode, $diagnostic)
+    }
+
+    $output = @($stdout -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
+    if ($output.Count -lt 1) { throw 'Consulta readonly do journal MAIN falhou: stdout vazio.' }
+    if ($output[0] -ne 'megadesk_local') { throw 'Banco MAIN inesperado; verificacao de migration recusada.' }
+    return @($output | Select-Object -Skip 1)
+  } finally {
+    if ($null -ne $process) { $process.Dispose() }
+  }
 }
 
 function Get-MegaDeskAppliedMainMigrationJournal {

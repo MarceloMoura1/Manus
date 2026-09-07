@@ -2498,6 +2498,89 @@ Describe 'MegaDesk verified MAIN migration gate' {
   }
 }
 
+Describe 'MegaDesk MAIN migration readonly query input transport' {
+  BeforeEach {
+    $global:MegaDeskMigrationQueryInput = ''
+    $global:MegaDeskMigrationQueryInputClosed = $false
+    $global:MegaDeskMigrationQueryStartInfo = $null
+    $global:MegaDeskMigrationQueryExitCode = 0
+    $global:MegaDeskMigrationQueryStdout = "megadesk_local`nhash-row`n"
+    $global:MegaDeskMigrationQueryStderr = ''
+  }
+
+  It 'sends representative SQL verbatim over stdin without native execute quoting' {
+    $queries = @(
+      'SELECT 1;',
+      'SELECT column_name FROM information_schema.columns WHERE table_name = ''megadesk_conversation_events'';',
+      'SELECT "double quoted value", `hash` FROM __drizzle_migrations WHERE hash = ''7c374f753a8f4819969562120376a86ed94c7da328e24ddab1eb45dee6cc6f27'';',
+      "SELECT DATABASE();`nSELECT (1 + 2) AS value;"
+    )
+
+    foreach ($query in $queries) {
+      $global:MegaDeskMigrationTransportSql = $query
+      InModuleScope $moduleName {
+        Mock Assert-DockerAndMySql { }
+        Mock Get-MegaDeskMainMigrationContainerImage { 'mysql:8.0' }
+        Mock Start-MegaDeskProcess {
+          param($StartInfo)
+          $global:MegaDeskMigrationQueryStartInfo = $StartInfo
+          $input = New-Object psobject
+          $input | Add-Member -MemberType ScriptMethod -Name Write -Value { param($value) $global:MegaDeskMigrationQueryInput += [string]$value }
+          $input | Add-Member -MemberType ScriptMethod -Name Close -Value { $global:MegaDeskMigrationQueryInputClosed = $true }
+          $output = New-Object psobject
+          $output | Add-Member -MemberType ScriptMethod -Name ReadToEndAsync -Value { [System.Threading.Tasks.Task[string]]::FromResult([string]$global:MegaDeskMigrationQueryStdout) }
+          $error = New-Object psobject
+          $error | Add-Member -MemberType ScriptMethod -Name ReadToEndAsync -Value { [System.Threading.Tasks.Task[string]]::FromResult([string]$global:MegaDeskMigrationQueryStderr) }
+          $process = New-Object psobject -Property @{ StandardInput = $input; StandardOutput = $output; StandardError = $error; ExitCode = $global:MegaDeskMigrationQueryExitCode }
+          $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { }
+          $process | Add-Member -MemberType ScriptMethod -Name Dispose -Value { }
+          return $process
+        }
+
+        $global:MegaDeskMigrationQueryInput = ''
+        $global:MegaDeskMigrationQueryInputClosed = $false
+        $result = @(Invoke-MegaDeskMainMigrationReadOnlyQuery -Sql $global:MegaDeskMigrationTransportSql)
+
+        $global:MegaDeskMigrationQueryStartInfo.Arguments | Should Match '^exec -i megadesk-local-mysql sh -lc '
+        $global:MegaDeskMigrationQueryStartInfo.Arguments | Should Not Match '--execute'
+        $global:MegaDeskMigrationQueryInput | Should Be ("SELECT DATABASE();`n" + $global:MegaDeskMigrationTransportSql + "`n")
+        $global:MegaDeskMigrationQueryInputClosed | Should Be $true
+        $result.Count | Should Be 1
+        $result[0] | Should Be 'hash-row'
+      }
+    }
+  }
+
+  It 'fails closed with diagnostic stderr when mysql exits unsuccessfully' {
+    $global:MegaDeskMigrationQueryExitCode = 17
+    $global:MegaDeskMigrationQueryStderr = 'mysql: syntax error near broken SQL'
+    $global:MegaDeskMigrationTransportSql = 'SELECT broken;'
+    InModuleScope $moduleName {
+      Mock Assert-DockerAndMySql { }
+      Mock Get-MegaDeskMainMigrationContainerImage { 'mysql:8.0' }
+      Mock Start-MegaDeskProcess {
+        $input = New-Object psobject
+        $input | Add-Member -MemberType ScriptMethod -Name Write -Value { param($value) }
+        $input | Add-Member -MemberType ScriptMethod -Name Close -Value { }
+        $output = New-Object psobject
+        $output | Add-Member -MemberType ScriptMethod -Name ReadToEndAsync -Value { [System.Threading.Tasks.Task[string]]::FromResult('') }
+        $error = New-Object psobject
+        $error | Add-Member -MemberType ScriptMethod -Name ReadToEndAsync -Value { [System.Threading.Tasks.Task[string]]::FromResult([string]$global:MegaDeskMigrationQueryStderr) }
+        $process = New-Object psobject -Property @{ StandardInput = $input; StandardOutput = $output; StandardError = $error; ExitCode = $global:MegaDeskMigrationQueryExitCode }
+        $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { }
+        $process | Add-Member -MemberType ScriptMethod -Name Dispose -Value { }
+        return $process
+      }
+
+      $failure = $null
+      try { Invoke-MegaDeskMainMigrationReadOnlyQuery -Sql $global:MegaDeskMigrationTransportSql } catch { $failure = $_.Exception.Message }
+      $failure | Should Not BeNullOrEmpty
+      $failure | Should Match 'exit 17'
+      $failure | Should Match 'syntax error'
+    }
+  }
+}
+
 Describe 'MegaDesk update preparation only' {
   BeforeEach {
     $script:port = Get-IsolatedTestPort
