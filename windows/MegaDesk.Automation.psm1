@@ -348,8 +348,15 @@ function Set-MegaDeskOperationState {
 }
 
 function Assert-MegaDeskRecoverableState {
+  param([switch]$AllowReadyUpdate)
   $state = Get-MegaDeskState
-  if ($null -ne $state.operation -and [string]$state.operation.status -in @('PREPARING', 'READY', 'SWITCHING', 'ROLLING_BACK')) {
+  if ($null -ne $state.operation -and [string]$state.operation.status -eq 'READY') {
+    if ($AllowReadyUpdate -and [string]$state.operation.kind -eq 'UPDATE' -and (Test-MegaDeskFullSha ([string]$state.operation.candidateSha))) {
+      return $state
+    }
+    throw 'Operacao anterior incompleta (READY). Estado preservado para recuperacao manual; atualizacao recusada.'
+  }
+  if ($null -ne $state.operation -and [string]$state.operation.status -in @('PREPARING', 'SWITCHING', 'ROLLING_BACK')) {
     throw ("Operacao anterior incompleta ({0}). Estado preservado para recuperacao manual; atualizacao recusada." -f $state.operation.status)
   }
   return $state
@@ -1837,6 +1844,24 @@ function Resolve-MegaDeskCommitSha {
   return ([string]$resolved[0]).ToLowerInvariant()
 }
 
+function Assert-MegaDeskCandidateHeadUnchanged {
+  param([Parameter(Mandatory = $true)][string]$CandidateSha)
+  $head = (Invoke-MegaDeskGit -Arguments @('rev-parse', 'HEAD') -FailureMessage 'Nao foi possivel revalidar o HEAD Git apos a preparacao.' | Select-Object -First 1).Trim().ToLowerInvariant()
+  if ($head -cne $CandidateSha.ToLowerInvariant()) {
+    throw ("HEAD Git mudou durante a preparacao (candidate={0}; head_atual={1}); release nao foi marcada READY." -f $CandidateSha, $head)
+  }
+}
+
+function Assert-MegaDeskCandidateDescendsFromActive {
+  param(
+    [Parameter(Mandatory = $true)][string]$ActiveReleaseSha,
+    [Parameter(Mandatory = $true)][string]$CandidateReleaseSha
+  )
+  $active = Resolve-MegaDeskCommitSha -Sha $ActiveReleaseSha -Label 'ActiveReleaseSha'
+  $candidate = Resolve-MegaDeskCommitSha -Sha $CandidateReleaseSha -Label 'CandidateReleaseSha'
+  Invoke-MegaDeskGit -Arguments @('merge-base', '--is-ancestor', $active, $candidate) -FailureMessage 'CandidateReleaseSha nao e descendente da activeRelease; publicacao regressiva recusada.' | Out-Null
+}
+
 function Assert-MegaDeskPreparedReleaseMetadata {
   param(
     [Parameter(Mandatory = $true)]$Release,
@@ -1876,12 +1901,12 @@ function Resolve-MegaDeskPreparedReleaseCandidate {
   $candidateReleaseSha = $updaterHead
   $source = 'HEAD preparado'
 
-  if ($null -ne $State.operation -and [string]$State.operation.status -eq 'FAILED') {
+  if ($null -ne $State.operation -and [string]$State.operation.status -in @('FAILED', 'READY')) {
     if (-not ($State.operation.PSObject.Properties.Name -contains 'kind') -or [string]$State.operation.kind -cne 'UPDATE') {
-      throw 'Operacao FAILED nao representa uma candidate UPDATE preparada; selecao ambigua recusada.'
+      throw 'Operacao preparada nao representa uma candidate UPDATE valida; selecao ambigua recusada.'
     }
     if (-not ($State.operation.PSObject.Properties.Name -contains 'candidateSha') -or -not (Test-MegaDeskFullSha ([string]$State.operation.candidateSha))) {
-      throw 'Operacao UPDATE FAILED sem CandidateReleaseSha valido; selecao ambigua recusada.'
+      throw 'Operacao UPDATE preparada sem CandidateReleaseSha valido; selecao ambigua recusada.'
     }
     $candidateReleaseSha = Resolve-MegaDeskCommitSha -Sha ([string]$State.operation.candidateSha) -Label 'CandidateReleaseSha'
     $source = 'operacao UPDATE preparada anteriormente'
@@ -1890,6 +1915,7 @@ function Resolve-MegaDeskPreparedReleaseCandidate {
   if ($candidateReleaseSha -ceq [string]$ActiveRelease.sha) {
     throw 'CandidateReleaseSha coincide com a release ativa; publicacao recusada.'
   }
+  Assert-MegaDeskCandidateDescendsFromActive -ActiveReleaseSha ([string]$ActiveRelease.sha) -CandidateReleaseSha $candidateReleaseSha
   Invoke-MegaDeskGit -Arguments @('merge-base', '--is-ancestor', $candidateReleaseSha, $updaterHead) -FailureMessage 'CandidateReleaseSha nao e ancestral da branch operacional sincronizada; publicacao recusada.' | Out-Null
 
   return [pscustomobject]@{
@@ -2155,6 +2181,7 @@ function Invoke-MegaDeskUpdaterV2 {
     $state = Assert-MegaDeskRecoverableState
     $activeRelease = Assert-MegaDeskActiveRelease -State $state
     $candidateSha = $git.sha
+    Assert-MegaDeskCandidateDescendsFromActive -ActiveReleaseSha ([string]$activeRelease.sha) -CandidateReleaseSha $candidateSha
     Set-MegaDeskOperationState -Status 'PREPARING' -Kind 'UPDATE' -CandidateSha $candidateSha -Message 'Preflight do updater v2 iniciado.' | Out-Null
 
     $migrationChanges = @(Get-MegaDeskMigrationChanges -FromSha $activeRelease.sha -ToSha $candidateSha | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
@@ -2178,18 +2205,12 @@ function Invoke-MegaDeskUpdaterV2 {
 
     $candidateRelease = Invoke-MegaDeskIsolatedBuild -Sha $candidateSha
     Assert-MegaDeskNoSourceMutation
+    Assert-MegaDeskCandidateHeadUnchanged -CandidateSha $candidateSha
     Set-MegaDeskOperationState -Status 'READY' -CandidateSha $candidateSha -Message 'Release candidata pronta para switch.' | Out-Null
-    Write-Host ''
-    Write-Host 'MegaDesk Updater v2'
-    Write-Host ("Versao ativa:     {0}" -f $activeRelease.sha)
-    Write-Host ("Versao candidata: {0}" -f $candidateRelease.sha)
-    Write-Host 'Git: OK'
-    Write-Host 'Banco: SEM ALTERACAO DE MIGRATION'
-    Write-Host 'Build: READY'
-    $confirmation = Read-Host 'Digite PUBLICAR para iniciar o switch controlado'
-    if ($confirmation -cne 'PUBLICAR') { throw 'Atualizacao cancelada; confirmacao exata nao recebida.' }
-    Invoke-MegaDeskReleaseSwitch -CandidateRelease $candidateRelease -PreviousRelease $activeRelease
-    Write-MegaDeskLog ("Atualizacao v2 concluida com release ativa {0}." -f $candidateRelease.sha)
+    Write-Host ("Release {0} preparada com sucesso." -f $candidateRelease.sha)
+    Write-Host 'Use "Publicar MegaDesk" para coloca-la no ar.'
+    Write-MegaDeskLog ("Atualizacao v2 preparou a release {0}; aguardando publicacao explicita." -f $candidateRelease.sha)
+    return $candidateRelease
   } catch {
     $failure = $_.Exception.Message
     try {
@@ -2222,7 +2243,7 @@ function Invoke-MegaDeskPreparedReleasePublish {
     # CandidateReleaseSha identifies the already prepared immutable release.
     Assert-CloudflaredConfig
     $git = Assert-MegaDeskGitPreflight -ExpectedBranch $ExpectedBranch
-    $state = Assert-MegaDeskRecoverableState
+    $state = Assert-MegaDeskRecoverableState -AllowReadyUpdate
     $activeRelease = Assert-MegaDeskActiveRelease -State $state
     $selection = Resolve-MegaDeskPreparedReleaseCandidate -State $state -UpdaterHeadSha ([string]$git.sha) -ActiveRelease $activeRelease
     $candidateSha = [string]$selection.candidateReleaseSha
@@ -2252,8 +2273,10 @@ function Invoke-MegaDeskPreparedReleasePublish {
     }
 
     $publishConfirmed = $true
-    Set-MegaDeskOperationState -Status 'PREPARING' -Kind 'UPDATE' -CandidateSha $candidateSha -Message 'Publicacao rapida de release preparada iniciada.' | Out-Null
-    Set-MegaDeskOperationState -Status 'READY' -Kind 'UPDATE' -CandidateSha $candidateSha -Message 'Publicacao rapida confirmou a release preparada; pronta para switch.' | Out-Null
+    if ([string]$state.operation.status -ne 'READY') {
+      Set-MegaDeskOperationState -Status 'PREPARING' -Kind 'UPDATE' -CandidateSha $candidateSha -Message 'Publicacao rapida de release preparada iniciada.' | Out-Null
+      Set-MegaDeskOperationState -Status 'READY' -Kind 'UPDATE' -CandidateSha $candidateSha -Message 'Publicacao rapida confirmou a release preparada; pronta para switch.' | Out-Null
+    }
     Invoke-MegaDeskReleaseSwitch -CandidateRelease $candidateRelease -PreviousRelease $activeRelease -PublicChecks $PublicChecks -TestMode:$TestMode -LocalTimeoutSeconds $LocalTimeoutSeconds -PublicTimeoutSeconds $PublicTimeoutSeconds
     Write-MegaDeskLog ("Publicacao rapida confirmou a release {0}." -f $candidateRelease.sha)
     return $candidateRelease
