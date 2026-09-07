@@ -1944,6 +1944,36 @@ function Invoke-MegaDeskReleaseRollback {
   }
 }
 
+function Resolve-MegaDeskReleaseSwitchNodeStatus {
+  param([Parameter(Mandatory = $true)]$State)
+
+  $record = $State.node
+  if ($null -eq $record) {
+    $ownership = Get-MegaDeskPortOwnership -Port $script:RuntimePort
+    if ($ownership.status -ne 'FREE') {
+      throw ('Switch recusado: porta {0} nao esta comprovadamente livre sem Node registrado ({1}).' -f $script:RuntimePort, $ownership.status)
+    }
+    return [pscustomobject]@{ status = 'ABSENT'; recordCleared = $false }
+  }
+
+  $status = Get-MegaDeskManagedProcessStatus -Record $record -Kind node
+  if ($status -eq 'VALID') { return [pscustomobject]@{ status = 'VALID'; recordCleared = $false } }
+  if ($status -ne 'ABSENT') {
+    throw ('Switch recusado: identidade do Node registrado e ambigua ({0}).' -f $status)
+  }
+
+  $ownership = Get-MegaDeskPortOwnership -Port $script:RuntimePort
+  if ($ownership.status -ne 'FREE') {
+    throw ('Switch recusado: Node registrado ausente, mas porta {0} nao esta comprovadamente livre ({1}).' -f $script:RuntimePort, $ownership.status)
+  }
+
+  # A record is cleared only after the exact registered PID is proved absent
+  # and the managed port is proved free. No process is stopped in this path.
+  $State.node = $null
+  Save-MegaDeskState $State
+  return [pscustomobject]@{ status = 'ABSENT'; recordCleared = $true }
+}
+
 function Invoke-MegaDeskReleaseSwitch {
   param(
     [Parameter(Mandatory = $true)]$CandidateRelease,
@@ -1959,14 +1989,13 @@ function Invoke-MegaDeskReleaseSwitch {
   try {
     Set-MegaDeskOperationState -Status 'SWITCHING' -CandidateSha ([string]$CandidateRelease.sha) -Message 'Switch de codigo iniciado.' | Out-Null
     $state = Get-MegaDeskState
-    if ($null -ne $state.node) {
-      if (-not (Test-ManagedProcess -Record $state.node -Kind node) -or [string]$state.node.releaseSha -ne [string]$PreviousRelease.sha) {
+    $runtime = Resolve-MegaDeskReleaseSwitchNodeStatus -State $state
+    if ($runtime.status -eq 'VALID') {
+      if ([string]$state.node.releaseSha -ne [string]$PreviousRelease.sha) {
         throw 'Node ativo nao corresponde a release ativa registrada; switch recusado.'
       }
       Stop-MegaDeskManagedProcess -Kind node
       $oldProcessStopped = $true
-    } else {
-      Assert-MegaDeskPortFree -Port $script:RuntimePort -Operation 'switch' | Out-Null
     }
     Assert-MegaDeskPortFree -Port $script:RuntimePort -Operation 'switch apos parada do runtime gerenciado' | Out-Null
     $startedCandidateRecord = Start-MegaDeskNode -ReleaseSha ([string]$CandidateRelease.sha) -Port $script:RuntimePort

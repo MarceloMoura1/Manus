@@ -2044,10 +2044,98 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
       Mock Get-MegaDeskState { $script:testState }
       Mock Save-MegaDeskState { param($State) $script:testState = $State }
       Mock Set-MegaDeskOperationState { }
-      Mock Test-ManagedProcess { $false }
+      Mock Get-MegaDeskManagedProcessStatus { 'AMBIGUOUS' }
       Mock Stop-MegaDeskManagedProcess { }
+      Mock Start-MegaDeskNode { throw 'PID reuse must not start a replacement' }
       { Invoke-MegaDeskReleaseSwitch -CandidateRelease $candidate -PreviousRelease $old -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) -TestMode } | Should Throw
-      Assert-MockCalled Stop-MegaDeskManagedProcess -Times 0 -Exactly
+      Assert-MockCalled Stop-MegaDeskManagedProcess -Times 0 -Exactly -Scope It
+      Assert-MockCalled Start-MegaDeskNode -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'clears only an absent stale Node record canonically and continues the switch without stopping a process' {
+    $old = [pscustomobject]@{ sha = '2121212121212121212121212121212121212121'; path = 'C:\isolated\old' }
+    $candidate = [pscustomobject]@{ sha = '2323232323232323232323232323232323232323'; path = 'C:\isolated\candidate' }
+    $global:MegaDeskTestOld = $old
+    $global:MegaDeskTestCandidate = $candidate
+    InModuleScope $moduleName {
+      $old = $global:MegaDeskTestOld
+      $candidate = $global:MegaDeskTestCandidate
+      $stale = [pscustomobject]@{ pid = 4242; releaseSha = $old.sha; port = $script:RuntimePort }
+      $replacement = [pscustomobject]@{ pid = 4343; releaseSha = $candidate.sha; port = $script:RuntimePort }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $stale; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $old.sha; path = $old.path; activatedAt = '2026-01-01T00:00:00.000Z' }; previousRelease = $null; operation = [pscustomobject]@{ status = 'READY' } }
+      $script:staleRecordCleared = $false
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState {
+        param($State)
+        if ($null -eq $State.node) { $script:staleRecordCleared = $true }
+        $script:testState = $State
+      }
+      Mock Set-MegaDeskOperationState { }
+      Mock Get-MegaDeskManagedProcessStatus { 'ABSENT' }
+      Mock Get-MegaDeskPortOwnership { [pscustomobject]@{ status = 'FREE'; port = $script:RuntimePort; process = $null; reason = '' } }
+      Mock Assert-MegaDeskPortFree { }
+      Mock Stop-MegaDeskManagedProcess { throw 'ABSENT must not stop a process' }
+      Mock Start-MegaDeskNode { $script:testState.node = $replacement; return $replacement }
+      Mock Wait-MegaDeskLocal { }
+      Mock Wait-MegaDeskPublicEndpoints { }
+
+      Invoke-MegaDeskReleaseSwitch -CandidateRelease $candidate -PreviousRelease $old -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) -TestMode
+
+      $script:staleRecordCleared | Should Be $true
+      $script:testState.activeRelease.sha | Should Be $candidate.sha
+      Assert-MockCalled Stop-MegaDeskManagedProcess -Times 0 -Exactly -Scope It
+      Assert-MockCalled Start-MegaDeskNode -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'blocks an absent stale record when the managed port is occupied' {
+    $old = [pscustomobject]@{ sha = '2424242424242424242424242424242424242424'; path = 'C:\isolated\old' }
+    $candidate = [pscustomobject]@{ sha = '2525252525252525252525252525252525252525'; path = 'C:\isolated\candidate' }
+    $global:MegaDeskTestOld = $old
+    $global:MegaDeskTestCandidate = $candidate
+    InModuleScope $moduleName {
+      $old = $global:MegaDeskTestOld
+      $candidate = $global:MegaDeskTestCandidate
+      $stale = [pscustomobject]@{ pid = 4242; releaseSha = $old.sha; port = $script:RuntimePort }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $stale; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $old.sha; path = $old.path; activatedAt = '2026-01-01T00:00:00.000Z' }; previousRelease = $null; operation = [pscustomobject]@{ status = 'READY' } }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { throw 'stale record must remain when port is not free' }
+      Mock Set-MegaDeskOperationState { }
+      Mock Get-MegaDeskManagedProcessStatus { 'ABSENT' }
+      Mock Get-MegaDeskPortOwnership { [pscustomobject]@{ status = 'OWNED_BY_EXTERNAL_PROCESS'; port = $script:RuntimePort; process = [pscustomobject]@{ ProcessId = 5151 }; reason = '' } }
+      Mock Stop-MegaDeskManagedProcess { throw 'must not stop external process' }
+      Mock Start-MegaDeskNode { throw 'must not start with occupied port' }
+
+      { Invoke-MegaDeskReleaseSwitch -CandidateRelease $candidate -PreviousRelease $old -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) -TestMode } | Should Throw
+      $script:testState.node | Should Be $stale
+      Assert-MockCalled Stop-MegaDeskManagedProcess -Times 0 -Exactly -Scope It
+      Assert-MockCalled Start-MegaDeskNode -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'blocks an absent stale record when the managed port ownership is unknown' {
+    $old = [pscustomobject]@{ sha = '2626262626262626262626262626262626262626'; path = 'C:\isolated\old' }
+    $candidate = [pscustomobject]@{ sha = '2727272727272727272727272727272727272727'; path = 'C:\isolated\candidate' }
+    $global:MegaDeskTestOld = $old
+    $global:MegaDeskTestCandidate = $candidate
+    InModuleScope $moduleName {
+      $old = $global:MegaDeskTestOld
+      $candidate = $global:MegaDeskTestCandidate
+      $stale = [pscustomobject]@{ pid = 4242; releaseSha = $old.sha; port = $script:RuntimePort }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $stale; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $old.sha; path = $old.path; activatedAt = '2026-01-01T00:00:00.000Z' }; previousRelease = $null; operation = [pscustomobject]@{ status = 'READY' } }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { throw 'stale record must remain when port ownership is unknown' }
+      Mock Set-MegaDeskOperationState { }
+      Mock Get-MegaDeskManagedProcessStatus { 'ABSENT' }
+      Mock Get-MegaDeskPortOwnership { [pscustomobject]@{ status = 'UNKNOWN'; port = $script:RuntimePort; process = $null; reason = 'listener query failed' } }
+      Mock Stop-MegaDeskManagedProcess { throw 'must not stop an ambiguous runtime' }
+      Mock Start-MegaDeskNode { throw 'must not start with unknown port ownership' }
+
+      { Invoke-MegaDeskReleaseSwitch -CandidateRelease $candidate -PreviousRelease $old -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) -TestMode } | Should Throw
+      $script:testState.node | Should Be $stale
+      Assert-MockCalled Stop-MegaDeskManagedProcess -Times 0 -Exactly -Scope It
+      Assert-MockCalled Start-MegaDeskNode -Times 0 -Exactly -Scope It
     }
   }
 
@@ -2063,7 +2151,7 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
       Mock Get-MegaDeskState { $script:testState }
       Mock Save-MegaDeskState { param($State) $script:testState = $State }
       Mock Set-MegaDeskOperationState { }
-      Mock Test-ManagedProcess { $true }
+      Mock Get-MegaDeskManagedProcessStatus { 'VALID' }
       Mock Stop-MegaDeskManagedProcess { }
       Mock Assert-MegaDeskPortFree { }
       Mock Start-MegaDeskNode { [pscustomobject]@{ releaseSha = $candidate.sha } }
@@ -2072,8 +2160,9 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
       Invoke-MegaDeskReleaseSwitch -CandidateRelease $candidate -PreviousRelease $old -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'health isolated' }) -TestMode
       $script:testState.activeRelease.sha | Should Be $candidate.sha
       $script:testState.previousRelease.sha | Should Be $old.sha
-      Assert-MockCalled Wait-MegaDeskLocal -Times 1 -Exactly
-      Assert-MockCalled Wait-MegaDeskPublicEndpoints -Times 1 -Exactly
+      Assert-MockCalled Stop-MegaDeskManagedProcess -Times 1 -Exactly -Scope It
+      Assert-MockCalled Wait-MegaDeskLocal -Times 1 -Exactly -Scope It
+      Assert-MockCalled Wait-MegaDeskPublicEndpoints -Times 1 -Exactly -Scope It
     }
   }
 
@@ -2089,6 +2178,7 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
       Mock Get-MegaDeskState { $script:testState }
       Mock Save-MegaDeskState { param($State) $script:testState = $State }
       Mock Set-MegaDeskOperationState { }
+      Mock Get-MegaDeskPortOwnership { [pscustomobject]@{ status = 'FREE'; port = $script:RuntimePort; process = $null; reason = '' } }
       Mock Assert-MegaDeskPortFree { }
       Mock Start-MegaDeskNode { [pscustomobject]@{ releaseSha = $candidate.sha } }
       Mock Wait-MegaDeskLocal { throw 'Health local retornou SHA diferente da release candidata.' }
