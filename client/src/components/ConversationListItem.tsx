@@ -5,7 +5,7 @@ import { formatConversationListTimestamp, getConversationChannelPresentation } f
 type ConversationListItemProps = {
   name: string;
   lastMessage?: string | null;
-  timestamp?: string | number | null;
+  timestamp?: string | number | Date | null;
   unreadCount?: number | null;
   provider?: string | null;
   channel?: string | null;
