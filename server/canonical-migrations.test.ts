@@ -20,9 +20,20 @@ describe("canonical migration architecture", () => {
   });
 
   it("contains creation-only baselines", () => {
-    expect(sql(MAIN_MIGRATIONS_DIR)).not.toMatch(/^\s*(?:DROP|TRUNCATE|DELETE|UPDATE|INSERT)\b/im);
-    expect(sql(MAIN_MIGRATIONS_DIR)).not.toMatch(/^\s*ALTER\s+TABLE[\s\S]*?\bDROP\b/im);
+    const mainBaseline = readdirSync(MAIN_MIGRATIONS_DIR)
+      .filter((file) => file.endsWith(".sql") && file !== "0019_utc_conversation_timestamp_repair.sql")
+      .map((file) => readFileSync(resolve(MAIN_MIGRATIONS_DIR, file), "utf8"))
+      .join("\n");
+    expect(mainBaseline).not.toMatch(/^\s*(?:DROP|TRUNCATE|DELETE|UPDATE|INSERT)\b/im);
+    expect(mainBaseline).not.toMatch(/^\s*ALTER\s+TABLE[\s\S]*?\bDROP\b/im);
     expect(sql(TENANT_MIGRATIONS_DIR)).not.toMatch(/^\s*(?:DROP|TRUNCATE|DELETE|UPDATE|INSERT)\b/im);
+
+    const repair = readFileSync(resolve(MAIN_MIGRATIONS_DIR, "0019_utc_conversation_timestamp_repair.sql"), "utf8");
+    expect(repair).toContain("CONVERSATION_TIMESTAMP_REPAIR_PRECONDITION_FAILED");
+    expect(repair).toContain("UPDATE megadesk_domain_conversations_messages AS m");
+    expect(repair).toContain("m.updated_at = m.updated_at");
+    expect(repair).toContain("COLLATE utf8mb4_unicode_ci");
+    expect(repair).not.toMatch(/\b(?:megadesk_conversation_events|wa_)\b/i);
   });
 
   it("keeps the internal Evolution queue in main exactly once", () => {

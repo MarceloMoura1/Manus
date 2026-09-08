@@ -134,6 +134,15 @@
       "when": 1788755899545,
       "tag": "0018_clean_union_jack",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1788825600000,
+      "tag": "0019_utc_conversation_timestamp_repair",
+      "breakpoints": true,
+      "kind": "data_repair",
+      "contract": "conversation_timestamp_utc_v1"
     }
   ]
 }

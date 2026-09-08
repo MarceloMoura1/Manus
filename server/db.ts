@@ -112,7 +112,10 @@ export function getDb(): Database {
 
 export function getPool() {
   if (!cachedPool) {
-    cachedPool = mysql.createPool(getConfiguredDatabaseUrl());
+    // MySQL stores the application's TIMESTAMP values as UTC.  The driver must
+    // therefore parse and serialize JavaScript Dates in UTC as well, regardless
+    // of the Windows/Node host timezone.
+    cachedPool = mysql.createPool({ uri: getConfiguredDatabaseUrl(), timezone: "Z" });
   }
   return cachedPool;
 }

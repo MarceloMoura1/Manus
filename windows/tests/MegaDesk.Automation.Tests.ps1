@@ -2577,6 +2577,27 @@ Describe 'MegaDesk verified MAIN migration gate' {
     }
   }
 
+  It 'allows the UTC repair validator companion only with its exact canonical migration' {
+    InModuleScope $moduleName {
+      $utcRepair = [pscustomobject]@{ path = 'drizzle/main-migrations/0019_utc_conversation_timestamp_repair.sql'; tag = '0019_utc_conversation_timestamp_repair'; sha256 = ('c' * 64) }
+      Mock Get-MegaDeskMigrationChanges { @(
+        'drizzle/main-migrations/0019_utc_conversation_timestamp_repair.sql',
+        'drizzle/main-migrations/meta/_journal.json',
+        'drizzle/main-migrations/meta/0019_snapshot.json',
+        'server/_core/canonical-migrations.ts'
+      ) }
+      Mock Invoke-MegaDeskGit { $global:MegaDeskMigrationGateTo }
+      Mock Get-MegaDeskMainMigrationIdentity { $utcRepair }
+      Mock Get-MegaDeskAppliedMainMigrationJournal { [pscustomobject]@{ database = 'megadesk_local'; hashes = @($utcRepair.sha256) } }
+      Mock Test-MegaDeskKnownMainMigrationPhysicalStructure { $true }
+
+      (Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo).status | Should Be 'APPLIED_MATCH'
+
+      Mock Get-MegaDeskMigrationChanges { @('drizzle/main-migrations/0019_utc_conversation_timestamp_repair.sql', 'server/_core/canonical-migrations.ts', 'server/other-db-code.ts') }
+      (Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo).status | Should Be 'DIVERGENT'
+    }
+  }
+
   It 'uses the same asserted gate from updater and quick publish' {
     $source = Get-Content -LiteralPath (Get-Module $moduleName).Path -Raw
     $updater = [regex]::Match($source, 'function Invoke-MegaDeskUpdaterV2 \{.*?(?=function Invoke-MegaDeskPreparedReleasePublish)', [System.Text.RegularExpressions.RegexOptions]::Singleline).Value

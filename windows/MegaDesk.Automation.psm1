@@ -531,10 +531,18 @@ function Get-MegaDeskMigrationDeltaState {
     if ($changes.Count -eq 0) { return [pscustomobject]@{ status = 'NONE'; migrations = @(); message = 'Nenhuma alteracao de migration.' } }
 
     $mainMigrations = @($changes | Where-Object { $_ -match '^drizzle/main-migrations/[0-9]{4}_[A-Za-z0-9_]+\.sql$' } | Sort-Object -Unique)
+    # The UTC data repair is intentionally accompanied by a validator change.
+    # Accept that one source companion only with its exact, canonical migration;
+    # any other source change remains fail-closed.
+    $isUtcRepairValidatorCompanion =
+      $mainMigrations.Count -eq 1 -and
+      $mainMigrations[0] -ceq 'drizzle/main-migrations/0019_utc_conversation_timestamp_repair.sql' -and
+      @($changes | Where-Object { $_ -ceq 'server/_core/canonical-migrations.ts' }).Count -eq 1
     $unsupportedChanges = @($changes | Where-Object {
       $_ -notmatch '^drizzle/main-migrations/[0-9]{4}_[A-Za-z0-9_]+\.sql$' -and
       $_ -notmatch '^drizzle/main-migrations/meta/(?:_journal|[0-9]{4}_snapshot)\.json$' -and
-      $_ -ne 'drizzle/schema.ts'
+      $_ -ne 'drizzle/schema.ts' -and
+      (-not ($isUtcRepairValidatorCompanion -and $_ -ceq 'server/_core/canonical-migrations.ts'))
     })
     if ($mainMigrations.Count -eq 0 -or $unsupportedChanges.Count -ne 0) {
       return [pscustomobject]@{ status = 'DIVERGENT'; migrations = @(); message = 'Delta de banco nao representa exclusivamente migrations MAIN canonicas verificaveis.' }

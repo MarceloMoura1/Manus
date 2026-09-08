@@ -4,6 +4,9 @@ import { resolve } from "node:path";
 export const MAIN_MIGRATIONS_DIR = resolve(process.cwd(), "drizzle/main-migrations");
 export const TENANT_MIGRATIONS_DIR = resolve(process.cwd(), "drizzle/tenant-migrations");
 
+const CONVERSATION_TIMESTAMP_UTC_REPAIR_TAG = "0019_utc_conversation_timestamp_repair";
+const CONVERSATION_TIMESTAMP_UTC_REPAIR_CONTRACT = "conversation_timestamp_utc_v1";
+
 export const REQUIRED_RUNTIME_MAIN_TABLES = [
   "megadesk_ticket_statuses", "megadesk_crm_timeline", "megadesk_domain_conversations_messages",
   "megadesk_evolution_sessions", "megadesk_domain_ia_conversations",
@@ -51,7 +54,51 @@ export const REQUIRED_RUNTIME_COLUMNS: Record<string, readonly string[]> = {
   erp_fiscal_operations: ["client_id", "idempotency_key", "operation", "fiscal_document_id", "payload_hash"],
 };
 
-function validateStrongCanonicalContract(folder: string, sqlFiles: string[], entries: Array<{ idx?: number; tag?: string }>): void {
+type CanonicalMigrationEntry = {
+  idx?: number;
+  tag?: string;
+  kind?: string;
+  contract?: string;
+};
+
+function validateConversationTimestampUtcRepair(sql: string): void {
+  const required = [
+    "CREATE PROCEDURE `megadesk_repair_conversation_timestamps_0019`",
+    "START TRANSACTION",
+    "SIGNAL SQLSTATE '45000'",
+    "candidate_rows <> 101",
+    "distinct_messages <> 101",
+    "UPDATE megadesk_domain_conversations_messages AS m",
+    "m.timestamp = DATE_ADD(m.timestamp, INTERVAL 3 HOUR)",
+    "m.updated_at = m.updated_at",
+    "BINARY legacy.message_id = BINARY m.message_id",
+    "BINARY c.conversation_id = BINARY m.conversation_id",
+    "COLLATE utf8mb4_unicode_ci",
+    "m.client_id IS NOT NULL",
+    "m.provider IS NOT NULL",
+    "m.integration_id IS NOT NULL",
+    "m.direction IS NOT NULL",
+    "m.message_type IS NOT NULL",
+    "10799000000",
+    "10801000000",
+    "COUNT(DISTINCT m.message_id)",
+    "ROW_COUNT()",
+    "updated_rows <> 101",
+    "DROP PROCEDURE IF EXISTS `megadesk_repair_conversation_timestamps_0019`",
+  ];
+  for (const requiredFragment of required) {
+    if (!sql.includes(requiredFragment)) throw new Error(`Contrato da migration de repair UTC ausente: ${requiredFragment}`);
+  }
+  if (/\b(?:INSERT|DELETE|TRUNCATE)\b/i.test(sql)
+    || /\bDROP\s+(?!PROCEDURE\b)/i.test(sql)
+    || /\bUPDATE\s+(?!megadesk_domain_conversations_messages\s+AS\s+m\b)/i.test(sql)
+    || /\b(?:megadesk_conversation_events|wa_)\b/i.test(sql)
+    || /\bSET\s+(?:m\.)?messages_json\b/i.test(sql)) {
+    throw new Error("Migration de repair UTC contem operacao ou alvo nao permitido.");
+  }
+}
+
+function validateStrongCanonicalContract(folder: string, sqlFiles: string[], entries: CanonicalMigrationEntry[]): void {
   const expected = new Set(entries.map((entry) => `${entry.tag}.sql`));
   const orphan = sqlFiles.filter((file) => !expected.has(file));
   if (orphan.length) throw new Error(`Migration SQL órfã: ${orphan.join(", ")}`);
@@ -60,10 +107,31 @@ function validateStrongCanonicalContract(folder: string, sqlFiles: string[], ent
     const snapshot = resolve(folder, `meta/${entry.tag.slice(0, 4)}_snapshot.json`);
     if (!existsSync(snapshot)) throw new Error(`Snapshot esperado ausente: ${snapshot}`);
   });
-  const combinedSql = sqlFiles.map((file) => readFileSync(resolve(folder, file), "utf8")).join("\n");
-  if (/^\s*(?:DROP|TRUNCATE|DELETE|UPDATE|INSERT)\b/im.test(combinedSql) || /^\s*ALTER\s+TABLE[\s\S]*?\bDROP\b/im.test(combinedSql)) {
+  const dataRepairEntries = entries.filter((entry) => entry.kind === "data_repair");
+  if (dataRepairEntries.length > 0) {
+    if (resolve(folder) !== MAIN_MIGRATIONS_DIR || dataRepairEntries.length !== 1 || entries.at(-1) !== dataRepairEntries[0]) {
+      throw new Error("Data repair só é aceito como migration MAIN final e única.");
+    }
+    const repair = dataRepairEntries[0];
+    if (repair.tag !== CONVERSATION_TIMESTAMP_UTC_REPAIR_TAG || repair.contract !== CONVERSATION_TIMESTAMP_UTC_REPAIR_CONTRACT) {
+      throw new Error("Data repair canônico não reconhecido.");
+    }
+    const repairSnapshot = readFileSync(resolve(folder, `meta/${repair.tag.slice(0, 4)}_snapshot.json`), "utf8");
+    const previous = entries.at(-2);
+    if (!previous?.tag || repairSnapshot !== readFileSync(resolve(folder, `meta/${previous.tag.slice(0, 4)}_snapshot.json`), "utf8")) {
+      throw new Error("Data repair não pode alterar o snapshot de schema.");
+    }
+    validateConversationTimestampUtcRepair(readFileSync(resolve(folder, `${repair.tag}.sql`), "utf8"));
+  }
+  const dataRepairFiles = new Set(dataRepairEntries.map((entry) => `${entry.tag}.sql`));
+  const baselineSql = sqlFiles
+    .filter((file) => !dataRepairFiles.has(file))
+    .map((file) => readFileSync(resolve(folder, file), "utf8"))
+    .join("\n");
+  if (/^\s*(?:DROP|TRUNCATE|DELETE|UPDATE|INSERT)\b/im.test(baselineSql) || /^\s*ALTER\s+TABLE[\s\S]*?\bDROP\b/im.test(baselineSql)) {
     throw new Error("Operação destrutiva proibida na baseline canônica.");
   }
+  const combinedSql = sqlFiles.map((file) => readFileSync(resolve(folder, file), "utf8")).join("\n");
   const matches = [...combinedSql.matchAll(/CREATE\s+TABLE\s+`([^`]+)`\s*\(([\s\S]*?)\);/gi)];
   const names = matches.map((match) => match[1]);
   const duplicates = names.filter((name, index) => names.indexOf(name) !== index);
@@ -100,7 +168,7 @@ export function validateTenantDatabaseName(databaseName: string): string {
 export function validateCanonicalMigrationFolder(folder: string): string[] {
   const journal = resolve(folder, "meta/_journal.json");
   if (!existsSync(journal)) throw new Error("Journal canônico ausente.");
-  const parsed = JSON.parse(readFileSync(journal, "utf8")) as { entries?: Array<{ tag?: string }> };
+  const parsed = JSON.parse(readFileSync(journal, "utf8")) as { entries?: CanonicalMigrationEntry[] };
   const entries = parsed.entries ?? [];
   if (entries.length === 0) throw new Error("Journal canônico não contém baseline.");
   const sqlFiles = readdirSync(folder).filter((name) => name.endsWith(".sql"));
