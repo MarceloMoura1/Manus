@@ -1160,6 +1160,11 @@ export const megadeskUserSettings = mysqlTable(
     showMessagePreview: tinyint("show_message_preview").default(1).notNull(),
     autoResponseEnabled: tinyint("auto_response_enabled").default(0).notNull(),
     autoResponseMessage: text("auto_response_message"),
+    // Visual preferences remain scoped to the authenticated tenant + user pair.
+    // The custom image is an opaque private storage key, never a user-controlled URL.
+    conversationBackgroundType: varchar("conversation_background_type", { length: 16 }).default("default").notNull(),
+    conversationBackgroundPresetId: varchar("conversation_background_preset_id", { length: 64 }),
+    conversationBackgroundImageKey: varchar("conversation_background_image_key", { length: 128 }),
     createdAt: timestamp("created_at", { mode: "string" })
       .defaultNow()
       .notNull(),

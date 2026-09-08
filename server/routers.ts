@@ -25,6 +25,7 @@ import { ticketStatusesRouter } from "./routers-ticket-statuses";
 import { botScriptsRouter } from "./routers-bot-scripts";
 import { notificationsRouter } from "./routers-notifications";
 import { megadeskSettingsRouter } from "./routers-megadesk-settings";
+import { userPersonalizationRouter } from "./routers-user-personalization";
 import { evolutionRouter } from "./routers-evolution";
 import { conversasRouter } from "./routers-conversas";
 import { conversationsRouter } from "./routers-conversations";
@@ -317,6 +318,7 @@ export const appRouter = router({
   company: companyRouter,
   ticketStatuses: ticketStatusesRouter,
   megadeskSettings: megadeskSettingsRouter,
+  userPersonalization: userPersonalizationRouter,
   botScripts: botScriptsRouter,
   notifications: notificationsRouter,
   whatsappModule: whatsappModuleRouter,

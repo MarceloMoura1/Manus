@@ -19,6 +19,7 @@ import {
   Eye, EyeOff, Save, X, AlertTriangle, CheckCircle2, Info
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { UserPersonalizationTab } from '@/components/UserPersonalizationTab';
 
 // ─── Session helper ──────────────────────────────────────────────────────────
 const MEGADESK_SESSION_KEY = 'megadesk_session_v1';
@@ -1597,6 +1598,7 @@ export function SettingsPage() {
     { value: 'account', label: 'Conta', adminOnly: false },
     { value: 'notifications', label: 'Notificações', adminOnly: false },
     { value: 'attendance', label: 'Atendimento', adminOnly: false },
+    { value: 'personalization', label: 'Personalização', adminOnly: false },
     { value: 'geral', label: '🏢 Geral', adminOnly: true },
     { value: 'chamados', label: '🎫 Chamados', adminOnly: true },
     { value: 'equipe', label: '👥 Equipe', adminOnly: true },
@@ -1611,6 +1613,7 @@ export function SettingsPage() {
     account: Users,
     notifications: Bell,
     attendance: Phone,
+    personalization: Palette,
     geral: Building2,
     chamados: Tag,
     equipe: Shield,
@@ -1622,6 +1625,7 @@ export function SettingsPage() {
     account: 'Dados pessoais e senha',
     notifications: 'Alertas e sons',
     attendance: 'Respostas e atalhos',
+    personalization: 'Fundo da conversa',
     geral: 'Dados da empresa',
     chamados: 'Status personalizados',
     equipe: 'Usuários e permissões',
@@ -2014,6 +2018,8 @@ export function SettingsPage() {
               </CardContent>
             </Card>
           </div>}
+
+          {activeTab === 'personalization' && <UserPersonalizationTab />}
 
           {/* ─── Aba: Geral (ADMIN) ────────────────────────────────────────── */}
           {activeTab === 'geral' && <TabGeral clientId={clientId} userRole={userRole} />}

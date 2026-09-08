@@ -109,16 +109,20 @@ function validateStrongCanonicalContract(folder: string, sqlFiles: string[], ent
   });
   const dataRepairEntries = entries.filter((entry) => entry.kind === "data_repair");
   if (dataRepairEntries.length > 0) {
-    if (resolve(folder) !== MAIN_MIGRATIONS_DIR || dataRepairEntries.length !== 1 || entries.at(-1) !== dataRepairEntries[0]) {
-      throw new Error("Data repair só é aceito como migration MAIN final e única.");
+    if (resolve(folder) !== MAIN_MIGRATIONS_DIR || dataRepairEntries.length !== 1) {
+      throw new Error("Data repair só é aceito uma vez na cadeia MAIN.");
     }
     const repair = dataRepairEntries[0];
     if (repair.tag !== CONVERSATION_TIMESTAMP_UTC_REPAIR_TAG || repair.contract !== CONVERSATION_TIMESTAMP_UTC_REPAIR_CONTRACT) {
       throw new Error("Data repair canônico não reconhecido.");
     }
-    const repairSnapshot = readFileSync(resolve(folder, `meta/${repair.tag.slice(0, 4)}_snapshot.json`), "utf8");
-    const previous = entries.at(-2);
-    if (!previous?.tag || repairSnapshot !== readFileSync(resolve(folder, `meta/${previous.tag.slice(0, 4)}_snapshot.json`), "utf8")) {
+    const repairIndex = entries.indexOf(repair);
+    const previous = entries[repairIndex - 1];
+    const repairSnapshot = JSON.parse(readFileSync(resolve(folder, `meta/${repair.tag.slice(0, 4)}_snapshot.json`), "utf8")) as { tables?: unknown; views?: unknown };
+    const previousSnapshot = previous?.tag
+      ? JSON.parse(readFileSync(resolve(folder, `meta/${previous.tag.slice(0, 4)}_snapshot.json`), "utf8")) as { tables?: unknown; views?: unknown }
+      : null;
+    if (!previousSnapshot || JSON.stringify(repairSnapshot.tables) !== JSON.stringify(previousSnapshot.tables) || JSON.stringify(repairSnapshot.views) !== JSON.stringify(previousSnapshot.views)) {
       throw new Error("Data repair não pode alterar o snapshot de schema.");
     }
     validateConversationTimestampUtcRepair(readFileSync(resolve(folder, `${repair.tag}.sql`), "utf8"));

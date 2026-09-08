@@ -15,6 +15,7 @@ import { handleEvolutionWebhook, ensureSessionTable } from "../evolution";
 import { operationalAllowedOrigins } from "./megadesk-session";
 import { registerConversationMediaBridge } from "../conversation-media-bridge";
 import { registerProductMediaRoutes } from "../product-media";
+import { registerUserPersonalizationRoutes } from "../user-personalization";
 
 // ─── Domínios permitidos (CORS) ───────────────────────────────────────────────
 const ALLOWED_ORIGINS = [
@@ -81,6 +82,7 @@ async function startServer() {
   registerIntegrationApi(app);
   registerConversationMediaBridge(app);
   registerProductMediaRoutes(app);
+  registerUserPersonalizationRoutes(app);
 
   // ─── Webhooks ─────────────────────────────────────────────────────────────
   // Meta WhatsApp Business API

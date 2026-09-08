@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/lib/trpc';
+import { ConversationBackground } from '@/components/ConversationBackground';
+import { useUserPersonalization } from '@/hooks/useUserPersonalization';
 import {
   AudioRecordingController,
   browserAudioRecordingDependencies,
@@ -64,6 +66,7 @@ export function NewAttendanceFlow({ onNavigate, initialPhone, initialCrmCustomer
   embedded?: boolean;
   onCancel?: () => void;
 }) {
+  const { preference: conversationBackground } = useUserPersonalization();
   const [search, setSearch] = useState(initialPhone ?? '');
   const [recipient, setRecipient] = useState<Recipient | null>(() => initialCrmCustomer ? {
     source: 'crm',
@@ -277,7 +280,7 @@ export function NewAttendanceFlow({ onNavigate, initialPhone, initialCrmCustomer
           <button type="button" onClick={onCancel} aria-label="Fechar novo atendimento" className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><X className="h-5 w-5" /></button>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+        <ConversationBackground preference={conversationBackground} className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
           {error && <div role="alert" className="mb-4 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800"><AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" /><p>{error}</p></div>}
 
           <div className="space-y-2">
@@ -316,7 +319,7 @@ export function NewAttendanceFlow({ onNavigate, initialPhone, initialCrmCustomer
 
             {knownActive && <div className="rounded-2xl border border-blue-300 bg-white p-4 shadow-sm" role="status" data-testid="active-attendance-warning"><div className="flex items-start gap-3"><div className="rounded-xl bg-blue-100 p-2 text-blue-700"><AlertCircle className="h-5 w-5" /></div><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-700">Atendimento em andamento</p><h3 className="mt-1 font-semibold text-slate-950">Este número já possui uma conversa ativa.</h3><p className="mt-1 text-sm text-slate-600">Para evitar duplicidade, uma nova conversa não será criada.</p></div></div><button type="button" onClick={openExistingConversation} className="mt-4 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Abrir atendimento</button></div>}
           </div>}
-        </div>
+        </ConversationBackground>
 
         <div className="border-t border-slate-100 bg-white p-3 sm:p-4" data-testid="new-attendance-message-composer">
           {attachment && <div className="mb-3 flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 p-3">{attachment.kind === 'image' || attachment.kind === 'sticker' ? <img src={attachment.dataUrl} alt="Prévia" className="h-12 w-12 rounded-lg object-contain" /> : attachment.kind === 'video' ? <Video className="h-7 w-7 text-blue-700" /> : attachment.kind === 'audio' ? <Mic className="h-7 w-7 text-blue-700" /> : <FileText className="h-7 w-7 text-blue-700" />}<div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-700">{attachment.fileName}</p><p className="text-xs text-slate-500">Adicione uma legenda e envie a primeira mensagem</p></div><button type="button" onClick={() => setAttachment(null)} aria-label="Remover anexo" className="rounded-full p-1 text-slate-500 hover:bg-white"><X className="h-4 w-4" /></button></div>}

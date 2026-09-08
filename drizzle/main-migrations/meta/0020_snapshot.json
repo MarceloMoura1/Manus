@@ -1,8 +1,8 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "a5c49a0d-30f6-4ca8-8a1a-94ed0a1e6ce7",
-  "prevId": "c6a08c5b-ec55-45c5-89ca-125ddeb6b3cb",
+  "id": "9e32a164-cc99-40bc-9f9f-de12dbdaf147",
+  "prevId": "a5c49a0d-30f6-4ca8-8a1a-94ed0a1e6ce7",
   "tables": {
     "admin_credentials": {
       "name": "admin_credentials",
@@ -8684,6 +8684,28 @@
         "auto_response_message": {
           "name": "auto_response_message",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "conversation_background_type": {
+          "name": "conversation_background_type",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'default'"
+        },
+        "conversation_background_preset_id": {
+          "name": "conversation_background_preset_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "conversation_background_image_key": {
+          "name": "conversation_background_image_key",
+          "type": "varchar(128)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

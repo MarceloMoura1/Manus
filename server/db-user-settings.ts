@@ -97,6 +97,27 @@ export async function updateUserAttendanceSettings(
   return await getUserSettings(clientId, userId);
 }
 
+export type UserConversationBackgroundUpdate = {
+  conversationBackgroundType: "default" | "preset" | "custom";
+  conversationBackgroundPresetId: string | null;
+  conversationBackgroundImageKey: string | null;
+};
+
+/** Persists a visual preference only for the authenticated tenant/user pair. */
+export async function updateUserConversationBackground(
+  clientId: string,
+  userId: string,
+  updates: UserConversationBackgroundUpdate,
+) {
+  await getUserSettings(clientId, userId);
+  await db
+    .update(megadeskUserSettings)
+    .set(updates)
+    .where(and(eq(megadeskUserSettings.clientId, clientId), eq(megadeskUserSettings.userId, userId)));
+
+  return getUserSettings(clientId, userId);
+}
+
 /**
  * Silenciar notificações por tempo determinado
  */
