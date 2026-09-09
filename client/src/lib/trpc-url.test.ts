@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { trpcBaseUrl, trpcProcedureUrl, userPersonalizationBackgroundUrl } from "./trpc-url";
+import {
+  isUserPersonalizationBackgroundPath,
+  resolveUserPersonalizationBackgroundUrl,
+  trpcBaseUrl,
+  trpcProcedureUrl,
+  userPersonalizationBackgroundUrl,
+} from "./trpc-url";
 
 describe("tRPC transport URL", () => {
   it.each(["app.megadesk.online", "admin.megadesk.online", "api.megadesk.online"])(
@@ -17,5 +23,13 @@ describe("tRPC transport URL", () => {
     expect(trpcBaseUrl(hostname)).toBe("/api/trpc");
     expect(trpcProcedureUrl("megadesk.sendAttachment", hostname))
       .toBe("/api/trpc/megadesk.sendAttachment");
+  });
+
+  it("keeps an opaque custom-image revision on the authenticated API origin", () => {
+    const privatePath = "/api/user-personalization/background?v=0123456789abcdef";
+
+    expect(isUserPersonalizationBackgroundPath(privatePath)).toBe(true);
+    expect(resolveUserPersonalizationBackgroundUrl(privatePath, "app.megadesk.online"))
+      .toBe("https://api.megadesk.online/api/user-personalization/background?v=0123456789abcdef");
   });
 });

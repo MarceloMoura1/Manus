@@ -6,8 +6,8 @@ import {
   type ConversationBackgroundPreference,
 } from "@shared/user-personalization";
 import {
-  USER_PERSONALIZATION_BACKGROUND_PATH,
-  userPersonalizationBackgroundUrl,
+  isUserPersonalizationBackgroundPath,
+  resolveUserPersonalizationBackgroundUrl,
 } from "@/lib/trpc-url";
 
 type ConversationBackgroundProps = {
@@ -18,8 +18,8 @@ type ConversationBackgroundProps = {
 
 export function ConversationBackground({ preference, className, children }: ConversationBackgroundProps) {
   const normalized = normalizeConversationBackgroundPreference(preference ?? DEFAULT_CONVERSATION_BACKGROUND);
-  const customImageUrl = normalized.backgroundType === "custom" && normalized.customImageUrl === USER_PERSONALIZATION_BACKGROUND_PATH
-    ? userPersonalizationBackgroundUrl()
+  const customImageUrl = normalized.backgroundType === "custom" && isUserPersonalizationBackgroundPath(normalized.customImageUrl)
+    ? resolveUserPersonalizationBackgroundUrl(normalized.customImageUrl)
     : normalized.customImageUrl;
   const renderablePreference = customImageUrl === normalized.customImageUrl
     ? normalized

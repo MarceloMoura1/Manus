@@ -54,10 +54,10 @@ describe("UserPersonalizationTab save flow", () => {
       preference: {
         backgroundType: "custom",
         presetId: null,
-        customImageUrl: "/api/user-personalization/background",
+        customImageUrl: "/api/user-personalization/background?v=0123456789abcdef",
         hasCustomImage: true,
       },
-    })).toMatchObject({ backgroundType: "custom", customImageUrl: "/api/user-personalization/background" });
+    })).toMatchObject({ backgroundType: "custom", customImageUrl: "/api/user-personalization/background?v=0123456789abcdef" });
     expect(persistedCustomBackgroundFromUpload({ ok: true })).toBeNull();
     expect(persistedCustomBackgroundFromUpload({
       ok: true,

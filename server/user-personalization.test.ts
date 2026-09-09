@@ -24,21 +24,14 @@ describe("user personalization storage", () => {
       conversationBackgroundPresetId: null,
       conversationBackgroundImageKey: "user-backgrounds/0123456789abcdef0123456789abcdef/11111111-1111-4111-8111-111111111111.webp",
     } as const;
-    expect(userConversationBackgroundPreference(settings)).toEqual({
+    const preference = userConversationBackgroundPreference(settings);
+    expect(preference).toMatchObject({
       backgroundType: "custom",
       presetId: null,
-      customImageUrl: "/api/user-personalization/background",
+      customImageUrl: expect.stringMatching(/^\/api\/user-personalization\/background\?v=[0-9a-f]{16}$/),
       hasCustomImage: true,
     });
-    expect(userConversationBackgroundUploadResponse(settings)).toEqual({
-      ok: true,
-      preference: {
-        backgroundType: "custom",
-        presetId: null,
-        customImageUrl: "/api/user-personalization/background",
-        hasCustomImage: true,
-      },
-    });
+    expect(userConversationBackgroundUploadResponse(settings)).toEqual({ ok: true, preference });
     expect(JSON.stringify(userConversationBackgroundUploadResponse(settings))).not.toContain(settings.conversationBackgroundImageKey);
   });
 });

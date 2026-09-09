@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ConversationBackground } from "@/components/ConversationBackground";
 import { trpc } from "@/lib/trpc";
 import {
-  USER_PERSONALIZATION_BACKGROUND_PATH,
+  isUserPersonalizationBackgroundPath,
   userPersonalizationBackgroundUrl,
 } from "@/lib/trpc-url";
 import { useUserPersonalization } from "@/hooks/useUserPersonalization";
@@ -49,7 +49,7 @@ export function persistedCustomBackgroundFromUpload(value: unknown): Conversatio
   const response = value as CustomBackgroundUploadResponse | null;
   if (!response?.ok) return null;
   const preference = normalizeConversationBackgroundPreference(response.preference);
-  return preference.backgroundType === "custom" && preference.customImageUrl === USER_PERSONALIZATION_BACKGROUND_PATH ? preference : null;
+  return preference.backgroundType === "custom" && isUserPersonalizationBackgroundPath(preference.customImageUrl) ? preference : null;
 }
 
 export function UserPersonalizationTab() {

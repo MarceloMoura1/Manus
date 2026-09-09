@@ -63,6 +63,10 @@ function isOwnedKey(identity: Identity, key: string | null | undefined): key is 
   return Boolean(key && key.startsWith(`${BACKGROUND_PREFIX}/${identityKey(identity)}/`) && IMAGE_KEY.test(key));
 }
 
+function imageRevision(key: string): string {
+  return createHash("sha256").update(key).digest("hex").slice(0, 16);
+}
+
 function imageErrorStatus(error: unknown): number {
   if (!(error instanceof UserPersonalizationError)) return 500;
   if (error.code === "TOO_LARGE") return 413;
@@ -82,7 +86,12 @@ export function userConversationBackgroundPreference(settings: ConversationBackg
     return { backgroundType: "preset", presetId: settings.conversationBackgroundPresetId, customImageUrl: null, hasCustomImage };
   }
   if (settings.conversationBackgroundType === "custom" && hasCustomImage) {
-    return { backgroundType: "custom", presetId: null, customImageUrl: "/api/user-personalization/background", hasCustomImage: true };
+    return {
+      backgroundType: "custom",
+      presetId: null,
+      customImageUrl: `/api/user-personalization/background?v=${imageRevision(settings.conversationBackgroundImageKey!)}`,
+      hasCustomImage: true,
+    };
   }
   return { ...DEFAULT_CONVERSATION_BACKGROUND, hasCustomImage };
 }
