@@ -1633,8 +1633,8 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="max-w-6xl mx-auto">
+    <div className="min-h-screen bg-background px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-[1440px]">
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-foreground">Configurações</h1>
@@ -1648,10 +1648,10 @@ export function SettingsPage() {
         </div>
 
         {/* Layout: lista lateral + conteúdo */}
-        <div className="flex gap-4 items-start">
+        <div className="grid items-start gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
           {/* ─── Lista lateral ─────────────────────────────────────────── */}
-          <div className="w-80 flex-shrink-0">
-            <nav className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="min-w-0 lg:sticky lg:top-6">
+            <nav className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               {isAdmin && (
                 <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Administrador</p>
@@ -1670,7 +1670,7 @@ export function SettingsPage() {
                       <li>
                         <button
                           onClick={() => setActiveTab(tab.value)}
-                          className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-all duration-150 group ${
+                          className={`group flex w-full items-center gap-3 px-4 py-3 text-left transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${
                             isActive
                               ? 'bg-blue-50 text-blue-700 border-l-4 border-blue-500'
                               : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
@@ -1700,7 +1700,7 @@ export function SettingsPage() {
           </div>
 
           {/* ─── Conteúdo da aba selecionada ───────────────────────────── */}
-          <div className="flex-1 min-w-0">
+          <div className="min-w-0">
 
           {/* ─── Aba: WhatsApp ───────────────────────────────────────────── */}
           {activeTab === 'whatsapp' && <div className="space-y-6">

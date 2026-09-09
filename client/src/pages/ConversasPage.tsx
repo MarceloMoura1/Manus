@@ -31,6 +31,7 @@ import { useConversasSocket } from "@/hooks/useConversasSocket";
 import { FailedMessagesRetry } from "@/components/FailedMessagesRetry";
 import { ConversationMedia } from "@/components/ConversationMedia";
 import { ConversationBackground } from "@/components/ConversationBackground";
+import { ConversationMessageBubble } from "@/components/ConversationMessageBubble";
 import { useUserPersonalization } from "@/hooks/useUserPersonalization";
 import type { ConversaSocketItem } from "@/hooks/useConversasSocket";
 import { validations } from "@/lib/validations";
@@ -830,15 +831,15 @@ export function ConversasPage() {
               <button type="button" onClick={closeSelectedConversation} aria-label="Fechar conversa">×</button>
             </header>
             <ConversationBackground preference={conversationBackground} className="flex-1 space-y-3 overflow-y-auto p-4">
-              {(selectedMessages?.messages ?? []).map((message: any) => (
-                <div key={message.id ?? `${message.timestamp}-${message.text}`} className={`flex ${message.sender === "customer" || message.from === "customer" ? "justify-start" : "justify-end"}`}>
-                  <div className="max-w-[85%] rounded-xl bg-slate-100 px-3 py-2 text-sm">
+              {(selectedMessages?.messages ?? []).map((message: any) => {
+                const incoming = message.sender === "customer" || message.from === "customer";
+                return (
+                  <ConversationMessageBubble key={message.id ?? `${message.timestamp}-${message.text}`} direction={incoming ? "incoming" : "outgoing"}>
                     <ConversationMedia conversationId={selectedConversation} message={message} fallback={<span>{message.text}</span>} />
-                    {message.sender !== "customer" && message.from !== "customer" && message.agentName &&
-                      <p className="mt-1 text-[10px] text-slate-500">{message.agentName}</p>}
-                  </div>
-                </div>
-              ))}
+                    {!incoming && message.agentName && <p className="mt-1 text-[10px] text-blue-100">{message.agentName}</p>}
+                  </ConversationMessageBubble>
+                );
+              })}
             </ConversationBackground>
             <form data-testid="conversation-composer" className="flex gap-2 border-t p-3" onSubmit={(event) => {
               event.preventDefault();

@@ -74,7 +74,17 @@ describe("UserPersonalizationTab save flow", () => {
     expect(source).toContain('utils.userPersonalization.get.setData(personalization.cacheIdentity, saved)');
     expect(source).toContain('fetch(userPersonalizationBackgroundUrl(), {');
     expect(source).toContain('onClick={() => void save()}');
-    expect(source).toContain('}Salvar</Button>');
+    expect(source).toContain('{isSaving ? "Salvando…" : "Salvar"}');
     expect(source).not.toContain('saveMutation.mutate({');
+  });
+
+  it("renders a large responsive preview with the shared conversation bubble primitive", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/components/UserPersonalizationTab.tsx"), "utf8");
+
+    expect(source).toContain("min-h-[22rem]");
+    expect(source).toContain("sm:min-h-[28rem]");
+    expect(source).toContain("<ConversationMessageBubble direction=\"incoming\"");
+    expect(source).toContain("<ConversationMessageBubble direction=\"outgoing\"");
+    expect(source).toContain("aria-pressed={selected}");
   });
 });
