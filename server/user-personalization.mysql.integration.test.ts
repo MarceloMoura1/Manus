@@ -14,7 +14,6 @@ import mysql, { type Pool, type RowDataPacket } from "mysql2/promise";
 import sharp from "sharp";
 import { userPersonalizationRouter } from "./routers-user-personalization";
 import {
-  applyCanonicalMainPrefixForTest,
   applyCanonicalMigrations,
   MAIN_MIGRATIONS_DIR,
 } from "./_core/canonical-migrations";
@@ -70,7 +69,8 @@ function adminDatabaseUrl(): string {
 }
 
 function mainPrefixMigrationFolder(lastTag: string, prefix: string): string {
-  const folder = mkdtempSync(join(tmpdir(), prefix));
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  const folder = resolve(root, "drizzle/main-migrations");
   cpSync(MAIN_MIGRATIONS_DIR, folder, { recursive: true });
   const journalPath = resolve(folder, "meta/_journal.json");
   const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
@@ -87,7 +87,23 @@ function mainPrefixMigrationFolder(lastTag: string, prefix: string): string {
       force: true,
     });
   }
-  return folder;
+  return root;
+}
+
+async function applyMainPrefixFixture(database: string, fixtureRoot: string): Promise<void> {
+  const previousWorkingDirectory = process.cwd();
+  process.chdir(fixtureRoot);
+  vi.resetModules();
+  try {
+    const fixtureModule = await import("./_core/canonical-migrations");
+    await fixtureModule.applyCanonicalMigrations(
+      database,
+      fixtureModule.MAIN_MIGRATIONS_DIR,
+    );
+  } finally {
+    process.chdir(previousWorkingDirectory);
+    vi.resetModules();
+  }
 }
 
 async function recreateDatabase(database: string): Promise<void> {
@@ -200,7 +216,7 @@ physical("user personalization against disposable MySQL", () => {
     for (const database of DATABASES) {
       await recreateDatabase(database);
       if (database !== FRESH_DATABASE)
-        await applyCanonicalMainPrefixForTest(databaseUrl(database), priorFolder);
+        await applyMainPrefixFixture(databaseUrl(database), priorFolder);
     }
   }, 180_000);
 

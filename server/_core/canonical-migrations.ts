@@ -59,31 +59,7 @@ type CanonicalMigrationEntry = {
   tag?: string;
   kind?: string;
   contract?: string;
-  [key: string]: unknown;
 };
-
-function isExactMainPrefixCopy(folder: string, entries: CanonicalMigrationEntry[]): boolean {
-  if (resolve(folder) === MAIN_MIGRATIONS_DIR) return false;
-  const canonicalJournal = JSON.parse(
-    readFileSync(resolve(MAIN_MIGRATIONS_DIR, "meta/_journal.json"), "utf8"),
-  ) as { entries?: CanonicalMigrationEntry[] };
-  const canonicalEntries = canonicalJournal.entries ?? [];
-  if (entries.length === 0 || entries.length >= canonicalEntries.length) return false;
-  for (const [index, entry] of entries.entries()) {
-    const canonicalEntry = canonicalEntries[index];
-    if (JSON.stringify(entry) !== JSON.stringify(canonicalEntry) || !entry.tag) return false;
-    for (const relativeFile of [
-      `${entry.tag}.sql`,
-      `meta/${entry.tag.slice(0, 4)}_snapshot.json`,
-    ]) {
-      if (
-        readFileSync(resolve(folder, relativeFile), "utf8")
-        !== readFileSync(resolve(MAIN_MIGRATIONS_DIR, relativeFile), "utf8")
-      ) return false;
-    }
-  }
-  return true;
-}
 
 function validateConversationTimestampUtcRepair(sql: string): void {
   const required = [
@@ -122,12 +98,7 @@ function validateConversationTimestampUtcRepair(sql: string): void {
   }
 }
 
-function validateStrongCanonicalContract(
-  folder: string,
-  sqlFiles: string[],
-  entries: CanonicalMigrationEntry[],
-  allowExactMainPrefixForTest: boolean,
-): void {
+function validateStrongCanonicalContract(folder: string, sqlFiles: string[], entries: CanonicalMigrationEntry[]): void {
   const expected = new Set(entries.map((entry) => `${entry.tag}.sql`));
   const orphan = sqlFiles.filter((file) => !expected.has(file));
   if (orphan.length) throw new Error(`Migration SQL órfã: ${orphan.join(", ")}`);
@@ -138,9 +109,7 @@ function validateStrongCanonicalContract(
   });
   const dataRepairEntries = entries.filter((entry) => entry.kind === "data_repair");
   if (dataRepairEntries.length > 0) {
-    const isCanonicalMain = resolve(folder) === MAIN_MIGRATIONS_DIR;
-    const isVerifiedMainPrefix = allowExactMainPrefixForTest && isExactMainPrefixCopy(folder, entries);
-    if ((!isCanonicalMain && !isVerifiedMainPrefix) || dataRepairEntries.length !== 1) {
+    if (resolve(folder) !== MAIN_MIGRATIONS_DIR || dataRepairEntries.length !== 1) {
       throw new Error("Data repair só é aceito uma vez na cadeia MAIN.");
     }
     const repair = dataRepairEntries[0];
@@ -200,7 +169,7 @@ export function validateTenantDatabaseName(databaseName: string): string {
   return databaseName;
 }
 
-function validateCanonicalMigrationFolderInternal(folder: string, allowExactMainPrefixForTest: boolean): string[] {
+export function validateCanonicalMigrationFolder(folder: string): string[] {
   const journal = resolve(folder, "meta/_journal.json");
   if (!existsSync(journal)) throw new Error("Journal canônico ausente.");
   const parsed = JSON.parse(readFileSync(journal, "utf8")) as { entries?: CanonicalMigrationEntry[] };
@@ -211,25 +180,12 @@ function validateCanonicalMigrationFolderInternal(folder: string, allowExactMain
     const expected = `${entry.tag}.sql`;
     if (!sqlFiles.includes(expected)) throw new Error(`Migration esperada ausente: ${expected}`);
   }
-  validateStrongCanonicalContract(folder, sqlFiles, entries, allowExactMainPrefixForTest);
+  validateStrongCanonicalContract(folder, sqlFiles, entries);
   return sqlFiles.sort();
 }
 
-export function validateCanonicalMigrationFolder(folder: string): string[] {
-  return validateCanonicalMigrationFolderInternal(folder, false);
-}
-
-/** Test-only: validates a byte-identical leading prefix of the real MAIN chain. */
-export function validateCanonicalMainPrefixForTest(folder: string): string[] {
-  return validateCanonicalMigrationFolderInternal(folder, true);
-}
-
-async function applyValidatedCanonicalMigrations(
-  databaseUrl: string,
-  folder: string,
-  allowExactMainPrefixForTest: boolean,
-): Promise<void> {
-  validateCanonicalMigrationFolderInternal(folder, allowExactMainPrefixForTest);
+export async function applyCanonicalMigrations(databaseUrl: string, folder: string): Promise<void> {
+  validateCanonicalMigrationFolder(folder);
   const parsed = new URL(databaseUrl);
   const databaseName = decodeURIComponent(parsed.pathname.slice(1));
   if (!databaseName) throw new Error("Migration exige banco explícito.");
@@ -246,13 +202,4 @@ async function applyValidatedCanonicalMigrations(
   } finally {
     await pool.end();
   }
-}
-
-export async function applyCanonicalMigrations(databaseUrl: string, folder: string): Promise<void> {
-  await applyValidatedCanonicalMigrations(databaseUrl, folder, false);
-}
-
-/** Test-only: applies only a verified, byte-identical leading prefix of MAIN. */
-export async function applyCanonicalMainPrefixForTest(databaseUrl: string, folder: string): Promise<void> {
-  await applyValidatedCanonicalMigrations(databaseUrl, folder, true);
 }

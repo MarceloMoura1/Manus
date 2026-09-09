@@ -1,11 +1,10 @@
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   MAIN_MIGRATIONS_DIR,
   TENANT_MIGRATIONS_DIR,
-  validateCanonicalMainPrefixForTest,
   validateCanonicalMigrationFolder,
   validateTenantDatabaseName,
 } from "./_core/canonical-migrations";
@@ -15,6 +14,19 @@ function sql(folder: string): string {
     .filter((file) => file.endsWith(".sql"))
     .map((file) => readFileSync(resolve(folder, file), "utf8"))
     .join("\n");
+}
+
+async function validateTemporaryMainChain(root: string): Promise<string[]> {
+  const previousWorkingDirectory = process.cwd();
+  process.chdir(root);
+  vi.resetModules();
+  try {
+    const fixtureModule = await import("./_core/canonical-migrations");
+    return fixtureModule.validateCanonicalMigrationFolder(fixtureModule.MAIN_MIGRATIONS_DIR);
+  } finally {
+    process.chdir(previousWorkingDirectory);
+    vi.resetModules();
+  }
 }
 
 describe("canonical migration architecture", () => {
@@ -103,47 +115,34 @@ describe("canonical migration architecture", () => {
     }
   });
 
-  it("accepts only an exact MAIN prefix for test setup and still rejects two data repairs", () => {
-    const root = mkdtempSync(resolve(tmpdir(), "megadesk-main-prefix-validator-"));
-    const prefix = resolve(root, "prefix");
-    const duplicateRepair = resolve(root, "duplicate-repair");
-    const makePrefix = (folder: string) => {
-      cpSync(MAIN_MIGRATIONS_DIR, folder, { recursive: true });
-      const journalPath = resolve(folder, "meta/_journal.json");
-      const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: Array<{ tag: string }> };
-      journal.entries = journal.entries.filter((entry) => entry.tag !== "0021_concerned_fabian_cortez");
-      writeFileSync(journalPath, JSON.stringify(journal, null, 2));
-      rmSync(resolve(folder, "0021_concerned_fabian_cortez.sql"));
-      rmSync(resolve(folder, "meta/0021_snapshot.json"));
-    };
+  it("accepts the real MAIN chain and rejects a second data repair in a temporary MAIN harness", async () => {
+    const root = mkdtempSync(resolve(tmpdir(), "megadesk-main-validator-harness-"));
+    const fixtureMain = resolve(root, "drizzle/main-migrations");
     try {
-      makePrefix(prefix);
-      expect(validateCanonicalMainPrefixForTest(prefix)).toContain("0019_utc_conversation_timestamp_repair.sql");
-      expect(() => validateCanonicalMigrationFolder(prefix)).toThrow("Data repair só é aceito uma vez na cadeia MAIN.");
-
-      makePrefix(duplicateRepair);
-      const journalPath = resolve(duplicateRepair, "meta/_journal.json");
+      expect(validateCanonicalMigrationFolder(MAIN_MIGRATIONS_DIR)).toContain("0019_utc_conversation_timestamp_repair.sql");
+      cpSync(MAIN_MIGRATIONS_DIR, fixtureMain, { recursive: true });
+      const journalPath = resolve(fixtureMain, "meta/_journal.json");
       const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: Array<Record<string, unknown>> };
       journal.entries.push({
-        idx: 21,
+        idx: journal.entries.length,
         version: "5",
         when: 0,
-        tag: "0021_synthetic_second_data_repair",
+        tag: "0022_synthetic_second_data_repair",
         breakpoints: true,
         kind: "data_repair",
         contract: "synthetic_test_only_v1",
       });
       writeFileSync(journalPath, JSON.stringify(journal, null, 2));
       writeFileSync(
-        resolve(duplicateRepair, "0021_synthetic_second_data_repair.sql"),
+        resolve(fixtureMain, "0022_synthetic_second_data_repair.sql"),
         "CREATE PROCEDURE `synthetic_second_data_repair` () SELECT 1;\n",
       );
       writeFileSync(
-        resolve(duplicateRepair, "meta/0021_snapshot.json"),
-        readFileSync(resolve(duplicateRepair, "meta/0020_snapshot.json"), "utf8"),
+        resolve(fixtureMain, "meta/0022_snapshot.json"),
+        readFileSync(resolve(fixtureMain, "meta/0021_snapshot.json"), "utf8"),
       );
-      expect(() => validateCanonicalMainPrefixForTest(duplicateRepair))
-        .toThrow("Data repair só é aceito uma vez na cadeia MAIN.");
+      await expect(validateTemporaryMainChain(root))
+        .rejects.toThrow("Data repair só é aceito uma vez na cadeia MAIN.");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
