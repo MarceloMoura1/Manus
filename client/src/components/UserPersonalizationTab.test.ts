@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   conversationBackgroundSaveInput,
   hasUnsavedConversationBackground,
+  persistedCustomBackgroundFromUpload,
 } from "./UserPersonalizationTab";
 
 const saved = {
@@ -47,12 +48,30 @@ describe("UserPersonalizationTab save flow", () => {
     expect(hasUnsavedConversationBackground(null, saved, false)).toBe(false);
   });
 
+  it("accepts only a persisted custom background URL from the upload response", () => {
+    expect(persistedCustomBackgroundFromUpload({
+      ok: true,
+      preference: {
+        backgroundType: "custom",
+        presetId: null,
+        customImageUrl: "/api/user-personalization/background",
+        hasCustomImage: true,
+      },
+    })).toMatchObject({ backgroundType: "custom", customImageUrl: "/api/user-personalization/background" });
+    expect(persistedCustomBackgroundFromUpload({ ok: true })).toBeNull();
+    expect(persistedCustomBackgroundFromUpload({
+      ok: true,
+      preference: { backgroundType: "custom", customImageUrl: "blob:preview" },
+    })).toBeNull();
+  });
+
   it("wires the explicit Save command to the per-user mutation and only clears the draft on success", () => {
     const source = readFileSync(resolve(process.cwd(), "client/src/components/UserPersonalizationTab.tsx"), "utf8");
 
     expect(source).toContain('saveMutation.mutateAsync(conversationBackgroundSaveInput(preview, personalization.cacheIdentity))');
     expect(source).toContain('utils.userPersonalization.get.setData(personalization.cacheIdentity, saved)');
-    expect(source).toContain('await utils.userPersonalization.get.invalidate(personalization.cacheIdentity)');
+    expect(source).toContain('const saved = persistedCustomBackgroundFromUpload(payload)');
+    expect(source).toContain('utils.userPersonalization.get.setData(personalization.cacheIdentity, saved)');
     expect(source).toContain('onClick={() => void save()}');
     expect(source).toContain('}Salvar</Button>');
     expect(source).not.toContain('saveMutation.mutate({');

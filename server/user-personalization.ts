@@ -6,11 +6,18 @@ import path from "node:path";
 import { assertOperationalCsrf, resolveOperationalSessionReadOnly } from "./_core/megadesk-session";
 import { getUserSettings, updateUserConversationBackground } from "./db-user-settings";
 import { PRODUCT_MEDIA_MAX_BYTES, processProductImage, productMediaRoot } from "./product-media";
+import {
+  DEFAULT_CONVERSATION_BACKGROUND,
+  isConversationBackgroundPresetId,
+  type ConversationBackgroundPreference,
+} from "../shared/user-personalization";
 
 const BACKGROUND_PREFIX = "user-backgrounds";
 const IMAGE_KEY = /^user-backgrounds\/[0-9a-f]{32}\/[0-9a-f-]{36}\.webp$/i;
 
 type Identity = { tenantId: string; userId: string };
+type ConversationBackgroundSettings = Pick<Awaited<ReturnType<typeof getUserSettings>>,
+  "conversationBackgroundType" | "conversationBackgroundPresetId" | "conversationBackgroundImageKey">;
 
 export class UserPersonalizationError extends Error {
   constructor(public readonly code: "BAD_IMAGE" | "TOO_LARGE" | "NOT_FOUND" | "STORAGE", message: string) {
@@ -68,6 +75,22 @@ async function resolveIdentity(req: Request): Promise<Identity | null> {
   return session ? { tenantId: session.tenantId, userId: session.userId } : null;
 }
 
+/** Returns a renderable preference while keeping the storage key private. */
+export function userConversationBackgroundPreference(settings: ConversationBackgroundSettings): ConversationBackgroundPreference {
+  const hasCustomImage = Boolean(settings.conversationBackgroundImageKey);
+  if (settings.conversationBackgroundType === "preset" && isConversationBackgroundPresetId(settings.conversationBackgroundPresetId)) {
+    return { backgroundType: "preset", presetId: settings.conversationBackgroundPresetId, customImageUrl: null, hasCustomImage };
+  }
+  if (settings.conversationBackgroundType === "custom" && hasCustomImage) {
+    return { backgroundType: "custom", presetId: null, customImageUrl: "/api/user-personalization/background", hasCustomImage: true };
+  }
+  return { ...DEFAULT_CONVERSATION_BACKGROUND, hasCustomImage };
+}
+
+export function userConversationBackgroundUploadResponse(settings: ConversationBackgroundSettings) {
+  return { ok: true, preference: userConversationBackgroundPreference(settings) };
+}
+
 export async function uploadUserConversationBackground(identity: Identity, bytes: Buffer) {
   if (bytes.length > PRODUCT_MEDIA_MAX_BYTES) throw new UserPersonalizationError("TOO_LARGE", "A imagem deve ter no máximo 5 MB.");
   let image: Awaited<ReturnType<typeof processProductImage>>;
@@ -97,7 +120,7 @@ export async function uploadUserConversationBackground(identity: Identity, bytes
   if (isOwnedKey(identity, previous.conversationBackgroundImageKey)) {
     await rm(resolveUserBackgroundPath(root, previous.conversationBackgroundImageKey), { force: true }).catch(() => undefined);
   }
-  return { ok: true };
+  return userConversationBackgroundUploadResponse(await getUserSettings(identity.tenantId, identity.userId));
 }
 
 export async function saveUserConversationBackground(

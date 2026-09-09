@@ -14,8 +14,13 @@ import {
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const CUSTOM_BACKGROUND_ROUTE = "/api/user-personalization/background";
 
 type PersonalizationIdentity = { clientId?: string; userEmail?: string };
+type CustomBackgroundUploadResponse = {
+  ok?: boolean;
+  preference?: Partial<ConversationBackgroundPreference>;
+};
 
 export function hasUnsavedConversationBackground(
   draft: ConversationBackgroundPreference | null,
@@ -36,6 +41,13 @@ export function conversationBackgroundSaveInput(
     backgroundType: draft.backgroundType === "preset" ? "preset" as const : "default" as const,
     presetId: draft.backgroundType === "preset" ? draft.presetId : null,
   };
+}
+
+export function persistedCustomBackgroundFromUpload(value: unknown): ConversationBackgroundPreference | null {
+  const response = value as CustomBackgroundUploadResponse | null;
+  if (!response?.ok) return null;
+  const preference = normalizeConversationBackgroundPreference(response.preference);
+  return preference.backgroundType === "custom" && preference.customImageUrl === CUSTOM_BACKGROUND_ROUTE ? preference : null;
 }
 
 export function UserPersonalizationTab() {
@@ -92,7 +104,10 @@ export function UserPersonalizationTab() {
           const data = await response.json().catch(() => null) as { error?: string } | null;
           throw new Error(data?.error || "Não foi possível salvar a imagem.");
         }
-        await utils.userPersonalization.get.invalidate(personalization.cacheIdentity);
+        const payload = await response.json().catch(() => null);
+        const saved = persistedCustomBackgroundFromUpload(payload);
+        if (!saved) throw new Error("A imagem foi enviada, mas a preferÃªncia salva nÃ£o pÃ´de ser confirmada.");
+        utils.userPersonalization.get.setData(personalization.cacheIdentity, saved);
         setPreview(null);
         setPendingImage(null);
         setObjectUrl(null);
