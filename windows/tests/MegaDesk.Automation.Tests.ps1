@@ -20,6 +20,46 @@ function New-BootstrapReleaseRuntimeFixture {
   return $releasePath
 }
 
+function New-MegaDeskSnapshotRepairFixture {
+  $root = '00000000-0000-0000-0000-000000000000'
+  $id18 = '11111111-1111-1111-1111-111111111111'
+  $id19 = '22222222-2222-2222-2222-222222222222'
+  $id20 = '33333333-3333-3333-3333-333333333333'
+  $newSnapshot = {
+    param([string]$Id, [string]$PrevId, [string]$ColumnType = 'varchar(80)', [string]$IndexName = 'idx_name', [string]$ForeignKeyTarget = 'megadesk_clients.id', [string]$DefaultValue = 'default')
+    return [pscustomobject]@{
+      id = $Id; prevId = $PrevId; version = '5'; dialect = 'mysql'
+      tables = [pscustomobject]@{
+        megadesk_user_settings = [pscustomobject]@{
+          columns = [pscustomobject]@{ name = [pscustomobject]@{ name = 'name'; type = $ColumnType; default = $DefaultValue } }
+          indexes = [pscustomobject]@{ idx_name = [pscustomobject]@{ name = $IndexName; columns = @('name') } }
+          foreignKeys = [pscustomobject]@{ fk_client = [pscustomobject]@{ tableFrom = 'megadesk_user_settings'; tableTo = $ForeignKeyTarget; columnsFrom = @('client_id'); columnsTo = @('id') } }
+        }
+      }
+      views = [pscustomobject]@{}
+    }
+  }
+  $baselineJournal = [pscustomobject]@{ entries = @(
+    [pscustomobject]@{ idx = 0; tag = '0018_baseline' },
+    [pscustomobject]@{ idx = 1; tag = '0019_repair' }
+  ) }
+  $candidateJournal = [pscustomobject]@{ entries = @(
+    [pscustomobject]@{ idx = 0; tag = '0018_baseline' },
+    [pscustomobject]@{ idx = 1; tag = '0019_repair' },
+    [pscustomobject]@{ idx = 2; tag = '0020_forward' }
+  ) }
+  return [pscustomobject]@{
+    BaselineJournal = $baselineJournal
+    CandidateJournal = $candidateJournal
+    BaselineSnapshots = @{ '0018_baseline' = (& $newSnapshot $id18 $root); '0019_repair' = (& $newSnapshot $id18 $id18) }
+    CandidateSnapshots = @{ '0018_baseline' = (& $newSnapshot $id18 $root); '0019_repair' = (& $newSnapshot $id19 $id18); '0020_forward' = (& $newSnapshot $id20 $id19) }
+    BaselineSnapshotBlobs = @{ '0018_baseline' = ('c' * 40); '0019_repair' = ('d' * 40) }
+    CandidateSnapshotBlobs = @{ '0018_baseline' = ('c' * 40); '0019_repair' = ('e' * 40) }
+    BaselineSqlBlobs = @{ '0018_baseline' = ('a' * 40); '0019_repair' = ('b' * 40) }
+    CandidateSqlBlobs = @{ '0018_baseline' = ('a' * 40); '0019_repair' = ('b' * 40) }
+  }
+}
+
 Describe 'MegaDesk daily operational shortcuts' {
   It 'starts only the active immutable release with exact health checks' {
     $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Iniciar-MegaDesk.ps1') -Raw
@@ -2500,6 +2540,9 @@ Describe 'MegaDesk verified MAIN migration gate' {
     $global:MegaDeskMigrationGateTo = '2222222222222222222222222222222222222222'
     $global:MegaDeskMigration0018 = [pscustomobject]@{ path = 'drizzle/main-migrations/0018_clean_union_jack.sql'; tag = '0018_clean_union_jack'; sha256 = ('a' * 64) }
     $global:MegaDeskMigration0019 = [pscustomobject]@{ path = 'drizzle/main-migrations/0019_safe_followup.sql'; tag = '0019_safe_followup'; sha256 = ('b' * 64) }
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskHistoricalSnapshotRepairState { [pscustomobject]@{ status = 'NONE'; message = 'no historical repair'; repairedTags = @(); newMigrationPaths = @() } }
+    }
   }
 
   It 'allows a delta without migration changes' {
@@ -2577,7 +2620,7 @@ Describe 'MegaDesk verified MAIN migration gate' {
     }
   }
 
-  It 'allows the UTC repair validator companion only with its exact canonical migration' {
+  It 'allows the canonical migration validator companion only with a proved metadata-only repair' {
     InModuleScope $moduleName {
       $utcRepair = [pscustomobject]@{ path = 'drizzle/main-migrations/0019_utc_conversation_timestamp_repair.sql'; tag = '0019_utc_conversation_timestamp_repair'; sha256 = ('c' * 64) }
       Mock Get-MegaDeskMigrationChanges { @(
@@ -2590,11 +2633,81 @@ Describe 'MegaDesk verified MAIN migration gate' {
       Mock Get-MegaDeskMainMigrationIdentity { $utcRepair }
       Mock Get-MegaDeskAppliedMainMigrationJournal { [pscustomobject]@{ database = 'megadesk_local'; hashes = @($utcRepair.sha256) } }
       Mock Test-MegaDeskKnownMainMigrationPhysicalStructure { $true }
+      Mock Get-MegaDeskHistoricalSnapshotRepairState { [pscustomobject]@{ status = 'SAFE_METADATA_ONLY_REPAIR'; message = 'proved'; repairedTags = @('0019_repair'); newMigrationPaths = @('drizzle/main-migrations/0019_utc_conversation_timestamp_repair.sql') } }
 
-      (Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo).status | Should Be 'APPLIED_MATCH'
+      $result = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
+      $result.status | Should Be 'APPLIED_MATCH'
+      $result.classification | Should Be 'SAFE_METADATA_ONLY_REPAIR'
 
       Mock Get-MegaDeskMigrationChanges { @('drizzle/main-migrations/0019_utc_conversation_timestamp_repair.sql', 'server/_core/canonical-migrations.ts', 'server/other-db-code.ts') }
       (Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo).status | Should Be 'DIVERGENT'
+    }
+  }
+
+  It 'accepts a proved metadata-only repair alongside an applied forward migration' {
+    InModuleScope $moduleName {
+      $forward = [pscustomobject]@{ path = 'drizzle/main-migrations/0020_forward.sql'; tag = '0020_forward'; sha256 = ('d' * 64) }
+      Mock Get-MegaDeskMigrationChanges { @(
+        'drizzle/schema.ts',
+        'drizzle/main-migrations/0020_forward.sql',
+        'drizzle/main-migrations/meta/_journal.json',
+        'drizzle/main-migrations/meta/0019_snapshot.json',
+        'drizzle/main-migrations/meta/0020_snapshot.json',
+        'server/_core/canonical-migrations.ts'
+      ) }
+      Mock Get-MegaDeskHistoricalSnapshotRepairState { [pscustomobject]@{ status = 'SAFE_METADATA_ONLY_REPAIR'; message = 'proved'; repairedTags = @('0019_repair'); newMigrationPaths = @('drizzle/main-migrations/0020_forward.sql') } }
+      Mock Invoke-MegaDeskGit { $global:MegaDeskMigrationGateTo }
+      Mock Get-MegaDeskMainMigrationIdentity { $forward }
+      Mock Get-MegaDeskAppliedMainMigrationJournal { [pscustomobject]@{ database = 'megadesk_local'; hashes = @($forward.sha256) } }
+      Mock Test-MegaDeskKnownMainMigrationPhysicalStructure { $true }
+
+      $result = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
+      $result.status | Should Be 'APPLIED_MATCH'
+      $result.classification | Should Be 'SAFE_METADATA_ONLY_REPAIR'
+    }
+  }
+
+  It 'fails closed when journal-added SQL paths do not match the Git delta' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @('drizzle/main-migrations/0020_forward.sql') }
+      Mock Get-MegaDeskHistoricalSnapshotRepairState { [pscustomobject]@{ status = 'NONE'; message = 'no repair'; repairedTags = @(); newMigrationPaths = @('drizzle/main-migrations/0021_other.sql') } }
+      (Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo).status | Should Be 'DIVERGENT'
+    }
+  }
+
+  It 'classifies an 0018/0019 metadata repair followed by a generic forward migration' {
+    $fixture = New-MegaDeskSnapshotRepairFixture
+    $result = & (Get-Module $moduleName) {
+      param($repairFixture)
+      Get-MegaDeskHistoricalSnapshotRepairClassification -BaselineJournal $repairFixture.BaselineJournal -CandidateJournal $repairFixture.CandidateJournal -BaselineSnapshots $repairFixture.BaselineSnapshots -CandidateSnapshots $repairFixture.CandidateSnapshots -BaselineSnapshotBlobs $repairFixture.BaselineSnapshotBlobs -CandidateSnapshotBlobs $repairFixture.CandidateSnapshotBlobs -BaselineSqlBlobs $repairFixture.BaselineSqlBlobs -CandidateSqlBlobs $repairFixture.CandidateSqlBlobs
+    } $fixture
+    $result.status | Should Be 'SAFE_METADATA_ONLY_REPAIR'
+    $result.newMigrationPaths | Should Be @('drizzle/main-migrations/0020_forward.sql')
+  }
+
+  It 'fails closed for every historical mutation that is not metadata-only' {
+    $cases = @(
+      [pscustomobject]@{ name = 'historical SQL change'; mutate = { param($fixture) $fixture.CandidateSqlBlobs['0019_repair'] = ('c' * 40) } },
+      [pscustomobject]@{ name = 'historical column change'; mutate = { param($fixture) $fixture.CandidateSnapshots['0019_repair'].tables.megadesk_user_settings.columns.name.type = 'int' } },
+      [pscustomobject]@{ name = 'historical index change'; mutate = { param($fixture) $fixture.CandidateSnapshots['0019_repair'].tables.megadesk_user_settings.indexes.idx_name.name = 'idx_changed' } },
+      [pscustomobject]@{ name = 'historical FK change'; mutate = { param($fixture) $fixture.CandidateSnapshots['0019_repair'].tables.megadesk_user_settings.foreignKeys.fk_client.tableTo = 'other_clients.id' } },
+      [pscustomobject]@{ name = 'historical default change'; mutate = { param($fixture) $fixture.CandidateSnapshots['0019_repair'].tables.megadesk_user_settings.columns.name.default = 'changed' } },
+      [pscustomobject]@{ name = 'historical snapshot removed'; mutate = { param($fixture) $fixture.CandidateSnapshots.Remove('0019_repair') } },
+      [pscustomobject]@{ name = 'historical migration removed'; mutate = { param($fixture) $fixture.CandidateJournal = [pscustomobject]@{ entries = @($fixture.CandidateJournal.entries | Select-Object -First 1) } } },
+      [pscustomobject]@{ name = 'duplicate snapshot ID'; mutate = { param($fixture) $fixture.CandidateSnapshots['0020_forward'].id = '22222222-2222-2222-2222-222222222222' } },
+      [pscustomobject]@{ name = 'broken prevId'; mutate = { param($fixture) $fixture.CandidateSnapshots['0020_forward'].prevId = '11111111-1111-1111-1111-111111111111' } },
+      [pscustomobject]@{ name = 'cycle'; mutate = { param($fixture) $fixture.CandidateSnapshots['0018_baseline'].prevId = '33333333-3333-3333-3333-333333333333' } },
+      [pscustomobject]@{ name = 'orphan'; mutate = { param($fixture) $fixture.CandidateSnapshots['0020_forward'].prevId = '44444444-4444-4444-4444-444444444444' } },
+      [pscustomobject]@{ name = 'journal history change'; mutate = { param($fixture) $fixture.CandidateJournal.entries = @([pscustomobject]@{ idx = 0; tag = '0019_repair' }, [pscustomobject]@{ idx = 1; tag = '0018_baseline' }, $fixture.CandidateJournal.entries[2]) } }
+    )
+    foreach ($case in $cases) {
+      $fixture = New-MegaDeskSnapshotRepairFixture
+      & $case.mutate $fixture
+      $result = & (Get-Module $moduleName) {
+        param($repairFixture)
+        Get-MegaDeskHistoricalSnapshotRepairClassification -BaselineJournal $repairFixture.BaselineJournal -CandidateJournal $repairFixture.CandidateJournal -BaselineSnapshots $repairFixture.BaselineSnapshots -CandidateSnapshots $repairFixture.CandidateSnapshots -BaselineSnapshotBlobs $repairFixture.BaselineSnapshotBlobs -CandidateSnapshotBlobs $repairFixture.CandidateSnapshotBlobs -BaselineSqlBlobs $repairFixture.BaselineSqlBlobs -CandidateSqlBlobs $repairFixture.CandidateSqlBlobs
+      } $fixture
+      $result.status | Should Be 'DIVERGENT'
     }
   }
 

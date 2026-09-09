@@ -445,6 +445,211 @@ function Get-MegaDeskMainMigrationIdentity {
   }
 }
 
+function ConvertTo-MegaDeskCanonicalJson {
+  param($Value)
+
+  if ($null -eq $Value) { return 'null' }
+  if ($Value -is [string] -or $Value -is [char] -or $Value -is [bool] -or $Value -is [ValueType]) {
+    return ($Value | ConvertTo-Json -Compress)
+  }
+  if ($Value -is [System.Collections.IDictionary]) {
+    $pairs = @()
+    foreach ($name in @($Value.Keys | ForEach-Object { [string]$_ } | Sort-Object)) {
+      $pairs += ((ConvertTo-MegaDeskCanonicalJson -Value $name) + ':' + (ConvertTo-MegaDeskCanonicalJson -Value $Value[$name]))
+    }
+    return '{' + ($pairs -join ',') + '}'
+  }
+  if ($Value -is [System.Collections.IEnumerable]) {
+    return '[' + ((@($Value | ForEach-Object { ConvertTo-MegaDeskCanonicalJson -Value $_ })) -join ',') + ']'
+  }
+
+  $pairs = @()
+  foreach ($property in @($Value.PSObject.Properties | Sort-Object Name)) {
+    $pairs += ((ConvertTo-MegaDeskCanonicalJson -Value $property.Name) + ':' + (ConvertTo-MegaDeskCanonicalJson -Value $property.Value))
+  }
+  return '{' + ($pairs -join ',') + '}'
+}
+
+function Get-MegaDeskSnapshotSemanticFingerprint {
+  param([Parameter(Mandatory = $true)]$Snapshot)
+
+  $normalized = [ordered]@{}
+  foreach ($property in $Snapshot.PSObject.Properties) {
+    if ($property.Name -ceq 'id' -or $property.Name -ceq 'prevId') { continue }
+    $normalized[$property.Name] = $property.Value
+  }
+  return ConvertTo-MegaDeskCanonicalJson -Value $normalized
+}
+
+function Test-MegaDeskCanonicalMigrationJournal {
+  param([Parameter(Mandatory = $true)]$Journal)
+
+  if ($null -eq $Journal -or -not ($Journal.PSObject.Properties.Name -contains 'entries')) { return $false }
+  $entries = @($Journal.entries)
+  if ($entries.Count -eq 0) { return $false }
+  $tags = @{}
+  for ($index = 0; $index -lt $entries.Count; $index++) {
+    $entry = $entries[$index]
+    if ($null -eq $entry -or -not ($entry.PSObject.Properties.Name -contains 'idx') -or -not ($entry.PSObject.Properties.Name -contains 'tag')) { return $false }
+    if ([string]$entry.idx -ne [string]$index) { return $false }
+    $tag = [string]$entry.tag
+    if ($tag -notmatch '^[0-9]{4}_[A-Za-z0-9_]+$' -or $tags.ContainsKey($tag)) { return $false }
+    $tags[$tag] = $true
+  }
+  return $true
+}
+
+function Test-MegaDeskSnapshotChain {
+  param(
+    [Parameter(Mandatory = $true)]$Journal,
+    [Parameter(Mandatory = $true)][hashtable]$Snapshots
+  )
+
+  if (-not (Test-MegaDeskCanonicalMigrationJournal -Journal $Journal)) { return $false }
+  $entries = @($Journal.entries)
+  $seenIds = @{}
+  $previousId = '00000000-0000-0000-0000-000000000000'
+  foreach ($entry in $entries) {
+    $tag = [string]$entry.tag
+    if (-not $Snapshots.ContainsKey($tag) -or $null -eq $Snapshots[$tag]) { return $false }
+    $snapshot = $Snapshots[$tag]
+    if (-not ($snapshot.PSObject.Properties.Name -contains 'id') -or -not ($snapshot.PSObject.Properties.Name -contains 'prevId')) { return $false }
+    $id = [string]$snapshot.id
+    $prevId = [string]$snapshot.prevId
+    if ($id -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -or $prevId -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') { return $false }
+    if ($seenIds.ContainsKey($id) -or $prevId -cne $previousId) { return $false }
+    $seenIds[$id] = $true
+    $previousId = $id
+  }
+  return $true
+}
+
+function Get-MegaDeskHistoricalSnapshotRepairClassification {
+  param(
+    [Parameter(Mandatory = $true)]$BaselineJournal,
+    [Parameter(Mandatory = $true)]$CandidateJournal,
+    [Parameter(Mandatory = $true)][hashtable]$BaselineSnapshots,
+    [Parameter(Mandatory = $true)][hashtable]$CandidateSnapshots,
+    [Parameter(Mandatory = $true)][hashtable]$BaselineSnapshotBlobs,
+    [Parameter(Mandatory = $true)][hashtable]$CandidateSnapshotBlobs,
+    [Parameter(Mandatory = $true)][hashtable]$BaselineSqlBlobs,
+    [Parameter(Mandatory = $true)][hashtable]$CandidateSqlBlobs
+  )
+
+  $divergent = {
+    param([string]$Message)
+    return [pscustomobject]@{ status = 'DIVERGENT'; message = $Message; repairedTags = @(); newMigrationPaths = @() }
+  }
+  if (-not (Test-MegaDeskCanonicalMigrationJournal -Journal $BaselineJournal) -or -not (Test-MegaDeskCanonicalMigrationJournal -Journal $CandidateJournal)) {
+    return & $divergent 'Journal canonico MAIN invalido.'
+  }
+
+  $baselineEntries = @($BaselineJournal.entries)
+  $candidateEntries = @($CandidateJournal.entries)
+  if ($candidateEntries.Count -lt $baselineEntries.Count) { return & $divergent 'Journal candidato removeu migration historica.' }
+
+  $repairedTags = @()
+  for ($index = 0; $index -lt $baselineEntries.Count; $index++) {
+    $baselineEntry = $baselineEntries[$index]
+    $candidateEntry = $candidateEntries[$index]
+    if ((ConvertTo-MegaDeskCanonicalJson -Value $baselineEntry) -cne (ConvertTo-MegaDeskCanonicalJson -Value $candidateEntry)) {
+      return & $divergent 'Journal candidato reordenou ou alterou migration historica.'
+    }
+
+    $tag = [string]$baselineEntry.tag
+    if (-not $BaselineSqlBlobs.ContainsKey($tag) -or -not $CandidateSqlBlobs.ContainsKey($tag) -or [string]::IsNullOrWhiteSpace([string]$BaselineSqlBlobs[$tag]) -or [string]$BaselineSqlBlobs[$tag] -cne [string]$CandidateSqlBlobs[$tag]) {
+      return & $divergent ('SQL historico divergente para: ' + $tag)
+    }
+    if (-not $BaselineSnapshotBlobs.ContainsKey($tag) -or -not $CandidateSnapshotBlobs.ContainsKey($tag) -or [string]::IsNullOrWhiteSpace([string]$BaselineSnapshotBlobs[$tag]) -or [string]::IsNullOrWhiteSpace([string]$CandidateSnapshotBlobs[$tag])) {
+      return & $divergent ('Identidade de snapshot historico ausente para: ' + $tag)
+    }
+    if ([string]$BaselineSnapshotBlobs[$tag] -cne [string]$CandidateSnapshotBlobs[$tag]) {
+      if (-not $BaselineSnapshots.ContainsKey($tag) -or -not $CandidateSnapshots.ContainsKey($tag)) {
+        return & $divergent ('Snapshot historico ausente para: ' + $tag)
+      }
+      $baselineSnapshot = $BaselineSnapshots[$tag]
+      $candidateSnapshot = $CandidateSnapshots[$tag]
+      if ((Get-MegaDeskSnapshotSemanticFingerprint -Snapshot $baselineSnapshot) -cne (Get-MegaDeskSnapshotSemanticFingerprint -Snapshot $candidateSnapshot)) {
+        return & $divergent ('Snapshot historico alterou schema para: ' + $tag)
+      }
+      $repairedTags += $tag
+    }
+  }
+
+  if (-not (Test-MegaDeskSnapshotChain -Journal $CandidateJournal -Snapshots $CandidateSnapshots)) {
+    return & $divergent 'Cadeia de snapshots candidata invalida.'
+  }
+
+  $newMigrationPaths = @($candidateEntries | Select-Object -Skip $baselineEntries.Count | ForEach-Object { 'drizzle/main-migrations/{0}.sql' -f [string]$_.tag })
+  if ($repairedTags.Count -eq 0) {
+    return [pscustomobject]@{ status = 'NONE'; message = 'Nenhum reparo historico de metadata foi detectado.'; repairedTags = @(); newMigrationPaths = $newMigrationPaths }
+  }
+  return [pscustomobject]@{ status = 'SAFE_METADATA_ONLY_REPAIR'; message = ('Reparo metadata-only seguro: ' + ($repairedTags -join ', ')); repairedTags = $repairedTags; newMigrationPaths = $newMigrationPaths }
+}
+
+function Get-MegaDeskGitBlobIdentity {
+  param([Parameter(Mandatory = $true)][string]$Sha, [Parameter(Mandatory = $true)][string]$RelativePath)
+
+  $blob = (Invoke-MegaDeskGit -Arguments @('rev-parse', ("{0}:{1}" -f $Sha, $RelativePath)) -FailureMessage ('Blob Git indisponivel: ' + $RelativePath) | Select-Object -First 1).Trim().ToLowerInvariant()
+  if ($blob -notmatch '^[0-9a-f]{40,64}$') { throw ('Identidade de blob Git invalida: ' + $RelativePath) }
+  return $blob
+}
+
+function Get-MegaDeskGitSnapshotAtCommit {
+  param([Parameter(Mandatory = $true)][string]$Sha, [Parameter(Mandatory = $true)][string]$Tag)
+
+  if ($Tag -notmatch '^[0-9]{4}_[A-Za-z0-9_]+$') { throw 'Tag de snapshot MAIN invalida.' }
+  $path = 'drizzle/main-migrations/meta/{0}_snapshot.json' -f $Tag.Substring(0, 4)
+  $text = (Invoke-MegaDeskGit -Arguments @('show', ("{0}:{1}" -f $Sha, $path)) -FailureMessage ('Snapshot Git indisponivel: ' + $path)) -join "`n"
+  try { return $text | ConvertFrom-Json -ErrorAction Stop } catch { throw ('Snapshot Git invalido: ' + $path) }
+}
+
+function Get-MegaDeskGitMainMigrationJournalAtCommit {
+  param([Parameter(Mandatory = $true)][string]$Sha)
+
+  $path = 'drizzle/main-migrations/meta/_journal.json'
+  $text = (Invoke-MegaDeskGit -Arguments @('show', ("{0}:{1}" -f $Sha, $path)) -FailureMessage 'Journal Git MAIN indisponivel.') -join "`n"
+  try { return $text | ConvertFrom-Json -ErrorAction Stop } catch { throw 'Journal Git MAIN invalido.' }
+}
+
+function Get-MegaDeskHistoricalSnapshotRepairState {
+  param([Parameter(Mandatory = $true)][string]$FromSha, [Parameter(Mandatory = $true)][string]$ToSha)
+
+  try {
+    $baselineJournal = Get-MegaDeskGitMainMigrationJournalAtCommit -Sha $FromSha
+    $candidateJournal = Get-MegaDeskGitMainMigrationJournalAtCommit -Sha $ToSha
+    if (-not (Test-MegaDeskCanonicalMigrationJournal -Journal $BaselineJournal) -or -not (Test-MegaDeskCanonicalMigrationJournal -Journal $CandidateJournal)) {
+      return [pscustomobject]@{ status = 'DIVERGENT'; message = 'Journal Git MAIN invalido.'; repairedTags = @(); newMigrationPaths = @() }
+    }
+
+    $baselineSnapshots = @{}
+    $candidateSnapshots = @{}
+    $baselineSnapshotBlobs = @{}
+    $candidateSnapshotBlobs = @{}
+    $baselineSqlBlobs = @{}
+    $candidateSqlBlobs = @{}
+    foreach ($entry in @($BaselineJournal.entries)) {
+      $tag = [string]$entry.tag
+      $sqlPath = 'drizzle/main-migrations/{0}.sql' -f $tag
+      $snapshotPath = 'drizzle/main-migrations/meta/{0}_snapshot.json' -f $tag.Substring(0, 4)
+      $baselineSqlBlobs[$tag] = Get-MegaDeskGitBlobIdentity -Sha $FromSha -RelativePath $sqlPath
+      $candidateSqlBlobs[$tag] = Get-MegaDeskGitBlobIdentity -Sha $ToSha -RelativePath $sqlPath
+      $baselineSnapshotBlobs[$tag] = Get-MegaDeskGitBlobIdentity -Sha $FromSha -RelativePath $snapshotPath
+      $candidateSnapshotBlobs[$tag] = Get-MegaDeskGitBlobIdentity -Sha $ToSha -RelativePath $snapshotPath
+      if ([string]$baselineSnapshotBlobs[$tag] -cne [string]$candidateSnapshotBlobs[$tag]) {
+        $baselineSnapshots[$tag] = Get-MegaDeskGitSnapshotAtCommit -Sha $FromSha -Tag $tag
+      }
+    }
+    foreach ($entry in @($CandidateJournal.entries)) {
+      $tag = [string]$entry.tag
+      if (-not $candidateSnapshots.ContainsKey($tag)) { $candidateSnapshots[$tag] = Get-MegaDeskGitSnapshotAtCommit -Sha $ToSha -Tag $tag }
+    }
+    return Get-MegaDeskHistoricalSnapshotRepairClassification -BaselineJournal $baselineJournal -CandidateJournal $candidateJournal -BaselineSnapshots $baselineSnapshots -CandidateSnapshots $candidateSnapshots -BaselineSnapshotBlobs $baselineSnapshotBlobs -CandidateSnapshotBlobs $candidateSnapshotBlobs -BaselineSqlBlobs $baselineSqlBlobs -CandidateSqlBlobs $candidateSqlBlobs
+  } catch {
+    return [pscustomobject]@{ status = 'DIVERGENT'; message = ('Nao foi possivel comprovar reparo historico de metadata: ' + $_.Exception.Message); repairedTags = @(); newMigrationPaths = @() }
+  }
+}
+
 function Get-MegaDeskMainMigrationContainerImage {
   $image = @(& docker inspect --format '{{.Config.Image}}' megadesk-local-mysql 2>$null)
   if ($LASTEXITCODE -ne 0 -or $image.Count -ne 1 -or $image[0].Trim() -ne 'mysql:8.0') { throw 'Identidade da imagem MySQL principal nao comprovada.' }
@@ -531,44 +736,54 @@ function Get-MegaDeskMigrationDeltaState {
     if ($changes.Count -eq 0) { return [pscustomobject]@{ status = 'NONE'; migrations = @(); message = 'Nenhuma alteracao de migration.' } }
 
     $mainMigrations = @($changes | Where-Object { $_ -match '^drizzle/main-migrations/[0-9]{4}_[A-Za-z0-9_]+\.sql$' } | Sort-Object -Unique)
-    # The UTC data repair is intentionally accompanied by a validator change.
-    # Accept that one source companion only with its exact, canonical migration;
-    # any other source change remains fail-closed.
-    $isUtcRepairValidatorCompanion =
-      $mainMigrations.Count -eq 1 -and
-      $mainMigrations[0] -ceq 'drizzle/main-migrations/0019_utc_conversation_timestamp_repair.sql' -and
+    if ($mainMigrations.Count -eq 0) {
+      return [pscustomobject]@{ status = 'DIVERGENT'; migrations = @(); message = 'Delta de banco nao contem migration MAIN nova verificavel.'; classification = 'DIVERGENT' }
+    }
+
+    $historicalRepair = Get-MegaDeskHistoricalSnapshotRepairState -FromSha $FromSha -ToSha $ToSha
+    if ([string]$historicalRepair.status -eq 'DIVERGENT') {
+      return [pscustomobject]@{ status = 'DIVERGENT'; migrations = @(); message = [string]$historicalRepair.message; classification = 'DIVERGENT' }
+    }
+    $expectedNewMigrationPaths = @($historicalRepair.newMigrationPaths | Sort-Object -Unique)
+    if ($expectedNewMigrationPaths.Count -gt 0 -and (($mainMigrations -join "`n") -cne ($expectedNewMigrationPaths -join "`n"))) {
+      return [pscustomobject]@{ status = 'DIVERGENT'; migrations = @(); message = 'Journal candidato e arquivos SQL novos divergem.'; classification = 'DIVERGENT' }
+    }
+    # A canonical migration validator change is permitted only when the
+    # accompanying historical snapshot repair is independently proven safe.
+    $isSafeMetadataRepairCompanion =
+      [string]$historicalRepair.status -eq 'SAFE_METADATA_ONLY_REPAIR' -and
       @($changes | Where-Object { $_ -ceq 'server/_core/canonical-migrations.ts' }).Count -eq 1
     $unsupportedChanges = @($changes | Where-Object {
       $_ -notmatch '^drizzle/main-migrations/[0-9]{4}_[A-Za-z0-9_]+\.sql$' -and
       $_ -notmatch '^drizzle/main-migrations/meta/(?:_journal|[0-9]{4}_snapshot)\.json$' -and
       $_ -ne 'drizzle/schema.ts' -and
-      (-not ($isUtcRepairValidatorCompanion -and $_ -ceq 'server/_core/canonical-migrations.ts'))
+      (-not ($isSafeMetadataRepairCompanion -and $_ -ceq 'server/_core/canonical-migrations.ts'))
     })
-    if ($mainMigrations.Count -eq 0 -or $unsupportedChanges.Count -ne 0) {
-      return [pscustomobject]@{ status = 'DIVERGENT'; migrations = @(); message = 'Delta de banco nao representa exclusivamente migrations MAIN canonicas verificaveis.' }
+    if ($unsupportedChanges.Count -ne 0) {
+      return [pscustomobject]@{ status = 'DIVERGENT'; migrations = @(); message = 'Delta de banco nao representa exclusivamente migrations MAIN canonicas verificaveis.'; classification = 'DIVERGENT' }
     }
 
     $currentHead = (Invoke-MegaDeskGit -Arguments @('rev-parse', 'HEAD') -FailureMessage 'HEAD indisponivel para verificar migrations.' | Select-Object -First 1).Trim()
     if ($currentHead -cne $ToSha) {
-      return [pscustomobject]@{ status = 'DIVERGENT'; migrations = @(); message = 'Candidate de migration nao corresponde ao HEAD local verificado.' }
+      return [pscustomobject]@{ status = 'DIVERGENT'; migrations = @(); message = 'Candidate de migration nao corresponde ao HEAD local verificado.'; classification = 'DIVERGENT' }
     }
 
     $identities = @($mainMigrations | ForEach-Object { Get-MegaDeskMainMigrationIdentity -RelativePath $_ })
     $journal = Get-MegaDeskAppliedMainMigrationJournal
     if ([string]$journal.database -ne 'megadesk_local') {
-      return [pscustomobject]@{ status = 'DIVERGENT'; migrations = $identities; message = 'Identidade do banco MAIN divergiu.' }
+      return [pscustomobject]@{ status = 'DIVERGENT'; migrations = $identities; message = 'Identidade do banco MAIN divergiu.'; classification = 'DIVERGENT' }
     }
     $pending = @($identities | Where-Object { $journal.hashes -notcontains $_.sha256 })
     if ($pending.Count -ne 0) {
-      return [pscustomobject]@{ status = 'PENDING'; migrations = $identities; message = ('Migration MAIN sem hash fisico correspondente: ' + (($pending | ForEach-Object { $_.tag }) -join ', ')) }
+      return [pscustomobject]@{ status = 'PENDING'; migrations = $identities; message = ('Migration MAIN sem hash fisico correspondente: ' + (($pending | ForEach-Object { $_.tag }) -join ', ')); classification = [string]$historicalRepair.status }
     }
     $invalidStructure = @($identities | Where-Object { -not (Test-MegaDeskKnownMainMigrationPhysicalStructure -Migration $_) })
     if ($invalidStructure.Count -ne 0) {
-      return [pscustomobject]@{ status = 'DIVERGENT'; migrations = $identities; message = ('Estrutura fisica divergente para: ' + (($invalidStructure | ForEach-Object { $_.tag }) -join ', ')) }
+      return [pscustomobject]@{ status = 'DIVERGENT'; migrations = $identities; message = ('Estrutura fisica divergente para: ' + (($invalidStructure | ForEach-Object { $_.tag }) -join ', ')); classification = 'DIVERGENT' }
     }
-    return [pscustomobject]@{ status = 'APPLIED_MATCH'; migrations = $identities; message = 'Todas as migrations MAIN do delta possuem hash fisico correspondente e estrutura validada.' }
+    return [pscustomobject]@{ status = 'APPLIED_MATCH'; migrations = $identities; message = 'Todas as migrations MAIN do delta possuem hash fisico correspondente e estrutura validada.'; classification = [string]$historicalRepair.status }
   } catch {
-    return [pscustomobject]@{ status = 'UNKNOWN'; migrations = @(); message = ('Nao foi possivel comprovar migration MAIN: ' + $_.Exception.Message) }
+    return [pscustomobject]@{ status = 'UNKNOWN'; migrations = @(); message = ('Nao foi possivel comprovar migration MAIN: ' + $_.Exception.Message); classification = 'UNKNOWN' }
   }
 }
 
