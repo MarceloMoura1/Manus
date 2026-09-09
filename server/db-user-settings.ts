@@ -16,7 +16,12 @@ export async function getUserSettings(clientId: string, userId: string) {
   const existing = await db
     .select()
     .from(megadeskUserSettings)
-    .where(and(eq(megadeskUserSettings.clientId, clientId), eq(megadeskUserSettings.userId, userId)))
+    .where(
+      and(
+        eq(megadeskUserSettings.clientId, clientId),
+        eq(megadeskUserSettings.userId, userId)
+      )
+    )
     .limit(1);
 
   if (existing.length > 0) {
@@ -45,7 +50,12 @@ export async function getUserSettings(clientId: string, userId: string) {
   return await db
     .select()
     .from(megadeskUserSettings)
-    .where(and(eq(megadeskUserSettings.clientId, clientId), eq(megadeskUserSettings.userId, userId)))
+    .where(
+      and(
+        eq(megadeskUserSettings.clientId, clientId),
+        eq(megadeskUserSettings.userId, userId)
+      )
+    )
     .limit(1)
     .then((rows: any[]) => rows[0]);
 }
@@ -73,7 +83,12 @@ export async function updateUserNotificationSettings(
   await db
     .update(megadeskUserSettings)
     .set(updates as any)
-    .where(and(eq(megadeskUserSettings.clientId, clientId), eq(megadeskUserSettings.userId, userId)));
+    .where(
+      and(
+        eq(megadeskUserSettings.clientId, clientId),
+        eq(megadeskUserSettings.userId, userId)
+      )
+    );
 
   return await getUserSettings(clientId, userId);
 }
@@ -92,28 +107,40 @@ export async function updateUserAttendanceSettings(
   await db
     .update(megadeskUserSettings)
     .set(updates as any)
-    .where(and(eq(megadeskUserSettings.clientId, clientId), eq(megadeskUserSettings.userId, userId)));
+    .where(
+      and(
+        eq(megadeskUserSettings.clientId, clientId),
+        eq(megadeskUserSettings.userId, userId)
+      )
+    );
 
   return await getUserSettings(clientId, userId);
 }
 
-export type UserConversationBackgroundUpdate = {
+export type UserConversationAppearanceUpdate = {
   conversationBackgroundType: "default" | "preset" | "custom";
   conversationBackgroundPresetId: string | null;
   conversationBackgroundImageKey: string | null;
+  conversationIncomingBubbleColor: string | null;
+  conversationOutgoingBubbleColor: string | null;
 };
 
-/** Persists a visual preference only for the authenticated tenant/user pair. */
-export async function updateUserConversationBackground(
+/** Persists conversation appearance only for the authenticated tenant/user pair. */
+export async function updateUserConversationAppearance(
   clientId: string,
   userId: string,
-  updates: UserConversationBackgroundUpdate,
+  updates: UserConversationAppearanceUpdate
 ) {
   await getUserSettings(clientId, userId);
   await db
     .update(megadeskUserSettings)
     .set(updates)
-    .where(and(eq(megadeskUserSettings.clientId, clientId), eq(megadeskUserSettings.userId, userId)));
+    .where(
+      and(
+        eq(megadeskUserSettings.clientId, clientId),
+        eq(megadeskUserSettings.userId, userId)
+      )
+    );
 
   return getUserSettings(clientId, userId);
 }
@@ -121,14 +148,25 @@ export async function updateUserConversationBackground(
 /**
  * Silenciar notificações por tempo determinado
  */
-export async function muteNotifications(clientId: string, userId: string, minutes: number) {
+export async function muteNotifications(
+  clientId: string,
+  userId: string,
+  minutes: number
+) {
   const muteUntil = new Date(Date.now() + minutes * 60 * 1000)
-    .toISOString().slice(0, 19).replace('T', ' ');
+    .toISOString()
+    .slice(0, 19)
+    .replace("T", " ");
 
   await db
     .update(megadeskUserSettings)
     .set({ muteUntil })
-    .where(and(eq(megadeskUserSettings.clientId, clientId), eq(megadeskUserSettings.userId, userId)));
+    .where(
+      and(
+        eq(megadeskUserSettings.clientId, clientId),
+        eq(megadeskUserSettings.userId, userId)
+      )
+    );
 
   return await getUserSettings(clientId, userId);
 }
@@ -140,7 +178,12 @@ export async function getUserShortcuts(clientId: string, userId: string) {
   return await db
     .select()
     .from(megadeskUserShortcuts)
-    .where(and(eq(megadeskUserShortcuts.clientId, clientId), eq(megadeskUserShortcuts.userId, userId)))
+    .where(
+      and(
+        eq(megadeskUserShortcuts.clientId, clientId),
+        eq(megadeskUserShortcuts.userId, userId)
+      )
+    )
     .orderBy(megadeskUserShortcuts.createdAt);
 }
 
@@ -210,7 +253,11 @@ export async function updateUserShortcut(
 /**
  * Deletar atalho
  */
-export async function deleteUserShortcut(clientId: string, userId: string, shortcutKey: string) {
+export async function deleteUserShortcut(
+  clientId: string,
+  userId: string,
+  shortcutKey: string
+) {
   const normalizedKey = shortcutKey.toLowerCase().replace(/[^a-z0-9_]/g, "");
 
   await db

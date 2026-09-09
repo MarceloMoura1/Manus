@@ -11,6 +11,8 @@ const saved = {
   presetId: null,
   customImageUrl: null,
   hasCustomImage: false,
+  incomingBubbleColor: null,
+  outgoingBubbleColor: null,
 };
 
 describe("UserPersonalizationTab save flow", () => {
@@ -20,6 +22,8 @@ describe("UserPersonalizationTab save flow", () => {
       presetId: "solid-blue",
       customImageUrl: null,
       hasCustomImage: false,
+      incomingBubbleColor: null,
+      outgoingBubbleColor: null,
     };
 
     expect(hasUnsavedConversationBackground(draft, saved, false)).toBe(true);
@@ -33,6 +37,8 @@ describe("UserPersonalizationTab save flow", () => {
       userEmail: "agent@example.invalid",
       backgroundType: "preset",
       presetId: "solid-blue",
+      incomingBubbleColor: null,
+      outgoingBubbleColor: null,
     });
     expect(saved).toMatchObject({ backgroundType: "default", presetId: null });
   });
@@ -43,12 +49,41 @@ describe("UserPersonalizationTab save flow", () => {
       presetId: null,
       customImageUrl: "blob:preview",
       hasCustomImage: true,
+      incomingBubbleColor: null,
+      outgoingBubbleColor: null,
     };
 
     expect(hasUnsavedConversationBackground(imageDraft, saved, true)).toBe(
       true
     );
     expect(hasUnsavedConversationBackground(null, saved, false)).toBe(false);
+  });
+
+  it("keeps draft bubble colours unsaved until the shared personalization mutation succeeds", () => {
+    const colorDraft = {
+      ...saved,
+      incomingBubbleColor: "#DBEAFE",
+      outgoingBubbleColor: "#1E293B",
+    };
+    expect(hasUnsavedConversationBackground(colorDraft, saved, false)).toBe(
+      true
+    );
+    expect(
+      conversationBackgroundSaveInput(colorDraft, {
+        clientId: "tenant-a",
+        userEmail: "agent@example.invalid",
+      })
+    ).toMatchObject({
+      incomingBubbleColor: "#DBEAFE",
+      outgoingBubbleColor: "#1E293B",
+    });
+    expect(
+      hasUnsavedConversationBackground(
+        { ...colorDraft, incomingBubbleColor: null, outgoingBubbleColor: null },
+        saved,
+        false
+      )
+    ).toBe(false);
   });
 
   it("accepts only a persisted custom background URL from the upload response", () => {

@@ -1,0 +1,2 @@
+ALTER TABLE `megadesk_user_settings` ADD `conversation_incoming_bubble_color` varchar(7);--> statement-breakpoint
+ALTER TABLE `megadesk_user_settings` ADD `conversation_outgoing_bubble_color` varchar(7);

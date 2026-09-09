@@ -21,7 +21,9 @@ import {
 import { useUserPersonalization } from "@/hooks/useUserPersonalization";
 import {
   CONVERSATION_BACKGROUND_PRESETS,
+  CONVERSATION_BUBBLE_COLOR_SWATCHES,
   DEFAULT_CONVERSATION_BACKGROUND,
+  conversationBubbleForegroundColor,
   getConversationBackgroundPreset,
   normalizeConversationBackgroundPreference,
   type ConversationBackgroundPreference,
@@ -77,7 +79,9 @@ export function hasUnsavedConversationBackground(
   if (hasPendingImage) return true;
   return (
     draft.backgroundType !== saved.backgroundType ||
-    draft.presetId !== saved.presetId
+    draft.presetId !== saved.presetId ||
+    draft.incomingBubbleColor !== saved.incomingBubbleColor ||
+    draft.outgoingBubbleColor !== saved.outgoingBubbleColor
   );
 }
 
@@ -87,11 +91,10 @@ export function conversationBackgroundSaveInput(
 ) {
   return {
     ...identity,
-    backgroundType:
-      draft.backgroundType === "preset"
-        ? ("preset" as const)
-        : ("default" as const),
+    backgroundType: draft.backgroundType,
     presetId: draft.backgroundType === "preset" ? draft.presetId : null,
+    incomingBubbleColor: draft.incomingBubbleColor,
+    outgoingBubbleColor: draft.outgoingBubbleColor,
   };
 }
 
@@ -128,6 +131,73 @@ function activeBackgroundLabel(preference: ConversationBackgroundPreference) {
       "Fundo estilizado"
     );
   return "Padrão MegaDesk";
+}
+
+function BubbleColorPalette({
+  direction,
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  direction: "incoming" | "outgoing";
+  label: string;
+  value: string | null;
+  disabled: boolean;
+  onChange: (value: string | null) => void;
+}) {
+  return (
+    <fieldset
+      className="min-w-0"
+      data-testid={`bubble-color-${direction}-selector`}
+    >
+      <legend className="text-sm font-semibold text-slate-900">{label}</legend>
+      <p className="mt-1 text-xs leading-5 text-slate-500">
+        Escolha uma cor segura ou mantenha o padrão atual.
+      </p>
+      <div
+        className="mt-3 flex flex-wrap gap-2"
+        role="group"
+        aria-label={`Cores dos balões ${label.toLowerCase()}`}
+      >
+        {CONVERSATION_BUBBLE_COLOR_SWATCHES.map(color => {
+          const selected = value === color;
+          return (
+            <button
+              key={color}
+              type="button"
+              aria-pressed={selected}
+              aria-label={`${label}: ${color}${selected ? ", selecionada" : ""}`}
+              disabled={disabled}
+              onClick={() => onChange(color)}
+              className="flex size-9 items-center justify-center rounded-full border-2 border-white shadow-sm ring-1 ring-slate-300 transition hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-55"
+              style={{
+                backgroundColor: color,
+                color: conversationBubbleForegroundColor(color),
+              }}
+            >
+              {selected && <Check className="size-4" aria-hidden="true" />}
+              <span className="sr-only">
+                {selected ? "Selecionada" : color}
+              </span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          aria-pressed={value === null}
+          disabled={disabled}
+          onClick={() => onChange(null)}
+          className="rounded-full border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-55"
+        >
+          {value === null && (
+            <Check className="mr-1 inline size-3.5" aria-hidden="true" />
+          )}
+          Usar padrão
+        </button>
+      </div>
+    </fieldset>
+  );
 }
 
 export function UserPersonalizationTab() {
@@ -183,7 +253,11 @@ export function UserPersonalizationTab() {
             customImageUrl: null,
             hasCustomImage: false,
           })
-        : DEFAULT_CONVERSATION_BACKGROUND
+        : {
+            ...DEFAULT_CONVERSATION_BACKGROUND,
+            incomingBubbleColor: visiblePreference.incomingBubbleColor,
+            outgoingBubbleColor: visiblePreference.outgoingBubbleColor,
+          }
     );
     setControlMode(
       backgroundType === "preset"
@@ -206,22 +280,44 @@ export function UserPersonalizationTab() {
       presetId: null,
       customImageUrl: nextUrl,
       hasCustomImage: true,
+      incomingBubbleColor: visiblePreference.incomingBubbleColor,
+      outgoingBubbleColor: visiblePreference.outgoingBubbleColor,
     });
     setControlMode("custom");
   };
 
+  const selectBubbleColor = (
+    direction: "incoming" | "outgoing",
+    color: string | null
+  ) => {
+    setPreview(
+      normalizeConversationBackgroundPreference({
+        ...visiblePreference,
+        [direction === "incoming"
+          ? "incomingBubbleColor"
+          : "outgoingBubbleColor"]: color,
+      })
+    );
+  };
+
   const save = async () => {
     if (!preview || !hasUnsavedChanges || !canPersist || isSaving) return;
+    const imageToUpload = pendingImage;
 
-    if (preview.backgroundType === "custom") {
-      if (!pendingImage) return;
+    if (preview.backgroundType === "custom" && imageToUpload) {
       setUploading(true);
       try {
         const response = await fetch(userPersonalizationBackgroundUrl(), {
           method: "PUT",
           credentials: "include",
-          headers: { "Content-Type": pendingImage.type },
-          body: pendingImage,
+          headers: {
+            "Content-Type": imageToUpload.type,
+            "x-megadesk-incoming-bubble-color":
+              preview.incomingBubbleColor ?? "default",
+            "x-megadesk-outgoing-bubble-color":
+              preview.outgoingBubbleColor ?? "default",
+          },
+          body: imageToUpload,
         });
         if (!response.ok) {
           const data = (await response.json().catch(() => null)) as {
@@ -343,6 +439,67 @@ export function UserPersonalizationTab() {
         >
           {BACKGROUND_MODES.map(({ id, label, description, icon: Icon }) => {
             const selected = controlMode === id;
+            if (id === "custom") {
+              return (
+                <div
+                  key={id}
+                  className={`group relative overflow-hidden rounded-xl border transition duration-150 ${selected ? "border-blue-600 bg-blue-50/70 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50"}`}
+                  data-testid="custom-image-option"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setControlMode("custom")}
+                    disabled={isSaving}
+                    className="flex min-h-24 w-full items-start gap-3 p-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-600 disabled:pointer-events-none disabled:opacity-55"
+                  >
+                    <span
+                      className={`flex size-9 shrink-0 items-center justify-center rounded-lg transition ${selected ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 group-hover:bg-blue-100 group-hover:text-blue-700"}`}
+                    >
+                      <Icon className="size-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                        {label}
+                        {activeMode === id && (
+                          <Check
+                            className="size-3.5 text-blue-700"
+                            aria-label="Fundo atual"
+                          />
+                        )}
+                      </span>
+                      <span className="mt-1 block text-xs leading-5 text-slate-500">
+                        {description}
+                      </span>
+                    </span>
+                  </button>
+                  <div className="border-t border-blue-100 px-3.5 pb-3.5 pt-3">
+                    <p className="text-xs leading-5 text-slate-500">
+                      JPG, PNG ou WebP de até 5 MB.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="mt-2 w-full border-blue-200 bg-white text-blue-800 hover:bg-blue-100"
+                      disabled={isSaving}
+                      onClick={() => fileInput.current?.click()}
+                    >
+                      <ImagePlus className="size-4" /> Enviar imagem
+                    </Button>
+                    {(pendingImage ||
+                      visiblePreference.backgroundType === "custom") && (
+                      <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-blue-800">
+                        <Check className="size-3.5" />
+                        {pendingImage
+                          ? "Imagem pronta para salvar"
+                          : "Imagem personalizada ativa"}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            }
             return (
               <button
                 key={id}
@@ -377,9 +534,9 @@ export function UserPersonalizationTab() {
         </div>
       </section>
 
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(19rem,0.9fr)_minmax(0,1.35fr)]">
+      <div className="space-y-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <section
-          className="rounded-2xl border border-slate-200 bg-white shadow-sm"
+          className="border-t border-slate-100"
           aria-labelledby="background-controls-title"
         >
           <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
@@ -511,7 +668,7 @@ export function UserPersonalizationTab() {
                 </div>
               </fieldset>
             )}
-            {controlMode === "custom" && (
+            {false && controlMode === "custom" && (
               <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50/45 p-4 sm:p-5">
                 <div className="flex size-10 items-center justify-center rounded-xl bg-white text-blue-700 shadow-sm">
                   <ImagePlus className="size-5" />
@@ -538,7 +695,7 @@ export function UserPersonalizationTab() {
                   <p className="mt-4 flex items-center gap-2 text-xs font-semibold text-blue-800">
                     <Check className="size-3.5" />
                     {pendingImage
-                      ? `Imagem pronta para salvar: ${pendingImage.name}`
+                      ? `Imagem pronta para salvar: ${pendingImage?.name ?? "imagem selecionada"}`
                       : "Imagem personalizada ativa"}
                   </p>
                 )}
@@ -546,7 +703,43 @@ export function UserPersonalizationTab() {
             )}
           </div>
         </section>
-        <ConversationAppearancePreview preference={visiblePreference} />
+        <section
+          className="border-t border-slate-100 px-5 py-5 sm:px-6"
+          aria-labelledby="message-bubbles-title"
+        >
+          <h3
+            id="message-bubbles-title"
+            className="text-sm font-semibold text-slate-950"
+          >
+            Balões de mensagem
+          </h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Personalize mensagens recebidas e enviadas sem mudar o conteúdo da
+            conversa.
+          </p>
+          <div className="mt-5 grid gap-6 lg:grid-cols-2">
+            <BubbleColorPalette
+              direction="incoming"
+              label="Recebidas"
+              value={visiblePreference.incomingBubbleColor}
+              disabled={isSaving}
+              onChange={color => selectBubbleColor("incoming", color)}
+            />
+            <BubbleColorPalette
+              direction="outgoing"
+              label="Enviadas"
+              value={visiblePreference.outgoingBubbleColor}
+              disabled={isSaving}
+              onChange={color => selectBubbleColor("outgoing", color)}
+            />
+          </div>
+        </section>
+        <div
+          className="border-t border-slate-100 p-4 sm:p-6"
+          data-testid="conversation-preview-wide"
+        >
+          <ConversationAppearancePreview preference={visiblePreference} />
+        </div>
       </div>
 
       <input

@@ -50,6 +50,45 @@ describe("ConversationAppearancePreview", () => {
         'data-testid="conversation-preview-message-area"'
       );
       expect(markup).toContain('data-testid="conversation-message-outgoing"');
+      expect(markup).toContain("aspect-[16/10]");
+    }
+  });
+
+  it("combines every background mode with draft bubble colours through the real bubble primitive", () => {
+    for (const background of [
+      {
+        backgroundType: "default" as const,
+        presetId: null,
+        customImageUrl: null,
+        hasCustomImage: false,
+      },
+      {
+        backgroundType: "preset" as const,
+        presetId: "solid-blue",
+        customImageUrl: null,
+        hasCustomImage: false,
+      },
+      {
+        backgroundType: "preset" as const,
+        presetId: "minimal-blue",
+        customImageUrl: null,
+        hasCustomImage: false,
+      },
+      {
+        backgroundType: "custom" as const,
+        presetId: null,
+        customImageUrl:
+          "/api/user-personalization/background?v=abcdef0123456789",
+        hasCustomImage: true,
+      },
+    ]) {
+      const markup = renderPreview({
+        ...background,
+        incomingBubbleColor: "#DBEAFE",
+        outgoingBubbleColor: "#1E293B",
+      });
+      expect(markup).toContain('data-bubble-color="#DBEAFE"');
+      expect(markup).toContain('data-bubble-color="#1E293B"');
     }
   });
 

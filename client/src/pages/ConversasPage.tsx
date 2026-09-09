@@ -31,7 +31,10 @@ import { useConversasSocket } from "@/hooks/useConversasSocket";
 import { FailedMessagesRetry } from "@/components/FailedMessagesRetry";
 import { ConversationMedia } from "@/components/ConversationMedia";
 import { ConversationBackground } from "@/components/ConversationBackground";
-import { ConversationMessageBubble } from "@/components/ConversationMessageBubble";
+import {
+  conversationMessageAreaClasses,
+  ConversationMessageBubble,
+} from "@/components/ConversationMessageBubble";
 import { useUserPersonalization } from "@/hooks/useUserPersonalization";
 import type { ConversaSocketItem } from "@/hooks/useConversasSocket";
 import { validations } from "@/lib/validations";
@@ -140,19 +143,27 @@ function ConversationCard({
       className={[
         "bg-white rounded-xl border transition-all duration-200",
         "hover:shadow-md hover:-translate-y-0.5",
-        isUnread ? "border-blue-200 shadow-sm shadow-blue-50" : "border-slate-100",
+        isUnread
+          ? "border-blue-200 shadow-sm shadow-blue-50"
+          : "border-slate-100",
       ].join(" ")}
       style={{ animation: "fadeSlideIn 0.2s ease-out" }}
     >
       <div className="p-4">
         {/* Header do card */}
         <div className="flex items-start justify-between gap-3 mb-2">
-          <button type="button" className="flex-1 min-w-0 text-left" onClick={() => onOpen(conv.id)}>
+          <button
+            type="button"
+            className="flex-1 min-w-0 text-left"
+            onClick={() => onOpen(conv.id)}
+          >
             <div className="flex items-center gap-2">
               <span
                 className={[
                   "text-sm truncate",
-                  isUnread ? "font-bold text-slate-900" : "font-semibold text-slate-800",
+                  isUnread
+                    ? "font-bold text-slate-900"
+                    : "font-semibold text-slate-800",
                 ].join(" ")}
               >
                 {conv.customerName || "Sem nome"}
@@ -164,9 +175,14 @@ function ConversationCard({
               )}
             </div>
             {conv.publicCode && (
-              <button type="button" title="Copiar código do atendimento"
-                onClick={() => void navigator.clipboard.writeText(conv.publicCode ?? "")}
-                className="mt-1 text-[11px] font-medium text-blue-600 hover:underline">
+              <button
+                type="button"
+                title="Copiar código do atendimento"
+                onClick={() =>
+                  void navigator.clipboard.writeText(conv.publicCode ?? "")
+                }
+                className="mt-1 text-[11px] font-medium text-blue-600 hover:underline"
+              >
                 Atendimento {conv.publicCode}
               </button>
             )}
@@ -174,25 +190,29 @@ function ConversationCard({
               {conv.companyName && (
                 <div className="flex items-center gap-1">
                   <Building2 className="w-3 h-3 text-slate-400 flex-shrink-0" />
-                  <span className="text-xs text-slate-500 truncate">{conv.companyName}</span>
+                  <span className="text-xs text-slate-500 truncate">
+                    {conv.companyName}
+                  </span>
                 </div>
               )}
               {conv.customerPhone && (
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-slate-400">📱</span>
-                  <span className="text-xs text-slate-500 font-mono">{validations.formatPhone(conv.customerPhone)}</span>
+                  <span className="text-xs text-slate-500 font-mono">
+                    {validations.formatPhone(conv.customerPhone)}
+                  </span>
                 </div>
               )}
             </div>
           </button>
           <div className="flex items-center gap-2 flex-shrink-0">
-            {conv.syncStatus === 'syncing' && (
+            {conv.syncStatus === "syncing" && (
               <div className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded-lg">
                 <div className="w-3 h-3 rounded-full border-2 border-amber-600 border-t-transparent animate-spin" />
                 <span>Sincronizando...</span>
               </div>
             )}
-            {conv.syncStatus === 'sync_failed' && (
+            {conv.syncStatus === "sync_failed" && (
               <div className="flex items-center gap-1 text-xs text-red-600 bg-red-50 px-2 py-1 rounded-lg">
                 <span>⚠️ Erro na sincronização</span>
               </div>
@@ -210,11 +230,13 @@ function ConversationCard({
             isClosed
               ? "text-slate-400 italic"
               : isUnread
-              ? "text-slate-800 font-semibold"
-              : "text-slate-500",
+                ? "text-slate-800 font-semibold"
+                : "text-slate-500",
           ].join(" ")}
         >
-          {isClosed ? "Conversa encerrada" : conv.lastMessage || "Sem mensagens"}
+          {isClosed
+            ? "Conversa encerrada"
+            : conv.lastMessage || "Sem mensagens"}
         </p>
 
         {/* Footer do card */}
@@ -244,8 +266,11 @@ function ConversationCard({
           {/* Ações */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {!isClosed && conv.status === "pending" && !conv.assignedUserId && (
-              <button type="button" onClick={() => onClaim(conv.id)}
-                className="text-xs font-semibold text-blue-600 px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100">
+              <button
+                type="button"
+                onClick={() => onClaim(conv.id)}
+                className="text-xs font-semibold text-blue-600 px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100"
+              >
                 Assumir conversa
               </button>
             )}
@@ -263,7 +288,9 @@ function ConversationCard({
             {!isClosed ? (
               confirmingClose === conv.id ? (
                 <div className="flex items-center gap-1 bg-red-50 border border-red-200 rounded-lg px-2 py-1">
-                  <span className="text-xs text-red-600 font-medium">Encerrar?</span>
+                  <span className="text-xs text-red-600 font-medium">
+                    Encerrar?
+                  </span>
                   <button
                     type="button"
                     onClick={() => {
@@ -294,7 +321,9 @@ function ConversationCard({
               )
             ) : confirmingReopen === conv.id ? (
               <div className="flex items-center gap-1 bg-green-50 border border-green-200 rounded-lg px-2 py-1">
-                <span className="text-xs text-green-600 font-medium">Abrir?</span>
+                <span className="text-xs text-green-600 font-medium">
+                  Abrir?
+                </span>
                 <button
                   type="button"
                   onClick={() => {
@@ -338,7 +367,12 @@ type AssignModalProps = {
   onClose: () => void;
 };
 
-function AssignModal({ conversationId, users, onAssign, onClose }: AssignModalProps) {
+function AssignModal({
+  conversationId,
+  users,
+  onAssign,
+  onClose,
+}: AssignModalProps) {
   if (!conversationId) return null;
   return (
     <div
@@ -349,14 +383,18 @@ function AssignModal({ conversationId, users, onAssign, onClose }: AssignModalPr
       <div
         className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm p-5"
         style={{ animation: "scaleIn 0.15s cubic-bezier(0.23, 1, 0.32, 1)" }}
-        onClick={(e) => e.stopPropagation()}
+        onClick={e => e.stopPropagation()}
       >
-        <h3 className="text-base font-semibold text-slate-800 mb-4">Atribuir conversa</h3>
+        <h3 className="text-base font-semibold text-slate-800 mb-4">
+          Atribuir conversa
+        </h3>
         <div className="space-y-2 max-h-64 overflow-y-auto">
           {users.length === 0 ? (
-            <p className="text-sm text-slate-500 text-center py-4">Nenhum usuário disponível</p>
+            <p className="text-sm text-slate-500 text-center py-4">
+              Nenhum usuário disponível
+            </p>
           ) : (
-            users.map((u) => (
+            users.map(u => (
               <button
                 key={u.id}
                 type="button"
@@ -406,15 +444,20 @@ export function ConversasPage() {
   const [assigningConvId, setAssigningConvId] = useState<string | null>(null);
 
   // Estado local das conversas (para atualizações em tempo real)
-  const [localConversations, setLocalConversations] = useState<ConversationItem[]>([]);
+  const [localConversations, setLocalConversations] = useState<
+    ConversationItem[]
+  >([]);
   const [hasLoaded, setHasLoaded] = useState(false);
-  const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+  const [selectedConversation, setSelectedConversation] = useState<
+    string | null
+  >(null);
   const [draftMessage, setDraftMessage] = useState("");
 
   // Carregar conversa selecionada do localStorage quando a página é montada
   useEffect(() => {
-    const readSelection = () => new URLSearchParams(window.location.search).get("conversationId")
-      ?? localStorage.getItem('MEGADESK_SELECTED_CONVERSATION_ID');
+    const readSelection = () =>
+      new URLSearchParams(window.location.search).get("conversationId") ??
+      localStorage.getItem("MEGADESK_SELECTED_CONVERSATION_ID");
     const conversationId = readSelection();
     if (conversationId) setSelectedConversation(conversationId);
     const onPopState = () => setSelectedConversation(readSelection());
@@ -424,7 +467,10 @@ export function ConversasPage() {
 
   useEffect(() => {
     if (!selectedConversation) return;
-    localStorage.setItem('MEGADESK_SELECTED_CONVERSATION_ID', selectedConversation);
+    localStorage.setItem(
+      "MEGADESK_SELECTED_CONVERSATION_ID",
+      selectedConversation
+    );
     const url = new URL(window.location.href);
     if (url.searchParams.get("conversationId") !== selectedConversation) {
       url.searchParams.set("conversationId", selectedConversation);
@@ -434,18 +480,27 @@ export function ConversasPage() {
 
   const closeSelectedConversation = useCallback(() => {
     setSelectedConversation(null);
-    localStorage.removeItem('MEGADESK_SELECTED_CONVERSATION_ID');
+    localStorage.removeItem("MEGADESK_SELECTED_CONVERSATION_ID");
     const url = new URL(window.location.href);
     url.searchParams.delete("conversationId");
     window.history.replaceState(window.history.state, "", url);
   }, []);
 
   // ─── Busca de usuários ──────────────────────────────────────────────────────
-  const { data: usersData } = trpc.conversations.eligibleUsers.useQuery(undefined, { enabled: !!clientId, staleTime: 60_000 });
-  const { data: countsData } = trpc.conversations.counts.useQuery(undefined, { enabled: !!clientId });
+  const { data: usersData } = trpc.conversations.eligibleUsers.useQuery(
+    undefined,
+    { enabled: !!clientId, staleTime: 60_000 }
+  );
+  const { data: countsData } = trpc.conversations.counts.useQuery(undefined, {
+    enabled: !!clientId,
+  });
 
   // ─── Query de conversas ─────────────────────────────────────────────────────
-  const { data: conversationsData, isLoading, refetch } = trpc.conversations.list.useQuery(
+  const {
+    data: conversationsData,
+    isLoading,
+    refetch,
+  } = trpc.conversations.list.useQuery(
     {
       viewMode,
       status: statusTab,
@@ -459,10 +514,14 @@ export function ConversasPage() {
       refetchOnWindowFocus: false,
     }
   );
-  const { data: selectedMessages, refetch: refetchMessages } = trpc.conversations.messages.useQuery(
-    { conversationId: selectedConversation ?? "", limit: 200 },
-    { enabled: !!selectedConversation, refetchInterval: selectedConversation ? 3000 : false },
-  );
+  const { data: selectedMessages, refetch: refetchMessages } =
+    trpc.conversations.messages.useQuery(
+      { conversationId: selectedConversation ?? "", limit: 200 },
+      {
+        enabled: !!selectedConversation,
+        refetchInterval: selectedConversation ? 3000 : false,
+      }
+    );
 
   // Sincronizar dados do servidor com estado local
   useEffect(() => {
@@ -471,7 +530,9 @@ export function ConversasPage() {
         conversationsData.map((c: ConversationItem) => ({
           ...c,
           lastMessageAt:
-            c.lastMessageAt instanceof Date ? c.lastMessageAt : new Date(c.lastMessageAt),
+            c.lastMessageAt instanceof Date
+              ? c.lastMessageAt
+              : new Date(c.lastMessageAt),
         }))
       );
       setHasLoaded(true);
@@ -480,13 +541,16 @@ export function ConversasPage() {
 
   // ─── Mutations ──────────────────────────────────────────────────────────────
   const refreshConversationQueries = useCallback(async () => {
-    await Promise.all([utils.conversations.list.invalidate(), utils.conversations.counts.invalidate()]);
+    await Promise.all([
+      utils.conversations.list.invalidate(),
+      utils.conversations.counts.invalidate(),
+    ]);
   }, [utils]);
 
   const closeMutation = trpc.conversations.close.useMutation({
     onSuccess: async (_, vars) => {
-      setLocalConversations((prev) =>
-        prev.map((c) =>
+      setLocalConversations(prev =>
+        prev.map(c =>
           c.id === vars.conversationId ? { ...c, status: "closed" as const } : c
         )
       );
@@ -496,8 +560,8 @@ export function ConversasPage() {
 
   const reopenMutation = trpc.conversations.reopen.useMutation({
     onSuccess: async (_, vars) => {
-      setLocalConversations((prev) =>
-        prev.map((c) =>
+      setLocalConversations(prev =>
+        prev.map(c =>
           c.id === vars.conversationId ? { ...c, status: "open" as const } : c
         )
       );
@@ -507,8 +571,8 @@ export function ConversasPage() {
 
   const assignMutation = trpc.conversations.transfer.useMutation({
     onSuccess: async (result, vars) => {
-      setLocalConversations((prev) =>
-        prev.map((c) =>
+      setLocalConversations(prev =>
+        prev.map(c =>
           c.id === vars.conversationId
             ? {
                 ...c,
@@ -524,9 +588,18 @@ export function ConversasPage() {
   });
   const claimMutation = trpc.conversations.claim.useMutation({
     onSuccess: async (result, vars) => {
-      setLocalConversations((prev) => prev.map((conversation) =>
-        conversation.id === vars.conversationId ? { ...conversation, status: "open" as const,
-          assignedUserId: result.assignedUserId, assignedUserName: result.assignedUserName } : conversation));
+      setLocalConversations(prev =>
+        prev.map(conversation =>
+          conversation.id === vars.conversationId
+            ? {
+                ...conversation,
+                status: "open" as const,
+                assignedUserId: result.assignedUserId,
+                assignedUserName: result.assignedUserName,
+              }
+            : conversation
+        )
+      );
       await refreshConversationQueries();
     },
   });
@@ -539,32 +612,36 @@ export function ConversasPage() {
 
   // ─── Socket.IO — atualizações em tempo real ─────────────────────────────────
   const handleConversationNew = useCallback((conv: ConversaSocketItem) => {
-    setLocalConversations((prev) => {
-      if (prev.some((c) => c.id === conv.id)) return prev;
+    setLocalConversations(prev => {
+      if (prev.some(c => c.id === conv.id)) return prev;
       return [conv, ...prev];
     });
   }, []);
 
   const handleConversationClosed = useCallback((conversationId: string) => {
-    setLocalConversations((prev) =>
-      prev.map((c) =>
+    setLocalConversations(prev =>
+      prev.map(c =>
         c.id === conversationId ? { ...c, status: "closed" as const } : c
       )
     );
   }, []);
 
   const handleConversationReopened = useCallback((conversationId: string) => {
-    setLocalConversations((prev) =>
-      prev.map((c) =>
+    setLocalConversations(prev =>
+      prev.map(c =>
         c.id === conversationId ? { ...c, status: "open" as const } : c
       )
     );
   }, []);
 
   const handleConversationAssigned = useCallback(
-    (data: { conversationId: string; assignedUserId: string; assignedUserName?: string }) => {
-      setLocalConversations((prev) =>
-        prev.map((c) =>
+    (data: {
+      conversationId: string;
+      assignedUserId: string;
+      assignedUserName?: string;
+    }) => {
+      setLocalConversations(prev =>
+        prev.map(c =>
           c.id === data.conversationId
             ? {
                 ...c,
@@ -620,9 +697,14 @@ export function ConversasPage() {
   const handleAssignConfirm = useCallback(
     (userId: string, userName: string) => {
       if (!clientId || !assigningConvId) return;
-      const current = localConversations.find((conversation) => conversation.id === assigningConvId);
-      assignMutation.mutate({ conversationId: assigningConvId, targetUserId: userId,
-        expectedAssignedUserId: current?.assignedUserId ?? null });
+      const current = localConversations.find(
+        conversation => conversation.id === assigningConvId
+      );
+      assignMutation.mutate({
+        conversationId: assigningConvId,
+        targetUserId: userId,
+        expectedAssignedUserId: current?.assignedUserId ?? null,
+      });
     },
     [clientId, assigningConvId, assignMutation]
   );
@@ -631,14 +713,28 @@ export function ConversasPage() {
   if (!clientId) {
     return (
       <div className="flex items-center justify-center h-64">
-        <p className="text-slate-500 text-sm">Sessão não encontrada. Faça login novamente.</p>
+        <p className="text-slate-500 text-sm">
+          Sessão não encontrada. Faça login novamente.
+        </p>
       </div>
     );
   }
 
-  const tabConfig: Array<{ id: StatusTab; label: string; icon: React.ReactNode }> = [
-    { id: "active", label: "Abertas", icon: <MessageCircle className="w-3.5 h-3.5" /> },
-    { id: "closed", label: "Encerradas", icon: <CheckCircle2 className="w-3.5 h-3.5" /> },
+  const tabConfig: Array<{
+    id: StatusTab;
+    label: string;
+    icon: React.ReactNode;
+  }> = [
+    {
+      id: "active",
+      label: "Abertas",
+      icon: <MessageCircle className="w-3.5 h-3.5" />,
+    },
+    {
+      id: "closed",
+      label: "Encerradas",
+      icon: <CheckCircle2 className="w-3.5 h-3.5" />,
+    },
   ];
 
   return (
@@ -669,13 +765,15 @@ export function ConversasPage() {
             <div className="flex items-center gap-2">
               <FailedMessagesRetry />
               <button
-              type="button"
-              onClick={() => refetch()}
-              className="p-2 rounded-lg hover:bg-slate-100 transition-colors text-slate-500 hover:text-slate-700"
-              title="Atualizar"
-            >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
-            </button>
+                type="button"
+                onClick={() => refetch()}
+                className="p-2 rounded-lg hover:bg-slate-100 transition-colors text-slate-500 hover:text-slate-700"
+                title="Atualizar"
+              >
+                <RefreshCw
+                  className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`}
+                />
+              </button>
             </div>
           </div>
 
@@ -688,7 +786,7 @@ export function ConversasPage() {
                   { id: "mine" as ViewMode, label: "Minhas" },
                   { id: "waiting" as ViewMode, label: "Bot/Aguardando" },
                 ] as const
-              ).map((opt) => (
+              ).map(opt => (
                 <button
                   key={opt.id}
                   type="button"
@@ -706,14 +804,13 @@ export function ConversasPage() {
                 </button>
               ))}
             </div>
-
           </div>
         </div>
 
         {/* ─── Abas de Status ─────────────────────────────────────────────── */}
         <div className="bg-white border-b border-slate-200 px-6 flex-shrink-0">
           <div className="flex gap-0">
-            {tabConfig.map((tab) => (
+            {tabConfig.map(tab => (
               <button
                 key={tab.id}
                 type="button"
@@ -749,7 +846,7 @@ export function ConversasPage() {
             <Input
               placeholder="Buscar por código, nome, empresa ou telefone..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={e => setSearchTerm(e.target.value)}
               className="pl-9 h-9 text-sm bg-slate-50 border-slate-200 focus:bg-white transition-colors"
             />
             {searchTerm && (
@@ -765,7 +862,10 @@ export function ConversasPage() {
         </div>
 
         {/* ─── Lista de Conversas ──────────────────────────────────────────── */}
-        <div data-testid="conversation-list-panel" className="flex-1 overflow-y-auto px-6 py-4">
+        <div
+          data-testid="conversation-list-panel"
+          className="flex-1 overflow-y-auto px-6 py-4"
+        >
           {isLoading && !hasLoaded ? (
             <div className="space-y-3">
               {Array.from({ length: 5 }).map((_, i) => (
@@ -781,8 +881,8 @@ export function ConversasPage() {
                 {searchTerm
                   ? "Nenhuma conversa encontrada para esta busca"
                   : statusTab === "active"
-                  ? "Nenhuma conversa aberta"
-                  : "Nenhuma conversa encerrada"}
+                    ? "Nenhuma conversa aberta"
+                    : "Nenhuma conversa encerrada"}
               </p>
               {searchTerm && (
                 <button
@@ -806,8 +906,8 @@ export function ConversasPage() {
                     onOpen={setSelectedConversation}
                     onClose={handleClose}
                     onReopen={handleReopen}
-                    onAssign={(id) => setAssigningConvId(id)}
-                    onClaim={(id) => claimMutation.mutate({ conversationId: id })}
+                    onAssign={id => setAssigningConvId(id)}
+                    onClaim={id => claimMutation.mutate({ conversationId: id })}
                     confirmingClose={confirmingClose}
                     setConfirmingClose={setConfirmingClose}
                     confirmingReopen={confirmingReopen}
@@ -821,34 +921,91 @@ export function ConversasPage() {
       </div>
 
       {selectedConversation && (
-        <div className="fixed inset-0 z-40 flex justify-end bg-black/20" onClick={closeSelectedConversation}>
-          <section data-testid="conversation-chat-panel" className="flex h-full w-full max-w-xl flex-col bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-40 flex justify-end bg-black/20"
+          onClick={closeSelectedConversation}
+        >
+          <section
+            data-testid="conversation-chat-panel"
+            className="flex h-full w-full max-w-xl flex-col bg-white shadow-xl"
+            onClick={event => event.stopPropagation()}
+          >
             <header className="flex items-center justify-between border-b px-4 py-3">
               <div>
-                <h2 className="font-semibold">Atendimento {localConversations.find(c => c.id === selectedConversation)?.publicCode ?? ""}</h2>
-                <p className="text-xs text-slate-500">{localConversations.find(c => c.id === selectedConversation)?.customerName ?? "Conversa"}</p>
+                <h2 className="font-semibold">
+                  Atendimento{" "}
+                  {localConversations.find(c => c.id === selectedConversation)
+                    ?.publicCode ?? ""}
+                </h2>
+                <p className="text-xs text-slate-500">
+                  {localConversations.find(c => c.id === selectedConversation)
+                    ?.customerName ?? "Conversa"}
+                </p>
               </div>
-              <button type="button" onClick={closeSelectedConversation} aria-label="Fechar conversa">×</button>
+              <button
+                type="button"
+                onClick={closeSelectedConversation}
+                aria-label="Fechar conversa"
+              >
+                ×
+              </button>
             </header>
-            <ConversationBackground preference={conversationBackground} className="flex-1 space-y-3 overflow-y-auto p-4">
+            <ConversationBackground
+              preference={conversationBackground}
+              className={`flex-1 ${conversationMessageAreaClasses}`}
+              data-testid="conversation-message-area"
+            >
               {(selectedMessages?.messages ?? []).map((message: any) => {
-                const incoming = message.sender === "customer" || message.from === "customer";
+                const incoming =
+                  message.sender === "customer" || message.from === "customer";
                 return (
-                  <ConversationMessageBubble key={message.id ?? `${message.timestamp}-${message.text}`} direction={incoming ? "incoming" : "outgoing"}>
-                    <ConversationMedia conversationId={selectedConversation} message={message} fallback={<span>{message.text}</span>} />
-                    {!incoming && message.agentName && <p className="mt-1 text-[10px] text-blue-100">{message.agentName}</p>}
+                  <ConversationMessageBubble
+                    key={message.id ?? `${message.timestamp}-${message.text}`}
+                    direction={incoming ? "incoming" : "outgoing"}
+                    preference={conversationBackground}
+                  >
+                    <ConversationMedia
+                      conversationId={selectedConversation}
+                      message={message}
+                      fallback={<span>{message.text}</span>}
+                    />
+                    {!incoming && message.agentName && (
+                      <p className="mt-1 text-[10px] opacity-70">
+                        {message.agentName}
+                      </p>
+                    )}
                   </ConversationMessageBubble>
                 );
               })}
             </ConversationBackground>
-            <form data-testid="conversation-composer" className="flex gap-2 border-t p-3" onSubmit={(event) => {
-              event.preventDefault();
-              const message = draftMessage.trim();
-              if (!message || sendMutation.isPending || !session?.userEmail) return;
-              sendMutation.mutate({ conversationId: selectedConversation, message, userEmail: session.userEmail, clientAttemptId: crypto.randomUUID() });
-            }}>
-              <Input value={draftMessage} onChange={(event) => setDraftMessage(event.target.value)} placeholder="Digite uma mensagem" />
-              <button type="submit" disabled={!draftMessage.trim() || sendMutation.isPending} className="rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50">Enviar</button>
+            <form
+              data-testid="conversation-composer"
+              className="flex gap-2 border-t p-3"
+              onSubmit={event => {
+                event.preventDefault();
+                const message = draftMessage.trim();
+                if (!message || sendMutation.isPending || !session?.userEmail)
+                  return;
+                sendMutation.mutate({
+                  conversationId: selectedConversation,
+                  message,
+                  userEmail: session.userEmail,
+                  clientAttemptId: crypto.randomUUID(),
+                });
+              }}
+            >
+              <Input
+                value={draftMessage}
+                onChange={event => setDraftMessage(event.target.value)}
+                placeholder="Digite uma mensagem"
+              />
+              <button
+                type="submit"
+                disabled={!draftMessage.trim() || sendMutation.isPending}
+                className="rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Enviar
+              </button>
             </form>
           </section>
         </div>
@@ -858,7 +1015,7 @@ export function ConversasPage() {
       <AssignModal
         conversationId={assigningConvId}
         users={
-          usersData?.map((u) => ({
+          usersData?.map(u => ({
             id: u.id,
             name: u.name,
             email: u.email,

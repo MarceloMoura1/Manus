@@ -1,6 +1,9 @@
 import { MessageCircle } from "lucide-react";
 import { ConversationBackground } from "@/components/ConversationBackground";
-import { ConversationMessageBubble } from "@/components/ConversationMessageBubble";
+import {
+  conversationMessageAreaClasses,
+  ConversationMessageBubble,
+} from "@/components/ConversationMessageBubble";
 import type { ConversationBackgroundPreference } from "@shared/user-personalization";
 
 type ConversationAppearancePreviewProps = {
@@ -45,34 +48,43 @@ export function ConversationAppearancePreview({
 
       <ConversationBackground
         preference={preference}
-        className="min-h-[25rem] p-4 sm:min-h-[29rem] sm:p-5"
+        className={`${conversationMessageAreaClasses} aspect-[16/10] w-full`}
       >
         <div
-          className="flex h-full max-w-xl flex-col justify-end gap-3"
+          className="space-y-3"
           data-testid="conversation-preview-message-area"
         >
-          <ConversationMessageBubble direction="incoming">
+          <ConversationMessageBubble
+            direction="incoming"
+            preference={preference}
+          >
             <p>Olá! Preciso de uma atualização sobre meu atendimento.</p>
             <time
-              className="mt-1 block text-[10px] text-slate-400"
+              className="mt-1 block text-[10px] opacity-70"
               dateTime="2026-09-09T10:30:00"
             >
               10:30
             </time>
           </ConversationMessageBubble>
-          <ConversationMessageBubble direction="outgoing">
+          <ConversationMessageBubble
+            direction="outgoing"
+            preference={preference}
+          >
             <p>Claro! Vou verificar os detalhes para você.</p>
             <time
-              className="mt-1 block text-[10px] text-blue-100"
+              className="mt-1 block text-[10px] opacity-70"
               dateTime="2026-09-09T10:31:00"
             >
               10:31
             </time>
           </ConversationMessageBubble>
-          <ConversationMessageBubble direction="incoming">
+          <ConversationMessageBubble
+            direction="incoming"
+            preference={preference}
+          >
             <p>Perfeito, obrigada pela ajuda.</p>
             <time
-              className="mt-1 block text-[10px] text-slate-400"
+              className="mt-1 block text-[10px] opacity-70"
               dateTime="2026-09-09T10:31:30"
             >
               10:31

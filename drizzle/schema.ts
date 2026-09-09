@@ -449,7 +449,11 @@ export const megadeskDomainConversations = mysqlTable(
     uniqueIndex("uq_mdc_public_code").on(table.publicCode),
     uniqueIndex("uq_mdc_active_key").on(table.activeKey),
     index("idx_mdc_tenant_contact").on(table.clientId, table.contactId),
-    index("idx_mdc_tenant_activity").on(table.clientId, table.status, table.updatedAt),
+    index("idx_mdc_tenant_activity").on(
+      table.clientId,
+      table.status,
+      table.updatedAt
+    ),
   ]
 );
 
@@ -465,11 +469,21 @@ export const megadeskConversationContacts = mysqlTable(
     provider: varchar({ length: 40 }).notNull(),
     externalIdentity: varchar("external_identity", { length: 180 }).notNull(),
     crmClientId: varchar("crm_client_id", { length: 80 }),
-    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow().onUpdateNow().notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
   },
   table => [
-    uniqueIndex("uq_mcc_identity").on(table.clientId, table.channel, table.provider, table.externalIdentity),
+    uniqueIndex("uq_mcc_identity").on(
+      table.clientId,
+      table.channel,
+      table.provider,
+      table.externalIdentity
+    ),
     index("idx_mcc_tenant_phone").on(table.clientId, table.canonicalPhone),
     index("idx_mcc_tenant_crm").on(table.clientId, table.crmClientId),
   ]
@@ -484,13 +498,26 @@ export const megadeskConversationEvents = mysqlTable(
     eventType: varchar("event_type", { length: 40 }).notNull(),
     operatorUserId: varchar("operator_user_id", { length: 80 }),
     anchorMessageId: varchar("anchor_message_id", { length: 100 }),
-    timelineAnchorKind: mysqlEnum("timeline_anchor_kind", ["message", "before_first"]),
+    timelineAnchorKind: mysqlEnum("timeline_anchor_kind", [
+      "message",
+      "before_first",
+    ]),
     metadataJson: text("metadata_json").default("{}").notNull(),
-    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
   },
   table => [
-    index("idx_mce_tenant_conversation").on(table.clientId, table.conversationId, table.createdAt),
-    index("idx_mce_tenant_conversation_anchor").on(table.clientId, table.conversationId, table.anchorMessageId),
+    index("idx_mce_tenant_conversation").on(
+      table.clientId,
+      table.conversationId,
+      table.createdAt
+    ),
+    index("idx_mce_tenant_conversation_anchor").on(
+      table.clientId,
+      table.conversationId,
+      table.anchorMessageId
+    ),
   ]
 );
 
@@ -503,10 +530,16 @@ export const megadeskConversationTickets = mysqlTable(
     chamadoId: varchar("chamado_id", { length: 80 }).notNull(),
     contactId: varchar("contact_id", { length: 80 }),
     linkedByUserId: varchar("linked_by_user_id", { length: 80 }).notNull(),
-    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
   },
   table => [
-    uniqueIndex("uq_mct_tenant_link").on(table.clientId, table.conversationId, table.chamadoId),
+    uniqueIndex("uq_mct_tenant_link").on(
+      table.clientId,
+      table.conversationId,
+      table.chamadoId
+    ),
     index("idx_mct_tenant_chamado").on(table.clientId, table.chamadoId),
   ]
 );
@@ -789,9 +822,21 @@ export const megadeskConversationMessages = mysqlTable(
   },
   table => [
     index("idx_mdcm_conversation").on(table.conversationId),
-    index("idx_mdcm_tenant_conversation").on(table.clientId, table.conversationId, table.timestamp),
-    uniqueIndex("uq_mdcm_external").on(table.clientId, table.provider, table.integrationId, table.externalMessageId),
-    uniqueIndex("uq_mdcm_client_attempt").on(table.clientId, table.clientAttemptId),
+    index("idx_mdcm_tenant_conversation").on(
+      table.clientId,
+      table.conversationId,
+      table.timestamp
+    ),
+    uniqueIndex("uq_mdcm_external").on(
+      table.clientId,
+      table.provider,
+      table.integrationId,
+      table.externalMessageId
+    ),
+    uniqueIndex("uq_mdcm_client_attempt").on(
+      table.clientId,
+      table.clientAttemptId
+    ),
   ]
 );
 
@@ -1070,7 +1115,11 @@ export const megadeskCrmClients = mysqlTable(
     status: mysqlEnum(["lead", "ativo", "inativo", "cancelado", "inadimplente"])
       .default("lead")
       .notNull(),
-    lifecycleState: mysqlEnum("lifecycle_state", ["active", "inactive", "archived"])
+    lifecycleState: mysqlEnum("lifecycle_state", [
+      "active",
+      "inactive",
+      "archived",
+    ])
       .default("active")
       .notNull(),
     preArchiveState: mysqlEnum("pre_archive_state", ["active", "inactive"]),
@@ -1162,9 +1211,28 @@ export const megadeskUserSettings = mysqlTable(
     autoResponseMessage: text("auto_response_message"),
     // Visual preferences remain scoped to the authenticated tenant + user pair.
     // The custom image is an opaque private storage key, never a user-controlled URL.
-    conversationBackgroundType: varchar("conversation_background_type", { length: 16 }).default("default").notNull(),
-    conversationBackgroundPresetId: varchar("conversation_background_preset_id", { length: 64 }),
-    conversationBackgroundImageKey: varchar("conversation_background_image_key", { length: 128 }),
+    conversationBackgroundType: varchar("conversation_background_type", {
+      length: 16,
+    })
+      .default("default")
+      .notNull(),
+    conversationBackgroundPresetId: varchar(
+      "conversation_background_preset_id",
+      { length: 64 }
+    ),
+    conversationBackgroundImageKey: varchar(
+      "conversation_background_image_key",
+      { length: 128 }
+    ),
+    // Null preserves the approved legacy bubble styling for existing users.
+    conversationIncomingBubbleColor: varchar(
+      "conversation_incoming_bubble_color",
+      { length: 7 }
+    ),
+    conversationOutgoingBubbleColor: varchar(
+      "conversation_outgoing_bubble_color",
+      { length: 7 }
+    ),
     createdAt: timestamp("created_at", { mode: "string" })
       .defaultNow()
       .notNull(),
@@ -1248,7 +1316,10 @@ export const erpProducts = mysqlTable(
     uniqueIndex("uq_erp_products_tenant_id").on(table.clientId, table.id),
     index("idx_erp_products_tenant_name").on(table.clientId, table.name),
     index("idx_erp_products_tenant_active").on(table.clientId, table.active),
-    index("idx_erp_products_primary_media").on(table.clientId, table.primaryMediaId),
+    index("idx_erp_products_primary_media").on(
+      table.clientId,
+      table.primaryMediaId
+    ),
     foreignKey({
       name: "fk_erp_products_primary_media",
       columns: [table.clientId, table.id, table.primaryMediaId],
@@ -1270,32 +1341,59 @@ export const erpProductMedia = mysqlTable(
     productId: bigint("product_id", { mode: "number" }).notNull(),
     category: mysqlEnum(["product_image"]).default("product_image").notNull(),
     storageKey: varchar("storage_key", { length: 180 }).notNull(),
-    thumbnailStorageKey: varchar("thumbnail_storage_key", { length: 180 }).notNull(),
-    mimeType: mysqlEnum("mime_type", ["image/jpeg", "image/png", "image/webp"]).notNull(),
+    thumbnailStorageKey: varchar("thumbnail_storage_key", {
+      length: 180,
+    }).notNull(),
+    mimeType: mysqlEnum("mime_type", [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+    ]).notNull(),
     byteSize: bigint("byte_size", { mode: "number" }).notNull(),
     sha256: varchar({ length: 64 }).notNull(),
     width: int().notNull(),
     height: int().notNull(),
-    state: mysqlEnum(["staged", "active", "pending_delete", "deleted"]).default("staged").notNull(),
-    activeProductId: bigint("active_product_id", { mode: "number" }).generatedAlwaysAs(
+    state: mysqlEnum(["staged", "active", "pending_delete", "deleted"])
+      .default("staged")
+      .notNull(),
+    activeProductId: bigint("active_product_id", {
+      mode: "number",
+    }).generatedAlwaysAs(
       sql`CASE WHEN ${sql.identifier("state")} = 'active' THEN ${sql.identifier("product_id")} ELSE NULL END`
     ),
     clientAttemptId: varchar("client_attempt_id", { length: 36 }).notNull(),
     createdBy: varchar("created_by", { length: 80 }).notNull(),
-    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
     activatedAt: timestamp("activated_at", { mode: "string" }),
     pendingDeleteAt: timestamp("pending_delete_at", { mode: "string" }),
     deletedAt: timestamp("deleted_at", { mode: "string" }),
   },
   (table): MySqlTableExtraConfigValue[] => [
     uniqueIndex("uq_epm_tenant_media").on(table.clientId, table.mediaId),
-    uniqueIndex("uq_epm_tenant_attempt").on(table.clientId, table.clientAttemptId),
+    uniqueIndex("uq_epm_tenant_attempt").on(
+      table.clientId,
+      table.clientAttemptId
+    ),
     uniqueIndex("uq_epm_storage_key").on(table.storageKey),
     uniqueIndex("uq_epm_thumbnail_key").on(table.thumbnailStorageKey),
-    uniqueIndex("uq_epm_tenant_product_id").on(table.clientId, table.productId, table.id),
+    uniqueIndex("uq_epm_tenant_product_id").on(
+      table.clientId,
+      table.productId,
+      table.id
+    ),
     uniqueIndex("uq_epm_one_active").on(table.clientId, table.activeProductId),
-    index("idx_epm_tenant_product_state").on(table.clientId, table.productId, table.state),
-    index("idx_epm_reconcile").on(table.state, table.createdAt, table.pendingDeleteAt),
+    index("idx_epm_tenant_product_state").on(
+      table.clientId,
+      table.productId,
+      table.state
+    ),
+    index("idx_epm_reconcile").on(
+      table.state,
+      table.createdAt,
+      table.pendingDeleteAt
+    ),
     foreignKey({
       name: "fk_epm_tenant_product",
       columns: [table.clientId, table.productId],
@@ -1696,165 +1794,782 @@ export const erpPurchaseOrderReceiptItems = mysqlTable(
   ]
 );
 
-export const erpSaleOrderSequences = mysqlTable("erp_sale_order_sequences", {
-  id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
-  clientId: varchar("client_id", { length: 80 }).notNull(),
-  year: int().notNull(),
-  nextNumber: int("next_number").default(1).notNull(),
-}, table => [uniqueIndex("uq_erp_sale_sequence_tenant_year").on(table.clientId, table.year)]);
+export const erpSaleOrderSequences = mysqlTable(
+  "erp_sale_order_sequences",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    year: int().notNull(),
+    nextNumber: int("next_number").default(1).notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_sale_sequence_tenant_year").on(
+      table.clientId,
+      table.year
+    ),
+  ]
+);
 
-export const erpSaleOrders = mysqlTable("erp_sale_orders", {
-  id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
-  publicId: varchar("public_id", { length: 36 }).notNull(),
-  clientId: varchar("client_id", { length: 80 }).notNull(),
-  orderNumber: varchar("order_number", { length: 32 }).notNull(),
-  crmClientId: varchar("crm_client_id", { length: 80 }).notNull(),
-  customerNameSnapshot: varchar("customer_name_snapshot", { length: 255 }).notNull(),
-  status: mysqlEnum(["draft", "confirmed", "fulfilled", "cancelled"]).default("draft").notNull(),
-  notes: text(),
-  expectedDate: date("expected_date", { mode: "string" }),
-  subtotalCents: bigint("subtotal_cents", { mode: "number" }).default(0).notNull(),
-  totalCents: bigint("total_cents", { mode: "number" }).default(0).notNull(),
-  confirmedBy: varchar("confirmed_by", { length: 80 }),
-  confirmedAt: timestamp("confirmed_at", { mode: "string" }),
-  fulfilledBy: varchar("fulfilled_by", { length: 80 }),
-  fulfilledAt: timestamp("fulfilled_at", { mode: "string" }),
-  cancelledBy: varchar("cancelled_by", { length: 80 }),
-  cancelledAt: timestamp("cancelled_at", { mode: "string" }),
-  cancellationReason: varchar("cancellation_reason", { length: 500 }),
-  createdBy: varchar("created_by", { length: 80 }).notNull(),
-  createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow().onUpdateNow().notNull(),
-}, table => [
-  uniqueIndex("uq_erp_sale_orders_tenant_public").on(table.clientId, table.publicId),
-  uniqueIndex("uq_erp_sale_orders_tenant_number").on(table.clientId, table.orderNumber),
-  index("idx_erp_sale_orders_tenant_status_date").on(table.clientId, table.status, table.createdAt),
-  index("idx_erp_sale_orders_tenant_customer").on(table.clientId, table.crmClientId),
-  foreignKey({ name: "fk_erp_so_customer", columns: [table.crmClientId], foreignColumns: [megadeskCrmClients.crmClientId] }),
-]);
+export const erpSaleOrders = mysqlTable(
+  "erp_sale_orders",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    orderNumber: varchar("order_number", { length: 32 }).notNull(),
+    crmClientId: varchar("crm_client_id", { length: 80 }).notNull(),
+    customerNameSnapshot: varchar("customer_name_snapshot", {
+      length: 255,
+    }).notNull(),
+    status: mysqlEnum(["draft", "confirmed", "fulfilled", "cancelled"])
+      .default("draft")
+      .notNull(),
+    notes: text(),
+    expectedDate: date("expected_date", { mode: "string" }),
+    subtotalCents: bigint("subtotal_cents", { mode: "number" })
+      .default(0)
+      .notNull(),
+    totalCents: bigint("total_cents", { mode: "number" }).default(0).notNull(),
+    confirmedBy: varchar("confirmed_by", { length: 80 }),
+    confirmedAt: timestamp("confirmed_at", { mode: "string" }),
+    fulfilledBy: varchar("fulfilled_by", { length: 80 }),
+    fulfilledAt: timestamp("fulfilled_at", { mode: "string" }),
+    cancelledBy: varchar("cancelled_by", { length: 80 }),
+    cancelledAt: timestamp("cancelled_at", { mode: "string" }),
+    cancellationReason: varchar("cancellation_reason", { length: 500 }),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_sale_orders_tenant_public").on(
+      table.clientId,
+      table.publicId
+    ),
+    uniqueIndex("uq_erp_sale_orders_tenant_number").on(
+      table.clientId,
+      table.orderNumber
+    ),
+    index("idx_erp_sale_orders_tenant_status_date").on(
+      table.clientId,
+      table.status,
+      table.createdAt
+    ),
+    index("idx_erp_sale_orders_tenant_customer").on(
+      table.clientId,
+      table.crmClientId
+    ),
+    foreignKey({
+      name: "fk_erp_so_customer",
+      columns: [table.crmClientId],
+      foreignColumns: [megadeskCrmClients.crmClientId],
+    }),
+  ]
+);
 
-export const erpSaleOrderItems = mysqlTable("erp_sale_order_items", {
-  id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
-  publicId: varchar("public_id", { length: 36 }).notNull(),
-  saleOrderId: bigint("sale_order_id", { mode: "number" }).notNull(),
-  productId: bigint("product_id", { mode: "number" }).notNull(),
-  productNameSnapshot: varchar("product_name_snapshot", { length: 180 }).notNull(),
-  skuSnapshot: varchar("sku_snapshot", { length: 80 }).notNull(),
-  quantity: decimal({ precision: 18, scale: 3 }).notNull(),
-  unitPriceCents: bigint("unit_price_cents", { mode: "number" }).notNull(),
-  lineTotalCents: bigint("line_total_cents", { mode: "number" }).notNull(),
-  createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow().onUpdateNow().notNull(),
-}, table => [
-  uniqueIndex("uq_erp_sale_items_order_public").on(table.saleOrderId, table.publicId),
-  uniqueIndex("uq_erp_sale_items_order_product").on(table.saleOrderId, table.productId),
-  foreignKey({ name: "fk_erp_soi_order", columns: [table.saleOrderId], foreignColumns: [erpSaleOrders.id] }),
-  foreignKey({ name: "fk_erp_soi_product", columns: [table.productId], foreignColumns: [erpProducts.id] }),
-]);
+export const erpSaleOrderItems = mysqlTable(
+  "erp_sale_order_items",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    saleOrderId: bigint("sale_order_id", { mode: "number" }).notNull(),
+    productId: bigint("product_id", { mode: "number" }).notNull(),
+    productNameSnapshot: varchar("product_name_snapshot", {
+      length: 180,
+    }).notNull(),
+    skuSnapshot: varchar("sku_snapshot", { length: 80 }).notNull(),
+    quantity: decimal({ precision: 18, scale: 3 }).notNull(),
+    unitPriceCents: bigint("unit_price_cents", { mode: "number" }).notNull(),
+    lineTotalCents: bigint("line_total_cents", { mode: "number" }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_sale_items_order_public").on(
+      table.saleOrderId,
+      table.publicId
+    ),
+    uniqueIndex("uq_erp_sale_items_order_product").on(
+      table.saleOrderId,
+      table.productId
+    ),
+    foreignKey({
+      name: "fk_erp_soi_order",
+      columns: [table.saleOrderId],
+      foreignColumns: [erpSaleOrders.id],
+    }),
+    foreignKey({
+      name: "fk_erp_soi_product",
+      columns: [table.productId],
+      foreignColumns: [erpProducts.id],
+    }),
+  ]
+);
 
-export const erpSaleOrderHistory = mysqlTable("erp_sale_order_history", {
-  id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
-  saleOrderId: bigint("sale_order_id", { mode: "number" }).notNull(),
-  fromStatus: mysqlEnum("from_status", ["draft", "confirmed", "fulfilled", "cancelled"]),
-  toStatus: mysqlEnum("to_status", ["draft", "confirmed", "fulfilled", "cancelled"]).notNull(),
-  reason: varchar({ length: 500 }),
-  changedBy: varchar("changed_by", { length: 80 }).notNull(),
-  createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
-}, table => [
-  index("idx_erp_sale_history_order_date").on(table.saleOrderId, table.createdAt),
-  foreignKey({ name: "fk_erp_soh_order", columns: [table.saleOrderId], foreignColumns: [erpSaleOrders.id] }),
-]);
+export const erpSaleOrderHistory = mysqlTable(
+  "erp_sale_order_history",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    saleOrderId: bigint("sale_order_id", { mode: "number" }).notNull(),
+    fromStatus: mysqlEnum("from_status", [
+      "draft",
+      "confirmed",
+      "fulfilled",
+      "cancelled",
+    ]),
+    toStatus: mysqlEnum("to_status", [
+      "draft",
+      "confirmed",
+      "fulfilled",
+      "cancelled",
+    ]).notNull(),
+    reason: varchar({ length: 500 }),
+    changedBy: varchar("changed_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  table => [
+    index("idx_erp_sale_history_order_date").on(
+      table.saleOrderId,
+      table.createdAt
+    ),
+    foreignKey({
+      name: "fk_erp_soh_order",
+      columns: [table.saleOrderId],
+      foreignColumns: [erpSaleOrders.id],
+    }),
+  ]
+);
 
-export const erpSaleOrderFulfillments = mysqlTable("erp_sale_order_fulfillments", {
-  id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
-  publicId: varchar("public_id", { length: 36 }).notNull(),
-  clientId: varchar("client_id", { length: 80 }).notNull(),
-  saleOrderId: bigint("sale_order_id", { mode: "number" }).notNull(),
-  idempotencyKey: varchar("idempotency_key", { length: 100 }).notNull(),
-  fulfilledBy: varchar("fulfilled_by", { length: 80 }).notNull(),
-  fulfilledAt: timestamp("fulfilled_at", { mode: "string" }).defaultNow().notNull(),
-  createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow().onUpdateNow().notNull(),
-}, table => [
-  uniqueIndex("uq_erp_sale_fulfillments_tenant_public").on(table.clientId, table.publicId),
-  uniqueIndex("uq_erp_sale_fulfillments_tenant_idempotency").on(table.clientId, table.idempotencyKey),
-  uniqueIndex("uq_erp_sale_fulfillments_order").on(table.saleOrderId),
-  foreignKey({ name: "fk_erp_sof_order", columns: [table.saleOrderId], foreignColumns: [erpSaleOrders.id] }),
-]);
+export const erpSaleOrderFulfillments = mysqlTable(
+  "erp_sale_order_fulfillments",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    saleOrderId: bigint("sale_order_id", { mode: "number" }).notNull(),
+    idempotencyKey: varchar("idempotency_key", { length: 100 }).notNull(),
+    fulfilledBy: varchar("fulfilled_by", { length: 80 }).notNull(),
+    fulfilledAt: timestamp("fulfilled_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_sale_fulfillments_tenant_public").on(
+      table.clientId,
+      table.publicId
+    ),
+    uniqueIndex("uq_erp_sale_fulfillments_tenant_idempotency").on(
+      table.clientId,
+      table.idempotencyKey
+    ),
+    uniqueIndex("uq_erp_sale_fulfillments_order").on(table.saleOrderId),
+    foreignKey({
+      name: "fk_erp_sof_order",
+      columns: [table.saleOrderId],
+      foreignColumns: [erpSaleOrders.id],
+    }),
+  ]
+);
 
-export const erpSaleOrderFulfillmentItems = mysqlTable("erp_sale_order_fulfillment_items", {
-  id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
-  fulfillmentId: bigint("fulfillment_id", { mode: "number" }).notNull(),
-  saleOrderItemId: bigint("sale_order_item_id", { mode: "number" }).notNull(),
-  productId: bigint("product_id", { mode: "number" }).notNull(),
-  quantity: decimal({ precision: 18, scale: 3 }).notNull(),
-  stockMovementId: bigint("stock_movement_id", { mode: "number" }).notNull(),
-  createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
-}, table => [
-  uniqueIndex("uq_erp_sale_fulfillment_item_order_item").on(table.fulfillmentId, table.saleOrderItemId),
-  uniqueIndex("uq_erp_sale_fulfillment_item_movement").on(table.stockMovementId),
-  foreignKey({ name: "fk_erp_sofi_fulfillment", columns: [table.fulfillmentId], foreignColumns: [erpSaleOrderFulfillments.id] }),
-  foreignKey({ name: "fk_erp_sofi_order_item", columns: [table.saleOrderItemId], foreignColumns: [erpSaleOrderItems.id] }),
-  foreignKey({ name: "fk_erp_sofi_product", columns: [table.productId], foreignColumns: [erpProducts.id] }),
-  foreignKey({ name: "fk_erp_sofi_movement", columns: [table.stockMovementId], foreignColumns: [erpStockMovements.id] }),
-]);
+export const erpSaleOrderFulfillmentItems = mysqlTable(
+  "erp_sale_order_fulfillment_items",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    fulfillmentId: bigint("fulfillment_id", { mode: "number" }).notNull(),
+    saleOrderItemId: bigint("sale_order_item_id", { mode: "number" }).notNull(),
+    productId: bigint("product_id", { mode: "number" }).notNull(),
+    quantity: decimal({ precision: 18, scale: 3 }).notNull(),
+    stockMovementId: bigint("stock_movement_id", { mode: "number" }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_sale_fulfillment_item_order_item").on(
+      table.fulfillmentId,
+      table.saleOrderItemId
+    ),
+    uniqueIndex("uq_erp_sale_fulfillment_item_movement").on(
+      table.stockMovementId
+    ),
+    foreignKey({
+      name: "fk_erp_sofi_fulfillment",
+      columns: [table.fulfillmentId],
+      foreignColumns: [erpSaleOrderFulfillments.id],
+    }),
+    foreignKey({
+      name: "fk_erp_sofi_order_item",
+      columns: [table.saleOrderItemId],
+      foreignColumns: [erpSaleOrderItems.id],
+    }),
+    foreignKey({
+      name: "fk_erp_sofi_product",
+      columns: [table.productId],
+      foreignColumns: [erpProducts.id],
+    }),
+    foreignKey({
+      name: "fk_erp_sofi_movement",
+      columns: [table.stockMovementId],
+      foreignColumns: [erpStockMovements.id],
+    }),
+  ]
+);
 
-export const erpFinancialAccounts = mysqlTable("erp_financial_accounts", {
-  id: bigint({mode:"number"}).autoincrement().primaryKey().notNull(), publicId:varchar("public_id",{length:36}).notNull(), clientId:varchar("client_id",{length:80}).notNull(),
-  name:varchar({length:180}).notNull(), type:mysqlEnum(["cash","bank"]).notNull(), initialBalanceCents:bigint("initial_balance_cents",{mode:"number"}).notNull(), currentBalanceCents:bigint("current_balance_cents",{mode:"number"}).notNull(),
-  allowNegative:boolean("allow_negative").default(false).notNull(), active:boolean().default(true).notNull(), createdBy:varchar("created_by",{length:80}).notNull(),
-  createdAt:timestamp("created_at",{mode:"string"}).defaultNow().notNull(),updatedAt:timestamp("updated_at",{mode:"string"}).defaultNow().onUpdateNow().notNull(),
-},t=>[uniqueIndex("uq_erp_fin_accounts_tenant_public").on(t.clientId,t.publicId),uniqueIndex("uq_erp_fin_accounts_tenant_name").on(t.clientId,t.name),index("idx_erp_fin_accounts_tenant_active").on(t.clientId,t.active)]);
+export const erpFinancialAccounts = mysqlTable(
+  "erp_financial_accounts",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    name: varchar({ length: 180 }).notNull(),
+    type: mysqlEnum(["cash", "bank"]).notNull(),
+    initialBalanceCents: bigint("initial_balance_cents", {
+      mode: "number",
+    }).notNull(),
+    currentBalanceCents: bigint("current_balance_cents", {
+      mode: "number",
+    }).notNull(),
+    allowNegative: boolean("allow_negative").default(false).notNull(),
+    active: boolean().default(true).notNull(),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  t => [
+    uniqueIndex("uq_erp_fin_accounts_tenant_public").on(t.clientId, t.publicId),
+    uniqueIndex("uq_erp_fin_accounts_tenant_name").on(t.clientId, t.name),
+    index("idx_erp_fin_accounts_tenant_active").on(t.clientId, t.active),
+  ]
+);
 
-export const erpFinancialCategories = mysqlTable("erp_financial_categories", {
-  id:bigint({mode:"number"}).autoincrement().primaryKey().notNull(),publicId:varchar("public_id",{length:36}).notNull(),clientId:varchar("client_id",{length:80}).notNull(),name:varchar({length:180}).notNull(),
-  direction:mysqlEnum(["payable","receivable","both"]).notNull(),active:boolean().default(true).notNull(),createdAt:timestamp("created_at",{mode:"string"}).defaultNow().notNull(),updatedAt:timestamp("updated_at",{mode:"string"}).defaultNow().onUpdateNow().notNull(),
-},t=>[uniqueIndex("uq_erp_fin_categories_tenant_public").on(t.clientId,t.publicId),uniqueIndex("uq_erp_fin_categories_tenant_name").on(t.clientId,t.name),index("idx_erp_fin_categories_tenant_active").on(t.clientId,t.active)]);
+export const erpFinancialCategories = mysqlTable(
+  "erp_financial_categories",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    name: varchar({ length: 180 }).notNull(),
+    direction: mysqlEnum(["payable", "receivable", "both"]).notNull(),
+    active: boolean().default(true).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  t => [
+    uniqueIndex("uq_erp_fin_categories_tenant_public").on(
+      t.clientId,
+      t.publicId
+    ),
+    uniqueIndex("uq_erp_fin_categories_tenant_name").on(t.clientId, t.name),
+    index("idx_erp_fin_categories_tenant_active").on(t.clientId, t.active),
+  ]
+);
 
-export const erpFinancialEntries = mysqlTable("erp_financial_entries", {
-  id:bigint({mode:"number"}).autoincrement().primaryKey().notNull(),publicId:varchar("public_id",{length:36}).notNull(),clientId:varchar("client_id",{length:80}).notNull(),documentNumber:varchar("document_number",{length:80}).notNull(),
-  direction:mysqlEnum(["payable","receivable"]).notNull(),status:mysqlEnum(["open","settled","cancelled"]).default("open").notNull(),description:varchar({length:500}).notNull(),amountCents:bigint("amount_cents",{mode:"number"}).notNull(),
-  dueDate:date("due_date",{mode:"string"}).notNull(),issueDate:date("issue_date",{mode:"string"}).notNull(),categoryId:bigint("category_id",{mode:"number"}).notNull(),financialAccountId:bigint("financial_account_id",{mode:"number"}),
-  supplierId:bigint("supplier_id",{mode:"number"}),crmClientId:varchar("crm_client_id",{length:80}),sourceType:mysqlEnum("source_type",["manual","purchase_order","sales_order"]).notNull(),sourcePublicId:varchar("source_public_id",{length:36}),
-  partyNameSnapshot:varchar("party_name_snapshot",{length:255}),notes:text(),settledAt:timestamp("settled_at",{mode:"string"}),settledBy:varchar("settled_by",{length:80}),cancelledAt:timestamp("cancelled_at",{mode:"string"}),cancelledBy:varchar("cancelled_by",{length:80}),cancellationReason:varchar("cancellation_reason",{length:500}),createdBy:varchar("created_by",{length:80}).notNull(),createdAt:timestamp("created_at",{mode:"string"}).defaultNow().notNull(),updatedAt:timestamp("updated_at",{mode:"string"}).defaultNow().onUpdateNow().notNull(),
-},t=>[uniqueIndex("uq_erp_fin_entries_tenant_public").on(t.clientId,t.publicId),uniqueIndex("uq_erp_fin_entries_tenant_source").on(t.clientId,t.sourceType,t.sourcePublicId),index("idx_erp_fin_entries_tenant_status_due").on(t.clientId,t.status,t.dueDate),index("idx_erp_fin_entries_tenant_direction_issue").on(t.clientId,t.direction,t.issueDate),foreignKey({name:"fk_erp_fin_entry_category",columns:[t.categoryId],foreignColumns:[erpFinancialCategories.id]}),foreignKey({name:"fk_erp_fin_entry_account",columns:[t.financialAccountId],foreignColumns:[erpFinancialAccounts.id]}),foreignKey({name:"fk_erp_fin_entry_supplier",columns:[t.supplierId],foreignColumns:[erpSuppliers.id]})]);
+export const erpFinancialEntries = mysqlTable(
+  "erp_financial_entries",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    documentNumber: varchar("document_number", { length: 80 }).notNull(),
+    direction: mysqlEnum(["payable", "receivable"]).notNull(),
+    status: mysqlEnum(["open", "settled", "cancelled"])
+      .default("open")
+      .notNull(),
+    description: varchar({ length: 500 }).notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    dueDate: date("due_date", { mode: "string" }).notNull(),
+    issueDate: date("issue_date", { mode: "string" }).notNull(),
+    categoryId: bigint("category_id", { mode: "number" }).notNull(),
+    financialAccountId: bigint("financial_account_id", { mode: "number" }),
+    supplierId: bigint("supplier_id", { mode: "number" }),
+    crmClientId: varchar("crm_client_id", { length: 80 }),
+    sourceType: mysqlEnum("source_type", [
+      "manual",
+      "purchase_order",
+      "sales_order",
+    ]).notNull(),
+    sourcePublicId: varchar("source_public_id", { length: 36 }),
+    partyNameSnapshot: varchar("party_name_snapshot", { length: 255 }),
+    notes: text(),
+    settledAt: timestamp("settled_at", { mode: "string" }),
+    settledBy: varchar("settled_by", { length: 80 }),
+    cancelledAt: timestamp("cancelled_at", { mode: "string" }),
+    cancelledBy: varchar("cancelled_by", { length: 80 }),
+    cancellationReason: varchar("cancellation_reason", { length: 500 }),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  t => [
+    uniqueIndex("uq_erp_fin_entries_tenant_public").on(t.clientId, t.publicId),
+    uniqueIndex("uq_erp_fin_entries_tenant_source").on(
+      t.clientId,
+      t.sourceType,
+      t.sourcePublicId
+    ),
+    index("idx_erp_fin_entries_tenant_status_due").on(
+      t.clientId,
+      t.status,
+      t.dueDate
+    ),
+    index("idx_erp_fin_entries_tenant_direction_issue").on(
+      t.clientId,
+      t.direction,
+      t.issueDate
+    ),
+    foreignKey({
+      name: "fk_erp_fin_entry_category",
+      columns: [t.categoryId],
+      foreignColumns: [erpFinancialCategories.id],
+    }),
+    foreignKey({
+      name: "fk_erp_fin_entry_account",
+      columns: [t.financialAccountId],
+      foreignColumns: [erpFinancialAccounts.id],
+    }),
+    foreignKey({
+      name: "fk_erp_fin_entry_supplier",
+      columns: [t.supplierId],
+      foreignColumns: [erpSuppliers.id],
+    }),
+  ]
+);
 
-export const erpFinancialSettlements = mysqlTable("erp_financial_settlements", {
-  id:bigint({mode:"number"}).autoincrement().primaryKey().notNull(),publicId:varchar("public_id",{length:36}).notNull(),clientId:varchar("client_id",{length:80}).notNull(),financialEntryId:bigint("financial_entry_id",{mode:"number"}).notNull(),financialAccountId:bigint("financial_account_id",{mode:"number"}).notNull(),idempotencyKey:varchar("idempotency_key",{length:100}).notNull(),amountCents:bigint("amount_cents",{mode:"number"}).notNull(),settledBy:varchar("settled_by",{length:80}).notNull(),settledAt:timestamp("settled_at",{mode:"string"}).defaultNow().notNull(),createdAt:timestamp("created_at",{mode:"string"}).defaultNow().notNull(),updatedAt:timestamp("updated_at",{mode:"string"}).defaultNow().onUpdateNow().notNull(),
-},t=>[uniqueIndex("uq_erp_fin_settlements_tenant_public").on(t.clientId,t.publicId),uniqueIndex("uq_erp_fin_settlements_tenant_entry").on(t.clientId,t.financialEntryId),uniqueIndex("uq_erp_fin_settlements_tenant_key").on(t.clientId,t.idempotencyKey),foreignKey({name:"fk_erp_fin_settlement_entry",columns:[t.financialEntryId],foreignColumns:[erpFinancialEntries.id]}),foreignKey({name:"fk_erp_fin_settlement_account",columns:[t.financialAccountId],foreignColumns:[erpFinancialAccounts.id]})]);
+export const erpFinancialSettlements = mysqlTable(
+  "erp_financial_settlements",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    financialEntryId: bigint("financial_entry_id", {
+      mode: "number",
+    }).notNull(),
+    financialAccountId: bigint("financial_account_id", {
+      mode: "number",
+    }).notNull(),
+    idempotencyKey: varchar("idempotency_key", { length: 100 }).notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    settledBy: varchar("settled_by", { length: 80 }).notNull(),
+    settledAt: timestamp("settled_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  t => [
+    uniqueIndex("uq_erp_fin_settlements_tenant_public").on(
+      t.clientId,
+      t.publicId
+    ),
+    uniqueIndex("uq_erp_fin_settlements_tenant_entry").on(
+      t.clientId,
+      t.financialEntryId
+    ),
+    uniqueIndex("uq_erp_fin_settlements_tenant_key").on(
+      t.clientId,
+      t.idempotencyKey
+    ),
+    foreignKey({
+      name: "fk_erp_fin_settlement_entry",
+      columns: [t.financialEntryId],
+      foreignColumns: [erpFinancialEntries.id],
+    }),
+    foreignKey({
+      name: "fk_erp_fin_settlement_account",
+      columns: [t.financialAccountId],
+      foreignColumns: [erpFinancialAccounts.id],
+    }),
+  ]
+);
 
-export const erpFinancialLedger = mysqlTable("erp_financial_ledger", {
-  id:bigint({mode:"number"}).autoincrement().primaryKey().notNull(),publicId:varchar("public_id",{length:36}).notNull(),clientId:varchar("client_id",{length:80}).notNull(),financialAccountId:bigint("financial_account_id",{mode:"number"}).notNull(),financialEntryId:bigint("financial_entry_id",{mode:"number"}),settlementId:bigint("settlement_id",{mode:"number"}),type:mysqlEnum(["opening_balance","payable_settlement","receivable_settlement"]).notNull(),amountCents:bigint("amount_cents",{mode:"number"}).notNull(),previousBalanceCents:bigint("previous_balance_cents",{mode:"number"}).notNull(),resultingBalanceCents:bigint("resulting_balance_cents",{mode:"number"}).notNull(),occurredAt:timestamp("occurred_at",{mode:"string"}).defaultNow().notNull(),createdBy:varchar("created_by",{length:80}).notNull(),metadata:text(),createdAt:timestamp("created_at",{mode:"string"}).defaultNow().notNull(),updatedAt:timestamp("updated_at",{mode:"string"}).defaultNow().notNull(),
-},t=>[uniqueIndex("uq_erp_fin_ledger_tenant_public").on(t.clientId,t.publicId),uniqueIndex("uq_erp_fin_ledger_settlement").on(t.settlementId),index("idx_erp_fin_ledger_tenant_account_date").on(t.clientId,t.financialAccountId,t.occurredAt),foreignKey({name:"fk_erp_fin_ledger_account",columns:[t.financialAccountId],foreignColumns:[erpFinancialAccounts.id]}),foreignKey({name:"fk_erp_fin_ledger_entry",columns:[t.financialEntryId],foreignColumns:[erpFinancialEntries.id]}),foreignKey({name:"fk_erp_fin_ledger_settlement",columns:[t.settlementId],foreignColumns:[erpFinancialSettlements.id]})]);
+export const erpFinancialLedger = mysqlTable(
+  "erp_financial_ledger",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    financialAccountId: bigint("financial_account_id", {
+      mode: "number",
+    }).notNull(),
+    financialEntryId: bigint("financial_entry_id", { mode: "number" }),
+    settlementId: bigint("settlement_id", { mode: "number" }),
+    type: mysqlEnum([
+      "opening_balance",
+      "payable_settlement",
+      "receivable_settlement",
+    ]).notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    previousBalanceCents: bigint("previous_balance_cents", {
+      mode: "number",
+    }).notNull(),
+    resultingBalanceCents: bigint("resulting_balance_cents", {
+      mode: "number",
+    }).notNull(),
+    occurredAt: timestamp("occurred_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    metadata: text(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  t => [
+    uniqueIndex("uq_erp_fin_ledger_tenant_public").on(t.clientId, t.publicId),
+    uniqueIndex("uq_erp_fin_ledger_settlement").on(t.settlementId),
+    index("idx_erp_fin_ledger_tenant_account_date").on(
+      t.clientId,
+      t.financialAccountId,
+      t.occurredAt
+    ),
+    foreignKey({
+      name: "fk_erp_fin_ledger_account",
+      columns: [t.financialAccountId],
+      foreignColumns: [erpFinancialAccounts.id],
+    }),
+    foreignKey({
+      name: "fk_erp_fin_ledger_entry",
+      columns: [t.financialEntryId],
+      foreignColumns: [erpFinancialEntries.id],
+    }),
+    foreignKey({
+      name: "fk_erp_fin_ledger_settlement",
+      columns: [t.settlementId],
+      foreignColumns: [erpFinancialSettlements.id],
+    }),
+  ]
+);
 
-export const erpFiscalSettings = mysqlTable("erp_fiscal_settings", {
-  id:bigint({mode:"number"}).autoincrement().primaryKey().notNull(),publicId:varchar("public_id",{length:36}).notNull(),clientId:varchar("client_id",{length:80}).notNull(),taxRegime:mysqlEnum("tax_regime",["mei","simples_nacional","lucro_presumido","lucro_real","other"]).notNull(),taxpayerIndicator:mysqlEnum("taxpayer_indicator",["taxpayer","exempt","non_taxpayer"]).notNull(),stateRegistration:varchar("state_registration",{length:30}),municipalRegistration:varchar("municipal_registration",{length:30}),mainCnae:varchar("main_cnae",{length:10}),ibgeCityCode:varchar("ibge_city_code",{length:7}),environment:mysqlEnum(["homologation","production"]).default("homologation").notNull(),provider:mysqlEnum(["none"]).default("none").notNull(),status:mysqlEnum(["incomplete","ready_for_integration"]).default("incomplete").notNull(),updatedBy:varchar("updated_by",{length:80}).notNull(),createdAt:timestamp("created_at",{mode:"string"}).defaultNow().notNull(),updatedAt:timestamp("updated_at",{mode:"string"}).defaultNow().onUpdateNow().notNull(),
-},t=>[uniqueIndex("uq_erp_fiscal_settings_tenant").on(t.clientId),uniqueIndex("uq_erp_fiscal_settings_public").on(t.clientId,t.publicId)]);
+export const erpFiscalSettings = mysqlTable(
+  "erp_fiscal_settings",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    taxRegime: mysqlEnum("tax_regime", [
+      "mei",
+      "simples_nacional",
+      "lucro_presumido",
+      "lucro_real",
+      "other",
+    ]).notNull(),
+    taxpayerIndicator: mysqlEnum("taxpayer_indicator", [
+      "taxpayer",
+      "exempt",
+      "non_taxpayer",
+    ]).notNull(),
+    stateRegistration: varchar("state_registration", { length: 30 }),
+    municipalRegistration: varchar("municipal_registration", { length: 30 }),
+    mainCnae: varchar("main_cnae", { length: 10 }),
+    ibgeCityCode: varchar("ibge_city_code", { length: 7 }),
+    environment: mysqlEnum(["homologation", "production"])
+      .default("homologation")
+      .notNull(),
+    provider: mysqlEnum(["none"]).default("none").notNull(),
+    status: mysqlEnum(["incomplete", "ready_for_integration"])
+      .default("incomplete")
+      .notNull(),
+    updatedBy: varchar("updated_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  t => [
+    uniqueIndex("uq_erp_fiscal_settings_tenant").on(t.clientId),
+    uniqueIndex("uq_erp_fiscal_settings_public").on(t.clientId, t.publicId),
+  ]
+);
 
-export const erpFiscalSettingsHistory = mysqlTable("erp_fiscal_settings_history", {
-  id:bigint({mode:"number"}).autoincrement().primaryKey().notNull(),clientId:varchar("client_id",{length:80}).notNull(),settingsId:bigint("settings_id",{mode:"number"}).notNull(),operation:mysqlEnum(["created","updated"]).notNull(),status:mysqlEnum(["incomplete","ready_for_integration"]).notNull(),changedFields:text("changed_fields").notNull(),changedBy:varchar("changed_by",{length:80}).notNull(),createdAt:timestamp("created_at",{mode:"string"}).defaultNow().notNull(),
-},t=>[index("idx_erp_fiscal_settings_history_tenant_date").on(t.clientId,t.createdAt),foreignKey({name:"fk_erp_fiscal_settings_history_settings",columns:[t.settingsId],foreignColumns:[erpFiscalSettings.id]})]);
+export const erpFiscalSettingsHistory = mysqlTable(
+  "erp_fiscal_settings_history",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    settingsId: bigint("settings_id", { mode: "number" }).notNull(),
+    operation: mysqlEnum(["created", "updated"]).notNull(),
+    status: mysqlEnum(["incomplete", "ready_for_integration"]).notNull(),
+    changedFields: text("changed_fields").notNull(),
+    changedBy: varchar("changed_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  t => [
+    index("idx_erp_fiscal_settings_history_tenant_date").on(
+      t.clientId,
+      t.createdAt
+    ),
+    foreignKey({
+      name: "fk_erp_fiscal_settings_history_settings",
+      columns: [t.settingsId],
+      foreignColumns: [erpFiscalSettings.id],
+    }),
+  ]
+);
 
-export const erpProductFiscalProfiles = mysqlTable("erp_product_fiscal_profiles", {
-  id:bigint({mode:"number"}).autoincrement().primaryKey().notNull(),publicId:varchar("public_id",{length:36}).notNull(),clientId:varchar("client_id",{length:80}).notNull(),productId:bigint("product_id",{mode:"number"}).notNull(),ncm:varchar({length:8}),cest:varchar({length:7}),defaultOutboundCfop:varchar("default_outbound_cfop",{length:4}),defaultInboundCfop:varchar("default_inbound_cfop",{length:4}),goodsOrigin:varchar("goods_origin",{length:2}),fiscalUnit:varchar("fiscal_unit",{length:12}).notNull(),gtin:varchar({length:14}),serviceCode:varchar("service_code",{length:20}),operationNature:varchar("operation_nature",{length:120}),internalNotes:text("internal_notes"),completeness:mysqlEnum(["incomplete","complete"]).default("incomplete").notNull(),updatedBy:varchar("updated_by",{length:80}).notNull(),createdAt:timestamp("created_at",{mode:"string"}).defaultNow().notNull(),updatedAt:timestamp("updated_at",{mode:"string"}).defaultNow().onUpdateNow().notNull(),
-},t=>[uniqueIndex("uq_erp_product_fiscal_tenant_public").on(t.clientId,t.publicId),uniqueIndex("uq_erp_product_fiscal_product").on(t.productId),index("idx_erp_product_fiscal_tenant_complete").on(t.clientId,t.completeness),foreignKey({name:"fk_erp_product_fiscal_product",columns:[t.productId],foreignColumns:[erpProducts.id]})]);
+export const erpProductFiscalProfiles = mysqlTable(
+  "erp_product_fiscal_profiles",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    productId: bigint("product_id", { mode: "number" }).notNull(),
+    ncm: varchar({ length: 8 }),
+    cest: varchar({ length: 7 }),
+    defaultOutboundCfop: varchar("default_outbound_cfop", { length: 4 }),
+    defaultInboundCfop: varchar("default_inbound_cfop", { length: 4 }),
+    goodsOrigin: varchar("goods_origin", { length: 2 }),
+    fiscalUnit: varchar("fiscal_unit", { length: 12 }).notNull(),
+    gtin: varchar({ length: 14 }),
+    serviceCode: varchar("service_code", { length: 20 }),
+    operationNature: varchar("operation_nature", { length: 120 }),
+    internalNotes: text("internal_notes"),
+    completeness: mysqlEnum(["incomplete", "complete"])
+      .default("incomplete")
+      .notNull(),
+    updatedBy: varchar("updated_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  t => [
+    uniqueIndex("uq_erp_product_fiscal_tenant_public").on(
+      t.clientId,
+      t.publicId
+    ),
+    uniqueIndex("uq_erp_product_fiscal_product").on(t.productId),
+    index("idx_erp_product_fiscal_tenant_complete").on(
+      t.clientId,
+      t.completeness
+    ),
+    foreignKey({
+      name: "fk_erp_product_fiscal_product",
+      columns: [t.productId],
+      foreignColumns: [erpProducts.id],
+    }),
+  ]
+);
 
-export const erpFiscalDocumentSequences = mysqlTable("erp_fiscal_document_sequences", {
-  id:bigint({mode:"number"}).autoincrement().primaryKey().notNull(),clientId:varchar("client_id",{length:80}).notNull(),year:int().notNull(),nextNumber:int("next_number").default(1).notNull(),
-},t=>[uniqueIndex("uq_erp_fiscal_sequence_tenant_year").on(t.clientId,t.year)]);
+export const erpFiscalDocumentSequences = mysqlTable(
+  "erp_fiscal_document_sequences",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    year: int().notNull(),
+    nextNumber: int("next_number").default(1).notNull(),
+  },
+  t => [
+    uniqueIndex("uq_erp_fiscal_sequence_tenant_year").on(t.clientId, t.year),
+  ]
+);
 
-export const erpFiscalDocuments = mysqlTable("erp_fiscal_documents", {
-  id:bigint({mode:"number"}).autoincrement().primaryKey().notNull(),publicId:varchar("public_id",{length:36}).notNull(),clientId:varchar("client_id",{length:80}).notNull(),internalNumber:varchar("internal_number",{length:32}).notNull(),type:mysqlEnum(["sale","purchase","manual"]).notNull(),status:mysqlEnum(["draft","ready_for_integration","cancelled"]).default("draft").notNull(),internalIssueDate:date("internal_issue_date",{mode:"string"}).notNull(),sourcePublicId:varchar("source_public_id",{length:36}),partyNameSnapshot:varchar("party_name_snapshot",{length:255}).notNull(),partyDocumentSnapshot:varchar("party_document_snapshot",{length:30}),totalCents:bigint("total_cents",{mode:"number"}).notNull(),internalNotes:text("internal_notes"),cancelledAt:timestamp("cancelled_at",{mode:"string"}),cancelledBy:varchar("cancelled_by",{length:80}),cancellationReason:varchar("cancellation_reason",{length:500}),createdBy:varchar("created_by",{length:80}).notNull(),updatedBy:varchar("updated_by",{length:80}).notNull(),createdAt:timestamp("created_at",{mode:"string"}).defaultNow().notNull(),updatedAt:timestamp("updated_at",{mode:"string"}).defaultNow().onUpdateNow().notNull(),
-},t=>[uniqueIndex("uq_erp_fiscal_documents_tenant_public").on(t.clientId,t.publicId),uniqueIndex("uq_erp_fiscal_documents_tenant_number").on(t.clientId,t.internalNumber),uniqueIndex("uq_erp_fiscal_documents_tenant_source").on(t.clientId,t.type,t.sourcePublicId),index("idx_erp_fiscal_documents_tenant_status_date").on(t.clientId,t.status,t.internalIssueDate)]);
+export const erpFiscalDocuments = mysqlTable(
+  "erp_fiscal_documents",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    internalNumber: varchar("internal_number", { length: 32 }).notNull(),
+    type: mysqlEnum(["sale", "purchase", "manual"]).notNull(),
+    status: mysqlEnum(["draft", "ready_for_integration", "cancelled"])
+      .default("draft")
+      .notNull(),
+    internalIssueDate: date("internal_issue_date", {
+      mode: "string",
+    }).notNull(),
+    sourcePublicId: varchar("source_public_id", { length: 36 }),
+    partyNameSnapshot: varchar("party_name_snapshot", {
+      length: 255,
+    }).notNull(),
+    partyDocumentSnapshot: varchar("party_document_snapshot", { length: 30 }),
+    totalCents: bigint("total_cents", { mode: "number" }).notNull(),
+    internalNotes: text("internal_notes"),
+    cancelledAt: timestamp("cancelled_at", { mode: "string" }),
+    cancelledBy: varchar("cancelled_by", { length: 80 }),
+    cancellationReason: varchar("cancellation_reason", { length: 500 }),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    updatedBy: varchar("updated_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  t => [
+    uniqueIndex("uq_erp_fiscal_documents_tenant_public").on(
+      t.clientId,
+      t.publicId
+    ),
+    uniqueIndex("uq_erp_fiscal_documents_tenant_number").on(
+      t.clientId,
+      t.internalNumber
+    ),
+    uniqueIndex("uq_erp_fiscal_documents_tenant_source").on(
+      t.clientId,
+      t.type,
+      t.sourcePublicId
+    ),
+    index("idx_erp_fiscal_documents_tenant_status_date").on(
+      t.clientId,
+      t.status,
+      t.internalIssueDate
+    ),
+  ]
+);
 
-export const erpFiscalDocumentItems = mysqlTable("erp_fiscal_document_items", {
-  id:bigint({mode:"number"}).autoincrement().primaryKey().notNull(),publicId:varchar("public_id",{length:36}).notNull(),clientId:varchar("client_id",{length:80}).notNull(),fiscalDocumentId:bigint("fiscal_document_id",{mode:"number"}).notNull(),productPublicId:varchar("product_public_id",{length:36}),productNameSnapshot:varchar("product_name_snapshot",{length:180}).notNull(),skuSnapshot:varchar("sku_snapshot",{length:80}),quantityMillis:bigint("quantity_millis",{mode:"number"}).notNull(),unitAmountCents:bigint("unit_amount_cents",{mode:"number"}).notNull(),lineTotalCents:bigint("line_total_cents",{mode:"number"}).notNull(),fiscalProfileSnapshot:text("fiscal_profile_snapshot"),createdAt:timestamp("created_at",{mode:"string"}).defaultNow().notNull(),
-},t=>[uniqueIndex("uq_erp_fiscal_items_document_public").on(t.fiscalDocumentId,t.publicId),index("idx_erp_fiscal_items_tenant_document").on(t.clientId,t.fiscalDocumentId),foreignKey({name:"fk_erp_fiscal_items_document",columns:[t.fiscalDocumentId],foreignColumns:[erpFiscalDocuments.id]})]);
+export const erpFiscalDocumentItems = mysqlTable(
+  "erp_fiscal_document_items",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    fiscalDocumentId: bigint("fiscal_document_id", {
+      mode: "number",
+    }).notNull(),
+    productPublicId: varchar("product_public_id", { length: 36 }),
+    productNameSnapshot: varchar("product_name_snapshot", {
+      length: 180,
+    }).notNull(),
+    skuSnapshot: varchar("sku_snapshot", { length: 80 }),
+    quantityMillis: bigint("quantity_millis", { mode: "number" }).notNull(),
+    unitAmountCents: bigint("unit_amount_cents", { mode: "number" }).notNull(),
+    lineTotalCents: bigint("line_total_cents", { mode: "number" }).notNull(),
+    fiscalProfileSnapshot: text("fiscal_profile_snapshot"),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  t => [
+    uniqueIndex("uq_erp_fiscal_items_document_public").on(
+      t.fiscalDocumentId,
+      t.publicId
+    ),
+    index("idx_erp_fiscal_items_tenant_document").on(
+      t.clientId,
+      t.fiscalDocumentId
+    ),
+    foreignKey({
+      name: "fk_erp_fiscal_items_document",
+      columns: [t.fiscalDocumentId],
+      foreignColumns: [erpFiscalDocuments.id],
+    }),
+  ]
+);
 
-export const erpFiscalDocumentHistory = mysqlTable("erp_fiscal_document_history", {
-  id:bigint({mode:"number"}).autoincrement().primaryKey().notNull(),clientId:varchar("client_id",{length:80}).notNull(),fiscalDocumentId:bigint("fiscal_document_id",{mode:"number"}).notNull(),fromStatus:mysqlEnum("from_status",["draft","ready_for_integration","cancelled"]),toStatus:mysqlEnum("to_status",["draft","ready_for_integration","cancelled"]).notNull(),reason:varchar({length:500}),changedBy:varchar("changed_by",{length:80}).notNull(),createdAt:timestamp("created_at",{mode:"string"}).defaultNow().notNull(),
-},t=>[index("idx_erp_fiscal_history_tenant_document_date").on(t.clientId,t.fiscalDocumentId,t.createdAt),foreignKey({name:"fk_erp_fiscal_history_document",columns:[t.fiscalDocumentId],foreignColumns:[erpFiscalDocuments.id]})]);
+export const erpFiscalDocumentHistory = mysqlTable(
+  "erp_fiscal_document_history",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    fiscalDocumentId: bigint("fiscal_document_id", {
+      mode: "number",
+    }).notNull(),
+    fromStatus: mysqlEnum("from_status", [
+      "draft",
+      "ready_for_integration",
+      "cancelled",
+    ]),
+    toStatus: mysqlEnum("to_status", [
+      "draft",
+      "ready_for_integration",
+      "cancelled",
+    ]).notNull(),
+    reason: varchar({ length: 500 }),
+    changedBy: varchar("changed_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  t => [
+    index("idx_erp_fiscal_history_tenant_document_date").on(
+      t.clientId,
+      t.fiscalDocumentId,
+      t.createdAt
+    ),
+    foreignKey({
+      name: "fk_erp_fiscal_history_document",
+      columns: [t.fiscalDocumentId],
+      foreignColumns: [erpFiscalDocuments.id],
+    }),
+  ]
+);
 
-export const erpFiscalOperations = mysqlTable("erp_fiscal_operations", {
-  id:bigint({mode:"number"}).autoincrement().primaryKey().notNull(),clientId:varchar("client_id",{length:80}).notNull(),idempotencyKey:varchar("idempotency_key",{length:100}).notNull(),operation:mysqlEnum(["create_source","create_manual","ready"]).notNull(),fiscalDocumentId:bigint("fiscal_document_id",{mode:"number"}).notNull(),payloadHash:varchar("payload_hash",{length:64}).notNull(),createdAt:timestamp("created_at",{mode:"string"}).defaultNow().notNull(),
-},t=>[uniqueIndex("uq_erp_fiscal_operations_tenant_key").on(t.clientId,t.idempotencyKey),foreignKey({name:"fk_erp_fiscal_operations_document",columns:[t.fiscalDocumentId],foreignColumns:[erpFiscalDocuments.id]})]);
+export const erpFiscalOperations = mysqlTable(
+  "erp_fiscal_operations",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    idempotencyKey: varchar("idempotency_key", { length: 100 }).notNull(),
+    operation: mysqlEnum(["create_source", "create_manual", "ready"]).notNull(),
+    fiscalDocumentId: bigint("fiscal_document_id", {
+      mode: "number",
+    }).notNull(),
+    payloadHash: varchar("payload_hash", { length: 64 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  t => [
+    uniqueIndex("uq_erp_fiscal_operations_tenant_key").on(
+      t.clientId,
+      t.idempotencyKey
+    ),
+    foreignKey({
+      name: "fk_erp_fiscal_operations_document",
+      columns: [t.fiscalDocumentId],
+      foreignColumns: [erpFiscalDocuments.id],
+    }),
+  ]
+);
