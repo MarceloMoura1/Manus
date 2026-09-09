@@ -1330,12 +1330,17 @@ function TabBackup({ clientId, userRole }: { clientId: string; userRole: string 
 // ════════════════════════════════════════════════════════════════════════════
 // COMPONENTE PRINCIPAL: SettingsPage
 // ════════════════════════════════════════════════════════════════════════════
-export function SettingsPage() {
+type SettingsPageProps = {
+  layout?: "standalone" | "workspace";
+};
+
+export function SettingsPage({ layout = "standalone" }: SettingsPageProps) {
   const { user } = useAuth();
   const session = getMegaDeskSession();
   const clientId = session?.clientId ?? '';
   const userRole = session?.userRole ?? 'viewer';
   const isAdmin = userRole === 'admin';
+  const isWorkspace = layout === "workspace";
 
   const [activeTab, setActiveTab] = useState(isAdmin ? 'whatsapp' : 'account');
 
@@ -1633,10 +1638,15 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
-      <div className="mx-auto w-full max-w-[1440px]">
+    <div
+      className={isWorkspace
+        ? "min-h-full bg-background px-4 py-3 sm:px-5 sm:py-4 lg:px-5 lg:py-4"
+        : "min-h-screen bg-background px-4 py-4 sm:px-6 sm:py-5 lg:px-8"}
+      data-layout={layout}
+    >
+      <div className={isWorkspace ? "w-full max-w-none" : "mx-auto w-full max-w-[1440px]"}>
         {/* Layout: lista lateral + conteúdo */}
-        <div className="grid items-start gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
+        <div className="grid items-start gap-5 lg:grid-cols-[17rem_minmax(0,1fr)]">
           {/* ─── Lista lateral ─────────────────────────────────────────── */}
           <div className="min-w-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:pr-1" data-testid="settings-navigation-shell">
             <nav className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-label="Navegação de configurações">

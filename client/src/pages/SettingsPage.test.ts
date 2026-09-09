@@ -15,9 +15,16 @@ describe("SettingsPage access and layout", () => {
     expect(source).toContain("{ value: 'backup', label: '💾 Backup', adminOnly: true }");
   });
 
-  it("uses the wider responsive settings shell", () => {
+  it("uses the wider responsive settings shell when it is rendered standalone", () => {
     expect(source).toContain("max-w-[1440px]");
     expect(source).toContain("lg:grid-cols-[17rem_minmax(0,1fr)]");
+  });
+
+  it("uses the full available workspace when embedded by the authenticated shell", () => {
+    expect(source).toContain('layout?: "standalone" | "workspace"');
+    expect(source).toContain('data-layout={layout}');
+    expect(source).toContain('"min-h-full bg-background px-4 py-3 sm:px-5 sm:py-4 lg:px-5 lg:py-4"');
+    expect(source).toContain('"w-full max-w-none"');
   });
 
   it("removes the page hero and keeps the settings navigation aligned and sticky on desktop", () => {

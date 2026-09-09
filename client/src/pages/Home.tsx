@@ -180,7 +180,31 @@ const SESSION_DURATION_LONG = 30 * 24 * 60 * 60 * 1000; // 30 dias ("lembrar meu
 const REFRESH_THRESHOLD = 5 * 60 * 1000; // Renovar 5 minutos antes de expirar
 const REFRESH_INTERVAL = 10 * 60 * 1000; // Verificar renovação a cada 10 minutos
 
-  type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-clients" | "erp-products" | "erp-stock" | "erp-suppliers" | "erp-purchases" | "erp-sales" | "erp-finance" | "erp-fiscal" | "erp-reports" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "whatsapp-config" | "admin-settings";
+export type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-clients" | "erp-products" | "erp-stock" | "erp-suppliers" | "erp-purchases" | "erp-sales" | "erp-finance" | "erp-fiscal" | "erp-reports" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "whatsapp-config" | "admin-settings";
+
+export function getShellWorkspaceLayout(active: RouteId) {
+  if (active === "conversations") {
+    return {
+      moduleTopbar: "none" as const,
+      mainContentClassName: "overflow-hidden",
+      settingsPageLayout: "standalone" as const,
+    };
+  }
+
+  if (active === "settings") {
+    return {
+      moduleTopbar: "mobile-only" as const,
+      mainContentClassName: "overflow-auto p-0",
+      settingsPageLayout: "workspace" as const,
+    };
+  }
+
+  return {
+    moduleTopbar: "standard" as const,
+    mainContentClassName: "overflow-auto p-4 sm:p-8",
+    settingsPageLayout: "standalone" as const,
+  };
+}
 
 type Ticket = {
   id: string;
@@ -3752,6 +3776,7 @@ function Shell() {
     canAccessReports: session.userRole !== "agent",
     onNavigate: navigateToErpSection,
   });
+  const shellLayout = getShellWorkspaceLayout(active);
 
   return (
     <div className={`flex h-screen h-[100dvh] min-w-0 overflow-hidden bg-slate-50 ${theme === 'dark' ? 'dark bg-slate-950' : ''}`}>
@@ -3930,25 +3955,27 @@ function Shell() {
 
       {/* Main Content */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {active !== "conversations" && (
-          <ModuleTopbar
+        {shellLayout.moduleTopbar !== "none" && (
+          <div className={shellLayout.moduleTopbar === "mobile-only" ? "lg:hidden" : undefined} data-testid="module-topbar-shell">
+            <ModuleTopbar
             ariaLabel={active.startsWith("erp-") ? "Módulos do ERP" : "Ações da página"}
             activeItemId={active.startsWith("erp-") ? erpSection : undefined}
             items={active.startsWith("erp-") ? erpTopbarItems : []}
             leading={<button ref={sidebarTriggerRef} type="button" onClick={() => setSidebarOpen(true)} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-700 hover:bg-slate-100 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
             actions={<button type="button" onClick={() => window.dispatchEvent(new Event("megadesk-open-assistant"))} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500" title="Abrir assistente IA" aria-label="Abrir assistente IA"><Sparkles className="h-5 w-5" /></button>}
-          />
+            />
+          </div>
         )}
 
         {/* Content */}
-        <main ref={mainContentRef} tabIndex={-1} className={`flex min-h-0 min-w-0 flex-1 flex-col ${active === 'conversations' ? 'overflow-hidden' : 'overflow-auto p-4 sm:p-8'}`}>
+        <main ref={mainContentRef} tabIndex={-1} className={`flex min-h-0 min-w-0 flex-1 flex-col ${shellLayout.mainContentClassName}`}>
           <ErrorBoundary key={active}>
           {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} />}
           {active === "conversations" && <ConversationsPage attendanceLaunch={attendanceLaunch} attendancePhone={activeAttendancePhone} />}
           {active === "tickets" && <TicketsPage />}
           {active === "tracking" && <TrackingPage />}
            {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} initialCrmClientId={activeCrmClientId ?? undefined} onClientNavigate={handleClientNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
-          {active === "settings" && <SettingsPageComponent />}
+           {active === "settings" && <SettingsPageComponent layout={shellLayout.settingsPageLayout} />}
           {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
           {active === "bot-config" && <BotConfigPage />}
           {active === "whatsapp-config" && <WhatsAppConfigPage />}
