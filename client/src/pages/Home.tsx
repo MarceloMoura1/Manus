@@ -17,6 +17,7 @@ import { NotificationsModernPage } from "./NotificationsModernPage";
 import type { CrmWhatsAppIntent } from "../../../shared/crm";
 import { normalizeContactPhone } from "../../../shared/contact-phone";
 import { ConversationMedia } from "@/components/ConversationMedia";
+import { ConversationBackground } from "@/components/ConversationBackground";
 import { ConversationDetailsPanel } from "@/components/ConversationDetailsPanel";
 import { ConversationListItem } from "@/components/ConversationListItem";
 import { ConversationActivityEvent } from "@/components/ConversationActivityEvent";
@@ -24,6 +25,7 @@ import { formatConversationTime, formatDate, formatTime } from "@/lib/conversati
 import { composeConversationTimeline, reconcileConversationMessages } from "@/lib/conversationTimeline";
 import { messageReplyPreview, replyAuthor, replyPreview, type ConversationReplyPreview } from "@/lib/conversationQuote";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useUserPersonalization } from "@/hooks/useUserPersonalization";
 import {
   conversationFilterStorageKey,
   readConversationFilters,
@@ -397,6 +399,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   attendancePhone: string;
 }) {
   const utils = trpc.useUtils();
+  const { preference: conversationBackground } = useUserPersonalization();
   // Obter dados da sessão
   const sessionData = React.useMemo(() => {
     try { return JSON.parse(localStorage.getItem(MEGADESK_SESSION_KEY) || 'null'); } catch { return null; }
@@ -1339,7 +1342,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
             </div>
 
             {/* Área de Mensagens */}
-            <div ref={messageScrollRef} onScroll={handleMessageScroll} data-testid="conversation-message-scroll-region" aria-label="Mensagens da conversa" className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-4 md:px-6" style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)' }}>
+            <ConversationBackground preference={conversationBackground} className="min-h-0 flex-1 overflow-hidden">
+              <div ref={messageScrollRef} onScroll={handleMessageScroll} data-testid="conversation-message-scroll-region" aria-label="Mensagens da conversa" className="h-full space-y-3 overflow-y-auto px-3 py-4 md:px-6">
               {(() => {
                 const msgs: any[] = timelineMessages;
                 const indeterminate: any[] = indeterminateConversationHistory;
@@ -1481,7 +1485,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                   </section>}
                 </>;
               })()}
-            </div>
+              </div>
+            </ConversationBackground>
 
             {/* Input de Mensagem */}
             <div data-testid="conversation-composer" className="max-w-full flex-shrink-0 border-t border-slate-100 bg-white px-3 pt-3 md:px-6 md:pt-4" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>

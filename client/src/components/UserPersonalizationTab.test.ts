@@ -1,0 +1,60 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+import {
+  conversationBackgroundSaveInput,
+  hasUnsavedConversationBackground,
+} from "./UserPersonalizationTab";
+
+const saved = {
+  backgroundType: "default" as const,
+  presetId: null,
+  customImageUrl: null,
+  hasCustomImage: false,
+};
+
+describe("UserPersonalizationTab save flow", () => {
+  it("keeps a draft separate from the saved preference until it has a valid save payload", () => {
+    const draft = {
+      backgroundType: "preset" as const,
+      presetId: "solid-blue",
+      customImageUrl: null,
+      hasCustomImage: false,
+    };
+
+    expect(hasUnsavedConversationBackground(draft, saved, false)).toBe(true);
+    expect(conversationBackgroundSaveInput(draft, {
+      clientId: "tenant-a",
+      userEmail: "agent@example.invalid",
+    })).toEqual({
+      clientId: "tenant-a",
+      userEmail: "agent@example.invalid",
+      backgroundType: "preset",
+      presetId: "solid-blue",
+    });
+    expect(saved).toMatchObject({ backgroundType: "default", presetId: null });
+  });
+
+  it("keeps a pending image dirty until its upload is confirmed", () => {
+    const imageDraft = {
+      backgroundType: "custom" as const,
+      presetId: null,
+      customImageUrl: "blob:preview",
+      hasCustomImage: true,
+    };
+
+    expect(hasUnsavedConversationBackground(imageDraft, saved, true)).toBe(true);
+    expect(hasUnsavedConversationBackground(null, saved, false)).toBe(false);
+  });
+
+  it("wires the explicit Save command to the per-user mutation and only clears the draft on success", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/components/UserPersonalizationTab.tsx"), "utf8");
+
+    expect(source).toContain('saveMutation.mutateAsync(conversationBackgroundSaveInput(preview, personalization.cacheIdentity))');
+    expect(source).toContain('utils.userPersonalization.get.setData(personalization.cacheIdentity, saved)');
+    expect(source).toContain('await utils.userPersonalization.get.invalidate(personalization.cacheIdentity)');
+    expect(source).toContain('onClick={() => void save()}');
+    expect(source).toContain('}Salvar</Button>');
+    expect(source).not.toContain('saveMutation.mutate({');
+  });
+});
