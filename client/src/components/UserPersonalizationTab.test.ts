@@ -72,6 +72,7 @@ describe("UserPersonalizationTab save flow", () => {
     expect(source).toContain('utils.userPersonalization.get.setData(personalization.cacheIdentity, saved)');
     expect(source).toContain('const saved = persistedCustomBackgroundFromUpload(payload)');
     expect(source).toContain('utils.userPersonalization.get.setData(personalization.cacheIdentity, saved)');
+    expect(source).toContain('fetch(userPersonalizationBackgroundUrl(), {');
     expect(source).toContain('onClick={() => void save()}');
     expect(source).toContain('}Salvar</Button>');
     expect(source).not.toContain('saveMutation.mutate({');

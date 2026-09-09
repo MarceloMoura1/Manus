@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { trpcBaseUrl, trpcProcedureUrl } from "./trpc-url";
+import { trpcBaseUrl, trpcProcedureUrl, userPersonalizationBackgroundUrl } from "./trpc-url";
 
 describe("tRPC transport URL", () => {
   it.each(["app.megadesk.online", "admin.megadesk.online", "api.megadesk.online"])(
@@ -8,6 +8,8 @@ describe("tRPC transport URL", () => {
       expect(trpcBaseUrl(hostname)).toBe("https://api.megadesk.online/api/trpc");
       expect(trpcProcedureUrl("megadesk.sendMessage", hostname))
         .toBe("https://api.megadesk.online/api/trpc/megadesk.sendMessage");
+      expect(userPersonalizationBackgroundUrl(hostname))
+        .toBe("https://api.megadesk.online/api/user-personalization/background");
     },
   );
 

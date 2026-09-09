@@ -4,6 +4,10 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ConversationBackground } from "@/components/ConversationBackground";
 import { trpc } from "@/lib/trpc";
+import {
+  USER_PERSONALIZATION_BACKGROUND_PATH,
+  userPersonalizationBackgroundUrl,
+} from "@/lib/trpc-url";
 import { useUserPersonalization } from "@/hooks/useUserPersonalization";
 import {
   CONVERSATION_BACKGROUND_PRESETS,
@@ -14,8 +18,6 @@ import {
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-const CUSTOM_BACKGROUND_ROUTE = "/api/user-personalization/background";
-
 type PersonalizationIdentity = { clientId?: string; userEmail?: string };
 type CustomBackgroundUploadResponse = {
   ok?: boolean;
@@ -47,7 +49,7 @@ export function persistedCustomBackgroundFromUpload(value: unknown): Conversatio
   const response = value as CustomBackgroundUploadResponse | null;
   if (!response?.ok) return null;
   const preference = normalizeConversationBackgroundPreference(response.preference);
-  return preference.backgroundType === "custom" && preference.customImageUrl === CUSTOM_BACKGROUND_ROUTE ? preference : null;
+  return preference.backgroundType === "custom" && preference.customImageUrl === USER_PERSONALIZATION_BACKGROUND_PATH ? preference : null;
 }
 
 export function UserPersonalizationTab() {
@@ -94,7 +96,7 @@ export function UserPersonalizationTab() {
       if (!pendingImage) return;
       setUploading(true);
       try {
-        const response = await fetch("/api/user-personalization/background", {
+        const response = await fetch(userPersonalizationBackgroundUrl(), {
           method: "PUT",
           credentials: "include",
           headers: { "Content-Type": pendingImage.type },
