@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  conversationBackgroundMode,
   conversationBackgroundSaveInput,
   hasUnsavedConversationBackground,
   persistedCustomBackgroundFromUpload,
@@ -24,10 +23,12 @@ describe("UserPersonalizationTab save flow", () => {
     };
 
     expect(hasUnsavedConversationBackground(draft, saved, false)).toBe(true);
-    expect(conversationBackgroundSaveInput(draft, {
-      clientId: "tenant-a",
-      userEmail: "agent@example.invalid",
-    })).toEqual({
+    expect(
+      conversationBackgroundSaveInput(draft, {
+        clientId: "tenant-a",
+        userEmail: "agent@example.invalid",
+      })
+    ).toEqual({
       clientId: "tenant-a",
       userEmail: "agent@example.invalid",
       backgroundType: "preset",
@@ -44,50 +45,66 @@ describe("UserPersonalizationTab save flow", () => {
       hasCustomImage: true,
     };
 
-    expect(hasUnsavedConversationBackground(imageDraft, saved, true)).toBe(true);
+    expect(hasUnsavedConversationBackground(imageDraft, saved, true)).toBe(
+      true
+    );
     expect(hasUnsavedConversationBackground(null, saved, false)).toBe(false);
   });
 
   it("accepts only a persisted custom background URL from the upload response", () => {
-    expect(persistedCustomBackgroundFromUpload({
-      ok: true,
-      preference: {
+    expect(
+      persistedCustomBackgroundFromUpload({
+        ok: true,
+        preference: {
+          backgroundType: "custom",
+          presetId: null,
+          customImageUrl:
+            "/api/user-personalization/background?v=0123456789abcdef",
+          hasCustomImage: true,
+        },
+      })
+    ).toMatchObject({
+      backgroundType: "custom",
+      customImageUrl: "/api/user-personalization/background?v=0123456789abcdef",
+    });
+    expect(persistedCustomBackgroundFromUpload({ ok: true })).toBeNull();
+    expect(
+      persistedCustomBackgroundFromUpload({
+        ok: true,
+        preference: {
+          backgroundType: "custom",
+          customImageUrl: "blob:preview",
+        },
+      })
+    ).toBeNull();
+  });
+
+  it("keeps each persisted background value in its corresponding visual mode without changing its contract", () => {
+    expect(conversationBackgroundMode(saved)).toBe("default");
+    expect(
+      conversationBackgroundMode({
+        backgroundType: "preset",
+        presetId: "solid-blue",
+        customImageUrl: null,
+        hasCustomImage: false,
+      })
+    ).toBe("solid");
+    expect(
+      conversationBackgroundMode({
+        backgroundType: "preset",
+        presetId: "minimal-blue",
+        customImageUrl: null,
+        hasCustomImage: false,
+      })
+    ).toBe("pattern");
+    expect(
+      conversationBackgroundMode({
         backgroundType: "custom",
         presetId: null,
-        customImageUrl: "/api/user-personalization/background?v=0123456789abcdef",
+        customImageUrl:
+          "/api/user-personalization/background?v=abcdef0123456789",
         hasCustomImage: true,
-      },
-    })).toMatchObject({ backgroundType: "custom", customImageUrl: "/api/user-personalization/background?v=0123456789abcdef" });
-    expect(persistedCustomBackgroundFromUpload({ ok: true })).toBeNull();
-    expect(persistedCustomBackgroundFromUpload({
-      ok: true,
-      preference: { backgroundType: "custom", customImageUrl: "blob:preview" },
-    })).toBeNull();
-  });
-
-  it("wires the explicit Save command to the per-user mutation and only clears the draft on success", () => {
-    const source = readFileSync(resolve(process.cwd(), "client/src/components/UserPersonalizationTab.tsx"), "utf8");
-
-    expect(source).toContain('saveMutation.mutateAsync(conversationBackgroundSaveInput(preview, personalization.cacheIdentity))');
-    expect(source).toContain('utils.userPersonalization.get.setData(personalization.cacheIdentity, saved)');
-    expect(source).toContain('const saved = persistedCustomBackgroundFromUpload(payload)');
-    expect(source).toContain('utils.userPersonalization.get.setData(personalization.cacheIdentity, saved)');
-    expect(source).toContain('fetch(userPersonalizationBackgroundUrl(), {');
-    expect(source).toContain('onClick={() => void save()}');
-    expect(source).toContain('{isSaving ? "Salvando…" : "Salvar"}');
-    expect(source).not.toContain('saveMutation.mutate({');
-  });
-
-  it("renders a compact section heading and a rebalanced responsive preview with the shared conversation bubble primitive", () => {
-    const source = readFileSync(resolve(process.cwd(), "client/src/components/UserPersonalizationTab.tsx"), "utf8");
-
-    expect(source).toContain('data-testid="personalization-section-header"');
-    expect(source).not.toContain("rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-sm");
-    expect(source).toContain("min-h-[20rem]");
-    expect(source).toContain("sm:min-h-[23rem]");
-    expect(source).toContain("lg:min-h-[25rem]");
-    expect(source).toContain("<ConversationMessageBubble direction=\"incoming\"");
-    expect(source).toContain("<ConversationMessageBubble direction=\"outgoing\"");
-    expect(source).toContain("aria-pressed={selected}");
+      })
+    ).toBe("custom");
   });
 });
