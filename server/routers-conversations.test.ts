@@ -155,6 +155,27 @@ describe("Conversations authorization, filters and lifecycle", () => {
     expect(db.rollback).toHaveBeenCalledOnce();
   });
 
+  it("keeps the explicit reopen lifecycle authoritative", async () => {
+    mocks.execute.mockResolvedValueOnce([[{ user_id: "user-a", name: "A" }]]);
+    const db = connection([
+      [[{ conversation_id: "closed-a", requested_active_key: "key-a" }]],
+      [[]],
+      [{ affectedRows: 1 }],
+      [[]],
+      [{ affectedRows: 1 }],
+    ]);
+    mocks.getConnection.mockResolvedValue(db);
+
+    await expect(conversationsRouter.createCaller(context()).reopen({ conversationId: "closed-a" }))
+      .resolves.toEqual({ ok: true });
+
+    expect(db.execute.mock.calls[2][0]).toContain("SET status = 'open'");
+    expect(db.execute.mock.calls[2][0]).toContain("reopened_at = NOW()");
+    expect(db.execute.mock.calls[2][0]).toContain("closed_at = NULL");
+    expect(db.execute.mock.calls[4][1][3]).toBe("reopened");
+    expect(db.commit).toHaveBeenCalledOnce();
+  });
+
   it("reads the canonical contact name and free-text company without conflating the CRM company", async () => {
     mocks.execute.mockResolvedValue([[]]);
     await conversationsRouter.createCaller(context()).list({ viewMode: "all", status: "active", search: "", limit: 30, offset: 0 });

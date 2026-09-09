@@ -480,7 +480,7 @@ export async function upsertConversationStateSnapshot(
   conversation: MegaDeskStructuredState["conversations"][number],
 ): Promise<void> {
   await connection.execute(
-    "INSERT INTO megadesk_domain_conversations (conversation_id, client_id, customer_name, phone, company, status, last_message, time_label, messages_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE customer_name=VALUES(customer_name), phone=VALUES(phone), company=VALUES(company), status=VALUES(status), last_message=VALUES(last_message), time_label=VALUES(time_label)",
+    "INSERT INTO megadesk_domain_conversations (conversation_id, client_id, customer_name, phone, company, status, last_message, time_label, messages_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE customer_name=VALUES(customer_name), phone=VALUES(phone), company=VALUES(company), status=CASE WHEN status = 'closed' THEN 'closed' ELSE VALUES(status) END, last_message=VALUES(last_message), time_label=VALUES(time_label)",
     [conversation.id, conversation.clientId, conversation.name, conversation.phone, conversation.company, conversation.status,
       conversation.lastMessage, conversation.time, JSON.stringify(conversation.messages ?? [])],
   );
