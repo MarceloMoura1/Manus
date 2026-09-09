@@ -140,17 +140,15 @@ export function UserPersonalizationTab() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8 pb-6" data-testid="personalization-tab">
-      <header className="rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-sm sm:px-6">
-        <div className="flex items-start gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><Palette className="size-5" /></div>
-          <div><h2 className="text-xl font-semibold tracking-tight text-slate-900">Personalização</h2><p className="mt-1 text-sm text-slate-500">Escolha como suas conversas aparecem para você.</p></div>
-        </div>
+    <div className="mx-auto max-w-6xl space-y-6 pb-6" data-testid="personalization-tab">
+      <header className="flex items-start gap-3 px-1 py-1" data-testid="personalization-section-header">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><Palette className="size-4" /></div>
+        <div><h2 className="text-xl font-semibold tracking-tight text-slate-900">Personalização</h2><p className="mt-1 text-sm text-slate-500">Escolha como suas conversas aparecem para você.</p></div>
       </header>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-labelledby="conversation-preview-title">
-        <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4"><Sparkles className="size-4 text-blue-600" /><div><h3 id="conversation-preview-title" className="text-sm font-semibold text-slate-900">Prévia da conversa</h3><p className="text-xs text-slate-500">Veja o fundo antes de salvar.</p></div></div>
-        <ConversationBackground preference={visiblePreference} className="min-h-[22rem] p-5 sm:min-h-[28rem] sm:p-7">
+        <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5"><Sparkles className="size-4 text-blue-600" /><div><h3 id="conversation-preview-title" className="text-sm font-semibold text-slate-900">Prévia da conversa</h3><p className="text-xs text-slate-500">Veja o fundo antes de salvar.</p></div></div>
+        <ConversationBackground preference={visiblePreference} className="min-h-[20rem] p-5 sm:min-h-[23rem] sm:p-6 lg:min-h-[25rem]">
           <div className="mx-auto flex h-full max-w-2xl flex-col justify-end gap-3">
             <ConversationMessageBubble direction="incoming">Olá! Como posso ajudar?</ConversationMessageBubble>
             <ConversationMessageBubble direction="outgoing">Quero acompanhar meu atendimento.</ConversationMessageBubble>

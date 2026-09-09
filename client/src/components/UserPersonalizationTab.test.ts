@@ -78,11 +78,14 @@ describe("UserPersonalizationTab save flow", () => {
     expect(source).not.toContain('saveMutation.mutate({');
   });
 
-  it("renders a large responsive preview with the shared conversation bubble primitive", () => {
+  it("renders a compact section heading and a rebalanced responsive preview with the shared conversation bubble primitive", () => {
     const source = readFileSync(resolve(process.cwd(), "client/src/components/UserPersonalizationTab.tsx"), "utf8");
 
-    expect(source).toContain("min-h-[22rem]");
-    expect(source).toContain("sm:min-h-[28rem]");
+    expect(source).toContain('data-testid="personalization-section-header"');
+    expect(source).not.toContain("rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-sm");
+    expect(source).toContain("min-h-[20rem]");
+    expect(source).toContain("sm:min-h-[23rem]");
+    expect(source).toContain("lg:min-h-[25rem]");
     expect(source).toContain("<ConversationMessageBubble direction=\"incoming\"");
     expect(source).toContain("<ConversationMessageBubble direction=\"outgoing\"");
     expect(source).toContain("aria-pressed={selected}");

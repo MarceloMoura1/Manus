@@ -1633,28 +1633,17 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background px-4 py-6 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-background px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
       <div className="mx-auto w-full max-w-[1440px]">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground">Configurações</h1>
-          <p className="text-muted-foreground mt-1 text-sm">Personalize sua experiência no MegaDesk</p>
-          {isAdmin && (
-            <div className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-full">
-              <Shield className="w-3.5 h-3.5 text-red-600" />
-              <span className="text-xs font-medium text-red-700">Modo Administrador — Acesso completo</span>
-            </div>
-          )}
-        </div>
-
         {/* Layout: lista lateral + conteúdo */}
         <div className="grid items-start gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
           {/* ─── Lista lateral ─────────────────────────────────────────── */}
-          <div className="min-w-0 lg:sticky lg:top-6">
-            <nav className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="min-w-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:pr-1" data-testid="settings-navigation-shell">
+            <nav className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-label="Navegação de configurações">
               {isAdmin && (
-                <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Administrador</p>
+                <div className="flex items-center gap-2 border-b border-red-100 bg-red-50 px-4 py-2.5">
+                  <Shield className="size-3.5 shrink-0 text-red-600" />
+                  <span className="text-xs font-medium text-red-700">Modo Administrador · Acesso completo</span>
                 </div>
               )}
               <ul className="py-2">

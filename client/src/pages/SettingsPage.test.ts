@@ -19,4 +19,12 @@ describe("SettingsPage access and layout", () => {
     expect(source).toContain("max-w-[1440px]");
     expect(source).toContain("lg:grid-cols-[17rem_minmax(0,1fr)]");
   });
+
+  it("removes the page hero and keeps the settings navigation aligned and sticky on desktop", () => {
+    expect(source).not.toContain('<h1 className="text-2xl font-bold text-foreground">Configurações</h1>');
+    expect(source).not.toContain("Personalize sua experiência no MegaDesk");
+    expect(source).toContain('data-testid="settings-navigation-shell"');
+    expect(source).toContain("lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto");
+    expect(source).toContain("Modo Administrador · Acesso completo");
+  });
 });
