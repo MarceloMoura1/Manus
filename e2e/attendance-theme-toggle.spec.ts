@@ -101,8 +101,11 @@ test("Atendimento follows the real sidebar toggle without reload even when brows
   const inactiveScopeDark = await backgroundColor(page, '[data-testid="attendance-scope-controls"] button:nth-child(2)');
   const activeScopeDark = await backgroundColor(page, '[data-testid="attendance-scope-controls"] button[aria-pressed="true"]');
   const detailsDark = await backgroundColor(page, '[data-testid="conversation-details-panel"]');
-  expect(workspaceDark).not.toBe(workspaceLight);
-  expect(panelDark).toBe(workspaceDark);
+  const approvedDarkWorkspace = "oklch(0.129 0.042 264.695)";
+  const approvedDarkSurface = "oklch(0.208 0.042 265.755)";
+  expect(workspaceDark).toBe(approvedDarkWorkspace);
+  expect(panelDark).toBe(approvedDarkSurface);
+  expect(panelDark).not.toBe(workspaceDark);
   expect(filterDark).not.toBe(panelDark);
   expect(newAttendanceControlDark).not.toBe(panelDark);
   expect(inactiveScopeDark).not.toBe(panelDark);
