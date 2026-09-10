@@ -60,6 +60,7 @@ vi.mock("@/hooks/useDebounce", () => ({ useDebounce: <T,>(value: T) => value }))
 
 import { ConversationsPage } from "./Home";
 import { ConversationDetailsPanel } from "@/components/ConversationDetailsPanel";
+import { ConversationListItem } from "@/components/ConversationListItem";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { NewAttendanceFlow } from "./NewAttendanceFlow";
 
@@ -118,7 +119,9 @@ describe("Atendimento dark mode", () => {
     for (const markup of [lightMarkup, darkMarkup]) {
       expect(markup).toContain('data-testid="attendance-workspace"');
       expect(markup).toContain("bg-white data-[theme=dark]:border-slate-800 data-[theme=dark]:bg-slate-950");
-      expect(markup).toContain("bg-slate-50 group-data-[theme=dark]:bg-slate-900");
+      expect(markup).toContain("bg-slate-50 group-data-[theme=dark]:bg-slate-950");
+      expect(markup).toContain("group-data-[theme=dark]:border-slate-700 group-data-[theme=dark]:bg-slate-900");
+      expect(markup).toContain("group-data-[theme=dark]:bg-slate-900 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800");
       expect(markup).toContain('data-testid="attendance-empty-state"');
       expect(markup).toContain("from-slate-50 to-slate-100 group-data-[theme=dark]:from-slate-950 group-data-[theme=dark]:to-slate-900");
       expect(markup).toContain('data-testid="new-attendance-flow"');
@@ -129,6 +132,40 @@ describe("Atendimento dark mode", () => {
     }
     expect(lightMarkup).toContain('data-theme="light"');
     expect(darkMarkup).toContain('data-theme="dark"');
+  });
+
+  it("keeps conversation items layered in dark mode while preserving the selected state", () => {
+    const renderItem = (theme: "light" | "dark", selected: boolean) => {
+      localStorage.setItem("megadesk_theme", theme);
+      return renderToStaticMarkup(
+        React.createElement(
+          ThemeProvider,
+          { defaultTheme: theme },
+          React.createElement(ConversationListItem, {
+            name: "Cliente Theme",
+            lastMessage: "Mensagem de teste",
+            timestamp: "2026-09-10T12:00:00.000Z",
+            unreadCount: 1,
+            selected,
+            avatarColor: "bg-violet-500",
+            initials: "CT",
+            onSelect: () => undefined,
+          }),
+        ),
+      );
+    };
+
+    const lightItem = renderItem("light", false);
+    const darkItem = renderItem("dark", false);
+    const selectedDarkItem = renderItem("dark", true);
+
+    expect(lightItem).toContain('data-theme="light"');
+    expect(lightItem).toContain("border-l-transparent bg-white hover:bg-slate-50");
+    expect(darkItem).toContain('data-theme="dark"');
+    expect(darkItem).toContain("data-[theme=dark]:bg-slate-900 data-[theme=dark]:hover:bg-slate-800");
+    expect(darkItem).toContain("group-data-[theme=dark]:bg-slate-700");
+    expect(selectedDarkItem).toContain('data-selected="true"');
+    expect(selectedDarkItem).toContain("border-l-violet-600 bg-violet-50/70 data-[theme=dark]:bg-violet-500/20");
   });
 
   it("keeps message bubbles on the existing personalization helper instead of inheriting container colors", () => {

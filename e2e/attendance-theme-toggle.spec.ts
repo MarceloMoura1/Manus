@@ -80,6 +80,7 @@ test("Atendimento follows the real sidebar toggle without reload even when brows
 
   await expect(page.getByTestId("attendance-workspace")).toHaveAttribute("data-theme", "light");
   const workspaceLight = await backgroundColor(page, '[data-testid="attendance-workspace"]');
+  const panelLight = await backgroundColor(page, '[data-testid="conversation-list-panel"]');
   await page.getByRole("button", { name: /Cliente Theme/ }).click();
   await page.getByRole("button", { name: "Abrir detalhes da conversa" }).click();
   const details = page.getByTestId("conversation-details-panel");
@@ -94,8 +95,18 @@ test("Atendimento follows the real sidebar toggle without reload even when brows
   await expect(page).toHaveURL(originalUrl);
   await expect(details).toBeVisible();
   const workspaceDark = await backgroundColor(page, '[data-testid="attendance-workspace"]');
+  const panelDark = await backgroundColor(page, '[data-testid="conversation-list-panel"]');
+  const filterDark = await backgroundColor(page, '[data-testid="attendance-primary-controls"] button');
+  const newAttendanceControlDark = await backgroundColor(page, '[data-testid="attendance-action-controls"] button:first-child');
+  const inactiveScopeDark = await backgroundColor(page, '[data-testid="attendance-scope-controls"] button:nth-child(2)');
+  const activeScopeDark = await backgroundColor(page, '[data-testid="attendance-scope-controls"] button[aria-pressed="true"]');
   const detailsDark = await backgroundColor(page, '[data-testid="conversation-details-panel"]');
   expect(workspaceDark).not.toBe(workspaceLight);
+  expect(panelDark).toBe(workspaceDark);
+  expect(filterDark).not.toBe(panelDark);
+  expect(newAttendanceControlDark).not.toBe(panelDark);
+  expect(inactiveScopeDark).not.toBe(panelDark);
+  expect(activeScopeDark).not.toBe(inactiveScopeDark);
   expect(detailsDark).not.toBe(detailsLight);
 
   await page.getByTitle("Mudar para modo claro").click();
@@ -103,6 +114,10 @@ test("Atendimento follows the real sidebar toggle without reload even when brows
   await expect(page.getByTestId("attendance-workspace")).toHaveAttribute("data-theme", "light");
   await expect(details).toHaveAttribute("data-theme", "light");
   expect(await backgroundColor(page, '[data-testid="attendance-workspace"]')).toBe(workspaceLight);
+  expect(await backgroundColor(page, '[data-testid="conversation-list-panel"]')).toBe(panelLight);
+  expect(await backgroundColor(page, '[data-testid="attendance-primary-controls"] button')).not.toBe(filterDark);
+  expect(await backgroundColor(page, '[data-testid="attendance-action-controls"] button:first-child')).not.toBe(newAttendanceControlDark);
+  expect(await backgroundColor(page, '[data-testid="attendance-scope-controls"] button:nth-child(2)')).not.toBe(inactiveScopeDark);
   expect(await backgroundColor(page, '[data-testid="conversation-details-panel"]')).toBe(detailsLight);
 
   await page.getByRole("button", { name: "Novo atendimento", exact: true }).click();
