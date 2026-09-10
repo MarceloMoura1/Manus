@@ -2229,6 +2229,164 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
   }
 }
 
+Describe 'MegaDesk publish tunnel lifecycle' {
+  It 'ensures the existing managed tunnel before candidate public readiness without starting a duplicate' {
+    $old = [pscustomobject]@{ sha = '7373737373737373737373737373737373737373'; path = 'C:\isolated\old' }
+    $candidate = [pscustomobject]@{ sha = '7474747474747474747474747474747474747474'; path = 'C:\isolated\candidate' }
+    $global:MegaDeskTunnelLifecycleOld = $old
+    $global:MegaDeskTunnelLifecycleCandidate = $candidate
+    InModuleScope $moduleName {
+      $old = $global:MegaDeskTunnelLifecycleOld
+      $candidate = $global:MegaDeskTunnelLifecycleCandidate
+      $existingTunnel = [pscustomobject]@{ pid = 5252; configPath = 'C:\runtime\config.yml' }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $existingTunnel; activeRelease = [pscustomobject]@{ sha = $old.sha; path = $old.path; activatedAt = '2026-01-01T00:00:00.000Z' }; previousRelease = $null; operation = [pscustomobject]@{ status = 'READY' } }
+      $script:sequence = @()
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Set-MegaDeskOperationState { param($Status) $script:testState.operation.status = $Status; return $script:testState }
+      Mock Get-MegaDeskPortOwnership { [pscustomobject]@{ status = 'FREE'; port = $script:RuntimePort; process = $null; reason = '' } }
+      Mock Assert-MegaDeskPortFree { }
+      Mock Start-MegaDeskNode { param($ReleaseSha) $script:sequence += 'candidate-node'; $record = [pscustomobject]@{ pid = 7474; releaseSha = $ReleaseSha; port = $script:RuntimePort }; $script:testState.node = $record; return $record }
+      Mock Wait-MegaDeskLocal { $script:sequence += 'local' }
+      Mock Start-MegaDeskTunnel { $script:sequence += 'tunnel'; return $null }
+      Mock Wait-MegaDeskPublicEndpoints { $script:sequence += 'public' }
+
+      Invoke-MegaDeskReleaseSwitch -CandidateRelease $candidate -PreviousRelease $old
+
+      $script:sequence | Should Be @('candidate-node', 'local', 'tunnel', 'public')
+      $script:testState.cloudflared | Should Be $existingTunnel
+      Assert-MockCalled Start-MegaDeskTunnel -Times 1 -Exactly -Scope It
+      Assert-MockCalled Wait-MegaDeskPublicEndpoints -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'replaces an absent stale tunnel before candidate public readiness' {
+    $old = [pscustomobject]@{ sha = '7575757575757575757575757575757575757575'; path = 'C:\isolated\old' }
+    $candidate = [pscustomobject]@{ sha = '7676767676767676767676767676767676767676'; path = 'C:\isolated\candidate' }
+    $global:MegaDeskTunnelLifecycleOld = $old
+    $global:MegaDeskTunnelLifecycleCandidate = $candidate
+    InModuleScope $moduleName {
+      $old = $global:MegaDeskTunnelLifecycleOld
+      $candidate = $global:MegaDeskTunnelLifecycleCandidate
+      $staleTunnel = [pscustomobject]@{ pid = 5252; configPath = 'C:\runtime\config.yml' }
+      $replacementTunnel = [pscustomobject]@{ pid = 5353; configPath = 'C:\runtime\config.yml' }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $staleTunnel; activeRelease = [pscustomobject]@{ sha = $old.sha; path = $old.path; activatedAt = '2026-01-01T00:00:00.000Z' }; previousRelease = $null; operation = [pscustomobject]@{ status = 'READY' } }
+      $script:sequence = @()
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Set-MegaDeskOperationState { param($Status) $script:testState.operation.status = $Status; return $script:testState }
+      Mock Get-MegaDeskPortOwnership { [pscustomobject]@{ status = 'FREE'; port = $script:RuntimePort; process = $null; reason = '' } }
+      Mock Assert-MegaDeskPortFree { }
+      Mock Start-MegaDeskNode { param($ReleaseSha) $script:sequence += 'candidate-node'; $record = [pscustomobject]@{ pid = 7676; releaseSha = $ReleaseSha; port = $script:RuntimePort }; $script:testState.node = $record; return $record }
+      Mock Wait-MegaDeskLocal { $script:sequence += 'local' }
+      Mock Start-MegaDeskTunnel { $script:sequence += 'tunnel'; $script:testState.cloudflared = $replacementTunnel; return $replacementTunnel }
+      Mock Wait-MegaDeskPublicEndpoints { $script:sequence += 'public' }
+
+      Invoke-MegaDeskReleaseSwitch -CandidateRelease $candidate -PreviousRelease $old
+
+      $script:sequence | Should Be @('candidate-node', 'local', 'tunnel', 'public')
+      $script:testState.cloudflared | Should Be $replacementTunnel
+      Assert-MockCalled Start-MegaDeskTunnel -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'ensures the tunnel after restoring the previous Node and before rollback public readiness' {
+    $old = [pscustomobject]@{ sha = '7777777777777777777777777777777777777777'; path = 'C:\isolated\old' }
+    $candidateRecord = [pscustomobject]@{ pid = 7878; releaseSha = '7878787878787878787878787878787878787878'; port = 32120 }
+    $global:MegaDeskTunnelLifecycleOld = $old
+    $global:MegaDeskTunnelLifecycleCandidateRecord = $candidateRecord
+    InModuleScope $moduleName {
+      $old = $global:MegaDeskTunnelLifecycleOld
+      $candidateRecord = $global:MegaDeskTunnelLifecycleCandidateRecord
+      $replacementTunnel = [pscustomobject]@{ pid = 5353; configPath = 'C:\runtime\config.yml' }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $candidateRecord; cloudflared = [pscustomobject]@{ pid = 5252 }; activeRelease = [pscustomobject]@{ sha = $old.sha; path = $old.path; activatedAt = '2026-01-01T00:00:00.000Z' }; previousRelease = $null; operation = [pscustomobject]@{ status = 'SWITCHING' } }
+      $script:sequence = @()
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Set-MegaDeskOperationState { param($Status) $script:testState.operation.status = $Status; return $script:testState }
+      Mock Undo-MegaDeskInvocation { $script:sequence += 'undo-candidate'; $script:testState.node = $null }
+      Mock Assert-MegaDeskPortFree { }
+      Mock Start-MegaDeskNode { param($ReleaseSha) $script:sequence += 'rollback-node'; $record = [pscustomobject]@{ pid = 7777; releaseSha = $ReleaseSha; port = $script:RuntimePort }; $script:testState.node = $record; return $record }
+      Mock Wait-MegaDeskLocal { $script:sequence += 'local' }
+      Mock Start-MegaDeskTunnel { $script:sequence += 'tunnel'; $script:testState.cloudflared = $replacementTunnel; return $replacementTunnel }
+      Mock Wait-MegaDeskPublicEndpoints { $script:sequence += 'public' }
+
+      Invoke-MegaDeskReleaseRollback -PreviousRelease $old -StartedCandidateRecord $candidateRecord
+
+      $script:sequence | Should Be @('undo-candidate', 'rollback-node', 'local', 'tunnel', 'public')
+      $script:testState.operation.status | Should Be 'ACTIVE'
+      Assert-MockCalled Start-MegaDeskTunnel -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'reports a tunnel-start failure before candidate public readiness and invokes rollback' {
+    $old = [pscustomobject]@{ sha = '7979797979797979797979797979797979797979'; path = 'C:\isolated\old' }
+    $candidate = [pscustomobject]@{ sha = '8080808080808080808080808080808080808080'; path = 'C:\isolated\candidate' }
+    $global:MegaDeskTunnelLifecycleOld = $old
+    $global:MegaDeskTunnelLifecycleCandidate = $candidate
+    InModuleScope $moduleName {
+      $old = $global:MegaDeskTunnelLifecycleOld
+      $candidate = $global:MegaDeskTunnelLifecycleCandidate
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $old.sha; path = $old.path; activatedAt = '2026-01-01T00:00:00.000Z' }; previousRelease = $null; operation = [pscustomobject]@{ status = 'READY' } }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Set-MegaDeskOperationState { param($Status) $script:testState.operation.status = $Status; return $script:testState }
+      Mock Get-MegaDeskPortOwnership { [pscustomobject]@{ status = 'FREE'; port = $script:RuntimePort; process = $null; reason = '' } }
+      Mock Assert-MegaDeskPortFree { }
+      $script:nodeStarts = 0
+      $script:tunnelStarts = 0
+      Mock Start-MegaDeskNode {
+        param($ReleaseSha)
+        $script:nodeStarts++
+        $record = [pscustomobject]@{ pid = (8080 + $script:nodeStarts); releaseSha = $ReleaseSha; port = $script:RuntimePort }
+        $script:testState.node = $record
+        return $record
+      }
+      Mock Wait-MegaDeskLocal { }
+      Mock Start-MegaDeskTunnel {
+        $script:tunnelStarts++
+        if ($script:tunnelStarts -eq 1) { throw 'cloudflared.exe nao foi encontrado no PATH.' }
+        $record = [pscustomobject]@{ pid = 5353; configPath = 'C:\runtime\config.yml' }
+        $script:testState.cloudflared = $record
+        return $record
+      }
+      Mock Wait-MegaDeskPublicEndpoints { }
+      Mock Undo-MegaDeskInvocation { $script:testState.node = $null }
+
+      { Invoke-MegaDeskReleaseSwitch -CandidateRelease $candidate -PreviousRelease $old } | Should Throw 'cloudflared.exe nao foi encontrado no PATH.'
+
+      Assert-MockCalled Start-MegaDeskTunnel -Times 2 -Exactly -Scope It
+      Assert-MockCalled Wait-MegaDeskPublicEndpoints -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'does not report rollback confirmed when tunnel start fails' {
+    $old = [pscustomobject]@{ sha = '8181818181818181818181818181818181818181'; path = 'C:\isolated\old' }
+    $candidateRecord = [pscustomobject]@{ pid = 8282; releaseSha = '8282828282828282828282828282828282828282'; port = 32120 }
+    $global:MegaDeskTunnelLifecycleOld = $old
+    $global:MegaDeskTunnelLifecycleCandidateRecord = $candidateRecord
+    InModuleScope $moduleName {
+      $old = $global:MegaDeskTunnelLifecycleOld
+      $candidateRecord = $global:MegaDeskTunnelLifecycleCandidateRecord
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $candidateRecord; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $old.sha; path = $old.path; activatedAt = '2026-01-01T00:00:00.000Z' }; previousRelease = $null; operation = [pscustomobject]@{ status = 'SWITCHING' } }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Set-MegaDeskOperationState { param($Status) $script:testState.operation.status = $Status; return $script:testState }
+      Mock Undo-MegaDeskInvocation { $script:testState.node = $null }
+      Mock Assert-MegaDeskPortFree { }
+      Mock Start-MegaDeskNode { param($ReleaseSha) $record = [pscustomobject]@{ pid = 8181; releaseSha = $ReleaseSha; port = $script:RuntimePort }; $script:testState.node = $record; return $record }
+      Mock Wait-MegaDeskLocal { }
+      Mock Start-MegaDeskTunnel { throw 'cloudflared.exe nao foi encontrado no PATH.' }
+      Mock Wait-MegaDeskPublicEndpoints { throw 'public readiness must not run' }
+
+      { Invoke-MegaDeskReleaseRollback -PreviousRelease $old -StartedCandidateRecord $candidateRecord } | Should Throw 'CRITICO: rollback da release anterior nao foi confirmado: cloudflared.exe nao foi encontrado no PATH.'
+
+      $script:testState.operation.status | Should Be 'FAILED'
+      Assert-MockCalled Wait-MegaDeskPublicEndpoints -Times 0 -Exactly -Scope It
+    }
+  }
+}
+
 Describe 'MegaDesk updater v2 real process health' -Tags @('ProcessReal') {
   BeforeEach {
     $script:port = Get-IsolatedTestPort

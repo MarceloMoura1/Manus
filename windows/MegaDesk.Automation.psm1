@@ -2155,6 +2155,7 @@ function Invoke-MegaDeskReleaseRollback {
     Assert-MegaDeskPortFree -Port $script:RuntimePort -Operation 'rollback' | Out-Null
     $rollbackNodeRecord = Start-MegaDeskNode -ReleaseSha ([string]$PreviousRelease.sha) -Port $script:RuntimePort
     Wait-MegaDeskLocal -ExpectedReleaseSha ([string]$PreviousRelease.sha) -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds -NodeRecord $rollbackNodeRecord
+    if (-not $TestMode) { Start-MegaDeskTunnel | Out-Null }
     Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha ([string]$PreviousRelease.sha) -Checks $PublicChecks -TestMode:$TestMode -TimeoutSeconds $PublicTimeoutSeconds
     $state = Get-MegaDeskState
     $state.activeRelease = [pscustomobject]@{ sha = $PreviousRelease.sha; path = $PreviousRelease.path; activatedAt = (Get-Date).ToUniversalTime().ToString('o') }
@@ -2223,6 +2224,7 @@ function Invoke-MegaDeskReleaseSwitch {
     Assert-MegaDeskPortFree -Port $script:RuntimePort -Operation 'switch apos parada do runtime gerenciado' | Out-Null
     $startedCandidateRecord = Start-MegaDeskNode -ReleaseSha ([string]$CandidateRelease.sha) -Port $script:RuntimePort
     Wait-MegaDeskLocal -ExpectedReleaseSha ([string]$CandidateRelease.sha) -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds -NodeRecord $startedCandidateRecord
+    if (-not $TestMode) { Start-MegaDeskTunnel | Out-Null }
     Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha ([string]$CandidateRelease.sha) -Checks $PublicChecks -TestMode:$TestMode -TimeoutSeconds $PublicTimeoutSeconds
     $state = Get-MegaDeskState
     $state.previousRelease = [pscustomobject]@{ sha = $PreviousRelease.sha; path = $PreviousRelease.path; activatedAt = $state.activeRelease.activatedAt }
