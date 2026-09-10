@@ -25,4 +25,17 @@ describe("saved conversation background consumers", () => {
     expect(attendance).toContain('<ConversationBackground preference={conversationBackground}');
     expect(attendance).toMatch(/id="attendance-recipient"[\s\S]*?bg-white/);
   });
+
+  it("passes the saved preference through the shared bubble primitive in Conversas", () => {
+    const conversations = source("client/src/pages/ConversasPage.tsx");
+
+    expect(conversations).toContain(
+      'import { useUserPersonalization } from "@/hooks/useUserPersonalization"'
+    );
+    expect(conversations).toContain(
+      'const { preference: conversationBackground } = useUserPersonalization();'
+    );
+    expect(conversations).toContain("<ConversationMessageBubble");
+    expect(conversations).toContain("preference={conversationBackground}");
+  });
 });

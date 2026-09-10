@@ -26,6 +26,44 @@ export function conversationMessageBubbleClasses(
     : "max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm border border-slate-200/80 bg-white/95 text-slate-700";
 }
 
+type RgbColor = { red: number; green: number; blue: number };
+
+function hexToRgb(color: string): RgbColor {
+  return {
+    red: Number.parseInt(color.slice(1, 3), 16),
+    green: Number.parseInt(color.slice(3, 5), 16),
+    blue: Number.parseInt(color.slice(5, 7), 16),
+  };
+}
+
+function rgbToHex({ red, green, blue }: RgbColor) {
+  return `#${[red, green, blue]
+    .map(channel => channel.toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase()}`;
+}
+
+function mixBubbleColor(
+  color: string,
+  target: RgbColor,
+  amount: number
+) {
+  const source = hexToRgb(color);
+  const mix = (channel: keyof RgbColor) =>
+    Math.round(source[channel] * (1 - amount) + target[channel] * amount);
+  return rgbToHex({ red: mix("red"), green: mix("green"), blue: mix("blue") });
+}
+
+/**
+ * Derives restrained tonal stops from a persisted base colour. The low stop
+ * uses slate rather than pure black so very dark colours retain their hue.
+ */
+export function conversationMessageBubbleGradient(color: string) {
+  const lighter = mixBubbleColor(color, { red: 255, green: 255, blue: 255 }, 0.18);
+  const darker = mixBubbleColor(color, { red: 15, green: 23, blue: 42 }, 0.16);
+  return `linear-gradient(135deg, ${lighter} 0%, ${color} 52%, ${darker} 100%)`;
+}
+
 /** Resolves only normalized persisted colours; null deliberately leaves the legacy classes untouched. */
 export function conversationMessageBubbleStyle(
   direction: ConversationBubbleDirection,
@@ -39,6 +77,7 @@ export function conversationMessageBubbleStyle(
   if (!backgroundColor) return undefined;
   return {
     backgroundColor,
+    backgroundImage: conversationMessageBubbleGradient(backgroundColor),
     color: conversationBubbleForegroundColor(backgroundColor),
     ...(direction === "incoming" ? { borderColor: backgroundColor } : {}),
   };

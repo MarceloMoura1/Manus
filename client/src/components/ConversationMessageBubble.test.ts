@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   conversationMessageBubbleClasses,
+  conversationMessageBubbleGradient,
   conversationMessageBubbleStyle,
 } from "./ConversationMessageBubble";
 import { ConversationAppearancePreview } from "./ConversationAppearancePreview";
@@ -30,14 +31,18 @@ describe("ConversationMessageBubble", () => {
     );
   });
 
-  it("keeps legacy classes by default and resolves readable custom bubble colours", () => {
+  it("keeps legacy classes by default and derives readable tonal custom bubble colours", () => {
     expect(conversationMessageBubbleStyle("incoming")).toBeUndefined();
     expect(
       conversationMessageBubbleStyle("outgoing", {
         ...DEFAULT_CONVERSATION_BACKGROUND,
         outgoingBubbleColor: "#FFFFFF",
       })
-    ).toEqual({ backgroundColor: "#FFFFFF", color: "#0F172A" });
+    ).toEqual({
+      backgroundColor: "#FFFFFF",
+      backgroundImage: conversationMessageBubbleGradient("#FFFFFF"),
+      color: "#0F172A",
+    });
     expect(
       conversationMessageBubbleStyle("incoming", {
         ...DEFAULT_CONVERSATION_BACKGROUND,
@@ -45,9 +50,31 @@ describe("ConversationMessageBubble", () => {
       })
     ).toEqual({
       backgroundColor: "#1E293B",
+      backgroundImage: conversationMessageBubbleGradient("#1E293B"),
       color: "#FFFFFF",
       borderColor: "#1E293B",
     });
+  });
+
+  it("derives deterministic, valid gradients independently from each base colour", () => {
+    const blue = conversationMessageBubbleGradient("#2563EB");
+    const red = conversationMessageBubbleGradient("#DC2626");
+
+    expect(blue).toMatch(
+      /^linear-gradient\(135deg, #[0-9A-F]{6} 0%, #2563EB 52%, #[0-9A-F]{6} 100%\)$/
+    );
+    expect(red).toMatch(
+      /^linear-gradient\(135deg, #[0-9A-F]{6} 0%, #DC2626 52%, #[0-9A-F]{6} 100%\)$/
+    );
+    expect(blue).not.toBe(red);
+
+    const preference = {
+      ...DEFAULT_CONVERSATION_BACKGROUND,
+      incomingBubbleColor: "#DC2626",
+      outgoingBubbleColor: "#2563EB",
+    };
+    expect(conversationMessageBubbleStyle("incoming", preference)?.backgroundImage).toBe(red);
+    expect(conversationMessageBubbleStyle("outgoing", preference)?.backgroundImage).toBe(blue);
   });
 
   it("renders the real conversation bubble primitive inside the personalization preview", () => {
@@ -78,6 +105,7 @@ describe("ConversationMessageBubble", () => {
 
     expect(markup).toContain('data-bubble-color="#DBEAFE"');
     expect(markup).toContain('data-bubble-color="#1E293B"');
+    expect(markup).toContain("background-image:linear-gradient");
     expect(markup).toContain("color:#0F172A");
     expect(markup).toContain("color:#FFFFFF");
   });
