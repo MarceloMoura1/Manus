@@ -419,7 +419,7 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
   );
 }
 
-function ConversationsPage({ attendanceLaunch, attendancePhone }: {
+export function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   attendanceLaunch: number;
   attendancePhone: string;
 }) {
@@ -1017,21 +1017,21 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   const getAvatarColor = (id: string) => avatarColors[id?.charCodeAt(0) % avatarColors.length] || 'bg-slate-500';
 
   return (
-    <div className="relative flex h-full min-h-0 w-full min-w-0 max-w-full overflow-hidden bg-white min-[900px]:rounded-2xl min-[900px]:border min-[900px]:border-slate-200 min-[900px]:shadow-xl">
+      <div data-testid="attendance-workspace" className="relative flex h-full min-h-0 w-full min-w-0 max-w-full overflow-hidden bg-white dark:bg-slate-950 min-[900px]:rounded-2xl min-[900px]:border min-[900px]:border-slate-200 dark:min-[900px]:border-slate-800 min-[900px]:shadow-xl dark:min-[900px]:shadow-black/30">
 
       {/* ─── Coluna Esquerda: Lista de Conversas ─── */}
       <div className={cn(
-        'min-h-0 min-w-0 w-full max-w-full flex-col bg-slate-50 min-[900px]:flex min-[900px]:w-[420px] min-[900px]:flex-shrink-0 min-[900px]:border-r min-[900px]:border-slate-100',
+        'min-h-0 min-w-0 w-full max-w-full flex-col bg-slate-50 dark:bg-slate-900 min-[900px]:flex min-[900px]:w-[420px] min-[900px]:flex-shrink-0 min-[900px]:border-r min-[900px]:border-slate-100 dark:min-[900px]:border-slate-800',
         selectedConv || newAttendanceOpen || crmHandoffState === 'composer' ? 'hidden' : 'flex',
       )} data-testid="conversation-list-panel">
 
         {/* Header */}
-        <div className="border-b border-slate-100 bg-white px-4 py-3">
+        <div className="border-b border-slate-100 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center gap-2.5" data-testid="attendance-header">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700" aria-hidden="true">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300" aria-hidden="true">
               <MessageCircle className="h-4 w-4" />
             </span>
-            <h2 className="truncate text-base font-bold tracking-tight text-slate-900">Atendimento</h2>
+            <h2 className="truncate text-base font-bold tracking-tight text-slate-900 dark:text-slate-100">Atendimento</h2>
           </div>
           <div className="mt-3" data-testid="attendance-primary-controls">
             <button
@@ -1041,8 +1041,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
               className={cn(
                 'flex w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500',
                 (dateFilterOpen || hasListFilters)
-                  ? 'border-violet-200 bg-violet-50 text-violet-700'
-                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  ? 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/40 dark:bg-violet-500/20 dark:text-violet-200'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
               )}
             >
               <Filter className="h-4 w-4" />
@@ -1053,24 +1053,24 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
 
           {/* Painel de filtros unificado */}
           {dateFilterOpen && (
-            <div className="mt-2 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+            <div className="mt-2 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
 
               {/* Busca por nome/empresa/telefone */}
               <div>
-                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Buscar</label>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Buscar</label>
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                  <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
                   <input
                     type="text"
                     placeholder="Nome, empresa ou telefone..."
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
-                    className="w-full pl-8 pr-8 py-2 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent transition-all"
+                    className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-8 pr-8 text-xs text-slate-700 transition-all placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
                   />
                   {searchTerm && (
                     <button
                       onClick={() => setSearchTerm('')}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-200"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -1088,7 +1088,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                       type="date"
                       value={dateFrom}
                       onChange={e => setDateFrom(e.target.value)}
-                      className="w-full px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                     />
                   </div>
                   <div className="flex-1">
@@ -1107,12 +1107,12 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
               {hasListFilters && (
                 <button
                   onClick={clearConversationFilters}
-                  className="w-full text-xs text-indigo-600 hover:text-indigo-800 font-medium py-1 text-center underline"
+                  className="w-full py-1 text-center text-xs font-medium text-indigo-600 underline hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200"
                 >Limpar todos os filtros</button>
               )}
 
               {(hasDateFilter || searchTerm) && (
-                <p className="text-xs text-slate-500 text-center">
+                <p className="text-center text-xs text-slate-500 dark:text-slate-400">
                   {orderedConversations.length} resultado{orderedConversations.length !== 1 ? 's' : ''}
                 </p>
               )}
@@ -1121,8 +1121,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
         </div>
 
         {/* Segunda linha: iniciar ou consultar atendimentos encerrados */}
-        <div className="px-3 py-2 bg-white border-b border-slate-100">
-          <div className="flex overflow-hidden rounded-lg border border-slate-200" data-testid="attendance-action-controls">
+        <div className="border-b border-slate-100 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700" data-testid="attendance-action-controls">
             <button
               type="button"
               aria-pressed={newAttendanceOpen}
@@ -1134,7 +1134,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
               }}
               className={cn(
                 'min-w-0 flex-1 flex items-center justify-center gap-1 px-2 py-2 text-xs font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-3',
-                newAttendanceOpen ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                newAttendanceOpen ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
               )}
             >
               <PhoneCall className="h-3.5 w-3.5" />
@@ -1145,8 +1145,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
               aria-pressed={inboxView === 'closed'}
               onClick={() => selectInboxView('closed')}
               className={cn(
-                'min-w-0 flex-1 flex items-center justify-center gap-1 border-l border-slate-200 px-2 py-2 text-xs font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:gap-1.5 sm:px-3',
-                inboxView === 'closed' ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                'min-w-0 flex-1 flex items-center justify-center gap-1 border-l border-slate-200 px-2 py-2 text-xs font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:border-slate-700 sm:gap-1.5 sm:px-3',
+                inboxView === 'closed' ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
               )}
             >
               <CheckCircle2 className="h-3.5 w-3.5" />
@@ -1156,8 +1156,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
         </div>
 
         {/* Terceira linha: escopo das conversas ativas */}
-        <div className="px-3 py-2 bg-white border-b border-slate-100">
-          <div className="flex overflow-hidden rounded-lg border border-slate-200" data-testid="attendance-scope-controls">
+        <div className="border-b border-slate-100 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700" data-testid="attendance-scope-controls">
             {(['all', 'mine'] as const).map((scope, index) => (
               <button
                 type="button"
@@ -1166,8 +1166,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                 onClick={() => selectAttendantScope(scope)}
                 className={cn(
                   'min-w-0 flex-1 flex items-center justify-center gap-1 px-2 py-2 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:gap-1.5 sm:px-3',
-                  index > 0 && 'border-l border-slate-200',
-                  inboxView === 'open' && attendantScope === scope ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                  index > 0 && 'border-l border-slate-200 dark:border-slate-700',
+                  inboxView === 'open' && attendantScope === scope ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
                 )}
               >
                 {scope === 'all' ? <MessageCircle className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
@@ -1180,8 +1180,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
               aria-pressed={inboxView === 'bot'}
               onClick={() => selectInboxView('bot')}
               className={cn(
-                'min-w-0 flex-1 flex items-center justify-center gap-1 border-l border-slate-200 px-2 py-2 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:gap-1.5 sm:px-3',
-                inboxView === 'bot' ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                    'min-w-0 flex-1 flex items-center justify-center gap-1 border-l border-slate-200 px-2 py-2 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:border-slate-700 sm:gap-1.5 sm:px-3',
+                    inboxView === 'bot' ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
               )}
             >
               <Bot className="h-3.5 w-3.5" />
@@ -1190,10 +1190,10 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3" data-testid="conversation-list-heading">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900" data-testid="conversation-list-heading">
           <div className="flex min-w-0 items-center gap-2">
-            <h3 className="truncate text-sm font-bold text-slate-900">{conversationSectionTitle}</h3>
-            <span data-testid="conversation-list-count" className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-100 px-1.5 text-[11px] font-semibold tabular-nums text-violet-700">{orderedConversations.length}</span>
+            <h3 className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">{conversationSectionTitle}</h3>
+            <span data-testid="conversation-list-count" className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-100 px-1.5 text-[11px] font-semibold tabular-nums text-violet-700 dark:bg-violet-500/20 dark:text-violet-200">{orderedConversations.length}</span>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button
@@ -1203,7 +1203,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
               aria-label={`Ordenação: ${conversationSortOrder === 'recent' ? 'mais recentes primeiro' : 'mais antigas primeiro'}`}
               title={`Ordenação: ${conversationSortOrder === 'recent' ? 'mais recentes primeiro' : 'mais antigas primeiro'}`}
               onClick={() => setConversationSortOrder(order => order === 'recent' ? 'oldest' : 'recent')}
-              className="flex h-8 items-center gap-1 rounded-md px-1.5 text-slate-600 transition-colors hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+              className="flex h-8 items-center gap-1 rounded-md px-1.5 text-slate-600 transition-colors hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 dark:text-slate-300 dark:hover:bg-violet-500/20 dark:hover:text-violet-200"
             >
               <ArrowDownUp className={cn('h-4 w-4 transition-transform', conversationSortOrder === 'oldest' && 'rotate-180')} />
               <span className="text-[11px] font-semibold">{conversationSortOrder === 'recent' ? 'Recentes' : 'Antigas'}</span>
@@ -1214,7 +1214,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
         {/* Lista */}
         <div className="flex-1 overflow-y-auto">
           {conversationsLoading ? (
-            <div className="flex h-48 items-center justify-center text-sm text-slate-500" role="status">Carregando conversas...</div>
+            <div className="flex h-48 items-center justify-center text-sm text-slate-500 dark:text-slate-400" role="status">Carregando conversas...</div>
           ) : orderedConversations.length > 0 ? (
             orderedConversations.map(conv => <ConversationListItem
               key={conv.id}
@@ -1235,9 +1235,9 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
             />)
           ) : (
             <div className="flex flex-col items-center justify-center h-48 text-center px-6">
-              <MessageCircle className="w-10 h-10 text-slate-200 mb-3" />
-              <p className="text-sm font-medium text-slate-500">Nenhuma conversa</p>
-              <p className="text-xs text-slate-400 mt-1">Tente outro filtro ou busca</p>
+              <MessageCircle className="mb-3 h-10 w-10 text-slate-200 dark:text-slate-700" />
+              <p className="text-sm font-medium text-slate-500 dark:text-slate-300">Nenhuma conversa</p>
+              <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">Tente outro filtro ou busca</p>
             </div>
           )}
         </div>
@@ -1292,13 +1292,13 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
         ) : selectedConv ? (
           <>
             {/* Header do Chat */}
-            <div data-testid="active-conversation-header" className="flex min-w-0 flex-shrink-0 items-center justify-between gap-2 border-b border-slate-200/80 bg-white px-3 py-2.5 sm:px-4 md:px-6 md:py-3">
+            <div data-testid="active-conversation-header" className="flex min-w-0 flex-shrink-0 items-center justify-between gap-2 border-b border-slate-200/80 bg-white px-3 py-2.5 sm:px-4 md:px-6 md:py-3 dark:border-slate-800 dark:bg-slate-900">
               <div className="flex min-w-0 items-center gap-2 md:gap-3">
                 <button
                   type="button"
                   onClick={returnToConversationList}
                   aria-label="Voltar para conversas"
-                  className="flex h-11 flex-shrink-0 items-center gap-1 rounded-xl px-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 min-[900px]:hidden"
+                  className="flex h-11 flex-shrink-0 items-center gap-1 rounded-xl px-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-blue-300 dark:hover:bg-blue-500/20 min-[900px]:hidden"
                 >
                   <ArrowLeft className="h-5 w-5" />
                   <span>Voltar</span>
@@ -1308,17 +1308,17 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                 </div>
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-center gap-1.5 md:gap-2">
-                    <h3 className="truncate text-sm font-bold text-slate-900 md:text-base">{selectedConv.name}</h3>
+                    <h3 className="truncate text-sm font-bold text-slate-900 dark:text-slate-100 md:text-base">{selectedConv.name}</h3>
                     <span className={cn(
                       'hidden flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium sm:inline',
-                      selectedConv.status === 'open' ? 'bg-emerald-100 text-emerald-700' :
-                      selectedConv.status === 'bot' ? 'bg-violet-100 text-violet-700' :
-                      'bg-slate-100 text-slate-600'
+                      selectedConv.status === 'open' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300' :
+                      selectedConv.status === 'bot' ? 'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-200' :
+                      'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
                     )}>
                       {selectedConv.status === 'open' ? 'Aberta' : selectedConv.status === 'bot' ? 'BOT' : 'Fechada'}
                     </span>
                   </div>
-                  <p className="truncate text-xs text-slate-500">{selectedConv.phone} {selectedConv.company ? `• ${selectedConv.company}` : ''}</p>
+                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">{selectedConv.phone} {selectedConv.company ? `• ${selectedConv.company}` : ''}</p>
                 </div>
               </div>
               <div className="flex flex-shrink-0 items-center gap-1.5 sm:gap-2">
@@ -1337,7 +1337,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                   onClick={() => setTransferOpen(true)}
                   aria-label="Transferir atendimento"
                   title="Transferir atendimento"
-                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-violet-500/40 dark:hover:bg-violet-500/20 dark:hover:text-violet-200"
                 >
                   <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />
                 </button>
@@ -1360,7 +1360,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                   aria-label={conversationDetailsOpen ? "Fechar detalhes da conversa" : "Abrir detalhes da conversa"}
                   title={conversationDetailsOpen ? "Fechar detalhes da conversa" : "Abrir detalhes da conversa"}
                   onClick={() => setConversationDetailsOpen(value => !value)}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                  className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-slate-300 dark:hover:bg-slate-800">
                   {conversationDetailsOpen ? <ArrowRight className="h-5 w-5" aria-hidden="true" /> : <ArrowLeft className="h-5 w-5" aria-hidden="true" />}
                 </button>
               </div>
@@ -1514,7 +1514,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
             </ConversationBackground>
 
             {/* Input de Mensagem */}
-            <div data-testid="conversation-composer" className="max-w-full flex-shrink-0 border-t border-slate-100 bg-white px-3 pt-3 md:px-6 md:pt-4" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+            <div data-testid="conversation-composer" className="max-w-full flex-shrink-0 border-t border-slate-100 bg-white px-3 pt-3 dark:border-slate-800 dark:bg-slate-900 md:px-6 md:pt-4" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
               {/* Indicador de status do WhatsApp */}
               {waConnected === false && (
                 <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 text-xs text-red-700">
@@ -1523,25 +1523,25 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                 </div>
               )}
               {replyTarget && (
-                <div data-testid="conversation-composer-quote" className="mb-3 flex items-center gap-3 rounded-xl border border-violet-200 bg-violet-50 p-3 text-slate-700">
-                  <Reply className="h-4 w-4 shrink-0 text-violet-700" aria-hidden="true" />
+                <div data-testid="conversation-composer-quote" className="mb-3 flex items-center gap-3 rounded-xl border border-violet-200 bg-violet-50 p-3 text-slate-700 dark:border-violet-500/40 dark:bg-violet-500/15 dark:text-slate-200">
+                  <Reply className="h-4 w-4 shrink-0 text-violet-700 dark:text-violet-300" aria-hidden="true" />
                   <div className="min-w-0 flex-1 border-l-2 border-violet-400 pl-2.5">
-                    <p className="truncate text-xs font-bold text-violet-800">Respondendo a {replyAuthor(replyTarget)}</p>
-                    <p className="truncate text-xs text-slate-600">{replyPreview(replyTarget)}</p>
+                    <p className="truncate text-xs font-bold text-violet-800 dark:text-violet-200">Respondendo a {replyAuthor(replyTarget)}</p>
+                    <p className="truncate text-xs text-slate-600 dark:text-slate-300">{replyPreview(replyTarget)}</p>
                   </div>
-                  <button type="button" onClick={() => setReplyTarget(null)} aria-label="Cancelar resposta" title="Cancelar resposta" className="rounded-full p-1 text-slate-500 hover:bg-white hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"><X className="h-4 w-4" /></button>
+                  <button type="button" onClick={() => setReplyTarget(null)} aria-label="Cancelar resposta" title="Cancelar resposta" className="rounded-full p-1 text-slate-500 hover:bg-white hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"><X className="h-4 w-4" /></button>
                 </div>
               )}
               {attachment && (
                 <div className="mb-3 flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
                   {attachment.kind === 'image' || attachment.kind === 'sticker' ? <img src={attachment.dataUrl} alt="Prévia" className="h-16 w-16 rounded-lg object-contain" /> : attachment.kind === 'video' ? <Video className="h-8 w-8 text-blue-600" /> : attachment.kind === 'audio' ? <Mic className="h-8 w-8 text-blue-600" /> : <FileText className="h-8 w-8 text-blue-600" />}
-                  <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-700">{attachment.fileName}</p><p className="text-xs text-slate-500">Adicione uma legenda e pressione Enter para enviar</p></div>
-                  <button type="button" onClick={() => setAttachment(null)} className="rounded-full p-1 text-slate-500 hover:bg-white"><X className="h-4 w-4" /></button>
+                  <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-700 dark:text-slate-100">{attachment.fileName}</p><p className="text-xs text-slate-500 dark:text-slate-400">Adicione uma legenda e pressione Enter para enviar</p></div>
+                  <button type="button" onClick={() => setAttachment(null)} className="rounded-full p-1 text-slate-500 hover:bg-white dark:text-slate-400 dark:hover:bg-slate-800"><X className="h-4 w-4" /></button>
                 </div>
               )}
               <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:gap-3">
                 <input ref={attachmentInputRef} type="file" className="hidden" accept={outboundAttachmentAccept} onChange={(e) => { const file = e.target.files?.[0]; if (file) prepareAttachment(file); e.currentTarget.value = ''; }} />
-                <button type="button" title="Adicionar anexo" disabled={waConnected === false || isSendingMessage || isAudioBusy || isRecordingAudio} onClick={() => attachmentInputRef.current?.click()} className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl border border-slate-200 text-slate-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50"><Paperclip className="h-5 w-5" /></button>
+                <button type="button" title="Adicionar anexo" disabled={waConnected === false || isSendingMessage || isAudioBusy || isRecordingAudio} onClick={() => attachmentInputRef.current?.click()} className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl border border-slate-200 text-slate-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/15 dark:hover:text-blue-300"><Paperclip className="h-5 w-5" /></button>
                 {isRecordingAudio ? (
                   <div className="order-first flex w-full items-center gap-2 sm:order-none sm:w-auto" role="group" aria-label="Controles da gravação de áudio">
                     <button type="button" title="Cancelar gravação" aria-label="Cancelar gravação" onClick={() => finishAudioRecording('cancel')} className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl border border-red-200 bg-red-50 text-red-600 transition hover:border-red-300 hover:bg-red-100"><X className="h-5 w-5" /></button>
@@ -1554,7 +1554,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                     {audioRecordingPhase === 'requesting_permission' ? 'Aguardando microfone…' : audioRecordingPhase === 'sending' ? 'Enviando áudio…' : 'Finalizando áudio…'}
                   </div>
                 ) : (
-                  <button type="button" title="Gravar áudio" aria-label="Gravar áudio" disabled={waConnected === false || isSendingMessage || !selectedConversation} onClick={startAudioRecording} className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl border border-slate-200 text-slate-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50"><Mic className="h-5 w-5" /></button>
+                  <button type="button" title="Gravar áudio" aria-label="Gravar áudio" disabled={waConnected === false || isSendingMessage || !selectedConversation} onClick={startAudioRecording} className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl border border-slate-200 text-slate-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/15 dark:hover:text-blue-300"><Mic className="h-5 w-5" /></button>
                 )}
                 <div className="relative min-w-0 flex-[1_1_10rem]">
                   <input
@@ -1571,8 +1571,8 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                       }
                     }}
                     className={cn(
-                      'w-full px-4 py-3 rounded-2xl border bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm transition-all pr-12',
-                      waConnected === false ? 'border-red-200 bg-red-50 cursor-not-allowed opacity-60' : 'border-slate-200'
+                       'w-full rounded-2xl border bg-slate-50 px-4 py-3 pr-12 text-sm transition-all placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:bg-slate-800',
+                       waConnected === false ? 'border-red-200 bg-red-50 cursor-not-allowed opacity-60 dark:border-red-500/40 dark:bg-red-500/15' : 'border-slate-200 dark:border-slate-700'
                     )}
                   />
                 </div>
@@ -1592,22 +1592,22 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                 </button>
               </div>
               <div className="flex items-center justify-between mt-2 ml-1">
-                <p className="text-xs text-slate-400">Enviando como <span className="font-medium text-slate-600">{userName}</span></p>
+                <p className="text-xs text-slate-400 dark:text-slate-500">Enviando como <span className="font-medium text-slate-600 dark:text-slate-300">{userName}</span></p>
                 <div className="flex items-center gap-1.5">
                   <span className={cn('w-2 h-2 rounded-full', waConnected === null ? 'bg-yellow-400' : waConnected ? 'bg-green-400' : 'bg-red-500')}></span>
-                  <span className="text-xs text-slate-400">{waConnected === null ? 'Verificando...' : waConnected ? 'WhatsApp conectado' : 'WhatsApp desconectado'}</span>
+                  <span className="text-xs text-slate-400 dark:text-slate-500">{waConnected === null ? 'Verificando...' : waConnected ? 'WhatsApp conectado' : 'WhatsApp desconectado'}</span>
                 </div>
               </div>
             </div>
           </>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center" style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)' }}>
+          <div data-testid="attendance-empty-state" className="flex flex-1 flex-col items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
             <div className="text-center">
-              <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-100 to-violet-100 flex items-center justify-center mx-auto mb-5">
+              <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-100 to-violet-100 dark:from-blue-500/20 dark:to-violet-500/20">
                 <MessageCircle className="w-10 h-10 text-blue-400" />
               </div>
-              <h3 className="text-xl font-bold text-slate-700 mb-2">Selecione uma conversa</h3>
-              <p className="text-slate-400 text-sm max-w-xs">Escolha uma conversa da lista à esquerda para começar a atender</p>
+              <h3 className="mb-2 text-xl font-bold text-slate-700 dark:text-slate-100">Selecione uma conversa</h3>
+              <p className="max-w-xs text-sm text-slate-400 dark:text-slate-500">Escolha uma conversa da lista à esquerda para começar a atender</p>
             </div>
           </div>
         )}
@@ -1628,10 +1628,10 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
         <div data-testid="transfer-conversation-dialog" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-labelledby="transfer-conversation-title" onMouseDown={(event) => {
           if (event.currentTarget === event.target) setTransferOpen(false);
         }}>
-          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-xl sm:p-5">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/40 sm:p-5">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="min-w-0"><h3 id="transfer-conversation-title" className="font-semibold text-slate-900">Transferir conversa</h3>{transferConversationMutation.isPending && <span role="status" className="mt-0.5 block text-xs text-violet-700">Transferindo atendimento…</span>}</div>
-              <button type="button" onClick={() => setTransferOpen(false)} disabled={transferConversationMutation.isPending} aria-label="Fechar transferência" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-50"><X className="h-4 w-4" /></button>
+              <div className="min-w-0"><h3 id="transfer-conversation-title" className="font-semibold text-slate-900 dark:text-slate-100">Transferir conversa</h3>{transferConversationMutation.isPending && <span role="status" className="mt-0.5 block text-xs text-violet-700 dark:text-violet-300">Transferindo atendimento…</span>}</div>
+              <button type="button" onClick={() => setTransferOpen(false)} disabled={transferConversationMutation.isPending} aria-label="Fechar transferência" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800"><X className="h-4 w-4" /></button>
             </div>
             <div className="max-h-64 space-y-1 overflow-y-auto pr-1">
               {(activeUsersData ?? []).map((user) => (
@@ -1646,10 +1646,10 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                     showToast('Conversa transferida com sucesso!', 'success');
                   },
                   onError: () => showToast('Não foi possível transferir a conversa', 'error'),
-                })} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-violet-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-50">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">{getInitials(user.name)}</span>
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{user.name}</span>
-                  {user.id === selectedConv.assignedUserId && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">Atual</span>}
+                })} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-violet-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-violet-500/20">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700 dark:bg-violet-500/20 dark:text-violet-200">{getInitials(user.name)}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800 dark:text-slate-200">{user.name}</span>
+                  {user.id === selectedConv.assignedUserId && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-300">Atual</span>}
                 </button>
               ))}
             </div>
@@ -1660,12 +1660,12 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
       {/* Modal de Confirmação - Encerrar Conversa - Simplificado */}
       {closeConfirmOpen && (
         <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-          <div className="bg-white rounded-lg shadow-lg p-4 w-80 pointer-events-auto">
-            <p className="text-slate-900 font-semibold mb-4 text-center">Encerrar conversa?</p>
+          <div className="w-80 rounded-lg bg-white p-4 shadow-lg pointer-events-auto dark:bg-slate-900 dark:shadow-black/40">
+            <p className="mb-4 text-center font-semibold text-slate-900 dark:text-slate-100">Encerrar conversa?</p>
             <div className="flex gap-2">
               <button
                 onClick={() => setCloseConfirmOpen(false)}
-                className="flex-1 px-3 py-2 bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-colors font-medium text-sm"
+                className="flex-1 rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-900 transition-colors hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Não
               </button>
@@ -1683,12 +1683,12 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
       {/* Modal de Confirmação - Reabrir Conversa - Simplificado */}
       {reopenConfirmOpen && (
         <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-          <div className="bg-white rounded-lg shadow-lg p-4 w-80 pointer-events-auto">
-            <p className="text-slate-900 font-semibold mb-4 text-center">Reabrir conversa?</p>
+          <div className="w-80 rounded-lg bg-white p-4 shadow-lg pointer-events-auto dark:bg-slate-900 dark:shadow-black/40">
+            <p className="mb-4 text-center font-semibold text-slate-900 dark:text-slate-100">Reabrir conversa?</p>
             <div className="flex gap-2">
               <button
                 onClick={() => setReopenConfirmOpen(false)}
-                className="flex-1 px-3 py-2 bg-slate-100 text-slate-900 rounded-lg hover:bg-slate-200 transition-colors font-medium text-sm"
+                className="flex-1 rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-900 transition-colors hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Não
               </button>
