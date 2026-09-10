@@ -18,6 +18,7 @@ import type { CrmWhatsAppIntent } from "../../../shared/crm";
 import { normalizeContactPhone } from "../../../shared/contact-phone";
 import { ConversationMedia } from "@/components/ConversationMedia";
 import { ConversationBackground } from "@/components/ConversationBackground";
+import { conversationMessageBubbleStyle } from "@/components/ConversationMessageBubble";
 import { ConversationDetailsPanel } from "@/components/ConversationDetailsPanel";
 import { ConversationListItem } from "@/components/ConversationListItem";
 import { ConversationActivityEvent } from "@/components/ConversationActivityEvent";
@@ -1460,7 +1461,7 @@ function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                       else messageElementRefs.current.delete(messageId);
                     }} data-testid="conversation-message" className={`flex ${isAgent ? 'justify-end' : 'justify-start'}`}>
                       <div className={cn("group min-w-0 max-w-[85%]", isAgent ? "md:max-w-sm lg:max-w-lg" : "md:max-w-xs lg:max-w-md", isShortText && "min-w-[9rem] sm:min-w-[10rem]")}>
-                        <div data-testid="conversation-message-bubble" className={`rounded-2xl px-4 transition-shadow ${isAgent ? 'py-2.5' : 'py-3'} ${highlightedMessageId === messageId ? 'ring-2 ring-inset ring-violet-400' : ''} ${
+                        <div data-testid="conversation-message-bubble" style={conversationMessageBubbleStyle(isAgent ? "outgoing" : "incoming", conversationBackground)} className={`rounded-2xl px-4 transition-shadow ${isAgent ? 'py-2.5' : 'py-3'} ${highlightedMessageId === messageId ? 'ring-2 ring-inset ring-violet-400' : ''} ${
                           isAgent
                             ? 'rounded-tr-sm bg-gradient-to-br from-blue-500 to-violet-600 text-white shadow-[0_1px_2px_rgba(15,23,42,0.14)]'
                             : 'rounded-tl-sm border border-slate-100 bg-white text-slate-800 shadow-sm'
