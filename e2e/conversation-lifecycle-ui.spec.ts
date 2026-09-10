@@ -11,10 +11,11 @@ const conversation = { id: "conv-ui", publicCode: "CV-260829000000-TEST", contac
 
 type TimelineMessage = Record<string, unknown>;
 
-async function mockedPage(page: Page, deepLink = false, options: { session?: typeof session; conversation?: typeof conversation; conversations?: Array<typeof conversation>; attendanceActive?: { id: string; customerName: string; phone: string } | null; transferError?: boolean; transferDelayMs?: number; sendDelayMs?: number; messages?: TimelineMessage[]; events?: TimelineMessage[] } = {}) {
+async function mockedPage(page: Page, deepLink = false, options: { session?: typeof session; conversation?: typeof conversation; conversations?: Array<typeof conversation>; closedConversations?: Array<typeof conversation>; attendanceActive?: { id: string; customerName: string; phone: string } | null; transferError?: boolean; transferDelayMs?: number; sendDelayMs?: number; messages?: TimelineMessage[]; events?: TimelineMessage[] } = {}) {
   const activeSession = options.session ?? session;
   const activeConversation = options.conversation ?? conversation;
   const activeConversations = options.conversations ?? [activeConversation];
+  const closedConversations = options.closedConversations ?? activeConversations;
   const attendanceActive = options.attendanceActive ?? null;
   const transferDelayMs = options.transferDelayMs ?? 0;
   const sendDelayMs = options.sendDelayMs ?? 0;
@@ -76,8 +77,8 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
           clientAttemptId: input.clientAttemptId, status: "sent", replyTo });
       }
     });
-    const result = (name: string) => name.includes("refreshSession") ? { ok: true, session: activeSession }
-      : name.includes("conversations.list") ? activeConversations
+    const result = (name: string, index: number) => name.includes("refreshSession") ? { ok: true, session: activeSession }
+      : name.includes("conversations.list") ? ((parsedInput[index]?.json ?? parsedInput.json) as { status?: string } | undefined)?.status === "closed" ? closedConversations : activeConversations
       : name.includes("conversations.counts") ? { active: 3, closed: 4, waiting: 2, mine: 1 }
       : name.includes("conversations.eligibleUsers") ? [{ id: "user-ui", name: "Agent", email: "agent@example.test", role: "agent" }]
       : name.includes("evolution.getStatus") ? { status: "connected", providerReachable: true }
@@ -98,9 +99,9 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
       : name.includes("megadesk.createConversation") ? { conversationId: conversation.id, existing: false }
       : name.includes("megadesk.sendMessage") ? { ok: true, conversationId: conversation.id }
       : { ok: true };
-    const body = names.map(name => options.transferError && name.includes("conversations.transfer")
+    const body = names.map((name, index) => options.transferError && name.includes("conversations.transfer")
       ? { error: { json: { message: "Não foi possível transferir a conversa", code: -32603, data: { code: "INTERNAL_SERVER_ERROR", httpStatus: 500, path: "conversations.transfer" } } } }
-      : { result: { data: { json: result(name) } } });
+      : { result: { data: { json: result(name, index) } } });
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(url.searchParams.get("batch") === "1" ? body : body[0]) });
   });
   await page.goto(deepLink ? "/?conversationId=conv-ui" : "/", { waitUntil: "domcontentloaded" });
@@ -258,30 +259,42 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     expect(calls.some(name => name.includes("megadesk.getConversations"))).toBe(false);
   });
 
+  test("searches active and closed conversations globally without changing the active scope", async ({ page }) => {
+    const closedConversation = { ...conversation, id: "conv-closed-search", customerName: "Cliente encerrado", status: "closed", unreadCount: 0 };
+    const { calls, listInputs } = await mockedPage(page, true, { closedConversations: [closedConversation] });
+    await page.getByRole("button", { name: "Filtro" }).click();
+    const filter = page.getByPlaceholder("Nome, empresa ou telefone...");
+    await filter.fill("Cliente UI");
+    await expect.poll(() => listInputs.filter(input => input.search === "Cliente UI").length).toBeGreaterThanOrEqual(2);
+    expect(listInputs.some(input => input.viewMode === "all" && input.status === "active" && input.search === "Cliente UI")).toBe(true);
+    expect(listInputs.some(input => input.viewMode === "all" && input.status === "closed" && input.search === "Cliente UI")).toBe(true);
+    await expect(page.getByTestId("conversation-list-item").filter({ hasText: "Cliente encerrado" })).toBeVisible();
+    await expect(page.getByTestId("conversation-list-count")).toHaveText("2");
+    await expect(page.getByTestId("attendance-scope-controls").getByRole("button", { name: "Todos" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("attendance-action-controls").getByRole("button", { name: "Encerradas" })).toHaveAttribute("aria-pressed", "false");
+    await page.getByTestId("conversation-list-item").filter({ hasText: "Cliente encerrado" }).click();
+    await expect(page.getByRole("button", { name: "Reabrir atendimento" })).toBeVisible();
+    await expect(page.getByTestId("attendance-scope-controls").getByRole("button", { name: "Todos" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("attendance-action-controls").getByRole("button", { name: "Encerradas" })).toHaveAttribute("aria-pressed", "false");
+    expect(calls.some(name => name.includes("conversations.reopen"))).toBe(false);
+  });
+
   test("sends text and local calendar filters to the backend while preserving inbox scope", async ({ page }) => {
     const { listInputs } = await mockedPage(page, true);
     await page.getByRole("button", { name: "Filtro" }).click();
     const filter = page.getByPlaceholder("Nome, empresa ou telefone...");
     await filter.fill("Cliente UI");
-    await expect.poll(() => listInputs.at(-1)).toMatchObject({
-      viewMode: "all",
-      status: "active",
-      search: "Cliente UI",
-    });
+    await expect.poll(() => listInputs.filter(input => input.search === "Cliente UI").length).toBeGreaterThanOrEqual(2);
+    expect(listInputs.some(input => input.viewMode === "all" && input.status === "active" && input.search === "Cliente UI")).toBe(true);
+    expect(listInputs.some(input => input.viewMode === "all" && input.status === "closed" && input.search === "Cliente UI")).toBe(true);
     const dates = page.locator('input[type="date"]');
     await dates.nth(0).fill("2026-08-01");
     await dates.nth(1).fill("2026-08-31");
-    await expect.poll(() => listInputs.at(-1)).toMatchObject({
-      viewMode: "all",
-      status: "active",
-      search: "Cliente UI",
-      dateFrom: "2026-08-01",
-      dateTo: "2026-08-31",
-    });
+    await expect.poll(() => listInputs.some(input => input.status === "active" && input.search === "Cliente UI" && input.dateFrom === "2026-08-01" && input.dateTo === "2026-08-31")).toBe(true);
+    await expect.poll(() => listInputs.some(input => input.status === "closed" && input.search === "Cliente UI" && input.dateFrom === "2026-08-01" && input.dateTo === "2026-08-31")).toBe(true);
     await page.getByRole("button", { name: "Limpar todos os filtros" }).click();
     await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "all", status: "active", search: "" });
   });
-
   test("renders activities chronologically with canonical names and a refined outbound bubble", async ({ page }) => {
     await mockedPage(page, true, {
       messages: [

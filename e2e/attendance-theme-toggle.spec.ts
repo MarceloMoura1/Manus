@@ -102,15 +102,20 @@ test("Atendimento follows the real sidebar toggle without reload even when brows
   const activeScopeDark = await backgroundColor(page, '[data-testid="attendance-scope-controls"] button[aria-pressed="true"]');
   const detailsDark = await backgroundColor(page, '[data-testid="conversation-details-panel"]');
   const approvedDarkWorkspace = "oklch(0.129 0.042 264.695)";
-  const approvedDarkSurface = "oklch(0.208 0.042 265.755)";
+  const approvedDarkListPanel = "oklch(0.129 0.042 264.695)";
   expect(workspaceDark).toBe(approvedDarkWorkspace);
-  expect(panelDark).toBe(approvedDarkSurface);
-  expect(panelDark).not.toBe(workspaceDark);
+  expect(panelDark).toBe(approvedDarkListPanel);
   expect(filterDark).not.toBe(panelDark);
   expect(newAttendanceControlDark).not.toBe(panelDark);
   expect(inactiveScopeDark).not.toBe(panelDark);
   expect(activeScopeDark).not.toBe(inactiveScopeDark);
   expect(detailsDark).not.toBe(detailsLight);
+  await expect(page.getByRole("button", { name: "Todos" })).toHaveClass(/bg-sky-500/);
+  await expect(page.getByTestId("attendance-action-controls").getByRole("button", { name: "Encerradas" })).not.toHaveClass(/bg-violet-600/);
+  await page.getByRole("button", { name: "Encerradas" }).click();
+  await expect(page.getByRole("button", { name: "Encerradas" })).toHaveClass(/bg-red-600/);
+  await page.getByRole("button", { name: "Novo atendimento", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Novo atendimento", exact: true })).toHaveClass(/bg-blue-800/);
 
   await page.getByTitle("Mudar para modo claro").click();
   await expect(page.locator("html")).not.toHaveClass(/dark/);

@@ -665,7 +665,29 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     },
     { enabled: !!clientId, refetchInterval: 5000, refetchOnWindowFocus: true }
   );
-  const conversationsData = React.useMemo(() => (conversationRows ?? []).map((conversation: any) => ({
+  const shouldSearchClosedConversations = Boolean(debouncedSearchTerm) && selectedFilter !== 'closed';
+  const { data: closedSearchRows } = trpc.conversations.list.useQuery(
+    {
+      viewMode: ownerFilter === 'mine' ? 'mine' : ownerFilter === 'waiting' ? 'waiting' : 'all',
+      status: 'closed',
+      search: debouncedSearchTerm,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+      limit: 100,
+      offset: 0,
+    },
+    {
+      enabled: !!clientId && shouldSearchClosedConversations,
+      refetchInterval: 5000,
+      refetchOnWindowFocus: true,
+    }
+  );
+  const conversationsData = React.useMemo(() => {
+    const rowsById = new Map<string, any>();
+    for (const conversation of [...(conversationRows ?? []), ...(closedSearchRows ?? [])]) {
+      rowsById.set(conversation.id, conversation);
+    }
+    return [...rowsById.values()].map((conversation: any) => ({
     ...conversation,
     name: conversation.customerName,
     phone: conversation.customerPhone,
@@ -677,7 +699,8 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     status: conversation.status === 'pending' ? 'bot' : conversation.status,
     assignedTo: conversation.assignedUserName,
     isUnread: Number(conversation.unreadCount ?? 0) > 0 && conversation.lastMessageFrom === 'customer',
-  })), [conversationRows]);
+    }));
+  }, [closedSearchRows, conversationRows]);
   const crmCustomerQuery = trpc.crm.getById.useQuery(
     { crmClientId: crmIntent?.crmClientId ?? '' },
     { enabled: crmHandoffState === 'resolving' && !!crmIntent && !!conversationsData },
@@ -1135,7 +1158,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone }: {
               }}
               className={cn(
                 'min-w-0 flex-1 flex items-center justify-center gap-1 px-2 py-2 text-xs font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-3',
-                newAttendanceOpen ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50 group-data-[theme=dark]:bg-slate-900 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800'
+                newAttendanceOpen ? 'bg-blue-800 text-white hover:bg-blue-900' : 'bg-white text-slate-600 hover:bg-slate-50 group-data-[theme=dark]:bg-slate-900 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800'
               )}
             >
               <PhoneCall className="h-3.5 w-3.5" />
@@ -1147,7 +1170,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone }: {
               onClick={() => selectInboxView('closed')}
               className={cn(
                 'min-w-0 flex-1 flex items-center justify-center gap-1 border-l border-slate-200 px-2 py-2 text-xs font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 group-data-[theme=dark]:border-slate-700 sm:gap-1.5 sm:px-3',
-                inboxView === 'closed' ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50 group-data-[theme=dark]:bg-slate-900 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800'
+                inboxView === 'closed' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-white text-slate-600 hover:bg-slate-50 group-data-[theme=dark]:bg-slate-900 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800'
               )}
             >
               <CheckCircle2 className="h-3.5 w-3.5" />
@@ -1168,7 +1191,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone }: {
                 className={cn(
                   'min-w-0 flex-1 flex items-center justify-center gap-1 px-2 py-2 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 sm:gap-1.5 sm:px-3',
                   index > 0 && 'border-l border-slate-200 group-data-[theme=dark]:border-slate-700',
-                  inboxView === 'open' && attendantScope === scope ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50 group-data-[theme=dark]:bg-slate-900 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800'
+                   inboxView === 'open' && attendantScope === scope ? 'bg-sky-500 text-white hover:bg-sky-600' : 'bg-white text-slate-600 hover:bg-slate-50 group-data-[theme=dark]:bg-slate-900 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800'
                 )}
               >
                 {scope === 'all' ? <MessageCircle className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
@@ -1182,7 +1205,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone }: {
               onClick={() => selectInboxView('bot')}
               className={cn(
                     'min-w-0 flex-1 flex items-center justify-center gap-1 border-l border-slate-200 px-2 py-2 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 group-data-[theme=dark]:border-slate-700 sm:gap-1.5 sm:px-3',
-                    inboxView === 'bot' ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50 group-data-[theme=dark]:bg-slate-900 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800'
+                    inboxView === 'bot' ? 'bg-sky-500 text-white hover:bg-sky-600' : 'bg-white text-slate-600 hover:bg-slate-50 group-data-[theme=dark]:bg-slate-900 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800'
               )}
             >
               <Bot className="h-3.5 w-3.5" />
