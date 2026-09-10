@@ -27,6 +27,34 @@ const ALLOWED_ORIGINS = [
   "http://127.0.0.1:3000",
 ];
 
+export const MEGADESK_CORS_ALLOWED_HEADERS = [
+  "Content-Type",
+  "Authorization",
+  "x-tenant-id",
+  "x-user-role",
+  "x-trpc-source",
+  "Cookie",
+  "x-megadesk-incoming-bubble-color",
+  "x-megadesk-outgoing-bubble-color",
+] as const;
+
+/** Registers the single CORS policy shared by every MegaDesk HTTP route. */
+export function registerMegaDeskCors(app: express.Express) {
+  app.use((req, res, next) => {
+    const origin = req.headers.origin ?? "";
+    const allowedOrigins = new Set([...ALLOWED_ORIGINS, ...operationalAllowedOrigins()]);
+    if ((typeof origin === "string" && allowedOrigins.has(origin)) || !origin) {
+      if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,PATCH,OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", MEGADESK_CORS_ALLOWED_HEADERS.join(","));
+      res.setHeader("Access-Control-Expose-Headers", "Set-Cookie");
+    }
+    if (req.method === "OPTIONS") return res.status(204).end();
+    next();
+  });
+}
+
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const s = net.createServer();
@@ -61,20 +89,7 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
   // ─── CORS ─────────────────────────────────────────────────────────────────
-  app.use((req, res, next) => {
-    const origin = req.headers.origin ?? "";
-    const allowedOrigins = new Set([...ALLOWED_ORIGINS, ...operationalAllowedOrigins()]);
-    if ((typeof origin === "string" && allowedOrigins.has(origin)) || !origin) {
-      if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
-      res.setHeader("Access-Control-Allow-Credentials", "true");
-      res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,PATCH,OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers",
-        "Content-Type,Authorization,x-tenant-id,x-user-role,x-trpc-source,Cookie");
-      res.setHeader("Access-Control-Expose-Headers", "Set-Cookie");
-    }
-    if (req.method === "OPTIONS") return res.status(204).end();
-    next();
-  });
+  registerMegaDeskCors(app);
 
   registerStorageProxy(app);
   registerOAuthRoutes(app);
@@ -163,4 +178,4 @@ async function startServer() {
   else server.listen(port, onListening);
 }
 
-startServer().catch(console.error);
+if (process.env.VITEST !== "true") startServer().catch(console.error);
