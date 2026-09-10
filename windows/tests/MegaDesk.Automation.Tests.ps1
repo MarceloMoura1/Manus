@@ -2642,13 +2642,18 @@ Describe 'MegaDesk prepared release candidate selection' {
   It 'blocks an unreachable or active failed candidate before release inspection' {
     $global:MegaDeskPreparedUpdaterHead = '1010101010101010101010101010101010101010'
     $global:MegaDeskPreparedCandidate = '6060606060606060606060606060606060606060'
-    InModuleScope $moduleName {
-      Mock Resolve-MegaDeskCommitSha { param($Sha) $Sha.ToLowerInvariant() }
-      Mock Assert-MegaDeskCandidateDescendsFromActive { }
-      $state = [pscustomobject]@{ operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'FAILED'; candidateSha = $global:MegaDeskPreparedCandidate } }
-      Mock Invoke-MegaDeskGit { throw 'CandidateReleaseSha nao e ancestral da branch operacional sincronizada; publicacao recusada.' }
-      { Resolve-MegaDeskPreparedReleaseCandidate -State $state -UpdaterHeadSha $global:MegaDeskPreparedUpdaterHead -ActiveRelease ([pscustomobject]@{ sha = '4040404040404040404040404040404040404040' }) } | Should Throw 'nao e ancestral'
-      { Resolve-MegaDeskPreparedReleaseCandidate -State $state -UpdaterHeadSha $global:MegaDeskPreparedUpdaterHead -ActiveRelease ([pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate }) } | Should Throw 'coincide com a release ativa'
+    $global:MegaDeskPreparedAncestryMockScope = 'failed-candidate'
+    try {
+      InModuleScope $moduleName {
+        Mock Resolve-MegaDeskCommitSha { param($Sha) $Sha.ToLowerInvariant() } -ParameterFilter { $global:MegaDeskPreparedAncestryMockScope -eq 'failed-candidate' }
+        Mock Assert-MegaDeskCandidateDescendsFromActive { } -ParameterFilter { $global:MegaDeskPreparedAncestryMockScope -eq 'failed-candidate' }
+        $state = [pscustomobject]@{ operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'FAILED'; candidateSha = $global:MegaDeskPreparedCandidate } }
+        Mock Invoke-MegaDeskGit { throw 'CandidateReleaseSha nao e ancestral da branch operacional sincronizada; publicacao recusada.' } -ParameterFilter { $global:MegaDeskPreparedAncestryMockScope -eq 'failed-candidate' }
+        { Resolve-MegaDeskPreparedReleaseCandidate -State $state -UpdaterHeadSha $global:MegaDeskPreparedUpdaterHead -ActiveRelease ([pscustomobject]@{ sha = '4040404040404040404040404040404040404040' }) } | Should Throw 'nao e ancestral'
+        { Resolve-MegaDeskPreparedReleaseCandidate -State $state -UpdaterHeadSha $global:MegaDeskPreparedUpdaterHead -ActiveRelease ([pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate }) } | Should Throw 'coincide com a release ativa'
+      }
+    } finally {
+      $global:MegaDeskPreparedAncestryMockScope = $null
     }
   }
 
@@ -2656,25 +2661,41 @@ Describe 'MegaDesk prepared release candidate selection' {
     $global:MegaDeskPreparedUpdaterHead = '1010101010101010101010101010101010101010'
     $global:MegaDeskPreparedCandidate = '6060606060606060606060606060606060606060'
     $global:MegaDeskPreparedActive = '4040404040404040404040404040404040404040'
-    InModuleScope $moduleName {
-      Mock Resolve-MegaDeskCommitSha { param($Sha) $Sha.ToLowerInvariant() }
-      Mock Assert-MegaDeskCandidateDescendsFromActive { throw 'CandidateReleaseSha nao e descendente da activeRelease; publicacao regressiva recusada.' }
-      $state = [pscustomobject]@{ operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'READY'; candidateSha = $global:MegaDeskPreparedCandidate } }
+    $global:MegaDeskPreparedAncestryMockScope = 'non-descendant-candidate'
+    try {
+      InModuleScope $moduleName {
+        Mock Resolve-MegaDeskCommitSha { param($Sha) $Sha.ToLowerInvariant() } -ParameterFilter { $global:MegaDeskPreparedAncestryMockScope -eq 'non-descendant-candidate' }
+        Mock Invoke-MegaDeskGit { throw 'CandidateReleaseSha nao e descendente da activeRelease; publicacao regressiva recusada.' } -ParameterFilter { $global:MegaDeskPreparedAncestryMockScope -eq 'non-descendant-candidate' }
+        $state = [pscustomobject]@{ operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'READY'; candidateSha = $global:MegaDeskPreparedCandidate } }
 
-      { Resolve-MegaDeskPreparedReleaseCandidate -State $state -UpdaterHeadSha $global:MegaDeskPreparedUpdaterHead -ActiveRelease ([pscustomobject]@{ sha = $global:MegaDeskPreparedActive }) } | Should Throw 'nao e descendente'
+        { Resolve-MegaDeskPreparedReleaseCandidate -State $state -UpdaterHeadSha $global:MegaDeskPreparedUpdaterHead -ActiveRelease ([pscustomobject]@{ sha = $global:MegaDeskPreparedActive }) } | Should Throw 'nao e descendente'
+      }
+    } finally {
+      $global:MegaDeskPreparedAncestryMockScope = $null
     }
   }
 
   It 'requires activeRelease to be an ancestor of the candidate' {
     $global:MegaDeskPreparedCandidate = '6060606060606060606060606060606060606060'
     $global:MegaDeskPreparedActive = '4040404040404040404040404040404040404040'
-    InModuleScope $moduleName {
-      Mock Resolve-MegaDeskCommitSha { param($Sha) $Sha.ToLowerInvariant() }
-      Mock Invoke-MegaDeskGit { }
-      { Assert-MegaDeskCandidateDescendsFromActive -ActiveReleaseSha $global:MegaDeskPreparedActive -CandidateReleaseSha $global:MegaDeskPreparedCandidate } | Should Not Throw
+    $global:MegaDeskPreparedAncestryMockScope = 'ancestor-check'
+    $global:MegaDeskPreparedAncestryShouldReject = $false
+    try {
+      InModuleScope $moduleName {
+        Mock Resolve-MegaDeskCommitSha { param($Sha) $Sha.ToLowerInvariant() } -ParameterFilter { $global:MegaDeskPreparedAncestryMockScope -eq 'ancestor-check' }
+        Mock Invoke-MegaDeskGit {
+          if ($global:MegaDeskPreparedAncestryShouldReject) {
+            throw 'CandidateReleaseSha nao e descendente da activeRelease; publicacao regressiva recusada.'
+          }
+        } -ParameterFilter { $global:MegaDeskPreparedAncestryMockScope -eq 'ancestor-check' }
+        { Assert-MegaDeskCandidateDescendsFromActive -ActiveReleaseSha $global:MegaDeskPreparedActive -CandidateReleaseSha $global:MegaDeskPreparedCandidate } | Should Not Throw
 
-      Mock Invoke-MegaDeskGit { throw 'CandidateReleaseSha nao e descendente da activeRelease; publicacao regressiva recusada.' }
-      { Assert-MegaDeskCandidateDescendsFromActive -ActiveReleaseSha $global:MegaDeskPreparedActive -CandidateReleaseSha $global:MegaDeskPreparedCandidate } | Should Throw 'nao e descendente'
+        $global:MegaDeskPreparedAncestryShouldReject = $true
+        { Assert-MegaDeskCandidateDescendsFromActive -ActiveReleaseSha $global:MegaDeskPreparedActive -CandidateReleaseSha $global:MegaDeskPreparedCandidate } | Should Throw 'nao e descendente'
+      }
+    } finally {
+      $global:MegaDeskPreparedAncestryMockScope = $null
+      $global:MegaDeskPreparedAncestryShouldReject = $false
     }
   }
 
@@ -2976,72 +2997,92 @@ Describe 'MegaDesk update preparation only' {
   It 'prepares the candidate through READY without confirmation, switch, or runtime mutation' {
     $global:MegaDeskUpdateCandidate = '7777777777777777777777777777777777777777'
     $global:MegaDeskUpdateActive = '6666666666666666666666666666666666666666'
-    InModuleScope $moduleName {
-      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskUpdateActive; path = 'C:\active' }; previousRelease = $null; operation = $null }
-      $script:transitions = @()
-      Mock Assert-MegaDeskToolchain { }
-      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskUpdateCandidate; branch = 'release/updater-v2-bootstrap' } }
-      Mock Assert-MegaDeskRecoverableState { $script:testState }
-      Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskUpdateActive; path = 'C:\active' } }
-      Mock Assert-MegaDeskCandidateDescendsFromActive { }
-      Mock Set-MegaDeskOperationState { param($Status, $CandidateSha, $Kind, $Message) $script:transitions += $Status; $script:testState.operation = [pscustomobject]@{ kind = 'UPDATE'; status = $Status; candidateSha = $CandidateSha; message = $Message }; $script:testState }
-      Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
-      Mock Test-MegaDeskDependencyDiff { $false }
-      Mock Invoke-MegaDeskIsolatedBuild { [pscustomobject]@{ sha = $global:MegaDeskUpdateCandidate; path = 'C:\candidate' } }
-      Mock Assert-MegaDeskNoSourceMutation { }
-      Mock Assert-MegaDeskCandidateHeadUnchanged { }
-      Mock Read-Host { throw 'Atualizar nao deve pedir confirmacao de publicacao.' }
-      Mock Invoke-MegaDeskReleaseSwitch { throw 'Atualizar nao deve executar switch.' }
-      Mock Start-MegaDeskNode { throw 'Atualizar nao deve iniciar runtime.' }
-      Mock Stop-MegaDeskManagedProcess { throw 'Atualizar nao deve parar runtime.' }
-      Mock Write-MegaDeskLog { }
+    $global:MegaDeskUpdatePreparationMockScope = 'ready-preparation'
+    try {
+      InModuleScope $moduleName {
+        $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskUpdateActive; path = 'C:\active' }; previousRelease = $null; operation = $null }
+        $script:transitions = @()
+        Mock Assert-MegaDeskToolchain { }
+        Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskUpdateCandidate; branch = 'release/updater-v2-bootstrap' } }
+        Mock Assert-MegaDeskRecoverableState { $script:testState }
+        Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskUpdateActive; path = 'C:\active' } }
+        Mock Assert-MegaDeskCandidateDescendsFromActive { }
+        Mock Set-MegaDeskOperationState { param($Status, $CandidateSha, $Kind, $Message) $script:transitions += $Status; $script:testState.operation = [pscustomobject]@{ kind = 'UPDATE'; status = $Status; candidateSha = $CandidateSha; message = $Message }; $script:testState }
+        Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
+        Mock Test-MegaDeskDependencyDiff { $false }
+        Mock Invoke-MegaDeskIsolatedBuild { [pscustomobject]@{ sha = $global:MegaDeskUpdateCandidate; path = 'C:\candidate' } }
+        Mock Assert-MegaDeskNoSourceMutation { }
+        Mock Assert-MegaDeskCandidateHeadUnchanged { } -ParameterFilter { $global:MegaDeskUpdatePreparationMockScope -eq 'ready-preparation' }
+        Mock Read-Host { throw 'Atualizar nao deve pedir confirmacao de publicacao.' }
+        Mock Invoke-MegaDeskReleaseSwitch { throw 'Atualizar nao deve executar switch.' }
+        Mock Start-MegaDeskNode { throw 'Atualizar nao deve iniciar runtime.' }
+        Mock Stop-MegaDeskManagedProcess { throw 'Atualizar nao deve parar runtime.' }
+        Mock Write-MegaDeskLog { }
 
-      $result = @(Invoke-MegaDeskUpdaterV2 -ExpectedBranch 'release/updater-v2-bootstrap')
-      $result.Count | Should Be 1
-      $result.sha | Should Be $global:MegaDeskUpdateCandidate
-      $script:testState.operation.status | Should Be 'READY'
-      $script:transitions | Should Be @('PREPARING', 'READY')
-      Assert-MockCalled Read-Host -Times 0 -Exactly -Scope It
-      Assert-MockCalled Invoke-MegaDeskReleaseSwitch -Times 0 -Exactly -Scope It
-      Assert-MockCalled Start-MegaDeskNode -Times 0 -Exactly -Scope It
-      Assert-MockCalled Stop-MegaDeskManagedProcess -Times 0 -Exactly -Scope It
+        $result = @(Invoke-MegaDeskUpdaterV2 -ExpectedBranch 'release/updater-v2-bootstrap')
+        $result.Count | Should Be 1
+        $result.sha | Should Be $global:MegaDeskUpdateCandidate
+        $script:testState.operation.status | Should Be 'READY'
+        $script:transitions | Should Be @('PREPARING', 'READY')
+        Assert-MockCalled Read-Host -Times 0 -Exactly -Scope It
+        Assert-MockCalled Invoke-MegaDeskReleaseSwitch -Times 0 -Exactly -Scope It
+        Assert-MockCalled Start-MegaDeskNode -Times 0 -Exactly -Scope It
+        Assert-MockCalled Stop-MegaDeskManagedProcess -Times 0 -Exactly -Scope It
+      }
+    } finally {
+      $global:MegaDeskUpdatePreparationMockScope = $null
     }
   }
 
   It 'fails closed without READY when HEAD changes after the isolated build' {
     $global:MegaDeskUpdateCandidate = '8888888888888888888888888888888888888888'
     $global:MegaDeskUpdateActive = '7777777777777777777777777777777777777777'
-    InModuleScope $moduleName {
-      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskUpdateActive; path = 'C:\active' }; previousRelease = $null; operation = $null }
-      $script:transitions = @()
-      Mock Assert-MegaDeskToolchain { }
-      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskUpdateCandidate; branch = 'release/updater-v2-bootstrap' } }
-      Mock Assert-MegaDeskRecoverableState { $script:testState }
-      Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskUpdateActive; path = 'C:\active' } }
-      Mock Assert-MegaDeskCandidateDescendsFromActive { }
-      Mock Set-MegaDeskOperationState { param($Status, $CandidateSha, $Kind, $Message) $script:transitions += $Status; $script:testState.operation = [pscustomobject]@{ kind = 'UPDATE'; status = $Status; candidateSha = $CandidateSha; message = $Message }; $script:testState }
-      Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
-      Mock Test-MegaDeskDependencyDiff { $false }
-      Mock Invoke-MegaDeskIsolatedBuild { [pscustomobject]@{ sha = $global:MegaDeskUpdateCandidate; path = 'C:\candidate' } }
-      Mock Assert-MegaDeskNoSourceMutation { }
-      Mock Assert-MegaDeskCandidateHeadUnchanged { throw 'HEAD Git mudou durante a preparacao.' }
-      Mock Invoke-MegaDeskReleaseSwitch { throw 'switch must not run' }
-      Mock Write-MegaDeskLog { }
+    $global:MegaDeskUpdatePreparationMockScope = 'head-changed-after-build'
+    try {
+      InModuleScope $moduleName {
+        $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskUpdateActive; path = 'C:\active' }; previousRelease = $null; operation = $null }
+        $script:transitions = @()
+        Mock Assert-MegaDeskToolchain { }
+        Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskUpdateCandidate; branch = 'release/updater-v2-bootstrap' } }
+        Mock Assert-MegaDeskRecoverableState { $script:testState }
+        Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskUpdateActive; path = 'C:\active' } }
+        Mock Assert-MegaDeskCandidateDescendsFromActive { }
+        Mock Set-MegaDeskOperationState { param($Status, $CandidateSha, $Kind, $Message) $script:transitions += $Status; $script:testState.operation = [pscustomobject]@{ kind = 'UPDATE'; status = $Status; candidateSha = $CandidateSha; message = $Message }; $script:testState }
+        Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
+        Mock Test-MegaDeskDependencyDiff { $false }
+        Mock Invoke-MegaDeskIsolatedBuild { [pscustomobject]@{ sha = $global:MegaDeskUpdateCandidate; path = 'C:\candidate' } }
+        Mock Assert-MegaDeskNoSourceMutation { }
+        Mock Assert-MegaDeskCandidateHeadUnchanged { throw 'HEAD Git mudou durante a preparacao.' } -ParameterFilter { $global:MegaDeskUpdatePreparationMockScope -eq 'head-changed-after-build' }
+        Mock Invoke-MegaDeskReleaseSwitch { throw 'switch must not run' }
+        Mock Write-MegaDeskLog { }
 
-      { Invoke-MegaDeskUpdaterV2 -ExpectedBranch 'release/updater-v2-bootstrap' } | Should Throw 'HEAD Git mudou durante a preparacao'
-      $script:transitions | Should Be @('PREPARING', 'FAILED')
-      Assert-MockCalled Invoke-MegaDeskReleaseSwitch -Times 0 -Exactly -Scope It
+        { Invoke-MegaDeskUpdaterV2 -ExpectedBranch 'release/updater-v2-bootstrap' } | Should Throw 'HEAD Git mudou durante a preparacao'
+        $script:transitions | Should Be @('PREPARING', 'FAILED')
+        Assert-MockCalled Invoke-MegaDeskReleaseSwitch -Times 0 -Exactly -Scope It
+      }
+    } finally {
+      $global:MegaDeskUpdatePreparationMockScope = $null
     }
   }
 
   It 'accepts only the original candidate HEAD after preparation' {
     $global:MegaDeskUpdateCandidate = '9999999999999999999999999999999999999999'
-    InModuleScope $moduleName {
-      Mock Invoke-MegaDeskGit { $global:MegaDeskUpdateCandidate }
-      { Assert-MegaDeskCandidateHeadUnchanged -CandidateSha $global:MegaDeskUpdateCandidate } | Should Not Throw
+    $global:MegaDeskUpdatePreparationMockScope = 'head-unchanged-check'
+    $global:MegaDeskUpdatePreparationHeadChanged = $false
+    try {
+      InModuleScope $moduleName {
+        Mock Invoke-MegaDeskGit {
+          if ($global:MegaDeskUpdatePreparationHeadChanged) { return 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }
+          return $global:MegaDeskUpdateCandidate
+        } -ParameterFilter { $global:MegaDeskUpdatePreparationMockScope -eq 'head-unchanged-check' }
+        { Assert-MegaDeskCandidateHeadUnchanged -CandidateSha $global:MegaDeskUpdateCandidate } | Should Not Throw
 
-      Mock Invoke-MegaDeskGit { 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }
-      { Assert-MegaDeskCandidateHeadUnchanged -CandidateSha $global:MegaDeskUpdateCandidate } | Should Throw 'HEAD Git mudou durante a preparacao'
+        $global:MegaDeskUpdatePreparationHeadChanged = $true
+        { Assert-MegaDeskCandidateHeadUnchanged -CandidateSha $global:MegaDeskUpdateCandidate } | Should Throw 'HEAD Git mudou durante a preparacao'
+      }
+    } finally {
+      $global:MegaDeskUpdatePreparationMockScope = $null
+      $global:MegaDeskUpdatePreparationHeadChanged = $false
     }
   }
 }
