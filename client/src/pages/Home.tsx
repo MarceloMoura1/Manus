@@ -1045,7 +1045,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone }: {
 
       {/* ─── Coluna Esquerda: Lista de Conversas ─── */}
       <div className={cn(
-        'min-h-0 min-w-0 w-full max-w-full flex-col bg-slate-50 group-data-[theme=dark]:bg-slate-950 min-[900px]:flex min-[900px]:w-[420px] min-[900px]:flex-shrink-0 min-[900px]:border-r min-[900px]:border-slate-100 group-data-[theme=dark]:min-[900px]:border-slate-800',
+        'min-h-0 min-w-0 w-full max-w-full flex-col bg-slate-50 group-data-[theme=dark]:bg-slate-900 min-[900px]:flex min-[900px]:w-[420px] min-[900px]:flex-shrink-0 min-[900px]:border-r min-[900px]:border-slate-100 group-data-[theme=dark]:min-[900px]:border-slate-800',
         selectedConv || newAttendanceOpen || crmHandoffState === 'composer' ? 'hidden' : 'flex',
       )} data-testid="conversation-list-panel">
 

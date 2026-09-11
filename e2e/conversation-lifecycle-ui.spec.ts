@@ -279,6 +279,40 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     expect(calls.some(name => name.includes("conversations.reopen"))).toBe(false);
   });
 
+  test("finds a tenant-scoped closed conversation by normalized phone without reopening it", async ({ page }) => {
+    const phoneSearch = "(11) 99999-8888";
+    const closedConversation = {
+      ...conversation,
+      id: "conv-closed-phone-search",
+      customerName: "Cliente encerrado por telefone",
+      customerPhone: "5511999998888",
+      lastMessage: "Mensagem sem o telefone pesquisado",
+      status: "closed",
+      unreadCount: 0,
+    };
+    const { calls, listInputs } = await mockedPage(page, true, { closedConversations: [closedConversation] });
+    await page.getByRole("button", { name: "Filtro" }).click();
+    const filter = page.getByPlaceholder("Nome, empresa ou telefone...");
+    await filter.fill(phoneSearch);
+    await expect.poll(() => listInputs.filter(input => input.search === phoneSearch).length).toBeGreaterThanOrEqual(2);
+    expect(listInputs.some(input => input.viewMode === "all" && input.status === "active" && input.search === phoneSearch)).toBe(true);
+    expect(listInputs.some(input => input.viewMode === "all" && input.status === "closed" && input.search === phoneSearch)).toBe(true);
+    const closedItem = page.getByTestId("conversation-list-item").filter({ hasText: "Cliente encerrado por telefone" });
+    await expect(closedItem).toBeVisible();
+    await expect(page.getByTestId("attendance-action-controls").getByRole("button", { name: "Encerradas" })).toHaveAttribute("aria-pressed", "false");
+
+    await page.getByRole("button", { name: "Limpar todos os filtros" }).click();
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "all", status: "active", search: "" });
+    await expect(closedItem).toHaveCount(0);
+
+    await filter.fill(phoneSearch);
+    await expect(closedItem).toBeVisible();
+    await closedItem.click();
+    await expect(page.getByRole("button", { name: "Reabrir atendimento" })).toBeVisible();
+    await expect(page.getByTestId("attendance-action-controls").getByRole("button", { name: "Encerradas" })).toHaveAttribute("aria-pressed", "false");
+    expect(calls.some(name => name.includes("conversations.reopen"))).toBe(false);
+  });
+
   test("sends text and local calendar filters to the backend while preserving inbox scope", async ({ page }) => {
     const { listInputs } = await mockedPage(page, true);
     await page.getByRole("button", { name: "Filtro" }).click();

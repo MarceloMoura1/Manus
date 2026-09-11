@@ -119,7 +119,7 @@ describe("Atendimento dark mode", () => {
     for (const markup of [lightMarkup, darkMarkup]) {
       expect(markup).toContain('data-testid="attendance-workspace"');
       expect(markup).toContain("bg-white data-[theme=dark]:border-slate-800 data-[theme=dark]:bg-slate-950");
-      expect(markup).toContain("bg-slate-50 group-data-[theme=dark]:bg-slate-950");
+      expect(markup).toContain("bg-slate-50 group-data-[theme=dark]:bg-slate-900");
       expect(markup).toContain("group-data-[theme=dark]:border-slate-700 group-data-[theme=dark]:bg-slate-900");
       expect(markup).toContain("group-data-[theme=dark]:bg-slate-900 group-data-[theme=dark]:text-slate-300 group-data-[theme=dark]:hover:bg-slate-800");
       expect(markup).toContain('data-testid="attendance-empty-state"');
