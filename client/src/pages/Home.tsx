@@ -684,7 +684,10 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   );
   const conversationsData = React.useMemo(() => {
     const rowsById = new Map<string, any>();
-    for (const conversation of [...(conversationRows ?? []), ...(closedSearchRows ?? [])]) {
+    for (const conversation of [
+      ...(conversationRows ?? []),
+      ...(shouldSearchClosedConversations ? (closedSearchRows ?? []) : []),
+    ]) {
       rowsById.set(conversation.id, conversation);
     }
     return [...rowsById.values()].map((conversation: any) => ({
@@ -700,7 +703,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     assignedTo: conversation.assignedUserName,
     isUnread: Number(conversation.unreadCount ?? 0) > 0 && conversation.lastMessageFrom === 'customer',
     }));
-  }, [closedSearchRows, conversationRows]);
+  }, [closedSearchRows, conversationRows, shouldSearchClosedConversations]);
   const crmCustomerQuery = trpc.crm.getById.useQuery(
     { crmClientId: crmIntent?.crmClientId ?? '' },
     { enabled: crmHandoffState === 'resolving' && !!crmIntent && !!conversationsData },

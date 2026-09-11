@@ -106,9 +106,9 @@ test("Atendimento follows the real sidebar toggle without reload even when brows
   expect(workspaceDark).toBe(approvedDarkWorkspace);
   expect(panelDark).toBe(approvedDarkListPanel);
   expect(panelDark).not.toBe(workspaceDark);
-  expect(filterDark).not.toBe(panelDark);
-  expect(newAttendanceControlDark).not.toBe(panelDark);
-  expect(inactiveScopeDark).not.toBe(panelDark);
+  await expect.poll(() => backgroundColor(page, '[data-testid="attendance-primary-controls"] button')).toBe(approvedDarkListPanel);
+  await expect.poll(() => backgroundColor(page, '[data-testid="attendance-action-controls"] button:first-child')).toBe(approvedDarkListPanel);
+  await expect.poll(() => backgroundColor(page, '[data-testid="attendance-scope-controls"] button:nth-child(2)')).toBe(approvedDarkListPanel);
   expect(activeScopeDark).not.toBe(inactiveScopeDark);
   expect(detailsDark).not.toBe(detailsLight);
   await expect(page.getByRole("button", { name: "Todos" })).toHaveClass(/bg-sky-500/);

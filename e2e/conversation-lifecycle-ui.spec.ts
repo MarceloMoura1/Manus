@@ -279,6 +279,32 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     expect(calls.some(name => name.includes("conversations.reopen"))).toBe(false);
   });
 
+  test("does not leak cached closed rows into Todos after returning from Encerradas", async ({ page }) => {
+    const activeConversation = { ...conversation, id: "conv-active-return-all", customerName: "Cliente ativo ao voltar para Todos" };
+    const closedConversation = { ...conversation, id: "conv-closed-return-all", customerName: "Cliente encerrado ao voltar para Todos", status: "closed", unreadCount: 0 };
+    const { calls, listInputs } = await mockedPage(page, false, {
+      conversations: [activeConversation],
+      closedConversations: [closedConversation],
+    });
+    const all = page.getByTestId("attendance-scope-controls").getByRole("button", { name: "Todos" });
+    const closed = page.getByTestId("attendance-action-controls").getByRole("button", { name: "Encerradas" });
+    const activeItem = page.getByTestId("conversation-list-item").filter({ hasText: activeConversation.customerName });
+    const closedItem = page.getByTestId("conversation-list-item").filter({ hasText: closedConversation.customerName });
+
+    await expect(activeItem).toBeVisible();
+    await closed.click();
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "all", status: "closed", search: "" });
+    await expect(closedItem).toBeVisible();
+    await expect(activeItem).toHaveCount(0);
+
+    await all.click();
+    await expect.poll(() => listInputs.at(-1)).toMatchObject({ viewMode: "all", status: "active", search: "" });
+    await expect(closed).toHaveAttribute("aria-pressed", "false");
+    await expect(activeItem).toBeVisible();
+    await expect(closedItem).toHaveCount(0);
+    expect(calls.some(name => name.includes("conversations.reopen"))).toBe(false);
+  });
+
   test("finds a tenant-scoped closed conversation by normalized phone without reopening it", async ({ page }) => {
     const phoneSearch = "(11) 99999-8888";
     const closedConversation = {
