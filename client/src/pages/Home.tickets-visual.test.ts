@@ -52,10 +52,10 @@ function createStorage() {
   };
 }
 
-function renderTickets(theme: "light" | "dark", withMobileMenu = false) {
-  localStorage.setItem("megadesk_theme", theme);
+function renderTickets(withMobileMenu = false) {
+  localStorage.setItem("megadesk_theme", "light");
   return renderToStaticMarkup(
-    React.createElement(ThemeProvider, { defaultTheme: theme }, React.createElement(TicketsPage, withMobileMenu ? { onOpenMobileMenu: () => undefined } : undefined)),
+    React.createElement(ThemeProvider, { defaultTheme: "light" }, React.createElement(TicketsPage, withMobileMenu ? { onOpenMobileMenu: () => undefined } : undefined)),
   );
 }
 
@@ -75,7 +75,7 @@ beforeEach(() => {
 });
 
 describe("Chamados visual workspace", () => {
-  it("renders compact controls, five status cards and one structural table card", () => {
+  it("restores the original light surfaces, card animation, search, table and pagination", () => {
     ticketState.tickets = [{
       id: "ticket-1",
       number: 42,
@@ -87,69 +87,42 @@ describe("Chamados visual workspace", () => {
       createdAt: "2026-09-12T10:00:00.000Z",
     }];
 
-    const markup = renderTickets("light");
+    const markup = renderTickets();
 
     expect(markup).toContain("Chamados:</label>");
     expect(markup).toContain("Novo Chamado");
     expect(markup).toContain("Cliente Exemplo");
     expect(markup).toContain("Solicitação de suporte");
     expect(markup).toContain("Abertos");
-    expect(markup.match(/aria-pressed=/g)).toHaveLength(5);
-    expect(markup).toContain('aria-pressed="true"');
-    expect(markup).toContain("min-h-[138px]");
-    expect(markup).toContain("h-12 rounded-xl border-slate-200");
-    expect(markup).toContain("h-12 rounded-xl bg-blue-600");
-    expect(markup).toContain("rounded-full px-3 py-1.5");
-    const surfaceStart = markup.indexOf('<section data-testid="tickets-table-surface"');
-    const surfaceEnd = markup.indexOf("</section>", surfaceStart);
-    const footerStart = markup.indexOf('<footer data-testid="tickets-pagination-footer"');
-    expect(surfaceStart).toBeGreaterThanOrEqual(0);
-    expect(footerStart).toBeGreaterThan(surfaceStart);
-    expect(footerStart).toBeLessThan(surfaceEnd);
-    expect(markup.match(/data-testid="tickets-table-surface"/g)).toHaveLength(1);
-    expect(markup.match(/data-testid="tickets-pagination-footer"/g)).toHaveLength(1);
-
-    const lightFooterClasses = markup.match(/<footer data-testid="tickets-pagination-footer" class="([^"]+)"/)?.[1] ?? "";
-    expect(lightFooterClasses).toContain("border-slate-200 bg-white");
-    expect(lightFooterClasses).not.toMatch(/bg-slate-(800|900)/);
-
-    const selectedCardClasses = markup.match(/<button[^>]*aria-pressed="true"[^>]*class="([^"]+)"/)?.[1] ?? "";
-    expect(selectedCardClasses).toContain("ring-1");
-    expect(selectedCardClasses).not.toContain("ring-2");
-    expect(selectedCardClasses).not.toContain("border-slate-400");
+    expect(markup).toContain("from-slate-50 to-slate-100");
+    expect(markup).toContain("from-blue-50 to-blue-100");
+    expect(markup).toContain("from-amber-50 to-amber-100");
+    expect(markup).toContain("from-orange-50 to-orange-100");
+    expect(markup).toContain("from-emerald-50 to-emerald-100");
+    expect(markup).toContain("hover:scale-102 hover:-translate-y-1");
+    expect(markup).toContain("group-hover:scale-110");
+    expect(markup).not.toContain("dark:from-slate-900");
+    expect(markup).toContain("pl-10");
+    expect(markup).toContain("bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2");
+    expect(markup).toContain('class="bg-white rounded-lg border border-slate-200 overflow-hidden"');
+    expect(markup).toContain('class="bg-slate-50 border-b border-slate-200"');
+    expect(markup).toContain("px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700");
+    expect(markup).toContain("flex items-center justify-between mt-6 px-6 py-4 bg-slate-50");
   });
 
-  it("renders the refined empty state and local light/dark variants", () => {
-    const lightMarkup = renderTickets("light");
-    const darkMarkup = renderTickets("dark");
+  it("keeps the original empty state in the light table", () => {
+    const markup = renderTickets();
 
-    expect(lightMarkup).toContain("Chamados:</label>");
-    expect(darkMarkup).toContain("Chamados:</label>");
-    expect(lightMarkup).toContain("Nenhum chamado encontrado");
-    expect(lightMarkup).toContain("Ajuste os filtros ou crie um novo chamado para começar.");
-    const lightFooterClasses = lightMarkup.match(/<footer data-testid="tickets-pagination-footer" class="([^"]+)"/)?.[1] ?? "";
-    expect(lightFooterClasses).toBe("");
-
-    ticketState.tickets = [{
-      id: "ticket-dark",
-      number: 43,
-      customerName: "Cliente Escuro",
-      company: "Empresa Escura",
-      title: "Chamado escuro",
-      assignedTo: "Ana Operadora",
-      status: "open",
-      createdAt: "2026-09-12T11:00:00.000Z",
-    }];
-    const darkTableMarkup = renderTickets("dark");
-    const darkFooterClasses = darkTableMarkup.match(/<footer data-testid="tickets-pagination-footer" class="([^"]+)"/)?.[1] ?? "";
-    expect(darkFooterClasses).toContain("border-slate-800 bg-slate-900");
+    expect(markup).toContain("Nenhum chamado encontrado");
+    expect(markup).toContain("px-4 py-8 text-center text-slate-500");
+    expect(markup).not.toContain("Ajuste os filtros ou crie um novo chamado para começar.");
   });
 
   it("keeps the menu action local to the mobile Tickets header instead of mounting the shared topbar", () => {
-    const markup = renderTickets("light", true);
+    const markup = renderTickets(true);
 
     expect(markup).toContain('aria-label="Abrir menu principal"');
-    expect(markup).toContain("md:hidden");
+    expect(markup).toContain("lg:hidden");
     expect(markup).not.toContain('data-testid="module-topbar-shell"');
   });
 });

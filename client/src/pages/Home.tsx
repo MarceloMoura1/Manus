@@ -233,42 +233,6 @@ export function ShellTopbarBoundary({ active, mode, children }: ShellTopbarBound
   );
 }
 
-export function TicketsTableCard({ children }: { children: React.ReactNode }) {
-  const { theme } = useTheme();
-
-  return (
-    <section
-      data-testid="tickets-table-surface"
-      className={cn(
-        "overflow-hidden rounded-2xl border shadow-sm",
-        theme === "dark"
-          ? "border-slate-800 bg-slate-900 shadow-black/20"
-          : "border-slate-200 bg-white shadow-slate-200/40",
-      )}
-    >
-      {children}
-    </section>
-  );
-}
-
-export function TicketsTableFooter({ children }: { children: React.ReactNode }) {
-  const { theme } = useTheme();
-
-  return (
-    <footer
-      data-testid="tickets-pagination-footer"
-      className={cn(
-        "flex flex-col gap-3 border-t px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-6",
-        theme === "dark"
-          ? "border-slate-800 bg-slate-900 text-slate-300"
-          : "border-slate-200 bg-white text-slate-600",
-      )}
-    >
-      {children}
-    </footer>
-  );
-}
-
 type Ticket = {
   id: string;
   number: number;
@@ -1817,7 +1781,6 @@ type TicketActivity = {
 
 export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => void }) {
   const { user } = useAuth();
-  const { theme } = useTheme();
   // Sessão MegaDesk para obter clientId
   const sessionData = React.useMemo(() => {
     try { return JSON.parse(localStorage.getItem(MEGADESK_SESSION_KEY) || 'null'); } catch { return null; }
@@ -2359,15 +2322,15 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   const getStatusBadgeColor = (status: string) => {
     switch (status) {
       case 'open':
-        return theme === 'dark' ? 'border border-blue-500/30 bg-blue-500/15 text-blue-300' : 'border border-blue-200 bg-blue-50 text-blue-700';
+        return 'bg-blue-100 text-blue-700';
       case 'in_progress':
-        return theme === 'dark' ? 'border border-amber-500/30 bg-amber-500/15 text-amber-300' : 'border border-amber-200 bg-amber-50 text-amber-700';
+        return 'bg-yellow-100 text-yellow-700';
       case 'waiting':
-        return theme === 'dark' ? 'border border-orange-500/30 bg-orange-500/15 text-orange-300' : 'border border-orange-200 bg-orange-50 text-orange-700';
+        return 'bg-orange-100 text-orange-700';
       case 'closed':
-        return theme === 'dark' ? 'border border-emerald-500/30 bg-emerald-500/15 text-emerald-300' : 'border border-emerald-200 bg-emerald-50 text-emerald-700';
+        return 'bg-green-100 text-green-700';
       default:
-        return theme === 'dark' ? 'border border-slate-600 bg-slate-800 text-slate-300' : 'border border-slate-200 bg-slate-100 text-slate-700';
+        return 'bg-gray-100 text-gray-700';
     }
   };
 
@@ -2413,135 +2376,126 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   }
 
   return (
-    <div className="space-y-5 pb-3">
+    <div className="space-y-4">
       {/* Filtro de Chamados */}
-      <div className="flex min-h-11 items-center gap-3">
-        {onOpenMobileMenu && <button type="button" onClick={onOpenMobileMenu} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 md:hidden" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
-        <div className="flex items-center gap-3">
-          <label htmlFor="tickets-scope-filter" className="text-base font-semibold text-slate-800 dark:text-slate-100">Chamados:</label>
+      <div className="flex items-center gap-4">
+        {onOpenMobileMenu && <button type="button" onClick={onOpenMobileMenu} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-700 hover:bg-slate-100 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
+        <label className="text-sm font-medium text-slate-700">Chamados:</label>
         <select
-          id="tickets-scope-filter"
           value={chamadoFilter}
           onChange={e => setChamadoFilter(e.target.value as 'all' | 'mine')}
-          className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 outline-none transition hover:border-slate-300 hover:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800"
+          className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="all">Todos</option>
           <option value="mine">Somente seu</option>
         </select>
       </div>
-      </div>
 
       {/* Cards de Status - Estilizados */}
-      <div className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 xl:grid-cols-5">
-        {statusCards.map((card: any) => {
+      <div className="flex flex-wrap gap-4">
+        {statusCards.map((card: any, idx) => {
           const Icon = card.icon;
           const isSelected = selectedFilter === card.id;
-          const cardTone = card.customColor ? "bg-white dark:bg-slate-900" : card.id === 'total'
-            ? 'bg-gradient-to-br from-white to-slate-100/80 dark:from-slate-900 dark:to-slate-800/80'
-            : card.id === 'open'
-              ? 'bg-gradient-to-br from-white to-blue-50 dark:from-slate-900 dark:to-blue-950/50'
-              : card.id === 'in_progress'
-                ? 'bg-gradient-to-br from-white to-amber-50 dark:from-slate-900 dark:to-amber-950/40'
-                : card.id === 'waiting'
-                  ? 'bg-gradient-to-br from-white to-orange-50 dark:from-slate-900 dark:to-orange-950/40'
-                  : 'bg-gradient-to-br from-white to-emerald-50 dark:from-slate-900 dark:to-emerald-950/40';
-          const selectedTone = card.id === 'total'
-            ? 'border-slate-300 ring-slate-300/70 dark:border-slate-600 dark:ring-slate-600/60'
-            : card.id === 'open'
-              ? 'border-blue-400 ring-blue-500/30 dark:border-blue-400 dark:ring-blue-400/25'
-              : card.id === 'in_progress'
-                ? 'border-amber-400 ring-amber-500/30 dark:border-amber-400 dark:ring-amber-400/25'
-                : card.id === 'waiting'
-                  ? 'border-orange-400 ring-orange-500/30 dark:border-orange-400 dark:ring-orange-400/25'
-                  : 'border-emerald-400 ring-emerald-500/30 dark:border-emerald-400 dark:ring-emerald-400/25';
           // Para status personalizados, usar a cor hex diretamente
           const cardStyle = card.customColor ? {
-            borderColor: isSelected ? card.customColor : undefined,
-            backgroundColor: isSelected ? `${card.customColor}12` : undefined,
-            boxShadow: isSelected ? `0 0 0 2px ${card.customColor}40` : undefined,
+            borderColor: isSelected ? card.customColor : 'transparent',
+            backgroundColor: isSelected ? `${card.customColor}15` : undefined,
           } : {};
           return (
             <button
               key={card.id}
               onClick={() => setSelectedFilter(card.id)}
-              aria-pressed={isSelected}
               style={cardStyle}
-              className={`group relative min-h-[138px] min-w-0 overflow-hidden rounded-[18px] border p-5 text-left shadow-sm transition-all duration-200 ${cardTone} ${
+              className={`group relative overflow-hidden rounded-2xl ${
+                card.customColor ? '' : `bg-gradient-to-br ${card.bgGradient}`
+              } p-5 transition-all duration-300 border-2 min-w-[140px] flex-1 ${
                 isSelected
-                  ? `${card.customColor ? '' : `ring-1 ${selectedTone}`} shadow-sm`
-                  : `border-slate-200/80 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md dark:border-slate-800 dark:hover:border-slate-700`
+                  ? `${card.customColor ? '' : 'border-current'} shadow-xl scale-105`
+                  : `border-transparent hover:shadow-lg hover:scale-102 hover:-translate-y-1`
               }`}
             >
-              <div className="flex h-full flex-col justify-between">
-                <div className="mb-4 flex items-center justify-between">
+              {!card.customColor && (
+                <div className={`absolute -top-8 -right-8 w-32 h-32 bg-gradient-to-br ${card.gradient} rounded-full blur-2xl opacity-10 group-hover:opacity-20 transition-all duration-300`} />
+              )}
+
+              <div className="relative z-10">
+                <div className="flex items-center justify-between mb-3">
                   <div
-                    className={`flex h-10 w-10 items-center justify-center rounded-xl shadow-sm ${
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center ${
                       card.customColor ? '' : `bg-gradient-to-br ${card.gradient}`
                     }`}
                     style={card.customColor ? { backgroundColor: card.customColor } : {}}
                   >
-                    <Icon className="h-5 w-5 text-white" />
+                    <Icon className="w-5 h-5 text-white" />
                   </div>
-                  {isSelected && <span className={`h-2.5 w-2.5 rounded-full shadow-sm ${card.id === 'total' ? 'bg-slate-600 dark:bg-slate-300' : card.id === 'open' ? 'bg-blue-500' : card.id === 'in_progress' ? 'bg-amber-500' : card.id === 'waiting' ? 'bg-orange-500' : 'bg-emerald-500'}`} aria-hidden="true" />}
+                  <div
+                    className={`w-1.5 h-1.5 rounded-full ${card.customColor ? '' : `bg-gradient-to-r ${card.gradient}`} ${isSelected ? 'animate-pulse' : ''}`}
+                    style={card.customColor ? { backgroundColor: card.customColor } : {}}
+                  />
                 </div>
-                <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">{card.label}</p>
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">{card.label}</p>
                 <p
-                  className={`text-3xl font-bold tracking-tight tabular-nums ${
-                    card.customColor ? '' : card.iconColor
+                  className={`text-3xl font-black group-hover:scale-110 transition-transform duration-300 origin-left ${
+                    card.customColor ? '' : `bg-gradient-to-r ${card.gradient} bg-clip-text text-transparent`
                   }`}
                   style={card.customColor ? { color: card.customColor } : {}}
                 >
                   {card.value}
                 </p>
               </div>
+
+              {!card.customColor && (
+                <div className={`absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r ${card.gradient} transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left`} />
+              )}
+              {card.customColor && (
+                <div
+                  className="absolute bottom-0 left-0 right-0 h-0.5 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left"
+                  style={{ backgroundColor: card.customColor }}
+                />
+              )}
             </button>
           );
         })}
       </div>
 
       {/* Filtro de Pesquisa e Botao Novo Chamado */}
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+      <div className="flex gap-2">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
           <Input
             placeholder="Buscar por nome, empresa, nº ou título..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="h-12 rounded-xl border-slate-200 bg-white pl-10 pr-4 text-sm shadow-sm transition focus-visible:border-blue-500 focus-visible:ring-4 focus-visible:ring-blue-500/10 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
+            className="pl-10"
           />
         </div>
         <Button
           onClick={() => setShowNewChamadoModal(true)}
-          className="h-12 rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition hover:bg-blue-700 hover:shadow-md hover:shadow-blue-600/25 active:scale-[0.98] focus-visible:ring-4 focus-visible:ring-blue-500/20"
+          className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
         >
-          <Plus className="h-[18px] w-[18px]" />
+          <Plus className="w-4 h-4" />
           Novo Chamado
         </Button>
       </div>
 
       {/* Tabela de Chamados */}
-      <TicketsTableCard>
-        <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px]">
-          <thead className="border-b border-slate-200 bg-slate-100/80 dark:border-slate-800 dark:bg-slate-800/80">
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">ID</th>
-              <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Abertura</th>
-              <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Nome e Cliente</th>
-              <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Título</th>
-              <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Atendente</th>
-              <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Status</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">ID</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Abertura</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Nome e Cliente</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Título</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Atendente</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Status</th>
             </tr>
           </thead>
           <tbody>
             {filteredChamados.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-6 py-16 text-center">
-                  <div className="mx-auto flex max-w-sm flex-col items-center">
-                    <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"><Ticket className="h-6 w-6" /></span>
-                    <p className="font-medium text-slate-800 dark:text-slate-200">Nenhum chamado encontrado</p>
-                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Ajuste os filtros ou crie um novo chamado para começar.</p>
-                  </div>
+                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                  Nenhum chamado encontrado
                 </td>
               </tr>
             ) : (
@@ -2549,20 +2503,20 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 <tr
                   key={chamado.id}
                   onClick={() => setSelectedChamado(chamado)}
-                  className="cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-blue-50/70 dark:border-slate-800 dark:hover:bg-blue-500/10"
+                  className="border-b border-slate-200 hover:bg-blue-50 cursor-pointer transition-colors"
                 >
-                  <td className="px-6 py-4 text-sm font-mono font-medium text-slate-600 dark:text-slate-300">#{String(chamado.number).padStart(4, '0')}</td>
-                  <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">
+                  <td className="px-4 py-3 text-sm font-mono text-slate-600">#{String(chamado.number).padStart(4, '0')}</td>
+                  <td className="px-4 py-3 text-sm text-slate-600">
                     {formatDate(chamado.createdAt)}
                   </td>
-                  <td className="px-6 py-4 text-sm">
-                    <div className="font-medium text-slate-900 dark:text-slate-100">{chamado.customerName}</div>
-                    <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{chamado.company}</div>
+                  <td className="px-4 py-3 text-sm">
+                    <div className="font-medium text-slate-900">{chamado.customerName}</div>
+                    <div className="text-xs text-slate-500">{chamado.company}</div>
                   </td>
-                  <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-200">{chamado.title}</td>
-                  <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">{chamado.assignedTo || '-'}</td>
-                  <td className="px-6 py-4 text-sm">
-                    <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-bold ${getStatusBadgeColor(chamado.status)}`}>
+                  <td className="px-4 py-3 text-sm text-slate-700">{chamado.title}</td>
+                  <td className="px-4 py-3 text-sm text-slate-600">{chamado.assignedTo || '-'}</td>
+                  <td className="px-4 py-3 text-sm">
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusBadgeColor(chamado.status)}`}>
                       {getStatusLabel(chamado.status)}
                     </span>
                   </td>
@@ -2571,12 +2525,12 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
             )}
           </tbody>
         </table>
-        </div>
+      </div>
 
       {/* Controles de Paginação */}
       {filteredChamados.length > 0 && (
-        <TicketsTableFooter>
-          <div className="text-sm">
+        <div className="flex items-center justify-between mt-6 px-6 py-4 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+          <div className="text-sm text-slate-600 dark:text-slate-300">
             Mostrando <span className="font-semibold">{(currentPage - 1) * ITEMS_PER_PAGE + 1}</span> a{' '}
             <span className="font-semibold">
               {Math.min(currentPage * ITEMS_PER_PAGE, totalChamados)}
@@ -2584,11 +2538,11 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
             de <span className="font-semibold">{totalChamados}</span> chamados
           </div>
           
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
               disabled={currentPage === 1}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              className="px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md hover:bg-slate-50 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               ← Anterior
             </button>
@@ -2609,10 +2563,10 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                   <button
                     key={pageNum}
                     onClick={() => setCurrentPage(pageNum)}
-                    className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${
                       currentPage === pageNum
-                        ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/25'
-                        : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+                        ? 'bg-blue-500 text-white'
+                        : 'text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-600'
                     }`}
                   >
                     {pageNum}
@@ -2624,26 +2578,25 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
             <button
               onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
               disabled={currentPage === totalPages}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              className="px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md hover:bg-slate-50 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               Próximo →
             </button>
           </div>
-        </TicketsTableFooter>
+        </div>
       )}
-      </TicketsTableCard>
 
       {/* Modal de Novo Chamado */}
       <Dialog open={showNewChamadoModal} onOpenChange={setShowNewChamadoModal}>
-        <DialogContent className="max-w-md rounded-2xl border border-slate-200 bg-white p-0 shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:[&_input]:!border-slate-700 dark:[&_input]:!bg-slate-800 dark:[&_input]:!text-slate-100 dark:[&_label]:!text-slate-200">
+        <DialogContent className="max-w-md bg-white border border-slate-300 shadow-lg rounded-lg p-0">
           <DialogTitle className="sr-only">Novo Chamado</DialogTitle>
-          <div className="rounded-t-2xl bg-blue-600 p-5">
+          <div className="bg-blue-600 p-4 rounded-t-lg">
             <h2 className="text-white text-lg font-bold flex items-center gap-2">
               <Plus className="w-5 h-5" />
               Novo Chamado
             </h2>
           </div>
-          <div className="p-5 sm:p-6">
+          <div className="p-6">
           <div className="space-y-4">
             {/* 1. Empresa - com busca automática no banco */}
             <div className="relative">
@@ -2749,10 +2702,10 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
             <div>
               <label className="text-sm font-semibold text-black block mb-2">Prioridade</label>
               <Select value={newChamadoForm.priority} onValueChange={priority => setNewChamadoForm({...newChamadoForm, priority: priority as 'media' | 'baixa' | 'alta' | 'critica'})}>
-                <SelectTrigger className="border-2 border-slate-400 bg-white text-black transition-colors focus:border-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                <SelectTrigger className="bg-white border-2 border-slate-400 focus:border-blue-500 transition-colors text-black">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="border border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                <SelectContent className="bg-white border border-slate-300">
                   <SelectItem value="baixa">🟢 Baixa</SelectItem>
                   <SelectItem value="media">🟡 Média</SelectItem>
                   <SelectItem value="alta">🔴 Alta</SelectItem>
@@ -2761,7 +2714,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               </Select>
             </div>
 
-            <div className="mt-4 flex gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
+            <div className="flex gap-3 pt-4 border-t border-slate-300 mt-4">
               <Button
                 onClick={handleCreateChamado}
                 disabled={createChamadoMutation.isPending}
@@ -2772,7 +2725,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               <Button
                 onClick={() => setShowNewChamadoModal(false)}
                 variant="outline"
-                className="flex-1 border-2 border-slate-300 text-slate-800 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                className="flex-1 border-2 border-slate-400 text-black hover:bg-slate-100 font-semibold transition-colors"
               >
                 ✕ Cancelar
               </Button>
