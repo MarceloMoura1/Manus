@@ -242,6 +242,7 @@ type Ticket = {
   customerName?: string;
   company?: string;
   assignedTo?: string;
+  collaborators?: TicketCollaborator[];
   activities: Array<{
     id: string;
     description: string;
@@ -250,6 +251,48 @@ type Ticket = {
     actionType?: string;
   }>;
 };
+
+export type TicketCollaborator = {
+  userId: string;
+  userName: string;
+};
+
+type TicketAssigneeSource = {
+  assignedTo?: string | null;
+  collaborators?: TicketCollaborator[] | null;
+};
+
+export function getTicketAssignees(ticket: TicketAssigneeSource): TicketCollaborator[] {
+  const assignees: TicketCollaborator[] = [];
+  const seenNames = new Set<string>();
+  const add = (userName?: string | null, userId = '') => {
+    const normalizedName = userName?.trim() ?? '';
+    const key = normalizedName.toLocaleLowerCase();
+    if (!normalizedName || seenNames.has(key)) return;
+    seenNames.add(key);
+    assignees.push({ userId, userName: normalizedName });
+  };
+
+  add(ticket.assignedTo);
+  ticket.collaborators?.forEach(collaborator => add(collaborator.userName, collaborator.userId));
+  return assignees;
+}
+
+export function filterTicketsByScope<T extends TicketAssigneeSource>(
+  tickets: T[],
+  scope: 'all' | 'mine',
+  currentUser?: { id?: string | number | null; name?: string | null } | null,
+): T[] {
+  if (scope === 'all') return tickets;
+  const userId = currentUser?.id == null ? '' : String(currentUser.id).trim();
+  const userName = currentUser?.name?.trim().toLocaleLowerCase() ?? '';
+  if (!userId && !userName) return [];
+
+  return tickets.filter(ticket => getTicketAssignees(ticket).some(assignee =>
+    (userId && assignee.userId === userId) ||
+    (userName && assignee.userName.toLocaleLowerCase() === userName),
+  ));
+}
 
 type ClientUser = {
   userId: string;
@@ -1953,7 +1996,8 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       setShowManageCollaboratorsCard(false);
       setIsEditingCollaborators(false);
       await getCollaboratorsQuery.refetch();
-      utils.chamados.list.invalidate();
+      await utils.chamados.list.invalidate();
+      await chamadosQuery.refetch();
     } catch (error) {
       showToast('Erro ao atualizar colaboradores', 'error');
       console.error('Error updating collaborators:', error);
@@ -2273,9 +2317,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   console.log('[DEBUG] chamados.length:', chamados.length);
 
   // Filtrar por usuário (todos vs somente seu)
-  const chamadosFiltrados = chamadoFilter === 'mine' 
-    ? chamados.filter(c => c.assignedTo === user?.user?.name)
-    : chamados;
+  const chamadosFiltrados = filterTicketsByScope(chamados, chamadoFilter, user?.user);
   console.log('[DEBUG] chamadosFiltrados:', chamadosFiltrados);
 
   // Filtrar por busca
@@ -2354,9 +2396,9 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       case 'baixa':
         return 'text-green-600';
       case 'media':
-        return 'text-yellow-600';
+        return 'text-amber-600';
       case 'alta':
-        return 'text-orange-600';
+        return 'text-red-600';
       case 'critica':
         return 'text-red-600';
       default:
@@ -2397,20 +2439,6 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
   return (
     <div className="space-y-4">
-      {/* Filtro de Chamados */}
-      <div className="flex items-center gap-4">
-        {onOpenMobileMenu && <button type="button" onClick={onOpenMobileMenu} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-700 hover:bg-slate-100 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
-        <label className="text-sm font-medium text-slate-700">Chamados:</label>
-        <select
-          value={chamadoFilter}
-          onChange={e => setChamadoFilter(e.target.value as 'all' | 'mine')}
-          className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="all">Todos</option>
-          <option value="mine">Somente seu</option>
-        </select>
-      </div>
-
       {/* Cards de Status - Estilizados */}
       <div className="flex flex-wrap gap-4">
         {statusCards.map((card: any, idx) => {
@@ -2480,6 +2508,25 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
       {/* Filtro de Pesquisa e Botao Novo Chamado */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        {onOpenMobileMenu && <button type="button" onClick={onOpenMobileMenu} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[10px] border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-50 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
+        <div className="inline-flex h-11 shrink-0 rounded-[10px] border border-slate-200 bg-slate-50 p-1" role="group" aria-label="Escopo dos chamados" data-testid="ticket-scope-control">
+          <button
+            type="button"
+            onClick={() => setChamadoFilter('all')}
+            aria-pressed={chamadoFilter === 'all'}
+            className={`rounded-[7px] px-3 text-sm font-semibold transition-colors ${chamadoFilter === 'all' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white hover:text-slate-800'}`}
+          >
+            Todos
+          </button>
+          <button
+            type="button"
+            onClick={() => setChamadoFilter('mine')}
+            aria-pressed={chamadoFilter === 'mine'}
+            className={`rounded-[7px] px-3 text-sm font-semibold transition-colors ${chamadoFilter === 'mine' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white hover:text-slate-800'}`}
+          >
+            Meus
+          </button>
+        </div>
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
@@ -2501,16 +2548,25 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       {/* Tabela de Chamados */}
       <div className="overflow-hidden rounded-[14px] border border-slate-200/80 bg-white">
         <div className="overflow-x-auto">
-        <table className="w-full min-w-[980px]">
+        <table className="w-full min-w-[1080px] table-fixed">
+          <colgroup>
+            <col className="w-[6%]" />
+            <col className="w-[10%]" />
+            <col className="w-[21%]" />
+            <col className="w-[30%]" />
+            <col className="w-[16%]" />
+            <col className="w-[8%]" />
+            <col className="w-[9%]" />
+          </colgroup>
           <thead className="border-b border-slate-200/80 bg-slate-50/70">
             <tr>
-              <th className="w-20 px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">ID</th>
-              <th className="w-28 px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Abertura</th>
-              <th className="min-w-56 px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Nome e cliente</th>
-              <th className="min-w-56 px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Título</th>
-              <th className="w-40 px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Atendente</th>
-              <th className="w-28 px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Prioridade</th>
-              <th className="w-28 px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Status</th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">ID</th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Abertura</th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Nome e cliente</th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Título</th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Atendente</th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Prioridade</th>
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Status</th>
             </tr>
           </thead>
           <tbody>
@@ -2521,7 +2577,10 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 </td>
               </tr>
             ) : (
-              filteredChamados.map(chamado => (
+              filteredChamados.map(chamado => {
+                const assignees = getTicketAssignees(chamado);
+                const assigneeNames = assignees.map(assignee => assignee.userName);
+                return (
                 <tr
                   key={chamado.id}
                   onClick={() => setSelectedChamado(chamado)}
@@ -2544,11 +2603,18 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                   <td className="px-5 py-3.5">
                     <div className="max-w-sm truncate text-sm font-medium text-slate-800" title={chamado.title}>{chamado.title}</div>
                   </td>
-                  <td className="px-5 py-3.5">
-                    {chamado.assignedTo ? (
-                      <div className="flex min-w-0 items-center gap-2.5">
-                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600" aria-hidden="true">{getInitials(chamado.assignedTo)}</span>
-                        <span className="truncate text-sm text-slate-700">{chamado.assignedTo}</span>
+                  <td className="px-4 py-3.5">
+                    {assignees.length > 0 ? (
+                      <div className="flex min-w-0 items-center gap-2.5" title={assigneeNames.join(', ')}>
+                        <div className="flex shrink-0 -space-x-1.5" aria-hidden="true">
+                          {assignees.slice(0, 2).map(assignee => (
+                            <span key={`${assignee.userId}-${assignee.userName}`} className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-100 text-[10px] font-semibold text-slate-600">
+                              {getInitials(assignee.userName)}
+                            </span>
+                          ))}
+                          {assignees.length > 2 && <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-semibold text-slate-600">+{assignees.length - 2}</span>}
+                        </div>
+                        <span className="truncate text-sm text-slate-700">{assignees[0].userName}{assignees.length > 1 ? ` +${assignees.length - 1}` : ''}</span>
                       </div>
                     ) : <span className="text-sm text-slate-400">—</span>}
                   </td>
@@ -2561,7 +2627,8 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                     </span>
                   </td>
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>

@@ -29,6 +29,7 @@ import {
   addAttachment,
   getAttachments,
   getCustomerChamadoHistory,
+  getActiveClientUser,
   type ChamadoWithActivities,
 } from "./db-chamados";
 
@@ -205,6 +206,14 @@ export const chamadosRouter = router({
           priority: input.priority,
         });
         
+        const creator = await getActiveClientUser(clientId, ctx.operationalUserId ?? '');
+        if (!creator) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Não foi possível identificar o atendente criador do chamado.",
+          });
+        }
+
         const chamado = await createChamado(
           clientId,
           input.customerId || '',
@@ -213,7 +222,7 @@ export const chamadosRouter = router({
           input.title,
           input.observations,
           input.priority,
-          input.assignedTo,
+          creator.userName,
           input.customerPhone,
           input.customerEmail,
           input.customerCNPJ

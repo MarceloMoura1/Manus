@@ -14,7 +14,7 @@ import { createCallerFactory } from "./_core/trpc";
 
 // Mock do db-chamados para isolar os testes (sem DATABASE_URL)
 vi.mock("./db-chamados", () => ({
-  createChamado: vi.fn(async (clientId, customerId, customerName, company, title, observations, priority) => ({
+  createChamado: vi.fn(async (clientId, customerId, customerName, company, title, observations, priority, assignedTo) => ({
     id: `chamado-${Date.now()}`,
     number: 42,
     clientId,
@@ -25,7 +25,7 @@ vi.mock("./db-chamados", () => ({
     observations: observations || "",
     priority: priority || "media",
     status: "open",
-    assignedTo: null,
+    assignedTo,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     activities: [],
@@ -42,6 +42,7 @@ vi.mock("./db-chamados", () => ({
   removeCollaborator: vi.fn(async () => ({})),
   updateCollaborators: vi.fn(async () => ({})),
   registerActivity: vi.fn(async () => ({})),
+  getActiveClientUser: vi.fn(async () => ({ userId: "operator-1", userName: "Marcelo Moura" })),
 }));
 
 const createCaller = createCallerFactory(chamadosRouter);
@@ -51,6 +52,9 @@ function makeCtxWithTenant(tenantId: string) {
   return {
     user: null as any,
     tenantId,
+    operationalUserId: "operator-1",
+    operationalUserRole: "agent",
+    userEmail: "marcelo@example.invalid",
     req: {} as any,
     res: {} as any,
   };
@@ -88,6 +92,7 @@ describe("chamados.create — abertura de chamados", () => {
     expect(result.chamado.customerName).toBe("João Silva");
     expect(result.chamado.company).toBe("Empresa Teste");
     expect(result.chamado.status).toBe("open");
+    expect(result.chamado.assignedTo).toBe("Marcelo Moura");
     expect(result.message).toContain("42");
   });
 
@@ -137,7 +142,7 @@ describe("chamados.create — abertura de chamados", () => {
       "Suporte técnico urgente",
       "",
       "alta",
-      undefined,
+      "Marcelo Moura",
       undefined,
       undefined,
       undefined

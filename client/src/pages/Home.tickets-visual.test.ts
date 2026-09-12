@@ -41,7 +41,7 @@ vi.mock("@/lib/trpc", () => {
   };
 });
 
-import { TicketsPage } from "./Home";
+import { filterTicketsByScope, getTicketAssignees, TicketsPage } from "./Home";
 
 function createStorage() {
   const values = new Map<string, string>();
@@ -75,14 +75,18 @@ beforeEach(() => {
 });
 
 describe("Chamados visual workspace", () => {
-  it("restores the original light surfaces, card animation, search, table and pagination", () => {
+  it("keeps the frozen light cards and pagination while rendering the premium ticket list", () => {
     ticketState.tickets = [{
       id: "ticket-1",
       number: 42,
       customerName: "Cliente Exemplo",
       company: "Empresa Exemplo",
       title: "Solicitação de suporte",
-      assignedTo: "Ana Operadora",
+      assignedTo: "Cristiano Costa",
+      collaborators: [
+        { userId: "user-1", userName: "Ana Operadora" },
+        { userId: "user-2", userName: "Marcelo Moura" },
+      ],
       priority: "alta",
       status: "open",
       createdAt: "2026-09-12T10:00:00.000Z",
@@ -90,7 +94,12 @@ describe("Chamados visual workspace", () => {
 
     const markup = renderTickets();
 
-    expect(markup).toContain("Chamados:</label>");
+    expect(markup).not.toContain("Chamados:</label>");
+    expect(markup).toContain('data-testid="ticket-scope-control"');
+    expect(markup).toContain('aria-label="Escopo dos chamados"');
+    expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toContain("Todos");
+    expect(markup).toContain("Meus");
     expect(markup).toContain("Novo Chamado");
     expect(markup).toContain("Cliente Exemplo");
     expect(markup).toContain("Solicitação de suporte");
@@ -106,17 +115,49 @@ describe("Chamados visual workspace", () => {
     expect(markup).toContain("h-11 rounded-[10px] border-slate-200 bg-white pl-10");
     expect(markup).toContain("h-11 rounded-[10px] bg-blue-600 px-4");
     expect(markup).toContain('class="overflow-hidden rounded-[14px] border border-slate-200/80 bg-white"');
+    expect(markup).toContain('class="w-full min-w-[1080px] table-fixed"');
     expect(markup).toContain('class="border-b border-slate-200/80 bg-slate-50/70"');
     expect(markup).toContain("Nome e cliente");
     expect(markup).toContain("Prioridade");
     expect(markup).toContain("h-8 w-8 shrink-0");
     expect(markup).toContain(">CE</span>");
+    expect(markup).toContain(">CC</span>");
     expect(markup).toContain(">AO</span>");
+    expect(markup).toContain("Cristiano Costa +2");
     expect(markup).toContain("07:00");
     expect(markup).toContain("Alta");
     expect(markup).toContain("hover:bg-slate-50/70");
     expect(markup).toContain("border-blue-200/80 bg-blue-50 text-blue-700");
     expect(markup).toContain("flex items-center justify-between mt-6 px-6 py-4 bg-slate-50");
+  });
+
+  it("keeps Todos and Meus tied to the canonical primary and collaborator assignees", () => {
+    const tickets = [
+      { id: "created", assignedTo: "Marcelo Moura", collaborators: [] },
+      { id: "transferred", assignedTo: "Cristiano Costa", collaborators: [] },
+      { id: "collaborative", assignedTo: "Ana Operadora", collaborators: [{ userId: "user-1", userName: "Marcelo Moura" }] },
+    ];
+
+    expect(filterTicketsByScope(tickets, "all", { id: "user-1", name: "Marcelo Moura" }).map(ticket => ticket.id))
+      .toEqual(["created", "transferred", "collaborative"]);
+    expect(filterTicketsByScope(tickets, "mine", { id: "user-1", name: "Marcelo Moura" }).map(ticket => ticket.id))
+      .toEqual(["created", "collaborative"]);
+    expect(filterTicketsByScope(tickets, "all", { id: "user-1", name: "Marcelo Moura" }).map(ticket => ticket.id))
+      .toEqual(["created", "transferred", "collaborative"]);
+  });
+
+  it("renders the current primary attendant and compacts additional canonical collaborators", () => {
+    expect(getTicketAssignees({ assignedTo: "Ana Operadora", collaborators: [] }))
+      .toEqual([{ userId: "", userName: "Ana Operadora" }]);
+    expect(getTicketAssignees({ assignedTo: "Cristiano Costa", collaborators: [] }))
+      .toEqual([{ userId: "", userName: "Cristiano Costa" }]);
+    expect(getTicketAssignees({
+      assignedTo: "Marcelo Moura",
+      collaborators: [
+        { userId: "user-2", userName: "Cristiano Costa" },
+        { userId: "user-3", userName: "Ana Operadora" },
+      ],
+    }).map(assignee => assignee.userName)).toEqual(["Marcelo Moura", "Cristiano Costa", "Ana Operadora"]);
   });
 
   it("keeps the original empty state in the light table", () => {

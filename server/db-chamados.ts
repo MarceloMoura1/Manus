@@ -16,6 +16,7 @@ import {
   megadeskDomainChamadoSequence,
   megadeskDomainChamadoActivities,
   megadeskDomainChamadoCollaborators,
+  megadeskDomainClientUsers,
   megadeskDomainChamadoAttachments,
 } from '../drizzle/schema';
 import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
@@ -35,6 +36,10 @@ export type ChamadoWithActivities = {
   status: string;
   priority?: string;
   assignedTo?: string;
+  collaborators: Array<{
+    userId: string;
+    userName: string;
+  }>;
   createdAt: number; // timestamp em millisegundos
   activities: Array<{
     id: string;
@@ -44,6 +49,8 @@ export type ChamadoWithActivities = {
     actionType?: string;
   }>;
 };
+
+export type ChamadoCollaborator = ChamadoWithActivities['collaborators'][number];
 
 // Constantes de validação
 const VALID_STATUSES = ['open', 'in_progress', 'waiting', 'closed'] as const;
@@ -93,6 +100,33 @@ function validatePriority(priority: string): asserts priority is typeof VALID_PR
   if (!VALID_PRIORITIES.includes(priority as any)) {
     throw new Error(`Prioridade inválida: ${priority}. Valores válidos: ${VALID_PRIORITIES.join(', ')}`);
   }
+}
+
+/**
+ * Resolve a identidade operacional canônica do usuário ativo do tenant.
+ * O nome é persistido em assignedTo; o ID permanece disponível na relação
+ * de colaboradores quando ela for usada.
+ */
+export async function getActiveClientUser(
+  clientId: string,
+  userId: string,
+): Promise<ChamadoCollaborator | null> {
+  if (!clientId?.trim() || !userId?.trim()) return null;
+
+  const users = await db
+    .select({
+      userId: megadeskDomainClientUsers.userId,
+      userName: megadeskDomainClientUsers.name,
+    })
+    .from(megadeskDomainClientUsers)
+    .where(and(
+      eq(megadeskDomainClientUsers.clientId, clientId),
+      eq(megadeskDomainClientUsers.userId, userId),
+      eq(megadeskDomainClientUsers.status, 'active'),
+    ))
+    .limit(1);
+
+  return users[0] ?? null;
 }
 
 /**
@@ -297,7 +331,9 @@ export async function getChamadoWithActivities(
       }
     }
 
-        const c = chamado[0];
+    const collaborators = await getCollaborators(chamadoId, clientId);
+
+    const c = chamado[0];
     return {
       id: c.chamadoId, // eslint-disable-line
       number: c.chamadoNumber,
@@ -312,6 +348,7 @@ export async function getChamadoWithActivities(
       status: c.status,
       priority: c.priority,
       assignedTo: c.assignedTo || undefined,
+      collaborators,
       createdAt: new Date((c.createdAt as string).replace(' ', 'T') + 'Z').getTime(),
       activities: activities.map(a => {
         let date = a.createdAt;
@@ -410,6 +447,21 @@ export async function listChamados(
       }
     }
 
+    let allCollaborators: Array<ChamadoCollaborator & { chamadoId: string }> = [];
+    if (chamadoIds.length > 0) {
+      allCollaborators = await db
+        .select({
+          chamadoId: megadeskDomainChamadoCollaborators.chamadoId,
+          userId: megadeskDomainChamadoCollaborators.userId,
+          userName: megadeskDomainChamadoCollaborators.userName,
+        })
+        .from(megadeskDomainChamadoCollaborators)
+        .where(and(
+          inArray(megadeskDomainChamadoCollaborators.chamadoId, chamadoIds),
+          eq(megadeskDomainChamadoCollaborators.clientId, clientId),
+        ));
+    }
+
     // Agrupar atividades por chamado_id
     const activitiesByChamado: Record<string, any[]> = {};
     allActivities.forEach(a => {
@@ -417,6 +469,17 @@ export async function listChamados(
         activitiesByChamado[a.chamadoId] = [];
       }
       activitiesByChamado[a.chamadoId].push(a);
+    });
+
+    const collaboratorsByChamado: Record<string, ChamadoCollaborator[]> = {};
+    allCollaborators.forEach(collaborator => {
+      if (!collaboratorsByChamado[collaborator.chamadoId]) {
+        collaboratorsByChamado[collaborator.chamadoId] = [];
+      }
+      collaboratorsByChamado[collaborator.chamadoId].push({
+        userId: collaborator.userId,
+        userName: collaborator.userName,
+      });
     });
 
     // Mapear chamados com suas atividades
@@ -434,6 +497,7 @@ export async function listChamados(
       status: c.status,
       priority: c.priority,
       assignedTo: c.assignedTo,
+      collaborators: collaboratorsByChamado[c.chamadoId] || [],
       createdAt: new Date((c.createdAt as string).replace(' ', 'T') + 'Z').getTime(),
       activities: (activitiesByChamado[c.chamadoId] || []).map(a => {
         // Converter data para string ISO
