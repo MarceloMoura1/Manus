@@ -83,6 +83,7 @@ describe("Chamados visual workspace", () => {
       company: "Empresa Exemplo",
       title: "Solicitação de suporte",
       assignedTo: "Ana Operadora",
+      priority: "alta",
       status: "open",
       createdAt: "2026-09-12T10:00:00.000Z",
     }];
@@ -102,11 +103,19 @@ describe("Chamados visual workspace", () => {
     expect(markup).toContain("hover:scale-102 hover:-translate-y-1");
     expect(markup).toContain("group-hover:scale-110");
     expect(markup).not.toContain("dark:from-slate-900");
-    expect(markup).toContain("pl-10");
-    expect(markup).toContain("bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2");
-    expect(markup).toContain('class="bg-white rounded-lg border border-slate-200 overflow-hidden"');
-    expect(markup).toContain('class="bg-slate-50 border-b border-slate-200"');
-    expect(markup).toContain("px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700");
+    expect(markup).toContain("h-11 rounded-[10px] border-slate-200 bg-white pl-10");
+    expect(markup).toContain("h-11 rounded-[10px] bg-blue-600 px-4");
+    expect(markup).toContain('class="overflow-hidden rounded-[14px] border border-slate-200/80 bg-white"');
+    expect(markup).toContain('class="border-b border-slate-200/80 bg-slate-50/70"');
+    expect(markup).toContain("Nome e cliente");
+    expect(markup).toContain("Prioridade");
+    expect(markup).toContain("h-8 w-8 shrink-0");
+    expect(markup).toContain(">CE</span>");
+    expect(markup).toContain(">AO</span>");
+    expect(markup).toContain("07:00");
+    expect(markup).toContain("Alta");
+    expect(markup).toContain("hover:bg-slate-50/70");
+    expect(markup).toContain("border-blue-200/80 bg-blue-50 text-blue-700");
     expect(markup).toContain("flex items-center justify-between mt-6 px-6 py-4 bg-slate-50");
   });
 
@@ -114,7 +123,8 @@ describe("Chamados visual workspace", () => {
     const markup = renderTickets();
 
     expect(markup).toContain("Nenhum chamado encontrado");
-    expect(markup).toContain("px-4 py-8 text-center text-slate-500");
+    expect(markup).toContain('colSpan="7"');
+    expect(markup).toContain("px-5 py-10 text-center text-sm text-slate-500");
     expect(markup).not.toContain("Ajuste os filtros ou crie um novo chamado para começar.");
   });
 

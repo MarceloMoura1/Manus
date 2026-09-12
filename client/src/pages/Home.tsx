@@ -2322,15 +2322,15 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   const getStatusBadgeColor = (status: string) => {
     switch (status) {
       case 'open':
-        return 'bg-blue-100 text-blue-700';
+        return 'border-blue-200/80 bg-blue-50 text-blue-700';
       case 'in_progress':
-        return 'bg-yellow-100 text-yellow-700';
+        return 'border-amber-200/80 bg-amber-50 text-amber-700';
       case 'waiting':
-        return 'bg-orange-100 text-orange-700';
+        return 'border-orange-200/80 bg-orange-50 text-orange-700';
       case 'closed':
-        return 'bg-green-100 text-green-700';
+        return 'border-emerald-200/80 bg-emerald-50 text-emerald-700';
       default:
-        return 'bg-gray-100 text-gray-700';
+        return 'border-slate-200 bg-slate-50 text-slate-700';
     }
   };
 
@@ -2362,6 +2362,26 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       default:
         return 'text-gray-600';
     }
+  };
+
+  const getPriorityLabel = (priority?: string) => {
+    switch (priority) {
+      case 'baixa':
+        return 'Baixa';
+      case 'media':
+        return 'Média';
+      case 'alta':
+        return 'Alta';
+      case 'critica':
+        return 'Crítica';
+      default:
+        return priority || '—';
+    }
+  };
+
+  const getInitials = (name?: string) => {
+    const parts = name?.trim().split(/\s+/).filter(Boolean) ?? [];
+    return parts.slice(0, 2).map(part => part[0]).join('').toUpperCase() || '—';
   };
 
   if (chamadosQuery.isLoading) {
@@ -2459,19 +2479,19 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       </div>
 
       {/* Filtro de Pesquisa e Botao Novo Chamado */}
-      <div className="flex gap-2">
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
             placeholder="Buscar por nome, empresa, nº ou título..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="pl-10"
+            className="h-11 rounded-[10px] border-slate-200 bg-white pl-10 pr-4 text-sm text-slate-700 shadow-none placeholder:text-slate-400 focus-visible:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-500/10"
           />
         </div>
         <Button
           onClick={() => setShowNewChamadoModal(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
+          className="h-11 rounded-[10px] bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
         >
           <Plus className="w-4 h-4" />
           Novo Chamado
@@ -2479,22 +2499,24 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       </div>
 
       {/* Tabela de Chamados */}
-      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-slate-50 border-b border-slate-200">
+      <div className="overflow-hidden rounded-[14px] border border-slate-200/80 bg-white">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[980px]">
+          <thead className="border-b border-slate-200/80 bg-slate-50/70">
             <tr>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">ID</th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Abertura</th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Nome e Cliente</th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Título</th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Atendente</th>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Status</th>
+              <th className="w-20 px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">ID</th>
+              <th className="w-28 px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Abertura</th>
+              <th className="min-w-56 px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Nome e cliente</th>
+              <th className="min-w-56 px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Título</th>
+              <th className="w-40 px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Atendente</th>
+              <th className="w-28 px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Prioridade</th>
+              <th className="w-28 px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Status</th>
             </tr>
           </thead>
           <tbody>
             {filteredChamados.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={7} className="px-5 py-10 text-center text-sm text-slate-500">
                   Nenhum chamado encontrado
                 </td>
               </tr>
@@ -2503,20 +2525,38 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 <tr
                   key={chamado.id}
                   onClick={() => setSelectedChamado(chamado)}
-                  className="border-b border-slate-200 hover:bg-blue-50 cursor-pointer transition-colors"
+                  className="cursor-pointer border-b border-slate-100 transition-colors duration-150 last:border-b-0 hover:bg-slate-50/70"
                 >
-                  <td className="px-4 py-3 text-sm font-mono text-slate-600">#{String(chamado.number).padStart(4, '0')}</td>
-                  <td className="px-4 py-3 text-sm text-slate-600">
-                    {formatDate(chamado.createdAt)}
+                  <td className="whitespace-nowrap px-5 py-3.5 text-xs font-mono font-medium text-slate-500">#{String(chamado.number).padStart(4, '0')}</td>
+                  <td className="whitespace-nowrap px-5 py-3.5">
+                    <div className="text-sm font-medium text-slate-700">{formatDate(chamado.createdAt) || '—'}</div>
+                    {formatTime(chamado.createdAt) && <div className="mt-0.5 text-xs text-slate-400">{formatTime(chamado.createdAt)}</div>}
                   </td>
-                  <td className="px-4 py-3 text-sm">
-                    <div className="font-medium text-slate-900">{chamado.customerName}</div>
-                    <div className="text-xs text-slate-500">{chamado.company}</div>
+                  <td className="px-5 py-3.5">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600" aria-hidden="true">{getInitials(chamado.customerName)}</span>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-slate-800">{chamado.customerName || '—'}</div>
+                        {chamado.company && <div className="mt-0.5 truncate text-xs text-slate-500">{chamado.company}</div>}
+                      </div>
+                    </div>
                   </td>
-                  <td className="px-4 py-3 text-sm text-slate-700">{chamado.title}</td>
-                  <td className="px-4 py-3 text-sm text-slate-600">{chamado.assignedTo || '-'}</td>
-                  <td className="px-4 py-3 text-sm">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusBadgeColor(chamado.status)}`}>
+                  <td className="px-5 py-3.5">
+                    <div className="max-w-sm truncate text-sm font-medium text-slate-800" title={chamado.title}>{chamado.title}</div>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    {chamado.assignedTo ? (
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600" aria-hidden="true">{getInitials(chamado.assignedTo)}</span>
+                        <span className="truncate text-sm text-slate-700">{chamado.assignedTo}</span>
+                      </div>
+                    ) : <span className="text-sm text-slate-400">—</span>}
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <span className={`text-sm font-medium ${getPriorityColor(chamado.priority)}`}>{getPriorityLabel(chamado.priority)}</span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${getStatusBadgeColor(chamado.status)}`}>
                       {getStatusLabel(chamado.status)}
                     </span>
                   </td>
@@ -2525,6 +2565,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Controles de Paginação */}
