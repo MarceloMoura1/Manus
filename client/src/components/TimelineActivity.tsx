@@ -84,14 +84,14 @@ export function getActivityAccentClass(actionType?: string) {
 export function getActivityTintClass(actionType?: string) {
   switch (actionType) {
     case 'close':
-      return 'bg-emerald-50/50';
+      return 'bg-emerald-50';
     case 'forward':
     case 'edit':
-      return 'bg-violet-50/45';
+      return 'bg-violet-50';
     case 'register':
     case 'note':
     default:
-      return 'bg-blue-50/45';
+      return 'bg-blue-50';
   }
 }
 
@@ -135,7 +135,7 @@ export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities }
               </div>
 
               {/* Conteúdo */}
-              <div className={`rounded-lg border border-l-2 border-slate-200 p-4 shadow-sm transition-shadow hover:shadow-md ${getActivityAccentClass(activity.actionType)} ${getActivityTintClass(activity.actionType)}`}>
+              <div data-testid={`timeline-activity-surface-${activity.id}`} className={`rounded-lg border border-l-2 border-slate-200 p-4 shadow-sm transition-shadow hover:shadow-md ${getActivityAccentClass(activity.actionType)} ${getActivityTintClass(activity.actionType)}`}>
                 {/* Data e Hora */}
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xs font-semibold text-slate-600">{date}</span>
@@ -150,7 +150,7 @@ export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities }
                 )}
 
                 {/* Descrição */}
-                <div className="mb-2 rounded bg-white/80 p-3">
+                <div className="mb-2 rounded bg-white p-3">
                   <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
                     {activity.description}
                   </p>

@@ -60,9 +60,9 @@ describe("TimelineActivity", () => {
     expect(getActivityAccentClass("edit")).toBe("border-l-violet-400");
     expect(getActivityAccentClass("forward")).toBe("border-l-violet-400");
     expect(getActivityAccentClass("close")).toBe("border-l-emerald-400");
-    expect(getActivityTintClass("note")).toBe("bg-blue-50/45");
-    expect(getActivityTintClass("forward")).toBe("bg-violet-50/45");
-    expect(getActivityTintClass("close")).toBe("bg-emerald-50/50");
+    expect(getActivityTintClass("note")).toBe("bg-blue-50");
+    expect(getActivityTintClass("forward")).toBe("bg-violet-50");
+    expect(getActivityTintClass("close")).toBe("bg-emerald-50");
 
     const markup = renderToStaticMarkup(React.createElement(TimelineActivity, {
       activities: [{
@@ -75,6 +75,6 @@ describe("TimelineActivity", () => {
     }));
 
     expect(markup).toContain("border-l-blue-400");
-    expect(markup).toContain("bg-blue-50/45");
+    expect(markup).toContain("bg-blue-50");
   });
 });

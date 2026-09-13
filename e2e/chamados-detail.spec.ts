@@ -58,6 +58,27 @@ const canonicalCustomer = {
 
 const result = (json: unknown) => ({ result: { data: { json } } });
 
+async function expectOpaqueSurface(locator: ReturnType<Page["getByTestId"]>) {
+  await expect(locator).toHaveCSS("opacity", "1");
+  const backgroundColor = await locator.evaluate(element => getComputedStyle(element).backgroundColor);
+  expect(backgroundColor).toMatch(/^(rgb|oklch)\(/);
+  expect(backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+  expect(backgroundColor).not.toContain("/ 0");
+}
+
+async function expectDetailWorkspaceToCover(detail: ReturnType<Page["getByTestId"]>, underlying: ReturnType<Page["locator"]>) {
+  const covered = await underlying.evaluate(element => {
+    const workspace = document.querySelector<HTMLElement>("[data-testid='ticket-detail-shell']");
+    const bounds = element.getBoundingClientRect();
+    if (!workspace || bounds.width === 0 || bounds.height === 0) return false;
+    const topElement = document.elementFromPoint(bounds.left + Math.min(8, bounds.width / 2), bounds.top + Math.min(8, bounds.height / 2));
+    return Boolean(topElement && workspace.contains(topElement));
+  });
+
+  await expect(detail).toBeVisible();
+  expect(covered).toBe(true);
+}
+
 async function prepareDetail(page: Page) {
   let currentCollaborators = [...ticket.collaborators];
   let collaboratorUpdates = 0;
@@ -134,12 +155,15 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
   await expect(page.getByTestId("ticket-status-control")).toHaveAttribute("data-status", "open");
   await expect(page.getByTestId("ticket-status-control")).toHaveClass(/bg-blue-50/);
   await expect(page.getByTestId("ticket-detail-priority")).toHaveClass(/bg-red-50/);
-  await expect(detail).toHaveClass(/bg-slate-100\/70/);
-  await expect(page.getByTestId("ticket-customer-card")).toHaveClass(/bg-sky-50\/70/);
-  await expect(page.getByTestId("ticket-action-bar")).toHaveClass(/bg-white\/70/);
-  await expect(page.getByTestId("ticket-history-panel")).toHaveClass(/bg-sky-50\/35/);
-  await expect(page.getByTestId("ticket-details-panel")).toHaveClass(/bg-slate-50\/80/);
-  await expect(page.getByTestId("ticket-initial-message")).toHaveClass(/border-sky-100/);
+  await expectOpaqueSurface(detail);
+  await expectOpaqueSurface(page.getByTestId("ticket-customer-card"));
+  await expectOpaqueSurface(page.getByTestId("ticket-action-bar"));
+  await expectOpaqueSurface(page.getByTestId("ticket-history-panel"));
+  await expectOpaqueSurface(page.getByTestId("ticket-details-panel"));
+  await expectOpaqueSurface(page.getByTestId("timeline-activity-surface-activity-note"));
+  await expectOpaqueSurface(page.getByTestId("ticket-initial-message"));
+  await expectDetailWorkspaceToCover(detail, page.locator("tbody"));
+  await expectDetailWorkspaceToCover(detail, page.getByText("Mostrando 1 a 1 de 1 chamados", { exact: true }));
 
   const boxes = await Promise.all([sidebar.boundingBox(), detail.boundingBox()]);
   expect(boxes[0]).not.toBeNull();

@@ -2906,7 +2906,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
       {/* Tela Branca de Detalhes do Chamado */}
       {selectedChamado && (
-        <div data-testid="ticket-detail-shell" className="absolute inset-0 z-20 min-h-full overflow-y-auto bg-slate-100/70 pb-8">
+        <div data-testid="ticket-detail-shell" className="absolute inset-0 z-20 min-h-full overflow-y-auto bg-slate-100 pb-8">
           {/* Header com Botao Voltar */}
           <div className="sticky top-0 z-10 flex flex-col gap-4 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 md:flex-row md:items-center md:justify-between">
             <div className="flex min-w-0 items-center gap-3">
@@ -2947,7 +2947,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           </div>
 
           {/* Cliente canonico do ERP, com fallback seguro para snapshots legados */}
-          <section data-testid="ticket-customer-card" aria-labelledby="ticket-customer-heading" className="mx-4 mt-6 rounded-xl border border-sky-100 bg-sky-50/70 p-5 shadow-sm sm:mx-6 lg:mx-8">
+          <section data-testid="ticket-customer-card" aria-labelledby="ticket-customer-heading" className="mx-4 mt-6 rounded-xl border border-sky-100 bg-sky-50 p-5 shadow-sm sm:mx-6 lg:mx-8">
             <div className="mb-4 flex items-center justify-between gap-4">
               <div>
                 <p id="ticket-customer-heading" className="text-xs font-bold uppercase tracking-wider text-slate-500">Cliente</p>
@@ -2972,7 +2972,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           </section>
 
           {/* Linha de Icones com Tooltips */}
-          <div data-testid="ticket-action-bar" className="flex items-center justify-center gap-0 border-b border-slate-200/80 bg-white/70 px-8 py-6" style={{height: '60px', marginBottom: '-5px'}}>
+          <div data-testid="ticket-action-bar" className="flex items-center justify-center gap-0 border-b border-slate-200 bg-white px-8 py-6" style={{height: '60px', marginBottom: '-5px'}}>
             <div className="group relative cursor-pointer rounded-lg px-6 py-4 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowForwardCard(!showForwardCard)}>
               {/* Círculo com seta - Encaminhar */}
               <svg className="h-6 w-6 text-slate-600 transition-colors group-hover:text-blue-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -3050,7 +3050,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
           {/* Primeira camada: historico principal e detalhes laterais */}
           <div className="mx-4 mt-6 grid gap-6 sm:mx-6 lg:mx-8 lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)]">
-            <section data-testid="ticket-history-panel" aria-labelledby="ticket-history-heading" className="min-w-0 rounded-xl border border-sky-100 bg-sky-50/35 p-5 shadow-sm">
+            <section data-testid="ticket-history-panel" aria-labelledby="ticket-history-heading" className="min-w-0 rounded-xl border border-sky-100 bg-sky-50 p-5 shadow-sm">
               <h2 id="ticket-history-heading" className="text-lg font-semibold text-slate-900">Histórico do Chamado</h2>
               <div className="mt-6">
                 {selectedChamado.activities && selectedChamado.activities.length > 0 ? (
@@ -3063,7 +3063,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               </div>
             </section>
 
-            <aside data-testid="ticket-details-panel" aria-labelledby="ticket-details-heading" className="self-start rounded-xl border border-slate-200 bg-slate-50/80 p-5 shadow-sm">
+            <aside data-testid="ticket-details-panel" aria-labelledby="ticket-details-heading" className="self-start rounded-xl border border-slate-200 bg-slate-50 p-5 shadow-sm">
               <h2 id="ticket-details-heading" className="text-lg font-semibold text-slate-900">Detalhes do Chamado</h2>
               <dl className="mt-5 space-y-4">
                 <div>
@@ -3106,7 +3106,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 {selectedChamado.observations && (
                   <div>
                     <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Mensagem inicial</dt>
-                    <dd data-testid="ticket-initial-message" className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-sky-100 bg-sky-50/70 p-3 text-sm leading-relaxed text-slate-700">{selectedChamado.observations}</dd>
+                    <dd data-testid="ticket-initial-message" className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-sky-100 bg-sky-50 p-3 text-sm leading-relaxed text-slate-700">{selectedChamado.observations}</dd>
                   </div>
                 )}
               </dl>
