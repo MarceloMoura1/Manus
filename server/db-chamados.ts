@@ -80,9 +80,14 @@ export function buildTicketStatusCounts(rows: TicketStatusCountRow[]): TicketSta
   const counts: TicketStatusCounts = { total: 0, open: 0, in_progress: 0, waiting: 0, closed: 0 };
   for (const row of rows) {
     const value = Number(row.count) || 0;
+
+    // "Total" means every active status in the already-scoped aggregate. Keep this
+    // independent from the three currently displayed active-status cards so a future
+    // active domain status is not silently omitted.
+    if (row.status !== 'closed') counts.total += value;
+
     if (row.status === 'open' || row.status === 'in_progress' || row.status === 'waiting' || row.status === 'closed') {
       counts[row.status] = value;
-      counts.total += value;
     }
   }
   return counts;
