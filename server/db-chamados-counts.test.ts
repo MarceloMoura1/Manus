@@ -1,5 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { buildTicketStatusCounts, resolveUnambiguousTenantLegacyDisplayName } from "./db-chamados";
+import { MySqlDialect } from "drizzle-orm/mysql-core";
+import {
+  buildTicketStatusCounts,
+  resolveUnambiguousTenantLegacyDisplayName,
+  ticketStatusCondition,
+} from "./db-chamados";
+
+describe("ticketStatusCondition", () => {
+  const dialect = new MySqlDialect();
+
+  it("excludes closed tickets when the Total card is selected", () => {
+    const query = dialect.sqlToQuery(ticketStatusCondition("total")!);
+
+    expect(query.sql).toMatch(/<>\s*\?/);
+    expect(query.params).toEqual(["closed"]);
+  });
+
+  it("keeps canonical status cards as exact filters", () => {
+    const query = dialect.sqlToQuery(ticketStatusCondition("closed")!);
+
+    expect(query.sql).toMatch(/=\s*\?/);
+    expect(query.params).toEqual(["closed"]);
+  });
+});
 
 describe("buildTicketStatusCounts", () => {
   it("keeps an empty tenant aggregate at zero without inferred values", () => {

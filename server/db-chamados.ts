@@ -19,7 +19,7 @@ import {
   megadeskDomainClientUsers,
   megadeskDomainChamadoAttachments,
 } from '../drizzle/schema';
-import { and, asc, desc, eq, exists, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, exists, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 
 export type ChamadoWithActivities = {
@@ -132,6 +132,15 @@ function validateStatus(status: string): asserts status is typeof VALID_STATUSES
   if (!VALID_STATUSES.includes(status as any)) {
     throw new Error(`Status inválido: ${status}. Valores válidos: ${VALID_STATUSES.join(', ')}`);
   }
+}
+
+/** Resolves the canonical list/count filter selected by a status card. */
+export function ticketStatusCondition(status?: string) {
+  if (!status) return null;
+  if (status === 'total') return ne(megadeskDomainChamados.status, 'closed');
+
+  validateStatus(status);
+  return eq(megadeskDomainChamados.status, status);
 }
 
 /**
@@ -564,13 +573,10 @@ export async function listChamados(
     throw new Error('offset não pode ser negativo');
   }
 
-  if (status && status !== 'total') {
-    validateStatus(status);
-  }
-
   return retryWithBackoff(async () => {
     const conditions = [await ticketScopeCondition(clientId, options.scope, options.operationalUserId)];
-    if (status && status !== 'total') conditions.push(eq(megadeskDomainChamados.status, status as typeof VALID_STATUSES[number]));
+    const statusCondition = ticketStatusCondition(status);
+    if (statusCondition) conditions.push(statusCondition);
     const searchCondition = ticketSearchCondition(options.search);
     if (searchCondition) conditions.push(searchCondition);
 
@@ -1095,7 +1101,8 @@ export async function countChamados(
   
   try {
     const conditions = [await ticketScopeCondition(clientId, options.scope, options.operationalUserId)];
-    if (status && status !== 'total') conditions.push(eq(megadeskDomainChamados.status, status as typeof VALID_STATUSES[number]));
+    const statusCondition = ticketStatusCondition(status);
+    if (statusCondition) conditions.push(statusCondition);
     const searchCondition = ticketSearchCondition(options.search);
     if (searchCondition) conditions.push(searchCondition);
     const result = await db
