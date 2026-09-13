@@ -46,11 +46,24 @@ const getActionLabel = (actionType?: string) => {
 };
 
 export function getActivityAuthorName(attendant?: string) {
-  return attendant?.trim() || 'Atendente';
+  const normalizedName = attendant?.trim();
+
+  // Activities persisted before canonical authorship was introduced only have a
+  // display snapshot. A generic snapshot is not evidence of a real person, so
+  // keep the fallback neutral instead of guessing across users or tenants.
+  if (!normalizedName || normalizedName.toLocaleLowerCase('pt-BR') === 'atendente') {
+    return 'Autor não identificado';
+  }
+
+  return normalizedName;
 }
 
 export function getActivitySummary(activity: Pick<ActivityItem, 'attendant' | 'actionType'>) {
   return `${getActivityAuthorName(activity.attendant)} ${getActionLabel(activity.actionType)}`;
+}
+
+export function shouldRenderActivityNarrative(actionType?: ActivityItem['actionType']) {
+  return actionType !== 'note' && actionType !== 'register';
 }
 
 export function getActivityAccentClass(actionType?: string) {
@@ -65,6 +78,20 @@ export function getActivityAccentClass(actionType?: string) {
     case 'note':
     default:
       return 'border-l-blue-400';
+  }
+}
+
+export function getActivityTintClass(actionType?: string) {
+  switch (actionType) {
+    case 'close':
+      return 'bg-emerald-50/50';
+    case 'forward':
+    case 'edit':
+      return 'bg-violet-50/45';
+    case 'register':
+    case 'note':
+    default:
+      return 'bg-blue-50/45';
   }
 }
 
@@ -99,36 +126,38 @@ export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities }
           const { date, time } = formatDateTime(activity.date);
           
           return (
-            <div key={activity.id} className="relative pl-20">
+            <div key={activity.id} data-testid={`timeline-activity-${activity.id}`} className="relative pl-20">
               {/* Ícone */}
               <div className="absolute left-0 top-0 w-16 h-16 flex items-center justify-center bg-white rounded-full border-4 border-white">
-                <div className="p-1.5 bg-slate-50 rounded-full">
+                <div className={`rounded-full p-1.5 ${getActivityTintClass(activity.actionType)}`}>
                   {getActionIcon(activity.actionType)}
                 </div>
               </div>
 
               {/* Conteúdo */}
-              <div className={`rounded-lg border border-l-2 border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md ${getActivityAccentClass(activity.actionType)}`}>
+              <div className={`rounded-lg border border-l-2 border-slate-200 p-4 shadow-sm transition-shadow hover:shadow-md ${getActivityAccentClass(activity.actionType)} ${getActivityTintClass(activity.actionType)}`}>
                 {/* Data e Hora */}
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xs font-semibold text-slate-600">{date}</span>
                   <span className="text-xs text-slate-500">{time}</span>
                 </div>
 
-                {/* Tipo de Ação */}
-                <p className="text-sm text-slate-700 mb-2">
-                  <span className="font-medium">{getActivitySummary(activity)}</span>
-                </p>
+                {/* Eventos estruturais precisam do resumo; notas e apontamentos já têm conteúdo próprio. */}
+                {shouldRenderActivityNarrative(activity.actionType) && (
+                  <p className="mb-2 text-sm text-slate-700">
+                    <span className="font-medium">{getActivitySummary(activity)}</span>
+                  </p>
+                )}
 
                 {/* Descrição */}
-                <div className="bg-slate-50 rounded p-3 mb-2">
+                <div className="mb-2 rounded bg-white/80 p-3">
                   <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
                     {activity.description}
                   </p>
                 </div>
 
                 {/* Nome do Atendente */}
-                <div className="flex items-center gap-2 text-xs text-slate-500">
+                <div data-testid={`timeline-activity-author-${activity.id}`} className="flex items-center gap-2 text-xs text-slate-500">
                   <User className="w-3 h-3" />
                   <span>{getActivityAuthorName(activity.attendant)}</span>
                 </div>

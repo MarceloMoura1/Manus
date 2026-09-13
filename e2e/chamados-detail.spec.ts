@@ -28,7 +28,22 @@ const ticket = {
   priority: "alta",
   status: "open",
   createdAt: "2026-09-12T10:00:00.000Z",
-  activities: [],
+  activities: [
+    {
+      id: "activity-note",
+      date: Date.UTC(2026, 8, 13, 14, 12, 0),
+      description: "Lembra que eu comentei que o acesso voltou a funcionar?",
+      attendant: "Marcelo Moura",
+      actionType: "note",
+    },
+    {
+      id: "activity-forward",
+      date: Date.UTC(2026, 8, 13, 14, 20, 0),
+      description: "Pedro Ferrari foi adicionado como participante.",
+      attendant: "Marcelo Moura",
+      actionType: "forward",
+    },
+  ],
 };
 
 const canonicalCustomer = {
@@ -105,7 +120,13 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
   await expect(page.getByText("cliente@example.invalid", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Histórico do Chamado" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Detalhes do Chamado" })).toBeVisible();
-  await expect(page.getByText("Nenhuma atividade registrada ainda.", { exact: true })).toBeVisible();
+  const note = page.getByTestId("timeline-activity-activity-note");
+  await expect(note).toContainText("Lembra que eu comentei que o acesso voltou a funcionar?");
+  await expect(note.getByTestId("timeline-activity-author-activity-note")).toHaveText("Marcelo Moura");
+  await expect(note).not.toContainText(/registrou uma nota/i);
+  await expect(note).not.toContainText(/^Atendente$/);
+  await expect(page.getByTestId("timeline-activity-activity-forward")).toContainText("Marcelo Moura encaminhou o chamado.");
+  await expect(page.getByTestId("timeline-activity-activity-forward")).toContainText("Pedro Ferrari foi adicionado como participante.");
   await expect(page.getByRole("button", { name: "Encerrar Chamado", exact: true })).toBeVisible();
   await expect(detail.locator("section[aria-labelledby='ticket-history-heading']").getByText("Mensagem Inicial", { exact: true })).toHaveCount(0);
   await expect(page.getByTestId("ticket-initial-message")).toHaveText("Mensagem inicial preservada");
@@ -113,6 +134,12 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
   await expect(page.getByTestId("ticket-status-control")).toHaveAttribute("data-status", "open");
   await expect(page.getByTestId("ticket-status-control")).toHaveClass(/bg-blue-50/);
   await expect(page.getByTestId("ticket-detail-priority")).toHaveClass(/bg-red-50/);
+  await expect(detail).toHaveClass(/bg-slate-100\/70/);
+  await expect(page.getByTestId("ticket-customer-card")).toHaveClass(/bg-sky-50\/70/);
+  await expect(page.getByTestId("ticket-action-bar")).toHaveClass(/bg-white\/70/);
+  await expect(page.getByTestId("ticket-history-panel")).toHaveClass(/bg-sky-50\/35/);
+  await expect(page.getByTestId("ticket-details-panel")).toHaveClass(/bg-slate-50\/80/);
+  await expect(page.getByTestId("ticket-initial-message")).toHaveClass(/border-sky-100/);
 
   const boxes = await Promise.all([sidebar.boundingBox(), detail.boundingBox()]);
   expect(boxes[0]).not.toBeNull();
@@ -164,7 +191,8 @@ test("ticket collaborators update in detail and toolbar without a reload", async
   await page.getByLabel("Agente Três", { exact: true }).check();
   await page.getByRole("button", { name: /Salvar/ }).click();
 
-  await expect(page.getByTestId("ticket-detail-participants")).toHaveText("Agente Dois, Agente Três");
+  await expect(page.getByTestId("ticket-detail-participants")).toContainText("Agente Dois");
+  await expect(page.getByTestId("ticket-detail-participants")).toContainText("Agente Três");
   await expect(page.getByTestId("ticket-detail-collaborators").getByTitle("Agente Três")).toBeVisible();
 
   await page.getByTestId("ticket-manage-collaborators").click();

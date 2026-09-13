@@ -2906,7 +2906,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
       {/* Tela Branca de Detalhes do Chamado */}
       {selectedChamado && (
-        <div data-testid="ticket-detail-shell" className="absolute inset-0 z-20 min-h-full overflow-y-auto bg-slate-50 pb-8">
+        <div data-testid="ticket-detail-shell" className="absolute inset-0 z-20 min-h-full overflow-y-auto bg-slate-100/70 pb-8">
           {/* Header com Botao Voltar */}
           <div className="sticky top-0 z-10 flex flex-col gap-4 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 md:flex-row md:items-center md:justify-between">
             <div className="flex min-w-0 items-center gap-3">
@@ -2947,7 +2947,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           </div>
 
           {/* Cliente canonico do ERP, com fallback seguro para snapshots legados */}
-          <section aria-labelledby="ticket-customer-heading" className="mx-4 mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:mx-6 lg:mx-8">
+          <section data-testid="ticket-customer-card" aria-labelledby="ticket-customer-heading" className="mx-4 mt-6 rounded-xl border border-sky-100 bg-sky-50/70 p-5 shadow-sm sm:mx-6 lg:mx-8">
             <div className="mb-4 flex items-center justify-between gap-4">
               <div>
                 <p id="ticket-customer-heading" className="text-xs font-bold uppercase tracking-wider text-slate-500">Cliente</p>
@@ -2972,10 +2972,10 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           </section>
 
           {/* Linha de Icones com Tooltips */}
-          <div className="flex items-center justify-center gap-0 px-8 py-6 border-b border-slate-200" style={{height: '60px', marginBottom: '-5px'}}>
-            <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors" onClick={() => setShowForwardCard(!showForwardCard)}>
+          <div data-testid="ticket-action-bar" className="flex items-center justify-center gap-0 border-b border-slate-200/80 bg-white/70 px-8 py-6" style={{height: '60px', marginBottom: '-5px'}}>
+            <div className="group relative cursor-pointer rounded-lg px-6 py-4 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowForwardCard(!showForwardCard)}>
               {/* Círculo com seta - Encaminhar */}
-              <svg className="w-6 h-6 text-black hover:text-slate-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <svg className="h-6 w-6 text-slate-600 transition-colors group-hover:text-blue-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 8l4 4m-4-4l-4 4" />
                 <path d="M12 16v-4" />
@@ -2983,26 +2983,26 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Encaminhar chamado</div>
             </div>
             <div className="border-l border-slate-300 h-8"></div>
-            <div data-testid="ticket-manage-collaborators" className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors" onClick={() => setShowManageCollaboratorsCard(!showManageCollaboratorsCard)}>
+            <div data-testid="ticket-manage-collaborators" className="group relative cursor-pointer rounded-lg px-6 py-4 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowManageCollaboratorsCard(!showManageCollaboratorsCard)}>
               {/* Gerenciar colaboradores - mantém */}
-              <svg className="w-6 h-6 text-black hover:text-slate-700" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="h-6 w-6 text-slate-600 transition-colors group-hover:text-blue-700" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
               </svg>
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Gerenciar colaboradores</div>
             </div>
             <div className="border-l border-slate-300 h-8"></div>
-            <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors" onClick={() => setShowEditCard(!showEditCard)}>
+            <div className="group relative cursor-pointer rounded-lg px-6 py-4 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowEditCard(!showEditCard)}>
               {/* Editar chamado - mantém */}
-              <svg className="w-6 h-6 text-black hover:text-slate-700" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="h-6 w-6 text-slate-600 transition-colors group-hover:text-blue-700" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" />
                 <path d="M20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
               </svg>
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Editar chamado</div>
             </div>
             <div className="border-l border-slate-300 h-8"></div>
-            <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors" onClick={() => setShowRegisterActivityModal(true)}>
+            <div className="group relative cursor-pointer rounded-lg px-6 py-4 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowRegisterActivityModal(true)}>
               {/* Balão retangular com 2 linhas - Atividade */}
-              <svg className="w-6 h-6 text-black hover:text-slate-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <svg className="h-6 w-6 text-slate-600 transition-colors group-hover:text-blue-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <rect x="3" y="5" width="14" height="10" rx="2" />
                 <path d="M17 15l2 2" />
                 <line x1="6" y1="8" x2="12" y2="8" />
@@ -3050,7 +3050,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
           {/* Primeira camada: historico principal e detalhes laterais */}
           <div className="mx-4 mt-6 grid gap-6 sm:mx-6 lg:mx-8 lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)]">
-            <section aria-labelledby="ticket-history-heading" className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <section data-testid="ticket-history-panel" aria-labelledby="ticket-history-heading" className="min-w-0 rounded-xl border border-sky-100 bg-sky-50/35 p-5 shadow-sm">
               <h2 id="ticket-history-heading" className="text-lg font-semibold text-slate-900">Histórico do Chamado</h2>
               <div className="mt-6">
                 {selectedChamado.activities && selectedChamado.activities.length > 0 ? (
@@ -3063,7 +3063,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               </div>
             </section>
 
-            <aside aria-labelledby="ticket-details-heading" className="self-start rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <aside data-testid="ticket-details-panel" aria-labelledby="ticket-details-heading" className="self-start rounded-xl border border-slate-200 bg-slate-50/80 p-5 shadow-sm">
               <h2 id="ticket-details-heading" className="text-lg font-semibold text-slate-900">Detalhes do Chamado</h2>
               <dl className="mt-5 space-y-4">
                 <div>
@@ -3076,14 +3076,25 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 </div>
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Atendente</dt>
-                  <dd className="mt-1 text-sm font-medium text-slate-800">{selectedChamado.assignedTo || 'N/A'}</dd>
+                  <dd className="mt-1 flex items-center gap-2 text-sm font-medium text-slate-800">
+                    {selectedChamado.assignedTo && (
+                      <span aria-hidden="true" className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700">
+                        {selectedChamado.assignedTo.charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                    <span>{selectedChamado.assignedTo || 'N/A'}</span>
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Participantes</dt>
-                  <dd data-testid="ticket-detail-participants" className="mt-1 text-sm font-medium text-slate-800">
+                  <dd data-testid="ticket-detail-participants" className="mt-1 flex flex-wrap gap-1.5 text-sm font-medium text-slate-800">
                     {selectedChamado.collaborators?.length
-                      ? selectedChamado.collaborators.map((collaborator: { userName: string }) => collaborator.userName).join(', ')
-                      : 'Nenhum'}
+                      ? selectedChamado.collaborators.map((collaborator: { userId: string; userName: string }) => (
+                        <span key={collaborator.userId} className="rounded-full border border-sky-100 bg-sky-50 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                          {collaborator.userName}
+                        </span>
+                      ))
+                      : <span>Nenhum</span>}
                   </dd>
                 </div>
                 <div>
@@ -3095,7 +3106,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 {selectedChamado.observations && (
                   <div>
                     <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Mensagem inicial</dt>
-                    <dd data-testid="ticket-initial-message" className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{selectedChamado.observations}</dd>
+                    <dd data-testid="ticket-initial-message" className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-sky-100 bg-sky-50/70 p-3 text-sm leading-relaxed text-slate-700">{selectedChamado.observations}</dd>
                   </div>
                 )}
               </dl>
