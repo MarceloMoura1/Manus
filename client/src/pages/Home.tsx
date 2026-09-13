@@ -2789,7 +2789,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
             <div>
               <label className="text-sm font-semibold text-black block mb-2">Título</label>
               <Input
-                placeholder="Ex: Problema com login"
+                placeholder=""
                 value={newChamadoForm.title}
                 onChange={e => setNewChamadoForm({...newChamadoForm, title: e.target.value})}
                 className={`bg-white border-2 transition-colors text-black ${
