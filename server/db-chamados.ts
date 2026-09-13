@@ -19,7 +19,7 @@ import {
   megadeskDomainClientUsers,
   megadeskDomainChamadoAttachments,
 } from '../drizzle/schema';
-import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, exists, inArray, isNull, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 
 export type ChamadoWithActivities = {
@@ -36,6 +36,7 @@ export type ChamadoWithActivities = {
   status: string;
   priority?: string;
   assignedTo?: string;
+  assignedToUserId?: string;
   collaborators: Array<{
     userId: string;
     userName: string;
@@ -51,6 +52,41 @@ export type ChamadoWithActivities = {
 };
 
 export type ChamadoCollaborator = ChamadoWithActivities['collaborators'][number];
+
+export type TicketScope = 'all' | 'mine';
+export type TicketSortKey = 'number' | 'createdAt' | 'customer' | 'title' | 'assignee' | 'priority' | 'status';
+export type TicketSortDirection = 'asc' | 'desc';
+
+export type TicketListOptions = {
+  scope: TicketScope;
+  operationalUserId: string;
+  search?: string;
+  sortBy: TicketSortKey;
+  sortDirection: TicketSortDirection;
+};
+
+type TicketStatusCountRow = { status: string | null; count: number | string };
+
+export type TicketStatusCounts = {
+  total: number;
+  open: number;
+  in_progress: number;
+  waiting: number;
+  closed: number;
+};
+
+/** Converts a grouped, tenant-scoped aggregate into the fixed five-card contract. */
+export function buildTicketStatusCounts(rows: TicketStatusCountRow[]): TicketStatusCounts {
+  const counts: TicketStatusCounts = { total: 0, open: 0, in_progress: 0, waiting: 0, closed: 0 };
+  for (const row of rows) {
+    const value = Number(row.count) || 0;
+    if (row.status === 'open' || row.status === 'in_progress' || row.status === 'waiting' || row.status === 'closed') {
+      counts[row.status] = value;
+      counts.total += value;
+    }
+  }
+  return counts;
+}
 
 // Constantes de validação
 const VALID_STATUSES = ['open', 'in_progress', 'waiting', 'closed'] as const;
@@ -127,6 +163,124 @@ export async function getActiveClientUser(
     .limit(1);
 
   return users[0] ?? null;
+}
+
+/**
+ * Legacy rows predate assignedToUserId and retain only a display snapshot. They
+ * are resolved once against the active tenant directory only when the name is
+ * unambiguous; all normal filtering still compares canonical user IDs.
+ */
+export function resolveUnambiguousTenantLegacyDisplayName(
+  clientId: string,
+  current: ChamadoCollaborator | null,
+  candidates: Array<{ clientId: string; userId: string; userName: string }>,
+): string | null {
+  if (!current) return null;
+  const sameNameInTenant = candidates.filter(candidate =>
+    candidate.clientId === clientId && candidate.userName === current.userName,
+  );
+  return sameNameInTenant.length === 1 && sameNameInTenant[0].userId === current.userId
+    ? current.userName
+    : null;
+}
+
+async function getUnambiguousLegacyPrimaryName(clientId: string, userId: string): Promise<string | null> {
+  const current = await getActiveClientUser(clientId, userId);
+  if (!current) return null;
+
+  const sameNameUsers = await db
+    .select({
+      clientId: megadeskDomainClientUsers.clientId,
+      userId: megadeskDomainClientUsers.userId,
+      userName: megadeskDomainClientUsers.name,
+    })
+    .from(megadeskDomainClientUsers)
+    .where(and(
+      eq(megadeskDomainClientUsers.clientId, clientId),
+      eq(megadeskDomainClientUsers.name, current.userName),
+      eq(megadeskDomainClientUsers.status, 'active'),
+    ));
+
+  return resolveUnambiguousTenantLegacyDisplayName(clientId, current, sameNameUsers);
+}
+
+async function ticketScopeCondition(clientId: string, scope: TicketScope, operationalUserId: string) {
+  const tenantCondition = eq(megadeskDomainChamados.clientId, clientId);
+  if (scope === 'all') return tenantCondition;
+  if (!operationalUserId?.trim()) throw new Error('operationalUserId não pode estar vazio para escopo meus');
+
+  const legacyPrimaryName = await getUnambiguousLegacyPrimaryName(clientId, operationalUserId);
+  const primaryCondition = legacyPrimaryName
+    ? or(
+      eq(megadeskDomainChamados.assignedToUserId, operationalUserId),
+      and(isNull(megadeskDomainChamados.assignedToUserId), eq(megadeskDomainChamados.assignedTo, legacyPrimaryName)),
+    )
+    : eq(megadeskDomainChamados.assignedToUserId, operationalUserId);
+  const collaboratorCondition = exists(
+    db.select({ chamadoId: megadeskDomainChamadoCollaborators.chamadoId })
+      .from(megadeskDomainChamadoCollaborators)
+      .where(and(
+        eq(megadeskDomainChamadoCollaborators.chamadoId, megadeskDomainChamados.chamadoId),
+        eq(megadeskDomainChamadoCollaborators.clientId, clientId),
+        eq(megadeskDomainChamadoCollaborators.userId, operationalUserId),
+      )),
+  );
+
+  return and(tenantCondition, or(primaryCondition, collaboratorCondition));
+}
+
+function ticketSearchCondition(search: string | undefined) {
+  const value = search?.trim();
+  if (!value) return null;
+  const pattern = `%${value.toLocaleLowerCase()}%`;
+  return or(
+    sql`LOWER(COALESCE(${megadeskDomainChamados.customerName}, '')) LIKE ${pattern}`,
+    sql`LOWER(COALESCE(${megadeskDomainChamados.company}, '')) LIKE ${pattern}`,
+    sql`LOWER(COALESCE(${megadeskDomainChamados.title}, '')) LIKE ${pattern}`,
+    sql`CAST(${megadeskDomainChamados.chamadoNumber} AS CHAR) LIKE ${pattern}`,
+    sql`CONCAT('#', LPAD(${megadeskDomainChamados.chamadoNumber}, 4, '0')) LIKE ${pattern}`,
+  );
+}
+
+function ticketSortOrder(sortBy: TicketSortKey, sortDirection: TicketSortDirection) {
+  const order = (expression: any) => sortDirection === 'asc' ? asc(expression) : desc(expression);
+  const stableTicketNumber = asc(megadeskDomainChamados.chamadoNumber);
+  switch (sortBy) {
+    case 'createdAt':
+      return [order(megadeskDomainChamados.createdAt), stableTicketNumber];
+    case 'customer':
+      return [order(sql`LOWER(CONCAT(COALESCE(${megadeskDomainChamados.customerName}, ''), ' ', COALESCE(${megadeskDomainChamados.company}, '')))`), stableTicketNumber];
+    case 'title':
+      return [order(sql`LOWER(COALESCE(${megadeskDomainChamados.title}, ''))`), stableTicketNumber];
+    case 'assignee':
+      return [order(sql`LOWER(COALESCE(${megadeskDomainChamados.assignedTo}, ''))`), stableTicketNumber];
+    case 'priority':
+      return [order(sql`CASE ${megadeskDomainChamados.priority} WHEN 'critica' THEN 4 WHEN 'alta' THEN 3 WHEN 'media' THEN 2 WHEN 'baixa' THEN 1 ELSE 0 END`), stableTicketNumber];
+    case 'status':
+      return [order(sql`CASE ${megadeskDomainChamados.status} WHEN 'open' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'waiting' THEN 3 WHEN 'closed' THEN 4 ELSE 5 END`), stableTicketNumber];
+    case 'number':
+    default:
+      return [order(megadeskDomainChamados.chamadoNumber)];
+  }
+}
+
+async function resolveLegacyPrimaryAssigneeIds(clientId: string, chamados: Array<{ assignedTo?: string | null; assignedToUserId?: string | null }>) {
+  const names = [...new Set(chamados
+    .filter(chamado => !chamado.assignedToUserId && chamado.assignedTo?.trim())
+    .map(chamado => chamado.assignedTo!.trim()))];
+  if (!names.length) return new Map<string, string>();
+
+  const users = await db
+    .select({ userId: megadeskDomainClientUsers.userId, userName: megadeskDomainClientUsers.name })
+    .from(megadeskDomainClientUsers)
+    .where(and(
+      eq(megadeskDomainClientUsers.clientId, clientId),
+      eq(megadeskDomainClientUsers.status, 'active'),
+      inArray(megadeskDomainClientUsers.name, names),
+    ));
+  const byName = new Map<string, string[]>();
+  users.forEach(user => byName.set(user.userName, [...(byName.get(user.userName) ?? []), user.userId]));
+  return new Map([...byName].flatMap(([name, userIds]) => userIds.length === 1 ? [[name, userIds[0]] as const] : []));
 }
 
 /**
@@ -214,7 +368,8 @@ export async function createChamado(
   assignedTo?: string,
   customerPhone?: string,
   customerEmail?: string,
-  customerCNPJ?: string
+  customerCNPJ?: string,
+  assignedToUserId?: string,
 ): Promise<any> {
   // Validações de entrada
   if (!clientId || !clientId.trim()) {
@@ -232,6 +387,7 @@ export async function createChamado(
   const sanitizedTitle = sanitizeString(title, 255);
   const sanitizedObservations = sanitizeString(observations, MAX_OBSERVATIONS_LENGTH);
   const sanitizedAssignedTo = assignedTo ? sanitizeString(assignedTo, 180) : undefined;
+  const sanitizedAssignedToUserId = assignedToUserId ? sanitizeString(assignedToUserId, 80) : undefined;
 
   return retryWithBackoff(async () => {
     const chamadoNumber = await getNextChamadoNumber(clientId);
@@ -254,6 +410,7 @@ export async function createChamado(
       status: 'open' as 'open',
       priority: (priority || 'media') as typeof VALID_PRIORITIES[number],
       assignedTo: sanitizedAssignedTo,
+      assignedToUserId: sanitizedAssignedToUserId,
       createdAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
     });
 
@@ -274,6 +431,7 @@ export async function createChamado(
       status: 'open' as 'open',
       priority: priority || 'media',
       assignedTo: sanitizedAssignedTo,
+      assignedToUserId: sanitizedAssignedToUserId,
       createdAt: now.getTime(),
       activities: [],
     };
@@ -334,6 +492,7 @@ export async function getChamadoWithActivities(
     const collaborators = await getCollaborators(chamadoId, clientId);
 
     const c = chamado[0];
+    const legacyPrimaryAssigneeIds = await resolveLegacyPrimaryAssigneeIds(clientId, [c]);
     return {
       id: c.chamadoId, // eslint-disable-line
       number: c.chamadoNumber,
@@ -348,6 +507,7 @@ export async function getChamadoWithActivities(
       status: c.status,
       priority: c.priority,
       assignedTo: c.assignedTo || undefined,
+      assignedToUserId: c.assignedToUserId || (c.assignedTo ? legacyPrimaryAssigneeIds.get(c.assignedTo) : undefined),
       collaborators,
       createdAt: new Date((c.createdAt as string).replace(' ', 'T') + 'Z').getTime(),
       activities: activities.map(a => {
@@ -379,7 +539,13 @@ export async function listChamados(
   clientId: string,
   status?: string,
   limit: number = 10,
-  offset: number = 0
+  offset: number = 0,
+  options: TicketListOptions = {
+    scope: 'all',
+    operationalUserId: '',
+    sortBy: 'createdAt',
+    sortDirection: 'desc',
+  },
 ): Promise<any[]> {
   if (!clientId || !clientId.trim()) {
     throw new Error('clientId não pode estar vazio');
@@ -398,26 +564,19 @@ export async function listChamados(
   }
 
   return retryWithBackoff(async () => {
-    let query;
-    if (status && status !== 'total') {
-      query = db.select().from(megadeskDomainChamados).where(and(
-        eq(megadeskDomainChamados.clientId, clientId),
-        eq(megadeskDomainChamados.status, status as typeof VALID_STATUSES[number]),
-      ));
-    } else if (status === 'total') {
-      // Excluir fechados
-      query = db
-        .select()
-        .from(megadeskDomainChamados)
-        .where(
-          and(
-            eq(megadeskDomainChamados.clientId, clientId),
-            ne(megadeskDomainChamados.status, 'closed' as typeof VALID_STATUSES[number])
-          )
-        );
-    } else query = db.select().from(megadeskDomainChamados).where(eq(megadeskDomainChamados.clientId, clientId));
+    const conditions = [await ticketScopeCondition(clientId, options.scope, options.operationalUserId)];
+    if (status && status !== 'total') conditions.push(eq(megadeskDomainChamados.status, status as typeof VALID_STATUSES[number]));
+    const searchCondition = ticketSearchCondition(options.search);
+    if (searchCondition) conditions.push(searchCondition);
 
-    const chamados = await query.limit(limit).offset(offset);
+    // ORDER BY precedes LIMIT/OFFSET so no header ever orders only a visible page.
+    const chamados = await db
+      .select()
+      .from(megadeskDomainChamados)
+      .where(and(...conditions))
+      .orderBy(...ticketSortOrder(options.sortBy, options.sortDirection))
+      .limit(limit)
+      .offset(offset);
 
     console.log(`[LOG] Listando ${chamados.length} chamados para cliente ${clientId}, status: ${status || 'todos'}`);
 
@@ -483,6 +642,7 @@ export async function listChamados(
     });
 
     // Mapear chamados com suas atividades
+    const legacyPrimaryAssigneeIds = await resolveLegacyPrimaryAssigneeIds(clientId, chamados);
     const result: ChamadoWithActivities[] = chamados.map((c: any) => ({
       id: c.chamadoId,
       number: c.chamadoNumber,
@@ -497,6 +657,7 @@ export async function listChamados(
       status: c.status,
       priority: c.priority,
       assignedTo: c.assignedTo,
+      assignedToUserId: c.assignedToUserId || (c.assignedTo ? legacyPrimaryAssigneeIds.get(c.assignedTo) : undefined),
       collaborators: collaboratorsByChamado[c.chamadoId] || [],
       createdAt: new Date((c.createdAt as string).replace(' ', 'T') + 'Z').getTime(),
       activities: (activitiesByChamado[c.chamadoId] || []).map(a => {
@@ -566,6 +727,7 @@ export async function updateChamado(
     status?: string;
     priority?: string;
     assignedTo?: string;
+    assignedToUserId?: string;
   }
 ): Promise<void> {
   if (!chamadoId || !chamadoId.trim()) {
@@ -599,6 +761,9 @@ export async function updateChamado(
   
   if (updates.assignedTo !== undefined) {
     updateData.assignedTo = updates.assignedTo ? sanitizeString(updates.assignedTo) : null;
+  }
+  if (updates.assignedToUserId !== undefined) {
+    updateData.assignedToUserId = updates.assignedToUserId ? sanitizeString(updates.assignedToUserId, 80) : null;
   }
 
   return retryWithBackoff(async () => {
@@ -915,33 +1080,24 @@ export async function registerActivity(
  */
 export async function countChamados(
   clientId: string,
-  status?: string
+  status?: string,
+  options: Pick<TicketListOptions, 'scope' | 'operationalUserId' | 'search'> = {
+    scope: 'all',
+    operationalUserId: '',
+  },
 ): Promise<number> {
   const db = getDb();
   
   try {
-    let query: any = db
+    const conditions = [await ticketScopeCondition(clientId, options.scope, options.operationalUserId)];
+    if (status && status !== 'total') conditions.push(eq(megadeskDomainChamados.status, status as typeof VALID_STATUSES[number]));
+    const searchCondition = ticketSearchCondition(options.search);
+    if (searchCondition) conditions.push(searchCondition);
+    const result = await db
       .select({ count: sql<number>`count(*)` })
       .from(megadeskDomainChamados)
-      .where(eq(megadeskDomainChamados.clientId, clientId));
-
-    if (status && status !== 'total') {
-      query = query.where(eq(megadeskDomainChamados.status, status as typeof VALID_STATUSES[number]));
-    } else if (status === 'total') {
-      // Excluir fechados
-      query = db
-        .select({ count: sql<number>`count(*)` })
-        .from(megadeskDomainChamados)
-        .where(
-          and(
-            eq(megadeskDomainChamados.clientId, clientId),
-            ne(megadeskDomainChamados.status, 'closed' as typeof VALID_STATUSES[number])
-          )
-        );
-    }
-
-    const result = await query;
-    return result[0]?.count || 0;
+      .where(and(...conditions));
+    return Number(result[0]?.count) || 0;
   } catch (error) {
     console.error(`[ERROR] Failed to count chamados for ${clientId}:`, error);
     throw error;
@@ -951,42 +1107,25 @@ export async function countChamados(
 /**
  * Obter contadores de chamados por status
  */
-export async function getStatusCounts(clientId: string): Promise<{
-  total: number;
-  open: number;
-  in_progress: number;
-  waiting: number;
-  closed: number;
-}> {
+export async function getStatusCounts(
+  clientId: string,
+  scope: TicketScope,
+  operationalUserId: string,
+): Promise<TicketStatusCounts> {
   const db = getDb();
   
   try {
-    // Buscar todos os chamados para contar por status
-    const allChamados = await db
-      .select({ status: megadeskDomainChamados.status })
+    // A agregação é feita no banco para representar o conjunto inteiro, não a página atual.
+    const rows = await db
+      .select({
+        status: megadeskDomainChamados.status,
+        count: sql<number>`count(*)`,
+      })
       .from(megadeskDomainChamados)
-      .where(eq(megadeskDomainChamados.clientId, clientId));
+      .where(await ticketScopeCondition(clientId, scope, operationalUserId))
+      .groupBy(megadeskDomainChamados.status);
 
-    const counts = {
-      total: allChamados.length, // Total de TODOS os chamados
-      open: 0,
-      in_progress: 0,
-      waiting: 0,
-      closed: 0,
-    };
-
-    // Contar por status
-    for (const chamado of allChamados) {
-      if (chamado.status === 'open') {
-        counts.open++;
-      } else if (chamado.status === 'in_progress') {
-        counts.in_progress++;
-      } else if (chamado.status === 'waiting') {
-        counts.waiting++;
-      } else if (chamado.status === 'closed') {
-        counts.closed++;
-      }
-    }
+    const counts = buildTicketStatusCounts(rows);
 
     console.log(`[LOG] Status counts for ${clientId}:`, counts);
     return counts;

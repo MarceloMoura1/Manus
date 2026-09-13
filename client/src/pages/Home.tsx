@@ -5,7 +5,6 @@ import { trpc } from "@/lib/trpc";
 import { useTheme } from "@/contexts/ThemeContext";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { ModuleTopbar } from "@/components/ModuleTopbar";
-import { useAuth } from "@/_core/hooks/useAuth";
 import { validateNewChamado, ValidationError } from "@/lib/validations";
 import { ActiveAttendancePage } from "./ActiveAttendance";
 import { WhatsAppConfigPage } from "./WhatsAppConfigPage";
@@ -86,6 +85,7 @@ import {
   Smartphone,
   Tag,
   ChevronDown,
+  ChevronUp,
   Calendar,
   Filter,
   Wifi,
@@ -242,6 +242,7 @@ type Ticket = {
   customerName?: string;
   company?: string;
   assignedTo?: string;
+  assignedToUserId?: string;
   collaborators?: TicketCollaborator[];
   activities: Array<{
     id: string;
@@ -259,6 +260,7 @@ export type TicketCollaborator = {
 
 type TicketAssigneeSource = {
   assignedTo?: string | null;
+  assignedToUserId?: string | null;
   collaborators?: TicketCollaborator[] | null;
 };
 
@@ -273,7 +275,7 @@ export function getTicketAssignees(ticket: TicketAssigneeSource): TicketCollabor
     assignees.push({ userId, userName: normalizedName });
   };
 
-  add(ticket.assignedTo);
+  add(ticket.assignedTo, ticket.assignedToUserId ?? '');
   ticket.collaborators?.forEach(collaborator => add(collaborator.userName, collaborator.userId));
   return assignees;
 }
@@ -281,17 +283,26 @@ export function getTicketAssignees(ticket: TicketAssigneeSource): TicketCollabor
 export function filterTicketsByScope<T extends TicketAssigneeSource>(
   tickets: T[],
   scope: 'all' | 'mine',
-  currentUser?: { id?: string | number | null; name?: string | null } | null,
+  operationalUserId?: string | null,
 ): T[] {
   if (scope === 'all') return tickets;
-  const userId = currentUser?.id == null ? '' : String(currentUser.id).trim();
-  const userName = currentUser?.name?.trim().toLocaleLowerCase() ?? '';
-  if (!userId && !userName) return [];
+  const userId = operationalUserId?.trim() ?? '';
+  if (!userId) return [];
 
   return tickets.filter(ticket => getTicketAssignees(ticket).some(assignee =>
-    (userId && assignee.userId === userId) ||
-    (userName && assignee.userName.toLocaleLowerCase() === userName),
+    assignee.userId === userId,
   ));
+}
+
+export type TicketSortKey = 'number' | 'createdAt' | 'customer' | 'title' | 'assignee' | 'priority' | 'status';
+export type TicketSortDirection = 'asc' | 'desc';
+
+export function nextTicketSort(
+  current: { key: TicketSortKey; direction: TicketSortDirection },
+  key: TicketSortKey,
+): { key: TicketSortKey; direction: TicketSortDirection } {
+  if (current.key === key) return { key, direction: current.direction === 'asc' ? 'desc' : 'asc' };
+  return { key, direction: key === 'number' || key === 'createdAt' || key === 'priority' ? 'desc' : 'asc' };
 }
 
 type ClientUser = {
@@ -1823,7 +1834,6 @@ type TicketActivity = {
 // Tipo Ticket já definido acima
 
 export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => void }) {
-  const { user } = useAuth();
   // Sessão MegaDesk para obter clientId
   const sessionData = React.useMemo(() => {
     try { return JSON.parse(localStorage.getItem(MEGADESK_SESSION_KEY) || 'null'); } catch { return null; }
@@ -1832,6 +1842,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState<string>('total');
   const [chamadoFilter, setChamadoFilter] = React.useState<'all' | 'mine'>('all');
+  const [ticketSort, setTicketSort] = React.useState<{ key: TicketSortKey; direction: TicketSortDirection }>({ key: 'createdAt', direction: 'desc' });
   const [selectedChamado, setSelectedChamado] = React.useState<any | null>(null);
   const [showForwardCard, setShowForwardCard] = React.useState(false);
   const [forwardAttendant, setForwardAttendant] = React.useState<string>('');
@@ -1901,6 +1912,10 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       status: selectedFilter as 'total' | 'open' | 'in_progress' | 'waiting' | 'closed',
       limit: ITEMS_PER_PAGE,
       offset: (currentPage - 1) * ITEMS_PER_PAGE,
+      scope: chamadoFilter,
+      search: searchTerm || undefined,
+      sortBy: ticketSort.key,
+      sortDirection: ticketSort.direction,
     },
         { enabled: !!clientId }
   );
@@ -1930,8 +1945,8 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
   // Carregar contadores de status
   const statusCountsQuery = trpc.chamados.getStatusCounts.useQuery(
-    undefined,
-    { enabled: !!user?.user?.id }
+    { scope: chamadoFilter },
+    { enabled: !!clientId }
   );
   // Status personalizados do cliente
   const customStatusesQuery = trpc.megadeskSettings.listTicketStatuses.useQuery(
@@ -1940,10 +1955,10 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   );
   const customStatuses = customStatusesQuery.data ?? [];
 
-  // Resetar pagina quando o filtro muda
+  // Sempre retornar à primeira página quando o conjunto consultado muda.
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [selectedFilter]);
+  }, [selectedFilter, chamadoFilter, searchTerm, ticketSort]);
 
   React.useEffect(() => {
     if ((showForwardCard || showManageCollaboratorsCard) && selectedChamado && getClientUsersQuery.data) {
@@ -2035,6 +2050,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
     setSelectedChamado({
       ...selectedChamado,
       assignedTo: attendantName,
+      assignedToUserId: forwardAttendant,
     });
 
     // Enviar para backend em background
@@ -2042,7 +2058,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       // Atualizar o chamado com o novo atendente
       await updateChamadoMutation.mutateAsync({
         chamadoId: selectedChamado.id,
-        assignedTo: attendantName,
+        assignedToUserId: forwardAttendant,
       });
 
       // Adicionar atividade se houver observações
@@ -2050,7 +2066,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
         await addActivityMutation.mutateAsync({
           chamadoId: selectedChamado.id,
           description: `Encaminhado para ${attendantName}. Observação: ${forwardObservations}`,
-          attendant: user?.user?.name || 'Atendente',
+          attendant: sessionData?.userName || 'Atendente',
         });
       }
 
@@ -2064,6 +2080,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       setSelectedChamado({
         ...selectedChamado,
         assignedTo: oldAssignedTo,
+        assignedToUserId: selectedChamado.assignedToUserId,
       });
     }
   };
@@ -2079,7 +2096,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       id: `activity-${Date.now()}`,
       date: Date.now(),
       description: activityDescription.trim(),
-      attendant: user?.user?.name || 'Atendente',
+      attendant: sessionData?.userName || 'Atendente',
       actionType: activityType,
     };
 
@@ -2173,7 +2190,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       id: `activity-${Date.now()}`,
       date: Date.now(),
       description: `Encerramento: ${closeResolution.trim()}`,
-      attendant: user?.user?.name || 'Atendente',
+      attendant: sessionData?.userName || 'Atendente',
       actionType: 'close',
     };
 
@@ -2317,19 +2334,8 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   console.log('[DEBUG] chamados.length:', chamados.length);
 
   // Filtrar por usuário (todos vs somente seu)
-  const chamadosFiltrados = filterTicketsByScope(chamados, chamadoFilter, user?.user);
-  console.log('[DEBUG] chamadosFiltrados:', chamadosFiltrados);
-
-  // Filtrar por busca
-  const filteredChamados = chamadosFiltrados.filter(c => {
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      c.customerName.toLowerCase().includes(searchLower) ||
-      c.company.toLowerCase().includes(searchLower) ||
-      `#${String(c.number).padStart(4, '0')}`.includes(searchTerm) ||
-      c.title.toLowerCase().includes(searchLower)
-    );
-  });
+  // Escopo, busca e ordenaÃ§Ã£o sÃ£o resolvidos pelo backend antes da paginaÃ§Ã£o.
+  const filteredChamados = chamados;
   console.log('[DEBUG] filteredChamados:', filteredChamados);
 
   // Contar status (usando dados da query)
@@ -2360,6 +2366,18 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       customColor: cs.color,
     })),
   ];
+
+  const ticketSortHeaders: Array<{ key: TicketSortKey; label: string }> = [
+    { key: 'number', label: 'ID' },
+    { key: 'createdAt', label: 'Abertura' },
+    { key: 'customer', label: 'Nome e cliente' },
+    { key: 'title', label: 'Título' },
+    { key: 'assignee', label: 'Atendente' },
+    { key: 'priority', label: 'Prioridade' },
+    { key: 'status', label: 'Status' },
+  ];
+
+  const requestTicketSort = (key: TicketSortKey) => setTicketSort(current => nextTicketSort(current, key));
 
   const getStatusBadgeColor = (status: string) => {
     switch (status) {
@@ -2560,13 +2578,24 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           </colgroup>
           <thead className="border-b border-slate-200/80 bg-slate-50/70">
             <tr>
-              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">ID</th>
-              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Abertura</th>
-              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Nome e cliente</th>
-              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Título</th>
-              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Atendente</th>
-              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Prioridade</th>
-              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Status</th>
+              {ticketSortHeaders.map(header => {
+                const isActive = ticketSort.key === header.key;
+                const ariaSort = isActive ? (ticketSort.direction === 'asc' ? 'ascending' : 'descending') : 'none';
+                const SortIcon = ticketSort.direction === 'asc' ? ChevronUp : ChevronDown;
+                return (
+                  <th key={header.key} aria-sort={ariaSort} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+                    <button
+                      type="button"
+                      onClick={() => requestTicketSort(header.key)}
+                      className={`inline-flex items-center gap-1 transition-colors hover:text-slate-700 focus-visible:outline-none focus-visible:text-slate-800 ${isActive ? 'font-semibold text-slate-700' : ''}`}
+                      aria-label={`Ordenar por ${header.label}`}
+                    >
+                      {header.label}
+                      {isActive && <SortIcon className="h-3 w-3 text-blue-600" aria-hidden="true" />}
+                    </button>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>

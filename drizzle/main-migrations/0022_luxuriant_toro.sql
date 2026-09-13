@@ -1,0 +1,2 @@
+ALTER TABLE `megadesk_domain_chamados` ADD `assigned_to_user_id` varchar(80);--> statement-breakpoint
+CREATE INDEX `idx_mdc_client_assigned_user` ON `megadesk_domain_chamados` (`clientId`,`assigned_to_user_id`);

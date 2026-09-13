@@ -31,6 +31,9 @@ import {
   getCustomerChamadoHistory,
   getActiveClientUser,
   type ChamadoWithActivities,
+  type TicketScope,
+  type TicketSortDirection,
+  type TicketSortKey,
 } from "./db-chamados";
 
 // Schemas Zod com validações rigorosas
@@ -77,6 +80,10 @@ export const chamadosRouter = router({
         status: z.enum(["total", "open", "in_progress", "waiting", "closed"]).optional(),
         limit: z.number().int().min(1).max(100).default(10),
         offset: z.number().int().min(0).default(0),
+        scope: z.enum(['all', 'mine']).default('all'),
+        search: z.string().trim().max(180).optional(),
+        sortBy: z.enum(['number', 'createdAt', 'customer', 'title', 'assignee', 'priority', 'status']).default('createdAt'),
+        sortDirection: z.enum(['asc', 'desc']).default('desc'),
       })
     )
     .query(async ({ input, ctx }) => {
@@ -97,8 +104,18 @@ export const chamadosRouter = router({
         if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Listing chamados for clientId:', clientId, 'status:', input.status);
         
         const [chamados, total] = await Promise.all([
-          listChamados(clientId, input.status, input.limit, input.offset),
-          countChamados(clientId, input.status),
+          listChamados(clientId, input.status, input.limit, input.offset, {
+            scope: input.scope as TicketScope,
+            operationalUserId: ctx.operationalUserId ?? '',
+            search: input.search,
+            sortBy: input.sortBy as TicketSortKey,
+            sortDirection: input.sortDirection as TicketSortDirection,
+          }),
+          countChamados(clientId, input.status, {
+            scope: input.scope as TicketScope,
+            operationalUserId: ctx.operationalUserId ?? '',
+            search: input.search,
+          }),
         ]);
         if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Found chamados:', chamados.length, 'total:', total);
         
@@ -183,7 +200,7 @@ export const chamadosRouter = router({
         title: StringFieldSchema,
         observations: ObservationsSchema.optional().default(""),
         priority: PrioritySchema.default("media"),
-        assignedTo: z.string().optional(),
+        assignedToUserId: z.string().max(80).optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -225,7 +242,8 @@ export const chamadosRouter = router({
           creator.userName,
           input.customerPhone,
           input.customerEmail,
-          input.customerCNPJ
+          input.customerCNPJ,
+          creator.userId,
         );
         
         console.log('[SUCCESS] Chamado created:', chamado.id, 'number:', chamado.number);
@@ -270,14 +288,14 @@ export const chamadosRouter = router({
         observations: ObservationsSchema.optional(),
         status: StatusSchema.optional(),
         priority: PrioritySchema.optional(),
-        assignedTo: z.string().optional(),
+        assignedToUserId: z.string().max(80).optional(),
         clientName: z.string().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
       try {
         const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
-        
+
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
             code: "UNAUTHORIZED",
@@ -289,9 +307,19 @@ export const chamadosRouter = router({
 
         if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Updating chamado:', input.chamadoId, 'for clientId:', clientId);
         
-        const { chamadoId, ...updates } = input;
-        
-        await updateChamado(chamadoId, clientId, updates);
+        const { chamadoId, assignedToUserId, ...updates } = input;
+        const assignedTo = assignedToUserId === undefined
+          ? undefined
+          : await getActiveClientUser(clientId, assignedToUserId);
+        if (assignedToUserId !== undefined && !assignedTo) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Atendente responsável inválido para este tenant." });
+        }
+
+        await updateChamado(chamadoId, clientId, {
+          ...updates,
+          assignedTo: assignedTo?.userName,
+          assignedToUserId: assignedTo?.userId,
+        });
         
         const chamado = await getChamadoWithActivities(chamadoId, clientId);
         
@@ -608,7 +636,8 @@ export const chamadosRouter = router({
    * Obter contadores de chamados por status
    */
   getStatusCounts: megadeskProcedure
-    .query(async ({ ctx }) => {
+    .input(z.object({ scope: z.enum(['all', 'mine']).default('all') }).default({ scope: 'all' }))
+    .query(async ({ ctx, input }) => {
       try {
         const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
         
@@ -619,7 +648,7 @@ export const chamadosRouter = router({
           });
         }
 
-        const counts = await getStatusCounts(clientId);
+        const counts = await getStatusCounts(clientId, input.scope as TicketScope, ctx.operationalUserId ?? '');
         return counts;
       } catch (error) {
         console.error('[ERROR] Failed to get status counts:', error);

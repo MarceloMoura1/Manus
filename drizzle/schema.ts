@@ -266,6 +266,9 @@ export const megadeskDomainChamados = mysqlTable(
     ),
     priority: mysqlEnum(["baixa", "media", "alta", "critica"]).default("media"),
     assignedTo: varchar({ length: 80 }),
+    // Snapshot de exibição do responsável. A identidade canônica fica no ID
+    // para que escopos e permissões nunca dependam do nome apresentado.
+    assignedToUserId: varchar("assigned_to_user_id", { length: 80 }),
     createdAt: timestamp({ mode: "string" }).defaultNow().notNull(),
     updatedAt: timestamp({ mode: "string" })
       .defaultNow()
@@ -275,6 +278,7 @@ export const megadeskDomainChamados = mysqlTable(
   table => [
     index("idx_mdc_client").on(table.clientId),
     index("idx_mdc_status").on(table.status),
+    index("idx_mdc_client_assigned_user").on(table.clientId, table.assignedToUserId),
     uniqueIndex("uq_chamado_number").on(table.clientId, table.chamadoNumber),
   ]
 );

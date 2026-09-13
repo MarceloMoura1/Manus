@@ -14,7 +14,7 @@ import { createCallerFactory } from "./_core/trpc";
 
 // Mock do db-chamados para isolar os testes (sem DATABASE_URL)
 vi.mock("./db-chamados", () => ({
-  createChamado: vi.fn(async (clientId, customerId, customerName, company, title, observations, priority, assignedTo) => ({
+  createChamado: vi.fn(async (clientId, customerId, customerName, company, title, observations, priority, assignedTo, _phone, _email, _cnpj, assignedToUserId) => ({
     id: `chamado-${Date.now()}`,
     number: 42,
     clientId,
@@ -26,6 +26,7 @@ vi.mock("./db-chamados", () => ({
     priority: priority || "media",
     status: "open",
     assignedTo,
+    assignedToUserId,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     activities: [],
@@ -145,7 +146,8 @@ describe("chamados.create — abertura de chamados", () => {
       "Marcelo Moura",
       undefined,
       undefined,
-      undefined
+      undefined,
+      "operator-1"
     );
   });
 
