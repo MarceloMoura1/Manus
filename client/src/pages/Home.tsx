@@ -1872,14 +1872,12 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   const [toastMessage, setToastMessage] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [showNewChamadoModal, setShowNewChamadoModal] = React.useState(false);
   const [newChamadoForm, setNewChamadoForm] = React.useState<{
-    customerName: string;
-    company: string;
+    customerId: string;
     title: string;
     observations: string;
     priority: 'media' | 'baixa' | 'alta' | 'critica';
   }>({
-    customerName: '',
-    company: '',
+    customerId: '',
     title: '',
     observations: '',
     priority: 'media',
@@ -1887,11 +1885,16 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   const [validationErrors, setValidationErrors] = React.useState<ValidationError[]>([]);
   const [currentPage, setCurrentPage] = React.useState(1);
   const ITEMS_PER_PAGE = 20;
-  // Estados para busca de empresa no modal de novo chamado
-  const [companySearchResults, setCompanySearchResults] = React.useState<any[]>([]);
-  const [isSearchingCompany, setIsSearchingCompany] = React.useState(false);
+  // Estado do autocomplete canônico de clientes do ERP.
+  const [customerSearch, setCustomerSearch] = React.useState('');
+  const [debouncedCustomerSearch, setDebouncedCustomerSearch] = React.useState('');
   const [selectedCrmCustomer, setSelectedCrmCustomer] = React.useState<any | null>(null);
-  const [showCompanyDropdown, setShowCompanyDropdown] = React.useState(false);
+  const [showCustomerDropdown, setShowCustomerDropdown] = React.useState(false);
+
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedCustomerSearch(customerSearch.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [customerSearch]);
 
   React.useEffect(() => {
     const raw = sessionStorage.getItem("MEGADESK_TICKET_INTENT");
@@ -1900,8 +1903,9 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
     try {
       const intent = JSON.parse(raw);
       if (intent.mode !== "create" || !intent.crmClientId) return;
-      setSelectedCrmCustomer({ id: intent.crmClientId, company: intent.companyName || "", name: intent.contactName || "" });
-      setNewChamadoForm(current => ({ ...current, company: intent.companyName || "", customerName: intent.contactName || "" }));
+      setSelectedCrmCustomer({ id: intent.crmClientId, name: intent.companyName || intent.contactName || "" });
+      setCustomerSearch(intent.companyName || intent.contactName || "");
+      setNewChamadoForm(current => ({ ...current, customerId: intent.crmClientId }));
       setShowNewChamadoModal(true);
     } catch { /* intenção inválida é ignorada */ }
   }, []);
@@ -1928,6 +1932,14 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   const addActivityMutation = trpc.chamados.addActivity.useMutation();
   const editActivityMutation = trpc.chamados.editActivity.useMutation();
   const createChamadoMutation = trpc.chamados.create.useMutation();
+  const customerSearchQuery = trpc.chamados.searchCustomers.useQuery(
+    { query: debouncedCustomerSearch.length >= 2 ? debouncedCustomerSearch : "__" },
+    {
+      enabled: showNewChamadoModal && !selectedCrmCustomer && debouncedCustomerSearch.length >= 2,
+      refetchOnWindowFocus: false,
+      staleTime: 0,
+    },
+  );
   const updateCollaboratorsMutation = trpc.chamados.updateCollaborators.useMutation();
   const registerActivityMutation = trpc.chamados.registerActivity.useMutation();
 
@@ -2258,16 +2270,8 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
     setValidationErrors([]);
 
     try {
-      // Usar o customerId do CRM se encontrado, caso contrário vazio (backend gera fallback)
-      const customerId = selectedCrmCustomer?.id || '';
-      
       const result = await createChamadoMutation.mutateAsync({
-        customerId,
-        customerName: newChamadoForm.customerName,
-        customerPhone: selectedCrmCustomer?.phone || '',
-        customerEmail: selectedCrmCustomer?.email || '',
-        customerCNPJ: selectedCrmCustomer?.cpfCnpj || '',
-        company: newChamadoForm.company,
+        customerId: newChamadoForm.customerId,
         title: newChamadoForm.title,
         observations: newChamadoForm.observations,
         priority: newChamadoForm.priority,
@@ -2276,10 +2280,11 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       if (result.chamado) {
         showToast(`Chamado #${result.chamado.number} criado com sucesso!`, 'success');
         setShowNewChamadoModal(false);
-        setNewChamadoForm({ customerName: '', company: '', title: '', observations: '', priority: 'media' });
+        setNewChamadoForm({ customerId: '', title: '', observations: '', priority: 'media' });
+        setCustomerSearch('');
+        setDebouncedCustomerSearch('');
         setSelectedCrmCustomer(null);
-        setCompanySearchResults([]);
-        setShowCompanyDropdown(false);
+        setShowCustomerDropdown(false);
         // Invalidar cache e atualizar contadores
         await utils.chamados.list.invalidate();
         await utils.chamados.getStatusCounts.invalidate();
@@ -2291,41 +2296,20 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
     }
   };
 
-  // Buscar empresa no banco de dados com debounce
-  const handleCompanySearch = React.useCallback(
-    React.useMemo(() => {
-      let timer: ReturnType<typeof setTimeout>;
-      return (value: string) => {
-        clearTimeout(timer);
-        setNewChamadoForm(prev => ({ ...prev, company: value, customerName: '' }));
-        setSelectedCrmCustomer(null);
-        if (value.length < 2) {
-          setCompanySearchResults([]);
-          setShowCompanyDropdown(false);
-          return;
-        }
-        setIsSearchingCompany(true);
-        timer = setTimeout(async () => {
-          try {
-            const results = await (trpc.megadesk.searchCustomerByCompany as any).fetch({ company: value, clientId });
-            setCompanySearchResults(results || []);
-            setShowCompanyDropdown(true);
-          } catch {
-            setCompanySearchResults([]);
-          } finally {
-            setIsSearchingCompany(false);
-          }
-        }, 400);
-      };
-    }, [clientId]),
-    [clientId]
-  );
+  const handleCustomerSearch = (value: string) => {
+    setCustomerSearch(value);
+    setSelectedCrmCustomer(null);
+    setNewChamadoForm(prev => ({ ...prev, customerId: '' }));
+    setValidationErrors(prev => prev.filter(error => error.field !== 'customerId'));
+    setShowCustomerDropdown(value.trim().length >= 2);
+  };
 
-  const handleSelectCompany = (customer: any) => {
+  const handleSelectCustomer = (customer: any) => {
     setSelectedCrmCustomer(customer);
-    setNewChamadoForm(prev => ({ ...prev, company: customer.company, customerName: customer.name || '' }));
-    setShowCompanyDropdown(false);
-    setCompanySearchResults([]);
+    setCustomerSearch(customer.name);
+    setNewChamadoForm(prev => ({ ...prev, customerId: customer.id }));
+    setValidationErrors(prev => prev.filter(error => error.field !== 'customerId'));
+    setShowCustomerDropdown(false);
   };
 
   const chamados = chamadosQuery.data?.chamados || [];
@@ -2735,77 +2719,70 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           </div>
           <div className="p-6">
           <div className="space-y-4">
-            {/* 1. Empresa - com busca automática no banco */}
+            {/* Cliente canônico do ERP */}
             <div className="relative">
-              <label className="text-sm font-semibold text-black block mb-2">
-                Empresa <span className="text-red-500">*</span>
+              <label htmlFor="new-ticket-customer" className="text-sm font-semibold text-black block mb-2">
+                Cliente <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <Input
-                  placeholder="Digite o nome da empresa..."
-                  value={newChamadoForm.company}
-                  onChange={e => handleCompanySearch(e.target.value)}
-                  onBlur={() => setTimeout(() => setShowCompanyDropdown(false), 200)}
+                  id="new-ticket-customer"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={showCustomerDropdown}
+                  aria-controls="new-ticket-customer-options"
+                  placeholder="Buscar cliente por nome, CPF/CNPJ, telefone..."
+                  value={customerSearch}
+                  onChange={e => handleCustomerSearch(e.target.value)}
+                  onFocus={() => customerSearch.trim().length >= 2 && !selectedCrmCustomer && setShowCustomerDropdown(true)}
+                  onBlur={() => window.setTimeout(() => setShowCustomerDropdown(false), 200)}
                   autoComplete="off"
                   className={`bg-white border-2 transition-colors pr-8 text-black ${
-                    validationErrors.find(e => e.field === 'company')
+                    validationErrors.find(e => e.field === 'customerId')
                       ? 'border-red-500'
                       : selectedCrmCustomer ? 'border-green-500' : 'border-slate-400 focus:border-blue-500'
                   }`}
                 />
-                {isSearchingCompany && (
+                {(customerSearchQuery.isLoading || customerSearchQuery.isFetching || customerSearch.trim() !== debouncedCustomerSearch) && customerSearch.trim().length >= 2 && !selectedCrmCustomer && (
                   <div className="absolute right-3 top-1/2 -translate-y-1/2">
                     <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                   </div>
                 )}
-                {selectedCrmCustomer && !isSearchingCompany && (
+                {selectedCrmCustomer && (
                   <div className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500">✓</div>
                 )}
               </div>
-              {/* Dropdown de sugestões */}
-              {showCompanyDropdown && companySearchResults.length > 0 && (
-                <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                  {companySearchResults.map((customer: any) => (
+              {showCustomerDropdown && (customerSearchQuery.data?.customers.length ?? 0) > 0 && (
+                <div id="new-ticket-customer-options" role="listbox" className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+                  {customerSearchQuery.data?.customers.map((customer: any) => (
                     <button
                       key={customer.id}
                       type="button"
-                      onMouseDown={() => handleSelectCompany(customer)}
+                      role="option"
+                      aria-selected={selectedCrmCustomer?.id === customer.id}
+                      onMouseDown={() => handleSelectCustomer(customer)}
                       className="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors border-b border-slate-200 last:border-0 text-black"
                     >
-                      <div className="font-semibold text-black text-sm">{customer.company}</div>
-                      {customer.name && <div className="text-xs text-slate-600">{customer.name}</div>}
+                      <div className="font-semibold text-black text-sm">{customer.name}</div>
+                      {(customer.document || customer.phone) && (
+                        <div className="text-xs text-slate-600">
+                          {[customer.document, customer.phone].filter(Boolean).join(' · ')}
+                        </div>
+                      )}
                     </button>
                   ))}
                 </div>
               )}
-              {showCompanyDropdown && companySearchResults.length === 0 && !isSearchingCompany && newChamadoForm.company.length >= 2 && (
+              {showCustomerDropdown && customerSearchQuery.data && customerSearchQuery.data.customers.length === 0 && !customerSearchQuery.isFetching && customerSearch.trim() === debouncedCustomerSearch && (
                 <div className="absolute z-50 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg px-4 py-3 text-sm text-slate-600">
-                  Nenhuma empresa encontrada
+                  Nenhum cliente encontrado. Cadastre o cliente em ERP &gt; Clientes para abrir o chamado.
                 </div>
               )}
-              {validationErrors.find(e => e.field === 'company') && (
-                <p className="text-xs text-red-600 mt-1 font-medium">{validationErrors.find(e => e.field === 'company')?.message}</p>
+              {customerSearchQuery.isError && showCustomerDropdown && (
+                <p className="text-xs text-red-600 mt-1 font-medium">Não foi possível buscar os clientes. Tente novamente.</p>
               )}
-            </div>
-
-            {/* 2. Nome do Cliente - preenchido automaticamente */}
-            <div>
-              <label className="text-sm font-semibold text-black block mb-2">
-                Nome do Cliente <span className="text-red-500">*</span>
-                {selectedCrmCustomer && <span className="ml-2 text-xs text-green-700 font-normal">✓ Encontrado no banco</span>}
-              </label>
-              <Input
-                placeholder={selectedCrmCustomer ? '' : 'Selecione a empresa acima ou digite manualmente'}
-                value={newChamadoForm.customerName}
-                onChange={e => setNewChamadoForm({...newChamadoForm, customerName: e.target.value})}
-                className={`bg-white border-2 transition-colors text-black ${
-                  validationErrors.find(e => e.field === 'customerName')
-                    ? 'border-red-500'
-                    : selectedCrmCustomer ? 'border-green-500' : 'border-slate-400 focus:border-blue-500'
-                }`}
-              />
-              {validationErrors.find(e => e.field === 'customerName') && (
-                <p className="text-xs text-red-600 mt-1 font-medium">{validationErrors.find(e => e.field === 'customerName')?.message}</p>
+              {validationErrors.find(e => e.field === 'customerId') && (
+                <p className="text-xs text-red-600 mt-1 font-medium">{validationErrors.find(e => e.field === 'customerId')?.message}</p>
               )}
             </div>
 
@@ -2854,7 +2831,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
             <div className="flex gap-3 pt-4 border-t border-slate-300 mt-4">
               <Button
                 onClick={handleCreateChamado}
-                disabled={createChamadoMutation.isPending}
+                disabled={createChamadoMutation.isPending || !newChamadoForm.customerId}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-md hover:shadow-lg transition-all"
               >
                 {createChamadoMutation.isPending ? '⏳ Criando...' : '✅ Criar Chamado'}

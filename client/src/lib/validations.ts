@@ -84,30 +84,15 @@ export type ValidationError = {
  * Valida formulário de novo chamado
  */
 export function validateNewChamado(data: {
-  customerName: string;
-  company: string;
+  customerId: string;
   title: string;
   observations?: string;
   priority?: string;
 }): ValidationError[] {
   const errors: ValidationError[] = [];
 
-  if (!validations.isNotEmpty(data.customerName)) {
-    errors.push({ field: 'customerName', message: 'Nome do cliente é obrigatório' });
-  } else if (!validations.isValidName(data.customerName)) {
-    errors.push({ field: 'customerName', message: 'Nome deve conter apenas letras' });
-  } else if (!validations.isMinLength(data.customerName, 3)) {
-    errors.push({ field: 'customerName', message: 'Nome deve ter no mínimo 3 caracteres' });
-  } else if (!validations.isMaxLength(data.customerName, 100)) {
-    errors.push({ field: 'customerName', message: 'Nome não pode ter mais de 100 caracteres' });
-  }
-
-  if (!validations.isNotEmpty(data.company)) {
-    errors.push({ field: 'company', message: 'Empresa é obrigatória' });
-  } else if (!validations.isMinLength(data.company, 2)) {
-    errors.push({ field: 'company', message: 'Empresa deve ter no mínimo 2 caracteres' });
-  } else if (!validations.isMaxLength(data.company, 100)) {
-    errors.push({ field: 'company', message: 'Empresa não pode ter mais de 100 caracteres' });
+  if (!validations.isNotEmpty(data.customerId)) {
+    errors.push({ field: 'customerId', message: 'Selecione um cliente cadastrado em ERP > Clientes' });
   }
 
   if (!validations.isNotEmpty(data.title)) {

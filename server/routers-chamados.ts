@@ -35,6 +35,7 @@ import {
   type TicketSortDirection,
   type TicketSortKey,
 } from "./db-chamados";
+import { getCrmClientById, listCrmClients } from "./db-crm";
 
 // Schemas Zod com validações rigorosas
 const ChamadoIdSchema = z.string().uuid('ID de chamado inválido');
@@ -70,6 +71,29 @@ function checkRateLimit(clientId: string): void {
 }
 
 export const chamadosRouter = router({
+  /**
+   * Busca clientes canônicos do ERP para abertura de chamado.
+   * O tenant vem exclusivamente da sessão; nenhum clientId do navegador é aceito.
+   */
+  searchCustomers: megadeskProcedure
+    .input(z.object({ query: z.string().trim().min(2).max(120) }).strict())
+    .query(async ({ input, ctx }) => {
+      const digits = input.query.replace(/\D/g, "");
+      const searchTerms = digits.length >= 3 && digits !== input.query ? [input.query, digits] : [input.query];
+      const matches = (await Promise.all(searchTerms.map(term => listCrmClients(ctx.tenantId, term, "active")))).flat();
+      const clients = [...new Map(matches.map(client => [client.crmClientId, client])).values()];
+      return {
+        customers: clients.slice(0, 10).map(client => ({
+          id: client.crmClientId,
+          type: client.customerType,
+          name: client.companyName,
+          responsibleName: client.responsibleName,
+          document: client.cpfCnpj,
+          phone: client.phone,
+        })),
+      };
+    }),
+
   /**
    * Listar chamados do usuário autenticado
    * O clientId é derivado de ctx.tenantId
@@ -191,12 +215,7 @@ export const chamadosRouter = router({
   create: megadeskProcedure
     .input(
       z.object({
-        customerId: z.string().optional(),
-        customerName: StringFieldSchema,
-        customerPhone: z.string().optional(),
-        customerEmail: z.string().optional(),
-        customerCNPJ: z.string().optional(),
-        company: StringFieldSchema,
+        customerId: z.string().trim().min(1, "Selecione um cliente").max(80),
         title: StringFieldSchema,
         observations: ObservationsSchema.optional().default(""),
         priority: PrioritySchema.default("media"),
@@ -216,9 +235,21 @@ export const chamadosRouter = router({
 
         checkRateLimit(clientId);
 
+        const customer = await getCrmClientById(input.customerId, clientId);
+        if (!customer || customer.lifecycleState !== "active") {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Cliente não encontrado no ERP ou não pertence a este ambiente.",
+          });
+        }
+
+        const canonicalName = customer.companyName.trim();
+        const customerName = customer.customerType === "company" && customer.responsibleName.trim()
+          ? customer.responsibleName.trim()
+          : canonicalName;
+
         if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Creating chamado with clientId:', clientId, 'input:', {
-          customerName: input.customerName,
-          company: input.company,
+          customerId: customer.crmClientId,
           title: input.title,
           priority: input.priority,
         });
@@ -233,16 +264,16 @@ export const chamadosRouter = router({
 
         const chamado = await createChamado(
           clientId,
-          input.customerId || '',
-          input.customerName,
-          input.company,
+          customer.crmClientId,
+          customerName,
+          canonicalName,
           input.title,
           input.observations,
           input.priority,
           creator.userName,
-          input.customerPhone,
-          input.customerEmail,
-          input.customerCNPJ,
+          customer.phone ?? undefined,
+          customer.email ?? undefined,
+          customer.cpfCnpj ?? undefined,
           creator.userId,
         );
         

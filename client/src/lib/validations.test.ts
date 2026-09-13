@@ -83,8 +83,7 @@ describe('Validations', () => {
   describe('validateNewChamado', () => {
     it('should validate correct chamado data', () => {
       const errors = validateNewChamado({
-        customerName: 'João Silva',
-        company: 'Empresa XYZ',
+        customerId: 'crm-123',
         title: 'Problema com login',
         observations: 'Usuário não consegue fazer login',
         priority: 'media',
@@ -92,28 +91,17 @@ describe('Validations', () => {
       expect(errors).toHaveLength(0);
     });
 
-    it('should reject empty customer name', () => {
+    it('should reject a chamado without a selected canonical customer', () => {
       const errors = validateNewChamado({
-        customerName: '',
-        company: 'Empresa XYZ',
+        customerId: '',
         title: 'Problema com login',
       });
-      expect(errors.some(e => e.field === 'customerName')).toBe(true);
-    });
-
-    it('should reject short customer name', () => {
-      const errors = validateNewChamado({
-        customerName: 'AB',
-        company: 'Empresa XYZ',
-        title: 'Problema com login',
-      });
-      expect(errors.some(e => e.field === 'customerName')).toBe(true);
+      expect(errors.some(e => e.field === 'customerId')).toBe(true);
     });
 
     it('should reject short title', () => {
       const errors = validateNewChamado({
-        customerName: 'João Silva',
-        company: 'Empresa XYZ',
+        customerId: 'crm-123',
         title: 'Prob',
       });
       expect(errors.some(e => e.field === 'title')).toBe(true);
@@ -121,8 +109,7 @@ describe('Validations', () => {
 
     it('should reject long observations', () => {
       const errors = validateNewChamado({
-        customerName: 'João Silva',
-        company: 'Empresa XYZ',
+        customerId: 'crm-123',
         title: 'Problema com login',
         observations: 'a'.repeat(1001),
       });

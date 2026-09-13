@@ -28,6 +28,7 @@ vi.mock("@/lib/trpc", () => {
         addActivity: { useMutation: mutation },
         editActivity: { useMutation: mutation },
         create: { useMutation: mutation },
+        searchCustomers: { useQuery: () => ({ ...query({ customers: [] }), isFetching: false, isError: false }) },
         updateCollaborators: { useMutation: mutation },
         registerActivity: { useMutation: mutation },
       },

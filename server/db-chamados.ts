@@ -389,6 +389,7 @@ export async function createChamado(
   if (!clientId || !clientId.trim()) {
     throw new Error('clientId não pode estar vazio');
   }
+  validateNonEmptyString(customerId, 'customerId');
   
   validateNonEmptyString(customerName, 'customerName');
   validateNonEmptyString(company, 'company');
@@ -398,6 +399,7 @@ export async function createChamado(
   // Sanitizar strings
   const sanitizedCustomerName = sanitizeString(customerName, 180);
   const sanitizedCompany = sanitizeString(company, 255);
+  const sanitizedCustomerId = sanitizeString(customerId, 80);
   const sanitizedTitle = sanitizeString(title, 255);
   const sanitizedObservations = sanitizeString(observations, MAX_OBSERVATIONS_LENGTH);
   const sanitizedAssignedTo = assignedTo ? sanitizeString(assignedTo, 180) : undefined;
@@ -413,7 +415,7 @@ export async function createChamado(
       chamadoId,
       clientId,
       chamadoNumber,
-      customerId: customerId || `cust-${Date.now()}`,
+      customerId: sanitizedCustomerId,
       customerName: sanitizedCustomerName,
       customerPhone: customerPhone || null,
       customerEmail: customerEmail || null,
@@ -434,7 +436,7 @@ export async function createChamado(
         return {
       id: chamadoId,
       number: chamadoNumber,
-      customerId: customerId || `cust-${Date.now()}`,
+      customerId: sanitizedCustomerId,
       customerName: sanitizedCustomerName,
       customerPhone: customerPhone || null,
       customerEmail: customerEmail || null,
