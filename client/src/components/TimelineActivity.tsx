@@ -18,32 +18,55 @@ const getActionIcon = (actionType?: string) => {
     case 'close':
       return <CheckCircle className="w-6 h-6 text-green-500" />;
     case 'edit':
-      return <Edit className="w-6 h-6 text-blue-500" />;
+      return <Edit className="w-6 h-6 text-violet-500" />;
     case 'forward':
       return <Share2 className="w-6 h-6 text-purple-500" />;
     case 'register':
-      return <User className="w-6 h-6 text-slate-500" />;
+      return <User className="w-6 h-6 text-blue-500" />;
     case 'note':
     default:
-      return <MessageSquare className="w-6 h-6 text-slate-400" />;
+      return <MessageSquare className="w-6 h-6 text-blue-500" />;
   }
 };
 
 const getActionLabel = (actionType?: string) => {
   switch (actionType) {
     case 'close':
-      return 'Atendente encerrou o chamado.';
+      return 'encerrou o chamado.';
     case 'edit':
-      return 'Atendente editou o chamado.';
+      return 'editou o chamado.';
     case 'forward':
-      return 'Atendente encaminhou o chamado.';
+      return 'encaminhou o chamado.';
     case 'register':
-      return 'Atendente registrou um apontamento.';
+      return 'registrou um apontamento.';
     case 'note':
     default:
-      return 'Atendente registrou uma nota.';
+      return 'registrou uma nota.';
   }
 };
+
+export function getActivityAuthorName(attendant?: string) {
+  return attendant?.trim() || 'Atendente';
+}
+
+export function getActivitySummary(activity: Pick<ActivityItem, 'attendant' | 'actionType'>) {
+  return `${getActivityAuthorName(activity.attendant)} ${getActionLabel(activity.actionType)}`;
+}
+
+export function getActivityAccentClass(actionType?: string) {
+  switch (actionType) {
+    case 'close':
+      return 'border-l-emerald-400';
+    case 'forward':
+      return 'border-l-violet-400';
+    case 'edit':
+      return 'border-l-violet-400';
+    case 'register':
+    case 'note':
+    default:
+      return 'border-l-blue-400';
+  }
+}
 
 import { formatDate, formatTime } from '@/lib/conversationDateTime';
 
@@ -85,7 +108,7 @@ export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities }
               </div>
 
               {/* Conteúdo */}
-              <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
+              <div className={`rounded-lg border border-l-2 border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md ${getActivityAccentClass(activity.actionType)}`}>
                 {/* Data e Hora */}
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xs font-semibold text-slate-600">{date}</span>
@@ -94,7 +117,7 @@ export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities }
 
                 {/* Tipo de Ação */}
                 <p className="text-sm text-slate-700 mb-2">
-                  <span className="font-medium">Atendente {activity.attendant}</span> {getActionLabel(activity.actionType).split('Atendente')[1]}
+                  <span className="font-medium">{getActivitySummary(activity)}</span>
                 </p>
 
                 {/* Descrição */}
@@ -107,7 +130,7 @@ export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities }
                 {/* Nome do Atendente */}
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   <User className="w-3 h-3" />
-                  <span>{activity.attendant}</span>
+                  <span>{getActivityAuthorName(activity.attendant)}</span>
                 </div>
               </div>
             </div>

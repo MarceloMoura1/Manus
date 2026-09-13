@@ -116,6 +116,23 @@ export function resolveTicketDetailCustomer(
   };
 }
 
+/**
+ * Activities retain a display-name snapshot, so resolve that snapshot from the
+ * canonical operational identity instead of accepting an author supplied by
+ * the browser. The lookup is constrained to the active tenant.
+ */
+async function requireCanonicalActivityAuthor(clientId: string, operationalUserId?: string) {
+  const author = await getActiveClientUser(clientId, operationalUserId ?? "");
+  if (!author) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Não foi possível identificar o autor da atividade neste tenant.",
+    });
+  }
+
+  return author.userName;
+}
+
 export const chamadosRouter = router({
   /**
    * Busca clientes canônicos do ERP para abertura de chamado.
@@ -458,6 +475,7 @@ export const chamadosRouter = router({
         }
 
         checkRateLimit(clientId);
+        const attendantName = await requireCanonicalActivityAuthor(clientId, ctx.operationalUserId);
 
         if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Adding activity to chamado:', input.chamadoId);
 
@@ -465,7 +483,7 @@ export const chamadosRouter = router({
           input.chamadoId,
           clientId,
           input.description,
-          input.attendant
+          attendantName
         );
 
         const chamado = await getChamadoWithActivities(input.chamadoId, clientId);
@@ -687,7 +705,6 @@ export const chamadosRouter = router({
     .mutation(async ({ input, ctx }) => {
       // Obter clientId do tenantId (sessão MegaDesk)
       const clientId = ctx.tenantId || String(ctx.user?.id ?? 'unknown');
-      const attendantName = ctx.user?.name || ctx.user?.email || 'Atendente';
 
       if (!clientId || clientId.trim() === '') {
         throw new TRPCError({
@@ -697,6 +714,7 @@ export const chamadosRouter = router({
       }
 
       try {
+        const attendantName = await requireCanonicalActivityAuthor(clientId, ctx.operationalUserId);
         const result = await registerActivity(
           input.chamadoId,
           clientId,
@@ -710,6 +728,7 @@ export const chamadosRouter = router({
           activityId: result.id,
         };
       } catch (error) {
+        if (error instanceof TRPCError) throw error;
         console.error('[ERROR] Erro ao registrar atividade:', error);
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
@@ -768,7 +787,7 @@ export const chamadosRouter = router({
           });
         }
         checkRateLimit(clientId);
-        const uploadedBy = input.attendant || "Atendente";
+        const uploadedBy = await requireCanonicalActivityAuthor(clientId, ctx.operationalUserId);
         // Converter base64 para Buffer e fazer upload para storage
         const fileBuffer = Buffer.from(input.fileBase64, 'base64');
         const storageKey = `chamados/${clientId}/${input.chamadoId}/${Date.now()}-${input.fileName}`;

@@ -44,6 +44,9 @@ const canonicalCustomer = {
 const result = (json: unknown) => ({ result: { data: { json } } });
 
 async function prepareDetail(page: Page) {
+  let currentCollaborators = [...ticket.collaborators];
+  let collaboratorUpdates = 0;
+
   await page.addInitScript(value => {
     localStorage.setItem("megadesk_session_v1", JSON.stringify(value));
     localStorage.setItem("megadesk_active_page_v1", "tickets");
@@ -57,11 +60,24 @@ async function prepareDetail(page: Page) {
     const payloads = procedures.map(procedure => {
       if (procedure.includes("megadesk.refreshSession")) return result({ ok: true, session });
       if (procedure.includes("chamados.list")) return result({ chamados: [ticket], total: 1, limit: 20, offset: 0 });
-      if (procedure.includes("chamados.getDetail")) return result({ chamado: { ...ticket, customer: canonicalCustomer } });
+      if (procedure.includes("chamados.getDetail")) return result({ chamado: { ...ticket, collaborators: currentCollaborators, customer: canonicalCustomer } });
       if (procedure.includes("chamados.getStatusCounts")) return result({ total: 1, open: 1, in_progress: 0, waiting: 0, closed: 0 });
-      if (procedure.includes("chamados.getCollaborators")) return result({ collaborators: ticket.collaborators });
+      if (procedure.includes("chamados.getCollaborators")) return result({ collaborators: currentCollaborators });
       if (procedure.includes("megadeskSettings.listTicketStatuses")) return result([]);
-      if (procedure.includes("megadesk.getClientUsers")) return result([]);
+      if (procedure.includes("megadesk.getClientUsers")) return result([
+        { userId: "operator-two", name: "Agente Dois", email: "dois@example.invalid", role: "agent" },
+        { userId: "operator-three", name: "Agente Três", email: "tres@example.invalid", role: "agent" },
+      ]);
+      if (procedure.includes("chamados.updateCollaborators")) {
+        collaboratorUpdates += 1;
+        currentCollaborators = collaboratorUpdates === 1
+          ? [
+              { userId: "operator-two", userName: "Agente Dois" },
+              { userId: "operator-three", userName: "Agente Três" },
+            ]
+          : [{ userId: "operator-three", userName: "Agente Três" }];
+        return result({ chamado: { ...ticket, collaborators: currentCollaborators }, message: "Colaboradores atualizados com sucesso" });
+      }
       return result({ ok: true });
     });
 
@@ -91,6 +107,12 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
   await expect(page.getByRole("heading", { name: "Detalhes do Chamado" })).toBeVisible();
   await expect(page.getByText("Nenhuma atividade registrada ainda.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Encerrar Chamado", exact: true })).toBeVisible();
+  await expect(detail.locator("section[aria-labelledby='ticket-history-heading']").getByText("Mensagem Inicial", { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId("ticket-initial-message")).toHaveText("Mensagem inicial preservada");
+  await expect(page.getByTestId("ticket-initial-message")).toHaveCSS("white-space", "pre-wrap");
+  await expect(page.getByTestId("ticket-status-control")).toHaveAttribute("data-status", "open");
+  await expect(page.getByTestId("ticket-status-control")).toHaveClass(/bg-blue-50/);
+  await expect(page.getByTestId("ticket-detail-priority")).toHaveClass(/bg-red-50/);
 
   const boxes = await Promise.all([sidebar.boundingBox(), detail.boundingBox()]);
   expect(boxes[0]).not.toBeNull();
@@ -122,4 +144,34 @@ test("ticket detail keeps mobile navigation available and stacks its content", a
 
   await detail.getByRole("button", { name: "Abrir menu principal" }).click();
   await expect(page.getByLabel("Menu principal", { exact: true })).toBeVisible();
+});
+
+test("ticket collaborators update in detail and toolbar without a reload", async ({ page }) => {
+  await prepareDetail(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.locator("tbody").getByText("Snapshot antigo", { exact: true }).click();
+
+  let mainFrameNavigations = 0;
+  page.on("framenavigated", frame => {
+    if (frame === page.mainFrame()) mainFrameNavigations += 1;
+  });
+
+  await expect(page.getByTestId("ticket-detail-participants")).toHaveText("Agente Dois");
+  await expect(page.getByTestId("ticket-detail-collaborators")).toHaveText(/Colabs:/);
+
+  await page.getByTestId("ticket-manage-collaborators").click();
+  await page.getByLabel("Agente Três", { exact: true }).check();
+  await page.getByRole("button", { name: /Salvar/ }).click();
+
+  await expect(page.getByTestId("ticket-detail-participants")).toHaveText("Agente Dois, Agente Três");
+  await expect(page.getByTestId("ticket-detail-collaborators").getByTitle("Agente Três")).toBeVisible();
+
+  await page.getByTestId("ticket-manage-collaborators").click();
+  await page.getByLabel("Agente Dois", { exact: true }).uncheck();
+  await page.getByRole("button", { name: /Salvar/ }).click();
+
+  await expect(page.getByTestId("ticket-detail-participants")).toHaveText("Agente Três");
+  await expect(page.getByTestId("ticket-detail-collaborators").getByTitle("Agente Dois")).toHaveCount(0);
+  expect(mainFrameNavigations).toBe(0);
 });

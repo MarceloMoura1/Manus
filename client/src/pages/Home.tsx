@@ -2024,17 +2024,28 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
     }
 
     try {
-      await updateCollaboratorsMutation.mutateAsync({
+      const result = await updateCollaboratorsMutation.mutateAsync({
         chamadoId: selectedChamado.id,
         collaborators: selectedCollaborators,
       });
+      const collaborators = result.chamado.collaborators || [];
+
+      // The mutation returns the tenant-scoped canonical collaborators. Keep the
+      // detail panel and toolbar in sync immediately, before any cache refetch.
+      setSelectedCollaborators(collaborators);
+      setSelectedChamado((current: any) => current?.id === selectedChamado.id
+        ? { ...current, collaborators }
+        : current,
+      );
 
       showToast('Colaboradores atualizados com sucesso', 'success');
       setShowManageCollaboratorsCard(false);
       setIsEditingCollaborators(false);
-      await getCollaboratorsQuery.refetch();
-      await utils.chamados.list.invalidate();
-      await chamadosQuery.refetch();
+      await Promise.all([
+        utils.chamados.getCollaborators.invalidate({ chamadoId: selectedChamado.id }),
+        utils.chamados.getDetail.invalidate({ chamadoId: selectedChamado.id }),
+        utils.chamados.list.invalidate(),
+      ]);
     } catch (error) {
       showToast('Erro ao atualizar colaboradores', 'error');
       console.error('Error updating collaborators:', error);
@@ -2424,6 +2435,20 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
         return 'text-red-600';
       default:
         return 'text-gray-600';
+    }
+  };
+
+  const getPriorityBadgeColor = (priority?: string) => {
+    switch (priority) {
+      case 'baixa':
+        return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+      case 'media':
+        return 'border-amber-200 bg-amber-50 text-amber-700';
+      case 'alta':
+      case 'critica':
+        return 'border-red-200 bg-red-50 text-red-700';
+      default:
+        return 'border-slate-200 bg-slate-50 text-slate-700';
     }
   };
 
@@ -2902,7 +2927,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
             {/* Status e Botao Encerrar */}
             <div className="flex flex-wrap items-center gap-3 md:justify-end">
               <Select value={selectedChamado.status} onValueChange={(value) => handleUpdateStatus(value as 'open' | 'in_progress' | 'waiting' | 'closed')}>
-                <SelectTrigger className="w-40 bg-slate-50 border-2 border-slate-200 focus:border-blue-500">
+                <SelectTrigger data-testid="ticket-status-control" data-status={selectedChamado.status} className={`w-40 border ${getStatusBadgeColor(selectedChamado.status)} focus:ring-2 focus:ring-blue-200`}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-white border-2 border-slate-200">
@@ -2958,7 +2983,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Encaminhar chamado</div>
             </div>
             <div className="border-l border-slate-300 h-8"></div>
-            <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors" onClick={() => setShowManageCollaboratorsCard(!showManageCollaboratorsCard)}>
+            <div data-testid="ticket-manage-collaborators" className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors" onClick={() => setShowManageCollaboratorsCard(!showManageCollaboratorsCard)}>
               {/* Gerenciar colaboradores - mantém */}
               <svg className="w-6 h-6 text-black hover:text-slate-700" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
@@ -3004,18 +3029,18 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
             </div>
             <div className="border-l border-slate-300 h-8"></div>
             {/* Colaboradores na linha de ferramentas */}
-            {selectedCollaborators && selectedCollaborators.length > 0 && (
-              <div className="flex items-center gap-1.5 px-3 py-2">
+            {selectedChamado.collaborators && selectedChamado.collaborators.length > 0 && (
+              <div data-testid="ticket-detail-collaborators" className="flex items-center gap-1.5 px-3 py-2">
                 <span className="text-xs font-medium text-slate-500">Colabs:</span>
                 <div className="flex -space-x-1.5">
-                  {selectedCollaborators.slice(0, 3).map(collab => (
+                  {selectedChamado.collaborators.slice(0, 3).map((collab: { userId: string; userName: string }) => (
                     <div key={collab.userId} className="w-5 h-5 rounded-full bg-slate-400 flex items-center justify-center text-white text-xs font-semibold border border-slate-200 hover:z-10 cursor-pointer hover:bg-slate-500 transition-colors" title={collab.userName}>
                       {collab.userName.charAt(0).toUpperCase()}
                     </div>
                   ))}
-                  {selectedCollaborators.length > 3 && (
-                    <div className="w-5 h-5 rounded-full bg-slate-300 flex items-center justify-center text-slate-700 text-xs font-semibold border border-slate-200" title={`+${selectedCollaborators.length - 3} mais`}>
-                      +{selectedCollaborators.length - 3}
+                  {selectedChamado.collaborators.length > 3 && (
+                    <div className="w-5 h-5 rounded-full bg-slate-300 flex items-center justify-center text-slate-700 text-xs font-semibold border border-slate-200" title={`+${selectedChamado.collaborators.length - 3} mais`}>
+                      +{selectedChamado.collaborators.length - 3}
                     </div>
                   )}
                 </div>
@@ -3027,12 +3052,6 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           <div className="mx-4 mt-6 grid gap-6 sm:mx-6 lg:mx-8 lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)]">
             <section aria-labelledby="ticket-history-heading" className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 id="ticket-history-heading" className="text-lg font-semibold text-slate-900">Histórico do Chamado</h2>
-              {selectedChamado.observations && (
-                <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
-                  <h3 className="text-sm font-semibold text-slate-700">Mensagem Inicial</h3>
-                  <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-600">{selectedChamado.observations}</p>
-                </div>
-              )}
               <div className="mt-6">
                 {selectedChamado.activities && selectedChamado.activities.length > 0 ? (
                   <TimelineActivity activities={selectedChamado.activities} />
@@ -3053,7 +3072,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 </div>
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Prioridade</dt>
-                  <dd className={`mt-1 text-sm font-medium ${getPriorityColor(selectedChamado.priority)}`}>{getPriorityLabel(selectedChamado.priority)}</dd>
+                  <dd data-testid="ticket-detail-priority" className={`mt-1 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getPriorityBadgeColor(selectedChamado.priority)}`}>{getPriorityLabel(selectedChamado.priority)}</dd>
                 </div>
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Atendente</dt>
@@ -3061,7 +3080,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 </div>
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Participantes</dt>
-                  <dd className="mt-1 text-sm font-medium text-slate-800">
+                  <dd data-testid="ticket-detail-participants" className="mt-1 text-sm font-medium text-slate-800">
                     {selectedChamado.collaborators?.length
                       ? selectedChamado.collaborators.map((collaborator: { userName: string }) => collaborator.userName).join(', ')
                       : 'Nenhum'}
@@ -3073,6 +3092,12 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                     {[formatDate(selectedChamado.createdAt), formatTime(selectedChamado.createdAt)].filter(Boolean).join(' · ') || 'N/A'}
                   </dd>
                 </div>
+                {selectedChamado.observations && (
+                  <div>
+                    <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Mensagem inicial</dt>
+                    <dd data-testid="ticket-initial-message" className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{selectedChamado.observations}</dd>
+                  </div>
+                )}
               </dl>
             </aside>
           </div>
