@@ -1923,6 +1923,10 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
     },
         { enabled: !!clientId }
   );
+  const chamadoDetailQuery = trpc.chamados.getDetail.useQuery(
+    { chamadoId: selectedChamado?.id || '' },
+    { enabled: !!selectedChamado?.id },
+  );
   // Calcular total de páginas
   const totalChamados = chamadosQuery.data?.total || 0;
   const totalPages = Math.ceil(totalChamados / ITEMS_PER_PAGE);
@@ -1983,6 +1987,12 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       setSelectedCollaborators(getCollaboratorsQuery.data.collaborators || []);
     }
   }, [getCollaboratorsQuery.data, isEditingCollaborators]);
+
+  React.useEffect(() => {
+    const detail = chamadoDetailQuery.data?.chamado;
+    if (!detail) return;
+    setSelectedChamado((current: any) => current?.id === detail.id ? { ...current, ...detail } : current);
+  }, [chamadoDetailQuery.data]);
 
   React.useEffect(() => {
     if (showManageCollaboratorsCard && selectedChamado && getCollaboratorsQuery.data) {
@@ -2317,6 +2327,15 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   console.log('[DEBUG] chamados:', chamados);
   console.log('[DEBUG] chamados.length:', chamados.length);
 
+  const detailCustomer = selectedChamado?.customer ?? {
+    id: selectedChamado?.customerId || null,
+    name: selectedChamado?.customerName || selectedChamado?.company || null,
+    document: selectedChamado?.customerCNPJ || null,
+    phone: selectedChamado?.customerPhone || null,
+    email: selectedChamado?.customerEmail || null,
+    source: 'snapshot',
+  };
+
   // Filtrar por usuário (todos vs somente seu)
   // Escopo, busca e ordenaÃ§Ã£o sÃ£o resolvidos pelo backend antes da paginaÃ§Ã£o.
   const filteredChamados = chamados;
@@ -2440,7 +2459,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   }
 
   return (
-    <div className="space-y-4">
+    <div className="relative min-h-full space-y-4">
       {/* Cards de Status - Estilizados */}
       <div className="flex flex-wrap gap-4">
         {statusCards.map((card: any, idx) => {
@@ -2862,25 +2881,26 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
       {/* Tela Branca de Detalhes do Chamado */}
       {selectedChamado && (
-        <div className="fixed top-0 right-0 bottom-0 left-20 lg:left-64 bg-white z-40 overflow-y-auto border border-slate-300" style={{height: '1016px', marginBottom: '5px', marginLeft: '-175px', marginRight: '0px', marginTop: '83px', paddingBottom: '16px', paddingLeft: '2px', width: 'calc(100% - 80px)'}}>
+        <div data-testid="ticket-detail-shell" className="absolute inset-0 z-20 min-h-full overflow-y-auto bg-slate-50 pb-8">
           {/* Header com Botao Voltar */}
-          <div className="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
+          <div className="sticky top-0 z-10 flex flex-col gap-4 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 md:flex-row md:items-center md:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              {onOpenMobileMenu && <button type="button" onClick={onOpenMobileMenu} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
               <Button
                 onClick={() => setSelectedChamado(null)}
                 variant="outline"
-                className="flex items-center gap-2"
+                className="flex shrink-0 items-center gap-2"
               >
                 <X className="w-4 h-4" />
                 Voltar
               </Button>
-              <h1 className="text-2xl font-bold text-slate-900">
-                #{String(selectedChamado.number).padStart(4, '0')} - {selectedChamado.title}
+              <h1 className="truncate text-lg font-bold text-slate-900 sm:text-xl">
+                #{String(selectedChamado.number).padStart(4, '0')} · {detailCustomer.name || 'Cliente não informado'}
               </h1>
             </div>
             
             {/* Status e Botao Encerrar */}
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3 md:justify-end">
               <Select value={selectedChamado.status} onValueChange={(value) => handleUpdateStatus(value as 'open' | 'in_progress' | 'waiting' | 'closed')}>
                 <SelectTrigger className="w-40 bg-slate-50 border-2 border-slate-200 focus:border-blue-500">
                   <SelectValue />
@@ -2901,30 +2921,30 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
             </div>
           </div>
 
-          {/* Retangulo com Dados do Cliente */}
-          <div className="bg-slate-600 text-white p-4 mx-8 mt-6 rounded-lg flex items-center justify-between" style={{height: '103px', marginBottom: '6px', marginLeft: '31px', paddingBottom: '0px', paddingLeft: '16px', paddingTop: '0px', width: '1778px'}}>
-            <div className="flex items-center gap-8 w-full">
-              <div className="flex-1">
-                <p className="text-xs text-slate-300">Nome</p>
-                <p className="text-sm font-medium">{selectedChamado.clientName || 'N/A'}</p>
+          {/* Cliente canonico do ERP, com fallback seguro para snapshots legados */}
+          <section aria-labelledby="ticket-customer-heading" className="mx-4 mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:mx-6 lg:mx-8">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div>
+                <p id="ticket-customer-heading" className="text-xs font-bold uppercase tracking-wider text-slate-500">Cliente</p>
+                <p className="mt-1 text-lg font-semibold text-slate-900">{detailCustomer.name || 'N/A'}</p>
               </div>
-              <div className="border-l border-slate-500 h-12"></div>
-              <div className="flex-1">
-                <p className="text-xs text-slate-300">Telefone</p>
-                <p className="text-sm font-medium">{selectedChamado.clientPhone || 'N/A'}</p>
+              {detailCustomer.source === 'erp' && <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">ERP</span>}
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <p className="text-xs font-medium text-slate-500">CPF/CNPJ</p>
+                <p className="mt-1 text-sm font-medium text-slate-800">{detailCustomer.document || 'N/A'}</p>
               </div>
-              <div className="border-l border-slate-500 h-12"></div>
-              <div className="flex-1">
-                <p className="text-xs text-slate-300">CNPJ</p>
-                <p className="text-sm font-medium">{selectedChamado.clientCnpj || 'N/A'}</p>
+              <div>
+                <p className="text-xs font-medium text-slate-500">Telefone</p>
+                <p className="mt-1 text-sm font-medium text-slate-800">{detailCustomer.phone || 'N/A'}</p>
               </div>
-              <div className="border-l border-slate-500 h-12"></div>
-              <div className="flex-1">
-                <p className="text-xs text-slate-300">Email</p>
-                <p className="text-sm font-medium">{selectedChamado.clientEmail || 'N/A'}</p>
+              <div>
+                <p className="text-xs font-medium text-slate-500">Email</p>
+                <p className="mt-1 break-all text-sm font-medium text-slate-800">{detailCustomer.email || 'N/A'}</p>
               </div>
             </div>
-          </div>
+          </section>
 
           {/* Linha de Icones com Tooltips */}
           <div className="flex items-center justify-center gap-0 px-8 py-6 border-b border-slate-200" style={{height: '60px', marginBottom: '-5px'}}>
@@ -3003,30 +3023,59 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
             )}
           </div>
 
-          {/* Mensagem Inicial do Chamado */}
-          {selectedChamado && selectedChamado.observations && (
-            <div className="mx-8 mt-6 p-4 bg-white rounded-lg border border-slate-200">
-              <h3 className="text-sm font-semibold text-slate-700 mb-2">Mensagem Inicial</h3>
-              <p className="text-sm text-slate-600 leading-relaxed">{selectedChamado.observations}</p>
-            </div>
-          )}
-
-          {/* Historico do Chamado */}
-          {selectedChamado && (
-            <div className="mx-8 mt-8 pb-8">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-semibold text-slate-900">Historico do Chamado</h3>
-              </div>
-              
-              {selectedChamado.activities && selectedChamado.activities.length > 0 ? (
-                <TimelineActivity activities={selectedChamado.activities} />
-              ) : (
-                <div className="text-center py-8 text-slate-500">
-                  <p>Nenhuma atividade registrada ainda.</p>
+          {/* Primeira camada: historico principal e detalhes laterais */}
+          <div className="mx-4 mt-6 grid gap-6 sm:mx-6 lg:mx-8 lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)]">
+            <section aria-labelledby="ticket-history-heading" className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 id="ticket-history-heading" className="text-lg font-semibold text-slate-900">Histórico do Chamado</h2>
+              {selectedChamado.observations && (
+                <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <h3 className="text-sm font-semibold text-slate-700">Mensagem Inicial</h3>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-600">{selectedChamado.observations}</p>
                 </div>
               )}
-            </div>
-          )}
+              <div className="mt-6">
+                {selectedChamado.activities && selectedChamado.activities.length > 0 ? (
+                  <TimelineActivity activities={selectedChamado.activities} />
+                ) : (
+                  <div className="rounded-lg border border-dashed border-slate-200 py-10 text-center text-sm text-slate-500">
+                    Nenhuma atividade registrada ainda.
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <aside aria-labelledby="ticket-details-heading" className="self-start rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 id="ticket-details-heading" className="text-lg font-semibold text-slate-900">Detalhes do Chamado</h2>
+              <dl className="mt-5 space-y-4">
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Título</dt>
+                  <dd className="mt-1 text-sm font-medium text-slate-800">{selectedChamado.title || 'N/A'}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Prioridade</dt>
+                  <dd className={`mt-1 text-sm font-medium ${getPriorityColor(selectedChamado.priority)}`}>{getPriorityLabel(selectedChamado.priority)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Atendente</dt>
+                  <dd className="mt-1 text-sm font-medium text-slate-800">{selectedChamado.assignedTo || 'N/A'}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Participantes</dt>
+                  <dd className="mt-1 text-sm font-medium text-slate-800">
+                    {selectedChamado.collaborators?.length
+                      ? selectedChamado.collaborators.map((collaborator: { userName: string }) => collaborator.userName).join(', ')
+                      : 'Nenhum'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Data de abertura</dt>
+                  <dd className="mt-1 text-sm font-medium text-slate-800">
+                    {[formatDate(selectedChamado.createdAt), formatTime(selectedChamado.createdAt)].filter(Boolean).join(' · ') || 'N/A'}
+                  </dd>
+                </div>
+              </dl>
+            </aside>
+          </div>
 
           {/* Modal de Registrar Atividade */}
           {showRegisterActivityModal && selectedChamado && (

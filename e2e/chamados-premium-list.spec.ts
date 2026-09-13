@@ -242,9 +242,9 @@ test("Chamados keeps closed tickets out of Total across scope, search, sorting a
   await expect(ticketTable.getByText("Cliente Alpha", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^Total/ })).toContainText("22");
   await expect(page.getByRole("button", { name: /^Fechados/ })).toContainText("3");
+  await page.getByRole("button", { name: "Voltar", exact: true }).click();
   await page.getByRole("button", { name: /^Fechados/ }).click();
   await expect(ticketTable.getByText("Cliente Alpha", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Voltar", exact: true }).click();
   await page.getByRole("button", { name: /^Total/ }).click();
 
   const prioritySort = page.getByRole("button", { name: "Ordenar por Prioridade" });

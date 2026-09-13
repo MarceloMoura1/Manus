@@ -70,6 +70,52 @@ function checkRateLimit(clientId: string): void {
   record.count++;
 }
 
+type TicketCustomerSnapshot = {
+  customerId?: string | null;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  customerEmail?: string | null;
+  customerCNPJ?: string | null;
+  company?: string | null;
+};
+
+type CanonicalTicketCustomer = {
+  crmClientId: string;
+  customerType?: "person" | "company" | null;
+  companyName?: string | null;
+  responsibleName?: string | null;
+  cpfCnpj?: string | null;
+  phone?: string | null;
+  email?: string | null;
+};
+
+export function resolveTicketDetailCustomer(
+  chamado: TicketCustomerSnapshot,
+  canonicalCustomer: CanonicalTicketCustomer | null,
+) {
+  if (canonicalCustomer) {
+    return {
+      id: canonicalCustomer.crmClientId,
+      type: canonicalCustomer.customerType ?? null,
+      name: canonicalCustomer.companyName?.trim() || canonicalCustomer.responsibleName?.trim() || null,
+      document: canonicalCustomer.cpfCnpj || null,
+      phone: canonicalCustomer.phone || null,
+      email: canonicalCustomer.email || null,
+      source: "erp" as const,
+    };
+  }
+
+  return {
+    id: chamado.customerId || null,
+    type: null,
+    name: chamado.customerName?.trim() || chamado.company?.trim() || null,
+    document: chamado.customerCNPJ || null,
+    phone: chamado.customerPhone || null,
+    email: chamado.customerEmail || null,
+    source: "snapshot" as const,
+  };
+}
+
 export const chamadosRouter = router({
   /**
    * Busca clientes canônicos do ERP para abertura de chamado.
@@ -173,7 +219,7 @@ export const chamadosRouter = router({
     )
     .query(async ({ input, ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
+        const clientId = ctx.tenantId;
         
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
@@ -195,7 +241,16 @@ export const chamadosRouter = router({
           });
         }
         
-        return { chamado };
+        const canonicalCustomer = chamado.customerId
+          ? await getCrmClientById(chamado.customerId, clientId)
+          : null;
+
+        return {
+          chamado: {
+            ...chamado,
+            customer: resolveTicketDetailCustomer(chamado, canonicalCustomer),
+          },
+        };
       } catch (error) {
         console.error('[ERROR] Failed to get chamado detail:', error);
         

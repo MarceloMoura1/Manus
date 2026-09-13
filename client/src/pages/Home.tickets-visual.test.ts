@@ -22,6 +22,7 @@ vi.mock("@/lib/trpc", () => {
       useUtils: () => ({ chamados: { list: { invalidate }, getStatusCounts: { invalidate } } }),
       chamados: {
         list: { useQuery: () => query({ chamados: ticketState.tickets, total: ticketState.tickets.length }) },
+        getDetail: { useQuery: () => query(undefined) },
         getStatusCounts: { useQuery: () => query(ticketState.statusCounts) },
         getCollaborators: { useQuery: () => query({ collaborators: [] }) },
         update: { useMutation: mutation },
