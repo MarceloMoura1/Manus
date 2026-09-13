@@ -43,6 +43,20 @@ const ticket = {
       attendant: "Marcelo Moura",
       actionType: "forward",
     },
+    {
+      id: "activity-close",
+      date: Date.UTC(2026, 8, 13, 14, 25, 0),
+      description: "Chamado encerrado após validação.",
+      attendant: "Sistema",
+      actionType: "close",
+    },
+    {
+      id: "activity-create",
+      date: Date.UTC(2026, 8, 12, 10, 0, 0),
+      description: "Chamado criado.",
+      attendant: "Marcelo Moura",
+      actionType: "register",
+    },
   ],
 };
 
@@ -155,6 +169,11 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
   await expect(page.getByTestId("ticket-status-control")).toHaveAttribute("data-status", "open");
   await expect(page.getByTestId("ticket-status-control")).toHaveClass(/bg-blue-50/);
   await expect(page.getByTestId("ticket-detail-priority")).toHaveClass(/bg-red-50/);
+  await expect(page.getByTestId("ticket-detail-status")).toContainText("Aberto");
+  await expect(page.getByTestId("ticket-action-bar")).toContainText("Encaminhar");
+  await expect(page.getByTestId("ticket-action-bar")).toContainText("Colaboradores");
+  await expect(page.getByTestId("ticket-action-bar")).toContainText("Editar");
+  await expect(page.getByTestId("ticket-action-bar")).toContainText("Registrar");
   await expectOpaqueSurface(detail);
   await expectOpaqueSurface(page.getByTestId("ticket-customer-card"));
   await expectOpaqueSurface(page.getByTestId("ticket-action-bar"));
@@ -162,6 +181,24 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
   await expectOpaqueSurface(page.getByTestId("ticket-details-panel"));
   await expectOpaqueSurface(page.getByTestId("timeline-activity-surface-activity-note"));
   await expectOpaqueSurface(page.getByTestId("ticket-initial-message"));
+  const whiteSurfaceColors = await Promise.all([
+    page.getByTestId("ticket-customer-card"),
+    page.getByTestId("ticket-action-bar"),
+    page.getByTestId("ticket-history-panel"),
+    page.getByTestId("ticket-details-panel"),
+  ].map(locator => locator.evaluate(element => getComputedStyle(element).backgroundColor)));
+  expect(new Set(whiteSurfaceColors).size).toBe(1);
+  const eventAccentColors = await Promise.all([
+    "activity-note",
+    "activity-forward",
+    "activity-close",
+    "activity-create",
+  ].map(id => page.getByTestId(`timeline-activity-header-${id}`).evaluate(element => getComputedStyle(element).backgroundColor)));
+  expect(new Set(eventAccentColors).size).toBe(4);
+  await expect(page.getByTestId("timeline-activity-header-activity-note").getByText("Nota", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("timeline-activity-header-activity-forward").getByText("Colaborador", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("timeline-activity-header-activity-close").getByText("Sistema", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("timeline-activity-header-activity-create").getByText("Criação", { exact: true })).toBeVisible();
   await expectDetailWorkspaceToCover(detail, page.locator("tbody"));
   await expectDetailWorkspaceToCover(detail, page.getByText("Mostrando 1 a 1 de 1 chamados", { exact: true }));
 

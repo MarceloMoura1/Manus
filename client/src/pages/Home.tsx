@@ -2906,7 +2906,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
       {/* Tela Branca de Detalhes do Chamado */}
       {selectedChamado && (
-        <div data-testid="ticket-detail-shell" className="absolute inset-0 z-20 min-h-full overflow-y-auto bg-slate-100 pb-8">
+        <div data-testid="ticket-detail-shell" className="absolute inset-0 z-20 min-h-full overflow-y-auto bg-slate-50 pb-8">
           {/* Header com Botao Voltar */}
           <div className="sticky top-0 z-10 flex flex-col gap-4 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 md:flex-row md:items-center md:justify-between">
             <div className="flex min-w-0 items-center gap-3">
@@ -2947,60 +2947,75 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           </div>
 
           {/* Cliente canonico do ERP, com fallback seguro para snapshots legados */}
-          <section data-testid="ticket-customer-card" aria-labelledby="ticket-customer-heading" className="mx-4 mt-6 rounded-xl border border-sky-100 bg-sky-50 p-5 shadow-sm sm:mx-6 lg:mx-8">
-            <div className="mb-4 flex items-center justify-between gap-4">
-              <div>
-                <p id="ticket-customer-heading" className="text-xs font-bold uppercase tracking-wider text-slate-500">Cliente</p>
-                <p className="mt-1 text-lg font-semibold text-slate-900">{detailCustomer.name || 'N/A'}</p>
+          <section data-testid="ticket-customer-card" aria-labelledby="ticket-customer-heading" className="mx-4 mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:mx-6 lg:mx-8">
+            <div className="mb-5 flex items-center gap-3">
+              <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600"><User className="h-5 w-5" /></span>
+              <div className="min-w-0">
+                <p id="ticket-customer-heading" className="text-xs font-bold uppercase tracking-wider text-blue-600">Cliente</p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <p className="text-lg font-semibold text-slate-900">{detailCustomer.name || 'N/A'}</p>
+                  {detailCustomer.source === 'erp' && <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">ERP</span>}
+                </div>
               </div>
-              {detailCustomer.source === 'erp' && <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">ERP</span>}
             </div>
             <div className="grid gap-4 sm:grid-cols-3">
-              <div>
+              <div className="flex items-start gap-2">
+                <FileText className="mt-0.5 h-4 w-4 text-slate-400" />
+                <div>
                 <p className="text-xs font-medium text-slate-500">CPF/CNPJ</p>
                 <p className="mt-1 text-sm font-medium text-slate-800">{detailCustomer.document || 'N/A'}</p>
+                </div>
               </div>
-              <div>
+              <div className="flex items-start gap-2">
+                <PhoneIcon className="mt-0.5 h-4 w-4 text-slate-400" />
+                <div>
                 <p className="text-xs font-medium text-slate-500">Telefone</p>
                 <p className="mt-1 text-sm font-medium text-slate-800">{detailCustomer.phone || 'N/A'}</p>
+                </div>
               </div>
-              <div>
+              <div className="flex min-w-0 items-start gap-2">
+                <Mail className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                <div className="min-w-0">
                 <p className="text-xs font-medium text-slate-500">Email</p>
                 <p className="mt-1 break-all text-sm font-medium text-slate-800">{detailCustomer.email || 'N/A'}</p>
+                </div>
               </div>
             </div>
           </section>
 
           {/* Linha de Icones com Tooltips */}
-          <div data-testid="ticket-action-bar" className="flex items-center justify-center gap-0 border-b border-slate-200 bg-white px-8 py-6" style={{height: '60px', marginBottom: '-5px'}}>
-            <div className="group relative cursor-pointer rounded-lg px-6 py-4 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowForwardCard(!showForwardCard)}>
+          <div data-testid="ticket-action-bar" className="flex min-h-[76px] items-center justify-start gap-0 overflow-x-auto border-b border-slate-200 bg-white px-4 py-3 sm:justify-center">
+            <div className="group relative flex min-w-[84px] cursor-pointer flex-col items-center gap-1 rounded-lg px-3 py-2 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowForwardCard(!showForwardCard)}>
               {/* Círculo com seta - Encaminhar */}
               <svg className="h-6 w-6 text-slate-600 transition-colors group-hover:text-blue-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 8l4 4m-4-4l-4 4" />
                 <path d="M12 16v-4" />
               </svg>
+              <span className="text-[11px] font-medium">Encaminhar</span>
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Encaminhar chamado</div>
             </div>
             <div className="border-l border-slate-300 h-8"></div>
-            <div data-testid="ticket-manage-collaborators" className="group relative cursor-pointer rounded-lg px-6 py-4 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowManageCollaboratorsCard(!showManageCollaboratorsCard)}>
+            <div data-testid="ticket-manage-collaborators" className="group relative flex min-w-[92px] cursor-pointer flex-col items-center gap-1 rounded-lg px-3 py-2 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowManageCollaboratorsCard(!showManageCollaboratorsCard)}>
               {/* Gerenciar colaboradores - mantém */}
               <svg className="h-6 w-6 text-slate-600 transition-colors group-hover:text-blue-700" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
               </svg>
+              <span className="text-[11px] font-medium">Colaboradores</span>
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Gerenciar colaboradores</div>
             </div>
             <div className="border-l border-slate-300 h-8"></div>
-            <div className="group relative cursor-pointer rounded-lg px-6 py-4 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowEditCard(!showEditCard)}>
+            <div className="group relative flex min-w-[76px] cursor-pointer flex-col items-center gap-1 rounded-lg px-3 py-2 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowEditCard(!showEditCard)}>
               {/* Editar chamado - mantém */}
               <svg className="h-6 w-6 text-slate-600 transition-colors group-hover:text-blue-700" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" />
                 <path d="M20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
               </svg>
+              <span className="text-[11px] font-medium">Editar</span>
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Editar chamado</div>
             </div>
             <div className="border-l border-slate-300 h-8"></div>
-            <div className="group relative cursor-pointer rounded-lg px-6 py-4 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowRegisterActivityModal(true)}>
+            <div className="group relative flex min-w-[76px] cursor-pointer flex-col items-center gap-1 rounded-lg px-3 py-2 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowRegisterActivityModal(true)}>
               {/* Balão retangular com 2 linhas - Atividade */}
               <svg className="h-6 w-6 text-slate-600 transition-colors group-hover:text-blue-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <rect x="3" y="5" width="14" height="10" rx="2" />
@@ -3008,23 +3023,26 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 <line x1="6" y1="8" x2="12" y2="8" />
                 <line x1="6" y1="11" x2="12" y2="11" />
               </svg>
+              <span className="text-[11px] font-medium">Registrar</span>
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Registro de atividade</div>
             </div>
             <div className="border-l border-slate-300 h-8"></div>
-            <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors">
+            <div className="group relative flex min-w-[76px] cursor-pointer flex-col items-center gap-1 px-3 py-2 transition-colors hover:bg-slate-50">
               {/* Clipe - Anexo */}
               <svg className="w-6 h-6 text-black hover:text-slate-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
               </svg>
+              <span className="text-[11px] font-medium text-slate-600">Anexos</span>
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Anexo</div>
             </div>
             <div className="border-l border-slate-300 h-8"></div>
-            <div className="group relative cursor-pointer px-6 py-4 hover:bg-slate-50 transition-colors">
+            <div className="group relative flex min-w-[76px] cursor-pointer flex-col items-center gap-1 px-3 py-2 transition-colors hover:bg-slate-50">
               {/* Pasta bonita - Dossiê */}
               <svg className="w-6 h-6 text-black hover:text-slate-700" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" />
               </svg>
+              <span className="text-[11px] font-medium text-slate-600">Dossiê</span>
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Dossiê do cliente</div>
             </div>
             <div className="border-l border-slate-300 h-8"></div>
@@ -3050,8 +3068,8 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
           {/* Primeira camada: historico principal e detalhes laterais */}
           <div className="mx-4 mt-6 grid gap-6 sm:mx-6 lg:mx-8 lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)]">
-            <section data-testid="ticket-history-panel" aria-labelledby="ticket-history-heading" className="min-w-0 rounded-xl border border-sky-100 bg-sky-50 p-5 shadow-sm">
-              <h2 id="ticket-history-heading" className="text-lg font-semibold text-slate-900">Histórico do Chamado</h2>
+            <section data-testid="ticket-history-panel" aria-labelledby="ticket-history-heading" className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 id="ticket-history-heading" className="flex items-center gap-2 text-lg font-semibold text-slate-900"><span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><MessageSquare className="h-4 w-4" /></span>Histórico do Chamado</h2>
               <div className="mt-6">
                 {selectedChamado.activities && selectedChamado.activities.length > 0 ? (
                   <TimelineActivity activities={selectedChamado.activities} />
@@ -3063,16 +3081,22 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               </div>
             </section>
 
-            <aside data-testid="ticket-details-panel" aria-labelledby="ticket-details-heading" className="self-start rounded-xl border border-slate-200 bg-slate-50 p-5 shadow-sm">
-              <h2 id="ticket-details-heading" className="text-lg font-semibold text-slate-900">Detalhes do Chamado</h2>
+            <aside data-testid="ticket-details-panel" aria-labelledby="ticket-details-heading" className="self-start rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 id="ticket-details-heading" className="flex items-center gap-2 text-lg font-semibold text-slate-900"><ClipboardList className="h-5 w-5 text-blue-600" />Detalhes do Chamado</h2>
               <dl className="mt-5 space-y-4">
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Título</dt>
                   <dd className="mt-1 text-sm font-medium text-slate-800">{selectedChamado.title || 'N/A'}</dd>
                 </div>
-                <div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Prioridade</dt>
                   <dd data-testid="ticket-detail-priority" className={`mt-1 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getPriorityBadgeColor(selectedChamado.priority)}`}>{getPriorityLabel(selectedChamado.priority)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Status</dt>
+                    <dd data-testid="ticket-detail-status" className={`mt-1 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusBadgeColor(selectedChamado.status)}`}>{getStatusLabel(selectedChamado.status)}</dd>
+                  </div>
                 </div>
                 <div>
                   <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Atendente</dt>
@@ -3090,7 +3114,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                   <dd data-testid="ticket-detail-participants" className="mt-1 flex flex-wrap gap-1.5 text-sm font-medium text-slate-800">
                     {selectedChamado.collaborators?.length
                       ? selectedChamado.collaborators.map((collaborator: { userId: string; userName: string }) => (
-                        <span key={collaborator.userId} className="rounded-full border border-sky-100 bg-sky-50 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                        <span key={collaborator.userId} className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
                           {collaborator.userName}
                         </span>
                       ))
@@ -3106,7 +3130,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 {selectedChamado.observations && (
                   <div>
                     <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Mensagem inicial</dt>
-                    <dd data-testid="ticket-initial-message" className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-sky-100 bg-sky-50 p-3 text-sm leading-relaxed text-slate-700">{selectedChamado.observations}</dd>
+                    <dd data-testid="ticket-initial-message" className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm leading-relaxed text-slate-700">{selectedChamado.observations}</dd>
                   </div>
                 )}
               </dl>

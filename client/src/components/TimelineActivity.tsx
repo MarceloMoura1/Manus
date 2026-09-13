@@ -75,6 +75,7 @@ export function getActivityAccentClass(actionType?: string) {
     case 'edit':
       return 'border-l-violet-400';
     case 'register':
+      return 'border-l-amber-400';
     case 'note':
     default:
       return 'border-l-blue-400';
@@ -89,9 +90,26 @@ export function getActivityTintClass(actionType?: string) {
     case 'edit':
       return 'bg-violet-50';
     case 'register':
+      return 'bg-amber-50';
     case 'note':
     default:
       return 'bg-blue-50';
+  }
+}
+
+export function getActivityBadge(actionType?: ActivityItem['actionType']) {
+  switch (actionType) {
+    case 'close':
+      return { label: 'Sistema', className: 'border-emerald-200 bg-emerald-50 text-emerald-700' };
+    case 'forward':
+      return { label: 'Colaborador', className: 'border-violet-200 bg-violet-50 text-violet-700' };
+    case 'edit':
+      return { label: 'Alteração', className: 'border-violet-200 bg-violet-50 text-violet-700' };
+    case 'register':
+      return { label: 'Criação', className: 'border-amber-200 bg-amber-50 text-amber-700' };
+    case 'note':
+    default:
+      return { label: 'Nota', className: 'border-blue-200 bg-blue-50 text-blue-700' };
   }
 }
 
@@ -124,6 +142,7 @@ export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities }
       <div className="space-y-6">
         {activities.map((activity, index) => {
           const { date, time } = formatDateTime(activity.date);
+          const badge = getActivityBadge(activity.actionType);
           
           return (
             <div key={activity.id} data-testid={`timeline-activity-${activity.id}`} className="relative pl-20">
@@ -135,12 +154,17 @@ export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities }
               </div>
 
               {/* Conteúdo */}
-              <div data-testid={`timeline-activity-surface-${activity.id}`} className={`rounded-lg border border-l-2 border-slate-200 p-4 shadow-sm transition-shadow hover:shadow-md ${getActivityAccentClass(activity.actionType)} ${getActivityTintClass(activity.actionType)}`}>
+              <div data-testid={`timeline-activity-surface-${activity.id}`} className={`overflow-hidden rounded-lg border border-l-2 border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md ${getActivityAccentClass(activity.actionType)}`}>
+                <div data-testid={`timeline-activity-header-${activity.id}`} className={`flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-2.5 ${getActivityTintClass(activity.actionType)}`}>
                 {/* Data e Hora */}
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xs font-semibold text-slate-600">{date}</span>
-                  <span className="text-xs text-slate-500">{time}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-slate-600">{date}</span>
+                    <span className="text-xs text-slate-500">{time}</span>
+                  </div>
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badge.className}`}>{badge.label}</span>
                 </div>
+
+                <div className="p-4">
 
                 {/* Eventos estruturais precisam do resumo; notas e apontamentos já têm conteúdo próprio. */}
                 {shouldRenderActivityNarrative(activity.actionType) && (
@@ -150,7 +174,7 @@ export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities }
                 )}
 
                 {/* Descrição */}
-                <div className="mb-2 rounded bg-white p-3">
+                <div className="mb-3 rounded-lg bg-slate-50 p-3">
                   <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
                     {activity.description}
                   </p>
@@ -158,8 +182,9 @@ export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities }
 
                 {/* Nome do Atendente */}
                 <div data-testid={`timeline-activity-author-${activity.id}`} className="flex items-center gap-2 text-xs text-slate-500">
-                  <User className="w-3 h-3" />
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600"><User className="h-3 w-3" /></span>
                   <span>{getActivityAuthorName(activity.attendant)}</span>
+                </div>
                 </div>
               </div>
             </div>

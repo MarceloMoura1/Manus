@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   getActivityAccentClass,
   getActivityAuthorName,
+  getActivityBadge,
   getActivitySummary,
   getActivityTintClass,
   shouldRenderActivityNarrative,
@@ -60,9 +61,15 @@ describe("TimelineActivity", () => {
     expect(getActivityAccentClass("edit")).toBe("border-l-violet-400");
     expect(getActivityAccentClass("forward")).toBe("border-l-violet-400");
     expect(getActivityAccentClass("close")).toBe("border-l-emerald-400");
+    expect(getActivityAccentClass("register")).toBe("border-l-amber-400");
     expect(getActivityTintClass("note")).toBe("bg-blue-50");
     expect(getActivityTintClass("forward")).toBe("bg-violet-50");
     expect(getActivityTintClass("close")).toBe("bg-emerald-50");
+    expect(getActivityTintClass("register")).toBe("bg-amber-50");
+    expect(getActivityBadge("note").label).toBe("Nota");
+    expect(getActivityBadge("forward").label).toBe("Colaborador");
+    expect(getActivityBadge("close").label).toBe("Sistema");
+    expect(getActivityBadge("register").label).toBe("Criação");
 
     const markup = renderToStaticMarkup(React.createElement(TimelineActivity, {
       activities: [{
