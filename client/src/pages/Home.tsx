@@ -3216,7 +3216,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               ) : null}
               <div className="mt-6">
                 {selectedChamado.activities && selectedChamado.activities.length > 0 ? (
-                  <TimelineActivity activities={selectedChamado.activities} />
+                  <TimelineActivity activities={selectedChamado.activities} chamadoId={selectedChamado.id} />
                 ) : (
                   <div className="rounded-lg border border-dashed border-slate-200 py-10 text-center text-sm text-slate-500">
                     Nenhuma atividade registrada ainda.

@@ -58,16 +58,16 @@ describe("TimelineActivity", () => {
 
   it("uses discreet semantic accents and pastel tints per event type", () => {
     expect(getActivityAccentClass("note")).toBe("border-l-blue-400");
-    expect(getActivityAccentClass("edit")).toBe("border-l-violet-400");
-    expect(getActivityAccentClass("forward")).toBe("border-l-violet-400");
+    expect(getActivityAccentClass("edit")).toBe("border-l-amber-400");
+    expect(getActivityAccentClass("forward")).toBe("border-l-indigo-400");
     expect(getActivityAccentClass("close")).toBe("border-l-emerald-400");
-    expect(getActivityAccentClass("register")).toBe("border-l-amber-400");
+    expect(getActivityAccentClass("register")).toBe("border-l-orange-400");
     expect(getActivityTintClass("note")).toBe("bg-blue-50");
-    expect(getActivityTintClass("forward")).toBe("bg-violet-50");
+    expect(getActivityTintClass("forward")).toBe("bg-indigo-50");
     expect(getActivityTintClass("close")).toBe("bg-emerald-50");
-    expect(getActivityTintClass("register")).toBe("bg-amber-50");
+    expect(getActivityTintClass("register")).toBe("bg-orange-50");
     expect(getActivityBadge("note").label).toBe("Nota");
-    expect(getActivityBadge("forward").label).toBe("Colaborador");
+    expect(getActivityBadge("forward").label).toBe("Sistema");
     expect(getActivityBadge("close").label).toBe("Sistema");
     expect(getActivityBadge("register").label).toBe("Criação");
 
@@ -83,5 +83,25 @@ describe("TimelineActivity", () => {
 
     expect(markup).toContain("border-l-blue-400");
     expect(markup).toContain("bg-blue-50");
+  });
+
+  it("links a structured attachment event only through the existing private ticket route", () => {
+    const chamadoId = "11111111-1111-4111-8111-111111111111";
+    const attachmentId = "22222222-2222-4222-8222-222222222222";
+    const markup = renderToStaticMarkup(React.createElement(TimelineActivity, {
+      chamadoId,
+      activities: [{
+        id: "activity-attachment",
+        date: Date.UTC(2026, 8, 13, 12, 0, 0),
+        description: "Ana adicionou evidence.txt.",
+        attendant: "Ana",
+        actionType: "attachment_added",
+        metadata: { eventType: "attachment_added", attachmentId, fileName: "evidence.txt", mimeType: "text/plain", size: 17, sha256: "a".repeat(64) },
+      }],
+    }));
+
+    expect(markup).toContain("Visualizar arquivo");
+    expect(markup).toContain(`/api/chamados/${chamadoId}/attachments/${attachmentId}/file`);
+    expect(markup).toContain('rel="noreferrer"');
   });
 });

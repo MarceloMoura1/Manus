@@ -186,6 +186,24 @@ async function prepareDetail(page: Page) {
           canView: true,
           legacy: false,
         }];
+        currentTicket = {
+          ...currentTicket,
+          activities: [...currentTicket.activities, {
+            id: "activity-attachment",
+            date: Date.UTC(2026, 8, 13, 15, 10, 0),
+            description: "Agente Detail anexou evidence.txt.",
+            attendant: session.userName,
+            actionType: "attachment_added",
+            metadata: {
+              eventType: "attachment_added",
+              attachmentId: currentAttachments[0].attachmentId,
+              fileName: currentAttachments[0].fileName,
+              mimeType: currentAttachments[0].mimeType,
+              size: currentAttachments[0].fileSize,
+              sha256: "a".repeat(64),
+            },
+          }],
+        };
         return result({
           success: true,
           attachmentId: currentAttachments[0].attachmentId,
@@ -336,6 +354,8 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
   const attachment = page.getByTestId("ticket-attachments-list");
   await expect(attachment).toContainText("evidence.txt");
   await expect(attachment.getByTestId("ticket-attachment-view-22222222-2222-4222-8222-222222222222"))
+    .toHaveAttribute("href", `/api/chamados/${ticket.id}/attachments/22222222-2222-4222-8222-222222222222/file`);
+  await expect(page.getByTestId("timeline-activity-activity-attachment").getByRole("link", { name: "Visualizar arquivo" }))
     .toHaveAttribute("href", `/api/chamados/${ticket.id}/attachments/22222222-2222-4222-8222-222222222222/file`);
 
   await page.getByRole("button", { name: "Voltar", exact: true }).click();

@@ -14,6 +14,7 @@ export interface ActivityItem {
 
 interface TimelineActivityProps {
   activities: ActivityItem[];
+  chamadoId?: string;
 }
 
 type ActivityStyle = { icon: React.ReactNode; label: string; accent: string; tint: string; badge: string };
@@ -104,18 +105,28 @@ const statusLabels: Record<string, string> = { open: 'Aberto', in_progress: 'Em 
 const fieldLabels: Record<string, string> = { customer: 'Cliente', title: 'Título', observations: 'Observações', priority: 'Prioridade' };
 const formatBytes = (size: number) => size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / (1024 * 1024)).toFixed(1)} MB`;
 
-function renderMetadata(metadata: TicketActivityMetadata | null): React.ReactNode {
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function attachmentHref(chamadoId: string | undefined, attachmentId: string): string | null {
+  if (!chamadoId || !uuid.test(chamadoId) || !uuid.test(attachmentId)) return null;
+  return `/api/chamados/${encodeURIComponent(chamadoId)}/attachments/${encodeURIComponent(attachmentId)}/file`;
+}
+
+function renderMetadata(metadata: TicketActivityMetadata | null, chamadoId?: string): React.ReactNode {
   if (!metadata) return null;
   if (metadata.eventType === 'status_changed') return <>Status: <strong>{statusLabels[metadata.fromStatus] ?? metadata.fromStatus}</strong> → <strong>{statusLabels[metadata.toStatus] ?? metadata.toStatus}</strong></>;
   if (metadata.eventType === 'collaborator_added') return <>Adicionado: <strong>{metadata.collaboratorName}</strong></>;
   if (metadata.eventType === 'collaborator_removed') return <>Removido: <strong>{metadata.collaboratorName}</strong></>;
   if (metadata.eventType === 'ticket_forwarded') return <><span>Destino: <strong>{metadata.toAssigneeName}</strong></span>{metadata.observation ? <span className="mt-1 block whitespace-pre-wrap">Observação: {metadata.observation}</span> : null}</>;
   if (metadata.eventType === 'ticket_edited') return <ul className="space-y-1">{metadata.changes.map((change, index) => <li key={`${change.field}-${index}`}><strong>{fieldLabels[change.field]}</strong>: {change.from || '—'} → {change.to || '—'}</li>)}</ul>;
-  if (metadata.eventType === 'attachment_added') return <>{metadata.mimeType} · {formatBytes(metadata.size)}</>;
+  if (metadata.eventType === 'attachment_added') {
+    const href = attachmentHref(chamadoId, metadata.attachmentId);
+    return <><span>{metadata.mimeType} · {formatBytes(metadata.size)}</span>{href ? <a href={href} target="_blank" rel="noreferrer" className="ml-2 font-semibold text-emerald-700 underline underline-offset-2 hover:text-emerald-800">Visualizar arquivo</a> : null}</>;
+  }
   return null;
 }
 
-export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities }) => {
+export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities, chamadoId }) => {
   if (!activities || activities.length === 0) {
     return (
       <div className="text-center py-8 text-slate-500">
@@ -172,7 +183,7 @@ export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities }
                    </p>
                    {metadata && (
                      <div data-testid={`timeline-activity-metadata-${activity.id}`} className="mt-2 border-t border-slate-200 pt-2 text-xs leading-relaxed text-slate-600">
-                       {renderMetadata(metadata)}
+                        {renderMetadata(metadata, chamadoId)}
                      </div>
                    )}
                  </div>
