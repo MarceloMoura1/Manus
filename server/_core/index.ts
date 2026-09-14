@@ -17,6 +17,7 @@ import { registerConversationMediaBridge } from "../conversation-media-bridge";
 import { registerProductMediaRoutes } from "../product-media";
 import { registerUserPersonalizationRoutes } from "../user-personalization";
 import { registerTicketAttachmentRoutes } from "../chamados-attachments";
+import { startTicketAttachmentReconciler } from "../chamados-attachment-reconciler";
 
 // ─── Domínios permitidos (CORS) ───────────────────────────────────────────────
 const ALLOWED_ORIGINS = [
@@ -172,6 +173,7 @@ async function startServer() {
 
   const listenHost = process.env.HOST?.trim();
   const onListening = () => {
+    startTicketAttachmentReconciler();
     const displayHost = listenHost || "localhost";
     console.log(`\nMegaDesk rodando em http://${displayHost}:${port}`);
     console.log(`Admin:  http://${displayHost}:${port}/admin\n`);
