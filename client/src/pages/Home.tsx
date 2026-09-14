@@ -52,6 +52,7 @@ import {
   ArrowDownUp,
   Bell,
   Bot,
+  Building2,
   Check,
   CheckCheck,
   CheckCircle2,
@@ -2908,15 +2909,15 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       {selectedChamado && (
         <div data-testid="ticket-detail-shell" className="absolute inset-0 z-20 min-h-full overflow-y-auto bg-slate-50 pb-8">
           {/* Header com Botao Voltar */}
-          <div className="sticky top-0 z-10 flex flex-col gap-4 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 md:flex-row md:items-center md:justify-between">
+          <div data-testid="ticket-detail-header" className="sticky top-0 z-10 flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 md:flex-row md:items-center md:justify-between">
             <div className="flex min-w-0 items-center gap-3">
               {onOpenMobileMenu && <button type="button" onClick={onOpenMobileMenu} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
               <Button
                 onClick={() => setSelectedChamado(null)}
-                variant="outline"
-                className="flex shrink-0 items-center gap-2"
+                variant="ghost"
+                className="flex h-9 shrink-0 items-center gap-1.5 px-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
               >
-                <X className="w-4 h-4" />
+                <ArrowLeft className="h-4 w-4" />
                 Voltar
               </Button>
               <h1 className="truncate text-lg font-bold text-slate-900 sm:text-xl">
@@ -2925,9 +2926,9 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
             </div>
             
             {/* Status e Botao Encerrar */}
-            <div className="flex flex-wrap items-center gap-3 md:justify-end">
+            <div className="flex flex-wrap items-center gap-2 md:justify-end">
               <Select value={selectedChamado.status} onValueChange={(value) => handleUpdateStatus(value as 'open' | 'in_progress' | 'waiting' | 'closed')}>
-                <SelectTrigger data-testid="ticket-status-control" data-status={selectedChamado.status} className={`w-40 border ${getStatusBadgeColor(selectedChamado.status)} focus:ring-2 focus:ring-blue-200`}>
+                <SelectTrigger data-testid="ticket-status-control" data-status={selectedChamado.status} className={`h-9 w-36 border ${getStatusBadgeColor(selectedChamado.status)} focus:ring-2 focus:ring-blue-200`}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-white border-2 border-slate-200">
@@ -2939,7 +2940,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               </Select>
               <Button
                 onClick={() => setShowCloseModal(true)}
-                className="bg-red-500 hover:bg-red-600 text-white font-semibold"
+                className="h-9 bg-red-500 px-4 font-semibold text-white hover:bg-red-600"
               >
                 Encerrar Chamado
               </Button>
@@ -2947,123 +2948,124 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           </div>
 
           {/* Cliente canonico do ERP, com fallback seguro para snapshots legados */}
-          <section data-testid="ticket-customer-card" aria-labelledby="ticket-customer-heading" className="mx-4 mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:mx-6 lg:mx-8">
-            <div className="mb-5 flex items-center gap-3">
-              <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600"><User className="h-5 w-5" /></span>
-              <div className="min-w-0">
-                <p id="ticket-customer-heading" className="text-xs font-bold uppercase tracking-wider text-blue-600">Cliente</p>
-                <div className="mt-1 flex flex-wrap items-center gap-2">
-                  <p className="text-lg font-semibold text-slate-900">{detailCustomer.name || 'N/A'}</p>
-                  {detailCustomer.source === 'erp' && <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">ERP</span>}
-                </div>
-              </div>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="flex items-start gap-2">
-                <FileText className="mt-0.5 h-4 w-4 text-slate-400" />
-                <div>
-                <p className="text-xs font-medium text-slate-500">CPF/CNPJ</p>
-                <p className="mt-1 text-sm font-medium text-slate-800">{detailCustomer.document || 'N/A'}</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-2">
-                <PhoneIcon className="mt-0.5 h-4 w-4 text-slate-400" />
-                <div>
-                <p className="text-xs font-medium text-slate-500">Telefone</p>
-                <p className="mt-1 text-sm font-medium text-slate-800">{detailCustomer.phone || 'N/A'}</p>
-                </div>
-              </div>
-              <div className="flex min-w-0 items-start gap-2">
-                <Mail className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+          <section data-testid="ticket-customer-card" aria-labelledby="ticket-customer-heading" className="mx-4 mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:mx-6 sm:px-5 lg:mx-8">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:gap-6">
+              <div className="flex min-w-0 items-center gap-3 md:min-w-[270px]">
+                <span data-testid="ticket-customer-main-icon" className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-blue-100 text-blue-700 ring-4 ring-blue-50"><Building2 className="h-7 w-7" /></span>
                 <div className="min-w-0">
-                <p className="text-xs font-medium text-slate-500">Email</p>
-                <p className="mt-1 break-all text-sm font-medium text-slate-800">{detailCustomer.email || 'N/A'}</p>
+                  <p id="ticket-customer-heading" className="text-xs font-bold uppercase tracking-wider text-blue-600">Cliente</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <p className="truncate text-base font-semibold text-slate-900 sm:text-lg">{detailCustomer.name || 'N/A'}</p>
+                    {detailCustomer.source === 'erp' && <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">ERP</span>}
+                  </div>
+                </div>
+              </div>
+              <div data-testid="ticket-customer-data" className="grid min-w-0 flex-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3 md:border-l md:border-t-0 md:py-1 md:pl-6">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <FileText className="h-4 w-4 shrink-0 text-slate-400" />
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">CPF/CNPJ</p>
+                    <p className="mt-0.5 truncate text-sm font-medium text-slate-800">{detailCustomer.document || 'N/A'}</p>
+                  </div>
+                </div>
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <PhoneIcon className="h-4 w-4 shrink-0 text-slate-400" />
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Telefone</p>
+                    <p className="mt-0.5 truncate text-sm font-medium text-slate-800">{detailCustomer.phone || 'N/A'}</p>
+                  </div>
+                </div>
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <Mail className="h-4 w-4 shrink-0 text-slate-400" />
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Email</p>
+                    <p className="mt-0.5 truncate text-sm font-medium text-slate-800" title={detailCustomer.email || 'N/A'}>{detailCustomer.email || 'N/A'}</p>
+                  </div>
                 </div>
               </div>
             </div>
           </section>
 
-          {/* Linha de Icones com Tooltips */}
-          <div data-testid="ticket-action-bar" className="flex min-h-[76px] items-center justify-start gap-0 overflow-x-auto border-b border-slate-200 bg-white px-4 py-3 sm:justify-center">
-            <div className="group relative flex min-w-[84px] cursor-pointer flex-col items-center gap-1 rounded-lg px-3 py-2 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowForwardCard(!showForwardCard)}>
-              {/* Círculo com seta - Encaminhar */}
-              <svg className="h-6 w-6 text-slate-600 transition-colors group-hover:text-blue-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 8l4 4m-4-4l-4 4" />
-                <path d="M12 16v-4" />
-              </svg>
-              <span className="text-[11px] font-medium">Encaminhar</span>
-              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Encaminhar chamado</div>
-            </div>
-            <div className="border-l border-slate-300 h-8"></div>
-            <div data-testid="ticket-manage-collaborators" className="group relative flex min-w-[92px] cursor-pointer flex-col items-center gap-1 rounded-lg px-3 py-2 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowManageCollaboratorsCard(!showManageCollaboratorsCard)}>
+          {/* Barra de ações do detalhe: mantém os handlers existentes na ordem canônica */}
+          <div data-testid="ticket-action-bar" className="mx-4 mt-3 flex min-h-[72px] items-stretch justify-start overflow-x-auto rounded-xl border border-slate-200 bg-white px-2 py-1.5 shadow-sm sm:mx-6 lg:mx-8 lg:justify-center">
+            <Select value={selectedChamado.status} onValueChange={(value) => handleUpdateStatus(value as 'open' | 'in_progress' | 'waiting' | 'closed')}>
+              <SelectTrigger data-testid="ticket-status-action" data-action="status" aria-label="Alterar status" className="group flex !h-[58px] min-w-[88px] flex-col justify-center gap-1 rounded-lg border-0 px-3 py-1.5 text-slate-600 shadow-none hover:bg-blue-50 hover:text-blue-700 focus:ring-2 focus:ring-blue-200 [&>svg:last-child]:hidden">
+                <Clock className="h-5 w-5" />
+                <span className="text-[11px] font-medium">Status</span>
+              </SelectTrigger>
+              <SelectContent className="border-2 border-slate-200 bg-white">
+                <SelectItem value="open">Aberto</SelectItem>
+                <SelectItem value="in_progress">Em Progresso</SelectItem>
+                <SelectItem value="waiting">Aguardando</SelectItem>
+                <SelectItem value="closed">Encerrado</SelectItem>
+              </SelectContent>
+            </Select>
+            <div role="separator" className="my-3 w-px shrink-0 bg-slate-200"></div>
+            <button type="button" data-testid="ticket-manage-collaborators" data-action="collaborators" className="group relative flex h-[58px] min-w-[104px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1.5 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowManageCollaboratorsCard(!showManageCollaboratorsCard)}>
               {/* Gerenciar colaboradores - mantém */}
-              <svg className="h-6 w-6 text-slate-600 transition-colors group-hover:text-blue-700" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
               </svg>
               <span className="text-[11px] font-medium">Colaboradores</span>
-              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Gerenciar colaboradores</div>
-            </div>
-            <div className="border-l border-slate-300 h-8"></div>
-            <div className="group relative flex min-w-[76px] cursor-pointer flex-col items-center gap-1 rounded-lg px-3 py-2 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowEditCard(!showEditCard)}>
+            </button>
+            <div role="separator" className="my-3 w-px shrink-0 bg-slate-200"></div>
+            <button type="button" data-testid="ticket-edit-action" data-action="edit" className="group relative flex h-[58px] min-w-[82px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1.5 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowEditCard(!showEditCard)}>
               {/* Editar chamado - mantém */}
-              <svg className="h-6 w-6 text-slate-600 transition-colors group-hover:text-blue-700" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" />
                 <path d="M20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
               </svg>
               <span className="text-[11px] font-medium">Editar</span>
-              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Editar chamado</div>
-            </div>
-            <div className="border-l border-slate-300 h-8"></div>
-            <div className="group relative flex min-w-[76px] cursor-pointer flex-col items-center gap-1 rounded-lg px-3 py-2 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowRegisterActivityModal(true)}>
+            </button>
+            <div role="separator" className="my-3 w-px shrink-0 bg-slate-200"></div>
+            <button type="button" data-testid="ticket-register-action" data-action="register" className="group relative flex h-[58px] min-w-[88px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1.5 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowRegisterActivityModal(true)}>
               {/* Balão retangular com 2 linhas - Atividade */}
-              <svg className="h-6 w-6 text-slate-600 transition-colors group-hover:text-blue-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <rect x="3" y="5" width="14" height="10" rx="2" />
                 <path d="M17 15l2 2" />
                 <line x1="6" y1="8" x2="12" y2="8" />
                 <line x1="6" y1="11" x2="12" y2="11" />
               </svg>
               <span className="text-[11px] font-medium">Registrar</span>
-              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Registro de atividade</div>
-            </div>
-            <div className="border-l border-slate-300 h-8"></div>
-            <div className="group relative flex min-w-[76px] cursor-pointer flex-col items-center gap-1 px-3 py-2 transition-colors hover:bg-slate-50">
+            </button>
+            <div role="separator" className="my-3 w-px shrink-0 bg-slate-200"></div>
+            <button type="button" data-testid="ticket-forward-action" data-action="forward" className="group relative flex h-[58px] min-w-[92px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1.5 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowForwardCard(!showForwardCard)}>
+              {/* Círculo com seta - Encaminhar */}
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8l4 4m-4-4l-4 4" />
+                <path d="M12 16v-4" />
+              </svg>
+              <span className="text-[11px] font-medium">Encaminhar</span>
+            </button>
+            <div role="separator" className="my-3 w-px shrink-0 bg-slate-200"></div>
+            <button type="button" data-testid="ticket-attachments-action" data-action="attachments" aria-disabled="true" title="Anexos indisponíveis neste detalhe" className="flex h-[58px] min-w-[82px] cursor-default flex-col items-center justify-center gap-1 rounded-lg px-3 py-1.5 text-slate-500">
               {/* Clipe - Anexo */}
-              <svg className="w-6 h-6 text-black hover:text-slate-700" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
               </svg>
-              <span className="text-[11px] font-medium text-slate-600">Anexos</span>
-              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Anexo</div>
-            </div>
-            <div className="border-l border-slate-300 h-8"></div>
-            <div className="group relative flex min-w-[76px] cursor-pointer flex-col items-center gap-1 px-3 py-2 transition-colors hover:bg-slate-50">
-              {/* Pasta bonita - Dossiê */}
-              <svg className="w-6 h-6 text-black hover:text-slate-700" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" />
-              </svg>
-              <span className="text-[11px] font-medium text-slate-600">Dossiê</span>
-              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap font-medium">Dossiê do cliente</div>
-            </div>
-            <div className="border-l border-slate-300 h-8"></div>
-            {/* Colaboradores na linha de ferramentas */}
-            {selectedChamado.collaborators && selectedChamado.collaborators.length > 0 && (
-              <div data-testid="ticket-detail-collaborators" className="flex items-center gap-1.5 px-3 py-2">
-                <span className="text-xs font-medium text-slate-500">Colabs:</span>
-                <div className="flex -space-x-1.5">
-                  {selectedChamado.collaborators.slice(0, 3).map((collab: { userId: string; userName: string }) => (
-                    <div key={collab.userId} className="w-5 h-5 rounded-full bg-slate-400 flex items-center justify-center text-white text-xs font-semibold border border-slate-200 hover:z-10 cursor-pointer hover:bg-slate-500 transition-colors" title={collab.userName}>
-                      {collab.userName.charAt(0).toUpperCase()}
-                    </div>
-                  ))}
-                  {selectedChamado.collaborators.length > 3 && (
-                    <div className="w-5 h-5 rounded-full bg-slate-300 flex items-center justify-center text-slate-700 text-xs font-semibold border border-slate-200" title={`+${selectedChamado.collaborators.length - 3} mais`}>
-                      +{selectedChamado.collaborators.length - 3}
-                    </div>
-                  )}
-                </div>
+              <span className="text-[11px] font-medium">Anexos</span>
+            </button>
+            <div role="separator" className="my-3 w-px shrink-0 bg-slate-200"></div>
+            <div data-testid="ticket-detail-collaborators" className="flex h-[58px] min-w-max items-center gap-2 px-4 py-1.5">
+              <span className="text-xs font-semibold text-slate-500">Colabs:</span>
+              <div className="flex -space-x-2">
+                {(selectedChamado.collaborators ?? []).slice(0, 3).map((collab: { userId: string; userName: string }, index: number) => (
+                  <div key={collab.userId} className={`flex h-8 w-8 items-center justify-center rounded-full border-2 border-white text-[10px] font-bold text-white shadow-sm ${index % 2 === 0 ? 'bg-blue-600' : 'bg-violet-600'}`} title={collab.userName}>
+                    {getInitials(collab.userName)}
+                  </div>
+                ))}
+                {(selectedChamado.collaborators?.length ?? 0) > 3 && (
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-bold text-slate-700" title={`+${selectedChamado.collaborators.length - 3} mais`}>
+                    +{selectedChamado.collaborators.length - 3}
+                  </div>
+                )}
+                <button type="button" data-testid="ticket-add-collaborator" aria-label="Adicionar colaborador" onClick={() => setShowManageCollaboratorsCard(true)} className="relative z-10 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-100 text-slate-600 shadow-sm transition-colors hover:bg-blue-50 hover:text-blue-700">
+                  <Plus className="h-4 w-4" />
+                </button>
               </div>
-            )}
+            </div>
           </div>
 
           {/* Primeira camada: historico principal e detalhes laterais */}

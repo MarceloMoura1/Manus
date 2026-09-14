@@ -170,10 +170,45 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
   await expect(page.getByTestId("ticket-status-control")).toHaveClass(/bg-blue-50/);
   await expect(page.getByTestId("ticket-detail-priority")).toHaveClass(/bg-red-50/);
   await expect(page.getByTestId("ticket-detail-status")).toContainText("Aberto");
-  await expect(page.getByTestId("ticket-action-bar")).toContainText("Encaminhar");
-  await expect(page.getByTestId("ticket-action-bar")).toContainText("Colaboradores");
-  await expect(page.getByTestId("ticket-action-bar")).toContainText("Editar");
-  await expect(page.getByTestId("ticket-action-bar")).toContainText("Registrar");
+  const header = page.getByTestId("ticket-detail-header");
+  const customerCard = page.getByTestId("ticket-customer-card");
+  const actionBar = page.getByTestId("ticket-action-bar");
+  await expect(header.getByRole("button", { name: "Voltar", exact: true })).toBeVisible();
+  await expect(header.getByTestId("ticket-status-control")).toContainText("Aberto");
+  await expect(header.getByRole("button", { name: "Encerrar Chamado", exact: true })).toBeVisible();
+  await expect(customerCard.getByTestId("ticket-customer-main-icon")).toBeVisible();
+  await expect(customerCard.getByText("ERP", { exact: true })).toBeVisible();
+  const customerBox = await customerCard.boundingBox();
+  const customerIconBox = await customerCard.getByTestId("ticket-customer-main-icon").boundingBox();
+  expect(customerBox).not.toBeNull();
+  expect(customerIconBox).not.toBeNull();
+  expect(customerBox!.height).toBeLessThanOrEqual(100);
+  expect(customerIconBox!.width).toBeGreaterThanOrEqual(54);
+  const customerDataTops = await customerCard.getByTestId("ticket-customer-data").locator(":scope > div").evaluateAll(elements => elements.map(element => Math.round(element.getBoundingClientRect().top)));
+  expect(new Set(customerDataTops).size).toBe(1);
+  const visualActionOrder = await actionBar.locator("[data-action]").evaluateAll(elements => elements
+    .map(element => ({ action: element.getAttribute("data-action"), left: element.getBoundingClientRect().left }))
+    .sort((left, right) => left.left - right.left)
+    .map(item => item.action));
+  expect(visualActionOrder).toEqual(["status", "collaborators", "edit", "register", "forward", "attachments"]);
+  await expect(actionBar).not.toContainText("Dossiê");
+  await expect(page.getByTestId("ticket-attachments-action")).toHaveAttribute("aria-disabled", "true");
+  const actionHeights = await actionBar.locator("[data-action]").evaluateAll(elements => elements.map(element => Math.round(element.getBoundingClientRect().height)));
+  expect(new Set(actionHeights)).toEqual(new Set([58]));
+  const separatorHeights = await actionBar.locator("[role='separator']").evaluateAll(elements => elements.map(element => Math.round(element.getBoundingClientRect().height)));
+  expect(separatorHeights).toHaveLength(6);
+  expect(new Set(separatorHeights).size).toBe(1);
+  const actionCenter = await page.getByTestId("ticket-edit-action").evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    return Math.round(bounds.top + bounds.height / 2);
+  });
+  const colabsCenter = await page.getByTestId("ticket-detail-collaborators").evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    return Math.round(bounds.top + bounds.height / 2);
+  });
+  expect(Math.abs(actionCenter - colabsCenter)).toBeLessThanOrEqual(1);
+  await expect(page.getByTestId("ticket-detail-collaborators").getByTitle("Agente Dois")).toHaveText("AD");
+  await expect(page.getByTestId("ticket-add-collaborator")).toBeVisible();
   await expectOpaqueSurface(detail);
   await expectOpaqueSurface(page.getByTestId("ticket-customer-card"));
   await expectOpaqueSurface(page.getByTestId("ticket-action-bar"));
@@ -208,6 +243,19 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
   expect(boxes[1]!.x).toBeGreaterThanOrEqual(boxes[0]!.x + boxes[0]!.width - 1);
   await expect(detail).toHaveCSS("position", "absolute");
 
+  await page.getByTestId("ticket-status-action").click();
+  await expect(page.getByRole("option", { name: "Em Progresso" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByTestId("ticket-edit-action").click();
+  await expect(page.getByRole("heading", { name: "Editar Chamado" })).toBeVisible();
+  await page.getByRole("heading", { name: "Editar Chamado" }).locator("..").getByRole("button").click();
+  await page.getByTestId("ticket-register-action").click();
+  await expect(page.getByRole("heading", { name: "Registrar Atividade" })).toBeVisible();
+  await page.getByRole("heading", { name: "Registrar Atividade" }).locator("..").getByRole("button").click();
+  await page.getByTestId("ticket-forward-action").click();
+  await expect(page.getByRole("heading", { name: "Encaminhar Chamado" })).toBeVisible();
+  await page.getByRole("heading", { name: "Encaminhar Chamado" }).locator("..").getByRole("button").click();
+
   await page.getByRole("button", { name: "Voltar", exact: true }).click();
   await expect(page.getByTestId("ticket-detail-shell")).toHaveCount(0);
 
@@ -229,6 +277,14 @@ test("ticket detail keeps mobile navigation available and stacks its content", a
   expect(detailBox).not.toBeNull();
   expect(detailBox!.x).toBeGreaterThanOrEqual(0);
   expect(detailBox!.x + detailBox!.width).toBeLessThanOrEqual(390);
+  const actionBar = page.getByTestId("ticket-action-bar");
+  await expect(actionBar).toBeVisible();
+  const mobileActions = await actionBar.locator("[data-action]").evaluateAll(elements => elements
+    .map(element => ({ action: element.getAttribute("data-action"), left: element.getBoundingClientRect().left }))
+    .sort((left, right) => left.left - right.left)
+    .map(item => item.action));
+  expect(mobileActions).toEqual(["status", "collaborators", "edit", "register", "forward", "attachments"]);
+  expect(await actionBar.evaluate(element => element.scrollWidth >= element.clientWidth)).toBe(true);
 
   await detail.getByRole("button", { name: "Abrir menu principal" }).click();
   await expect(page.getByLabel("Menu principal", { exact: true })).toBeVisible();
