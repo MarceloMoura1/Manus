@@ -6,6 +6,8 @@ const ticketId = "11111111-1111-4111-8111-111111111111";
 const dbMocks = vi.hoisted(() => ({
   getChamadoWithActivities: vi.fn(),
   updateChamado: vi.fn(),
+  updateChamadoWithActivity: vi.fn(),
+  getActiveClientUser: vi.fn(),
 }));
 
 const crmMocks = vi.hoisted(() => ({
@@ -13,23 +15,29 @@ const crmMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./db-chamados", () => ({
+  createChamadoWithActivity: vi.fn(),
   createChamado: vi.fn(),
   getChamadoWithActivities: dbMocks.getChamadoWithActivities,
   listChamados: vi.fn(),
   countChamados: vi.fn(),
   getStatusCounts: vi.fn(),
   updateChamado: dbMocks.updateChamado,
+  updateChamadoWithActivity: dbMocks.updateChamadoWithActivity,
   addActivityToChamado: vi.fn(),
   editActivity: vi.fn(),
   getCollaborators: vi.fn(),
   addCollaborator: vi.fn(),
   removeCollaborator: vi.fn(),
   updateCollaborators: vi.fn(),
+  updateCollaboratorsWithActivities: vi.fn(),
   registerActivity: vi.fn(),
+  registerManualTicketActivity: vi.fn(),
   addAttachment: vi.fn(),
   getAttachments: vi.fn(),
+  uploadTicketAttachment: vi.fn(),
+  listTicketAttachments: vi.fn(),
   getCustomerChamadoHistory: vi.fn(),
-  getActiveClientUser: vi.fn(),
+  getActiveClientUser: dbMocks.getActiveClientUser,
 }));
 
 vi.mock("./db-crm", () => ({
@@ -79,6 +87,8 @@ describe("chamados.getDetail — cliente canônico", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dbMocks.getChamadoWithActivities.mockResolvedValue(ticket());
+    dbMocks.getActiveClientUser.mockResolvedValue({ userId: "operator-1", userName: "Agente Um" });
+    dbMocks.updateChamadoWithActivity.mockImplementation(async (input: any) => dbMocks.updateChamado(input.chamadoId, input.clientId, input.updates));
   });
 
   it.each([

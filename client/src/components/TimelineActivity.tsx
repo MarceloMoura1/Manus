@@ -1,49 +1,42 @@
 import React from 'react';
-import { CheckCircle, Edit, Users, Share2, MessageSquare, User } from 'lucide-react';
+import { CheckCircle, Edit, FileText, Flag, Users, Share2, MessageSquare, User } from 'lucide-react';
+import { parseTicketActivityMetadata, type TicketActivityMetadata, type TicketActivityType } from '@shared/chamados-activity';
 
 export interface ActivityItem {
   id: string;
   date: number; // timestamp em millisegundos
   description: string;
   attendant: string;
-  actionType?: 'register' | 'edit' | 'close' | 'forward' | 'note';
+  actorUserId?: string | null;
+  actionType?: TicketActivityType | string;
+  metadata?: unknown;
 }
 
 interface TimelineActivityProps {
   activities: ActivityItem[];
 }
 
-const getActionIcon = (actionType?: string) => {
-  switch (actionType) {
-    case 'close':
-      return <CheckCircle className="w-6 h-6 text-green-500" />;
-    case 'edit':
-      return <Edit className="w-6 h-6 text-violet-500" />;
-    case 'forward':
-      return <Share2 className="w-6 h-6 text-purple-500" />;
-    case 'register':
-      return <User className="w-6 h-6 text-blue-500" />;
-    case 'note':
-    default:
-      return <MessageSquare className="w-6 h-6 text-blue-500" />;
-  }
-};
+type ActivityStyle = { icon: React.ReactNode; label: string; accent: string; tint: string; badge: string };
 
-const getActionLabel = (actionType?: string) => {
-  switch (actionType) {
-    case 'close':
-      return 'encerrou o chamado.';
-    case 'edit':
-      return 'editou o chamado.';
-    case 'forward':
-      return 'encaminhou o chamado.';
-    case 'register':
-      return 'registrou um apontamento.';
-    case 'note':
-    default:
-      return 'registrou uma nota.';
-  }
+const activityStyles: Record<string, ActivityStyle> = {
+  note: { icon: <MessageSquare className="h-6 w-6" />, label: 'Nota', accent: 'border-l-blue-400', tint: 'bg-blue-50 text-blue-600', badge: 'border-blue-200 bg-blue-50 text-blue-700' },
+  manual_activity: { icon: <MessageSquare className="h-6 w-6" />, label: 'Nota', accent: 'border-l-blue-400', tint: 'bg-blue-50 text-blue-600', badge: 'border-blue-200 bg-blue-50 text-blue-700' },
+  status_changed: { icon: <Flag className="h-6 w-6" />, label: 'Status', accent: 'border-l-sky-400', tint: 'bg-sky-50 text-sky-600', badge: 'border-sky-200 bg-sky-50 text-sky-700' },
+  collaborator_added: { icon: <Users className="h-6 w-6" />, label: 'Colaborador', accent: 'border-l-violet-400', tint: 'bg-violet-50 text-violet-600', badge: 'border-violet-200 bg-violet-50 text-violet-700' },
+  collaborator_removed: { icon: <Users className="h-6 w-6" />, label: 'Colaborador', accent: 'border-l-violet-400', tint: 'bg-violet-50 text-violet-600', badge: 'border-violet-200 bg-violet-50 text-violet-700' },
+  ticket_edited: { icon: <Edit className="h-6 w-6" />, label: 'Edição', accent: 'border-l-amber-400', tint: 'bg-amber-50 text-amber-600', badge: 'border-amber-200 bg-amber-50 text-amber-700' },
+  ticket_forwarded: { icon: <Share2 className="h-6 w-6" />, label: 'Encaminhamento', accent: 'border-l-indigo-400', tint: 'bg-indigo-50 text-indigo-600', badge: 'border-indigo-200 bg-indigo-50 text-indigo-700' },
+  attachment_added: { icon: <FileText className="h-6 w-6" />, label: 'Anexo', accent: 'border-l-emerald-400', tint: 'bg-emerald-50 text-emerald-600', badge: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+  ticket_created: { icon: <User className="h-6 w-6" />, label: 'Criação', accent: 'border-l-orange-400', tint: 'bg-orange-50 text-orange-600', badge: 'border-orange-200 bg-orange-50 text-orange-700' },
+  register: { icon: <User className="h-6 w-6" />, label: 'Criação', accent: 'border-l-orange-400', tint: 'bg-orange-50 text-orange-600', badge: 'border-orange-200 bg-orange-50 text-orange-700' },
+  edit: { icon: <Edit className="h-6 w-6" />, label: 'Sistema', accent: 'border-l-amber-400', tint: 'bg-amber-50 text-amber-600', badge: 'border-amber-200 bg-amber-50 text-amber-700' },
+  close: { icon: <CheckCircle className="h-6 w-6" />, label: 'Sistema', accent: 'border-l-emerald-400', tint: 'bg-emerald-50 text-emerald-600', badge: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+  forward: { icon: <Share2 className="h-6 w-6" />, label: 'Sistema', accent: 'border-l-indigo-400', tint: 'bg-indigo-50 text-indigo-600', badge: 'border-indigo-200 bg-indigo-50 text-indigo-700' },
+  attachment: { icon: <FileText className="h-6 w-6" />, label: 'Sistema', accent: 'border-l-emerald-400', tint: 'bg-emerald-50 text-emerald-600', badge: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
 };
+const fallbackStyle: ActivityStyle = { icon: <MessageSquare className="h-6 w-6" />, label: 'Sistema', accent: 'border-l-slate-400', tint: 'bg-slate-50 text-slate-600', badge: 'border-slate-200 bg-slate-50 text-slate-700' };
+const getStyle = (actionType?: string) => activityStyles[actionType ?? ''] ?? fallbackStyle;
+const getActionIcon = (actionType?: string) => getStyle(actionType).icon;
 
 export function getActivityAuthorName(attendant?: string) {
   const normalizedName = attendant?.trim();
@@ -59,45 +52,28 @@ export function getActivityAuthorName(attendant?: string) {
 }
 
 export function getActivitySummary(activity: Pick<ActivityItem, 'attendant' | 'actionType'>) {
-  return `${getActivityAuthorName(activity.attendant)} ${getActionLabel(activity.actionType)}`;
+  const verbs: Record<string, string> = {
+    status_changed: 'alterou o status.', collaborator_added: 'adicionou um colaborador.', collaborator_removed: 'removeu um colaborador.', ticket_edited: 'editou o chamado.', ticket_forwarded: 'encaminhou o chamado.', attachment_added: 'adicionou um anexo.', ticket_created: 'criou o chamado.', close: 'encerrou o chamado.', edit: 'editou o chamado.', forward: 'encaminhou o chamado.', attachment: 'adicionou um anexo.',
+  };
+  return `${getActivityAuthorName(activity.attendant)} ${verbs[activity.actionType ?? ''] ?? 'registrou uma atividade.'}`;
 }
 
 export function shouldRenderActivityNarrative(actionType?: ActivityItem['actionType']) {
-  return actionType !== 'note' && actionType !== 'register';
+  return !['note', 'manual_activity', 'register'].includes(actionType ?? '');
 }
 
 export function getActivityAccentClass(actionType?: string) {
-  switch (actionType) {
-    case 'close':
-      return 'border-l-emerald-400';
-    case 'forward':
-      return 'border-l-violet-400';
-    case 'edit':
-      return 'border-l-violet-400';
-    case 'register':
-      return 'border-l-amber-400';
-    case 'note':
-    default:
-      return 'border-l-blue-400';
-  }
+  return getStyle(actionType).accent;
 }
 
 export function getActivityTintClass(actionType?: string) {
-  switch (actionType) {
-    case 'close':
-      return 'bg-emerald-50';
-    case 'forward':
-    case 'edit':
-      return 'bg-violet-50';
-    case 'register':
-      return 'bg-amber-50';
-    case 'note':
-    default:
-      return 'bg-blue-50';
-  }
+  return getStyle(actionType).tint.split(' ')[0];
 }
 
 export function getActivityBadge(actionType?: ActivityItem['actionType']) {
+  const style = getStyle(actionType);
+  return { label: style.label, className: style.badge };
+
   switch (actionType) {
     case 'close':
       return { label: 'Sistema', className: 'border-emerald-200 bg-emerald-50 text-emerald-700' };
@@ -124,6 +100,21 @@ const formatDateTime = (date: number | string | Date) => {
   };
 };
 
+const statusLabels: Record<string, string> = { open: 'Aberto', in_progress: 'Em Progresso', waiting: 'Aguardando', closed: 'Fechado' };
+const fieldLabels: Record<string, string> = { customer: 'Cliente', title: 'Título', observations: 'Observações', priority: 'Prioridade' };
+const formatBytes = (size: number) => size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / (1024 * 1024)).toFixed(1)} MB`;
+
+function renderMetadata(metadata: TicketActivityMetadata | null): React.ReactNode {
+  if (!metadata) return null;
+  if (metadata.eventType === 'status_changed') return <>Status: <strong>{statusLabels[metadata.fromStatus] ?? metadata.fromStatus}</strong> → <strong>{statusLabels[metadata.toStatus] ?? metadata.toStatus}</strong></>;
+  if (metadata.eventType === 'collaborator_added') return <>Adicionado: <strong>{metadata.collaboratorName}</strong></>;
+  if (metadata.eventType === 'collaborator_removed') return <>Removido: <strong>{metadata.collaboratorName}</strong></>;
+  if (metadata.eventType === 'ticket_forwarded') return <><span>Destino: <strong>{metadata.toAssigneeName}</strong></span>{metadata.observation ? <span className="mt-1 block whitespace-pre-wrap">Observação: {metadata.observation}</span> : null}</>;
+  if (metadata.eventType === 'ticket_edited') return <ul className="space-y-1">{metadata.changes.map((change, index) => <li key={`${change.field}-${index}`}><strong>{fieldLabels[change.field]}</strong>: {change.from || '—'} → {change.to || '—'}</li>)}</ul>;
+  if (metadata.eventType === 'attachment_added') return <>{metadata.mimeType} · {formatBytes(metadata.size)}</>;
+  return null;
+}
+
 export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities }) => {
   if (!activities || activities.length === 0) {
     return (
@@ -143,6 +134,7 @@ export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities }
         {activities.map((activity, index) => {
           const { date, time } = formatDateTime(activity.date);
           const badge = getActivityBadge(activity.actionType);
+          const metadata = parseTicketActivityMetadata(activity.actionType, activity.metadata);
           
           return (
             <div key={activity.id} data-testid={`timeline-activity-${activity.id}`} className="relative pl-20">
@@ -175,10 +167,15 @@ export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities }
 
                 {/* Descrição */}
                 <div className="mb-3 rounded-lg bg-slate-50 p-3">
-                  <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                    {activity.description}
-                  </p>
-                </div>
+                   <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                     {activity.description}
+                   </p>
+                   {metadata && (
+                     <div data-testid={`timeline-activity-metadata-${activity.id}`} className="mt-2 border-t border-slate-200 pt-2 text-xs leading-relaxed text-slate-600">
+                       {renderMetadata(metadata)}
+                     </div>
+                   )}
+                 </div>
 
                 {/* Nome do Atendente */}
                 <div data-testid={`timeline-activity-author-${activity.id}`} className="flex items-center gap-2 text-xs text-slate-500">

@@ -6,6 +6,7 @@ import {
   uniqueIndex,
   foreignKey,
   varchar,
+  char,
   timestamp,
   int,
   mysqlEnum,
@@ -280,6 +281,10 @@ export const megadeskDomainChamados = mysqlTable(
     index("idx_mdc_status").on(table.status),
     index("idx_mdc_client_assigned_user").on(table.clientId, table.assignedToUserId),
     uniqueIndex("uq_chamado_number").on(table.clientId, table.chamadoNumber),
+    // Although chamadoId is globally unique, this composite key is the parent
+    // constraint for tenant-scoped child FKs. It prevents a child row from
+    // pairing a valid ticket ID with a different tenant.
+    uniqueIndex("uq_mdc_client_chamado").on(table.clientId, table.chamadoId),
   ]
 );
 
@@ -291,6 +296,9 @@ export const megadeskDomainChamadoActivities = mysqlTable(
     clientId: varchar("client_id", { length: 80 }).notNull(),
     description: text().notNull(),
     attendant: varchar({ length: 180 }).notNull(),
+    // Canonical operational identity for new events. Nullable preserves legacy
+    // timeline rows whose author cannot be reconstructed safely.
+    actorUserId: varchar("actor_user_id", { length: 80 }),
     actionType: mysqlEnum("action_type", [
       "register",
       "edit",
@@ -298,9 +306,20 @@ export const megadeskDomainChamadoActivities = mysqlTable(
       "forward",
       "note",
       "attachment",
+      "ticket_created",
+      "manual_activity",
+      "status_changed",
+      "collaborator_added",
+      "collaborator_removed",
+      "ticket_edited",
+      "ticket_forwarded",
+      "attachment_added",
     ])
       .default("note")
       .notNull(),
+    // The rendered sentence is a safe snapshot; this payload is the source of
+    // truth for structured events and remains null for legacy entries.
+    metadataJson: json("metadata_json"),
     createdAt: timestamp("created_at", { mode: "string" })
       .defaultNow()
       .notNull(),
@@ -312,6 +331,20 @@ export const megadeskDomainChamadoActivities = mysqlTable(
   table => [
     index("idx_mdca_chamado").on(table.chamadoId),
     index("idx_mdca_client").on(table.clientId),
+    index("idx_mdca_client_chamado_created").on(
+      table.clientId,
+      table.chamadoId,
+      table.createdAt,
+      table.activityId
+    ),
+    foreignKey({
+      name: "fk_mdca_tenant_chamado",
+      columns: [table.clientId, table.chamadoId],
+      foreignColumns: [
+        megadeskDomainChamados.clientId as AnyMySqlColumn,
+        megadeskDomainChamados.chamadoId as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
   ]
 );
 
@@ -1082,10 +1115,26 @@ export const megadeskDomainChamadoAttachments = mysqlTable(
     chamadoId: varchar("chamado_id", { length: 80 }).notNull(),
     clientId: varchar("client_id", { length: 80 }).notNull(),
     fileName: varchar("file_name", { length: 255 }).notNull(),
-    fileUrl: text("file_url").notNull(),
+    // fileUrl remains readable for legacy rows only. New uploads persist an
+    // opaque, server-generated storage key and are served through an
+    // authenticated route.
+    fileUrl: text("file_url"),
+    storageKey: varchar("storage_key", { length: 255 }),
     fileSize: int("file_size"),
     mimeType: varchar("mime_type", { length: 100 }),
     uploadedBy: varchar("uploaded_by", { length: 180 }).notNull(),
+    uploadedByUserId: varchar("uploaded_by_user_id", { length: 80 }),
+    sha256: char({ length: 64 }),
+    clientAttemptId: varchar("client_attempt_id", { length: 36 }),
+    state: mysqlEnum("attachment_state", [
+      "legacy",
+      "staged",
+      "active",
+      "pending_delete",
+      "deleted",
+    ])
+      .default("legacy")
+      .notNull(),
     createdAt: timestamp("created_at", { mode: "string" })
       .defaultNow()
       .notNull(),
@@ -1093,6 +1142,26 @@ export const megadeskDomainChamadoAttachments = mysqlTable(
   table => [
     index("idx_mdca_att_chamado").on(table.chamadoId),
     index("idx_mdca_att_client").on(table.clientId),
+    index("idx_mdca_att_client_chamado_created").on(
+      table.clientId,
+      table.chamadoId,
+      table.createdAt,
+      table.attachmentId
+    ),
+    uniqueIndex("uq_mdca_att_storage_key").on(table.storageKey),
+    uniqueIndex("uq_mdca_att_client_attempt").on(
+      table.clientId,
+      table.clientAttemptId
+    ),
+    index("idx_mdca_att_state_created").on(table.state, table.createdAt),
+    foreignKey({
+      name: "fk_mdca_att_tenant_chamado",
+      columns: [table.clientId, table.chamadoId],
+      foreignColumns: [
+        megadeskDomainChamados.clientId as AnyMySqlColumn,
+        megadeskDomainChamados.chamadoId as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
   ]
 );
 

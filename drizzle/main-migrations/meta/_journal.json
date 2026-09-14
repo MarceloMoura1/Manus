@@ -164,6 +164,13 @@
       "when": 1789259598120,
       "tag": "0022_luxuriant_toro",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1789359218183,
+      "tag": "0023_rich_captain_america",
+      "breakpoints": true
     }
   ]
 }

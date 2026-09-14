@@ -249,8 +249,10 @@ type Ticket = {
     id: string;
     description: string;
     attendant: string;
+    actorUserId?: string | null;
     date: number; // timestamp em millisegundos
     actionType?: string;
+    metadata?: unknown;
   }>;
 };
 
@@ -1854,7 +1856,8 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   const [isEditingCollaborators, setIsEditingCollaborators] = React.useState(false);
   const [showRegisterActivityModal, setShowRegisterActivityModal] = React.useState(false);
   const [activityDescription, setActivityDescription] = React.useState('');
-  const [activityType, setActivityType] = React.useState<'register' | 'edit' | 'close' | 'forward' | 'note'>('note');
+  const [showAttachmentsModal, setShowAttachmentsModal] = React.useState(false);
+  const [ticketAttachmentFile, setTicketAttachmentFile] = React.useState<File | null>(null);
   const [showCloseModal, setShowCloseModal] = React.useState(false);
   const [closeResolution, setCloseResolution] = React.useState('');
   const [showEditCard, setShowEditCard] = React.useState(false);
@@ -1965,6 +1968,11 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   );
   const updateCollaboratorsMutation = trpc.chamados.updateCollaborators.useMutation();
   const registerActivityMutation = trpc.chamados.registerActivity.useMutation();
+  const uploadAttachmentMutation = trpc.chamados.uploadAttachment.useMutation();
+  const attachmentsQuery = trpc.chamados.getAttachments.useQuery(
+    { chamadoId: selectedChamado?.id || '' },
+    { enabled: !!selectedChamado?.id },
+  );
 
   // Carregar usuários do cliente ao abrir o card de encaminhamento
   const getClientUsersQuery = trpc.megadesk.getClientUsers.useQuery(
@@ -2122,13 +2130,15 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
     // Enviar para backend em background
     try {
       // Atualizar o chamado com o novo atendente
-      await updateChamadoMutation.mutateAsync({
+      const result = await updateChamadoMutation.mutateAsync({
         chamadoId: selectedChamado.id,
         assignedToUserId: forwardAttendant,
+        forwardObservation: forwardObservations.trim() || undefined,
       });
+      setSelectedChamado(result.chamado);
 
       // Adicionar atividade se houver observações
-      if (forwardObservations.trim()) {
+      if (false && forwardObservations.trim()) {
         await addActivityMutation.mutateAsync({
           chamadoId: selectedChamado.id,
           description: `Encaminhado para ${attendantName}. Observação: ${forwardObservations}`,
@@ -2163,12 +2173,11 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       date: Date.now(),
       description: activityDescription.trim(),
       attendant: sessionData?.userName || 'Atendente',
-      actionType: activityType,
+      actionType: 'manual_activity',
     };
 
     setShowRegisterActivityModal(false);
     setActivityDescription('');
-    setActivityType('note');
     showToast('Atividade registrada!', 'success');
 
     // Atualizar localmente a lista de atividades
@@ -2181,11 +2190,11 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
     // Enviar para backend em background
     try {
-      await registerActivityMutation.mutateAsync({
+      const result = await registerActivityMutation.mutateAsync({
         chamadoId: selectedChamado.id,
         description: activityDescription.trim(),
-        actionType: activityType,
       });
+      if (result.chamado) setSelectedChamado(result.chamado);
 
       // Recarregar para sincronizar com servidor
       const updatedChamado = await chamadosQuery.refetch();
@@ -2225,10 +2234,11 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
     // Enviar para backend em background
     try {
-      await updateChamadoMutation.mutateAsync({
+      const result = await updateChamadoMutation.mutateAsync({
         chamadoId: selectedChamado.id,
         status: newStatus,
       });
+      setSelectedChamado(result.chamado);
 
       // Recarregar a lista de chamados e atualizar contadores
       await chamadosQuery.refetch();
@@ -2276,14 +2286,15 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
     // Enviar para backend em background
     try {
       // Encerrar o chamado
-      await updateChamadoMutation.mutateAsync({
+      const result = await updateChamadoMutation.mutateAsync({
         chamadoId: selectedChamado.id,
         status: 'closed',
         observations: closeResolution.trim(),
       });
+      setSelectedChamado(result.chamado);
 
       // Criar atividade de encerramento no historico
-      await registerActivityMutation.mutateAsync({
+      if (false) await registerActivityMutation.mutateAsync({
         chamadoId: selectedChamado.id,
         description: `Encerramento: ${closeResolution.trim()}`,
         actionType: 'close',
@@ -2356,6 +2367,37 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
     setNewChamadoForm(prev => ({ ...prev, customerId: '' }));
     setValidationErrors(prev => prev.filter(error => error.field !== 'customerId'));
     setShowCustomerDropdown(value.trim().length >= 2);
+  };
+
+  const handleTicketAttachmentUpload = async () => {
+    if (!selectedChamado || !ticketAttachmentFile) return;
+    if (ticketAttachmentFile.size > 12 * 1024 * 1024) {
+      showToast('O arquivo excede o limite de 12 MiB.', 'error');
+      return;
+    }
+    try {
+      const bytes = new Uint8Array(await ticketAttachmentFile.arrayBuffer());
+      let binary = '';
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      const result = await uploadAttachmentMutation.mutateAsync({
+        chamadoId: selectedChamado.id,
+        fileName: ticketAttachmentFile.name,
+        fileType: ticketAttachmentFile.type || 'application/octet-stream',
+        fileBase64: btoa(binary),
+        clientAttemptId: crypto.randomUUID(),
+      });
+      if (result.chamado) setSelectedChamado(result.chamado);
+      setTicketAttachmentFile(null);
+      setShowAttachmentsModal(false);
+      showToast('Anexo enviado com sucesso.', 'success');
+      await Promise.all([
+        attachmentsQuery.refetch(),
+        utils.chamados.getDetail.invalidate({ chamadoId: selectedChamado.id }),
+      ]);
+    } catch (error) {
+      console.error('Erro ao anexar arquivo:', error);
+      showToast(error instanceof Error ? error.message : 'Não foi possível anexar o arquivo.', 'error');
+    }
   };
 
   const handleSelectCustomer = (customer: any) => {
@@ -3129,7 +3171,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               <span className="text-[11px] font-medium">Encaminhar</span>
             </button>
             <div role="separator" className="my-3 w-px shrink-0 bg-slate-200"></div>
-            <button type="button" data-testid="ticket-attachments-action" data-action="attachments" aria-disabled="true" title="Anexos indisponíveis neste detalhe" className="flex h-[58px] min-w-[82px] cursor-default flex-col items-center justify-center gap-1 rounded-lg px-3 py-1.5 text-slate-500">
+            <button type="button" data-testid="ticket-attachments-action" data-action="attachments" onClick={() => setShowAttachmentsModal(true)} title="Anexos" className="flex h-[58px] min-w-[82px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1.5 text-slate-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700">
               {/* Clipe - Anexo */}
               <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
@@ -3162,6 +3204,16 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           <div className="mx-4 mt-6 grid gap-6 sm:mx-6 lg:mx-8 lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)]">
             <section data-testid="ticket-history-panel" aria-labelledby="ticket-history-heading" className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 id="ticket-history-heading" className="flex items-center gap-2 text-lg font-semibold text-slate-900"><span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><MessageSquare className="h-4 w-4" /></span>Histórico do Chamado</h2>
+              {attachmentsQuery.data?.length ? (
+                <div data-testid="ticket-attachments-list" className="mt-4 space-y-2">
+                  {attachmentsQuery.data.map((attachment: any) => (
+                    <div key={attachment.attachmentId} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-100 bg-emerald-50/40 px-3 py-2.5">
+                      <div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{attachment.fileName}</p><p className="text-xs text-slate-500">{attachment.mimeType || 'Arquivo'} · {attachment.fileSize == null ? 'Tamanho indisponível' : `${(attachment.fileSize / 1024).toFixed(1)} KB`}</p></div>
+                      {attachment.canView ? <a data-testid={`ticket-attachment-view-${attachment.attachmentId}`} href={`/api/chamados/${selectedChamado.id}/attachments/${attachment.attachmentId}/file`} target="_blank" rel="noreferrer" className="rounded-md border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100">Visualizar arquivo</a> : <span className="text-xs font-medium text-slate-500">{attachment.legacy ? 'Anexo legado não disponível' : 'Indisponível'}</span>}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <div className="mt-6">
                 {selectedChamado.activities && selectedChamado.activities.length > 0 ? (
                   <TimelineActivity activities={selectedChamado.activities} />
@@ -3230,6 +3282,20 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           </div>
 
           {/* Modal de Registrar Atividade */}
+          {showAttachmentsModal && selectedChamado && (
+            <div data-testid="ticket-attachments-backdrop" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/20 p-4 backdrop-blur-[1px]">
+              <div role="dialog" aria-modal="true" aria-labelledby="ticket-attachments-title" className="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
+                <div className="mb-4 flex items-center justify-between"><h3 id="ticket-attachments-title" className="text-lg font-bold text-slate-900">Anexar arquivo</h3><button type="button" aria-label="Fechar anexos" onClick={() => { setShowAttachmentsModal(false); setTicketAttachmentFile(null); }} className="text-slate-400 transition-colors hover:text-slate-600"><X className="h-5 w-5" /></button></div>
+                <div className="space-y-4">
+                  <div><label htmlFor="ticket-attachment-file" className="mb-2 block text-sm font-semibold text-slate-700">Selecionar arquivo</label><input id="ticket-attachment-file" data-testid="ticket-attachment-file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx" onChange={event => setTicketAttachmentFile(event.target.files?.[0] ?? null)} className="block w-full rounded-lg border border-slate-300 bg-white p-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-emerald-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-emerald-700" /></div>
+                  {ticketAttachmentFile ? <div data-testid="ticket-attachment-preview" className="flex items-center justify-between rounded-lg border border-emerald-100 bg-emerald-50 p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{ticketAttachmentFile.name}</p><p className="text-xs text-slate-500">{(ticketAttachmentFile.size / 1024).toFixed(1)} KB</p></div><button type="button" onClick={() => setTicketAttachmentFile(null)} className="rounded p-1 text-slate-500 hover:bg-white hover:text-slate-700" aria-label="Remover arquivo"><X className="h-4 w-4" /></button></div> : null}
+                  <p className="text-xs text-slate-500">PDF, PNG, JPEG, WEBP, TXT, CSV, DOC, DOCX, XLS e XLSX até 12 MiB.</p>
+                  <div className="flex gap-3 border-t border-slate-200 pt-4"><Button type="button" onClick={handleTicketAttachmentUpload} disabled={!ticketAttachmentFile || uploadAttachmentMutation.isPending} className="flex-1 bg-emerald-600 font-semibold text-white hover:bg-emerald-700">{uploadAttachmentMutation.isPending ? 'Anexando...' : 'Anexar'}</Button><Button type="button" variant="outline" onClick={() => { setShowAttachmentsModal(false); setTicketAttachmentFile(null); }} className="flex-1 border-slate-300 bg-white font-semibold text-slate-700 hover:bg-slate-50">Cancelar</Button></div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {showRegisterActivityModal && selectedChamado && (
             <div data-testid="register-activity-backdrop" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/20 p-4 backdrop-blur-[1px]">
               <div data-testid="register-activity-modal" role="dialog" aria-modal="true" aria-labelledby="register-activity-title" className="w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl">

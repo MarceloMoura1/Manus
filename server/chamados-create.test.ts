@@ -11,9 +11,27 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { chamadosRouter } from "./routers-chamados";
 import { createCallerFactory } from "./_core/trpc";
+import * as chamadosDb from "./db-chamados";
 
 // Mock do db-chamados para isolar os testes (sem DATABASE_URL)
 vi.mock("./db-chamados", () => ({
+  createChamadoWithActivity: vi.fn(async (input) => ({
+    id: `chamado-${Date.now()}`,
+    number: 42,
+    clientId: input.clientId,
+    customerId: input.customerId,
+    customerName: input.customerName,
+    company: input.company,
+    title: input.title,
+    observations: input.observations || "",
+    priority: input.priority || "media",
+    status: "open",
+    assignedTo: input.assignedTo,
+    assignedToUserId: input.assignedToUserId,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    activities: [],
+  })),
   createChamado: vi.fn(async (clientId, customerId, customerName, company, title, observations, priority, assignedTo, _phone, _email, _cnpj, assignedToUserId) => ({
     id: `chamado-${Date.now()}`,
     number: 42,
@@ -36,13 +54,18 @@ vi.mock("./db-chamados", () => ({
   getStatusCounts: vi.fn(async () => ({ open: 0, in_progress: 0, waiting: 0, closed: 0 })),
   getChamadoWithActivities: vi.fn(async () => null),
   updateChamado: vi.fn(async () => ({})),
+  updateChamadoWithActivity: vi.fn(async () => ({})),
   addActivityToChamado: vi.fn(async () => ({})),
   editActivity: vi.fn(async () => ({})),
   getCollaborators: vi.fn(async () => []),
   addCollaborator: vi.fn(async () => ({})),
   removeCollaborator: vi.fn(async () => ({})),
   updateCollaborators: vi.fn(async () => ({})),
+  updateCollaboratorsWithActivities: vi.fn(async () => ({})),
   registerActivity: vi.fn(async () => ({})),
+  registerManualTicketActivity: vi.fn(async () => ({ id: "activity" })),
+  uploadTicketAttachment: vi.fn(async () => ({ attachmentId: "attachment", reused: false })),
+  listTicketAttachments: vi.fn(async () => []),
   getActiveClientUser: vi.fn(async () => ({ userId: "operator-1", userName: "Marcelo Moura" })),
 }));
 
@@ -81,6 +104,20 @@ function makeCtxWithoutTenant() {
 describe("chamados.create — abertura de chamados", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (chamadosDb.createChamadoWithActivity as any).mockImplementation(async (input: any) => chamadosDb.createChamado(
+      input.clientId,
+      input.customerId,
+      input.customerName,
+      input.company,
+      input.title,
+      input.observations,
+      input.priority,
+      input.assignedTo,
+      input.customerPhone ?? undefined,
+      input.customerEmail ?? undefined,
+      input.customerCNPJ ?? undefined,
+      input.assignedToUserId,
+    ));
     crmMocks.getCrmClientById.mockImplementation(async (customerId: string, tenantId: string) => {
       if (customerId === "crm-other-tenant") return null;
       return {

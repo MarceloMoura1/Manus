@@ -19,7 +19,7 @@ vi.mock("@/lib/trpc", () => {
 
   return {
     trpc: {
-      useUtils: () => ({ chamados: { list: { invalidate }, getStatusCounts: { invalidate } } }),
+      useUtils: () => ({ chamados: { list: { invalidate }, getStatusCounts: { invalidate }, getDetail: { invalidate } } }),
       chamados: {
         list: { useQuery: () => query({ chamados: ticketState.tickets, total: ticketState.tickets.length }) },
         getDetail: { useQuery: () => query(undefined) },
@@ -32,6 +32,8 @@ vi.mock("@/lib/trpc", () => {
         searchCustomers: { useQuery: () => ({ ...query({ customers: [] }), isFetching: false, isError: false }) },
         updateCollaborators: { useMutation: mutation },
         registerActivity: { useMutation: mutation },
+        uploadAttachment: { useMutation: mutation },
+        getAttachments: { useQuery: () => query([]) },
       },
       megadesk: {
         getClientUsers: { useQuery: () => query([]) },

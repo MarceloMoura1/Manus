@@ -10,6 +10,8 @@ const chamadosDb = vi.hoisted(() => ({
   listChamados: vi.fn(),
   countChamados: vi.fn(),
   getStatusCounts: vi.fn(),
+  createChamadoWithActivity: vi.fn(),
+  updateChamadoWithActivity: vi.fn(),
   updateChamado: vi.fn(),
   addActivityToChamado: vi.fn(),
   editActivity: vi.fn(),
@@ -20,6 +22,10 @@ const chamadosDb = vi.hoisted(() => ({
   registerActivity: vi.fn(),
   addAttachment: vi.fn(),
   getAttachments: vi.fn(),
+  updateCollaboratorsWithActivities: vi.fn(),
+  registerManualTicketActivity: vi.fn(),
+  uploadTicketAttachment: vi.fn(),
+  listTicketAttachments: vi.fn(),
   getCustomerChamadoHistory: vi.fn(),
   getActiveClientUser: vi.fn(),
 }));
@@ -52,8 +58,7 @@ describe("chamados activity author", () => {
         ? { userId: "operator-a", userName: "Marcelo Moura" }
         : null
     ));
-    chamadosDb.registerActivity.mockResolvedValue({ id: "activity-1" });
-    chamadosDb.addActivityToChamado.mockResolvedValue(undefined);
+    chamadosDb.registerManualTicketActivity.mockResolvedValue({ id: "activity-1" });
     chamadosDb.getChamadoWithActivities.mockResolvedValue({
       id: chamadoId,
       collaborators: [],
@@ -69,13 +74,12 @@ describe("chamados activity author", () => {
     });
 
     expect(chamadosDb.getActiveClientUser).toHaveBeenCalledWith("tenant-a", "operator-a");
-    expect(chamadosDb.registerActivity).toHaveBeenCalledWith(
+    expect(chamadosDb.registerManualTicketActivity).toHaveBeenCalledWith({
       chamadoId,
-      "tenant-a",
-      "Contato registrado",
-      "Marcelo Moura",
-      "note",
-    );
+      clientId: "tenant-a",
+      description: "Contato registrado",
+      actor: { userId: "operator-a", userName: "Marcelo Moura" },
+    });
   });
 
   it("ignores a browser-supplied author and uses the canonical operational user", async () => {
@@ -85,12 +89,12 @@ describe("chamados activity author", () => {
       attendant: "Outro usuário",
     });
 
-    expect(chamadosDb.addActivityToChamado).toHaveBeenCalledWith(
+    expect(chamadosDb.registerManualTicketActivity).toHaveBeenCalledWith({
       chamadoId,
-      "tenant-a",
-      "Encaminhamento registrado",
-      "Marcelo Moura",
-    );
+      clientId: "tenant-a",
+      description: "Encaminhamento registrado",
+      actor: { userId: "operator-a", userName: "Marcelo Moura" },
+    });
   });
 
   it("never resolves an author from another tenant", async () => {
@@ -101,6 +105,6 @@ describe("chamados activity author", () => {
     })).rejects.toMatchObject({ code: "FORBIDDEN" });
 
     expect(chamadosDb.getActiveClientUser).toHaveBeenCalledWith("tenant-b", "operator-a");
-    expect(chamadosDb.registerActivity).not.toHaveBeenCalled();
+    expect(chamadosDb.registerManualTicketActivity).not.toHaveBeenCalled();
   });
 });

@@ -8,6 +8,8 @@ const chamadosDb = vi.hoisted(() => ({
   listChamados: vi.fn(),
   countChamados: vi.fn(),
   getStatusCounts: vi.fn(),
+  createChamadoWithActivity: vi.fn(),
+  updateChamadoWithActivity: vi.fn(),
   updateChamado: vi.fn(),
   addActivityToChamado: vi.fn(),
   editActivity: vi.fn(),
@@ -15,9 +17,13 @@ const chamadosDb = vi.hoisted(() => ({
   addCollaborator: vi.fn(),
   removeCollaborator: vi.fn(),
   updateCollaborators: vi.fn(),
+  updateCollaboratorsWithActivities: vi.fn(),
   registerActivity: vi.fn(),
+  registerManualTicketActivity: vi.fn(),
   addAttachment: vi.fn(),
   getAttachments: vi.fn(),
+  uploadTicketAttachment: vi.fn(),
+  listTicketAttachments: vi.fn(),
   getCustomerChamadoHistory: vi.fn(),
   getActiveClientUser: vi.fn(),
 }));
@@ -41,6 +47,7 @@ function makeContext() {
 describe("chamados listing contract", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    chamadosDb.updateChamadoWithActivity.mockImplementation(async (input: any) => chamadosDb.updateChamado(input.chamadoId, input.clientId, input.updates));
     chamadosDb.listChamados.mockResolvedValue([{ id: "ticket-1", number: 42 }]);
     chamadosDb.countChamados.mockResolvedValue(41);
     chamadosDb.getStatusCounts.mockResolvedValue({ total: 41, open: 16, in_progress: 10, waiting: 9, closed: 6 });

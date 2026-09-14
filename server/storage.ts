@@ -75,13 +75,15 @@ function buildAuthHeaders(apiKey: string): HeadersInit {
   return { Authorization: `Bearer ${apiKey}` };
 }
 
-export async function storagePut(
+async function putStorageObject(
   relKey: string,
   data: Buffer | Uint8Array | string,
-  contentType = "application/octet-stream"
+  contentType: string,
+  appendSuffix: boolean,
 ): Promise<{ key: string; url: string }> {
   const { baseUrl, apiKey } = getStorageConfig();
-  const key = appendHashSuffix(normalizeKey(relKey));
+  const normalizedKey = normalizeKey(relKey);
+  const key = appendSuffix ? appendHashSuffix(normalizedKey) : normalizedKey;
   const uploadUrl = buildUploadUrl(baseUrl, key);
   const formData = toFormData(data, contentType, key.split("/").pop() ?? key);
   const response = await fetch(uploadUrl, {
@@ -98,6 +100,26 @@ export async function storagePut(
   }
   const url = (await response.json()).url;
   return { key, url };
+}
+
+export async function storagePut(
+  relKey: string,
+  data: Buffer | Uint8Array | string,
+  contentType = "application/octet-stream"
+): Promise<{ key: string; url: string }> {
+  return putStorageObject(relKey, data, contentType, true);
+}
+
+/**
+ * Callers that already own a collision-resistant opaque key (such as a UUID
+ * persisted before upload) need its exact value back for authenticated reads.
+ */
+export async function storagePutExact(
+  relKey: string,
+  data: Buffer | Uint8Array | string,
+  contentType = "application/octet-stream"
+): Promise<{ key: string; url: string }> {
+  return putStorageObject(relKey, data, contentType, false);
 }
 
 export async function storageGet(relKey: string): Promise<{ key: string; url: string; }> {

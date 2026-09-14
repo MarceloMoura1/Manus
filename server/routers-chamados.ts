@@ -12,22 +12,23 @@
 import { router, protectedProcedure, megadeskProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { randomUUID } from "node:crypto";
 import {
-  createChamado,
+  createChamadoWithActivity,
   getChamadoWithActivities,
   listChamados,
   countChamados,
   getStatusCounts,
-  updateChamado,
-  addActivityToChamado,
+  updateChamadoWithActivity,
   editActivity,
   getCollaborators,
   addCollaborator,
   removeCollaborator,
-  updateCollaborators,
-  registerActivity,
-  addAttachment,
-  getAttachments,
+  updateCollaboratorsWithActivities,
+  registerManualTicketActivity,
+  uploadTicketAttachment,
+  listTicketAttachments,
+  TicketAttachmentError,
   getCustomerChamadoHistory,
   getActiveClientUser,
   type ChamadoWithActivities,
@@ -121,7 +122,7 @@ export function resolveTicketDetailCustomer(
  * canonical operational identity instead of accepting an author supplied by
  * the browser. The lookup is constrained to the active tenant.
  */
-async function requireCanonicalActivityAuthor(clientId: string, operationalUserId?: string) {
+async function requireCanonicalActivityActor(clientId: string, operationalUserId?: string) {
   const author = await getActiveClientUser(clientId, operationalUserId ?? "");
   if (!author) {
     throw new TRPCError({
@@ -130,7 +131,7 @@ async function requireCanonicalActivityAuthor(clientId: string, operationalUserI
     });
   }
 
-  return author.userName;
+  return author;
 }
 
 export const chamadosRouter = router({
@@ -334,20 +335,21 @@ export const chamadosRouter = router({
           });
         }
 
-        const chamado = await createChamado(
+        const chamado = await createChamadoWithActivity({
           clientId,
-          customer.crmClientId,
+          customerId: customer.crmClientId,
           customerName,
-          canonicalName,
-          input.title,
-          input.observations,
-          input.priority,
-          creator.userName,
-          customer.phone ?? undefined,
-          customer.email ?? undefined,
-          customer.cpfCnpj ?? undefined,
-          creator.userId,
-        );
+          company: canonicalName,
+          title: input.title,
+          observations: input.observations,
+          priority: input.priority,
+          assignedTo: creator.userName,
+          assignedToUserId: creator.userId,
+          customerPhone: customer.phone ?? null,
+          customerEmail: customer.email ?? null,
+          customerCNPJ: customer.cpfCnpj ?? null,
+          actor: creator,
+        });
         
         console.log('[SUCCESS] Chamado created:', chamado.id, 'number:', chamado.number);
         
@@ -393,6 +395,7 @@ export const chamadosRouter = router({
         priority: PrioritySchema.optional(),
         assignedToUserId: z.string().max(80).optional(),
         customerId: z.string().trim().min(1, "Selecione um cliente").max(80).optional(),
+        forwardObservation: ObservationsSchema.optional(),
       }).strict()
     )
     .mutation(async ({ input, ctx }) => {
@@ -410,7 +413,7 @@ export const chamadosRouter = router({
 
         if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Updating chamado:', input.chamadoId, 'for clientId:', clientId);
         
-        const { chamadoId, assignedToUserId, customerId, ...updates } = input;
+        const { chamadoId, assignedToUserId, customerId, forwardObservation, ...updates } = input;
         const assignedTo = assignedToUserId === undefined
           ? undefined
           : await getActiveClientUser(clientId, assignedToUserId);
@@ -431,7 +434,18 @@ export const chamadosRouter = router({
           ? customer.responsibleName.trim()
           : canonicalName;
 
-        await updateChamado(chamadoId, clientId, {
+        const actor = await requireCanonicalActivityActor(clientId, ctx.operationalUserId);
+        const mode = assignedToUserId !== undefined
+          ? 'forward'
+          : updates.status !== undefined
+            ? 'status'
+            : 'edit';
+        await updateChamadoWithActivity({
+          chamadoId,
+          clientId,
+          actor,
+          mode,
+          updates: {
           ...updates,
           ...(customer && canonicalName && customerName ? {
             customerId: customer.crmClientId,
@@ -443,6 +457,8 @@ export const chamadosRouter = router({
           } : {}),
           assignedTo: assignedTo?.userName,
           assignedToUserId: assignedTo?.userId,
+            forwardObservation,
+          },
         });
         
         const chamado = await getChamadoWithActivities(chamadoId, clientId);
@@ -503,16 +519,16 @@ export const chamadosRouter = router({
         }
 
         checkRateLimit(clientId);
-        const attendantName = await requireCanonicalActivityAuthor(clientId, ctx.operationalUserId);
+        const actor = await requireCanonicalActivityActor(clientId, ctx.operationalUserId);
 
         if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Adding activity to chamado:', input.chamadoId);
 
-        await addActivityToChamado(
-          input.chamadoId,
+        await registerManualTicketActivity({
+          chamadoId: input.chamadoId,
           clientId,
-          input.description,
-          attendantName
-        );
+          description: input.description,
+          actor,
+        });
 
         const chamado = await getChamadoWithActivities(input.chamadoId, clientId);
         
@@ -661,7 +677,13 @@ export const chamadosRouter = router({
 
         if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Updating collaborators for chamado:', input.chamadoId);
 
-        await updateCollaborators(input.chamadoId, clientId, input.collaborators);
+        const actor = await requireCanonicalActivityActor(clientId, ctx.operationalUserId);
+        await updateCollaboratorsWithActivities({
+          chamadoId: input.chamadoId,
+          clientId,
+          collaboratorIds: input.collaborators.map(collaborator => collaborator.userId),
+          actor,
+        });
 
         const chamado = await getChamadoWithActivities(input.chamadoId, clientId);
         
@@ -742,18 +764,18 @@ export const chamadosRouter = router({
       }
 
       try {
-        const attendantName = await requireCanonicalActivityAuthor(clientId, ctx.operationalUserId);
-        const result = await registerActivity(
-          input.chamadoId,
+        const actor = await requireCanonicalActivityActor(clientId, ctx.operationalUserId);
+        const result = await registerManualTicketActivity({
+          chamadoId: input.chamadoId,
           clientId,
-          input.description,
-          attendantName,
-          input.actionType
-        );
+          description: input.description,
+          actor,
+        });
 
         return {
           success: true,
           activityId: result.id,
+          chamado: await getChamadoWithActivities(input.chamadoId, clientId),
         };
       } catch (error) {
         if (error instanceof TRPCError) throw error;
@@ -802,7 +824,7 @@ export const chamadosRouter = router({
         fileName: z.string().min(1),
         fileType: z.string().default('application/octet-stream'),
         fileBase64: z.string().min(1),
-        attendant: z.string().optional(),
+        clientAttemptId: z.string().uuid().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -815,32 +837,21 @@ export const chamadosRouter = router({
           });
         }
         checkRateLimit(clientId);
-        const uploadedBy = await requireCanonicalActivityAuthor(clientId, ctx.operationalUserId);
-        // Converter base64 para Buffer e fazer upload para storage
-        const fileBuffer = Buffer.from(input.fileBase64, 'base64');
-        const storageKey = `chamados/${clientId}/${input.chamadoId}/${Date.now()}-${input.fileName}`;
-        const { storagePut } = await import('../server/storage');
-        const { url: fileUrl } = await storagePut(storageKey, fileBuffer, input.fileType);
-        const result = await addAttachment(
-          input.chamadoId,
+        const actor = await requireCanonicalActivityActor(clientId, ctx.operationalUserId);
+        const result = await uploadTicketAttachment({
+          chamadoId: input.chamadoId,
           clientId,
-          input.fileName,
-          fileUrl,
-          uploadedBy,
-          fileBuffer.length,
-          input.fileType
-        );
-        await addActivityToChamado(
-          input.chamadoId,
-          clientId,
-          `${uploadedBy} adicionou anexo: ${input.fileName}`,
-          uploadedBy
-        );
+          actor,
+          clientAttemptId: input.clientAttemptId ?? randomUUID(),
+          fileName: input.fileName,
+          declaredMimeType: input.fileType,
+          fileBase64: input.fileBase64,
+        });
         const chamado = await getChamadoWithActivities(input.chamadoId, clientId);
         return {
           success: true,
           attachmentId: result.attachmentId,
-          fileUrl,
+          reused: result.reused,
           chamado,
         };
       } catch (error) {
@@ -868,7 +879,7 @@ export const chamadosRouter = router({
             message: "Identificacao de cliente invalida",
           });
         }
-        const attachments = await getAttachments(input.chamadoId, clientId);
+        const attachments = await listTicketAttachments(input.chamadoId, clientId);
         return attachments;
       } catch (error) {
         console.error('[ERROR] Failed to get attachments:', error);

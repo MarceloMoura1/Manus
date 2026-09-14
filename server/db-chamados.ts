@@ -21,6 +21,7 @@ import {
 } from '../drizzle/schema';
 import { and, asc, desc, eq, exists, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
+import { parseTicketActivityMetadata, type TicketActivityMetadata } from '../shared/chamados-activity';
 
 export type ChamadoWithActivities = {
   id: string;
@@ -48,6 +49,8 @@ export type ChamadoWithActivities = {
     description: string;
     attendant: string;
     actionType?: string;
+    actorUserId?: string | null;
+    metadata?: TicketActivityMetadata | null;
   }>;
 };
 
@@ -542,6 +545,8 @@ export async function getChamadoWithActivities(
           description: a.description,
           attendant: a.attendant,
           actionType: a.actionType || 'note',
+          actorUserId: a.actorUserId ?? null,
+          metadata: parseTicketActivityMetadata(a.actionType, a.metadataJson),
         };
       }),
     };
@@ -721,6 +726,8 @@ export async function listChamados(
           description: a.description,
           attendant: a.attendant,
           actionType: a.actionType || 'note',
+          actorUserId: a.actorUserId ?? null,
+          metadata: parseTicketActivityMetadata(a.actionType, a.metadataJson),
         };
       }),
     }));
@@ -1287,3 +1294,27 @@ export async function getCustomerChamadoHistory(
       })),
   }));
 }
+
+// The canonical mutations below deliberately use a single mysql2 connection
+// per domain operation. Existing helpers above remain available for legacy
+// callers and focused persistence tests.
+export {
+  createChamadoWithActivity,
+  updateChamadoWithActivity,
+  updateCollaboratorsWithActivities,
+  registerManualTicketActivity,
+  reserveTicketAttachment,
+  activateTicketAttachment,
+  markTicketAttachmentPendingDelete,
+  withChamadoTransaction,
+} from './chamados-domain';
+export type { CanonicalTicketActor, TicketDomainUpdate, TicketMutationMode } from './chamados-domain';
+export {
+  listTicketAttachments,
+  uploadTicketAttachment,
+  reconcileTicketAttachmentStates,
+  readTicketAttachment,
+  sniffTicketAttachment,
+  TicketAttachmentError,
+  TICKET_ATTACHMENT_MAX_BYTES,
+} from './chamados-attachments';
