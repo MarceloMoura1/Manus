@@ -70,6 +70,16 @@ const canonicalCustomer = {
   source: "erp",
 };
 
+const replacementCustomer = {
+  id: "crm-replacement",
+  type: "person",
+  name: "Marina Cliente",
+  document: "52998224725",
+  phone: "11977776666",
+  email: "marina@example.invalid",
+  source: "erp",
+};
+
 const result = (json: unknown) => ({ result: { data: { json } } });
 
 async function expectOpaqueSurface(locator: ReturnType<Page["getByTestId"]>) {
@@ -96,6 +106,9 @@ async function expectDetailWorkspaceToCover(detail: ReturnType<Page["getByTestId
 async function prepareDetail(page: Page) {
   let currentCollaborators = [...ticket.collaborators];
   let collaboratorUpdates = 0;
+  let currentTicket: any = { ...ticket, activities: [...ticket.activities] };
+  let currentCustomer: any = { ...canonicalCustomer };
+  const updateRequests: string[] = [];
 
   await page.addInitScript(value => {
     localStorage.setItem("megadesk_session_v1", JSON.stringify(value));
@@ -109,10 +122,11 @@ async function prepareDetail(page: Page) {
     const batch = url.searchParams.get("batch") === "1";
     const payloads = procedures.map(procedure => {
       if (procedure.includes("megadesk.refreshSession")) return result({ ok: true, session });
-      if (procedure.includes("chamados.list")) return result({ chamados: [ticket], total: 1, limit: 20, offset: 0 });
-      if (procedure.includes("chamados.getDetail")) return result({ chamado: { ...ticket, collaborators: currentCollaborators, customer: canonicalCustomer } });
+      if (procedure.includes("chamados.list")) return result({ chamados: [currentTicket], total: 1, limit: 20, offset: 0 });
+      if (procedure.includes("chamados.getDetail")) return result({ chamado: { ...currentTicket, collaborators: currentCollaborators, customer: currentCustomer } });
       if (procedure.includes("chamados.getStatusCounts")) return result({ total: 1, open: 1, in_progress: 0, waiting: 0, closed: 0 });
       if (procedure.includes("chamados.getCollaborators")) return result({ collaborators: currentCollaborators });
+      if (procedure.includes("chamados.searchCustomers")) return result({ customers: [replacementCustomer] });
       if (procedure.includes("megadeskSettings.listTicketStatuses")) return result([]);
       if (procedure.includes("megadesk.getClientUsers")) return result([
         { userId: "operator-two", name: "Agente Dois", email: "dois@example.invalid", role: "agent" },
@@ -126,7 +140,37 @@ async function prepareDetail(page: Page) {
               { userId: "operator-three", userName: "Agente Três" },
             ]
           : [{ userId: "operator-three", userName: "Agente Três" }];
-        return result({ chamado: { ...ticket, collaborators: currentCollaborators }, message: "Colaboradores atualizados com sucesso" });
+        return result({ chamado: { ...currentTicket, collaborators: currentCollaborators }, message: "Colaboradores atualizados com sucesso" });
+      }
+      if (procedure.includes("chamados.update")) {
+        updateRequests.push(route.request().postData() || "");
+        currentTicket = {
+          ...currentTicket,
+          customerId: replacementCustomer.id,
+          customerName: replacementCustomer.name,
+          customerPhone: replacementCustomer.phone,
+          customerEmail: replacementCustomer.email,
+          customerCNPJ: replacementCustomer.document,
+          company: replacementCustomer.name,
+          title: "Título editado",
+          observations: "Observação editada",
+          priority: "media",
+        };
+        currentCustomer = { ...replacementCustomer };
+        return result({ chamado: { ...currentTicket, collaborators: currentCollaborators, customer: currentCustomer }, message: "Chamado atualizado com sucesso" });
+      }
+      if (procedure.includes("chamados.registerActivity")) {
+        currentTicket = {
+          ...currentTicket,
+          activities: [...currentTicket.activities, {
+            id: "activity-new-note",
+            date: Date.UTC(2026, 8, 13, 15, 0, 0),
+            description: "Registro visual validado",
+            attendant: session.userName,
+            actionType: "note",
+          }],
+        };
+        return result({ ok: true });
       }
       return result({ ok: true });
     });
@@ -137,6 +181,8 @@ async function prepareDetail(page: Page) {
       body: JSON.stringify(batch ? payloads : payloads[0]),
     });
   });
+
+  return { updateRequests };
 }
 
 test("ticket detail loads canonical ERP customer and stays after the desktop sidebar", async ({ page }) => {
@@ -319,4 +365,116 @@ test("ticket collaborators update in detail and toolbar without a reload", async
   await expect(page.getByTestId("ticket-detail-participants")).toHaveText("Agente Três");
   await expect(page.getByTestId("ticket-detail-collaborators").getByTitle("Agente Dois")).toHaveCount(0);
   expect(mainFrameNavigations).toBe(0);
+});
+
+test("ticket edit selects a canonical customer and never reveals collaborators after save", async ({ page }) => {
+  const tracker = await prepareDetail(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.locator("tbody").getByText("Snapshot antigo", { exact: true }).click();
+
+  let mainFrameNavigations = 0;
+  page.on("framenavigated", frame => {
+    if (frame === page.mainFrame()) mainFrameNavigations += 1;
+  });
+
+  // Reproduz o estado antigo que ficava escondido sob Editar.
+  await page.getByTestId("ticket-manage-collaborators").click();
+  await expect(page.getByRole("heading", { name: "Gerenciar Colaboradores" })).toBeVisible();
+  await page.getByTestId("ticket-edit-action").click();
+
+  await expect(page.getByRole("heading", { name: "Gerenciar Colaboradores" })).toHaveCount(0);
+  const editModal = page.getByTestId("ticket-edit-modal");
+  const customerInput = editModal.getByRole("combobox", { name: "Cliente" });
+  await expect(customerInput).toHaveValue("Empresa Canônica Ltda");
+  await customerInput.fill("Marina");
+  await page.getByRole("option", { name: /Marina Cliente/ }).click();
+  await editModal.getByLabel("Título", { exact: true }).fill("Título editado");
+  await editModal.getByLabel("Observações", { exact: true }).fill("Observação editada");
+  await editModal.getByRole("button", { name: /Salvar/ }).click();
+
+  await expect(page.getByTestId("ticket-edit-modal")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Gerenciar Colaboradores" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "#0042 · Marina Cliente" })).toBeVisible();
+  await expect(page.getByText("52998224725", { exact: true })).toBeVisible();
+  await expect(page.getByText("11977776666", { exact: true })).toBeVisible();
+  await expect(page.getByText("marina@example.invalid", { exact: true })).toBeVisible();
+  expect(tracker.updateRequests.join("\n")).toContain('"customerId":"crm-replacement"');
+  expect(tracker.updateRequests.join("\n")).not.toContain("clientName");
+  expect(mainFrameNavigations).toBe(0);
+
+  await page.getByTestId("ticket-manage-collaborators").click();
+  await expect(page.getByRole("heading", { name: "Gerenciar Colaboradores" })).toBeVisible();
+});
+
+test("ticket edit customer selector remains usable on mobile", async ({ page }) => {
+  await prepareDetail(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.locator("tbody").getByText("Snapshot antigo", { exact: true }).click();
+  await page.getByTestId("ticket-edit-action").click();
+
+  const modal = page.getByTestId("ticket-edit-modal");
+  const input = modal.getByRole("combobox", { name: "Cliente" });
+  await expect(modal).toBeVisible();
+  const modalBox = await modal.boundingBox();
+  expect(modalBox).not.toBeNull();
+  expect(modalBox!.x).toBeGreaterThanOrEqual(0);
+  expect(modalBox!.x + modalBox!.width).toBeLessThanOrEqual(390);
+
+  await input.fill("Marina");
+  await expect(page.getByRole("option", { name: /Marina Cliente/ })).toBeVisible();
+  await page.getByRole("option", { name: /Marina Cliente/ }).click();
+  await expect(input).toHaveValue("Marina Cliente");
+
+  await modal.getByRole("button", { name: "Fechar edição do chamado" }).click();
+  await page.getByTestId("ticket-register-action").click();
+  const registerModal = page.getByTestId("register-activity-modal");
+  await expect(registerModal).toBeVisible();
+  const registerBox = await registerModal.boundingBox();
+  expect(registerBox).not.toBeNull();
+  expect(registerBox!.x).toBeGreaterThanOrEqual(0);
+  expect(registerBox!.x + registerBox!.width).toBeLessThanOrEqual(390);
+  expect(registerBox!.height).toBeLessThanOrEqual(844);
+  await expect(registerModal.getByRole("button", { name: "Registrar", exact: true })).toBeVisible();
+  await expect(registerModal.getByRole("button", { name: "Cancelar", exact: true })).toBeVisible();
+});
+
+test("register activity modal has light computed surfaces and preserves its complete flow", async ({ page }) => {
+  await prepareDetail(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.locator("tbody").getByText("Snapshot antigo", { exact: true }).click();
+  await page.getByTestId("ticket-register-action").click();
+
+  const backdrop = page.getByTestId("register-activity-backdrop");
+  const modal = page.getByTestId("register-activity-modal");
+  const textarea = page.getByTestId("register-activity-description");
+  await expect(modal).toBeVisible();
+  const colors = await Promise.all([
+    backdrop.evaluate(element => getComputedStyle(element).backgroundColor),
+    modal.evaluate(element => getComputedStyle(element).backgroundColor),
+    textarea.evaluate(element => getComputedStyle(element).backgroundColor),
+    textarea.evaluate(element => getComputedStyle(element).color),
+    textarea.evaluate(element => getComputedStyle(element, "::placeholder").color),
+  ]);
+  expect(colors[0]).not.toBe("rgb(0, 0, 0)");
+  expect(colors[0]).not.toBe("rgba(0, 0, 0, 1)");
+  expect(colors[1]).toBe("rgb(255, 255, 255)");
+  expect(colors[2]).toBe("rgb(255, 255, 255)");
+  expect(colors[3]).not.toBe("rgb(255, 255, 255)");
+  expect(colors[4]).not.toBe(colors[2]);
+
+  await page.getByRole("button", { name: "Cancelar", exact: true }).click();
+  await expect(modal).toHaveCount(0);
+  await page.getByTestId("ticket-register-action").click();
+  await page.getByRole("button", { name: "Fechar registro de atividade" }).click();
+  await expect(modal).toHaveCount(0);
+  await page.getByTestId("ticket-register-action").click();
+  await textarea.fill("Registro visual validado");
+  await modal.getByRole("button", { name: "Registrar", exact: true }).click();
+
+  await expect(modal).toHaveCount(0);
+  await expect(page.getByText("Registro visual validado", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Agente Detail", { exact: true }).first()).toBeVisible();
 });

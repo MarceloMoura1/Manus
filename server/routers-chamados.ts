@@ -392,12 +392,12 @@ export const chamadosRouter = router({
         status: StatusSchema.optional(),
         priority: PrioritySchema.optional(),
         assignedToUserId: z.string().max(80).optional(),
-        clientName: z.string().optional(),
-      })
+        customerId: z.string().trim().min(1, "Selecione um cliente").max(80).optional(),
+      }).strict()
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
+        const clientId = ctx.tenantId;
 
         if (!clientId || clientId.trim() === '') {
           throw new TRPCError({
@@ -410,7 +410,7 @@ export const chamadosRouter = router({
 
         if (process.env.NODE_ENV === 'development') console.log('[DEBUG] Updating chamado:', input.chamadoId, 'for clientId:', clientId);
         
-        const { chamadoId, assignedToUserId, ...updates } = input;
+        const { chamadoId, assignedToUserId, customerId, ...updates } = input;
         const assignedTo = assignedToUserId === undefined
           ? undefined
           : await getActiveClientUser(clientId, assignedToUserId);
@@ -418,8 +418,29 @@ export const chamadosRouter = router({
           throw new TRPCError({ code: "BAD_REQUEST", message: "Atendente responsável inválido para este tenant." });
         }
 
+        const customer = customerId === undefined ? null : await getCrmClientById(customerId, clientId);
+        if (customerId !== undefined && (!customer || customer.lifecycleState !== "active")) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Cliente não encontrado no ERP ou não pertence a este ambiente.",
+          });
+        }
+
+        const canonicalName = customer?.companyName.trim();
+        const customerName = customer && customer.customerType === "company" && customer.responsibleName.trim()
+          ? customer.responsibleName.trim()
+          : canonicalName;
+
         await updateChamado(chamadoId, clientId, {
           ...updates,
+          ...(customer && canonicalName && customerName ? {
+            customerId: customer.crmClientId,
+            customerName,
+            customerPhone: customer.phone ?? null,
+            customerEmail: customer.email ?? null,
+            customerCNPJ: customer.cpfCnpj ?? null,
+            company: canonicalName,
+          } : {}),
           assignedTo: assignedTo?.userName,
           assignedToUserId: assignedTo?.userId,
         });
@@ -433,10 +454,17 @@ export const chamadosRouter = router({
           });
         }
         
+        const canonicalCustomer = customer ?? (chamado.customerId
+          ? await getCrmClientById(chamado.customerId, clientId)
+          : null);
+
         console.log('[SUCCESS] Chamado updated:', chamadoId);
         
         return { 
-          chamado,
+          chamado: {
+            ...chamado,
+            customer: resolveTicketDetailCustomer(chamado, canonicalCustomer),
+          },
           message: "Chamado atualizado com sucesso",
         };
       } catch (error) {

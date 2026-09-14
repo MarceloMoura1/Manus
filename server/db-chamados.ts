@@ -735,6 +735,12 @@ export async function updateChamado(
   chamadoId: string,
   clientId: string,
   updates: {
+    customerId?: string;
+    customerName?: string;
+    customerPhone?: string | null;
+    customerEmail?: string | null;
+    customerCNPJ?: string | null;
+    company?: string;
     title?: string;
     observations?: string;
     status?: string;
@@ -752,6 +758,25 @@ export async function updateChamado(
 
   // Validar e sanitizar updates
   const updateData: any = {};
+
+  if (updates.customerId !== undefined) {
+    updateData.customerId = sanitizeString(updates.customerId, 80);
+  }
+  if (updates.customerName !== undefined) {
+    updateData.customerName = sanitizeString(updates.customerName, 255);
+  }
+  if (updates.customerPhone !== undefined) {
+    updateData.customerPhone = updates.customerPhone ? sanitizeString(updates.customerPhone, 40) : null;
+  }
+  if (updates.customerEmail !== undefined) {
+    updateData.customerEmail = updates.customerEmail ? sanitizeString(updates.customerEmail, 255) : null;
+  }
+  if (updates.customerCNPJ !== undefined) {
+    updateData.customerCNPJ = updates.customerCNPJ ? sanitizeString(updates.customerCNPJ, 20) : null;
+  }
+  if (updates.company !== undefined) {
+    updateData.company = sanitizeString(updates.company, 255);
+  }
   
   if (updates.title !== undefined) {
     validateNonEmptyString(updates.title, 'title');

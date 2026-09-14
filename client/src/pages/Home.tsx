@@ -1859,12 +1859,12 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   const [closeResolution, setCloseResolution] = React.useState('');
   const [showEditCard, setShowEditCard] = React.useState(false);
   const [editForm, setEditForm] = React.useState<{
-    clientName: string;
+    customerId: string;
     title: string;
     observations: string;
     priority: 'media' | 'baixa' | 'alta' | 'critica';
   }>({
-    clientName: '',
+    customerId: '',
     title: '',
     observations: '',
     priority: 'media',
@@ -1891,11 +1891,21 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   const [debouncedCustomerSearch, setDebouncedCustomerSearch] = React.useState('');
   const [selectedCrmCustomer, setSelectedCrmCustomer] = React.useState<any | null>(null);
   const [showCustomerDropdown, setShowCustomerDropdown] = React.useState(false);
+  const [editCustomerSearch, setEditCustomerSearch] = React.useState('');
+  const [debouncedEditCustomerSearch, setDebouncedEditCustomerSearch] = React.useState('');
+  const [selectedEditCrmCustomer, setSelectedEditCrmCustomer] = React.useState<any | null>(null);
+  const [showEditCustomerDropdown, setShowEditCustomerDropdown] = React.useState(false);
+  const [editCustomerError, setEditCustomerError] = React.useState('');
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedCustomerSearch(customerSearch.trim()), 300);
     return () => window.clearTimeout(timer);
   }, [customerSearch]);
+
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedEditCustomerSearch(editCustomerSearch.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [editCustomerSearch]);
 
   React.useEffect(() => {
     const raw = sessionStorage.getItem("MEGADESK_TICKET_INTENT");
@@ -1941,6 +1951,14 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
     { query: debouncedCustomerSearch.length >= 2 ? debouncedCustomerSearch : "__" },
     {
       enabled: showNewChamadoModal && !selectedCrmCustomer && debouncedCustomerSearch.length >= 2,
+      refetchOnWindowFocus: false,
+      staleTime: 0,
+    },
+  );
+  const editCustomerSearchQuery = trpc.chamados.searchCustomers.useQuery(
+    { query: debouncedEditCustomerSearch.length >= 2 ? debouncedEditCustomerSearch : "__" },
+    {
+      enabled: showEditCard && !selectedEditCrmCustomer && debouncedEditCustomerSearch.length >= 2,
       refetchOnWindowFocus: false,
       staleTime: 0,
     },
@@ -2004,12 +2022,26 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
   React.useEffect(() => {
     if (showEditCard && selectedChamado) {
+      const customer = selectedChamado.customer;
+      const customerId = customer?.id || selectedChamado.customerId || '';
+      const customerName = customer?.name || selectedChamado.customerName || selectedChamado.company || '';
       setEditForm({
-        clientName: selectedChamado.clientName || '',
+        customerId,
         title: selectedChamado.title || '',
         observations: selectedChamado.observations || '',
         priority: selectedChamado.priority || 'media',
       });
+      setSelectedEditCrmCustomer(customerId ? {
+        id: customerId,
+        name: customerName,
+        document: customer?.document || selectedChamado.customerCNPJ || null,
+        phone: customer?.phone || selectedChamado.customerPhone || null,
+        email: customer?.email || selectedChamado.customerEmail || null,
+        type: customer?.type || null,
+      } : null);
+      setEditCustomerSearch(customerName);
+      setEditCustomerError('');
+      setShowEditCustomerDropdown(false);
     }
   }, [showEditCard, selectedChamado]);
 
@@ -2332,6 +2364,64 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
     setNewChamadoForm(prev => ({ ...prev, customerId: customer.id }));
     setValidationErrors(prev => prev.filter(error => error.field !== 'customerId'));
     setShowCustomerDropdown(false);
+  };
+
+  const handleEditCustomerSearch = (value: string) => {
+    setEditCustomerSearch(value);
+    setSelectedEditCrmCustomer(null);
+    setEditForm(prev => ({ ...prev, customerId: '' }));
+    setEditCustomerError('');
+    setShowEditCustomerDropdown(value.trim().length >= 2);
+  };
+
+  const handleSelectEditCustomer = (customer: any) => {
+    setSelectedEditCrmCustomer(customer);
+    setEditCustomerSearch(customer.name);
+    setEditForm(prev => ({ ...prev, customerId: customer.id }));
+    setEditCustomerError('');
+    setShowEditCustomerDropdown(false);
+  };
+
+  const handleToggleEditCard = () => {
+    setShowManageCollaboratorsCard(false);
+    setIsEditingCollaborators(false);
+    setShowEditCard(current => !current);
+  };
+
+  const handleToggleCollaboratorsCard = () => {
+    setShowEditCard(false);
+    setShowManageCollaboratorsCard(current => !current);
+  };
+
+  const handleSaveEditedChamado = async () => {
+    if (!selectedChamado || !editForm.customerId || !selectedEditCrmCustomer) {
+      setEditCustomerError('Selecione um cliente cadastrado em ERP > Clientes.');
+      return;
+    }
+
+    try {
+      const result = await updateChamadoMutation.mutateAsync({
+        chamadoId: selectedChamado.id,
+        customerId: editForm.customerId,
+        title: editForm.title,
+        observations: editForm.observations,
+        priority: editForm.priority,
+      });
+
+      setSelectedChamado((current: any) => current?.id === selectedChamado.id
+        ? { ...current, ...result.chamado }
+        : current,
+      );
+      setShowEditCard(false);
+      showToast('Chamado atualizado com sucesso', 'success');
+      await Promise.all([
+        utils.chamados.getDetail.invalidate({ chamadoId: selectedChamado.id }),
+        utils.chamados.list.invalidate(),
+      ]);
+    } catch (error) {
+      console.error('Erro ao atualizar chamado:', error);
+      showToast('Erro ao atualizar chamado', 'error');
+    }
   };
 
   const chamados = chamadosQuery.data?.chamados || [];
@@ -3001,7 +3091,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               </SelectContent>
             </Select>
             <div role="separator" className="my-3 w-px shrink-0 bg-slate-200"></div>
-            <button type="button" data-testid="ticket-manage-collaborators" data-action="collaborators" className="group relative flex h-[58px] min-w-[104px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1.5 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowManageCollaboratorsCard(!showManageCollaboratorsCard)}>
+            <button type="button" data-testid="ticket-manage-collaborators" data-action="collaborators" className="group relative flex h-[58px] min-w-[104px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1.5 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={handleToggleCollaboratorsCard}>
               {/* Gerenciar colaboradores - mantém */}
               <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
@@ -3009,7 +3099,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               <span className="text-[11px] font-medium">Colaboradores</span>
             </button>
             <div role="separator" className="my-3 w-px shrink-0 bg-slate-200"></div>
-            <button type="button" data-testid="ticket-edit-action" data-action="edit" className="group relative flex h-[58px] min-w-[82px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1.5 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={() => setShowEditCard(!showEditCard)}>
+            <button type="button" data-testid="ticket-edit-action" data-action="edit" className="group relative flex h-[58px] min-w-[82px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1.5 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700" onClick={handleToggleEditCard}>
               {/* Editar chamado - mantém */}
               <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" />
@@ -3061,7 +3151,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                     +{selectedChamado.collaborators.length - 3}
                   </div>
                 )}
-                <button type="button" data-testid="ticket-add-collaborator" aria-label="Adicionar colaborador" onClick={() => setShowManageCollaboratorsCard(true)} className="relative z-10 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-100 text-slate-600 shadow-sm transition-colors hover:bg-blue-50 hover:text-blue-700">
+                <button type="button" data-testid="ticket-add-collaborator" aria-label="Adicionar colaborador" onClick={() => { setShowEditCard(false); setShowManageCollaboratorsCard(true); }} className="relative z-10 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-100 text-slate-600 shadow-sm transition-colors hover:bg-blue-50 hover:text-blue-700">
                   <Plus className="h-4 w-4" />
                 </button>
               </div>
@@ -3141,11 +3231,13 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
           {/* Modal de Registrar Atividade */}
           {showRegisterActivityModal && selectedChamado && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg shadow-2xl border border-slate-200 p-6 w-full max-w-2xl mx-4">
+            <div data-testid="register-activity-backdrop" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/20 p-4 backdrop-blur-[1px]">
+              <div data-testid="register-activity-modal" role="dialog" aria-modal="true" aria-labelledby="register-activity-title" className="w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold text-slate-900">Registrar Atividade</h3>
+                  <h3 id="register-activity-title" className="text-lg font-bold text-slate-900">Registrar Atividade</h3>
                   <button
+                    type="button"
+                    aria-label="Fechar registro de atividade"
                     onClick={() => setShowRegisterActivityModal(false)}
                     className="text-slate-400 hover:text-slate-600 transition-colors"
                   >
@@ -3156,27 +3248,32 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 <div className="space-y-4">
                   {/* Descricao */}
                   <div>
-                    <label className="text-sm font-semibold text-slate-700 block mb-2">Descricao</label>
+                    <label htmlFor="register-activity-description" className="text-sm font-semibold text-slate-700 block mb-2">Descrição</label>
                     <textarea
+                      id="register-activity-description"
+                      data-testid="register-activity-description"
                       placeholder="Descreva a atividade realizada..."
                       value={activityDescription}
                       onChange={(e) => setActivityDescription(e.target.value)}
-                      className="w-full p-3 bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-blue-500 rounded-lg transition-colors resize-none h-32 text-sm"
+                      className="h-32 w-full resize-none rounded-lg border border-slate-300 bg-white p-3 text-sm text-slate-900 placeholder:text-slate-400 transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                     />
                   </div>
 
                   {/* Botoes */}
-                  <div className="flex gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
+                  <div className="flex gap-3 border-t border-slate-200 pt-4">
                     <Button
+                      type="button"
                       onClick={handleRegisterActivity}
                       disabled={registerActivityMutation.isPending}
-                      className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold shadow-md hover:shadow-lg transition-all"
+                      className="flex-1 bg-blue-600 font-semibold text-white shadow-sm transition-colors hover:bg-blue-700"
                     >
                       {registerActivityMutation.isPending ? 'Registrando...' : 'Registrar'}
                     </Button>
                     <Button
+                      type="button"
                       onClick={() => setShowRegisterActivityModal(false)}
-                      className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-900 font-semibold transition-colors"
+                      variant="outline"
+                      className="flex-1 border-slate-300 bg-white font-semibold text-slate-700 transition-colors hover:bg-slate-50"
                     >
                       Cancelar
                     </Button>
@@ -3358,10 +3455,13 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
           {/* Card Suspenso de Editar Chamado */}
           {showEditCard && selectedChamado && (
-            <div className="absolute top-[280px] left-1/2 transform -translate-x-1/2 z-50 bg-white rounded-lg shadow-2xl border border-slate-200 p-8 w-[600px] max-h-[700px] overflow-y-auto">
+            <div data-testid="ticket-edit-backdrop" className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/20 p-4 backdrop-blur-[1px]">
+            <div data-testid="ticket-edit-modal" role="dialog" aria-modal="true" aria-labelledby="ticket-edit-title" className="w-full max-w-[600px] max-h-[calc(100vh-2rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl sm:p-8">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold text-slate-900">Editar Chamado</h3>
+                <h3 id="ticket-edit-title" className="text-lg font-bold text-slate-900">Editar Chamado</h3>
                 <button
+                  type="button"
+                  aria-label="Fechar edição do chamado"
                   onClick={() => setShowEditCard(false)}
                   className="text-slate-400 hover:text-slate-600 transition-colors"
                 >
@@ -3371,21 +3471,65 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
               <div className="space-y-4">
                 {/* Cliente */}
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Cliente</label>
-                  <Input
-                    type="text"
-                    value={editForm.clientName}
-                    onChange={(e) => setEditForm({ ...editForm, clientName: e.target.value })}
-                    placeholder="Nome do cliente"
-                    className="w-full"
-                  />
+                <div className="relative">
+                  <label htmlFor="edit-ticket-customer" className="block text-sm font-medium text-slate-700 mb-2">Cliente</label>
+                  <div className="relative">
+                    <Input
+                      id="edit-ticket-customer"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded={showEditCustomerDropdown}
+                      aria-controls="edit-ticket-customer-options"
+                      value={editCustomerSearch}
+                      onChange={(e) => handleEditCustomerSearch(e.target.value)}
+                      onFocus={() => editCustomerSearch.trim().length >= 2 && !selectedEditCrmCustomer && setShowEditCustomerDropdown(true)}
+                      onBlur={() => window.setTimeout(() => setShowEditCustomerDropdown(false), 200)}
+                      placeholder="Buscar cliente por nome, CPF/CNPJ, telefone..."
+                      autoComplete="off"
+                      className={`w-full bg-white pr-8 text-slate-900 ${editCustomerError ? 'border-red-500' : selectedEditCrmCustomer ? 'border-green-500' : 'border-slate-300 focus:border-blue-500'}`}
+                    />
+                    {(editCustomerSearchQuery.isLoading || editCustomerSearchQuery.isFetching || editCustomerSearch.trim() !== debouncedEditCustomerSearch) && editCustomerSearch.trim().length >= 2 && !selectedEditCrmCustomer && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                      </div>
+                    )}
+                    {selectedEditCrmCustomer && <div className="absolute right-3 top-1/2 -translate-y-1/2 text-green-600">✓</div>}
+                  </div>
+                  {showEditCustomerDropdown && (editCustomerSearchQuery.data?.customers.length ?? 0) > 0 && (
+                    <div id="edit-ticket-customer-options" role="listbox" className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-300 bg-white shadow-lg">
+                      {editCustomerSearchQuery.data?.customers.map((customer: any) => (
+                        <button
+                          key={customer.id}
+                          type="button"
+                          role="option"
+                          aria-selected={selectedEditCrmCustomer?.id === customer.id}
+                          onMouseDown={() => handleSelectEditCustomer(customer)}
+                          className="w-full border-b border-slate-200 px-4 py-3 text-left text-slate-900 transition-colors last:border-0 hover:bg-blue-50"
+                        >
+                          <div className="text-sm font-semibold">{customer.name}</div>
+                          {(customer.document || customer.phone) && (
+                            <div className="text-xs text-slate-600">{[customer.document, customer.phone].filter(Boolean).join(' · ')}</div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {showEditCustomerDropdown && editCustomerSearchQuery.data?.customers.length === 0 && !editCustomerSearchQuery.isFetching && editCustomerSearch.trim() === debouncedEditCustomerSearch && (
+                    <div className="absolute z-50 mt-1 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-600 shadow-lg">
+                      Nenhum cliente encontrado em ERP &gt; Clientes.
+                    </div>
+                  )}
+                  {editCustomerSearchQuery.isError && showEditCustomerDropdown && (
+                    <p className="mt-1 text-xs font-medium text-red-600">Não foi possível buscar os clientes. Tente novamente.</p>
+                  )}
+                  {editCustomerError && <p className="mt-1 text-xs font-medium text-red-600">{editCustomerError}</p>}
                 </div>
 
                 {/* Título */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Título</label>
+                  <label htmlFor="edit-ticket-title" className="block text-sm font-medium text-slate-700 mb-2">Título</label>
                   <Input
+                    id="edit-ticket-title"
                     type="text"
                     value={editForm.title}
                     onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
@@ -3396,8 +3540,9 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
 
                 {/* Observações */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Observações</label>
+                  <label htmlFor="edit-ticket-observations" className="block text-sm font-medium text-slate-700 mb-2">Observações</label>
                   <textarea
+                    id="edit-ticket-observations"
                     value={editForm.observations}
                     onChange={(e) => setEditForm({ ...editForm, observations: e.target.value })}
                     placeholder="Observações iniciais"
@@ -3425,36 +3570,15 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                 {/* Botões */}
                 <div className="flex gap-3 pt-4 border-t border-slate-200">
                   <Button
-                    onClick={() => {
-                      updateChamadoMutation.mutate({
-                        chamadoId: selectedChamado.id,
-                        title: editForm.title,
-                        clientName: editForm.clientName,
-                        observations: editForm.observations,
-                        priority: editForm.priority as 'media' | 'baixa' | 'alta' | 'critica',
-                      }, {
-                        onSuccess: () => {
-                          showToast('Chamado atualizado com sucesso', 'success');
-                          setShowEditCard(false);
-                          setSelectedChamado({
-                            ...selectedChamado,
-                            title: editForm.title,
-                            clientName: editForm.clientName,
-                            observations: editForm.observations,
-                            priority: editForm.priority,
-                          });
-                          utils.chamados.list.invalidate();
-                        },
-                        onError: () => {
-                          showToast('Erro ao atualizar chamado', 'error');
-                        },
-                      });
-                    }}
+                    type="button"
+                    onClick={handleSaveEditedChamado}
+                    disabled={updateChamadoMutation.isPending}
                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold"
                   >
                     ✅ Salvar
                   </Button>
                   <Button
+                    type="button"
                     onClick={() => setShowEditCard(false)}
                     variant="outline"
                     className="flex-1 border-2 border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold"
@@ -3463,6 +3587,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                   </Button>
                 </div>
               </div>
+            </div>
             </div>
           )}
 
