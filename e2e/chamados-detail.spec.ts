@@ -118,6 +118,7 @@ async function prepareDetail(page: Page, { loseFirstAttachmentResponse = false }
   let currentAttachments: any[] = [];
   const updateRequests: string[] = [];
   const attachmentAttemptIds: string[] = [];
+  const attachmentRemovalRequests: string[] = [];
 
   await page.addInitScript(value => {
     localStorage.setItem("megadesk_session_v1", JSON.stringify(value));
@@ -231,6 +232,33 @@ async function prepareDetail(page: Page, { loseFirstAttachmentResponse = false }
           chamado: currentTicket,
         });
       }
+      if (procedure.includes("chamados.removeAttachment")) {
+        const attachmentId = String(input.attachmentId ?? "");
+        attachmentRemovalRequests.push(attachmentId);
+        const attachment = currentAttachments.find(item => item.attachmentId === attachmentId);
+        if (attachment) {
+          currentAttachments = currentAttachments.filter(item => item.attachmentId !== attachmentId);
+          currentTicket = {
+            ...currentTicket,
+            activities: [...currentTicket.activities, {
+              id: "activity-attachment-removed",
+              date: Date.UTC(2026, 8, 13, 15, 11, 0),
+              description: "Agente Detail removeu evidence.txt do chamado.",
+              attendant: session.userName,
+              actionType: "attachment_removed",
+              metadata: {
+                eventType: "attachment_removed",
+                attachmentId,
+                fileName: attachment.fileName,
+                mimeType: attachment.mimeType,
+                size: attachment.fileSize,
+                sha256: "a".repeat(64),
+              },
+            }],
+          };
+        }
+        return result({ logicallyRemoved: true, state: "pending_delete", reused: false, chamado: currentTicket });
+      }
       return result({ ok: true });
     });
 
@@ -241,7 +269,7 @@ async function prepareDetail(page: Page, { loseFirstAttachmentResponse = false }
     });
   });
 
-  return { updateRequests, attachmentAttemptIds };
+  return { updateRequests, attachmentAttemptIds, attachmentRemovalRequests };
 }
 
 test("ticket detail loads canonical ERP customer and stays after the desktop sidebar", async ({ page }) => {
@@ -410,6 +438,32 @@ test("ticket attachment retry reuses one client attempt after a lost response", 
   expect(attachmentAttemptIds[1]).toBe(attachmentAttemptIds[0]);
   await expect(page.getByTestId("ticket-attachments-list").getByText("evidence.txt")).toHaveCount(1);
   await expect(page.getByTestId("timeline-activity-activity-attachment")).toHaveCount(1);
+});
+
+test("ticket attachment removal hides the attachment and adds one audit event", async ({ page }) => {
+  const { attachmentRemovalRequests } = await prepareDetail(page);
+  page.on("dialog", dialog => dialog.accept());
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.locator("tbody").getByText("Snapshot antigo", { exact: true }).click();
+  await page.getByTestId("ticket-attachments-action").click();
+
+  const attachmentModal = page.getByRole("dialog", { name: "Anexar arquivo" });
+  await attachmentModal.getByTestId("ticket-attachment-file").setInputFiles({
+    name: "evidence.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("ticket evidence\n"),
+  });
+  await attachmentModal.getByRole("button", { name: "Anexar", exact: true }).click();
+  await expect(attachmentModal).toHaveCount(0);
+
+  const attachmentId = "22222222-2222-4222-8222-222222222222";
+  await page.getByTestId(`ticket-attachment-remove-${attachmentId}`).click();
+  await expect(page.getByTestId("ticket-attachments-list")).toHaveCount(0);
+  await expect(page.getByTestId("timeline-activity-activity-attachment-removed"))
+    .toContainText("Removido logicamente");
+  await expect(page.getByTestId("timeline-activity-activity-attachment-removed").getByRole("link", { name: "Visualizar arquivo" }))
+    .toHaveCount(0);
+  expect(attachmentRemovalRequests).toEqual([attachmentId]);
 });
 
 test("ticket detail keeps mobile navigation available and stacks its content", async ({ page }) => {

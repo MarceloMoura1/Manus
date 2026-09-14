@@ -517,4 +517,64 @@ export async function markTicketAttachmentPendingDelete(
   );
 }
 
+export async function logicallyRemoveTicketAttachment(
+  input: {
+    attachmentId: string;
+    chamadoId: string;
+    clientId: string;
+    actor: CanonicalTicketActor;
+  },
+  pool: Pool = getPool(),
+): Promise<{ logicallyRemoved: true; state: "pending_delete" | "deleted"; reused: boolean }> {
+  const actor = assertActor(input.actor);
+  return withTransaction(async connection => {
+    const ticket = await ticketForUpdate(connection, input.clientId, input.chamadoId);
+    if (!ticket) throw new Error("ATTACHMENT_NOT_FOUND");
+    const [rows] = await connection.execute<Array<RowDataPacket & {
+      state: "legacy" | "staged" | "active" | "pending_delete" | "deleted";
+      fileName: string;
+      mimeType: string | null;
+      fileSize: number | null;
+      sha256: string | null;
+    }>>(
+      `SELECT attachment_state AS state, file_name AS fileName, mime_type AS mimeType,
+              file_size AS fileSize, sha256
+       FROM megadesk_domain_chamado_attachments
+       WHERE attachment_id=? AND chamado_id=? AND client_id=? LIMIT 1 FOR UPDATE`,
+      [input.attachmentId, input.chamadoId, input.clientId],
+    );
+    const attachment = rows[0];
+    if (!attachment) throw new Error("ATTACHMENT_NOT_FOUND");
+    if (attachment.state === "pending_delete" || attachment.state === "deleted") {
+      return { logicallyRemoved: true, state: attachment.state, reused: true };
+    }
+    if (attachment.state !== "active" || !attachment.mimeType || attachment.fileSize == null) {
+      throw new Error("ATTACHMENT_NOT_REMOVABLE");
+    }
+    const [result] = await connection.execute<ResultSetHeader>(
+      `UPDATE megadesk_domain_chamado_attachments
+       SET attachment_state='pending_delete', pending_delete_at=NOW()
+       WHERE attachment_id=? AND chamado_id=? AND client_id=? AND attachment_state='active'`,
+      [input.attachmentId, input.chamadoId, input.clientId],
+    );
+    if (result.affectedRows !== 1) throw new Error("ATTACHMENT_REMOVE_CONFLICT");
+    await insertEvent(connection, {
+      chamadoId: input.chamadoId,
+      clientId: input.clientId,
+      actor,
+      actionType: "attachment_removed",
+      description: `${actor.userName} removeu logicamente ${attachment.fileName}.`,
+      metadata: {
+        eventType: "attachment_removed",
+        attachmentId: input.attachmentId,
+        fileName: attachment.fileName,
+        mimeType: attachment.mimeType,
+        size: Number(attachment.fileSize),
+        ...(attachment.sha256 ? { sha256: attachment.sha256 } : {}),
+      },
+    });
+    return { logicallyRemoved: true, state: "pending_delete", reused: false };
+  }, pool);
+}
+
 export { withTransaction as withChamadoTransaction };

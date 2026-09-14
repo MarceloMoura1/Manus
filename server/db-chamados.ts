@@ -1306,6 +1306,7 @@ export {
   reserveTicketAttachment,
   activateTicketAttachment,
   markTicketAttachmentPendingDelete,
+  logicallyRemoveTicketAttachment,
   withChamadoTransaction,
 } from './chamados-domain';
 export type { CanonicalTicketActor, TicketDomainUpdate, TicketMutationMode } from './chamados-domain';

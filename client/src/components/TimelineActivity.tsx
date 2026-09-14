@@ -28,6 +28,7 @@ const activityStyles: Record<string, ActivityStyle> = {
   ticket_edited: { icon: <Edit className="h-6 w-6" />, label: 'Edição', accent: 'border-l-amber-400', tint: 'bg-amber-50 text-amber-600', badge: 'border-amber-200 bg-amber-50 text-amber-700' },
   ticket_forwarded: { icon: <Share2 className="h-6 w-6" />, label: 'Encaminhamento', accent: 'border-l-indigo-400', tint: 'bg-indigo-50 text-indigo-600', badge: 'border-indigo-200 bg-indigo-50 text-indigo-700' },
   attachment_added: { icon: <FileText className="h-6 w-6" />, label: 'Anexo', accent: 'border-l-emerald-400', tint: 'bg-emerald-50 text-emerald-600', badge: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+  attachment_removed: { icon: <FileText className="h-6 w-6" />, label: 'Anexo', accent: 'border-l-slate-400', tint: 'bg-slate-50 text-slate-600', badge: 'border-slate-200 bg-slate-50 text-slate-700' },
   ticket_created: { icon: <User className="h-6 w-6" />, label: 'Criação', accent: 'border-l-orange-400', tint: 'bg-orange-50 text-orange-600', badge: 'border-orange-200 bg-orange-50 text-orange-700' },
   register: { icon: <User className="h-6 w-6" />, label: 'Criação', accent: 'border-l-orange-400', tint: 'bg-orange-50 text-orange-600', badge: 'border-orange-200 bg-orange-50 text-orange-700' },
   edit: { icon: <Edit className="h-6 w-6" />, label: 'Sistema', accent: 'border-l-amber-400', tint: 'bg-amber-50 text-amber-600', badge: 'border-amber-200 bg-amber-50 text-amber-700' },
@@ -54,7 +55,7 @@ export function getActivityAuthorName(attendant?: string) {
 
 export function getActivitySummary(activity: Pick<ActivityItem, 'attendant' | 'actionType'>) {
   const verbs: Record<string, string> = {
-    status_changed: 'alterou o status.', collaborator_added: 'adicionou um colaborador.', collaborator_removed: 'removeu um colaborador.', ticket_edited: 'editou o chamado.', ticket_forwarded: 'encaminhou o chamado.', attachment_added: 'adicionou um anexo.', ticket_created: 'criou o chamado.', close: 'encerrou o chamado.', edit: 'editou o chamado.', forward: 'encaminhou o chamado.', attachment: 'adicionou um anexo.',
+    status_changed: 'alterou o status.', collaborator_added: 'adicionou um colaborador.', collaborator_removed: 'removeu um colaborador.', ticket_edited: 'editou o chamado.', ticket_forwarded: 'encaminhou o chamado.', attachment_added: 'adicionou um anexo.', attachment_removed: 'removeu um anexo do chamado.', ticket_created: 'criou o chamado.', close: 'encerrou o chamado.', edit: 'editou o chamado.', forward: 'encaminhou o chamado.', attachment: 'adicionou um anexo.',
   };
   return `${getActivityAuthorName(activity.attendant)} ${verbs[activity.actionType ?? ''] ?? 'registrou uma atividade.'}`;
 }
@@ -123,6 +124,7 @@ function renderMetadata(metadata: TicketActivityMetadata | null, chamadoId?: str
     const href = attachmentHref(chamadoId, metadata.attachmentId);
     return <><span>{metadata.mimeType} · {formatBytes(metadata.size)}</span>{href ? <a href={href} target="_blank" rel="noreferrer" className="ml-2 font-semibold text-emerald-700 underline underline-offset-2 hover:text-emerald-800">Visualizar arquivo</a> : null}</>;
   }
+  if (metadata.eventType === 'attachment_removed') return <span>{metadata.mimeType} · {formatBytes(metadata.size)} · Removido logicamente</span>;
   return null;
 }
 

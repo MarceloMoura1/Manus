@@ -16,6 +16,7 @@ export const structuredTicketActivityTypes = [
   "ticket_edited",
   "ticket_forwarded",
   "attachment_added",
+  "attachment_removed",
 ] as const;
 
 export const ticketActivityTypes = [
@@ -55,6 +56,14 @@ export type TicketActivityMetadata =
     }
   | {
       eventType: "attachment_added";
+      attachmentId: string;
+      fileName: string;
+      mimeType: string;
+      size: number;
+      sha256?: string;
+    }
+  | {
+      eventType: "attachment_removed";
       attachmentId: string;
       fileName: string;
       mimeType: string;
@@ -128,7 +137,7 @@ export function parseTicketActivityMetadata(
       ...(observation ? { observation } : {}),
     };
   }
-  if (eventType === "attachment_added") {
+  if (eventType === "attachment_added" || eventType === "attachment_removed") {
     const attachmentId = string(raw.attachmentId, 80);
     const fileName = string(raw.fileName, 255);
     const mimeType = string(raw.mimeType, 100);

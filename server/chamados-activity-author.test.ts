@@ -26,6 +26,7 @@ const chamadosDb = vi.hoisted(() => ({
   registerManualTicketActivity: vi.fn(),
   uploadTicketAttachment: vi.fn(),
   listTicketAttachments: vi.fn(),
+  logicallyRemoveTicketAttachment: vi.fn(),
   getCustomerChamadoHistory: vi.fn(),
   getActiveClientUser: vi.fn(),
 }));
@@ -59,6 +60,7 @@ describe("chamados activity author", () => {
         : null
     ));
     chamadosDb.registerManualTicketActivity.mockResolvedValue({ id: "activity-1" });
+    chamadosDb.logicallyRemoveTicketAttachment.mockResolvedValue({ logicallyRemoved: true, state: "pending_delete", reused: false });
     chamadosDb.getChamadoWithActivities.mockResolvedValue({
       id: chamadoId,
       collaborators: [],
@@ -106,5 +108,16 @@ describe("chamados activity author", () => {
 
     expect(chamadosDb.getActiveClientUser).toHaveBeenCalledWith("tenant-b", "operator-a");
     expect(chamadosDb.registerManualTicketActivity).not.toHaveBeenCalled();
+  });
+
+  it("uses the canonical tenant-scoped actor for logical attachment removal", async () => {
+    await expect(callerFor("tenant-a", "operator-a").removeAttachment({ chamadoId, attachmentId: "22222222-2222-4222-8222-222222222222" }))
+      .resolves.toMatchObject({ logicallyRemoved: true, state: "pending_delete", reused: false });
+    expect(chamadosDb.logicallyRemoveTicketAttachment).toHaveBeenCalledWith({
+      chamadoId,
+      attachmentId: "22222222-2222-4222-8222-222222222222",
+      clientId: "tenant-a",
+      actor: { userId: "operator-a", userName: "Marcelo Moura" },
+    });
   });
 });

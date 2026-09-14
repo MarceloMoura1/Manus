@@ -104,4 +104,17 @@ describe("TimelineActivity", () => {
     expect(markup).toContain(`/api/chamados/${chamadoId}/attachments/${attachmentId}/file`);
     expect(markup).toContain('rel="noreferrer"');
   });
+
+  it("renders an audited logical removal without exposing a file link", () => {
+    const markup = renderToStaticMarkup(React.createElement(TimelineActivity, {
+      activities: [{
+        id: "activity-removed", date: Date.UTC(2026, 8, 13, 12, 0, 0), description: "Ana removeu logicamente evidence.txt.", attendant: "Ana",
+        actionType: "attachment_removed",
+        metadata: { eventType: "attachment_removed", attachmentId: "22222222-2222-4222-8222-222222222222", fileName: "evidence.txt", mimeType: "text/plain", size: 17, sha256: "a".repeat(64) },
+      }],
+    }));
+    expect(markup).toContain("removeu um anexo do chamado.");
+    expect(markup).toContain("Removido logicamente");
+    expect(markup).not.toContain("Visualizar arquivo");
+  });
 });

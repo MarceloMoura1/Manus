@@ -120,7 +120,7 @@ export async function listTicketAttachments(chamadoId: string, clientId: string,
     `SELECT attachment_id AS attachmentId, file_name AS fileName, file_size AS fileSize, mime_type AS mimeType,
             uploaded_by AS uploadedBy, created_at AS createdAt, attachment_state AS state, storage_key AS storageKey
      FROM megadesk_domain_chamado_attachments
-     WHERE chamado_id=? AND client_id=?
+      WHERE chamado_id=? AND client_id=? AND attachment_state NOT IN ('pending_delete','deleted')
      ORDER BY created_at DESC, attachment_id DESC`,
     [chamadoId, clientId],
   );

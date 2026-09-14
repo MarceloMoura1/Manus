@@ -28,6 +28,7 @@ import {
   registerManualTicketActivity,
   uploadTicketAttachment,
   listTicketAttachments,
+  logicallyRemoveTicketAttachment,
   TicketAttachmentError,
   getCustomerChamadoHistory,
   getActiveClientUser,
@@ -888,6 +889,27 @@ export const chamadosRouter = router({
           code: "INTERNAL_SERVER_ERROR",
           message: `Erro ao obter anexos: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
         });
+      }
+    }),
+
+  removeAttachment: megadeskProcedure
+    .input(z.object({ chamadoId: ChamadoIdSchema, attachmentId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const clientId = ctx.tenantId || String(ctx.user?.id ?? "unknown");
+      if (!clientId || clientId.trim() === "") throw new TRPCError({ code: "UNAUTHORIZED", message: "Identificação de cliente inválida" });
+      checkRateLimit(clientId);
+      const actor = await requireCanonicalActivityActor(clientId, ctx.operationalUserId);
+      try {
+        const result = await logicallyRemoveTicketAttachment({ ...input, clientId, actor });
+        const chamado = await getChamadoWithActivities(input.chamadoId, clientId);
+        return { ...result, chamado };
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "";
+        if (code === "ATTACHMENT_NOT_FOUND") throw new TRPCError({ code: "NOT_FOUND", message: "Anexo não encontrado." });
+        if (code === "ATTACHMENT_NOT_REMOVABLE" || code === "ATTACHMENT_REMOVE_CONFLICT") {
+          throw new TRPCError({ code: "CONFLICT", message: "Anexo não está disponível para remoção." });
+        }
+        throw error;
       }
     }),
 

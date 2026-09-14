@@ -314,6 +314,7 @@ export const megadeskDomainChamadoActivities = mysqlTable(
       "ticket_edited",
       "ticket_forwarded",
       "attachment_added",
+      "attachment_removed",
     ])
       .default("note")
       .notNull(),
@@ -1138,6 +1139,7 @@ export const megadeskDomainChamadoAttachments = mysqlTable(
     createdAt: timestamp("created_at", { mode: "string" })
       .defaultNow()
       .notNull(),
+    pendingDeleteAt: timestamp("pending_delete_at", { mode: "string" }),
   },
   table => [
     index("idx_mdca_att_chamado").on(table.chamadoId),

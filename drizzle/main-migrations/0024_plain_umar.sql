@@ -1,0 +1,2 @@
+ALTER TABLE `megadesk_domain_chamado_activities` MODIFY COLUMN `action_type` enum('register','edit','close','forward','note','attachment','ticket_created','manual_activity','status_changed','collaborator_added','collaborator_removed','ticket_edited','ticket_forwarded','attachment_added','attachment_removed') NOT NULL DEFAULT 'note';--> statement-breakpoint
+ALTER TABLE `megadesk_domain_chamado_attachments` ADD `pending_delete_at` timestamp;

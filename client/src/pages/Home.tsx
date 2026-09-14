@@ -1970,6 +1970,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   const updateCollaboratorsMutation = trpc.chamados.updateCollaborators.useMutation();
   const registerActivityMutation = trpc.chamados.registerActivity.useMutation();
   const uploadAttachmentMutation = trpc.chamados.uploadAttachment.useMutation();
+  const removeAttachmentMutation = trpc.chamados.removeAttachment.useMutation();
   const attachmentsQuery = trpc.chamados.getAttachments.useQuery(
     { chamadoId: selectedChamado?.id || '' },
     { enabled: !!selectedChamado?.id },
@@ -2401,6 +2402,19 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
     } catch (error) {
       console.error('Erro ao anexar arquivo:', error);
       showToast(error instanceof Error ? error.message : 'Não foi possível anexar o arquivo.', 'error');
+    }
+  };
+
+  const handleTicketAttachmentRemove = async (attachment: { attachmentId: string; fileName: string }) => {
+    if (!selectedChamado || removeAttachmentMutation.isPending) return;
+    if (!window.confirm(`Remover "${attachment.fileName}" do chamado? O arquivo não será apagado fisicamente.`)) return;
+    try {
+      const result = await removeAttachmentMutation.mutateAsync({ chamadoId: selectedChamado.id, attachmentId: attachment.attachmentId });
+      if (result.chamado) setSelectedChamado(result.chamado);
+      await Promise.all([attachmentsQuery.refetch(), utils.chamados.getDetail.invalidate({ chamadoId: selectedChamado.id })]);
+      showToast('Anexo removido do chamado.', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Não foi possível remover o anexo.', 'error');
     }
   };
 
@@ -3213,7 +3227,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
                   {attachmentsQuery.data.map((attachment: any) => (
                     <div key={attachment.attachmentId} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-100 bg-emerald-50/40 px-3 py-2.5">
                       <div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{attachment.fileName}</p><p className="text-xs text-slate-500">{attachment.mimeType || 'Arquivo'} · {attachment.fileSize == null ? 'Tamanho indisponível' : `${(attachment.fileSize / 1024).toFixed(1)} KB`}</p></div>
-                      {attachment.canView ? <a data-testid={`ticket-attachment-view-${attachment.attachmentId}`} href={`/api/chamados/${selectedChamado.id}/attachments/${attachment.attachmentId}/file`} target="_blank" rel="noreferrer" className="rounded-md border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100">Visualizar arquivo</a> : <span className="text-xs font-medium text-slate-500">{attachment.legacy ? 'Anexo legado não disponível' : 'Indisponível'}</span>}
+                      <div className="flex items-center gap-2">{attachment.canView ? <a data-testid={`ticket-attachment-view-${attachment.attachmentId}`} href={`/api/chamados/${selectedChamado.id}/attachments/${attachment.attachmentId}/file`} target="_blank" rel="noreferrer" className="rounded-md border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100">Visualizar arquivo</a> : <span className="text-xs font-medium text-slate-500">{attachment.legacy ? 'Anexo legado não disponível' : 'Indisponível'}</span>}{attachment.state === 'active' ? <button type="button" data-testid={`ticket-attachment-remove-${attachment.attachmentId}`} onClick={() => void handleTicketAttachmentRemove(attachment)} disabled={removeAttachmentMutation.isPending} className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50">Remover do chamado</button> : null}</div>
                     </div>
                   ))}
                 </div>
