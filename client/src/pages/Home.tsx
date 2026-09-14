@@ -1858,6 +1858,7 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   const [activityDescription, setActivityDescription] = React.useState('');
   const [showAttachmentsModal, setShowAttachmentsModal] = React.useState(false);
   const [ticketAttachmentFile, setTicketAttachmentFile] = React.useState<File | null>(null);
+  const ticketAttachmentAttemptIdRef = React.useRef<string | null>(null);
   const [showCloseModal, setShowCloseModal] = React.useState(false);
   const [closeResolution, setCloseResolution] = React.useState('');
   const [showEditCard, setShowEditCard] = React.useState(false);
@@ -2376,6 +2377,8 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       return;
     }
     try {
+      const clientAttemptId = ticketAttachmentAttemptIdRef.current ?? crypto.randomUUID();
+      ticketAttachmentAttemptIdRef.current = clientAttemptId;
       const bytes = new Uint8Array(await ticketAttachmentFile.arrayBuffer());
       let binary = '';
       for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -2384,10 +2387,11 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
         fileName: ticketAttachmentFile.name,
         fileType: ticketAttachmentFile.type || 'application/octet-stream',
         fileBase64: btoa(binary),
-        clientAttemptId: crypto.randomUUID(),
+        clientAttemptId,
       });
       if (result.chamado) setSelectedChamado(result.chamado);
       setTicketAttachmentFile(null);
+      ticketAttachmentAttemptIdRef.current = null;
       setShowAttachmentsModal(false);
       showToast('Anexo enviado com sucesso.', 'success');
       await Promise.all([
@@ -3285,12 +3289,12 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           {showAttachmentsModal && selectedChamado && (
             <div data-testid="ticket-attachments-backdrop" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/20 p-4 backdrop-blur-[1px]">
               <div role="dialog" aria-modal="true" aria-labelledby="ticket-attachments-title" className="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
-                <div className="mb-4 flex items-center justify-between"><h3 id="ticket-attachments-title" className="text-lg font-bold text-slate-900">Anexar arquivo</h3><button type="button" aria-label="Fechar anexos" onClick={() => { setShowAttachmentsModal(false); setTicketAttachmentFile(null); }} className="text-slate-400 transition-colors hover:text-slate-600"><X className="h-5 w-5" /></button></div>
+                <div className="mb-4 flex items-center justify-between"><h3 id="ticket-attachments-title" className="text-lg font-bold text-slate-900">Anexar arquivo</h3><button type="button" aria-label="Fechar anexos" onClick={() => { setShowAttachmentsModal(false); setTicketAttachmentFile(null); ticketAttachmentAttemptIdRef.current = null; }} className="text-slate-400 transition-colors hover:text-slate-600"><X className="h-5 w-5" /></button></div>
                 <div className="space-y-4">
-                  <div><label htmlFor="ticket-attachment-file" className="mb-2 block text-sm font-semibold text-slate-700">Selecionar arquivo</label><input id="ticket-attachment-file" data-testid="ticket-attachment-file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx" onChange={event => setTicketAttachmentFile(event.target.files?.[0] ?? null)} className="block w-full rounded-lg border border-slate-300 bg-white p-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-emerald-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-emerald-700" /></div>
-                  {ticketAttachmentFile ? <div data-testid="ticket-attachment-preview" className="flex items-center justify-between rounded-lg border border-emerald-100 bg-emerald-50 p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{ticketAttachmentFile.name}</p><p className="text-xs text-slate-500">{(ticketAttachmentFile.size / 1024).toFixed(1)} KB</p></div><button type="button" onClick={() => setTicketAttachmentFile(null)} className="rounded p-1 text-slate-500 hover:bg-white hover:text-slate-700" aria-label="Remover arquivo"><X className="h-4 w-4" /></button></div> : null}
+                  <div><label htmlFor="ticket-attachment-file" className="mb-2 block text-sm font-semibold text-slate-700">Selecionar arquivo</label><input id="ticket-attachment-file" data-testid="ticket-attachment-file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx" onChange={event => { const file = event.target.files?.[0] ?? null; setTicketAttachmentFile(file); ticketAttachmentAttemptIdRef.current = file ? crypto.randomUUID() : null; }} className="block w-full rounded-lg border border-slate-300 bg-white p-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-emerald-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-emerald-700" /></div>
+                  {ticketAttachmentFile ? <div data-testid="ticket-attachment-preview" className="flex items-center justify-between rounded-lg border border-emerald-100 bg-emerald-50 p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{ticketAttachmentFile.name}</p><p className="text-xs text-slate-500">{(ticketAttachmentFile.size / 1024).toFixed(1)} KB</p></div><button type="button" onClick={() => { setTicketAttachmentFile(null); ticketAttachmentAttemptIdRef.current = null; }} className="rounded p-1 text-slate-500 hover:bg-white hover:text-slate-700" aria-label="Remover arquivo"><X className="h-4 w-4" /></button></div> : null}
                   <p className="text-xs text-slate-500">PDF, PNG, JPEG, WEBP, TXT, CSV, DOC, DOCX, XLS e XLSX até 12 MiB.</p>
-                  <div className="flex gap-3 border-t border-slate-200 pt-4"><Button type="button" onClick={handleTicketAttachmentUpload} disabled={!ticketAttachmentFile || uploadAttachmentMutation.isPending} className="flex-1 bg-emerald-600 font-semibold text-white hover:bg-emerald-700">{uploadAttachmentMutation.isPending ? 'Anexando...' : 'Anexar'}</Button><Button type="button" variant="outline" onClick={() => { setShowAttachmentsModal(false); setTicketAttachmentFile(null); }} className="flex-1 border-slate-300 bg-white font-semibold text-slate-700 hover:bg-slate-50">Cancelar</Button></div>
+                  <div className="flex gap-3 border-t border-slate-200 pt-4"><Button type="button" onClick={handleTicketAttachmentUpload} disabled={!ticketAttachmentFile || uploadAttachmentMutation.isPending} className="flex-1 bg-emerald-600 font-semibold text-white hover:bg-emerald-700">{uploadAttachmentMutation.isPending ? 'Anexando...' : 'Anexar'}</Button><Button type="button" variant="outline" onClick={() => { setShowAttachmentsModal(false); setTicketAttachmentFile(null); ticketAttachmentAttemptIdRef.current = null; }} className="flex-1 border-slate-300 bg-white font-semibold text-slate-700 hover:bg-slate-50">Cancelar</Button></div>
                 </div>
               </div>
             </div>

@@ -81,6 +81,13 @@ const replacementCustomer = {
 };
 
 const result = (json: unknown) => ({ result: { data: { json } } });
+const failure = (message: string) => ({ error: { json: { message, code: -32603, data: { code: "INTERNAL_SERVER_ERROR", httpStatus: 500 } } } });
+
+function inputAt(raw: unknown, index: number, batch: boolean): Record<string, unknown> {
+  if (!raw || typeof raw !== "object") return {};
+  if (batch) return (raw as Record<string, { json?: Record<string, unknown> }>)[String(index)]?.json ?? {};
+  return (raw as { json?: Record<string, unknown> }).json ?? (raw as Record<string, unknown>);
+}
 
 async function expectOpaqueSurface(locator: ReturnType<Page["getByTestId"]>) {
   await expect(locator).toHaveCSS("opacity", "1");
@@ -103,13 +110,14 @@ async function expectDetailWorkspaceToCover(detail: ReturnType<Page["getByTestId
   expect(covered).toBe(true);
 }
 
-async function prepareDetail(page: Page) {
+async function prepareDetail(page: Page, { loseFirstAttachmentResponse = false }: { loseFirstAttachmentResponse?: boolean } = {}) {
   let currentCollaborators = [...ticket.collaborators];
   let collaboratorUpdates = 0;
   let currentTicket: any = { ...ticket, activities: [...ticket.activities] };
   let currentCustomer: any = { ...canonicalCustomer };
   let currentAttachments: any[] = [];
   const updateRequests: string[] = [];
+  const attachmentAttemptIds: string[] = [];
 
   await page.addInitScript(value => {
     localStorage.setItem("megadesk_session_v1", JSON.stringify(value));
@@ -121,7 +129,11 @@ async function prepareDetail(page: Page) {
     const url = new URL(route.request().url());
     const procedures = decodeURIComponent(url.pathname).replace(/^.*\/api\/trpc\//, "").split(",");
     const batch = url.searchParams.get("batch") === "1";
-    const payloads = procedures.map(procedure => {
+    const rawInput = url.searchParams.get("input") ?? route.request().postData() ?? "{}";
+    let parsedInput: unknown = {};
+    try { parsedInput = JSON.parse(rawInput); } catch { /* controlled empty fixture */ }
+    const payloads = procedures.map((procedure, index) => {
+      const input = inputAt(parsedInput, index, batch);
       if (procedure.includes("megadesk.refreshSession")) return result({ ok: true, session });
       if (procedure.includes("chamados.list")) return result({ chamados: [currentTicket], total: 1, limit: 20, offset: 0 });
       if (procedure.includes("chamados.getDetail")) return result({ chamado: { ...currentTicket, collaborators: currentCollaborators, customer: currentCustomer } });
@@ -175,6 +187,10 @@ async function prepareDetail(page: Page) {
         return result({ ok: true });
       }
       if (procedure.includes("chamados.uploadAttachment")) {
+        const clientAttemptId = String(input.clientAttemptId ?? "");
+        attachmentAttemptIds.push(clientAttemptId);
+        const reused = attachmentAttemptIds.length > 1;
+        if (!reused) {
         currentAttachments = [{
           attachmentId: "22222222-2222-4222-8222-222222222222",
           fileName: "evidence.txt",
@@ -204,10 +220,14 @@ async function prepareDetail(page: Page) {
             },
           }],
         };
+        }
+        if (loseFirstAttachmentResponse && attachmentAttemptIds.length === 1) {
+          return failure("Resposta de upload perdida.");
+        }
         return result({
           success: true,
           attachmentId: currentAttachments[0].attachmentId,
-          reused: false,
+          reused,
           chamado: currentTicket,
         });
       }
@@ -221,7 +241,7 @@ async function prepareDetail(page: Page) {
     });
   });
 
-  return { updateRequests };
+  return { updateRequests, attachmentAttemptIds };
 }
 
 test("ticket detail loads canonical ERP customer and stays after the desktop sidebar", async ({ page }) => {
@@ -365,6 +385,31 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
   await expect(page.getByTestId("ticket-detail-shell")).toBeVisible();
   await sidebar.getByTitle("Home").click();
   await expect(page.getByTestId("ticket-detail-shell")).toHaveCount(0);
+});
+
+test("ticket attachment retry reuses one client attempt after a lost response", async ({ page }) => {
+  const { attachmentAttemptIds } = await prepareDetail(page, { loseFirstAttachmentResponse: true });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.locator("tbody").getByText("Snapshot antigo", { exact: true }).click();
+  await page.getByTestId("ticket-attachments-action").click();
+
+  const attachmentModal = page.getByRole("dialog", { name: "Anexar arquivo" });
+  await attachmentModal.getByTestId("ticket-attachment-file").setInputFiles({
+    name: "evidence.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("ticket evidence\n"),
+  });
+  const submit = attachmentModal.getByRole("button", { name: "Anexar", exact: true });
+  await submit.click();
+  await expect(submit).toBeEnabled();
+  await submit.click();
+  await expect(attachmentModal).toHaveCount(0);
+
+  expect(attachmentAttemptIds).toHaveLength(2);
+  expect(attachmentAttemptIds[0]).toMatch(/^[0-9a-f-]{36}$/i);
+  expect(attachmentAttemptIds[1]).toBe(attachmentAttemptIds[0]);
+  await expect(page.getByTestId("ticket-attachments-list").getByText("evidence.txt")).toHaveCount(1);
+  await expect(page.getByTestId("timeline-activity-activity-attachment")).toHaveCount(1);
 });
 
 test("ticket detail keeps mobile navigation available and stacks its content", async ({ page }) => {
