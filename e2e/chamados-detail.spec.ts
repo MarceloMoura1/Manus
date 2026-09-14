@@ -108,6 +108,7 @@ async function prepareDetail(page: Page) {
   let collaboratorUpdates = 0;
   let currentTicket: any = { ...ticket, activities: [...ticket.activities] };
   let currentCustomer: any = { ...canonicalCustomer };
+  let currentAttachments: any[] = [];
   const updateRequests: string[] = [];
 
   await page.addInitScript(value => {
@@ -126,6 +127,7 @@ async function prepareDetail(page: Page) {
       if (procedure.includes("chamados.getDetail")) return result({ chamado: { ...currentTicket, collaborators: currentCollaborators, customer: currentCustomer } });
       if (procedure.includes("chamados.getStatusCounts")) return result({ total: 1, open: 1, in_progress: 0, waiting: 0, closed: 0 });
       if (procedure.includes("chamados.getCollaborators")) return result({ collaborators: currentCollaborators });
+      if (procedure.includes("chamados.getAttachments")) return result(currentAttachments);
       if (procedure.includes("chamados.searchCustomers")) return result({ customers: [replacementCustomer] });
       if (procedure.includes("megadeskSettings.listTicketStatuses")) return result([]);
       if (procedure.includes("megadesk.getClientUsers")) return result([
@@ -171,6 +173,25 @@ async function prepareDetail(page: Page) {
           }],
         };
         return result({ ok: true });
+      }
+      if (procedure.includes("chamados.uploadAttachment")) {
+        currentAttachments = [{
+          attachmentId: "22222222-2222-4222-8222-222222222222",
+          fileName: "evidence.txt",
+          fileSize: 17,
+          mimeType: "text/plain",
+          uploadedBy: session.userName,
+          createdAt: "2026-09-13T15:10:00.000Z",
+          state: "active",
+          canView: true,
+          legacy: false,
+        }];
+        return result({
+          success: true,
+          attachmentId: currentAttachments[0].attachmentId,
+          reused: false,
+          chamado: currentTicket,
+        });
       }
       return result({ ok: true });
     });
@@ -238,7 +259,7 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
     .map(item => item.action));
   expect(visualActionOrder).toEqual(["status", "collaborators", "edit", "register", "forward", "attachments"]);
   await expect(actionBar).not.toContainText("Dossiê");
-  await expect(page.getByTestId("ticket-attachments-action")).toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByTestId("ticket-attachments-action")).toBeEnabled();
   const actionHeights = await actionBar.locator("[data-action]").evaluateAll(elements => elements.map(element => Math.round(element.getBoundingClientRect().height)));
   expect(new Set(actionHeights)).toEqual(new Set([58]));
   const separatorHeights = await actionBar.locator("[role='separator']").evaluateAll(elements => elements.map(element => Math.round(element.getBoundingClientRect().height)));
@@ -277,7 +298,7 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
   ].map(id => page.getByTestId(`timeline-activity-header-${id}`).evaluate(element => getComputedStyle(element).backgroundColor)));
   expect(new Set(eventAccentColors).size).toBe(4);
   await expect(page.getByTestId("timeline-activity-header-activity-note").getByText("Nota", { exact: true })).toBeVisible();
-  await expect(page.getByTestId("timeline-activity-header-activity-forward").getByText("Colaborador", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("timeline-activity-header-activity-forward").getByText("Sistema", { exact: true })).toBeVisible();
   await expect(page.getByTestId("timeline-activity-header-activity-close").getByText("Sistema", { exact: true })).toBeVisible();
   await expect(page.getByTestId("timeline-activity-header-activity-create").getByText("Criação", { exact: true })).toBeVisible();
   await expectDetailWorkspaceToCover(detail, page.locator("tbody"));
@@ -301,6 +322,21 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
   await page.getByTestId("ticket-forward-action").click();
   await expect(page.getByRole("heading", { name: "Encaminhar Chamado" })).toBeVisible();
   await page.getByRole("heading", { name: "Encaminhar Chamado" }).locator("..").getByRole("button").click();
+  await page.getByTestId("ticket-attachments-action").click();
+  const attachmentModal = page.getByRole("dialog", { name: "Anexar arquivo" });
+  await expect(attachmentModal).toBeVisible();
+  await attachmentModal.getByTestId("ticket-attachment-file").setInputFiles({
+    name: "evidence.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("ticket evidence\n"),
+  });
+  await expect(attachmentModal.getByTestId("ticket-attachment-preview")).toContainText("evidence.txt");
+  await attachmentModal.getByRole("button", { name: "Anexar", exact: true }).click();
+  await expect(attachmentModal).toHaveCount(0);
+  const attachment = page.getByTestId("ticket-attachments-list");
+  await expect(attachment).toContainText("evidence.txt");
+  await expect(attachment.getByTestId("ticket-attachment-view-22222222-2222-4222-8222-222222222222"))
+    .toHaveAttribute("href", `/api/chamados/${ticket.id}/attachments/22222222-2222-4222-8222-222222222222/file`);
 
   await page.getByRole("button", { name: "Voltar", exact: true }).click();
   await expect(page.getByTestId("ticket-detail-shell")).toHaveCount(0);
