@@ -1,10 +1,18 @@
 export const DEFAULT_TICKET_ATTACHMENT_RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
+export const DEFAULT_TICKET_ATTACHMENT_READ_TIMEOUT_MS = 30 * 1000;
 
 export function parseTicketAttachmentReconcileIntervalMs(value: string | undefined): number {
   const intervalMs = Number(value);
   return Number.isSafeInteger(intervalMs) && intervalMs > 0
     ? intervalMs
     : DEFAULT_TICKET_ATTACHMENT_RECONCILE_INTERVAL_MS;
+}
+
+export function parseTicketAttachmentReadTimeoutMs(value: string | undefined): number {
+  const timeoutMs = Number(value);
+  return Number.isSafeInteger(timeoutMs) && timeoutMs > 0
+    ? timeoutMs
+    : DEFAULT_TICKET_ATTACHMENT_READ_TIMEOUT_MS;
 }
 
 export const ENV = {
@@ -18,5 +26,8 @@ export const ENV = {
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
   ticketAttachmentReconcileIntervalMs: parseTicketAttachmentReconcileIntervalMs(
     process.env.TICKET_ATTACHMENT_RECONCILE_INTERVAL_MS,
+  ),
+  ticketAttachmentReadTimeoutMs: parseTicketAttachmentReadTimeoutMs(
+    process.env.TICKET_ATTACHMENT_READ_TIMEOUT_MS,
   ),
 };

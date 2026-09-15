@@ -4,6 +4,7 @@ import { fileTypeFromBuffer } from "file-type";
 import type { Pool, RowDataPacket } from "mysql2/promise";
 import { getPool } from "./db";
 import { resolveOperationalSessionReadOnly } from "./_core/megadesk-session";
+import { ENV } from "./_core/env";
 import { StorageReadError, storageGet, storagePutExact } from "./storage";
 import {
   activateTicketAttachment,
@@ -50,7 +51,7 @@ export class TicketAttachmentError extends Error {
 }
 
 export type TicketAttachmentReadFailureStage = "local" | "storage_config" | "download_url" | "signed_fetch" | "content_validation";
-export type TicketAttachmentReadFailureKind = "not_found" | "auth" | "rate_limit" | "server" | "transport" | "invalid_response" | "content_invalid" | "config" | "internal";
+export type TicketAttachmentReadFailureKind = "not_found" | "auth" | "rate_limit" | "server" | "transport" | "timeout" | "invalid_response" | "content_invalid" | "config" | "internal";
 
 export class TicketAttachmentReadError extends TicketAttachmentError {
   readonly cause?: unknown;
@@ -255,7 +256,7 @@ export async function readTicketAttachment(
   clientId: string,
   chamadoId: string,
   attachmentId: string,
-  dependencies: { pool?: Pool; storage?: TicketAttachmentStorage } = {},
+  dependencies: { pool?: Pool; storage?: TicketAttachmentStorage; timeoutMs?: number } = {},
 ): Promise<{ bytes: Buffer; fileName: string; mimeType: AllowedTicketAttachmentMime; inline: boolean }> {
   if (!uuid.test(chamadoId) || !uuid.test(attachmentId)) {
     throw new TicketAttachmentReadError({ stage: "local", kind: "not_found" });
@@ -291,24 +292,34 @@ export async function readTicketAttachment(
   } catch (cause) {
     throw new TicketAttachmentReadError({ stage: "download_url", kind: "invalid_response", cause });
   }
-  let response: globalThis.Response;
-  try {
-    response = await fetch(signedUrl);
-  } catch (cause) {
-    throw new TicketAttachmentReadError({ stage: "signed_fetch", kind: "transport", cause });
-  }
-  if (!response.ok) {
-    throw new TicketAttachmentReadError({
-      stage: "signed_fetch",
-      kind: signedFetchFailureKind(response.status),
-      providerStatus: response.status,
-    });
-  }
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, dependencies.timeoutMs ?? ENV.ticketAttachmentReadTimeoutMs);
   let bytes: Buffer;
   try {
-    bytes = Buffer.from(await response.arrayBuffer());
-  } catch (cause) {
-    throw new TicketAttachmentReadError({ stage: "signed_fetch", kind: "transport", cause });
+    let response: globalThis.Response;
+    try {
+      response = await fetch(signedUrl, { signal: controller.signal });
+    } catch (cause) {
+      throw new TicketAttachmentReadError({ stage: "signed_fetch", kind: timedOut ? "timeout" : "transport", cause });
+    }
+    if (!response.ok) {
+      throw new TicketAttachmentReadError({
+        stage: "signed_fetch",
+        kind: signedFetchFailureKind(response.status),
+        providerStatus: response.status,
+      });
+    }
+    try {
+      bytes = Buffer.from(await response.arrayBuffer());
+    } catch (cause) {
+      throw new TicketAttachmentReadError({ stage: "signed_fetch", kind: timedOut ? "timeout" : "transport", cause });
+    }
+  } finally {
+    clearTimeout(timer);
   }
   if (bytes.length === 0 || bytes.length > TICKET_ATTACHMENT_MAX_BYTES || (row.fileSize != null && bytes.length !== Number(row.fileSize))) {
     throw new TicketAttachmentReadError({ stage: "content_validation", kind: "content_invalid" });
@@ -350,7 +361,7 @@ export function ticketAttachmentReadHttpStatus(error: unknown): number {
   if (error instanceof TicketAttachmentReadError) {
     if (error.stage === "local" && error.kind === "not_found") return 404;
     if (error.stage === "signed_fetch" && error.kind === "not_found") return 404;
-    if (error.kind === "rate_limit" || error.kind === "server" || error.kind === "transport") return 503;
+    if (error.kind === "rate_limit" || error.kind === "server" || error.kind === "transport" || error.kind === "timeout") return 503;
     return 502;
   }
   if (error instanceof TicketAttachmentError) {

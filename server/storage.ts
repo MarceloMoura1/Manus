@@ -6,7 +6,7 @@ import { ENV } from './_core/env';
 export type StorageConfig = { baseUrl: string; apiKey: string };
 
 export type StorageReadErrorStage = "storage_config" | "download_url";
-export type StorageReadErrorKind = "auth" | "rate_limit" | "server" | "transport" | "invalid_response" | "config";
+export type StorageReadErrorKind = "auth" | "rate_limit" | "server" | "transport" | "timeout" | "invalid_response" | "config";
 
 export class StorageReadError extends Error {
   readonly cause?: unknown;
@@ -66,6 +66,7 @@ async function buildDownloadUrl(
   relKey: string,
   apiKey: string,
   fetcher: typeof fetch = fetch,
+  timeoutMs = ENV.ticketAttachmentReadTimeoutMs,
 ): Promise<string> {
   let downloadApiUrl: URL;
   try {
@@ -74,41 +75,57 @@ async function buildDownloadUrl(
     throw new StorageReadError({ stage: "storage_config", kind: "config", cause });
   }
   downloadApiUrl.searchParams.set("path", normalizeKey(relKey));
-  let response: Response;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   try {
-    response = await fetcher(downloadApiUrl, {
-      method: "GET",
-      headers: buildAuthHeaders(apiKey),
-    });
-  } catch (cause) {
-    throw new StorageReadError({ stage: "download_url", kind: "transport", cause });
-  }
-  if (!response.ok) {
-    const kind: StorageReadErrorKind = response.status === 401 || response.status === 403
-      ? "auth"
-      : response.status === 429
-        ? "rate_limit"
-        : response.status >= 500
-          ? "server"
-          : "invalid_response";
-    throw new StorageReadError({ stage: "download_url", kind, providerStatus: response.status });
-  }
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch (cause) {
-    throw new StorageReadError({ stage: "download_url", kind: "invalid_response", providerStatus: response.status, cause });
-  }
-  const url = typeof payload === "object" && payload !== null && "url" in payload ? (payload as { url?: unknown }).url : null;
-  if (typeof url !== "string") {
-    throw new StorageReadError({ stage: "download_url", kind: "invalid_response", providerStatus: response.status });
-  }
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("Unsupported download URL protocol");
-    return parsed.toString();
-  } catch (cause) {
-    throw new StorageReadError({ stage: "download_url", kind: "invalid_response", providerStatus: response.status, cause });
+    let response: Response;
+    try {
+      response = await fetcher(downloadApiUrl, {
+        method: "GET",
+        headers: buildAuthHeaders(apiKey),
+        signal: controller.signal,
+      });
+    } catch (cause) {
+      throw new StorageReadError({ stage: "download_url", kind: timedOut ? "timeout" : "transport", cause });
+    }
+    if (!response.ok) {
+      const kind: StorageReadErrorKind = response.status === 401 || response.status === 403
+        ? "auth"
+        : response.status === 429
+          ? "rate_limit"
+          : response.status >= 500
+            ? "server"
+            : "invalid_response";
+      throw new StorageReadError({ stage: "download_url", kind, providerStatus: response.status });
+    }
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch (cause) {
+      throw new StorageReadError({
+        stage: "download_url",
+        kind: timedOut ? "timeout" : "invalid_response",
+        ...(timedOut ? {} : { providerStatus: response.status }),
+        cause,
+      });
+    }
+    const url = typeof payload === "object" && payload !== null && "url" in payload ? (payload as { url?: unknown }).url : null;
+    if (typeof url !== "string") {
+      throw new StorageReadError({ stage: "download_url", kind: "invalid_response", providerStatus: response.status });
+    }
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("Unsupported download URL protocol");
+      return parsed.toString();
+    } catch (cause) {
+      throw new StorageReadError({ stage: "download_url", kind: "invalid_response", providerStatus: response.status, cause });
+    }
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -195,12 +212,12 @@ export async function storagePutExact(
 
 export async function storageGet(
   relKey: string,
-  dependencies: { config?: StorageConfig; fetch?: typeof fetch } = {},
+  dependencies: { config?: StorageConfig; fetch?: typeof fetch; timeoutMs?: number } = {},
 ): Promise<{ key: string; url: string; }> {
   const { baseUrl, apiKey } = dependencies.config ? validStorageReadConfig(dependencies.config) : getStorageReadConfig();
   const key = normalizeKey(relKey);
   return {
     key,
-    url: await buildDownloadUrl(baseUrl, key, apiKey, dependencies.fetch),
+    url: await buildDownloadUrl(baseUrl, key, apiKey, dependencies.fetch, dependencies.timeoutMs),
   };
 }
