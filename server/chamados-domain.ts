@@ -271,6 +271,20 @@ export async function updateChamadoWithActivity(
       [...assignments.map(([, value]) => value), input.clientId, input.chamadoId],
     );
 
+    const editChanges = buildEditChanges(current, input.updates);
+    const insertEditEvent = async () => {
+      if (!editChanges.length) return false;
+      await insertEvent(connection, {
+        chamadoId: input.chamadoId,
+        clientId: input.clientId,
+        actor,
+        actionType: "ticket_edited",
+        description: `${actor.userName} editou o chamado.`,
+        metadata: { eventType: "ticket_edited", changes: editChanges },
+      });
+      return true;
+    };
+
     if (input.mode === "status" && input.updates.status !== undefined && input.updates.status !== current.status) {
       await insertEvent(connection, {
         chamadoId: input.chamadoId,
@@ -280,6 +294,7 @@ export async function updateChamadoWithActivity(
         description: `${actor.userName} alterou o status de ${statusLabel[current.status]} para ${statusLabel[input.updates.status]}.`,
         metadata: { eventType: "status_changed", fromStatus: current.status, toStatus: input.updates.status },
       });
+      await insertEditEvent();
       return { changed: true, eventCreated: true };
     }
 
@@ -301,20 +316,12 @@ export async function updateChamadoWithActivity(
           ...(snapshot(input.updates.forwardObservation, 2_000) ? { observation: snapshot(input.updates.forwardObservation, 2_000)! } : {}),
         },
       });
+      await insertEditEvent();
       return { changed: true, eventCreated: true };
     }
 
     if (input.mode === "edit") {
-      const changes = buildEditChanges(current, input.updates);
-      if (changes.length > 0) {
-        await insertEvent(connection, {
-          chamadoId: input.chamadoId,
-          clientId: input.clientId,
-          actor,
-          actionType: "ticket_edited",
-          description: `${actor.userName} editou o chamado.`,
-          metadata: { eventType: "ticket_edited", changes },
-        });
+      if (await insertEditEvent()) {
         return { changed: true, eventCreated: true };
       }
     }

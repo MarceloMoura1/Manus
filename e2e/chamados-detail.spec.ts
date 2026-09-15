@@ -323,13 +323,13 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
     .map(element => ({ action: element.getAttribute("data-action"), left: element.getBoundingClientRect().left }))
     .sort((left, right) => left.left - right.left)
     .map(item => item.action));
-  expect(visualActionOrder).toEqual(["status", "collaborators", "edit", "register", "forward", "attachments"]);
+  expect(visualActionOrder).toEqual(["status", "collaborators", "edit", "register", "forward", "attachments", "attachment-upload"]);
   await expect(actionBar).not.toContainText("Dossiê");
   await expect(page.getByTestId("ticket-attachments-action")).toBeEnabled();
   const actionHeights = await actionBar.locator("[data-action]").evaluateAll(elements => elements.map(element => Math.round(element.getBoundingClientRect().height)));
   expect(new Set(actionHeights)).toEqual(new Set([58]));
   const separatorHeights = await actionBar.locator("[role='separator']").evaluateAll(elements => elements.map(element => Math.round(element.getBoundingClientRect().height)));
-  expect(separatorHeights).toHaveLength(6);
+  expect(separatorHeights).toHaveLength(7);
   expect(new Set(separatorHeights).size).toBe(1);
   const actionCenter = await page.getByTestId("ticket-edit-action").evaluate(element => {
     const bounds = element.getBoundingClientRect();
@@ -362,10 +362,10 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
     "activity-close",
     "activity-create",
   ].map(id => page.getByTestId(`timeline-activity-header-${id}`).evaluate(element => getComputedStyle(element).backgroundColor)));
-  expect(new Set(eventAccentColors).size).toBe(4);
+  expect(new Set(eventAccentColors).size).toBe(3);
   await expect(page.getByTestId("timeline-activity-header-activity-note").getByText("Nota", { exact: true })).toBeVisible();
-  await expect(page.getByTestId("timeline-activity-header-activity-forward").getByText("Sistema", { exact: true })).toBeVisible();
-  await expect(page.getByTestId("timeline-activity-header-activity-close").getByText("Sistema", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("timeline-activity-header-activity-forward").getByText("Encaminhamento", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("timeline-activity-header-activity-close").getByText("Status", { exact: true })).toBeVisible();
   await expect(page.getByTestId("timeline-activity-header-activity-create").getByText("Criação", { exact: true })).toBeVisible();
   await expectDetailWorkspaceToCover(detail, page.locator("tbody"));
   await expectDetailWorkspaceToCover(detail, page.getByText("Mostrando 1 a 1 de 1 chamados", { exact: true }));
@@ -389,6 +389,10 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
   await expect(page.getByRole("heading", { name: "Encaminhar Chamado" })).toBeVisible();
   await page.getByRole("heading", { name: "Encaminhar Chamado" }).locator("..").getByRole("button").click();
   await page.getByTestId("ticket-attachments-action").click();
+  const attachmentPanel = page.getByTestId("ticket-attachments-panel");
+  await expect(attachmentPanel).toBeVisible();
+  await expect(attachmentPanel).toContainText("Nenhum anexo neste chamado.");
+  await attachmentPanel.getByTestId("ticket-attachments-panel-upload").click();
   const attachmentModal = page.getByRole("dialog", { name: "Anexar arquivo" });
   await expect(attachmentModal).toBeVisible();
   await attachmentModal.getByTestId("ticket-attachment-file").setInputFiles({
@@ -405,6 +409,12 @@ test("ticket detail loads canonical ERP customer and stays after the desktop sid
     .toHaveAttribute("href", `/api/chamados/${ticket.id}/attachments/22222222-2222-4222-8222-222222222222/file`);
   await expect(page.getByTestId("timeline-activity-activity-attachment").getByRole("link", { name: "Visualizar arquivo" }))
     .toHaveAttribute("href", `/api/chamados/${ticket.id}/attachments/22222222-2222-4222-8222-222222222222/file`);
+  await page.getByTestId("ticket-attachments-action").click();
+  await expect(page.getByTestId("ticket-attachments-panel-list")).toContainText("evidence.txt");
+  await expect(page.getByTestId("ticket-attachments-panel-view-22222222-2222-4222-8222-222222222222"))
+    .toHaveAttribute("href", `/api/chamados/${ticket.id}/attachments/22222222-2222-4222-8222-222222222222/file`);
+  await page.getByTestId("ticket-attachments-panel-close").click();
+  await expect(page.getByTestId("ticket-attachments-panel")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Voltar", exact: true }).click();
   await expect(page.getByTestId("ticket-detail-shell")).toHaveCount(0);
@@ -419,7 +429,7 @@ test("ticket attachment retry reuses one client attempt after a lost response", 
   const { attachmentAttemptIds } = await prepareDetail(page, { loseFirstAttachmentResponse: true });
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.locator("tbody").getByText("Snapshot antigo", { exact: true }).click();
-  await page.getByTestId("ticket-attachments-action").click();
+  await page.getByTestId("ticket-attachment-upload-action").click();
 
   const attachmentModal = page.getByRole("dialog", { name: "Anexar arquivo" });
   await attachmentModal.getByTestId("ticket-attachment-file").setInputFiles({
@@ -445,7 +455,7 @@ test("ticket attachment removal hides the attachment and adds one audit event", 
   page.on("dialog", dialog => dialog.accept());
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.locator("tbody").getByText("Snapshot antigo", { exact: true }).click();
-  await page.getByTestId("ticket-attachments-action").click();
+  await page.getByTestId("ticket-attachment-upload-action").click();
 
   const attachmentModal = page.getByRole("dialog", { name: "Anexar arquivo" });
   await attachmentModal.getByTestId("ticket-attachment-file").setInputFiles({
@@ -457,7 +467,9 @@ test("ticket attachment removal hides the attachment and adds one audit event", 
   await expect(attachmentModal).toHaveCount(0);
 
   const attachmentId = "22222222-2222-4222-8222-222222222222";
-  await page.getByTestId(`ticket-attachment-remove-${attachmentId}`).click();
+  await page.getByTestId("ticket-attachments-action").click();
+  await page.getByTestId(`ticket-attachments-panel-remove-${attachmentId}`).click();
+  await expect(page.getByTestId("ticket-attachments-panel-empty")).toBeVisible();
   await expect(page.getByTestId("ticket-attachments-list")).toHaveCount(0);
   await expect(page.getByTestId("timeline-activity-activity-attachment-removed"))
     .toContainText("Removido logicamente");
@@ -484,7 +496,7 @@ test("ticket detail keeps mobile navigation available and stacks its content", a
     .map(element => ({ action: element.getAttribute("data-action"), left: element.getBoundingClientRect().left }))
     .sort((left, right) => left.left - right.left)
     .map(item => item.action));
-  expect(mobileActions).toEqual(["status", "collaborators", "edit", "register", "forward", "attachments"]);
+  expect(mobileActions).toEqual(["status", "collaborators", "edit", "register", "forward", "attachments", "attachment-upload"]);
   expect(await actionBar.evaluate(element => element.scrollWidth >= element.clientWidth)).toBe(true);
 
   await detail.getByRole("button", { name: "Abrir menu principal" }).click();
