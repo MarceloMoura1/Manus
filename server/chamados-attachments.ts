@@ -4,7 +4,7 @@ import { fileTypeFromBuffer } from "file-type";
 import type { Pool, RowDataPacket } from "mysql2/promise";
 import { getPool } from "./db";
 import { resolveOperationalSessionReadOnly } from "./_core/megadesk-session";
-import { storageGet, storagePutExact } from "./storage";
+import { StorageReadError, storageGet, storagePutExact } from "./storage";
 import {
   activateTicketAttachment,
   markTicketAttachmentPendingDelete,
@@ -47,6 +47,51 @@ export class TicketAttachmentError extends Error {
   constructor(readonly code: "BAD_FILE" | "TOO_LARGE" | "CONFLICT" | "NOT_FOUND" | "STORAGE", message: string) {
     super(message);
   }
+}
+
+export type TicketAttachmentReadFailureStage = "local" | "storage_config" | "download_url" | "signed_fetch" | "content_validation";
+export type TicketAttachmentReadFailureKind = "not_found" | "auth" | "rate_limit" | "server" | "transport" | "invalid_response" | "content_invalid" | "config" | "internal";
+
+export class TicketAttachmentReadError extends TicketAttachmentError {
+  readonly cause?: unknown;
+
+  constructor(readonly details: {
+    stage: TicketAttachmentReadFailureStage;
+    kind: TicketAttachmentReadFailureKind;
+    providerStatus?: number;
+    cause?: unknown;
+  }) {
+    super(
+      details.stage === "local" || (details.stage === "signed_fetch" && details.kind === "not_found") ? "NOT_FOUND" : "STORAGE",
+      "Arquivo não disponível.",
+    );
+    this.name = "TicketAttachmentReadError";
+    this.cause = details.cause;
+  }
+
+  get stage() { return this.details.stage; }
+  get kind() { return this.details.kind; }
+  get providerStatus() { return this.details.providerStatus; }
+}
+
+function signedFetchFailureKind(status: number): TicketAttachmentReadFailureKind {
+  if (status === 404) return "not_found";
+  if (status === 401 || status === 403) return "auth";
+  if (status === 429) return "rate_limit";
+  if (status >= 500) return "server";
+  return "invalid_response";
+}
+
+function storageReadFailure(error: unknown): TicketAttachmentReadError {
+  if (error instanceof StorageReadError) {
+    return new TicketAttachmentReadError({
+      stage: error.stage,
+      kind: error.kind,
+      ...(error.providerStatus == null ? {} : { providerStatus: error.providerStatus }),
+      cause: error.cause ?? error,
+    });
+  }
+  return new TicketAttachmentReadError({ stage: "download_url", kind: "transport", cause: error });
 }
 
 export type TicketAttachmentStorage = {
@@ -212,30 +257,74 @@ export async function readTicketAttachment(
   attachmentId: string,
   dependencies: { pool?: Pool; storage?: TicketAttachmentStorage } = {},
 ): Promise<{ bytes: Buffer; fileName: string; mimeType: AllowedTicketAttachmentMime; inline: boolean }> {
-  if (!uuid.test(chamadoId) || !uuid.test(attachmentId)) throw new TicketAttachmentError("NOT_FOUND", "Anexo não encontrado.");
+  if (!uuid.test(chamadoId) || !uuid.test(attachmentId)) {
+    throw new TicketAttachmentReadError({ stage: "local", kind: "not_found" });
+  }
   const pool = dependencies.pool ?? getPool();
-  const [rows] = await pool.execute<ReadableAttachmentRow[]>(
-    `SELECT a.storage_key AS storageKey, a.file_name AS fileName, a.mime_type AS mimeType, a.file_size AS fileSize, a.attachment_state AS state
-     FROM megadesk_domain_chamado_attachments a
-     INNER JOIN megadesk_domain_chamados c ON c.chamadoId=a.chamado_id AND c.clientId=a.client_id
-     WHERE a.attachment_id=? AND a.chamado_id=? AND a.client_id=? AND a.attachment_state='active' LIMIT 1`,
-    [attachmentId, chamadoId, clientId],
-  );
+  let rows: ReadableAttachmentRow[];
+  try {
+    [rows] = await pool.execute<ReadableAttachmentRow[]>(
+      `SELECT a.storage_key AS storageKey, a.file_name AS fileName, a.mime_type AS mimeType, a.file_size AS fileSize, a.attachment_state AS state
+       FROM megadesk_domain_chamado_attachments a
+       INNER JOIN megadesk_domain_chamados c ON c.chamadoId=a.chamado_id AND c.clientId=a.client_id
+       WHERE a.attachment_id=? AND a.chamado_id=? AND a.client_id=? AND a.attachment_state='active' LIMIT 1`,
+      [attachmentId, chamadoId, clientId],
+    );
+  } catch (cause) {
+    throw new TicketAttachmentReadError({ stage: "local", kind: "internal", cause });
+  }
   const row = rows[0];
-  if (!row || !row.storageKey || !storageKeyPattern.test(row.storageKey) || !row.mimeType || !allowedMimeTypes.has(row.mimeType)) {
-    throw new TicketAttachmentError("NOT_FOUND", "Anexo não encontrado.");
+  if (!row || row.state !== "active" || !row.storageKey || !storageKeyPattern.test(row.storageKey) || !row.mimeType || !allowedMimeTypes.has(row.mimeType)) {
+    throw new TicketAttachmentReadError({ stage: "local", kind: "not_found" });
   }
   const storage = dependencies.storage ?? forgeTicketAttachmentStorage;
-  const reference = await storage.get(row.storageKey);
-  const response = await fetch(reference.url);
-  if (!response.ok) throw new TicketAttachmentError("NOT_FOUND", "Arquivo não disponível.");
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.length === 0 || bytes.length > TICKET_ATTACHMENT_MAX_BYTES || (row.fileSize != null && bytes.length !== Number(row.fileSize))) {
-    throw new TicketAttachmentError("STORAGE", "Arquivo armazenado inválido.");
+  let reference: { url: string };
+  try {
+    reference = await storage.get(row.storageKey);
+  } catch (error) {
+    throw storageReadFailure(error);
   }
-  const detectedMimeType = await sniffTicketAttachment(bytes, row.mimeType);
-  if (detectedMimeType !== row.mimeType) throw new TicketAttachmentError("STORAGE", "Arquivo armazenado não confere com sua metadata.");
-  return { bytes, fileName: safeFileName(row.fileName), mimeType: detectedMimeType, inline: inlineMimeTypes.has(detectedMimeType) };
+  let signedUrl: URL;
+  try {
+    signedUrl = new URL(reference.url);
+    if (signedUrl.protocol !== "http:" && signedUrl.protocol !== "https:") throw new Error("Unsupported signed URL protocol");
+  } catch (cause) {
+    throw new TicketAttachmentReadError({ stage: "download_url", kind: "invalid_response", cause });
+  }
+  let response: globalThis.Response;
+  try {
+    response = await fetch(signedUrl);
+  } catch (cause) {
+    throw new TicketAttachmentReadError({ stage: "signed_fetch", kind: "transport", cause });
+  }
+  if (!response.ok) {
+    throw new TicketAttachmentReadError({
+      stage: "signed_fetch",
+      kind: signedFetchFailureKind(response.status),
+      providerStatus: response.status,
+    });
+  }
+  let bytes: Buffer;
+  try {
+    bytes = Buffer.from(await response.arrayBuffer());
+  } catch (cause) {
+    throw new TicketAttachmentReadError({ stage: "signed_fetch", kind: "transport", cause });
+  }
+  if (bytes.length === 0 || bytes.length > TICKET_ATTACHMENT_MAX_BYTES || (row.fileSize != null && bytes.length !== Number(row.fileSize))) {
+    throw new TicketAttachmentReadError({ stage: "content_validation", kind: "content_invalid" });
+  }
+  let detectedMimeType: AllowedTicketAttachmentMime;
+  try {
+    detectedMimeType = await sniffTicketAttachment(bytes, row.mimeType);
+    if (detectedMimeType !== row.mimeType) throw new Error("Stored MIME type does not match metadata");
+  } catch (cause) {
+    throw new TicketAttachmentReadError({ stage: "content_validation", kind: "content_invalid", cause });
+  }
+  try {
+    return { bytes, fileName: safeFileName(row.fileName), mimeType: detectedMimeType, inline: inlineMimeTypes.has(detectedMimeType) };
+  } catch (cause) {
+    throw new TicketAttachmentReadError({ stage: "content_validation", kind: "content_invalid", cause });
+  }
 }
 
 /**
@@ -257,7 +346,13 @@ export async function reconcileTicketAttachmentStates(
   return { markedPendingDelete: Number(result.affectedRows ?? 0) };
 }
 
-function statusFor(error: unknown): number {
+export function ticketAttachmentReadHttpStatus(error: unknown): number {
+  if (error instanceof TicketAttachmentReadError) {
+    if (error.stage === "local" && error.kind === "not_found") return 404;
+    if (error.stage === "signed_fetch" && error.kind === "not_found") return 404;
+    if (error.kind === "rate_limit" || error.kind === "server" || error.kind === "transport") return 503;
+    return 502;
+  }
   if (error instanceof TicketAttachmentError) {
     if (error.code === "NOT_FOUND") return 404;
     if (error.code === "TOO_LARGE") return 413;
@@ -265,6 +360,29 @@ function statusFor(error: unknown): number {
     if (error.code === "BAD_FILE") return 400;
   }
   return 502;
+}
+
+function safeCauseName(cause: unknown): string {
+  return cause instanceof Error ? cause.name : typeof cause;
+}
+
+export function logTicketAttachmentReadFailure(
+  error: unknown,
+  input: { attachmentId: string; chamadoId: string; clientId: string },
+): void {
+  const failure = error instanceof TicketAttachmentReadError
+    ? error
+    : new TicketAttachmentReadError({ stage: "local", kind: "internal", cause: error });
+  console.error("[Ticket Attachments]", {
+    event: "ticket_attachment_read_failed",
+    stage: failure.stage,
+    kind: failure.kind,
+    ...(failure.providerStatus == null ? {} : { providerStatus: failure.providerStatus }),
+    attachmentId: input.attachmentId,
+    chamadoId: input.chamadoId,
+    clientId: input.clientId,
+    cause: safeCauseName(failure.cause),
+  });
 }
 
 export function registerTicketAttachmentRoutes(app: Express): void {
@@ -281,7 +399,12 @@ export function registerTicketAttachmentRoutes(app: Express): void {
       res.setHeader("Content-Disposition", `${attachment.inline ? "inline" : "attachment"}; filename=\"${attachment.fileName.replace(/[\"\r\n]/g, "_")}\"`);
       res.status(200).send(attachment.bytes);
     } catch (error) {
-      res.status(statusFor(error)).end();
+      logTicketAttachmentReadFailure(error, {
+        attachmentId: req.params.attachmentId,
+        chamadoId: req.params.chamadoId,
+        clientId: identity.tenantId,
+      });
+      res.status(ticketAttachmentReadHttpStatus(error)).end();
     }
   });
 }

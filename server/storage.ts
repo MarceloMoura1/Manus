@@ -3,7 +3,36 @@
 
 import { ENV } from './_core/env';
 
-type StorageConfig = { baseUrl: string; apiKey: string };
+export type StorageConfig = { baseUrl: string; apiKey: string };
+
+export type StorageReadErrorStage = "storage_config" | "download_url";
+export type StorageReadErrorKind = "auth" | "rate_limit" | "server" | "transport" | "invalid_response" | "config";
+
+export class StorageReadError extends Error {
+  readonly cause?: unknown;
+
+  constructor(readonly details: {
+    stage: StorageReadErrorStage;
+    kind: StorageReadErrorKind;
+    providerStatus?: number;
+    cause?: unknown;
+  }) {
+    super(`Storage read failed at ${details.stage}: ${details.kind}`);
+    this.name = "StorageReadError";
+    this.cause = details.cause;
+  }
+
+  get stage() { return this.details.stage; }
+  get kind() { return this.details.kind; }
+  get providerStatus() { return this.details.providerStatus; }
+}
+
+function validStorageReadConfig(config: StorageConfig): StorageConfig {
+  if (!config.baseUrl || !config.apiKey) {
+    throw new StorageReadError({ stage: "storage_config", kind: "config" });
+  }
+  return { baseUrl: config.baseUrl.replace(/\/+$/, ""), apiKey: config.apiKey };
+}
 
 function getStorageConfig(): StorageConfig {
   const baseUrl = ENV.forgeApiUrl;
@@ -18,6 +47,14 @@ function getStorageConfig(): StorageConfig {
   return { baseUrl: baseUrl.replace(/\/+$/, ""), apiKey };
 }
 
+function getStorageReadConfig(): StorageConfig {
+  try {
+    return getStorageConfig();
+  } catch (cause) {
+    throw new StorageReadError({ stage: "storage_config", kind: "config", cause });
+  }
+}
+
 function buildUploadUrl(baseUrl: string, relKey: string): URL {
   const url = new URL("v1/storage/upload", ensureTrailingSlash(baseUrl));
   url.searchParams.set("path", normalizeKey(relKey));
@@ -27,18 +64,52 @@ function buildUploadUrl(baseUrl: string, relKey: string): URL {
 async function buildDownloadUrl(
   baseUrl: string,
   relKey: string,
-  apiKey: string
+  apiKey: string,
+  fetcher: typeof fetch = fetch,
 ): Promise<string> {
-  const downloadApiUrl = new URL(
-    "v1/storage/downloadUrl",
-    ensureTrailingSlash(baseUrl)
-  );
+  let downloadApiUrl: URL;
+  try {
+    downloadApiUrl = new URL("v1/storage/downloadUrl", ensureTrailingSlash(baseUrl));
+  } catch (cause) {
+    throw new StorageReadError({ stage: "storage_config", kind: "config", cause });
+  }
   downloadApiUrl.searchParams.set("path", normalizeKey(relKey));
-  const response = await fetch(downloadApiUrl, {
-    method: "GET",
-    headers: buildAuthHeaders(apiKey),
-  });
-  return (await response.json()).url;
+  let response: Response;
+  try {
+    response = await fetcher(downloadApiUrl, {
+      method: "GET",
+      headers: buildAuthHeaders(apiKey),
+    });
+  } catch (cause) {
+    throw new StorageReadError({ stage: "download_url", kind: "transport", cause });
+  }
+  if (!response.ok) {
+    const kind: StorageReadErrorKind = response.status === 401 || response.status === 403
+      ? "auth"
+      : response.status === 429
+        ? "rate_limit"
+        : response.status >= 500
+          ? "server"
+          : "invalid_response";
+    throw new StorageReadError({ stage: "download_url", kind, providerStatus: response.status });
+  }
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (cause) {
+    throw new StorageReadError({ stage: "download_url", kind: "invalid_response", providerStatus: response.status, cause });
+  }
+  const url = typeof payload === "object" && payload !== null && "url" in payload ? (payload as { url?: unknown }).url : null;
+  if (typeof url !== "string") {
+    throw new StorageReadError({ stage: "download_url", kind: "invalid_response", providerStatus: response.status });
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("Unsupported download URL protocol");
+    return parsed.toString();
+  } catch (cause) {
+    throw new StorageReadError({ stage: "download_url", kind: "invalid_response", providerStatus: response.status, cause });
+  }
 }
 
 function ensureTrailingSlash(value: string): string {
@@ -122,11 +193,14 @@ export async function storagePutExact(
   return putStorageObject(relKey, data, contentType, false);
 }
 
-export async function storageGet(relKey: string): Promise<{ key: string; url: string; }> {
-  const { baseUrl, apiKey } = getStorageConfig();
+export async function storageGet(
+  relKey: string,
+  dependencies: { config?: StorageConfig; fetch?: typeof fetch } = {},
+): Promise<{ key: string; url: string; }> {
+  const { baseUrl, apiKey } = dependencies.config ? validStorageReadConfig(dependencies.config) : getStorageReadConfig();
   const key = normalizeKey(relKey);
   return {
     key,
-    url: await buildDownloadUrl(baseUrl, key, apiKey),
+    url: await buildDownloadUrl(baseUrl, key, apiKey, dependencies.fetch),
   };
 }
