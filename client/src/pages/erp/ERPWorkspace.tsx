@@ -5,7 +5,7 @@ import { formatDateTime } from "@/lib/conversationDateTime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertCircle, Boxes, Image as ImageIcon, PackagePlus, RefreshCw, Search, Trash2, TrendingDown, Upload, WalletCards } from "lucide-react";
+import { AlertCircle, Boxes, Image as ImageIcon, PackagePlus, Search, Trash2, TrendingDown, Upload, WalletCards } from "lucide-react";
 import { SuppliersPage } from "./SuppliersPage";
 import { ClientesPage } from "../ClientesPage";
 import type { CrmWhatsAppIntent } from "../../../../shared/crm";
@@ -16,6 +16,8 @@ import { FiscalPage } from "./FiscalPage";
 import { ReportsPage } from "./ReportsPage";
 import type { ModuleTopbarItem } from "@/components/ModuleTopbar";
 import { ErpPageHeader } from "@/components/erp/ErpPageHeader";
+import { Pagination } from "@/components/erp/Pagination";
+import { ErpEmptyState } from "@/components/erp/ErpEmptyState";
 
 export type ErpSection = "summary" | "clients" | "products" | "stock" | "suppliers" | "purchases" | "sales" | "finance" | "fiscal" | "reports";
 const planned = ["Integrações"];
@@ -95,12 +97,7 @@ function useErpRealtime() {
 }
 
 function StateMessage({ title, retry }: { title: string; retry?: () => void }) {
-  return <div role="status" className="rounded-2xl border border-slate-200 bg-white p-8 text-center"><AlertCircle className="mx-auto mb-3 h-7 w-7 text-slate-400"/><p className="font-semibold text-slate-800">{title}</p>{retry && <Button className="mt-4" variant="outline" onClick={retry}><RefreshCw className="mr-2 h-4 w-4"/>Tentar novamente</Button>}</div>;
-}
-
-function Pagination({ page, totalPages, onPage }: { page: number; totalPages: number; onPage: (page: number) => void }) {
-  if (totalPages <= 1) return null;
-  return <nav aria-label="Paginação" className="flex flex-wrap items-center justify-end gap-2"><Button variant="outline" disabled={page <= 1} onClick={() => onPage(page - 1)}>Anterior</Button><span className="text-sm text-slate-600">Página {page} de {totalPages}</span><Button variant="outline" disabled={page >= totalPages} onClick={() => onPage(page + 1)}>Próxima</Button></nav>;
+  return <ErpEmptyState title={title} action={retry ? { label: "Tentar novamente", onClick: retry } : undefined} />;
 }
 
 export function ERPWorkspace({ section, onNavigate, canAccessClients, canAccessFinance, canAccessFiscal, canAccessReports, initialCrmClientId, onClientNavigate, whatsappConnected, canStartConversation }: { section: ErpSection; onNavigate: (section: ErpSection) => void; canAccessClients: boolean; canAccessFinance: boolean; canAccessFiscal: boolean; canAccessReports: boolean; initialCrmClientId?: string; onClientNavigate: (intent: CrmWhatsAppIntent) => void; whatsappConnected: boolean; canStartConversation: boolean }) {
