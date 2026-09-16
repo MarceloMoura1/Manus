@@ -14,6 +14,8 @@ $script:NodeDiagnosticsRoot = Join-Path $script:DiagnosticsRoot 'node'
 $script:RuntimePort = 3000
 $script:CloudflaredConfig = Join-Path $env:USERPROFILE '.cloudflared\config.yml'
 $script:AllowedOrigins = 'http://127.0.0.1:3000,http://localhost:3000,https://app.megadesk.online,https://admin.megadesk.online,https://api.megadesk.online'
+$script:LifecycleLockDepthByThread = @{}
+$script:LifecycleLockTimeoutMilliseconds = 30000
 
 if ($null -eq ('MegaDeskUpdaterNative' -as [type])) {
   Add-Type -TypeDefinition @'
@@ -294,17 +296,192 @@ function Get-MegaDeskState {
   return $state
 }
 
+function Get-MegaDeskLifecycleMutexName {
+  $canonicalStatePath = [System.IO.Path]::GetFullPath($script:StatePath).ToUpperInvariant()
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($canonicalStatePath)
+    $digest = $sha256.ComputeHash($bytes)
+  } finally {
+    $sha256.Dispose()
+  }
+  $suffix = ([System.BitConverter]::ToString($digest)).Replace('-', '')
+  return ('Global\MegaDesk.UpdaterV2.Lifecycle.{0}' -f $suffix)
+}
+
+function Get-MegaDeskLifecycleLeasePath {
+  return ($script:StatePath + '.lifecycle.lock')
+}
+
+function Test-MegaDeskLifecycleLockHeld {
+  $threadId = [System.Threading.Thread]::CurrentThread.ManagedThreadId
+  return ($script:LifecycleLockDepthByThread.ContainsKey($threadId) -and [int]$script:LifecycleLockDepthByThread[$threadId] -gt 0)
+}
+
+function Assert-MegaDeskLifecycleLockHeld {
+  if (-not (Test-MegaDeskLifecycleLockHeld)) {
+    throw 'Mutacao do state recusada sem lifecycle mutex.'
+  }
+}
+
+function Invoke-WithMegaDeskLifecycleLock {
+  param(
+    [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
+    [ValidateRange(1, 300000)][int]$TimeoutMilliseconds = $script:LifecycleLockTimeoutMilliseconds
+  )
+
+  $threadId = [System.Threading.Thread]::CurrentThread.ManagedThreadId
+  if ($script:LifecycleLockDepthByThread.ContainsKey($threadId) -and [int]$script:LifecycleLockDepthByThread[$threadId] -gt 0) {
+    $script:LifecycleLockDepthByThread[$threadId] = [int]$script:LifecycleLockDepthByThread[$threadId] + 1
+    try {
+      return & $ScriptBlock
+    } finally {
+      $script:LifecycleLockDepthByThread[$threadId] = [int]$script:LifecycleLockDepthByThread[$threadId] - 1
+    }
+  }
+
+  $mutex = $null
+  $acquired = $false
+  $leaseCreated = $false
+  $leasePath = Get-MegaDeskLifecycleLeasePath
+  try {
+    try {
+      $mutex = New-Object System.Threading.Mutex($false, (Get-MegaDeskLifecycleMutexName))
+    } catch {
+      throw ('Lifecycle mutex nao pode ser criado: {0}' -f $_.Exception.Message)
+    }
+    try {
+      $acquired = $mutex.WaitOne($TimeoutMilliseconds)
+    } catch [System.Threading.AbandonedMutexException] {
+      $acquired = $true
+      throw 'Lifecycle mutex abandonado; state incerto preservado e operacao recusada.'
+    }
+    if (-not $acquired) {
+      throw 'Timeout aguardando exclusao do lifecycle MegaDesk; nenhuma mutacao foi executada.'
+    }
+
+    Initialize-MegaDeskRuntime
+    if ([System.IO.File]::Exists($leasePath)) {
+      throw 'Lifecycle mutex abandonado; evidencia duravel de execucao interrompida foi preservada e a operacao foi recusada.'
+    }
+    try {
+      $leaseStream = New-Object System.IO.FileStream($leasePath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+      try { $leaseStream.Flush($true) } finally { $leaseStream.Dispose() }
+      $leaseCreated = $true
+    } catch {
+      throw ('Evidencia de ownership do lifecycle nao pode ser criada; operacao recusada: {0}' -f $_.Exception.Message)
+    }
+
+    $script:LifecycleLockDepthByThread[$threadId] = 1
+    try {
+      return & $ScriptBlock
+    } finally {
+      $script:LifecycleLockDepthByThread.Remove($threadId)
+      if ($leaseCreated) {
+        [System.IO.File]::Delete($leasePath)
+        if ([System.IO.File]::Exists($leasePath)) {
+          throw 'Evidencia de ownership do lifecycle nao pode ser removida; state incerto preservado.'
+        }
+        $leaseCreated = $false
+      }
+    }
+  } finally {
+    if ($acquired -and $null -ne $mutex) {
+      try { $mutex.ReleaseMutex() } catch { }
+    }
+    if ($null -ne $mutex) { $mutex.Dispose() }
+  }
+}
+
 function Save-MegaDeskState {
   param([Parameter(Mandatory = $true)]$State)
+  Assert-MegaDeskLifecycleLockHeld
   Initialize-MegaDeskRuntime
   $State.schemaVersion = 2
-  $tempPath = Join-Path $script:StateDirectory ('.updater-state-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+  $writeId = [guid]::NewGuid().ToString('N')
+  $tempPath = Join-Path $script:StateDirectory ('.updater-state-{0}.tmp' -f $writeId)
+  $backupPath = Join-Path $script:StateDirectory ('.updater-state-{0}.bak' -f $writeId)
   try {
-    $State | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $tempPath -Encoding UTF8 -NoNewline
-    Move-Item -LiteralPath $tempPath -Destination $script:StatePath -Force
+    $json = $State | ConvertTo-Json -Depth 100
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    $bytes = $encoding.GetBytes($json)
+    $stream = New-Object System.IO.FileStream($tempPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    try {
+      $stream.Write($bytes, 0, $bytes.Length)
+      $stream.Flush($true)
+    } finally {
+      $stream.Dispose()
+    }
+    if (Test-Path -LiteralPath $script:StatePath -PathType Leaf) {
+      [System.IO.File]::Replace($tempPath, $script:StatePath, $backupPath, $true)
+      Remove-Item -LiteralPath $backupPath -Force
+    } else {
+      [System.IO.File]::Move($tempPath, $script:StatePath)
+    }
   } finally {
     if (Test-Path -LiteralPath $tempPath) { Remove-Item -LiteralPath $tempPath -Force }
+    if (Test-Path -LiteralPath $backupPath) { Remove-Item -LiteralPath $backupPath -Force }
   }
+}
+
+function ConvertTo-MegaDeskStateComparisonJson {
+  param($Value)
+  return ($Value | ConvertTo-Json -Depth 100 -Compress)
+}
+
+function Test-MegaDeskStateValueEqual {
+  param($Left, $Right)
+  return (ConvertTo-MegaDeskStateComparisonJson $Left) -ceq (ConvertTo-MegaDeskStateComparisonJson $Right)
+}
+
+function Update-MegaDeskState {
+  param(
+    [Parameter(Mandatory = $true)][ValidateSet('node', 'cloudflared', 'activeRelease', 'previousRelease', 'operation')][string[]]$AllowedFields,
+    [Parameter(Mandatory = $true)][scriptblock]$Mutation,
+    [scriptblock]$Precondition = { param($State) $true },
+    [switch]$AllowNewOperation
+  )
+
+  Assert-MegaDeskLifecycleLockHeld
+  $state = Get-MegaDeskState
+  if (-not (& $Precondition $state)) { throw 'State divergente; mutacao recusada.' }
+  $before = $state | ConvertTo-Json -Depth 100 | ConvertFrom-Json
+  & $Mutation $state
+
+  $beforeFields = @($before.PSObject.Properties.Name)
+  $afterFields = @($state.PSObject.Properties.Name)
+  $allFields = @($beforeFields + $afterFields | Sort-Object -Unique)
+  foreach ($field in $allFields) {
+    if ($AllowedFields -notcontains $field) {
+      $beforeHasField = $beforeFields -ccontains $field
+      $afterHasField = $afterFields -ccontains $field
+      if ($beforeHasField -ne $afterHasField) { throw ("Mutacao tentou adicionar ou remover campo nao autorizado: {0}." -f $field) }
+      if ($beforeHasField) {
+        $beforeJson = ConvertTo-MegaDeskStateComparisonJson $before.PSObject.Properties[$field].Value
+        $afterJson = ConvertTo-MegaDeskStateComparisonJson $state.PSObject.Properties[$field].Value
+        if ($beforeJson -cne $afterJson) { throw ("Mutacao tentou alterar campo nao autorizado: {0}." -f $field) }
+      }
+    }
+  }
+
+  $beforeMarker = Get-MegaDeskOperationSwitchAttempted -Operation $before.operation
+  $afterMarker = Get-MegaDeskOperationSwitchAttempted -Operation $state.operation
+  if ($beforeMarker -eq $true -and $afterMarker -ne $true) {
+    $newOperationIsValid = $AllowNewOperation -and $null -ne $state.operation -and [string]$state.operation.status -ceq 'PREPARING' -and $afterMarker -eq $false -and ($null -eq $before.operation -or [string]$before.operation.status -ceq 'ACTIVE')
+    if (-not $newOperationIsValid) {
+      throw 'Marcador switchAttempted=true nao pode regredir ou ser removido na mesma operation.'
+    }
+  }
+
+  Save-MegaDeskState $state
+  return $state
+}
+
+function Get-MegaDeskOperationSwitchAttempted {
+  param($Operation)
+  if ($null -eq $Operation -or -not ($Operation.PSObject.Properties.Name -contains 'switchAttempted')) { return $null }
+  if ($Operation.switchAttempted -isnot [bool]) { return $null }
+  return [bool]$Operation.switchAttempted
 }
 
 function New-MegaDeskOperationRecord {
@@ -313,6 +490,7 @@ function New-MegaDeskOperationRecord {
     [Parameter(Mandatory = $true)][ValidateSet('UPDATE', 'BOOTSTRAP_ZERO')][string]$Kind,
     [string]$CandidateSha = '',
     [AllowNull()][string]$BaselineSha = $null,
+    [Parameter(Mandatory = $true)][bool]$SwitchAttempted,
     [string]$Message = ''
   )
   return [pscustomobject]@{
@@ -320,6 +498,7 @@ function New-MegaDeskOperationRecord {
     status = $Status
     candidateSha = $CandidateSha
     baselineSha = $BaselineSha
+    switchAttempted = $SwitchAttempted
     updatedAt = (Get-Date).ToUniversalTime().ToString('o')
     message = $Message
   }
@@ -333,24 +512,82 @@ function Set-MegaDeskOperationState {
     [AllowNull()][string]$BaselineSha = $null,
     [string]$Message = ''
   )
-  $state = Get-MegaDeskState
-  $previous = if ($null -eq $state.operation) { '' } else { [string]$state.operation.status }
-  $allowed = @{ '' = @('PREPARING'); ACTIVE = @('PREPARING'); FAILED = @('PREPARING'); PREPARING = @('READY', 'FAILED'); READY = @('SWITCHING', 'FAILED'); SWITCHING = @('ACTIVE', 'ROLLING_BACK', 'FAILED'); ROLLING_BACK = @('ACTIVE', 'FAILED') }
-  if (-not $allowed.ContainsKey($previous) -or $allowed[$previous] -notcontains $Status) { throw "Transicao de estado invalida: $previous -> $Status." }
-  $resolvedKind = $Kind
-  if ([string]::IsNullOrWhiteSpace($resolvedKind)) {
-    $resolvedKind = if ($null -ne $state.operation -and $state.operation.PSObject.Properties.Name -contains 'kind' -and -not [string]::IsNullOrWhiteSpace([string]$state.operation.kind)) { [string]$state.operation.kind } else { 'UPDATE' }
+  $baselineWasBound = $PSBoundParameters.ContainsKey('BaselineSha')
+  return Invoke-WithMegaDeskLifecycleLock {
+    Update-MegaDeskState -AllowedFields operation -AllowNewOperation -Mutation {
+      param($state)
+      $previous = if ($null -eq $state.operation) { '' } else { [string]$state.operation.status }
+      $allowed = @{ '' = @('PREPARING'); ACTIVE = @('PREPARING'); FAILED = @('PREPARING'); PREPARING = @('READY', 'FAILED'); READY = @('SWITCHING', 'FAILED'); SWITCHING = @('ACTIVE', 'ROLLING_BACK', 'FAILED'); ROLLING_BACK = @('ACTIVE', 'FAILED') }
+      if (-not $allowed.ContainsKey($previous) -or $allowed[$previous] -notcontains $Status) { throw "Transicao de estado invalida: $previous -> $Status." }
+      $resolvedKind = $Kind
+      if ([string]::IsNullOrWhiteSpace($resolvedKind)) {
+        $resolvedKind = if ($null -ne $state.operation -and $state.operation.PSObject.Properties.Name -contains 'kind' -and -not [string]::IsNullOrWhiteSpace([string]$state.operation.kind)) { [string]$state.operation.kind } else { 'UPDATE' }
+      }
+      $previousSwitchAttempted = Get-MegaDeskOperationSwitchAttempted -Operation $state.operation
+      if ($previous -eq 'FAILED' -and $Status -eq 'PREPARING' -and $previousSwitchAttempted -ne $false) {
+        throw 'Operacao FAILED sem prova duravel de falha pre-switch; nova preparacao recusada.'
+      }
+      if ($previous -eq 'PREPARING' -and $Status -eq 'READY' -and $previousSwitchAttempted -ne $false) {
+        throw 'Operacao PREPARING sem marcador switchAttempted=false; transicao READY recusada.'
+      }
+      if ($previous -eq 'READY' -and $Status -eq 'SWITCHING' -and $previousSwitchAttempted -ne $false) {
+        throw 'Operacao READY sem marcador switchAttempted=false; switch recusado.'
+      }
+      if ($previous -eq 'SWITCHING' -and $Status -eq 'ROLLING_BACK' -and $previousSwitchAttempted -ne $true) {
+        throw 'Operacao SWITCHING sem marcador switchAttempted=true; rollback automatico recusado.'
+      }
+      $switchAttempted = switch ($Status) {
+        'PREPARING' { $false; break }
+        'READY' {
+          if ($previousSwitchAttempted -eq $true) { throw 'Marcador switchAttempted nao pode regredir em READY.' }
+          $false
+          break
+        }
+        'SWITCHING' { $true; break }
+        'ROLLING_BACK' { $true; break }
+        'ACTIVE' { $true; break }
+        'FAILED' {
+          if ($previousSwitchAttempted -eq $true) { $true }
+          elseif ($previousSwitchAttempted -eq $false -and $previous -in @('PREPARING', 'READY')) { $false }
+          else { throw 'Operacao sem marcador switchAttempted valido; transicao FAILED recusada.' }
+          break
+        }
+      }
+      $resolvedBaselineSha = if ($baselineWasBound) { $BaselineSha } elseif ($Kind -eq 'UPDATE') { $null } elseif ($null -ne $state.operation -and $state.operation.PSObject.Properties.Name -contains 'baselineSha') { $state.operation.baselineSha } else { $null }
+      $state.operation = New-MegaDeskOperationRecord -Status $Status -Kind $resolvedKind -CandidateSha $CandidateSha -BaselineSha $resolvedBaselineSha -SwitchAttempted $switchAttempted -Message $Message
+    }
   }
-  $resolvedBaselineSha = if ($PSBoundParameters.ContainsKey('BaselineSha')) { $BaselineSha } elseif ($Kind -eq 'UPDATE') { $null } elseif ($null -ne $state.operation -and $state.operation.PSObject.Properties.Name -contains 'baselineSha') { $state.operation.baselineSha } else { $null }
-  $state.operation = New-MegaDeskOperationRecord -Status $Status -Kind $resolvedKind -CandidateSha $CandidateSha -BaselineSha $resolvedBaselineSha -Message $Message
-  Save-MegaDeskState $state
-  return $state
+}
+
+function Assert-MegaDeskStartupState {
+  param([Parameter(Mandatory = $true)]$State)
+  if ($null -eq $State.operation) { throw 'Inicio recusado: operation ausente.' }
+  if ([string]$State.operation.status -ceq 'ACTIVE') {
+    return Assert-MegaDeskActiveRelease -State $State
+  }
+  if ([string]$State.operation.kind -cne 'UPDATE' -or [string]$State.operation.status -cne 'FAILED') {
+    throw 'Inicio recusado: lifecycle incompleto nao permite restaurar a activeRelease.'
+  }
+  if (-not ($State.operation.PSObject.Properties.Name -contains 'candidateSha') -or -not (Test-MegaDeskFullSha ([string]$State.operation.candidateSha))) {
+    throw 'Inicio recusado: UPDATE FAILED sem candidateSha estruturalmente valido.'
+  }
+  $switchAttempted = Get-MegaDeskOperationSwitchAttempted -Operation $State.operation
+  if ($null -eq $switchAttempted) {
+    throw 'Inicio recusado: UPDATE FAILED legado ou sem marcador switchAttempted valido.'
+  }
+  if ($switchAttempted) {
+    throw 'Inicio recusado: UPDATE FAILED pode ter interrompido runtime ou tentado iniciar candidate.'
+  }
+  return Assert-MegaDeskActiveRelease -State $State
 }
 
 function Assert-MegaDeskRecoverableState {
   param([switch]$AllowReadyUpdate)
   $state = Get-MegaDeskState
   if ($null -ne $state.operation -and [string]$state.operation.status -eq 'READY') {
+    if ((Get-MegaDeskOperationSwitchAttempted -Operation $state.operation) -ne $false) {
+      throw 'Operacao READY sem marcador switchAttempted=false; estado ambiguo preservado e atualizacao recusada.'
+    }
     if ($AllowReadyUpdate -and [string]$state.operation.kind -eq 'UPDATE' -and (Test-MegaDeskFullSha ([string]$state.operation.candidateSha))) {
       return $state
     }
@@ -358,6 +595,15 @@ function Assert-MegaDeskRecoverableState {
   }
   if ($null -ne $state.operation -and [string]$state.operation.status -in @('PREPARING', 'SWITCHING', 'ROLLING_BACK')) {
     throw ("Operacao anterior incompleta ({0}). Estado preservado para recuperacao manual; atualizacao recusada." -f $state.operation.status)
+  }
+  if ($null -ne $state.operation -and [string]$state.operation.status -eq 'FAILED') {
+    if ([string]$state.operation.kind -cne 'UPDATE') {
+      throw 'Operacao FAILED nao pertence ao lifecycle UPDATE; recovery comum recusado.'
+    }
+    $switchAttempted = Get-MegaDeskOperationSwitchAttempted -Operation $state.operation
+    if ($null -eq $switchAttempted -or $switchAttempted) {
+      throw 'Operacao FAILED sem prova duravel de falha pre-switch. Estado preservado para recuperacao manual; atualizacao recusada.'
+    }
   }
   return $state
 }
@@ -1296,27 +1542,26 @@ function Test-MegaDeskNodeCommandLine {
   }
 }
 
-function Test-MegaDeskStaticProcessIdentity {
+function Test-MegaDeskStaticProcessSnapshotIdentity {
   param(
     [Parameter(Mandatory = $true)]$Record,
-    [Parameter(Mandatory = $true)][string]$Kind
+    [Parameter(Mandatory = $true)][string]$Kind,
+    [Parameter(Mandatory = $true)]$Process
   )
   if ($Kind -notin @('node', 'cloudflared')) { return $false }
   if ($null -eq $Record -or -not $Record.pid) { return $false }
-  $process = Get-ProcessSnapshot -ProcessId ([int]$Record.pid)
-  if ($null -eq $process) { return $false }
-  if ([string]::IsNullOrWhiteSpace([string]$process.ExecutablePath)) { return $false }
+  if ($null -eq $Process -or [string]::IsNullOrWhiteSpace([string]$Process.ExecutablePath)) { return $false }
 
   $expectedName = if ($Kind -eq 'node') { 'node.exe' } else { 'cloudflared.exe' }
-  if ([System.IO.Path]::GetFileName($process.ExecutablePath) -ine $expectedName) { return $false }
-  if (-not (Test-MegaDeskSamePath -Left ([string]$process.ExecutablePath) -Right ([string]$Record.executablePath))) { return $false }
+  if ([System.IO.Path]::GetFileName($Process.ExecutablePath) -ine $expectedName) { return $false }
+  if (-not (Test-MegaDeskSamePath -Left ([string]$Process.ExecutablePath) -Right ([string]$Record.executablePath))) { return $false }
 
   if ($Kind -eq 'node') {
-    if (-not (Test-MegaDeskNodeCommandLine -Process $process -Record $Record)) { return $false }
+    if (-not (Test-MegaDeskNodeCommandLine -Process $Process -Record $Record)) { return $false }
   } else {
     if ([string]::IsNullOrWhiteSpace([string]$Record.configPath)) { return $false }
     try {
-      $arguments = @(ConvertFrom-MegaDeskWindowsCommandLine -CommandLine ([string]$process.CommandLine))
+      $arguments = @(ConvertFrom-MegaDeskWindowsCommandLine -CommandLine ([string]$Process.CommandLine))
       if ($arguments.Count -ne 6) { return $false }
       if (-not (Test-MegaDeskSamePath -Left $arguments[0] -Right ([string]$Record.executablePath))) { return $false }
       if ($arguments[1] -cne 'tunnel' -or $arguments[2] -cne '--config' -or $arguments[4] -cne 'run' -or $arguments[5] -cne 'megadesk') { return $false }
@@ -1327,11 +1572,22 @@ function Test-MegaDeskStaticProcessIdentity {
   }
 
   try {
-    $actualStart = ConvertTo-MegaDeskProcessStartUtc -Value $process.CreationDate
+    $actualStart = ConvertTo-MegaDeskProcessStartUtc -Value $Process.CreationDate
     $recordedStart = ConvertTo-MegaDeskProcessStartUtc -Value $Record.startedAtUtc
     if ([Math]::Abs(($actualStart - $recordedStart).TotalMilliseconds) -gt 1) { return $false }
   } catch { return $false }
   return $true
+}
+
+function Test-MegaDeskStaticProcessIdentity {
+  param(
+    [Parameter(Mandatory = $true)]$Record,
+    [Parameter(Mandatory = $true)][string]$Kind
+  )
+  if ($null -eq $Record -or -not $Record.pid) { return $false }
+  $process = Get-ProcessSnapshot -ProcessId ([int]$Record.pid)
+  if ($null -eq $process) { return $false }
+  return Test-MegaDeskStaticProcessSnapshotIdentity -Record $Record -Kind $Kind -Process $process
 }
 
 function Test-MegaDeskPortOwnedByProcess {
@@ -1689,12 +1945,53 @@ function New-ManagedProcessRecord {
   }
 }
 
-function Start-MegaDeskNode {
-  param([string]$ReleaseSha = '', [ValidateRange(1025, 65535)][int]$Port = $script:RuntimePort)
-  $release = $null
-  if (-not [string]::IsNullOrWhiteSpace($ReleaseSha)) {
-    $release = Get-MegaDeskRelease -Sha $ReleaseSha
+function Assert-MegaDeskNodeStartAuthorization {
+  param(
+    [Parameter(Mandatory = $true)][ValidateSet('ACTIVE_START', 'UPDATE_CANDIDATE', 'UPDATE_ROLLBACK', 'BOOTSTRAP_ZERO_CANDIDATE')][string]$AuthorizationMode,
+    [Parameter(Mandatory = $true)][string]$ReleaseSha,
+    [switch]$RequireNodeAbsent
+  )
+
+  Assert-MegaDeskLifecycleLockHeld
+  if (-not (Test-MegaDeskFullSha $ReleaseSha)) { throw 'Inicio do Node recusado: ReleaseSha explicito e invalido.' }
+  $state = Get-MegaDeskState
+  if ($null -eq $state.operation) { throw 'Inicio do Node recusado: operation ausente.' }
+
+  $status = [string]$state.operation.status
+  $kind = if ($state.operation.PSObject.Properties.Name -contains 'kind') { [string]$state.operation.kind } else { '' }
+  $candidateSha = if ($state.operation.PSObject.Properties.Name -contains 'candidateSha') { [string]$state.operation.candidateSha } else { '' }
+  $switchAttempted = Get-MegaDeskOperationSwitchAttempted -Operation $state.operation
+  $isActiveRelease = $null -ne $state.activeRelease -and [string]$state.activeRelease.sha -ceq $ReleaseSha
+  $nodeStateAuthorized = -not $RequireNodeAbsent -or $null -eq $state.node
+
+  switch ($AuthorizationMode) {
+    'ACTIVE_START' {
+      $activeRelease = Assert-MegaDeskStartupState -State $state
+      if ([string]$activeRelease.sha -ceq $ReleaseSha -and $isActiveRelease -and $nodeStateAuthorized) { return $state }
+    }
+    'UPDATE_CANDIDATE' {
+      if ($kind -ceq 'UPDATE' -and $status -ceq 'SWITCHING' -and $candidateSha -ceq $ReleaseSha -and $switchAttempted -eq $true -and $null -ne $state.activeRelease -and $nodeStateAuthorized) { return $state }
+    }
+    'UPDATE_ROLLBACK' {
+      if ($kind -ceq 'UPDATE' -and $status -ceq 'ROLLING_BACK' -and $candidateSha -ceq $ReleaseSha -and $switchAttempted -eq $true -and $nodeStateAuthorized) { return $state }
+    }
+    'BOOTSTRAP_ZERO_CANDIDATE' {
+      if ($kind -ceq 'BOOTSTRAP_ZERO' -and $status -ceq 'SWITCHING' -and $candidateSha -ceq $ReleaseSha -and $switchAttempted -eq $true -and $null -eq $state.activeRelease -and $null -eq $state.previousRelease -and $nodeStateAuthorized) { return $state }
+    }
   }
+
+  throw ("Inicio do Node recusado: state oficial nao autoriza esta release no modo {0} imediatamente antes do spawn." -f $AuthorizationMode)
+}
+
+function Start-MegaDeskNode {
+  param(
+    [Parameter(Mandatory = $true)][ValidateSet('ACTIVE_START', 'UPDATE_CANDIDATE', 'UPDATE_ROLLBACK', 'BOOTSTRAP_ZERO_CANDIDATE')][string]$AuthorizationMode,
+    [Parameter(Mandatory = $true)][ValidateScript({ Test-MegaDeskFullSha $_ })][string]$ReleaseSha,
+    [ValidateRange(1025, 65535)][int]$Port = $script:RuntimePort
+  )
+  return Invoke-WithMegaDeskLifecycleLock {
+  Assert-MegaDeskNodeStartAuthorization -AuthorizationMode $AuthorizationMode -ReleaseSha $ReleaseSha | Out-Null
+  $release = Get-MegaDeskRelease -Sha $ReleaseSha
   $state = Get-MegaDeskState
   $nodeStatus = Get-MegaDeskManagedProcessStatus -Record $state.node -Kind node
   if ($nodeStatus -eq 'VALID') {
@@ -1705,18 +2002,20 @@ function Start-MegaDeskNode {
     return $null
   }
   if ($nodeStatus -eq 'AMBIGUOUS') { throw 'Identidade do processo Node registrada e ambigua; inicio recusado.' }
-  if ($null -ne $state.node) { $state.node = $null; Save-MegaDeskState $state }
+  if ($null -ne $state.node) {
+    $staleNodeRecord = $state.node
+    Update-MegaDeskState -AllowedFields node -Precondition {
+      param($current)
+      $null -ne $current.node -and (Test-MegaDeskStateValueEqual -Left $current.node -Right $staleNodeRecord)
+    } -Mutation { param($current) $current.node = $null } | Out-Null
+  }
 
   Assert-MegaDeskPortFree -Port $Port -Operation 'inicio do Node' | Out-Null
 
   $node = Get-Command node -ErrorAction SilentlyContinue
   if ($null -eq $node) { throw 'node.exe nao foi encontrado no PATH.' }
-  $scriptPath = Join-Path $script:ProjectRoot 'dist\index.js'
-  $workingDirectory = $script:ProjectRoot
-  if ($null -ne $release) {
-    $scriptPath = Join-Path $release.path 'dist\index.js'
-    $workingDirectory = $release.path
-  }
+  $scriptPath = Join-Path $release.path 'dist\index.js'
+  $workingDirectory = $release.path
   if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) { throw 'Artefato Node da release nao encontrado.' }
   $environmentFile = Join-Path $script:ProjectRoot '.env.local'
   if (-not (Test-Path -LiteralPath $environmentFile -PathType Leaf)) { throw '.env.local obrigatorio ausente fora da release.' }
@@ -1728,8 +2027,9 @@ function Start-MegaDeskNode {
     TRUST_PROXY_HOPS = '1'
     MEGADESK_ALLOWED_ORIGINS = $script:AllowedOrigins
   }
-  if (-not [string]::IsNullOrWhiteSpace($ReleaseSha)) { $environmentOverrides['MEGADESK_RELEASE_SHA'] = $ReleaseSha }
+  $environmentOverrides['MEGADESK_RELEASE_SHA'] = $ReleaseSha
   $diagnostics = New-MegaDeskNodeDiagnosticPaths -ReleaseSha $ReleaseSha
+  Assert-MegaDeskNodeStartAuthorization -AuthorizationMode $AuthorizationMode -ReleaseSha $ReleaseSha -RequireNodeAbsent | Out-Null
   $process = Start-MegaDeskNativeNodeProcess -Launch $launch -WorkingDirectory $workingDirectory -EnvironmentOverrides $environmentOverrides -StdoutPath $diagnostics.stdoutPath -StderrPath $diagnostics.stderrPath
   try {
     $record = New-ManagedProcessRecord -Process $process -ExecutablePath $launch.executablePath -Kind node -ScriptPath $launch.scriptPath -EnvironmentPath $launch.environmentPath -ReleaseSha $ReleaseSha -Port $Port -StdoutPath $diagnostics.stdoutPath -StderrPath $diagnostics.stderrPath -DiagnosticInvocationId $diagnostics.invocationId -ExitTelemetryPath $diagnostics.exitTelemetryPath
@@ -1737,8 +2037,10 @@ function Start-MegaDeskNode {
     throw ("CRITICO: identidade do Node iniciado nao pode ser comprovada: {0}. Nenhum encerramento por PID foi tentado; intervencao manual e necessaria." -f $_.Exception.Message)
   }
   try {
-    $state.node = $record
-    Save-MegaDeskState $state
+    Update-MegaDeskState -AllowedFields node -Precondition {
+      param($current)
+      $null -eq $current.node
+    } -Mutation { param($current) $current.node = $record } | Out-Null
   } catch {
     $stateFailure = $_.Exception.Message
     try {
@@ -1754,8 +2056,10 @@ function Start-MegaDeskNode {
     $telemetryFailure = $_.Exception.Message
     try {
       Stop-MegaDeskExactManagedProcess -Record $record -Kind node -AllowStaticIdentity
-      $state.node = $null
-      Save-MegaDeskState $state
+      Update-MegaDeskState -AllowedFields node -Precondition {
+        param($current)
+        $null -ne $current.node -and (Test-MegaDeskStateValueEqual -Left $current.node -Right $record)
+      } -Mutation { param($current) $current.node = $null } | Out-Null
     } catch {
       throw ("CRITICO: exit telemetry do Node nao iniciou: {0}. Compensacao automatica nao pode ser provada: {1}. Intervencao manual e necessaria." -f $telemetryFailure, $_.Exception.Message)
     }
@@ -1764,9 +2068,76 @@ function Start-MegaDeskNode {
   Add-Member -InputObject $record -NotePropertyName processHandle -NotePropertyValue $process -Force
   try { Write-MegaDeskLog ("MegaDesk Node iniciado e controlado (PID {0}); invocation={1}; stdout_path={2}; stderr_path={3}; exit_telemetry_path={4}." -f $process.Id, $diagnostics.invocationId, $diagnostics.stdoutPath, $diagnostics.stderrPath, $diagnostics.exitTelemetryPath) } catch { }
   return $record
+  }
+}
+
+function Assert-MegaDeskTunnelStartAuthorization {
+  param(
+    [Parameter(Mandatory = $true)][ValidateSet('ACTIVE_START', 'UPDATE_CANDIDATE', 'UPDATE_ROLLBACK', 'BOOTSTRAP_ZERO_CANDIDATE')][string]$AuthorizationMode,
+    [Parameter(Mandatory = $true)][string]$ReleaseSha
+  )
+
+  Assert-MegaDeskLifecycleLockHeld
+  if (-not (Test-MegaDeskFullSha $ReleaseSha)) { throw 'Inicio do tunnel recusado: ReleaseSha explicito e invalido.' }
+  $state = Get-MegaDeskState
+  if ($null -eq $state.operation -or $null -eq $state.node -or [string]$state.node.releaseSha -cne $ReleaseSha -or -not (Test-ManagedProcess -Record $state.node -Kind node)) {
+    throw 'Inicio do tunnel recusado: Node gerenciado da release solicitada nao foi comprovado.'
+  }
+
+  $status = [string]$state.operation.status
+  $kind = if ($state.operation.PSObject.Properties.Name -contains 'kind') { [string]$state.operation.kind } else { '' }
+  $candidateSha = if ($state.operation.PSObject.Properties.Name -contains 'candidateSha') { [string]$state.operation.candidateSha } else { '' }
+  $switchAttempted = Get-MegaDeskOperationSwitchAttempted -Operation $state.operation
+  $isActiveRelease = $null -ne $state.activeRelease -and [string]$state.activeRelease.sha -ceq $ReleaseSha
+
+  switch ($AuthorizationMode) {
+    'ACTIVE_START' {
+      $activeRelease = Assert-MegaDeskStartupState -State $state
+      if ([string]$activeRelease.sha -ceq $ReleaseSha -and $isActiveRelease) { return $state }
+    }
+    'UPDATE_CANDIDATE' {
+      if ($kind -ceq 'UPDATE' -and $status -ceq 'SWITCHING' -and $candidateSha -ceq $ReleaseSha -and $switchAttempted -eq $true -and $null -ne $state.activeRelease) { return $state }
+    }
+    'UPDATE_ROLLBACK' {
+      if ($kind -ceq 'UPDATE' -and $status -ceq 'ROLLING_BACK' -and $candidateSha -ceq $ReleaseSha -and $switchAttempted -eq $true) { return $state }
+    }
+    'BOOTSTRAP_ZERO_CANDIDATE' {
+      if ($kind -ceq 'BOOTSTRAP_ZERO' -and $status -ceq 'SWITCHING' -and $candidateSha -ceq $ReleaseSha -and $switchAttempted -eq $true -and $null -eq $state.activeRelease -and $null -eq $state.previousRelease) { return $state }
+    }
+  }
+
+  throw ("Inicio do tunnel recusado: state oficial nao autoriza esta release no modo {0} imediatamente antes do spawn." -f $AuthorizationMode)
+}
+
+function Get-MegaDeskGlobalCloudflaredPresence {
+  try {
+    $processes = @(Get-CimInstance Win32_Process -Filter "Name = 'cloudflared.exe'" -ErrorAction Stop)
+  } catch {
+    return [pscustomobject]@{ status = 'UNKNOWN'; processes = @() }
+  }
+
+  if ($processes.Count -eq 0) {
+    return [pscustomobject]@{ status = 'ABSENT'; processes = @() }
+  }
+  return [pscustomobject]@{ status = 'PRESENT'; processes = $processes }
+}
+
+function Assert-MegaDeskGlobalCloudflaredAbsent {
+  $presence = Get-MegaDeskGlobalCloudflaredPresence
+  switch ([string]$presence.status) {
+    'ABSENT' { return $presence }
+    'PRESENT' { throw 'Existe cloudflared nao controlado em execucao; inicio duplicado recusado.' }
+    default { throw 'Nao foi possivel provar a ausencia global de cloudflared.exe; inicio recusado.' }
+  }
 }
 
 function Start-MegaDeskTunnel {
+  param(
+    [Parameter(Mandatory = $true)][ValidateSet('ACTIVE_START', 'UPDATE_CANDIDATE', 'UPDATE_ROLLBACK', 'BOOTSTRAP_ZERO_CANDIDATE')][string]$AuthorizationMode,
+    [Parameter(Mandatory = $true)][ValidateScript({ Test-MegaDeskFullSha $_ })][string]$ReleaseSha
+  )
+  return Invoke-WithMegaDeskLifecycleLock {
+  Assert-MegaDeskTunnelStartAuthorization -AuthorizationMode $AuthorizationMode -ReleaseSha $ReleaseSha | Out-Null
   $state = Get-MegaDeskState
   $tunnelStatus = Get-MegaDeskManagedProcessStatus -Record $state.cloudflared -Kind cloudflared
   if ($tunnelStatus -eq 'VALID') {
@@ -1774,12 +2145,11 @@ function Start-MegaDeskTunnel {
     return $null
   }
   if ($tunnelStatus -eq 'AMBIGUOUS') { throw 'Identidade do processo Cloudflared registrada e ambigua; inicio recusado.' }
-  if ($null -ne $state.cloudflared) { $state.cloudflared = $null; Save-MegaDeskState $state }
+  Assert-MegaDeskGlobalCloudflaredAbsent | Out-Null
+  $staleTunnelRecord = $state.cloudflared
 
   $cloudflared = Get-Command cloudflared -ErrorAction SilentlyContinue
   if ($null -eq $cloudflared) { throw 'cloudflared.exe nao foi encontrado no PATH.' }
-  $existing = Get-CimInstance Win32_Process -Filter "Name = 'cloudflared.exe'" -ErrorAction SilentlyContinue
-  if ($existing) { throw 'Existe cloudflared nao controlado em execucao; inicio duplicado recusado.' }
 
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = $cloudflared.Source
@@ -1787,6 +2157,8 @@ function Start-MegaDeskTunnel {
   $psi.WorkingDirectory = $script:ProjectRoot
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true
+  Assert-MegaDeskTunnelStartAuthorization -AuthorizationMode $AuthorizationMode -ReleaseSha $ReleaseSha | Out-Null
+  Assert-MegaDeskGlobalCloudflaredAbsent | Out-Null
   $process = Start-MegaDeskProcess -StartInfo $psi
   try {
     $record = New-ManagedProcessRecord -Process $process -ExecutablePath $cloudflared.Source -Kind cloudflared -ConfigPath $script:CloudflaredConfig
@@ -1794,8 +2166,11 @@ function Start-MegaDeskTunnel {
     throw ("CRITICO: identidade do Cloudflared iniciado nao pode ser comprovada: {0}. Nenhum encerramento por PID foi tentado; cleanup automatico inseguro foi recusado e intervencao manual pode ser necessaria." -f $_.Exception.Message)
   }
   try {
-    $state.cloudflared = $record
-    Save-MegaDeskState $state
+    Update-MegaDeskState -AllowedFields cloudflared -Precondition {
+      param($current)
+      if ($null -eq $staleTunnelRecord) { return $null -eq $current.cloudflared }
+      return $null -ne $current.cloudflared -and (Test-MegaDeskStateValueEqual -Left $current.cloudflared -Right $staleTunnelRecord)
+    } -Mutation { param($current) $current.cloudflared = $record } | Out-Null
   } catch {
     $stateFailure = $_.Exception.Message
     try {
@@ -1807,6 +2182,7 @@ function Start-MegaDeskTunnel {
   }
   try { Write-MegaDeskLog ("Cloudflare Tunnel iniciado e controlado (PID {0})." -f $process.Id) } catch { }
   return $record
+  }
 }
 
 function Get-HttpStatusCode {
@@ -2035,32 +2411,99 @@ function Test-SameManagedProcessRecord {
   } catch { return $false }
 }
 
+function Get-MegaDeskProcessHandleById {
+  param([Parameter(Mandatory = $true)][int]$ProcessId)
+  return [System.Diagnostics.Process]::GetProcessById($ProcessId)
+}
+
+function Get-MegaDeskDestructiveProcessTarget {
+  param(
+    [Parameter(Mandatory = $true)]$Record,
+    [Parameter(Mandatory = $true)][ValidateSet('node', 'cloudflared')][string]$Kind,
+    [switch]$AllowStaticIdentity
+  )
+
+  if ($null -eq $Record -or -not ($Record.PSObject.Properties.Name -contains 'pid') -or -not $Record.pid) {
+    throw "Record $Kind parcial; ausencia ou identidade do processo nao pode ser provada."
+  }
+
+  try {
+    $snapshot = Get-ProcessSnapshotStrict -ProcessId ([int]$Record.pid)
+  } catch {
+    throw ("Snapshot estrito do processo {0} falhou; estado UNKNOWN preservado: {1}" -f $Kind, $_.Exception.Message)
+  }
+  if ($null -eq $snapshot) {
+    return [pscustomobject]@{ status = 'ABSENT'; processHandle = $null }
+  }
+
+  if (-not (Test-MegaDeskStaticProcessSnapshotIdentity -Record $Record -Kind $Kind -Process $snapshot)) {
+    throw "Identidade estatica do processo $Kind nao pode ser comprovada; encerramento recusado."
+  }
+  if (-not $AllowStaticIdentity -and $Kind -eq 'node') {
+    if (-not ($Record.PSObject.Properties.Name -contains 'port') -or $null -eq $Record.port -or -not (Test-MegaDeskPortOwnedByProcess -Port ([int]$Record.port) -ProcessId ([int]$Record.pid))) {
+      throw 'Ownership da porta do processo Node nao pode ser comprovado; encerramento recusado.'
+    }
+  }
+
+  $processHandle = $null
+  try {
+    $processHandle = Get-MegaDeskProcessHandleById -ProcessId ([int]$Record.pid)
+    $null = $processHandle.Handle
+    if ($processHandle.HasExited) {
+      $processHandle.Dispose()
+      return [pscustomobject]@{ status = 'ABSENT'; processHandle = $null }
+    }
+    $recordedStart = ConvertTo-MegaDeskProcessStartUtc -Value $Record.startedAtUtc
+    $handleStart = $processHandle.StartTime.ToUniversalTime()
+    if ([Math]::Abs(($handleStart - $recordedStart).TotalMilliseconds) -gt 1) {
+      throw 'PID foi reutilizado entre a prova de identidade e a aquisicao do handle; encerramento recusado.'
+    }
+    if (-not (Test-MegaDeskSamePath -Left ([string]$processHandle.MainModule.FileName) -Right ([string]$Record.executablePath))) {
+      throw 'Executavel do handle divergiu do processo validado; encerramento recusado.'
+    }
+  } catch [System.ArgumentException] {
+    if ($null -ne $processHandle) { $processHandle.Dispose() }
+    return [pscustomobject]@{ status = 'ABSENT'; processHandle = $null }
+  } catch {
+    if ($null -ne $processHandle) { $processHandle.Dispose() }
+    throw ("Handle do processo {0} ficou UNKNOWN; encerramento recusado: {1}" -f $Kind, $_.Exception.Message)
+  }
+
+  return [pscustomobject]@{ status = 'PRESENT'; processHandle = $processHandle }
+}
+
+function Stop-MegaDeskValidatedProcessHandle {
+  param(
+    [Parameter(Mandatory = $true)]$ProcessHandle,
+    [Parameter(Mandatory = $true)][ValidateSet('node', 'cloudflared')][string]$Kind
+  )
+
+  try {
+    $null = $ProcessHandle.Handle
+    if ($ProcessHandle.HasExited) { return }
+    Stop-Process -InputObject $ProcessHandle -ErrorAction Stop
+    if (-not $ProcessHandle.WaitForExit(20000) -or -not $ProcessHandle.HasExited) {
+      throw "Processo $Kind validado nao encerrou durante compensacao local."
+    }
+  } finally {
+    $ProcessHandle.Dispose()
+  }
+}
+
 function Stop-MegaDeskExactManagedProcess {
   param(
     [Parameter(Mandatory = $true)]$Record,
     [Parameter(Mandatory = $true)][ValidateSet('node', 'cloudflared')][string]$Kind,
     [switch]$AllowStaticIdentity
   )
-  $snapshot = Get-ProcessSnapshot -ProcessId ([int]$Record.pid)
-  if ($null -eq $snapshot) { return }
-  $identityProved = if ($AllowStaticIdentity) {
-    Test-MegaDeskStaticProcessIdentity -Record $Record -Kind $Kind
-  } else {
-    Test-ManagedProcess -Record $Record -Kind $Kind
-  }
-  if (-not $identityProved) {
-    $scope = if ($AllowStaticIdentity) { 'estatica forte' } else { 'gerenciada' }
-    throw "Identidade $scope do processo $Kind iniciado nao pode ser comprovada; encerramento recusado."
-  }
-  Stop-Process -Id ([int]$Record.pid) -ErrorAction Stop
-  Wait-Process -Id ([int]$Record.pid) -Timeout 20 -ErrorAction SilentlyContinue
-  if ($null -ne (Get-ProcessSnapshot -ProcessId ([int]$Record.pid))) {
-    throw "Processo $Kind iniciado nao encerrou durante compensacao local."
-  }
+  $target = Get-MegaDeskDestructiveProcessTarget -Record $Record -Kind $Kind -AllowStaticIdentity:$AllowStaticIdentity
+  if ($target.status -eq 'ABSENT') { return }
+  Stop-MegaDeskValidatedProcessHandle -ProcessHandle $target.processHandle -Kind $Kind
 }
 
 function Undo-MegaDeskInvocation {
   param($StartedNodeRecord = $null, $StartedTunnelRecord = $null)
+  return Invoke-WithMegaDeskLifecycleLock {
 
   $rollbackErrors = @()
   foreach ($entry in @(
@@ -2077,27 +2520,15 @@ function Undo-MegaDeskInvocation {
         try { Write-MegaDeskLog ("Rollback incompleto para {0}: {1}" -f $entry.Kind, $cause) } catch { }
         continue
       }
-      $snapshot = Get-ProcessSnapshot -ProcessId ([int]$current.pid)
-      $processWasAlreadyAbsent = $null -eq $snapshot
-      if ($null -ne $snapshot) {
-        $identityProved = Test-ManagedProcess -Record $current -Kind $entry.Kind
-        if (-not $identityProved -and $entry.Kind -eq 'node') {
-          $identityProved = Test-MegaDeskStaticProcessIdentity -Record $current -Kind $entry.Kind
-        }
-        if (-not $identityProved) {
-          $cause = 'cleanup recusado: identidade gerenciada do processo nao pode ser comprovada; processo preservado.'
-          $rollbackErrors += ("{0}: {1}" -f $entry.Kind, $cause)
-          try { Write-MegaDeskLog ("Rollback incompleto para {0}: {1}" -f $entry.Kind, $cause) } catch { }
-          continue
-        }
-        Stop-Process -Id ([int]$current.pid) -ErrorAction Stop
-        Wait-Process -Id ([int]$current.pid) -Timeout 20 -ErrorAction SilentlyContinue
-        if ($null -ne (Get-ProcessSnapshot -ProcessId ([int]$current.pid))) {
-          throw ("Rollback nao conseguiu encerrar {0}." -f $entry.Kind)
-        }
-      }
-      $state.($entry.Kind) = $null
-      Save-MegaDeskState $state
+      $target = Get-MegaDeskDestructiveProcessTarget -Record $current -Kind $entry.Kind -AllowStaticIdentity:($entry.Kind -eq 'node')
+      $processWasAlreadyAbsent = $target.status -eq 'ABSENT'
+      if ($target.status -eq 'PRESENT') { Stop-MegaDeskValidatedProcessHandle -ProcessHandle $target.processHandle -Kind $entry.Kind }
+      $ownedRecord = $entry.Record
+      $ownedKind = [string]$entry.Kind
+      Update-MegaDeskState -AllowedFields $ownedKind -Precondition {
+        param($latest)
+        $null -ne $latest.($ownedKind) -and (Test-SameManagedProcessRecord -Left $latest.($ownedKind) -Right $ownedRecord)
+      } -Mutation { param($latest) $latest.($ownedKind) = $null } | Out-Null
       if ($processWasAlreadyAbsent) {
         try { Write-MegaDeskLog ("Rollback observou {0} iniciado nesta invocacao ja encerrado; nenhum processo foi terminado." -f $entry.Kind) } catch { }
       } else {
@@ -2110,25 +2541,27 @@ function Undo-MegaDeskInvocation {
     }
   }
   if ($rollbackErrors.Count -gt 0) { throw ("Rollback seletivo incompleto: {0}." -f ($rollbackErrors -join ' | ')) }
+  }
 }
 
 function Stop-MegaDeskManagedProcess {
   param([Parameter(Mandatory = $true)][ValidateSet('node', 'cloudflared')][string]$Kind)
+  return Invoke-WithMegaDeskLifecycleLock {
   $state = Get-MegaDeskState
   $record = $state.$Kind
   if ($null -eq $record) {
     Write-MegaDeskLog ("Nenhum processo {0} registrado pela automacao." -f $Kind)
     return
   }
-  if (-not (Test-ManagedProcess -Record $record -Kind $Kind)) {
-    throw ("Identidade do processo {0} nao confere; encerramento recusado e estado preservado." -f $Kind)
-  }
-  Stop-Process -Id ([int]$record.pid) -ErrorAction Stop
-  Wait-Process -Id ([int]$record.pid) -Timeout 20 -ErrorAction SilentlyContinue
-  if ($null -ne (Get-ProcessSnapshot -ProcessId ([int]$record.pid))) { throw ("Processo {0} nao encerrou." -f $Kind) }
-  $state.$Kind = $null
-  Save-MegaDeskState $state
+  $target = Get-MegaDeskDestructiveProcessTarget -Record $record -Kind $Kind
+  if ($target.status -ne 'PRESENT') { throw ("Processo {0} registrado esta ausente; encerramento nao alterou o state." -f $Kind) }
+  Stop-MegaDeskValidatedProcessHandle -ProcessHandle $target.processHandle -Kind $Kind
+  Update-MegaDeskState -AllowedFields $Kind -Precondition {
+    param($latest)
+    $null -ne $latest.$Kind -and (Test-SameManagedProcessRecord -Left $latest.$Kind -Right $record)
+  } -Mutation { param($latest) $latest.$Kind = $null } | Out-Null
   Write-MegaDeskLog ("Processo {0} controlado foi encerrado." -f $Kind)
+  }
 }
 
 function Assert-MegaDeskTestChecks {
@@ -2140,6 +2573,36 @@ function Assert-MegaDeskTestChecks {
   }
 }
 
+function Assert-MegaDeskDangerousLifecycleState {
+  param(
+    [Parameter(Mandatory = $true)]$State,
+    [Parameter(Mandatory = $true)][ValidateSet('UPDATE', 'BOOTSTRAP_ZERO')][string]$Kind,
+    [Parameter(Mandatory = $true)][ValidateSet('SWITCHING', 'ROLLING_BACK')][string]$Status,
+    [Parameter(Mandatory = $true)][string]$CandidateSha,
+    [ValidateSet('MATCH', 'ABSENT', 'IGNORE')][string]$ActiveReleaseMode = 'IGNORE',
+    [string]$ActiveReleaseSha = '',
+    [ValidateSet('MATCH', 'ABSENT', 'IGNORE')][string]$PreviousReleaseMode = 'IGNORE',
+    [string]$PreviousReleaseSha = '',
+    [ValidateSet('MATCH', 'ABSENT', 'IGNORE')][string]$NodeMode = 'IGNORE',
+    $ExpectedNodeRecord = $null
+  )
+
+  Assert-MegaDeskLifecycleLockHeld
+  if ($null -eq $State.operation -or [string]$State.operation.kind -cne $Kind -or [string]$State.operation.status -cne $Status -or [string]$State.operation.candidateSha -cne $CandidateSha) {
+    throw 'Acao perigosa recusada: lifecycle divergiu do state esperado.'
+  }
+  if ((Get-MegaDeskOperationSwitchAttempted -Operation $State.operation) -ne $true) {
+    throw 'Acao perigosa recusada: switchAttempted=true nao esta comprovado.'
+  }
+  if ($ActiveReleaseMode -eq 'ABSENT' -and $null -ne $State.activeRelease) { throw 'Acao perigosa recusada: activeRelease deveria estar ausente.' }
+  if ($ActiveReleaseMode -eq 'MATCH' -and ($null -eq $State.activeRelease -or [string]$State.activeRelease.sha -cne $ActiveReleaseSha)) { throw 'Acao perigosa recusada: activeRelease divergiu.' }
+  if ($PreviousReleaseMode -eq 'ABSENT' -and $null -ne $State.previousRelease) { throw 'Acao perigosa recusada: previousRelease deveria estar ausente.' }
+  if ($PreviousReleaseMode -eq 'MATCH' -and ($null -eq $State.previousRelease -or [string]$State.previousRelease.sha -cne $PreviousReleaseSha)) { throw 'Acao perigosa recusada: previousRelease divergiu.' }
+  if ($NodeMode -eq 'ABSENT' -and $null -ne $State.node) { throw 'Acao perigosa recusada: record Node deveria estar ausente.' }
+  if ($NodeMode -eq 'MATCH' -and ($null -eq $State.node -or $null -eq $ExpectedNodeRecord -or -not (Test-MegaDeskStateValueEqual -Left $State.node -Right $ExpectedNodeRecord))) { throw 'Acao perigosa recusada: record Node divergiu.' }
+  return $State
+}
+
 function Invoke-MegaDeskReleaseRollback {
   param(
     [Parameter(Mandatory = $true)]$PreviousRelease,
@@ -2149,22 +2612,35 @@ function Invoke-MegaDeskReleaseRollback {
     [ValidateRange(1, 90)][int]$LocalTimeoutSeconds = 90,
     [ValidateRange(1, 60)][int]$PublicTimeoutSeconds = 60
   )
+  return Invoke-WithMegaDeskLifecycleLock {
   try {
+    $stateBeforeRollback = Get-MegaDeskState
+    if ($null -eq $stateBeforeRollback.activeRelease -or -not (Test-MegaDeskFullSha ([string]$stateBeforeRollback.activeRelease.sha))) {
+      throw 'Rollback recusado: activeRelease observada antes do rollback e invalida.'
+    }
+    $activeShaBeforeRollback = [string]$stateBeforeRollback.activeRelease.sha
     Set-MegaDeskOperationState -Status 'ROLLING_BACK' -CandidateSha ([string]$PreviousRelease.sha) -Message 'Rollback de codigo iniciado.' | Out-Null
     if ($null -ne $StartedCandidateRecord) { Undo-MegaDeskInvocation -StartedNodeRecord $StartedCandidateRecord }
+    $rollbackState = Get-MegaDeskState
+    Assert-MegaDeskDangerousLifecycleState -State $rollbackState -Kind UPDATE -Status ROLLING_BACK -CandidateSha ([string]$PreviousRelease.sha) -ActiveReleaseMode MATCH -ActiveReleaseSha $activeShaBeforeRollback -NodeMode ABSENT | Out-Null
     Assert-MegaDeskPortFree -Port $script:RuntimePort -Operation 'rollback' | Out-Null
-    $rollbackNodeRecord = Start-MegaDeskNode -ReleaseSha ([string]$PreviousRelease.sha) -Port $script:RuntimePort
+    $rollbackNodeRecord = Start-MegaDeskNode -AuthorizationMode UPDATE_ROLLBACK -ReleaseSha ([string]$PreviousRelease.sha) -Port $script:RuntimePort
     Wait-MegaDeskLocal -ExpectedReleaseSha ([string]$PreviousRelease.sha) -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds -NodeRecord $rollbackNodeRecord
-    if (-not $TestMode) { Start-MegaDeskTunnel | Out-Null }
+    if (-not $TestMode) { Start-MegaDeskTunnel -AuthorizationMode UPDATE_ROLLBACK -ReleaseSha ([string]$PreviousRelease.sha) | Out-Null }
     Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha ([string]$PreviousRelease.sha) -Checks $PublicChecks -TestMode:$TestMode -TimeoutSeconds $PublicTimeoutSeconds
-    $state = Get-MegaDeskState
-    $state.activeRelease = [pscustomobject]@{ sha = $PreviousRelease.sha; path = $PreviousRelease.path; activatedAt = (Get-Date).ToUniversalTime().ToString('o') }
-    $state.operation = [pscustomobject]@{ status = 'ACTIVE'; candidateSha = $PreviousRelease.sha; updatedAt = (Get-Date).ToUniversalTime().ToString('o'); message = 'Rollback de codigo confirmado por health local e publico.' }
-    Save-MegaDeskState $state
+    Update-MegaDeskState -AllowedFields @('activeRelease', 'operation') -Precondition {
+      param($current)
+      $null -ne $current.operation -and [string]$current.operation.kind -ceq 'UPDATE' -and [string]$current.operation.status -ceq 'ROLLING_BACK' -and [string]$current.operation.candidateSha -ceq [string]$PreviousRelease.sha -and (Get-MegaDeskOperationSwitchAttempted -Operation $current.operation) -eq $true
+    } -Mutation {
+      param($current)
+      $current.activeRelease = [pscustomobject]@{ sha = $PreviousRelease.sha; path = $PreviousRelease.path; activatedAt = (Get-Date).ToUniversalTime().ToString('o') }
+      $current.operation = New-MegaDeskOperationRecord -Status 'ACTIVE' -Kind 'UPDATE' -CandidateSha $PreviousRelease.sha -BaselineSha $null -SwitchAttempted $true -Message 'Rollback de codigo confirmado por health local e publico.'
+    } | Out-Null
     Write-MegaDeskLog ("Rollback confirmou a release anterior {0}." -f $PreviousRelease.sha)
   } catch {
     try { Set-MegaDeskOperationState -Status 'FAILED' -CandidateSha ([string]$PreviousRelease.sha) -Message 'Rollback nao confirmado.' | Out-Null } catch { }
     throw ("CRITICO: rollback da release anterior nao foi confirmado: {0}" -f $_.Exception.Message)
+  }
   }
 }
 
@@ -2193,8 +2669,12 @@ function Resolve-MegaDeskReleaseSwitchNodeStatus {
 
   # A record is cleared only after the exact registered PID is proved absent
   # and the managed port is proved free. No process is stopped in this path.
+  $staleRecord = $record
+  Update-MegaDeskState -AllowedFields node -Precondition {
+    param($current)
+    $null -ne $current.node -and (Test-MegaDeskStateValueEqual -Left $current.node -Right $staleRecord)
+  } -Mutation { param($current) $current.node = $null } | Out-Null
   $State.node = $null
-  Save-MegaDeskState $State
   return [pscustomobject]@{ status = 'ABSENT'; recordCleared = $true }
 }
 
@@ -2207,6 +2687,7 @@ function Invoke-MegaDeskReleaseSwitch {
     [ValidateRange(1, 90)][int]$LocalTimeoutSeconds = 90,
     [ValidateRange(1, 60)][int]$PublicTimeoutSeconds = 60
   )
+  return Invoke-WithMegaDeskLifecycleLock {
   if ($TestMode) { Assert-MegaDeskTestChecks -Checks $PublicChecks }
   $startedCandidateRecord = $null
   $oldProcessStopped = $false
@@ -2214,23 +2695,32 @@ function Invoke-MegaDeskReleaseSwitch {
     Set-MegaDeskOperationState -Status 'SWITCHING' -CandidateSha ([string]$CandidateRelease.sha) -Message 'Switch de codigo iniciado.' | Out-Null
     $state = Get-MegaDeskState
     $runtime = Resolve-MegaDeskReleaseSwitchNodeStatus -State $state
+    $expectedActiveNodeRecord = if ($runtime.status -eq 'VALID') { $state.node } else { $null }
+    $state = Get-MegaDeskState
     if ($runtime.status -eq 'VALID') {
       if ([string]$state.node.releaseSha -ne [string]$PreviousRelease.sha) {
         throw 'Node ativo nao corresponde a release ativa registrada; switch recusado.'
       }
+      Assert-MegaDeskDangerousLifecycleState -State $state -Kind UPDATE -Status SWITCHING -CandidateSha ([string]$CandidateRelease.sha) -ActiveReleaseMode MATCH -ActiveReleaseSha ([string]$PreviousRelease.sha) -NodeMode MATCH -ExpectedNodeRecord $expectedActiveNodeRecord | Out-Null
       Stop-MegaDeskManagedProcess -Kind node
       $oldProcessStopped = $true
     }
+    $stateBeforeCandidate = Get-MegaDeskState
+    Assert-MegaDeskDangerousLifecycleState -State $stateBeforeCandidate -Kind UPDATE -Status SWITCHING -CandidateSha ([string]$CandidateRelease.sha) -ActiveReleaseMode MATCH -ActiveReleaseSha ([string]$PreviousRelease.sha) -NodeMode ABSENT | Out-Null
     Assert-MegaDeskPortFree -Port $script:RuntimePort -Operation 'switch apos parada do runtime gerenciado' | Out-Null
-    $startedCandidateRecord = Start-MegaDeskNode -ReleaseSha ([string]$CandidateRelease.sha) -Port $script:RuntimePort
+    $startedCandidateRecord = Start-MegaDeskNode -AuthorizationMode UPDATE_CANDIDATE -ReleaseSha ([string]$CandidateRelease.sha) -Port $script:RuntimePort
     Wait-MegaDeskLocal -ExpectedReleaseSha ([string]$CandidateRelease.sha) -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds -NodeRecord $startedCandidateRecord
-    if (-not $TestMode) { Start-MegaDeskTunnel | Out-Null }
+    if (-not $TestMode) { Start-MegaDeskTunnel -AuthorizationMode UPDATE_CANDIDATE -ReleaseSha ([string]$CandidateRelease.sha) | Out-Null }
     Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha ([string]$CandidateRelease.sha) -Checks $PublicChecks -TestMode:$TestMode -TimeoutSeconds $PublicTimeoutSeconds
-    $state = Get-MegaDeskState
-    $state.previousRelease = [pscustomobject]@{ sha = $PreviousRelease.sha; path = $PreviousRelease.path; activatedAt = $state.activeRelease.activatedAt }
-    $state.activeRelease = [pscustomobject]@{ sha = $CandidateRelease.sha; path = $CandidateRelease.path; activatedAt = (Get-Date).ToUniversalTime().ToString('o') }
-    $state.operation = [pscustomobject]@{ status = 'ACTIVE'; candidateSha = $CandidateRelease.sha; updatedAt = (Get-Date).ToUniversalTime().ToString('o'); message = 'Release candidata confirmada por health local e publico.' }
-    Save-MegaDeskState $state
+    Update-MegaDeskState -AllowedFields @('previousRelease', 'activeRelease', 'operation') -Precondition {
+      param($current)
+      $null -ne $current.operation -and [string]$current.operation.kind -ceq 'UPDATE' -and [string]$current.operation.status -ceq 'SWITCHING' -and [string]$current.operation.candidateSha -ceq [string]$CandidateRelease.sha -and (Get-MegaDeskOperationSwitchAttempted -Operation $current.operation) -eq $true
+    } -Mutation {
+      param($current)
+      $current.previousRelease = [pscustomobject]@{ sha = $PreviousRelease.sha; path = $PreviousRelease.path; activatedAt = $current.activeRelease.activatedAt }
+      $current.activeRelease = [pscustomobject]@{ sha = $CandidateRelease.sha; path = $CandidateRelease.path; activatedAt = (Get-Date).ToUniversalTime().ToString('o') }
+      $current.operation = New-MegaDeskOperationRecord -Status 'ACTIVE' -Kind 'UPDATE' -CandidateSha $CandidateRelease.sha -BaselineSha $null -SwitchAttempted $true -Message 'Release candidata confirmada por health local e publico.'
+    } | Out-Null
     Write-MegaDeskLog ("Release {0} marcada como ativa." -f $CandidateRelease.sha)
   } catch {
     $switchError = $_.Exception.Message
@@ -2240,6 +2730,7 @@ function Invoke-MegaDeskReleaseSwitch {
       Set-MegaDeskOperationState -Status 'FAILED' -CandidateSha ([string]$CandidateRelease.sha) -Message 'Switch recusado antes de interromper a release ativa.' | Out-Null
     }
     throw $switchError
+  }
   }
 }
 
@@ -2317,6 +2808,13 @@ function Resolve-MegaDeskPreparedReleaseCandidate {
     if (-not ($State.operation.PSObject.Properties.Name -contains 'candidateSha') -or -not (Test-MegaDeskFullSha ([string]$State.operation.candidateSha))) {
       throw 'Operacao UPDATE preparada sem CandidateReleaseSha valido; selecao ambigua recusada.'
     }
+    $switchAttempted = Get-MegaDeskOperationSwitchAttempted -Operation $State.operation
+    if ([string]$State.operation.status -eq 'FAILED' -and ($null -eq $switchAttempted -or $switchAttempted)) {
+      throw 'Operacao UPDATE FAILED sem prova duravel de falha pre-switch; selecao ambigua recusada.'
+    }
+    if ([string]$State.operation.status -eq 'READY' -and $switchAttempted -ne $false) {
+      throw 'Operacao UPDATE READY sem marcador switchAttempted=false; selecao ambigua recusada.'
+    }
     $candidateReleaseSha = Resolve-MegaDeskCommitSha -Sha ([string]$State.operation.candidateSha) -Label 'CandidateReleaseSha'
     $source = 'operacao UPDATE preparada anteriormente'
   }
@@ -2367,12 +2865,17 @@ function Assert-MegaDeskBootstrapZeroState {
   if ([string]$State.operation.candidateSha -ne $CandidateSha -or -not ($State.operation.PSObject.Properties.Name -contains 'baselineSha') -or [string]$State.operation.baselineSha -ne $MigrationBaselineSha) {
     throw 'Bootstrap Zero recusado: parametros nao correspondem a operacao Bootstrap pendente.'
   }
+  $switchAttempted = Get-MegaDeskOperationSwitchAttempted -Operation $State.operation
   switch ([string]$State.operation.status) {
     'READY' {
+      if ($switchAttempted -ne $false) { throw 'Bootstrap Zero READY sem marcador switchAttempted=false; estado ambiguo.' }
       if ($null -ne $State.node) { throw 'Bootstrap Zero READY possui processo Node registrado; estado ambiguo.' }
       return [pscustomobject]@{ status = 'READY'; release = (Get-MegaDeskRelease -Sha $CandidateSha) }
     }
-    'SWITCHING' { return [pscustomobject]@{ status = 'SWITCHING'; release = (Get-MegaDeskRelease -Sha $CandidateSha) } }
+    'SWITCHING' {
+      if ($switchAttempted -ne $true) { throw 'Bootstrap Zero SWITCHING sem marcador switchAttempted=true; estado ambiguo.' }
+      return [pscustomobject]@{ status = 'SWITCHING'; release = (Get-MegaDeskRelease -Sha $CandidateSha) }
+    }
     'PREPARING' { throw 'Bootstrap Zero anterior ficou em PREPARING; release nao e presumida completa e a recuperacao manual e obrigatoria.' }
     'FAILED' { throw 'Bootstrap Zero anterior falhou; nenhuma reinicializacao automatica e permitida.' }
     'ACTIVE' { throw 'Bootstrap Zero ACTIVE sem activeRelease e estado ambiguo.' }
@@ -2391,11 +2894,12 @@ function Assert-MegaDeskBootstrapFailedRecoveryState {
   if ($null -eq $State.operation) { throw 'Recovery recusado: nao existe operacao Bootstrap Zero FAILED.' }
 
   $operation = $State.operation
-  foreach ($property in @('kind', 'status', 'candidateSha', 'baselineSha')) {
+  foreach ($property in @('kind', 'status', 'candidateSha', 'baselineSha', 'switchAttempted')) {
     if (-not ($operation.PSObject.Properties.Name -contains $property)) { throw "Recovery recusado: operacao FAILED sem $property." }
   }
   if ([string]$operation.kind -cne 'BOOTSTRAP_ZERO') { throw 'Recovery recusado: operacao nao e BOOTSTRAP_ZERO.' }
   if ([string]$operation.status -cne 'FAILED') { throw 'Recovery recusado: status da operacao nao e FAILED.' }
+  if ((Get-MegaDeskOperationSwitchAttempted -Operation $operation) -ne $false) { throw 'Recovery recusado: FAILED nao possui prova duravel de falha pre-switch.' }
   if (-not (Test-MegaDeskFullSha ([string]$operation.candidateSha))) { throw 'Recovery recusado: CandidateSha falho invalido.' }
   if (-not (Test-MegaDeskFullSha ([string]$operation.baselineSha))) { throw 'Recovery recusado: MigrationBaselineSha falho invalido.' }
 
@@ -2421,19 +2925,29 @@ function Assert-MegaDeskBootstrapFailedRecoveryState {
 }
 
 function Invoke-MegaDeskBootstrapFailedRecovery {
+  return Invoke-WithMegaDeskLifecycleLock {
   $state = Get-MegaDeskState
   $recovery = Assert-MegaDeskBootstrapFailedRecoveryState -State $state
   Write-MegaDeskLog ("Recovery Bootstrap Zero iniciado para CandidateSha falho {0}; status anterior {1}." -f $recovery.candidateSha, $recovery.priorStatus)
 
-  $state.node = $null
-  $state.cloudflared = $null
-  $state.activeRelease = $null
-  $state.previousRelease = $null
-  $state.operation = $null
-  Save-MegaDeskState $state
+  Update-MegaDeskState -AllowedFields @('node', 'cloudflared', 'activeRelease', 'previousRelease', 'operation') -Precondition {
+    param($current)
+    try {
+      $currentRecovery = Assert-MegaDeskBootstrapFailedRecoveryState -State $current
+      return [string]$currentRecovery.candidateSha -ceq [string]$recovery.candidateSha
+    } catch { return $false }
+  } -Mutation {
+    param($current)
+    $current.node = $null
+    $current.cloudflared = $null
+    $current.activeRelease = $null
+    $current.previousRelease = $null
+    $current.operation = $null
+  } | Out-Null
 
   Write-MegaDeskLog ("Recovery Bootstrap Zero concluido; state V2 retornou a EMPTY sem reutilizar CandidateSha {0}." -f $recovery.candidateSha)
   return [pscustomobject]@{ status = 'EMPTY'; clearedCandidateSha = $recovery.candidateSha; portStatus = $recovery.portStatus }
+  }
 }
 
 function Complete-MegaDeskBootstrapZeroActivation {
@@ -2441,21 +2955,29 @@ function Complete-MegaDeskBootstrapZeroActivation {
     [Parameter(Mandatory = $true)]$CandidateRelease,
     [Parameter(Mandatory = $true)][string]$MigrationBaselineSha
   )
+  return Invoke-WithMegaDeskLifecycleLock {
   $state = Get-MegaDeskState
   if ($null -ne $state.activeRelease -or $null -ne $state.previousRelease -or $null -eq $state.operation -or [string]$state.operation.kind -ne 'BOOTSTRAP_ZERO' -or [string]$state.operation.status -ne 'SWITCHING' -or [string]$state.operation.candidateSha -ne [string]$CandidateRelease.sha -or [string]$state.operation.baselineSha -ne $MigrationBaselineSha) {
     throw 'Bootstrap Zero nao pode promover state divergente.'
   }
+  if ((Get-MegaDeskOperationSwitchAttempted -Operation $state.operation) -ne $true) { throw 'Bootstrap Zero nao pode promover SWITCHING sem marcador switchAttempted=true.' }
   if ($null -eq $state.node -or [string]$state.node.releaseSha -ne [string]$CandidateRelease.sha -or -not (Test-ManagedProcess -Record $state.node -Kind node)) {
     throw 'Bootstrap Zero nao pode promover candidate sem identidade Node gerenciada valida.'
   }
   if ($null -eq $state.cloudflared -or -not (Test-ManagedProcess -Record $state.cloudflared -Kind cloudflared)) {
     throw 'Bootstrap Zero nao pode promover candidate sem Cloudflared gerenciado valido.'
   }
-  $state.activeRelease = [pscustomobject]@{ sha = $CandidateRelease.sha; path = $CandidateRelease.path; activatedAt = (Get-Date).ToUniversalTime().ToString('o') }
-  $state.previousRelease = $null
-  $state.operation = New-MegaDeskOperationRecord -Status 'ACTIVE' -Kind 'BOOTSTRAP_ZERO' -CandidateSha $CandidateRelease.sha -BaselineSha $MigrationBaselineSha -Message 'Bootstrap Zero confirmado por health local e publico.'
-  Save-MegaDeskState $state
+  Update-MegaDeskState -AllowedFields @('activeRelease', 'previousRelease', 'operation') -Precondition {
+    param($current)
+    $null -eq $current.activeRelease -and $null -eq $current.previousRelease -and $null -ne $current.operation -and [string]$current.operation.kind -ceq 'BOOTSTRAP_ZERO' -and [string]$current.operation.status -ceq 'SWITCHING' -and [string]$current.operation.candidateSha -ceq [string]$CandidateRelease.sha -and [string]$current.operation.baselineSha -ceq $MigrationBaselineSha -and (Get-MegaDeskOperationSwitchAttempted -Operation $current.operation) -eq $true -and $null -ne $current.node -and [string]$current.node.releaseSha -ceq [string]$CandidateRelease.sha -and (Test-ManagedProcess -Record $current.node -Kind node) -and $null -ne $current.cloudflared -and (Test-ManagedProcess -Record $current.cloudflared -Kind cloudflared)
+  } -Mutation {
+    param($current)
+    $current.activeRelease = [pscustomobject]@{ sha = $CandidateRelease.sha; path = $CandidateRelease.path; activatedAt = (Get-Date).ToUniversalTime().ToString('o') }
+    $current.previousRelease = $null
+    $current.operation = New-MegaDeskOperationRecord -Status 'ACTIVE' -Kind 'BOOTSTRAP_ZERO' -CandidateSha $CandidateRelease.sha -BaselineSha $MigrationBaselineSha -SwitchAttempted $true -Message 'Bootstrap Zero confirmado por health local e publico.'
+  } | Out-Null
   try { Write-MegaDeskLog ("Bootstrap Zero marcou a release {0} como ativa." -f $CandidateRelease.sha) } catch { }
+  }
 }
 
 function Resolve-MegaDeskBootstrapZeroOperation {
@@ -2506,6 +3028,7 @@ function Invoke-MegaDeskBootstrapZero {
     [ValidateRange(1, 90)][int]$LocalTimeoutSeconds = 90,
     [ValidateRange(1, 60)][int]$PublicTimeoutSeconds = 60
   )
+  return Invoke-WithMegaDeskLifecycleLock {
   if ($TestMode) { Assert-MegaDeskTestChecks -Checks $PublicChecks }
   $candidate = $null
   $startedCandidateRecord = $null
@@ -2546,12 +3069,12 @@ function Invoke-MegaDeskBootstrapZero {
     $candidateRelease = Get-MegaDeskRelease -Sha $candidate
     Set-MegaDeskOperationState -Status 'SWITCHING' -Kind 'BOOTSTRAP_ZERO' -CandidateSha $candidate -BaselineSha $baseline -Message 'Bootstrap Start da primeira release iniciado.' | Out-Null
     $current = Get-MegaDeskState
-    if ($null -ne $current.activeRelease -or $null -ne $current.previousRelease -or $null -ne $current.node) { throw 'Bootstrap Start recusado: state mudou antes do inicio do candidate.' }
+    Assert-MegaDeskDangerousLifecycleState -State $current -Kind BOOTSTRAP_ZERO -Status SWITCHING -CandidateSha $candidate -ActiveReleaseMode ABSENT -PreviousReleaseMode ABSENT -NodeMode ABSENT | Out-Null
     Assert-MegaDeskPortFree -Port $script:RuntimePort -Operation 'Bootstrap Start' | Out-Null
-    $startedCandidateRecord = Start-MegaDeskNode -ReleaseSha $candidate -Port $script:RuntimePort
+    $startedCandidateRecord = Start-MegaDeskNode -AuthorizationMode BOOTSTRAP_ZERO_CANDIDATE -ReleaseSha $candidate -Port $script:RuntimePort
     if ($null -eq $startedCandidateRecord) { throw 'Bootstrap Start nao recebeu identidade do candidate iniciado.' }
     Wait-MegaDeskLocal -ExpectedReleaseSha $candidate -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds -NodeRecord $startedCandidateRecord
-    $startedTunnelRecord = Start-MegaDeskTunnel
+    $startedTunnelRecord = Start-MegaDeskTunnel -AuthorizationMode BOOTSTRAP_ZERO_CANDIDATE -ReleaseSha $candidate
     Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha $candidate -Checks $PublicChecks -TestMode:$TestMode -TimeoutSeconds $PublicTimeoutSeconds
     Complete-MegaDeskBootstrapZeroActivation -CandidateRelease $candidateRelease -MigrationBaselineSha $baseline
     return $candidateRelease
@@ -2576,6 +3099,7 @@ function Invoke-MegaDeskBootstrapZero {
     try { Write-MegaDeskLog ("Bootstrap Zero bloqueado ou falhou: {0}" -f $failure) } catch { }
     throw ("Bootstrap Zero falhou; nao existe rollback automatico anterior: {0}" -f $failure)
   }
+  }
 }
 
 function Invoke-MegaDeskUpdaterV2 {
@@ -2583,6 +3107,7 @@ function Invoke-MegaDeskUpdaterV2 {
     [Parameter(Mandatory = $true)][string]$ExpectedBranch,
     [switch]$RunTests
   )
+  return Invoke-WithMegaDeskLifecycleLock {
   $candidateSha = ''
   try {
     Assert-MegaDeskToolchain -RequirePnpm
@@ -2626,6 +3151,7 @@ function Invoke-MegaDeskUpdaterV2 {
     Write-MegaDeskLog ("Atualizacao v2 bloqueada ou falhou: {0}" -f $failure)
     throw $failure
   }
+  }
 }
 
 function Invoke-MegaDeskPreparedReleasePublish {
@@ -2636,6 +3162,7 @@ function Invoke-MegaDeskPreparedReleasePublish {
     [ValidateRange(1, 90)][int]$LocalTimeoutSeconds = 90,
     [ValidateRange(1, 60)][int]$PublicTimeoutSeconds = 60
   )
+  return Invoke-WithMegaDeskLifecycleLock {
 
   if ($TestMode) { Assert-MegaDeskTestChecks -Checks $PublicChecks }
   $candidateSha = ''
@@ -2695,6 +3222,7 @@ function Invoke-MegaDeskPreparedReleasePublish {
     try { Write-MegaDeskLog ("Publicacao rapida bloqueada ou falhou: {0}" -f $failure) } catch { }
     throw $failure
   }
+  }
 }
 
 function Backup-MegaDeskDist {
@@ -2725,7 +3253,7 @@ function Restore-MegaDeskDist {
 }
 
 Export-ModuleMember -Function @(
-  'Write-MegaDeskLog', 'Get-MegaDeskState', 'Test-ManagedProcess', 'Test-MegaDeskStaticProcessIdentity', 'Get-PortOwner', 'Assert-MegaDeskToolchain', 'Assert-MegaDeskActiveRelease',
+  'Write-MegaDeskLog', 'Get-MegaDeskState', 'Invoke-WithMegaDeskLifecycleLock', 'Test-ManagedProcess', 'Test-MegaDeskStaticProcessIdentity', 'Get-PortOwner', 'Assert-MegaDeskToolchain', 'Assert-MegaDeskActiveRelease', 'Assert-MegaDeskStartupState',
   'Assert-MegaDeskArtifacts', 'Assert-DockerAndMySql', 'Assert-CloudflaredConfig',
   'Start-MegaDeskNode', 'Start-MegaDeskTunnel', 'Wait-MegaDeskLocal', 'Write-MegaDeskNodeExitTelemetry',
   'Wait-MegaDeskPublicEndpoints', 'Undo-MegaDeskInvocation', 'Stop-MegaDeskManagedProcess',
