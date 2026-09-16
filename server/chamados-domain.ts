@@ -524,6 +524,19 @@ export async function markTicketAttachmentPendingDelete(
   );
 }
 
+export async function discardTicketAttachmentReservation(
+  attachmentId: string,
+  clientId: string,
+  pool: Pool = getPool(),
+): Promise<boolean> {
+  const [result] = await pool.execute<ResultSetHeader>(
+    `DELETE FROM megadesk_domain_chamado_attachments
+     WHERE attachment_id=? AND client_id=? AND attachment_state='staged'`,
+    [attachmentId, clientId],
+  );
+  return result.affectedRows === 1;
+}
+
 export async function logicallyRemoveTicketAttachment(
   input: {
     attachmentId: string;

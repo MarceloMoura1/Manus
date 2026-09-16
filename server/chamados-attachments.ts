@@ -1,13 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
+import { lstatSync } from "node:fs";
+import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import path from "node:path";
 import type { Express, Request, Response } from "express";
 import { fileTypeFromBuffer } from "file-type";
 import type { Pool, RowDataPacket } from "mysql2/promise";
 import { getPool } from "./db";
 import { resolveOperationalSessionReadOnly } from "./_core/megadesk-session";
 import { ENV } from "./_core/env";
-import { StorageReadError, storageGet, storagePutExact } from "./storage";
+import { StorageReadError } from "./storage";
+import { productMediaRoot } from "./product-media";
 import {
   activateTicketAttachment,
+  discardTicketAttachmentReservation,
   markTicketAttachmentPendingDelete,
   reserveTicketAttachment,
   type CanonicalTicketActor,
@@ -30,7 +35,12 @@ const allowedMimeTypes = new Set([
 
 const inlineMimeTypes = new Set(["application/pdf", "image/png", "image/jpeg", "image/webp", "text/plain", "text/csv"]);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const storageKeyPattern = /^ticket-attachments\/[0-9a-f]{2}\/[0-9a-f-]{36}$/i;
+const storageKeyPattern = /^ticket-attachments\/([0-9a-f]{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
+
+function validStorageKey(value: string): boolean {
+  const match = storageKeyPattern.exec(value);
+  return Boolean(match && match[1].toLowerCase() === match[2].slice(0, 2).toLowerCase());
+}
 
 export type AllowedTicketAttachmentMime =
   | "application/pdf"
@@ -45,12 +55,21 @@ export type AllowedTicketAttachmentMime =
   | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 export class TicketAttachmentError extends Error {
-  constructor(readonly code: "BAD_FILE" | "TOO_LARGE" | "CONFLICT" | "NOT_FOUND" | "STORAGE", message: string) {
+  readonly storageStage?: string;
+  readonly causeName?: string;
+
+  constructor(
+    readonly code: "BAD_FILE" | "TOO_LARGE" | "CONFLICT" | "NOT_FOUND" | "STORAGE",
+    message: string,
+    details: { storageStage?: string; causeName?: string } = {},
+  ) {
     super(message);
+    this.storageStage = details.storageStage;
+    this.causeName = details.causeName;
   }
 }
 
-export type TicketAttachmentReadFailureStage = "local" | "storage_config" | "download_url" | "signed_fetch" | "content_validation";
+export type TicketAttachmentReadFailureStage = "local" | "local_storage" | "storage_config" | "download_url" | "signed_fetch" | "content_validation";
 export type TicketAttachmentReadFailureKind = "not_found" | "auth" | "rate_limit" | "server" | "transport" | "timeout" | "invalid_response" | "content_invalid" | "config" | "internal";
 
 export class TicketAttachmentReadError extends TicketAttachmentError {
@@ -97,22 +116,148 @@ function storageReadFailure(error: unknown): TicketAttachmentReadError {
 
 export type TicketAttachmentStorage = {
   putExact(key: string, bytes: Buffer, mimeType: string): Promise<{ key: string }>;
-  get(key: string): Promise<{ url: string }>;
+  readExact?(key: string): Promise<{ bytes: Buffer }>;
+  removeExact?(key: string): Promise<void>;
+  get?(key: string): Promise<{ url: string }>;
 };
 
-const forgeTicketAttachmentStorage: TicketAttachmentStorage = {
-  putExact: async (key, bytes, mimeType) => {
-    const result = await storagePutExact(key, bytes, mimeType);
-    return { key: result.key };
-  },
-  get: async key => storageGet(key),
-};
+export type TicketAttachmentStorageFailureStage = "root" | "directory" | "write" | "sync" | "finalize" | "read" | "remove";
+
+export class TicketAttachmentStorageError extends Error {
+  constructor(readonly stage: TicketAttachmentStorageFailureStage, readonly cause?: unknown) {
+    super(`Ticket attachment storage failed at ${stage}`);
+    this.name = "TicketAttachmentStorageError";
+  }
+}
+
+export function resolveTicketAttachmentPath(root: string, key: string): string {
+  if (!root || !path.isAbsolute(root) || !validStorageKey(key)) {
+    throw new TicketAttachmentStorageError("root");
+  }
+  const canonicalRoot = path.resolve(root);
+  const resolved = path.resolve(canonicalRoot, ...key.split("/"));
+  if (!resolved.startsWith(`${canonicalRoot}${path.sep}`)) throw new TicketAttachmentStorageError("root");
+  return resolved;
+}
+
+function assertPrivateDirectory(directory: string, stage: TicketAttachmentStorageFailureStage): void {
+  try {
+    const info = lstatSync(directory);
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Unsafe storage directory");
+  } catch (cause) {
+    throw new TicketAttachmentStorageError(stage, cause);
+  }
+}
+
+async function prepareTicketAttachmentDirectory(root: string, target: string): Promise<void> {
+  try {
+    await mkdir(root, { recursive: true });
+    assertPrivateDirectory(root, "root");
+    const relativeDirectory = path.relative(root, path.dirname(target));
+    let current = root;
+    for (const segment of relativeDirectory.split(path.sep).filter(Boolean)) {
+      current = path.join(current, segment);
+      await mkdir(current).catch(error => {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      });
+      assertPrivateDirectory(current, "directory");
+    }
+  } catch (cause) {
+    if (cause instanceof TicketAttachmentStorageError) throw cause;
+    throw new TicketAttachmentStorageError("directory", cause);
+  }
+}
+
+async function atomicWriteTicketAttachment(target: string, bytes: Buffer): Promise<void> {
+  try {
+    const existing = await readFile(target).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    });
+    if (existing) {
+      if (existing.equals(bytes)) return;
+      throw new TicketAttachmentStorageError("finalize");
+    }
+  } catch (cause) {
+    if (cause instanceof TicketAttachmentStorageError) throw cause;
+    throw new TicketAttachmentStorageError("read", cause);
+  }
+
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    try {
+      handle = await open(temporary, "wx", 0o600);
+      await handle.writeFile(bytes);
+    } catch (cause) {
+      throw new TicketAttachmentStorageError("write", cause);
+    }
+    try {
+      await handle.sync();
+    } catch (cause) {
+      throw new TicketAttachmentStorageError("sync", cause);
+    }
+    await handle.close();
+    handle = null;
+    try {
+      await rename(temporary, target);
+    } catch (cause) {
+      throw new TicketAttachmentStorageError("finalize", cause);
+    }
+  } finally {
+    await closeTicketAttachmentHandle(handle);
+    await rm(temporary, { force: true }).catch(() => undefined);
+  }
+}
+
+async function closeTicketAttachmentHandle(handle: Awaited<ReturnType<typeof open>> | null): Promise<void> {
+  if (handle) await handle.close().catch(() => undefined);
+}
+
+export function createLocalTicketAttachmentStorage(root = productMediaRoot()): TicketAttachmentStorage {
+  const canonicalRoot = path.resolve(root);
+  return {
+    async putExact(key, bytes) {
+      const target = resolveTicketAttachmentPath(canonicalRoot, key);
+      await prepareTicketAttachmentDirectory(canonicalRoot, target);
+      await atomicWriteTicketAttachment(target, bytes);
+      return { key };
+    },
+    async readExact(key) {
+      const target = resolveTicketAttachmentPath(canonicalRoot, key);
+      try {
+        const info = lstatSync(target);
+        if (!info.isFile() || info.isSymbolicLink()) throw new Error("Unsafe attachment object");
+        return { bytes: await readFile(target) };
+      } catch (cause) {
+        throw new TicketAttachmentStorageError("read", cause);
+      }
+    },
+    async removeExact(key) {
+      const target = resolveTicketAttachmentPath(canonicalRoot, key);
+      try {
+        await rm(target, { force: true });
+      } catch (cause) {
+        throw new TicketAttachmentStorageError("remove", cause);
+      }
+    },
+  };
+}
+
+function defaultTicketAttachmentStorage(): TicketAttachmentStorage {
+  return createLocalTicketAttachmentStorage(productMediaRoot());
+}
 
 function decodeBase64(value: string): Buffer {
   if (!value || value.length > Math.ceil(TICKET_ATTACHMENT_MAX_BYTES * 4 / 3) + 8) {
     throw new TicketAttachmentError("TOO_LARGE", "Arquivo excede o limite de 12 MiB.");
   }
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+  const firstPadding = value.indexOf("=");
+  const paddingLength = firstPadding < 0 ? 0 : value.length - firstPadding;
+  const invalidPadding = value.length % 4 !== 0
+    || paddingLength > 2
+    || (firstPadding >= 0 && !/^={1,2}$/.test(value.slice(firstPadding)));
+  if (invalidPadding || /[^A-Za-z0-9+/=]/.test(value)) {
     throw new TicketAttachmentError("BAD_FILE", "Arquivo codificado de forma inválida.");
   }
   const bytes = Buffer.from(value, "base64");
@@ -178,7 +323,7 @@ export async function listTicketAttachments(chamadoId: string, clientId: string,
     uploadedBy: row.uploadedBy,
     createdAt: row.createdAt,
     state: row.state,
-    canView: row.state === "active" && Boolean(row.storageKey && storageKeyPattern.test(row.storageKey)),
+    canView: row.state === "active" && Boolean(row.storageKey && validStorageKey(row.storageKey)),
     legacy: row.state === "legacy",
   }));
 }
@@ -205,7 +350,7 @@ export async function uploadTicketAttachment(
   const attachmentId = randomUUID();
   const storageKey = storageKeyFor(attachmentId);
   const pool = dependencies.pool ?? getPool();
-  const storage = dependencies.storage ?? forgeTicketAttachmentStorage;
+  const storage = dependencies.storage ?? defaultTicketAttachmentStorage();
   const reservation = await reserveTicketAttachment({
     chamadoId: input.chamadoId,
     clientId: input.clientId,
@@ -221,11 +366,13 @@ export async function uploadTicketAttachment(
   if (reservation.state !== "staged") {
     throw new TicketAttachmentError("CONFLICT", "Esta tentativa de anexo está pendente de reconciliação.");
   }
+  let storedObject = false;
   try {
     const stored = await storage.putExact(reservation.storageKey, bytes, mimeType);
-    if (stored.key !== reservation.storageKey || !storageKeyPattern.test(stored.key)) {
+    if (stored.key !== reservation.storageKey || !validStorageKey(stored.key)) {
       throw new TicketAttachmentError("STORAGE", "Storage retornou uma referência inválida.");
     }
+    storedObject = true;
     await activateTicketAttachment({
       attachmentId: reservation.attachmentId,
       chamadoId: input.chamadoId,
@@ -238,9 +385,24 @@ export async function uploadTicketAttachment(
     }, pool);
     return { attachmentId: reservation.attachmentId, reused: false };
   } catch (error) {
-    await markTicketAttachmentPendingDelete(reservation.attachmentId, input.clientId, pool).catch(() => undefined);
+    let compensated = false;
+    if (storage.removeExact) {
+      try {
+        await storage.removeExact(reservation.storageKey);
+        compensated = await discardTicketAttachmentReservation(reservation.attachmentId, input.clientId, pool);
+      } catch {
+        compensated = false;
+      }
+    }
+    if (!compensated) await markTicketAttachmentPendingDelete(reservation.attachmentId, input.clientId, pool).catch(() => undefined);
     if (error instanceof TicketAttachmentError) throw error;
-    throw new TicketAttachmentError("STORAGE", "Não foi possível armazenar o anexo com segurança.");
+    const stage = error instanceof TicketAttachmentStorageError
+      ? error.stage
+      : storedObject ? "metadata_activation" : "storage_write";
+    throw new TicketAttachmentError("STORAGE", "Não foi possível armazenar o anexo com segurança.", {
+      storageStage: stage,
+      causeName: error instanceof Error ? error.name : typeof error,
+    });
   }
 }
 
@@ -275,10 +437,29 @@ export async function readTicketAttachment(
     throw new TicketAttachmentReadError({ stage: "local", kind: "internal", cause });
   }
   const row = rows[0];
-  if (!row || row.state !== "active" || !row.storageKey || !storageKeyPattern.test(row.storageKey) || !row.mimeType || !allowedMimeTypes.has(row.mimeType)) {
+  if (!row || row.state !== "active" || !row.storageKey || !validStorageKey(row.storageKey) || !row.mimeType || !allowedMimeTypes.has(row.mimeType)) {
     throw new TicketAttachmentReadError({ stage: "local", kind: "not_found" });
   }
-  const storage = dependencies.storage ?? forgeTicketAttachmentStorage;
+  const storage = dependencies.storage ?? defaultTicketAttachmentStorage();
+  let bytes: Buffer;
+  if (storage.readExact) {
+    try {
+      bytes = (await storage.readExact(row.storageKey)).bytes;
+    } catch (cause) {
+      throw new TicketAttachmentReadError({ stage: "local_storage", kind: "internal", cause });
+    }
+    if (bytes.length === 0 || bytes.length > TICKET_ATTACHMENT_MAX_BYTES || (row.fileSize != null && bytes.length !== Number(row.fileSize))) {
+      throw new TicketAttachmentReadError({ stage: "content_validation", kind: "content_invalid" });
+    }
+    try {
+      const detectedMimeType = await sniffTicketAttachment(bytes, row.mimeType);
+      if (detectedMimeType !== row.mimeType) throw new Error("Stored MIME type does not match metadata");
+      return { bytes, fileName: safeFileName(row.fileName), mimeType: detectedMimeType, inline: inlineMimeTypes.has(detectedMimeType) };
+    } catch (cause) {
+      throw new TicketAttachmentReadError({ stage: "content_validation", kind: "content_invalid", cause });
+    }
+  }
+  if (!storage.get) throw new TicketAttachmentReadError({ stage: "storage_config", kind: "config" });
   let reference: { url: string };
   try {
     reference = await storage.get(row.storageKey);
@@ -298,7 +479,6 @@ export async function readTicketAttachment(
     timedOut = true;
     controller.abort();
   }, dependencies.timeoutMs ?? ENV.ticketAttachmentReadTimeoutMs);
-  let bytes: Buffer;
   try {
     let response: globalThis.Response;
     try {

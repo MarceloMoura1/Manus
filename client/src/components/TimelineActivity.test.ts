@@ -1,5 +1,6 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   getActivityAccentClass,
@@ -12,6 +13,19 @@ import {
 } from "./TimelineActivity";
 
 describe("TimelineActivity", () => {
+  it("binds dark utilities to MegaDesk's explicit theme and keeps the light surface neutral", () => {
+    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    const markup = renderToStaticMarkup(React.createElement(TimelineActivity, {
+      activities: [{ id: "theme", date: Date.UTC(2026, 8, 13), description: "Tema", attendant: "Ana", actionType: "note" }],
+    }));
+
+    expect(css).toContain("@custom-variant dark (&:where(.dark, .dark *));");
+    expect(markup).toContain("border-slate-200 bg-white");
+    expect(markup).toContain("dark:bg-slate-900");
+    expect(markup).toContain("bg-blue-50");
+    expect(markup).toContain("dark:bg-blue-950/40");
+  });
+
   it("shows the real author below a note without a redundant narrative", () => {
     const markup = renderToStaticMarkup(React.createElement(TimelineActivity, {
       activities: [{
