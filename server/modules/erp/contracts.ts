@@ -18,6 +18,7 @@ export const productInput = z.object({
 export const productListInput = z.object({
   search: z.string().trim().max(120).default(""), active: z.boolean().optional(),
   category: z.string().trim().max(120).optional(),
+  categoryId: z.number().int().positive().optional(),
   categoryPublicId: z.string().uuid().optional(),
   brandPublicId: z.string().uuid().optional(),
   stock: z.enum(["all", "low", "empty", "available", "normal"]).default("all"),

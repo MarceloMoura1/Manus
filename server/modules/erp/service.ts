@@ -8,7 +8,10 @@ import { ErpRepository, type MovementRow, type ProductListOptions, type ProductR
 
 import { CategoryRepository } from "./categories/repository";
 import { BrandRepository } from "./brands/repository";
-import { VariantRepository } from "./variants/repository";
+import { VariantRepository, type VariantRow, type VariantAttributeValueRow } from "./variants/repository";
+import { variantPublic } from "./variants/service";
+import { ProductSupplierRepository, type ProductSupplierRow } from "./product-suppliers/repository";
+import { productSupplierPublic } from "./product-suppliers/service";
 import {
   buildDiff,
   type ProductAuditAction,
@@ -42,9 +45,11 @@ function publicProduct(row: ProductRow) {
     categoryId: row.category_id ?? null,
     categoryPublicId: row.category_public_id ?? null,
     categoryDetails: row.category_public_id ? { publicId: row.category_public_id, name: row.category_name ?? "" } : null,
+    categoryRelational: row.category_public_id ? { publicId: row.category_public_id, name: row.category_name ?? "", slug: row.category_slug ?? "" } : null,
     brandId: row.brand_id ?? null,
     brandPublicId: row.brand_public_id ?? null,
     brandDetails: row.brand_public_id ? { publicId: row.brand_public_id, name: row.brand_name ?? "" } : null,
+    brand: row.brand_public_id ? { publicId: row.brand_public_id, name: row.brand_name ?? "", slug: row.brand_slug ?? "" } : null,
     unit: row.unit, costPriceCents: Number(row.cost_price_cents), salePriceCents: Number(row.sale_price_cents), minimumStock: row.minimum_stock, active: row.active === 1, hasImage: row.primary_media_id !== null, quantity: row.quantity, createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
@@ -58,7 +63,8 @@ export class ErpService {
     private readonly categories = new CategoryRepository(),
     private readonly brands = new BrandRepository(),
     private readonly variants = new VariantRepository(),
-    private readonly auditRepository = new ProductAuditRepository()
+    private readonly auditRepository = new ProductAuditRepository(),
+    private readonly productSuppliers = new ProductSupplierRepository()
   ) {}
   private assertWrite(identity: Identity) { if (!canWriteErp(identity.role)) throw new ErpDomainError("FORBIDDEN", "Seu perfil não permite alterar o ERP."); }
   private async publish(clientId: string, event: "erp:product.changed" | "erp:stock.changed", payload: ErpEvent) { await runPostCommitBestEffort([() => this.publisher.publish(clientId, event, payload)]); }
@@ -104,8 +110,63 @@ export class ErpService {
     return { categoryId: resolvedCategoryId, brandId: resolvedBrandId };
   }
 
-  async listProducts(identity: Identity, options: ProductListOptions) { const result = await this.repository.listProducts(identity.clientId, options); return { ...result, items: result.items.map(publicProduct), page: options.page, pageSize: options.pageSize, totalPages: Math.ceil(result.total / options.pageSize), canWrite: canWriteErp(identity.role) }; }
-  async getProduct(identity: Identity, publicId: string) { const row = await this.repository.findProduct(identity.clientId, publicId); if (!row) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado."); return publicProduct(row); }
+  async listProducts(identity: Identity, options: ProductListOptions) {
+    if (options.categoryPublicId) {
+      const cat = await this.categories.find(identity.clientId, options.categoryPublicId);
+      if (!cat) {
+        return { items: [], total: 0, page: options.page, pageSize: options.pageSize, totalPages: 0, canWrite: canWriteErp(identity.role) };
+      }
+    }
+    if (options.categoryId) {
+      const cat = await this.categories.findById(identity.clientId, options.categoryId);
+      if (!cat) {
+        return { items: [], total: 0, page: options.page, pageSize: options.pageSize, totalPages: 0, canWrite: canWriteErp(identity.role) };
+      }
+    }
+    const result = await this.repository.listProducts(identity.clientId, options);
+    return { ...result, items: result.items.map(publicProduct), page: options.page, pageSize: options.pageSize, totalPages: Math.ceil(result.total / options.pageSize), canWrite: canWriteErp(identity.role) };
+  }
+
+  async getProduct(identity: Identity, publicId: string) {
+    const row = await this.repository.findProduct(identity.clientId, publicId);
+    if (!row) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado.");
+    const base = publicProduct(row);
+
+    let variantRows: VariantRow[] = [];
+    let attributesMap = new Map<number, VariantAttributeValueRow[]>();
+    if (typeof this.variants?.findByProductId === "function") {
+      try {
+        const res = await this.variants.findByProductId(identity.clientId, row.id);
+        variantRows = res.rows;
+        attributesMap = res.attributesMap;
+      } catch {
+        variantRows = [];
+        attributesMap = new Map();
+      }
+    }
+    const variants = variantRows.map((v) => variantPublic(v, attributesMap.get(v.id) ?? []));
+
+    let preferredSupplierRow: ProductSupplierRow | null = null;
+    if (typeof this.productSuppliers?.findPreferredForProduct === "function") {
+      try {
+        preferredSupplierRow = await this.productSuppliers.findPreferredForProduct(identity.clientId, row.id);
+      } catch {
+        preferredSupplierRow = null;
+      }
+    }
+    const preferredSupplier =
+      preferredSupplierRow &&
+      preferredSupplierRow.active === 1 &&
+      preferredSupplierRow.is_preferred === 1
+        ? productSupplierPublic(preferredSupplierRow)
+        : null;
+
+    return {
+      ...base,
+      variants,
+      preferredSupplier,
+    };
+  }
 
   async createProduct(identity: Identity, command: ProductCommand) {
     this.assertWrite(identity);
@@ -375,8 +436,25 @@ export class ErpService {
     }
   }
   async summary(identity: Identity) {
-    const result = await this.repository.summary(identity.clientId); const metrics = result.metrics;
-    return { metrics: { activeProducts: Number(metrics?.activeProducts ?? 0), inactiveProducts: Number(metrics?.inactiveProducts ?? 0), lowProducts: Number(metrics?.lowProducts ?? 0), emptyProducts: Number(metrics?.emptyProducts ?? 0), totalQuantity: String(metrics?.totalQuantity ?? "0.000"), costValueCents: Number(metrics?.costValueCents ?? 0), saleValueCents: Number(metrics?.saleValueCents ?? 0) }, critical: result.critical.map(publicProduct), recent: result.recent.map(publicMovement), canWrite: canWriteErp(identity.role) };
+    const result = await this.repository.summary(identity.clientId);
+    const metrics = result.metrics;
+    return {
+      metrics: {
+        activeProducts: Number(metrics?.activeProducts ?? 0),
+        inactiveProducts: Number(metrics?.inactiveProducts ?? 0),
+        lowProducts: Number(metrics?.lowProducts ?? 0),
+        emptyProducts: Number(metrics?.emptyProducts ?? 0),
+        totalQuantity: String(metrics?.totalQuantity ?? "0.000"),
+        costValueCents: Number(metrics?.costValueCents ?? 0),
+        saleValueCents: Number(metrics?.saleValueCents ?? 0),
+        totalVariants: Number(metrics?.totalVariants ?? 0),
+        activeVariants: Number(metrics?.activeVariants ?? 0),
+        inactiveVariants: Number(metrics?.inactiveVariants ?? 0),
+      },
+      critical: result.critical.map(publicProduct),
+      recent: result.recent.map(publicMovement),
+      canWrite: canWriteErp(identity.role),
+    };
   }
   async listMovements(identity: Identity, filters: { productPublicId?: string; type?: string; search: string; from?: string; to?: string; page: number; pageSize: number }) {
     const result = await this.repository.listMovements(identity.clientId, filters);

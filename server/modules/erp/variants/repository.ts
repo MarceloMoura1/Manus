@@ -172,6 +172,28 @@ export class VariantRepository {
     return rows[0] ?? null;
   }
 
+  async findByProductId(
+    clientId: string,
+    productId: number,
+    connection: Pool | PoolConnection = this.database()
+  ): Promise<{ rows: VariantRow[]; attributesMap: Map<number, VariantAttributeValueRow[]> }> {
+    const [rows] = await connection.execute<VariantRow[]>(
+      `SELECT v.*,
+              p.public_id AS product_public_id,
+              p.name AS product_name,
+              p.sale_price_cents AS product_sale_price_cents
+       FROM erp_product_variants v
+       INNER JOIN erp_products p ON p.client_id = v.client_id AND p.id = v.product_id
+       WHERE v.client_id = ? AND v.product_id = ?
+       ORDER BY v.sku ASC, v.id ASC`,
+      [clientId, productId]
+    );
+    if (rows.length === 0) return { rows: [], attributesMap: new Map() };
+    const variantIds = rows.map((r) => r.id);
+    const attributesMap = await this.getAttributesForVariants(clientId, variantIds, connection);
+    return { rows, attributesMap };
+  }
+
   async getAttributesForVariant(
     clientId: string,
     variantId: number,

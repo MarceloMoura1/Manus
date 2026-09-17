@@ -4,8 +4,8 @@ import { getPool } from "../../db";
 export type ProductRow = RowDataPacket & {
   id: number; public_id: string; client_id: string; name: string; sku: string; barcode: string | null;
   description: string | null; category: string | null; category_id: number | null;
-  category_public_id?: string | null; category_name?: string | null;
-  brand_id: number | null; brand_public_id?: string | null; brand_name?: string | null;
+  category_public_id?: string | null; category_name?: string | null; category_slug?: string | null;
+  brand_id: number | null; brand_public_id?: string | null; brand_name?: string | null; brand_slug?: string | null;
   unit: "unit" | "kg" | "liter" | "meter";
   cost_price_cents: number; sale_price_cents: number; minimum_stock: string; active: number;
   primary_media_id: number | null;
@@ -49,12 +49,12 @@ export class ErpRepository {
     const where = conditions.join(" AND ");
     const order = { name: "p.name", sku: "p.sku", createdAt: "p.created_at", stock: "quantity" }[options.sort];
     const [countRows] = await this.database().execute<RowDataPacket[]>(`SELECT COUNT(*) total FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id LEFT JOIN erp_product_categories cat ON cat.client_id=p.client_id AND cat.id=p.category_id LEFT JOIN erp_product_brands br ON br.client_id=p.client_id AND br.id=p.brand_id WHERE ${where}`, values);
-    const [rows] = await this.database().execute<ProductRow[]>(`SELECT p.*, COALESCE(b.quantity, '0.000') quantity, cat.public_id AS category_public_id, cat.name AS category_name, br.public_id AS brand_public_id, br.name AS brand_name FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id LEFT JOIN erp_product_categories cat ON cat.client_id=p.client_id AND cat.id=p.category_id LEFT JOIN erp_product_brands br ON br.client_id=p.client_id AND br.id=p.brand_id WHERE ${where} ORDER BY ${order} ${options.direction === "desc" ? "DESC" : "ASC"} LIMIT ${limit} OFFSET ${offset}`, values);
+    const [rows] = await this.database().execute<ProductRow[]>(`SELECT p.*, COALESCE(b.quantity, '0.000') quantity, cat.public_id AS category_public_id, cat.name AS category_name, cat.slug AS category_slug, br.public_id AS brand_public_id, br.name AS brand_name, br.slug AS brand_slug FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id LEFT JOIN erp_product_categories cat ON cat.client_id=p.client_id AND cat.id=p.category_id LEFT JOIN erp_product_brands br ON br.client_id=p.client_id AND br.id=p.brand_id WHERE ${where} ORDER BY ${order} ${options.direction === "desc" ? "DESC" : "ASC"} LIMIT ${limit} OFFSET ${offset}`, values);
     return { items: rows, total: Number(countRows[0]?.total ?? 0) };
   }
 
   async findProduct(clientId: string, publicId: string, connection: Pool | PoolConnection = this.database(), lock = false): Promise<ProductRow | null> {
-    const [rows] = await connection.execute<ProductRow[]>(`SELECT p.*, COALESCE(b.quantity, '0.000') quantity, cat.public_id AS category_public_id, cat.name AS category_name, br.public_id AS brand_public_id, br.name AS brand_name FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id LEFT JOIN erp_product_categories cat ON cat.client_id=p.client_id AND cat.id=p.category_id LEFT JOIN erp_product_brands br ON br.client_id=p.client_id AND br.id=p.brand_id WHERE p.client_id=? AND p.public_id=? LIMIT 1${lock ? " FOR UPDATE" : ""}`, [clientId, publicId]);
+    const [rows] = await connection.execute<ProductRow[]>(`SELECT p.*, COALESCE(b.quantity, '0.000') quantity, cat.public_id AS category_public_id, cat.name AS category_name, cat.slug AS category_slug, br.public_id AS brand_public_id, br.name AS brand_name, br.slug AS brand_slug FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id LEFT JOIN erp_product_categories cat ON cat.client_id=p.client_id AND cat.id=p.category_id LEFT JOIN erp_product_brands br ON br.client_id=p.client_id AND br.id=p.brand_id WHERE p.client_id=? AND p.public_id=? LIMIT 1${lock ? " FOR UPDATE" : ""}`, [clientId, publicId]);
     return rows[0] ?? null;
   }
 
@@ -65,7 +65,7 @@ export class ErpRepository {
       conditions.push("p.public_id <> ?");
       values.push(excludePublicId);
     }
-    const [rows] = await connection.execute<ProductRow[]>(`SELECT p.*, COALESCE(b.quantity, '0.000') quantity, cat.public_id AS category_public_id, cat.name AS category_name, br.public_id AS brand_public_id, br.name AS brand_name FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id LEFT JOIN erp_product_categories cat ON cat.client_id=p.client_id AND cat.id=p.category_id LEFT JOIN erp_product_brands br ON br.client_id=p.client_id AND br.id=p.brand_id WHERE ${conditions.join(" AND ")} LIMIT 1`, values);
+    const [rows] = await connection.execute<ProductRow[]>(`SELECT p.*, COALESCE(b.quantity, '0.000') quantity, cat.public_id AS category_public_id, cat.name AS category_name, cat.slug AS category_slug, br.public_id AS brand_public_id, br.name AS brand_name, br.slug AS brand_slug FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id LEFT JOIN erp_product_categories cat ON cat.client_id=p.client_id AND cat.id=p.category_id LEFT JOIN erp_product_brands br ON br.client_id=p.client_id AND br.id=p.brand_id WHERE ${conditions.join(" AND ")} LIMIT 1`, values);
     return rows[0] ?? null;
   }
 
@@ -223,9 +223,10 @@ export class ErpRepository {
 
   async summary(clientId: string) {
     const [metrics] = await this.database().execute<RowDataPacket[]>("SELECT SUM(p.active=1) activeProducts,SUM(p.active=0) inactiveProducts,SUM(COALESCE(b.quantity,0)=0) emptyProducts,SUM(COALESCE(b.quantity,0)>0 AND COALESCE(b.quantity,0)<=p.minimum_stock) lowProducts,COALESCE(SUM(COALESCE(b.quantity,0)),0) totalQuantity,COALESCE(SUM(ROUND(COALESCE(b.quantity,0)*p.cost_price_cents)),0) costValueCents,COALESCE(SUM(ROUND(COALESCE(b.quantity,0)*p.sale_price_cents)),0) saleValueCents FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id WHERE p.client_id=?", [clientId]);
+    const [variantMetrics] = await this.database().execute<RowDataPacket[]>("SELECT COUNT(*) totalVariants, COALESCE(SUM(active = 1), 0) activeVariants, COALESCE(SUM(active = 0), 0) inactiveVariants FROM erp_product_variants WHERE client_id = ?", [clientId]);
     const critical = await this.listProducts(clientId, { search: "", active: true, stock: "low", sort: "stock", direction: "asc", page: 1, pageSize: 5 });
     const recent = await this.listMovements(clientId, { search: "", page: 1, pageSize: 5 });
-    return { metrics: metrics[0], critical: critical.items, recent: recent.items };
+    return { metrics: { ...(metrics[0] ?? {}), ...(variantMetrics[0] ?? {}) }, critical: critical.items, recent: recent.items };
   }
 
   getPool(): Pool { return this.database(); }
