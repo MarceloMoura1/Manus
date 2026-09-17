@@ -127,9 +127,7 @@ export class ErpService {
     return { ...result, items: result.items.map(publicProduct), page: options.page, pageSize: options.pageSize, totalPages: Math.ceil(result.total / options.pageSize), canWrite: canWriteErp(identity.role) };
   }
 
-  async getProduct(identity: Identity, publicId: string) {
-    const row = await this.repository.findProduct(identity.clientId, publicId);
-    if (!row) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado.");
+  private async assembleProduct(identity: Identity, row: ProductRow) {
     const base = publicProduct(row);
 
     let variantRows: VariantRow[] = [];
@@ -166,6 +164,52 @@ export class ErpService {
       variants,
       preferredSupplier,
     };
+  }
+
+  async getProduct(identity: Identity, publicId: string) {
+    const row = await this.repository.findProduct(identity.clientId, publicId);
+    if (!row) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado.");
+    return this.assembleProduct(identity, row);
+  }
+
+  async getProductBySku(identity: Identity, sku: string) {
+    const normalized = normalizeSku(sku);
+    let row = await this.repository.findProductBySku(identity.clientId, normalized);
+    let matchedVariantPublicId: string | null = null;
+
+    if (!row && typeof this.variants?.findBySku === "function") {
+      try {
+        const variant = await this.variants.findBySku(identity.clientId, normalized);
+        if (variant) {
+          matchedVariantPublicId = variant.public_id;
+          row = await this.repository.findProduct(identity.clientId, variant.product_public_id);
+        }
+      } catch {
+        row = null;
+      }
+    }
+
+    if (!row) {
+      throw new ErpDomainError("NOT_FOUND", "Produto não encontrado para o SKU informado.");
+    }
+
+    const assembled = await this.assembleProduct(identity, row);
+    return {
+      ...assembled,
+      matchedVariantPublicId,
+    };
+  }
+
+  async getProductByBarcode(identity: Identity, barcode: string) {
+    const normalized = normalizeBarcode(barcode);
+    if (!normalized) {
+      throw new ErpDomainError("VALIDATION", "Código de barras inválido.");
+    }
+    const row = await this.repository.findProductByBarcode(identity.clientId, normalized);
+    if (!row) {
+      throw new ErpDomainError("NOT_FOUND", "Produto não encontrado para o código de barras informado.");
+    }
+    return this.assembleProduct(identity, row);
   }
 
   async createProduct(identity: Identity, command: ProductCommand) {

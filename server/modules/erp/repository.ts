@@ -69,6 +69,18 @@ export class ErpRepository {
     return rows[0] ?? null;
   }
 
+  async findProductByBarcode(clientId: string, barcode: string, excludePublicId?: string, connection: Pool | PoolConnection = this.database()): Promise<ProductRow | null> {
+    const conditions = ["p.client_id = ?", "p.barcode = ?"];
+    const values: Array<string> = [clientId, barcode];
+    if (excludePublicId) {
+      conditions.push("p.public_id <> ?");
+      values.push(excludePublicId);
+    }
+    const [rows] = await connection.execute<ProductRow[]>(`SELECT p.*, COALESCE(b.quantity, '0.000') quantity, cat.public_id AS category_public_id, cat.name AS category_name, cat.slug AS category_slug, br.public_id AS brand_public_id, br.name AS brand_name, br.slug AS brand_slug FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id LEFT JOIN erp_product_categories cat ON cat.client_id=p.client_id AND cat.id=p.category_id LEFT JOIN erp_product_brands br ON br.client_id=p.client_id AND br.id=p.brand_id WHERE ${conditions.join(" AND ")} LIMIT 1`, values);
+    return rows[0] ?? null;
+  }
+
+
   async createProduct(
     clientId: string,
     userId: string,

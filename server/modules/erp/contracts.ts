@@ -20,11 +20,23 @@ export const productListInput = z.object({
   category: z.string().trim().max(120).optional(),
   categoryId: z.number().int().positive().optional(),
   categoryPublicId: z.string().uuid().optional(),
+  brandId: z.number().int().positive().optional(),
   brandPublicId: z.string().uuid().optional(),
   stock: z.enum(["all", "low", "empty", "available", "normal"]).default("all"),
   sort: z.enum(["name", "sku", "createdAt", "stock"]).default("name"), direction: z.enum(["asc", "desc"]).default("asc"),
   page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(100).default(20),
 });
+
+export const productBySkuInput = z.object({
+  sku: z.string().trim().min(1).max(80),
+});
+export type ProductBySkuInput = z.infer<typeof productBySkuInput>;
+
+export const productByBarcodeInput = z.object({
+  barcode: z.string().trim().min(1).max(80),
+});
+export type ProductByBarcodeInput = z.infer<typeof productByBarcodeInput>;
+
 
 export const stockMovementInput = z.object({
   productPublicId, type: z.enum(stockMovementTypes),

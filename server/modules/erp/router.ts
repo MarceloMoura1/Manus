@@ -1,7 +1,15 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { megadeskProcedure, router } from "../../_core/trpc";
-import { productInput, productListInput, productPublicId, stockListInput, stockMovementInput } from "./contracts";
+import {
+  productByBarcodeInput,
+  productBySkuInput,
+  productInput,
+  productListInput,
+  productPublicId,
+  stockListInput,
+  stockMovementInput,
+} from "./contracts";
 import { ErpDomainError, erpTrpcCode } from "./errors";
 import { ErpService } from "./service";
 import { categoriesRouter } from "./categories/router";
@@ -53,6 +61,8 @@ export const erpRouter = router({
   products: router({
     list: megadeskProcedure.input(productListInput).query(({ input, ctx }) => runErp(() => service.listProducts(identity(ctx), input))),
     detail: megadeskProcedure.input(z.object({ publicId: productPublicId })).query(({ input, ctx }) => runErp(() => service.getProduct(identity(ctx), input.publicId))),
+    bySku: megadeskProcedure.input(productBySkuInput).query(({ input, ctx }) => runErp(() => service.getProductBySku(identity(ctx), input.sku))),
+    byBarcode: megadeskProcedure.input(productByBarcodeInput).query(({ input, ctx }) => runErp(() => service.getProductByBarcode(identity(ctx), input.barcode))),
     create: megadeskProcedure.input(productInput).mutation(({ input, ctx }) => runErp(() => service.createProduct(identity(ctx), input))),
     update: megadeskProcedure.input(productInput.extend({ publicId: productPublicId })).mutation(({ input, ctx }) => { const { publicId, ...command } = input; return runErp(() => service.updateProduct(identity(ctx), publicId, command)); }),
     setActive: megadeskProcedure.input(z.object({ publicId: productPublicId, active: z.boolean() })).mutation(({ input, ctx }) => runErp(() => service.setProductActive(identity(ctx), input.publicId, input.active))),
