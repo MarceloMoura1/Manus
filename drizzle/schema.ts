@@ -1874,6 +1874,7 @@ export const erpSuppliers = mysqlTable(
       table.clientId,
       table.taxId
     ),
+    uniqueIndex("uq_erp_suppliers_tenant_id").on(table.clientId, table.id),
     index("idx_erp_suppliers_tenant_legal_name").on(
       table.clientId,
       table.legalName
@@ -1884,6 +1885,63 @@ export const erpSuppliers = mysqlTable(
       table.city,
       table.state
     ),
+  ]
+);
+
+export const erpProductSuppliers = mysqlTable(
+  "erp_product_suppliers",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    productId: bigint("product_id", { mode: "number" }).notNull(),
+    supplierId: bigint("supplier_id", { mode: "number" }).notNull(),
+    supplierProductCode: varchar("supplier_product_code", { length: 80 }),
+    costPriceCents: bigint("cost_price_cents", { mode: "number" }),
+    isPreferred: tinyint("is_preferred").default(0).notNull(),
+    active: tinyint().default(1).notNull(),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    updatedBy: varchar("updated_by", { length: 80 }),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_eps_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_eps_tenant_id").on(table.clientId, table.id),
+    uniqueIndex("uq_eps_tenant_product_supplier").on(
+      table.clientId,
+      table.productId,
+      table.supplierId
+    ),
+    index("idx_eps_tenant_product").on(table.clientId, table.productId),
+    index("idx_eps_tenant_supplier").on(table.clientId, table.supplierId),
+    index("idx_eps_tenant_preferred").on(
+      table.clientId,
+      table.productId,
+      table.isPreferred
+    ),
+    index("idx_eps_tenant_active").on(table.clientId, table.active),
+    foreignKey({
+      name: "fk_eps_product",
+      columns: [table.clientId, table.productId],
+      foreignColumns: [
+        erpProducts.clientId as AnyMySqlColumn,
+        erpProducts.id as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_eps_supplier",
+      columns: [table.clientId, table.supplierId],
+      foreignColumns: [
+        erpSuppliers.clientId as AnyMySqlColumn,
+        erpSuppliers.id as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
   ]
 );
 

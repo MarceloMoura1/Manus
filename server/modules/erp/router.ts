@@ -9,6 +9,7 @@ import { brandsRouter } from "./brands/router";
 import { attributesRouter } from "./attributes/router";
 import { variantsRouter } from "./variants/router";
 import { suppliersRouter } from "./suppliers/router";
+import { productSuppliersRouter } from "./product-suppliers/router";
 import { purchasesRouter } from "./purchases/router";
 import { salesRouter } from "./sales/router";
 import { financeRouter } from "./finance/router";
@@ -31,6 +32,7 @@ export const erpRouter = router({
   attributes: attributesRouter,
   variants: variantsRouter,
   suppliers: suppliersRouter,
+  productSuppliers: productSuppliersRouter,
   purchases: purchasesRouter,
   sales: salesRouter,
   finance: financeRouter,

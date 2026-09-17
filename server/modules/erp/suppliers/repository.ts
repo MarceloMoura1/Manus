@@ -3,7 +3,7 @@ import { getPool } from "../../../db";
 import type { SupplierInput, SupplierListInput } from "./contracts";
 
 export type SupplierRow = RowDataPacket & { id:number;public_id:string;client_id:string;legal_name:string;trade_name:string|null;person_type:"legal"|"individual";tax_id:string|null;state_registration:string|null;email:string|null;phone:string|null;contact_name:string|null;postal_code:string|null;street:string|null;address_number:string|null;address_complement:string|null;district:string|null;city:string|null;state:string|null;notes:string|null;active:number;created_by:string;updated_by:string|null;created_at:string;updated_at:string };
-const columns="public_id,client_id,legal_name,trade_name,person_type,tax_id,state_registration,email,phone,contact_name,postal_code,street,address_number,address_complement,district,city,state,notes,active,created_by,updated_by,created_at,updated_at";
+const columns="id,public_id,client_id,legal_name,trade_name,person_type,tax_id,state_registration,email,phone,contact_name,postal_code,street,address_number,address_complement,district,city,state,notes,active,created_by,updated_by,created_at,updated_at";
 const values=(input:SupplierInput)=>[input.legalName,input.tradeName,input.personType,input.taxId,input.stateRegistration,input.email,input.phone,input.contactName,input.postalCode,input.street,input.addressNumber,input.addressComplement,input.district,input.city,input.state,input.notes];
 export class SupplierRepository {
   constructor(private pool?:Pool){} private database():Pool{return this.pool??=getPool();} getPool():Pool{return this.database();}
