@@ -19,6 +19,12 @@ import { ErpPageHeader } from "@/components/erp/ErpPageHeader";
 import { Pagination } from "@/components/erp/Pagination";
 import { ErpEmptyState } from "@/components/erp/ErpEmptyState";
 import { ProductDetailPanel } from "./ProductDetailPanel";
+import {
+  ProductFormDialog,
+  type ProductForm,
+  emptyProduct,
+  prepareProductCommand,
+} from "./ProductFormDialog";
 
 export type ErpSection = "summary" | "clients" | "products" | "stock" | "suppliers" | "purchases" | "sales" | "finance" | "fiscal" | "reports";
 const planned = ["Integrações"];
@@ -54,10 +60,8 @@ export function getErpTopbarItems({
     ...planned.map(label => ({ id: `planned-${label}`, label, disabled: true, unavailableReason: "Em preparação" })),
   ];
 }
-type ProductForm = { publicId?: string; name: string; sku: string; barcode: string; category: string; unit: "unit" | "kg" | "liter" | "meter"; cost: string; sale: string; minimumStock: string; description: string };
 type StockForm = { productPublicId: string; type: "manual_in" | "manual_out" | "adjustment_in" | "adjustment_out"; quantity: string; reason: string; idempotencyKey: string };
 type StockFilterType = "all" | "initial" | "manual_in" | "manual_out" | "adjustment_in" | "adjustment_out" | "purchase_in" | "sale_out" | "reversal";
-const emptyProduct: ProductForm = { name: "", sku: "", barcode: "", category: "", unit: "unit", cost: "0,00", sale: "0,00", minimumStock: "0", description: "" };
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const cents = (value: string) => { const normalized = value.replace(/\./g, "").replace(",", "."); const parsed = Number(normalized); return Number.isFinite(parsed) ? Math.round(parsed * 100) : -1; };
 const formatQuantity = (value: string) => Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 3 });
@@ -146,10 +150,11 @@ function Products() {
   const create = trpc.erp.products.create.useMutation();
   const update = trpc.erp.products.update.useMutation();
   const status = trpc.erp.products.setActive.useMutation({ onSuccess: async () => { setMessage("Status atualizado com sucesso."); await utils.erp.invalidate(); } });
+  const submittingRef = React.useRef(false);
   const pending=create.isPending||update.isPending||mediaPending;
   const clearPhoto=()=>{if(photoPreview?.startsWith("blob:"))URL.revokeObjectURL(photoPreview);setPhoto(null);setPhotoPreview(null);setRemovePhoto(false)};
-  const submit = async (event: React.FormEvent) => { event.preventDefault(); if(!form||pending) return; const command={ name:form.name,sku:form.sku,barcode:form.barcode||undefined,description:form.description||undefined,category:form.category||undefined,unit:form.unit,costPriceCents:cents(form.cost),salePriceCents:cents(form.sale),minimumStock:form.minimumStock }; if(command.costPriceCents<0||command.salePriceCents<0){setMessage("Informe valores monetários válidos.");return;} try{const product=form.publicId?await update.mutateAsync({...command,publicId:form.publicId}):await create.mutateAsync(command);if(photo||removePhoto){setMediaPending(true);const response=await fetch(`/api/products/${product.publicId}/image`,photo?{method:"PUT",credentials:"include",headers:{"Content-Type":photo.type||"application/octet-stream","x-client-attempt-id":crypto.randomUUID()},body:photo}:{method:"DELETE",credentials:"include"});if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.error||"Não foi possível salvar a foto.");}setMediaVersions(current=>({...current,[product.publicId]:(current[product.publicId]??0)+1}));}clearPhoto();await done(form.publicId?"Produto atualizado com sucesso.":"Produto cadastrado com sucesso.");}catch(error){setMessage(error instanceof Error?error.message:"Não foi possível salvar o produto.");}finally{setMediaPending(false);} };
-  const edit = (product: NonNullable<typeof query.data>["items"][number]) => {clearPhoto();setPhotoPreview(product.hasImage?`/api/products/${product.publicId}/image?variant=thumbnail&v=${mediaVersions[product.publicId]??0}`:null);setForm({ publicId:product.publicId,name:product.name,sku:product.sku,barcode:product.barcode??"",category:product.category??"",unit:product.unit,cost:(product.costPriceCents/100).toFixed(2).replace(".",","),sale:(product.salePriceCents/100).toFixed(2).replace(".",","),minimumStock:product.minimumStock,description:product.description??"" });};
+  const submit = async (event: React.FormEvent) => { event.preventDefault(); if(!form||pending||submittingRef.current) return; submittingRef.current = true; const command=prepareProductCommand(form); if(command.costPriceCents<0||command.salePriceCents<0){submittingRef.current = false;setMessage("Informe valores monetários válidos.");return;} try{const product=form.publicId?await update.mutateAsync({...command,publicId:form.publicId}):await create.mutateAsync(command);if(photo||removePhoto){setMediaPending(true);const response=await fetch(`/api/products/${product.publicId}/image`,photo?{method:"PUT",credentials:"include",headers:{"Content-Type":photo.type||"application/octet-stream","x-client-attempt-id":crypto.randomUUID()},body:photo}:{method:"DELETE",credentials:"include"});if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.error||"Não foi possível salvar a foto.");}setMediaVersions(current=>({...current,[product.publicId]:(current[product.publicId]??0)+1}));}clearPhoto();await done(form.publicId?"Produto atualizado com sucesso.":"Produto cadastrado com sucesso.");}catch(error){setMessage(error instanceof Error?error.message:"Não foi possível salvar o produto.");}finally{submittingRef.current = false;setMediaPending(false);} };
+  const edit = (product: NonNullable<typeof query.data>["items"][number]) => {clearPhoto();setPhotoPreview(product.hasImage?`/api/products/${product.publicId}/image?variant=thumbnail&v=${mediaVersions[product.publicId]??0}`:null);setForm({ publicId:product.publicId,name:product.name,sku:product.sku,barcode:product.barcode??"",category:product.categoryRelational?.name??product.category??"",categoryPublicId:product.categoryPublicId??product.categoryRelational?.publicId??null,brandPublicId:product.brandPublicId??product.brand?.publicId??null,unit:product.unit,cost:(product.costPriceCents/100).toFixed(2).replace(".",","),sale:(product.salePriceCents/100).toFixed(2).replace(".",","),minimumStock:product.minimumStock,description:product.description??"" });};
   const reset = () => { setSearch("");setActive("all");setCategory("");setStock("all");setSort("name");setDirection("asc");setPage(1); };
   const canWrite=query.data?.canWrite===true;
 
@@ -168,6 +173,8 @@ function Products() {
             sku: prod.sku,
             barcode: prod.barcode ?? "",
             category: prod.categoryRelational?.name ?? prod.category ?? "",
+            categoryPublicId: prod.categoryPublicId ?? prod.categoryRelational?.publicId ?? null,
+            brandPublicId: prod.brandPublicId ?? prod.brand?.publicId ?? null,
             unit: prod.unit,
             cost: (prod.costPriceCents / 100).toFixed(2).replace(".", ","),
             sale: (prod.salePriceCents / 100).toFixed(2).replace(".", ","),
@@ -201,7 +208,35 @@ function Products() {
     {query.isLoading?<StateMessage title="Carregando produtos…"/>:query.error?<StateMessage title={query.error.message||"Erro ao carregar produtos."} retry={()=>void query.refetch()}/>:query.data?.items.length===0?<StateMessage title={search||category||active!=="all"||stock!=="all"?"Nenhum produto corresponde aos filtros.":"Nenhum produto cadastrado."}/>:<div className="hidden overflow-x-auto rounded-2xl border bg-white md:block"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-slate-50"><tr>{["Produto","SKU","Categoria","Custo","Venda","Saldo","Mínimo","Status","Ações"].map(x=><th key={x} className="p-3">{x}</th>)}</tr></thead><tbody>{query.data?.items.map(product=><tr key={product.publicId} className="border-t"><td className="p-3 font-medium"><div className="flex items-center gap-3"><ProductThumbnail product={product} version={mediaVersions[product.publicId]}/><span>{product.name}</span></div></td><td className="p-3">{product.sku}</td><td className="p-3">{product.category??"—"}</td><td className="p-3">{money.format(product.costPriceCents/100)}</td><td className="p-3">{money.format(product.salePriceCents/100)}</td><td className="p-3">{formatQuantity(product.quantity)}</td><td className="p-3">{formatQuantity(product.minimumStock)}</td><td className="p-3">{product.active?"Ativo":"Inativo"}</td><td className="p-3"><div className="flex gap-2"><Button size="sm" variant="outline" onClick={()=>setSelectedProductPublicId(product.publicId)}>Detalhes</Button>{canWrite&&<><Button size="sm" variant="outline" onClick={()=>edit(product)}>Editar</Button><Button size="sm" variant="outline" onClick={()=>status.mutate({publicId:product.publicId,active:!product.active})} disabled={status.isPending}>{product.active?"Inativar":"Ativar"}</Button></>}</div></td></tr>)}</tbody></table></div>}
     {query.data?.items.length?<div className="grid gap-3 md:hidden">{query.data.items.map(product=><article key={product.publicId} className="rounded-2xl border bg-white p-4"><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><ProductThumbnail product={product} className="h-16 w-16" version={mediaVersions[product.publicId]}/><div className="min-w-0"><p className="truncate font-semibold">{product.name}</p><p className="truncate text-xs text-slate-500">{product.sku}</p></div></div><span className="rounded-full bg-slate-100 px-2 py-1 text-xs">{product.active?"Ativo":"Inativo"}</span></div><dl className="mt-4 grid grid-cols-2 gap-2 text-sm"><div><dt className="text-slate-500">Categoria</dt><dd>{product.category??"—"}</dd></div><div><dt className="text-slate-500">Saldo</dt><dd>{formatQuantity(product.quantity)}</dd></div><div><dt className="text-slate-500">Custo</dt><dd>{money.format(product.costPriceCents/100)}</dd></div><div><dt className="text-slate-500">Venda</dt><dd>{money.format(product.salePriceCents/100)}</dd></div></dl><div className="mt-4 flex gap-2"><Button size="sm" variant="outline" onClick={()=>setSelectedProductPublicId(product.publicId)}>Detalhes</Button>{canWrite&&<><Button size="sm" variant="outline" onClick={()=>edit(product)}>Editar</Button><Button size="sm" variant="outline" onClick={()=>status.mutate({publicId:product.publicId,active:!product.active})}>{product.active?"Inativar":"Ativar"}</Button></>}</div></article>)}</div>:null}
     {query.data&&<Pagination page={page} totalPages={query.data.totalPages} onPage={setPage}/>}
-    <Dialog open={Boolean(form)} onOpenChange={open=>{if(!open){clearPhoto();setForm(null)}}}><DialogContent className="max-h-[90vh] overflow-y-auto bg-white sm:max-w-xl"><DialogHeader><DialogTitle>{form?.publicId?"Editar produto":"Novo produto"}</DialogTitle></DialogHeader>{form&&<form onSubmit={submit} className="grid gap-4 sm:grid-cols-2"><div className="sm:col-span-2"><span className="text-sm font-medium">Foto principal</span><div className="mt-2 flex items-center gap-4 rounded-xl border p-3">{photoPreview&&!removePhoto?<img src={photoPreview} alt="Prévia da foto do produto" className="h-24 w-24 rounded-lg object-cover"/>:<div className="flex h-24 w-24 items-center justify-center rounded-lg bg-slate-100"><ImageIcon className="h-8 w-8 text-slate-400"/></div>}<div className="flex flex-wrap gap-2"><label aria-disabled={pending} className={`inline-flex items-center rounded-md border px-3 py-2 text-sm ${pending?"cursor-not-allowed opacity-50":"cursor-pointer"}`}><Upload className="mr-2 h-4 w-4"/>{photoPreview?"Substituir":"Selecionar"}<input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" disabled={pending} onChange={event=>{const file=event.currentTarget.files?.[0]??null;event.currentTarget.value="";if(file){if(photoPreview?.startsWith("blob:"))URL.revokeObjectURL(photoPreview);setPhoto(file);setPhotoPreview(URL.createObjectURL(file));setRemovePhoto(false)}}}/></label>{photoPreview&&<Button type="button" variant="outline" disabled={pending} onClick={()=>{if(window.confirm("Remover a foto principal deste produto?")){setPhoto(null);setPhotoPreview(null);setRemovePhoto(true)}}}><Trash2 className="mr-2 h-4 w-4"/>Remover</Button>}</div></div></div><Field label="Nome" value={form.name} onChange={name=>setForm({...form,name})}/><Field label="SKU" value={form.sku} onChange={sku=>setForm({...form,sku})}/><Field label="Código de barras" value={form.barcode} onChange={barcode=>setForm({...form,barcode})}/><Field label="Categoria" value={form.category} onChange={category=>setForm({...form,category})}/><Field label="Preço de custo" value={form.cost} onChange={cost=>setForm({...form,cost})}/><Field label="Preço de venda" value={form.sale} onChange={sale=>setForm({...form,sale})}/><Field label="Estoque mínimo" value={form.minimumStock} onChange={minimumStock=>setForm({...form,minimumStock})}/><label className="text-sm">Unidade<select className="mt-1 w-full rounded-lg border p-2" value={form.unit} onChange={e=>setForm({...form,unit:e.target.value as ProductForm["unit"]})}><option value="unit">Unidade</option><option value="kg">Quilograma</option><option value="liter">Litro</option><option value="meter">Metro</option></select></label><label className="text-sm sm:col-span-2">Descrição<textarea className="mt-1 w-full rounded-lg border p-2" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>{(create.error||update.error)&&<p role="alert" className="text-sm text-red-600 sm:col-span-2">{create.error?.message??update.error?.message}</p>}<div className="flex justify-end gap-2 sm:col-span-2"><Button type="button" variant="outline" onClick={()=>{clearPhoto();setForm(null)}}>Cancelar</Button><Button type="submit" disabled={pending}>{pending?"Salvando…":"Salvar"}</Button></div></form>}</DialogContent></Dialog>
+    <ProductFormDialog
+      open={Boolean(form)}
+      onOpenChange={open => {
+        if (!open) {
+          clearPhoto();
+          setForm(null);
+        }
+      }}
+      form={form}
+      setForm={setForm}
+      onSubmit={submit}
+      pending={pending}
+      errorMessage={create.error?.message ?? update.error?.message}
+      photoPreview={photoPreview}
+      removePhoto={removePhoto}
+      onPhotoSelect={file => {
+        if (photoPreview?.startsWith("blob:")) URL.revokeObjectURL(photoPreview);
+        setPhoto(file);
+        setPhotoPreview(URL.createObjectURL(file));
+        setRemovePhoto(false);
+      }}
+      onPhotoRemove={() => {
+        if (window.confirm("Remover a foto principal deste produto?")) {
+          setPhoto(null);
+          setPhotoPreview(null);
+          setRemovePhoto(true);
+        }
+      }}
+    />
   </div>;
 }
 
