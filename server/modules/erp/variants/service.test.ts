@@ -79,7 +79,29 @@ describe("VariantService Domain Rules", () => {
 
     publisher = { publish: vi.fn() };
 
-    service = new VariantService(variantRepo, productRepo, attributeRepo, publisher);
+    const mockConnection = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
+      execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }]),
+    };
+
+    variantRepo.getPool = vi.fn().mockReturnValue({
+      getConnection: vi.fn().mockResolvedValue(mockConnection),
+    });
+
+    const auditRepo = {
+      record: vi.fn().mockResolvedValue({ id: 1 }),
+    };
+
+    service = new VariantService(
+      variantRepo,
+      productRepo,
+      attributeRepo,
+      publisher,
+      auditRepo as any
+    );
   });
 
   describe("VARIANT_CREATE & Lifecyle", () => {
@@ -112,7 +134,8 @@ describe("VariantService Domain Rules", () => {
           sku: "CAM-ESS-PRE-M",
           salePriceCents: null,
         }),
-        []
+        [],
+        expect.anything()
       );
       expect(result.effectivePriceCents).toBe(8000);
       expect(result.salePriceCents).toBeNull();

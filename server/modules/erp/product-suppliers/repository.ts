@@ -280,17 +280,12 @@ export class ProductSupplierRepository {
     clientId: string,
     publicId: string,
     userId: string,
-    isPreferred: boolean
+    isPreferred: boolean,
+    connection?: Pool | PoolConnection
   ): Promise<ProductSupplierRow | null> {
-    const connection = await this.database().getConnection();
-    try {
-      await connection.beginTransaction();
-
+    if (connection) {
       const current = await this.find(clientId, publicId, connection, true);
-      if (!current) {
-        await connection.rollback();
-        return null;
-      }
+      if (!current) return null;
 
       if (isPreferred) {
         await this.lockProductRow(clientId, current.product_id, connection);
@@ -319,12 +314,52 @@ export class ProductSupplierRepository {
         );
       }
 
-      await connection.commit();
+      return this.find(clientId, publicId, connection);
+    }
+
+    const conn = await this.database().getConnection();
+    try {
+      await conn.beginTransaction();
+
+      const current = await this.find(clientId, publicId, conn, true);
+      if (!current) {
+        await conn.rollback();
+        return null;
+      }
+
+      if (isPreferred) {
+        await this.lockProductRow(clientId, current.product_id, conn);
+        // Clear existing preferred for this product
+        await conn.execute(
+          `UPDATE erp_product_suppliers
+           SET is_preferred = 0, updated_by = ?
+           WHERE client_id = ? AND product_id = ? AND id <> ?`,
+          [userId, clientId, current.product_id, current.id]
+        );
+
+        // Set current to preferred
+        await conn.execute(
+          `UPDATE erp_product_suppliers
+           SET is_preferred = 1, updated_by = ?
+           WHERE client_id = ? AND id = ?`,
+          [userId, clientId, current.id]
+        );
+      } else {
+        // Unmark current
+        await conn.execute(
+          `UPDATE erp_product_suppliers
+           SET is_preferred = 0, updated_by = ?
+           WHERE client_id = ? AND id = ?`,
+          [userId, clientId, current.id]
+        );
+      }
+
+      await conn.commit();
     } catch (error) {
-      await connection.rollback();
+      await conn.rollback();
       throw error;
     } finally {
-      connection.release();
+      conn.release();
     }
 
     return this.find(clientId, publicId);

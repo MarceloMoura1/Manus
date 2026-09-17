@@ -16,8 +16,13 @@ import {
   ProductSupplierRepository,
   type ProductSupplierRow,
 } from "./repository";
+import {
+  buildDiff,
+  type ProductSupplierAuditAction,
+} from "../product-audit/contracts";
+import { ProductAuditRepository } from "../product-audit/repository";
 
-type Identity = { clientId: string; userId: string; role: OperationalRole };
+type Identity = { clientId: string; userId: string; role: OperationalRole; userName?: string };
 
 export type ProductSupplierOperation =
   | "created"
@@ -83,7 +88,8 @@ export class ProductSupplierService {
     private readonly repository = new ProductSupplierRepository(),
     private readonly productRepository = new ErpRepository(),
     private readonly supplierRepository = new SupplierRepository(),
-    private readonly publisher: ProductSupplierEventPublisher = socketPublisher
+    private readonly publisher: ProductSupplierEventPublisher = socketPublisher,
+    private readonly auditRepository = new ProductAuditRepository()
   ) {}
 
   private assertWrite(identity: Identity) {
@@ -223,6 +229,34 @@ export class ProductSupplierService {
         connection
       );
 
+      const actorName = identity.userName?.trim() || identity.userId;
+
+      await this.auditRepository.record(
+        {
+          clientId: identity.clientId,
+          productId: product.id,
+          entityType: "supplier_association",
+          entityPublicId: row.public_id,
+          action: "supplier_associated",
+          actorUserId: identity.userId,
+          actorNameSnapshot: actorName,
+          actorRole: identity.role,
+          summary: `Fornecedor ${supplier.tradeName || supplier.legalName} associado ao produto`,
+          changesJson: {
+            supplierProductCode: { before: null, after: normalizedCode },
+            costPriceCents: { before: null, after: input.costPriceCents ?? null },
+            isPreferred: { before: null, after: input.isPreferred ?? false },
+            active: { before: null, after: input.active ?? true },
+          },
+          metadataJson: {
+            supplierPublicId: supplier.public_id,
+            supplierLegalName: supplier.legalName,
+            supplierTradeName: supplier.tradeName ?? null,
+          },
+        },
+        connection
+      );
+
       await connection.commit();
 
       await this.publish(
@@ -341,6 +375,70 @@ export class ProductSupplierService {
         );
       }
 
+      const beforeFields: Record<string, unknown> = {
+        supplierProductCode: current.supplier_product_code,
+        costPriceCents:
+          current.cost_price_cents !== null && current.cost_price_cents !== undefined
+            ? Number(current.cost_price_cents)
+            : null,
+        isPreferred: current.is_preferred === 1,
+        active: current.active === 1,
+      };
+
+      const afterFields: Record<string, unknown> = {
+        supplierProductCode: updated.supplier_product_code,
+        costPriceCents:
+          updated.cost_price_cents !== null && updated.cost_price_cents !== undefined
+            ? Number(updated.cost_price_cents)
+            : null,
+        isPreferred: updated.is_preferred === 1,
+        active: updated.active === 1,
+      };
+
+      const changes = buildDiff(beforeFields, afterFields);
+      const changedKeys = Object.keys(changes ?? {});
+
+      let action: ProductSupplierAuditAction = "supplier_commercial_updated";
+      if (changedKeys.length === 1 && changedKeys[0] === "active") {
+        action = "supplier_association_status";
+      } else if (changedKeys.length === 1 && changedKeys[0] === "isPreferred") {
+        action = "preferred_supplier_changed";
+      }
+
+      const summary =
+        action === "supplier_association_status"
+          ? updated.active === 1
+            ? `Associação com fornecedor ${current.supplier_trade_name || current.supplier_legal_name} ativada`
+            : `Associação com fornecedor ${current.supplier_trade_name || current.supplier_legal_name} desativada`
+          : action === "preferred_supplier_changed"
+          ? updated.is_preferred === 1
+            ? `Fornecedor ${current.supplier_trade_name || current.supplier_legal_name} definido como preferencial`
+            : `Fornecedor ${current.supplier_trade_name || current.supplier_legal_name} desmarcado como preferencial`
+          : `Dados comerciais do fornecedor ${current.supplier_trade_name || current.supplier_legal_name} atualizados`;
+
+      const actorName = identity.userName?.trim() || identity.userId;
+
+      await this.auditRepository.record(
+        {
+          clientId: identity.clientId,
+          productId: current.product_id,
+          entityType: "supplier_association",
+          entityPublicId: updated.public_id,
+          action,
+          actorUserId: identity.userId,
+          actorNameSnapshot: actorName,
+          actorRole: identity.role,
+          summary,
+          changesJson: changes,
+          metadataJson: {
+            supplierPublicId: current.supplier_public_id,
+            supplierLegalName: current.supplier_legal_name,
+            supplierTradeName: current.supplier_trade_name ?? null,
+          },
+        },
+        connection
+      );
+
       await connection.commit();
 
       await this.publish(
@@ -382,29 +480,69 @@ export class ProductSupplierService {
       );
     }
 
-    const updated = await this.repository.setPreferred(
-      identity.clientId,
-      publicId,
-      identity.userId,
-      isPreferred
-    );
+    const connection = await this.repository.getPool().getConnection();
+    try {
+      await connection.beginTransaction();
 
-    if (!updated) {
-      throw new ErpDomainError(
-        "NOT_FOUND",
-        "Associação produto-fornecedor não encontrada neste tenant."
+      const updated = await this.repository.setPreferred(
+        identity.clientId,
+        publicId,
+        identity.userId,
+        isPreferred,
+        connection
       );
+
+      if (!updated) {
+        throw new ErpDomainError(
+          "NOT_FOUND",
+          "Associação produto-fornecedor não encontrada neste tenant."
+        );
+      }
+
+      const actorName = identity.userName?.trim() || identity.userId;
+
+      await this.auditRepository.record(
+        {
+          clientId: identity.clientId,
+          productId: current.product_id,
+          entityType: "supplier_association",
+          entityPublicId: current.public_id,
+          action: "preferred_supplier_changed",
+          actorUserId: identity.userId,
+          actorNameSnapshot: actorName,
+          actorRole: identity.role,
+          summary: isPreferred
+            ? `Fornecedor ${current.supplier_trade_name || current.supplier_legal_name} definido como preferencial`
+            : `Fornecedor ${current.supplier_trade_name || current.supplier_legal_name} desmarcado como preferencial`,
+          changesJson: {
+            isPreferred: { before: current.is_preferred === 1, after: isPreferred },
+          },
+          metadataJson: {
+            supplierPublicId: current.supplier_public_id,
+            supplierLegalName: current.supplier_legal_name,
+            supplierTradeName: current.supplier_trade_name ?? null,
+          },
+        },
+        connection
+      );
+
+      await connection.commit();
+
+      await this.publish(
+        identity.clientId,
+        publicId,
+        current.product_public_id,
+        current.supplier_public_id,
+        "preferred_changed"
+      );
+
+      return productSupplierPublic(updated);
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
     }
-
-    await this.publish(
-      identity.clientId,
-      publicId,
-      current.product_public_id,
-      current.supplier_public_id,
-      "preferred_changed"
-    );
-
-    return productSupplierPublic(updated);
   }
 
   async delete(identity: Identity, publicId: string) {
@@ -418,22 +556,60 @@ export class ProductSupplierService {
       );
     }
 
-    const deleted = await this.repository.delete(identity.clientId, publicId);
-    if (!deleted) {
-      throw new ErpDomainError(
-        "NOT_FOUND",
-        "Associação produto-fornecedor não encontrada neste tenant."
+    const connection = await this.repository.getPool().getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const deleted = await this.repository.delete(
+        identity.clientId,
+        publicId,
+        connection
       );
+      if (!deleted) {
+        throw new ErpDomainError(
+          "NOT_FOUND",
+          "Associação produto-fornecedor não encontrada neste tenant."
+        );
+      }
+
+      const actorName = identity.userName?.trim() || identity.userId;
+
+      await this.auditRepository.record(
+        {
+          clientId: identity.clientId,
+          productId: current.product_id,
+          entityType: "supplier_association",
+          entityPublicId: current.public_id,
+          action: "supplier_disassociated",
+          actorUserId: identity.userId,
+          actorNameSnapshot: actorName,
+          actorRole: identity.role,
+          summary: `Fornecedor ${current.supplier_trade_name || current.supplier_legal_name} desassociado do produto`,
+          metadataJson: {
+            supplierPublicId: current.supplier_public_id,
+            supplierLegalName: current.supplier_legal_name,
+            supplierTradeName: current.supplier_trade_name ?? null,
+          },
+        },
+        connection
+      );
+
+      await connection.commit();
+
+      await this.publish(
+        identity.clientId,
+        publicId,
+        current.product_public_id,
+        current.supplier_public_id,
+        "deleted"
+      );
+
+      return { ok: true };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
     }
-
-    await this.publish(
-      identity.clientId,
-      publicId,
-      current.product_public_id,
-      current.supplier_public_id,
-      "deleted"
-    );
-
-    return { ok: true };
   }
 }

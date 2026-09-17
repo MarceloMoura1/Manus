@@ -15,10 +15,22 @@ import { salesRouter } from "./sales/router";
 import { financeRouter } from "./finance/router";
 import { fiscalRouter } from "./fiscal/router";
 import { reportsRouter } from "./reports/router";
+import { productAuditRouter } from "./product-audit/router";
 
 const service = new ErpService();
-type ErpContext = { tenantId: string; operationalUserId: string; operationalUserRole: "admin" | "manager" | "agent" | "viewer" };
-const identity = (ctx: ErpContext) => ({ clientId: ctx.tenantId, userId: ctx.operationalUserId, role: ctx.operationalUserRole });
+type ErpContext = {
+  tenantId: string;
+  operationalUserId: string;
+  operationalUserRole: "admin" | "manager" | "agent" | "viewer";
+  user?: { name?: string | null } | null;
+  userName?: string;
+};
+const identity = (ctx: ErpContext) => ({
+  clientId: ctx.tenantId,
+  userId: ctx.operationalUserId,
+  role: ctx.operationalUserRole,
+  userName: ctx.userName ?? ctx.user?.name ?? undefined,
+});
 export function translateErpError(error: unknown): never {
   if (!(error instanceof ErpDomainError)) throw error;
   throw new TRPCError({ code: erpTrpcCode(error), message: error.message });
@@ -44,6 +56,7 @@ export const erpRouter = router({
     create: megadeskProcedure.input(productInput).mutation(({ input, ctx }) => runErp(() => service.createProduct(identity(ctx), input))),
     update: megadeskProcedure.input(productInput.extend({ publicId: productPublicId })).mutation(({ input, ctx }) => { const { publicId, ...command } = input; return runErp(() => service.updateProduct(identity(ctx), publicId, command)); }),
     setActive: megadeskProcedure.input(z.object({ publicId: productPublicId, active: z.boolean() })).mutation(({ input, ctx }) => runErp(() => service.setProductActive(identity(ctx), input.publicId, input.active))),
+    history: productAuditRouter,
   }),
   stock: router({
     list: megadeskProcedure.input(stockListInput).query(({ input, ctx }) => runErp(() => service.listMovements(identity(ctx), input))),

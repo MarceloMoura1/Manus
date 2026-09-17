@@ -246,12 +246,10 @@ export class VariantRepository {
       combinationHash?: string | null;
       active?: boolean;
     },
-    attributePairs: Array<{ attributeTypeId: number; attributeValueId: number }>
+    attributePairs: Array<{ attributeTypeId: number; attributeValueId: number }>,
+    connection?: Pool | PoolConnection
   ): Promise<VariantRow> {
-    const connection = await this.database().getConnection();
-    try {
-      await connection.beginTransaction();
-
+    if (connection) {
       const [insertResult] = await connection.execute<ResultSetHeader>(
         `INSERT INTO erp_product_variants
           (public_id, client_id, product_id, sku, name, sale_price_cents, combination_hash, active, created_by)
@@ -280,12 +278,49 @@ export class VariantRepository {
         );
       }
 
-      await connection.commit();
+      const row = await this.find(clientId, publicId, connection);
+      if (!row) throw new Error("Variant insert failed to retrieve row");
+      return row;
+    }
+
+    const conn = await this.database().getConnection();
+    try {
+      await conn.beginTransaction();
+
+      const [insertResult] = await conn.execute<ResultSetHeader>(
+        `INSERT INTO erp_product_variants
+          (public_id, client_id, product_id, sku, name, sale_price_cents, combination_hash, active, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          publicId,
+          clientId,
+          productId,
+          data.sku,
+          data.name ?? null,
+          data.salePriceCents ?? null,
+          data.combinationHash ?? null,
+          data.active ?? true ? 1 : 0,
+          userId,
+        ]
+      );
+
+      const variantId = insertResult.insertId;
+
+      for (const pair of attributePairs) {
+        await conn.execute(
+          `INSERT INTO erp_product_variant_attribute_values
+            (client_id, variant_id, attribute_type_id, attribute_value_id)
+           VALUES (?, ?, ?, ?)`,
+          [clientId, variantId, pair.attributeTypeId, pair.attributeValueId]
+        );
+      }
+
+      await conn.commit();
     } catch (error) {
-      await connection.rollback();
+      await conn.rollback();
       throw error;
     } finally {
-      connection.release();
+      conn.release();
     }
 
     const row = await this.find(clientId, publicId);
@@ -302,7 +337,8 @@ export class VariantRepository {
       name?: string | null;
       salePriceCents?: number | null;
       active?: boolean;
-    }
+    },
+    connection: Pool | PoolConnection = this.database()
   ): Promise<VariantRow | null> {
     const updates: string[] = ["updated_by = ?"];
     const parameters: Array<string | number | null> = [userId];
@@ -326,12 +362,12 @@ export class VariantRepository {
 
     parameters.push(clientId, publicId);
 
-    const [result] = await this.database().execute<ResultSetHeader>(
+    const [result] = await connection.execute<ResultSetHeader>(
       `UPDATE erp_product_variants SET ${updates.join(", ")} WHERE client_id = ? AND public_id = ?`,
       parameters
     );
 
-    return result.affectedRows > 0 ? this.find(clientId, publicId) : null;
+    return result.affectedRows > 0 ? this.find(clientId, publicId, connection) : null;
   }
 
   async setAttributes(
@@ -339,17 +375,12 @@ export class VariantRepository {
     publicId: string,
     userId: string,
     combinationHash: string | null,
-    attributePairs: Array<{ attributeTypeId: number; attributeValueId: number }>
+    attributePairs: Array<{ attributeTypeId: number; attributeValueId: number }>,
+    connection?: Pool | PoolConnection
   ): Promise<VariantRow | null> {
-    const connection = await this.database().getConnection();
-    try {
-      await connection.beginTransaction();
-
+    if (connection) {
       const variant = await this.find(clientId, publicId, connection, true);
-      if (!variant) {
-        await connection.rollback();
-        return null;
-      }
+      if (!variant) return null;
 
       await connection.execute(
         `DELETE FROM erp_product_variant_attribute_values WHERE client_id = ? AND variant_id = ?`,
@@ -370,12 +401,44 @@ export class VariantRepository {
         [combinationHash, userId, clientId, variant.id]
       );
 
-      await connection.commit();
+      return this.find(clientId, publicId, connection);
+    }
+
+    const conn = await this.database().getConnection();
+    try {
+      await conn.beginTransaction();
+
+      const variant = await this.find(clientId, publicId, conn, true);
+      if (!variant) {
+        await conn.rollback();
+        return null;
+      }
+
+      await conn.execute(
+        `DELETE FROM erp_product_variant_attribute_values WHERE client_id = ? AND variant_id = ?`,
+        [clientId, variant.id]
+      );
+
+      for (const pair of attributePairs) {
+        await conn.execute(
+          `INSERT INTO erp_product_variant_attribute_values
+            (client_id, variant_id, attribute_type_id, attribute_value_id)
+           VALUES (?, ?, ?, ?)`,
+          [clientId, variant.id, pair.attributeTypeId, pair.attributeValueId]
+        );
+      }
+
+      await conn.execute(
+        `UPDATE erp_product_variants SET combination_hash = ?, updated_by = ? WHERE client_id = ? AND id = ?`,
+        [combinationHash, userId, clientId, variant.id]
+      );
+
+      await conn.commit();
     } catch (error) {
-      await connection.rollback();
+      await conn.rollback();
       throw error;
     } finally {
-      connection.release();
+      conn.release();
     }
 
     return this.find(clientId, publicId);
@@ -385,17 +448,22 @@ export class VariantRepository {
     clientId: string,
     publicId: string,
     userId: string,
-    active: boolean
+    active: boolean,
+    connection: Pool | PoolConnection = this.database()
   ): Promise<boolean> {
-    const [result] = await this.database().execute<ResultSetHeader>(
+    const [result] = await connection.execute<ResultSetHeader>(
       `UPDATE erp_product_variants SET active = ?, updated_by = ? WHERE client_id = ? AND public_id = ?`,
       [active ? 1 : 0, userId, clientId, publicId]
     );
     return result.affectedRows > 0;
   }
 
-  async delete(clientId: string, publicId: string): Promise<boolean> {
-    const [result] = await this.database().execute<ResultSetHeader>(
+  async delete(
+    clientId: string,
+    publicId: string,
+    connection: Pool | PoolConnection = this.database()
+  ): Promise<boolean> {
+    const [result] = await connection.execute<ResultSetHeader>(
       `DELETE FROM erp_product_variants WHERE client_id = ? AND public_id = ?`,
       [clientId, publicId]
     );

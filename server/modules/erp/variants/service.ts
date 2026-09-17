@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { PoolConnection } from "mysql2/promise";
 import { runPostCommitBestEffort } from "../../../_core/post-commit";
 import { emitOperationalTenantEvent } from "../../whatsapp/socket/whatsapp.socket";
 import { AttributeRepository } from "../attributes/repository";
@@ -19,8 +20,13 @@ import {
   type VariantAttributeValueRow,
   type VariantRow,
 } from "./repository";
+import {
+  buildDiff,
+  type VariantAuditAction,
+} from "../product-audit/contracts";
+import { ProductAuditRepository } from "../product-audit/repository";
 
-type Identity = { clientId: string; userId: string; role: OperationalRole };
+type Identity = { clientId: string; userId: string; role: OperationalRole; userName?: string };
 
 export type VariantOperation =
   | "created"
@@ -102,13 +108,24 @@ export class VariantService {
     private readonly repository = new VariantRepository(),
     private readonly productRepository = new ErpRepository(),
     private readonly attributeRepository = new AttributeRepository(),
-    private readonly publisher: VariantEventPublisher = socketPublisher
+    private readonly publisher: VariantEventPublisher = socketPublisher,
+    private readonly auditRepository = new ProductAuditRepository()
   ) {}
 
   private assertWrite(identity: Identity) {
     if (!canWriteVariants(identity.role)) {
       throw new ErpDomainError("FORBIDDEN", "Seu perfil não permite alterar variantes.");
     }
+  }
+
+  private async getConnection(): Promise<PoolConnection | null> {
+    if (typeof this.repository.getPool === "function") {
+      const pool = this.repository.getPool();
+      if (pool && typeof pool.getConnection === "function") {
+        return await pool.getConnection();
+      }
+    }
+    return null;
   }
 
   private async publish(
@@ -248,8 +265,10 @@ export class VariantService {
     }
 
     const publicId = randomUUID();
-
+    const connection = await this.getConnection();
     try {
+      if (connection) await connection.beginTransaction();
+
       const row = await this.repository.create(
         identity.clientId,
         identity.userId,
@@ -262,8 +281,44 @@ export class VariantService {
           combinationHash,
           active: input.active,
         },
-        attributePairs
+        attributePairs,
+        connection ?? undefined
       );
+
+      const actorName = identity.userName?.trim() || identity.userId;
+
+      await this.auditRepository.record(
+        {
+          clientId: identity.clientId,
+          productId: product.id,
+          entityType: "variant",
+          entityPublicId: row.public_id,
+          action: "variant_created",
+          actorUserId: identity.userId,
+          actorNameSnapshot: actorName,
+          actorRole: identity.role,
+          summary: `Variante criada: SKU ${row.sku}${row.name ? ` (${row.name})` : ""}`,
+          changesJson: {
+            sku: { before: null, after: row.sku },
+            name: { before: null, after: row.name ?? null },
+            salePriceCents: {
+              before: null,
+              after:
+                row.sale_price_cents !== null && row.sale_price_cents !== undefined
+                  ? Number(row.sale_price_cents)
+                  : null,
+            },
+            active: { before: null, after: row.active === 1 },
+          },
+          metadataJson: {
+            combinationHash: row.combination_hash ?? null,
+            attributeCount: attributePairs.length,
+          },
+        },
+        connection ?? undefined
+      );
+
+      if (connection) await connection.commit();
 
       const attributes = await this.repository.getAttributesForVariant(
         identity.clientId,
@@ -279,6 +334,7 @@ export class VariantService {
 
       return variantPublic(row, attributes);
     } catch (error) {
+      if (connection) await connection.rollback();
       if (dbCode(error) === "ER_DUP_ENTRY") {
         throw new ErpDomainError(
           "CONFLICT",
@@ -286,6 +342,8 @@ export class VariantService {
         );
       }
       throw error;
+    } finally {
+      if (connection) connection.release();
     }
   }
 
@@ -364,16 +422,75 @@ export class VariantService {
       return variantPublic(current, attributes);
     }
 
+    const connection = await this.getConnection();
     try {
+      if (connection) await connection.beginTransaction();
+
       const updated = await this.repository.update(
         identity.clientId,
         publicId,
         identity.userId,
-        updates
+        updates,
+        connection ?? undefined
       );
       if (!updated) {
         throw new ErpDomainError("NOT_FOUND", "Variante não encontrada neste tenant.");
       }
+
+      const beforeFields: Record<string, unknown> = {
+        sku: current.sku,
+        name: current.name ?? null,
+        salePriceCents:
+          current.sale_price_cents !== null && current.sale_price_cents !== undefined
+            ? Number(current.sale_price_cents)
+            : null,
+        active: current.active === 1,
+      };
+
+      const afterFields: Record<string, unknown> = {
+        sku: updated.sku,
+        name: updated.name ?? null,
+        salePriceCents:
+          updated.sale_price_cents !== null && updated.sale_price_cents !== undefined
+            ? Number(updated.sale_price_cents)
+            : null,
+        active: updated.active === 1,
+      };
+
+      const changes = buildDiff(beforeFields, afterFields);
+      const changedKeys = Object.keys(changes ?? {});
+
+      let action: VariantAuditAction = "variant_updated";
+      if (changedKeys.length === 1 && changedKeys[0] === "active") {
+        action = updated.active === 1 ? "variant_activated" : "variant_deactivated";
+      }
+
+      const summary =
+        action === "variant_activated"
+          ? `Variante ativada: SKU ${updated.sku}`
+          : action === "variant_deactivated"
+          ? `Variante desativada: SKU ${updated.sku}`
+          : `Variante atualizada: SKU ${updated.sku} (${changedKeys.join(", ") || "sem alterações"})`;
+
+      const actorName = identity.userName?.trim() || identity.userId;
+
+      await this.auditRepository.record(
+        {
+          clientId: identity.clientId,
+          productId: current.product_id,
+          entityType: "variant",
+          entityPublicId: updated.public_id,
+          action,
+          actorUserId: identity.userId,
+          actorNameSnapshot: actorName,
+          actorRole: identity.role,
+          summary,
+          changesJson: changes,
+        },
+        connection ?? undefined
+      );
+
+      if (connection) await connection.commit();
 
       const attributes = await this.repository.getAttributesForVariant(
         identity.clientId,
@@ -389,6 +506,7 @@ export class VariantService {
 
       return variantPublic(updated, attributes);
     } catch (error) {
+      if (connection) await connection.rollback();
       if (dbCode(error) === "ER_DUP_ENTRY") {
         throw new ErpDomainError(
           "CONFLICT",
@@ -396,6 +514,8 @@ export class VariantService {
         );
       }
       throw error;
+    } finally {
+      if (connection) connection.release();
     }
   }
 
@@ -462,18 +582,50 @@ export class VariantService {
       }
     }
 
+    const connection = await this.getConnection();
     try {
+      if (connection) await connection.beginTransaction();
+
       const updated = await this.repository.setAttributes(
         identity.clientId,
         publicId,
         identity.userId,
         combinationHash,
-        attributePairs
+        attributePairs,
+        connection ?? undefined
       );
 
       if (!updated) {
         throw new ErpDomainError("NOT_FOUND", "Variante não encontrada neste tenant.");
       }
+
+      const actorName = identity.userName?.trim() || identity.userId;
+
+      await this.auditRepository.record(
+        {
+          clientId: identity.clientId,
+          productId: current.product_id,
+          entityType: "variant",
+          entityPublicId: updated.public_id,
+          action: "attribute_combination_changed",
+          actorUserId: identity.userId,
+          actorNameSnapshot: actorName,
+          actorRole: identity.role,
+          summary: `Combinação de atributos alterada para a variante ${current.sku}`,
+          changesJson: {
+            combinationHash: {
+              before: current.combination_hash,
+              after: updated.combination_hash,
+            },
+          },
+          metadataJson: {
+            attributeValues: valuePublicIds,
+          },
+        },
+        connection ?? undefined
+      );
+
+      if (connection) await connection.commit();
 
       const attributes = await this.repository.getAttributesForVariant(
         identity.clientId,
@@ -489,6 +641,7 @@ export class VariantService {
 
       return variantPublic(updated, attributes);
     } catch (error) {
+      if (connection) await connection.rollback();
       if (dbCode(error) === "ER_DUP_ENTRY") {
         throw new ErpDomainError(
           "CONFLICT",
@@ -496,6 +649,8 @@ export class VariantService {
         );
       }
       throw error;
+    } finally {
+      if (connection) connection.release();
     }
   }
 
@@ -507,24 +662,62 @@ export class VariantService {
       throw new ErpDomainError("NOT_FOUND", "Variante não encontrada neste tenant.");
     }
 
-    const updated = await this.repository.setActive(
-      identity.clientId,
-      publicId,
-      identity.userId,
-      active
-    );
-    if (!updated) {
-      throw new ErpDomainError("NOT_FOUND", "Variante não encontrada neste tenant.");
+    const connection = await this.getConnection();
+    try {
+      if (connection) await connection.beginTransaction();
+
+      const updated = await this.repository.setActive(
+        identity.clientId,
+        publicId,
+        identity.userId,
+        active,
+        connection ?? undefined
+      );
+      if (!updated) {
+        throw new ErpDomainError("NOT_FOUND", "Variante não encontrada neste tenant.");
+      }
+
+      const action: VariantAuditAction = active ? "variant_activated" : "variant_deactivated";
+      const summary = active
+        ? `Variante ativada: SKU ${current.sku}`
+        : `Variante desativada: SKU ${current.sku}`;
+
+      const actorName = identity.userName?.trim() || identity.userId;
+
+      await this.auditRepository.record(
+        {
+          clientId: identity.clientId,
+          productId: current.product_id,
+          entityType: "variant",
+          entityPublicId: current.public_id,
+          action,
+          actorUserId: identity.userId,
+          actorNameSnapshot: actorName,
+          actorRole: identity.role,
+          summary,
+          changesJson: {
+            active: { before: current.active === 1, after: active },
+          },
+        },
+        connection ?? undefined
+      );
+
+      if (connection) await connection.commit();
+
+      await this.publish(
+        identity.clientId,
+        publicId,
+        current.product_public_id,
+        active ? "activated" : "deactivated"
+      );
+
+      return { ok: true };
+    } catch (error) {
+      if (connection) await connection.rollback();
+      throw error;
+    } finally {
+      if (connection) connection.release();
     }
-
-    await this.publish(
-      identity.clientId,
-      publicId,
-      current.product_public_id,
-      active ? "activated" : "deactivated"
-    );
-
-    return { ok: true };
   }
 
   async delete(identity: Identity, publicId: string) {
@@ -535,18 +728,58 @@ export class VariantService {
       throw new ErpDomainError("NOT_FOUND", "Variante não encontrada neste tenant.");
     }
 
-    const deleted = await this.repository.delete(identity.clientId, publicId);
-    if (!deleted) {
-      throw new ErpDomainError("NOT_FOUND", "Variante não encontrada neste tenant.");
+    const connection = await this.getConnection();
+    try {
+      if (connection) await connection.beginTransaction();
+
+      const deleted = await this.repository.delete(
+        identity.clientId,
+        publicId,
+        connection ?? undefined
+      );
+      if (!deleted) {
+        throw new ErpDomainError("NOT_FOUND", "Variante não encontrada neste tenant.");
+      }
+
+      const actorName = identity.userName?.trim() || identity.userId;
+
+      await this.auditRepository.record(
+        {
+          clientId: identity.clientId,
+          productId: current.product_id,
+          entityType: "variant",
+          entityPublicId: current.public_id,
+          action: "variant_deleted",
+          actorUserId: identity.userId,
+          actorNameSnapshot: actorName,
+          actorRole: identity.role,
+          summary: `Variante excluída: SKU ${current.sku}${current.name ? ` (${current.name})` : ""}`,
+          changesJson: {
+            active: { before: current.active === 1, after: false },
+          },
+          metadataJson: {
+            sku: current.sku,
+            name: current.name ?? null,
+          },
+        },
+        connection ?? undefined
+      );
+
+      if (connection) await connection.commit();
+
+      await this.publish(
+        identity.clientId,
+        publicId,
+        current.product_public_id,
+        "deleted"
+      );
+
+      return { ok: true };
+    } catch (error) {
+      if (connection) await connection.rollback();
+      throw error;
+    } finally {
+      if (connection) connection.release();
     }
-
-    await this.publish(
-      identity.clientId,
-      publicId,
-      current.product_public_id,
-      "deleted"
-    );
-
-    return { ok: true };
   }
 }

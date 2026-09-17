@@ -69,24 +69,140 @@ export class ErpRepository {
     return rows[0] ?? null;
   }
 
-  async createProduct(clientId: string, userId: string, publicId: string, input: { name: string; sku: string; barcode: string | null; description: string | null; category: string | null; categoryId: number | null; brandId: number | null; unit: string; costPriceCents: number; salePriceCents: number; minimumStock: string }) {
-    const connection = await this.database().getConnection();
+  async createProduct(
+    clientId: string,
+    userId: string,
+    publicId: string,
+    input: {
+      name: string;
+      sku: string;
+      barcode: string | null;
+      description: string | null;
+      category: string | null;
+      categoryId: number | null;
+      brandId: number | null;
+      unit: string;
+      costPriceCents: number;
+      salePriceCents: number;
+      minimumStock: string;
+    },
+    connection?: Pool | PoolConnection
+  ) {
+    if (connection) {
+      const [result] = await connection.execute<ResultSetHeader>(
+        "INSERT INTO erp_products (public_id,client_id,name,sku,barcode,description,category,category_id,brand_id,unit,cost_price_cents,sale_price_cents,minimum_stock,active,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)",
+        [
+          publicId,
+          clientId,
+          input.name,
+          input.sku,
+          input.barcode,
+          input.description,
+          input.category,
+          input.categoryId,
+          input.brandId,
+          input.unit,
+          input.costPriceCents,
+          input.salePriceCents,
+          input.minimumStock,
+          userId,
+        ]
+      );
+      await connection.execute(
+        "INSERT INTO erp_stock_balances (client_id,product_id,quantity,version) VALUES (?,?,0,0)",
+        [clientId, result.insertId]
+      );
+      return this.findProduct(clientId, publicId, connection);
+    }
+
+    const conn = await this.database().getConnection();
     try {
-      await connection.beginTransaction();
-      const [result] = await connection.execute<ResultSetHeader>("INSERT INTO erp_products (public_id,client_id,name,sku,barcode,description,category,category_id,brand_id,unit,cost_price_cents,sale_price_cents,minimum_stock,active,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)", [publicId, clientId, input.name, input.sku, input.barcode, input.description, input.category, input.categoryId, input.brandId, input.unit, input.costPriceCents, input.salePriceCents, input.minimumStock, userId]);
-      await connection.execute("INSERT INTO erp_stock_balances (client_id,product_id,quantity,version) VALUES (?,?,0,0)", [clientId, result.insertId]);
-      await connection.commit();
-    } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); }
-    return this.findProduct(clientId, publicId);
+      await conn.beginTransaction();
+      const [result] = await conn.execute<ResultSetHeader>(
+        "INSERT INTO erp_products (public_id,client_id,name,sku,barcode,description,category,category_id,brand_id,unit,cost_price_cents,sale_price_cents,minimum_stock,active,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)",
+        [
+          publicId,
+          clientId,
+          input.name,
+          input.sku,
+          input.barcode,
+          input.description,
+          input.category,
+          input.categoryId,
+          input.brandId,
+          input.unit,
+          input.costPriceCents,
+          input.salePriceCents,
+          input.minimumStock,
+          userId,
+        ]
+      );
+      await conn.execute(
+        "INSERT INTO erp_stock_balances (client_id,product_id,quantity,version) VALUES (?,?,0,0)",
+        [clientId, result.insertId]
+      );
+      await conn.commit();
+      return this.findProduct(clientId, publicId);
+    } catch (error) {
+      await conn.rollback();
+      throw error;
+    } finally {
+      conn.release();
+    }
   }
 
-  async updateProduct(clientId: string, publicId: string, userId: string, input: { name: string; sku: string; barcode: string | null; description: string | null; category: string | null; categoryId: number | null; brandId: number | null; unit: string; costPriceCents: number; salePriceCents: number; minimumStock: string }) {
-    const [result] = await this.database().execute<ResultSetHeader>("UPDATE erp_products SET name=?,sku=?,barcode=?,description=?,category=?,category_id=?,brand_id=?,unit=?,cost_price_cents=?,sale_price_cents=?,minimum_stock=?,updated_by=? WHERE client_id=? AND public_id=?", [input.name, input.sku, input.barcode, input.description, input.category, input.categoryId, input.brandId, input.unit, input.costPriceCents, input.salePriceCents, input.minimumStock, userId, clientId, publicId]);
-    return result.affectedRows > 0 ? this.findProduct(clientId, publicId) : null;
+  async updateProduct(
+    clientId: string,
+    publicId: string,
+    userId: string,
+    input: {
+      name: string;
+      sku: string;
+      barcode: string | null;
+      description: string | null;
+      category: string | null;
+      categoryId: number | null;
+      brandId: number | null;
+      unit: string;
+      costPriceCents: number;
+      salePriceCents: number;
+      minimumStock: string;
+    },
+    connection: Pool | PoolConnection = this.database()
+  ) {
+    const [result] = await connection.execute<ResultSetHeader>(
+      "UPDATE erp_products SET name=?,sku=?,barcode=?,description=?,category=?,category_id=?,brand_id=?,unit=?,cost_price_cents=?,sale_price_cents=?,minimum_stock=?,updated_by=? WHERE client_id=? AND public_id=?",
+      [
+        input.name,
+        input.sku,
+        input.barcode,
+        input.description,
+        input.category,
+        input.categoryId,
+        input.brandId,
+        input.unit,
+        input.costPriceCents,
+        input.salePriceCents,
+        input.minimumStock,
+        userId,
+        clientId,
+        publicId,
+      ]
+    );
+    return result.affectedRows > 0 ? this.findProduct(clientId, publicId, connection) : null;
   }
 
-  async setProductActive(clientId: string, publicId: string, userId: string, active: boolean) {
-    const [result] = await this.database().execute<ResultSetHeader>("UPDATE erp_products SET active=?,updated_by=? WHERE client_id=? AND public_id=?", [active ? 1 : 0, userId, clientId, publicId]);
+  async setProductActive(
+    clientId: string,
+    publicId: string,
+    userId: string,
+    active: boolean,
+    connection: Pool | PoolConnection = this.database()
+  ) {
+    const [result] = await connection.execute<ResultSetHeader>(
+      "UPDATE erp_products SET active=?,updated_by=? WHERE client_id=? AND public_id=?",
+      [active ? 1 : 0, userId, clientId, publicId]
+    );
     return result.affectedRows > 0;
   }
 

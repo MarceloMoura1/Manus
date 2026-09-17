@@ -352,7 +352,8 @@ describe("ProductSupplierService Domain Rules", () => {
       "tenant-a",
       "ps-2",
       "admin-a",
-      true
+      true,
+      expect.anything()
     );
     expect(result.isPreferred).toBe(true);
   });
@@ -375,7 +376,8 @@ describe("ProductSupplierService Domain Rules", () => {
       "tenant-a",
       "ps-1",
       "admin-a",
-      true
+      true,
+      expect.anything()
     );
     expect(result.isPreferred).toBe(true);
   });
@@ -396,7 +398,8 @@ describe("ProductSupplierService Domain Rules", () => {
       "tenant-a",
       "ps-1",
       "admin-a",
-      false
+      false,
+      expect.anything()
     );
     expect(result.isPreferred).toBe(false);
   });
@@ -409,7 +412,7 @@ describe("ProductSupplierService Domain Rules", () => {
 
     const result = await service.delete(adminA, "ps-1");
     expect(result.ok).toBe(true);
-    expect(repo.delete).toHaveBeenCalledWith("tenant-a", "ps-1");
+    expect(repo.delete).toHaveBeenCalledWith("tenant-a", "ps-1", expect.anything());
   });
 
   // 17. comportamento após delete do preferencial

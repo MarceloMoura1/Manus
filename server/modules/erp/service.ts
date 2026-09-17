@@ -9,6 +9,11 @@ import { ErpRepository, type MovementRow, type ProductListOptions, type ProductR
 import { CategoryRepository } from "./categories/repository";
 import { BrandRepository } from "./brands/repository";
 import { VariantRepository } from "./variants/repository";
+import {
+  buildDiff,
+  type ProductAuditAction,
+} from "./product-audit/contracts";
+import { ProductAuditRepository } from "./product-audit/repository";
 
 type ProductCommand = {
   name: string; sku: string; barcode: string | null; description: string | null; category: string | null;
@@ -17,7 +22,7 @@ type ProductCommand = {
   unit: "unit" | "kg" | "liter" | "meter"; costPriceCents: number; salePriceCents: number; minimumStock: string;
 };
 type MovementCommand = { productPublicId: string; type: "initial" | "manual_in" | "manual_out" | "adjustment_in" | "adjustment_out"; quantity: string; reason: string; idempotencyKey: string };
-type Identity = { clientId: string; userId: string; role: OperationalRole };
+type Identity = { clientId: string; userId: string; role: OperationalRole; userName?: string };
 type ErpEvent = { productPublicId: string; movementPublicId?: string; operation: "created" | "updated" | "activated" | "deactivated" | "movement_created" | "movement_reversed"; occurredAt: string };
 export type ErpEventPublisher = { publish(clientId: string, event: "erp:product.changed" | "erp:stock.changed", payload: ErpEvent): void | Promise<void> };
 const socketPublisher: ErpEventPublisher = { publish: (clientId, event, payload) => emitOperationalTenantEvent(clientId, event, payload) };
@@ -52,10 +57,21 @@ export class ErpService {
     private readonly publisher: ErpEventPublisher = socketPublisher,
     private readonly categories = new CategoryRepository(),
     private readonly brands = new BrandRepository(),
-    private readonly variants = new VariantRepository()
+    private readonly variants = new VariantRepository(),
+    private readonly auditRepository = new ProductAuditRepository()
   ) {}
   private assertWrite(identity: Identity) { if (!canWriteErp(identity.role)) throw new ErpDomainError("FORBIDDEN", "Seu perfil não permite alterar o ERP."); }
   private async publish(clientId: string, event: "erp:product.changed" | "erp:stock.changed", payload: ErpEvent) { await runPostCommitBestEffort([() => this.publisher.publish(clientId, event, payload)]); }
+
+  private async getConnection(): Promise<PoolConnection | null> {
+    if (typeof this.repository.getPool === "function") {
+      const pool = this.repository.getPool();
+      if (pool && typeof pool.getConnection === "function") {
+        return await pool.getConnection();
+      }
+    }
+    return null;
+  }
 
   private async resolveCategoryAndBrand(
     clientId: string,
@@ -90,6 +106,7 @@ export class ErpService {
 
   async listProducts(identity: Identity, options: ProductListOptions) { const result = await this.repository.listProducts(identity.clientId, options); return { ...result, items: result.items.map(publicProduct), page: options.page, pageSize: options.pageSize, totalPages: Math.ceil(result.total / options.pageSize), canWrite: canWriteErp(identity.role) }; }
   async getProduct(identity: Identity, publicId: string) { const row = await this.repository.findProduct(identity.clientId, publicId); if (!row) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado."); return publicProduct(row); }
+
   async createProduct(identity: Identity, command: ProductCommand) {
     this.assertWrite(identity);
     const normalized = normalizedProduct(command);
@@ -98,18 +115,91 @@ export class ErpService {
       throw new ErpDomainError("CONFLICT", "SKU já cadastrado em uma variante deste tenant.");
     }
     const { categoryId, brandId } = await this.resolveCategoryAndBrand(identity.clientId, command);
+
+    const connection = await this.getConnection();
     try {
-      const row = await this.repository.createProduct(identity.clientId, identity.userId, randomUUID(), {
-        ...normalized,
-        categoryId,
-        brandId,
-      });
+      if (connection) await connection.beginTransaction();
+
+      const publicId = randomUUID();
+      const row = connection
+        ? await this.repository.createProduct(
+            identity.clientId,
+            identity.userId,
+            publicId,
+            {
+              ...normalized,
+              categoryId,
+              brandId,
+            },
+            connection
+          )
+        : await this.repository.createProduct(
+            identity.clientId,
+            identity.userId,
+            publicId,
+            {
+              ...normalized,
+              categoryId,
+              brandId,
+            }
+          );
       if (!row) throw new Error("Product insert unavailable");
+
+      const actorName = identity.userName?.trim() || identity.userId;
+
+      await this.auditRepository.record(
+        {
+          clientId: identity.clientId,
+          productId: row.id,
+          entityType: "product",
+          entityPublicId: row.public_id,
+          action: "product_created",
+          actorUserId: identity.userId,
+          actorNameSnapshot: actorName,
+          actorRole: identity.role,
+          summary: `Produto criado: ${row.name} (${row.sku})`,
+          changesJson: {
+            name: { before: null, after: row.name },
+            sku: { before: null, after: row.sku },
+            salePriceCents: { before: null, after: Number(row.sale_price_cents) },
+            costPriceCents: { before: null, after: Number(row.cost_price_cents) },
+            unit: { before: null, after: row.unit },
+            minimumStock: { before: null, after: row.minimum_stock },
+            ...(row.category_name || row.category
+              ? { category: { before: null, after: row.category_name ?? row.category } }
+              : {}),
+            ...(row.brand_name
+              ? { brand: { before: null, after: row.brand_name } }
+              : {}),
+          },
+          metadataJson: {
+            categoryPublicId: row.category_public_id ?? null,
+            brandPublicId: row.brand_public_id ?? null,
+          },
+        },
+        connection
+      );
+
+      if (connection) await connection.commit();
+
       const product = publicProduct(row);
-      await this.publish(identity.clientId, "erp:product.changed", { productPublicId: product.publicId, operation: "created", occurredAt: new Date().toISOString() });
+      await this.publish(identity.clientId, "erp:product.changed", {
+        productPublicId: product.publicId,
+        operation: "created",
+        occurredAt: new Date().toISOString(),
+      });
       return product;
-    } catch (error) { if (dbCode(error) === "ER_DUP_ENTRY") throw new ErpDomainError("CONFLICT", "SKU ou código de barras já cadastrado neste tenant."); throw error; }
+    } catch (error) {
+      if (connection) await connection.rollback();
+      if (dbCode(error) === "ER_DUP_ENTRY") {
+        throw new ErpDomainError("CONFLICT", "SKU ou código de barras já cadastrado neste tenant.");
+      }
+      throw error;
+    } finally {
+      if (connection) connection.release();
+    }
   }
+
   async updateProduct(identity: Identity, publicId: string, command: ProductCommand) {
     this.assertWrite(identity);
     const current = await this.repository.findProduct(identity.clientId, publicId);
@@ -122,23 +212,167 @@ export class ErpService {
       }
     }
     const { categoryId, brandId } = await this.resolveCategoryAndBrand(identity.clientId, command, current);
+
+    const connection = await this.getConnection();
     try {
-      const row = await this.repository.updateProduct(identity.clientId, publicId, identity.userId, {
-        ...normalized,
-        categoryId,
-        brandId,
-      });
+      if (connection) await connection.beginTransaction();
+
+      const row = await this.repository.updateProduct(
+        identity.clientId,
+        publicId,
+        identity.userId,
+        {
+          ...normalized,
+          categoryId,
+          brandId,
+        },
+        connection ?? undefined
+      );
       if (!row) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado.");
+
+      const beforeFields: Record<string, unknown> = {
+        name: current.name,
+        sku: current.sku,
+        barcode: current.barcode,
+        description: current.description,
+        unit: current.unit,
+        costPriceCents: Number(current.cost_price_cents),
+        salePriceCents: Number(current.sale_price_cents),
+        minimumStock: current.minimum_stock,
+        category: current.category_name ?? current.category ?? null,
+        brand: current.brand_name ?? null,
+      };
+
+      const afterFields: Record<string, unknown> = {
+        name: row.name,
+        sku: row.sku,
+        barcode: row.barcode,
+        description: row.description,
+        unit: row.unit,
+        costPriceCents: Number(row.cost_price_cents),
+        salePriceCents: Number(row.sale_price_cents),
+        minimumStock: row.minimum_stock,
+        category: row.category_name ?? row.category ?? null,
+        brand: row.brand_name ?? null,
+      };
+
+      const changes = buildDiff(beforeFields, afterFields);
+
+      let action: ProductAuditAction = "product_updated";
+      const changedKeys = Object.keys(changes ?? {});
+      if (changedKeys.length === 1 && changedKeys[0] === "category") {
+        action = "category_changed";
+      } else if (changedKeys.length === 1 && changedKeys[0] === "brand") {
+        action = "brand_changed";
+      }
+
+      const summary = action === "category_changed"
+        ? `Categoria do produto alterada de "${current.category_name ?? current.category ?? "Nenhuma"}" para "${row.category_name ?? row.category ?? "Nenhuma"}"`
+        : action === "brand_changed"
+        ? `Marca do produto alterada de "${current.brand_name ?? "Nenhuma"}" para "${row.brand_name ?? "Nenhuma"}"`
+        : `Produto atualizado: ${row.name}`;
+
+      const actorName = identity.userName?.trim() || identity.userId;
+
+      await this.auditRepository.record(
+        {
+          clientId: identity.clientId,
+          productId: row.id,
+          entityType: "product",
+          entityPublicId: row.public_id,
+          action,
+          actorUserId: identity.userId,
+          actorNameSnapshot: actorName,
+          actorRole: identity.role,
+          summary,
+          changesJson: changes,
+          metadataJson: {
+            categoryId: row.category_id ?? null,
+            categoryPublicId: row.category_public_id ?? null,
+            brandId: row.brand_id ?? null,
+            brandPublicId: row.brand_public_id ?? null,
+          },
+        },
+        connection
+      );
+
+      if (connection) await connection.commit();
+
       const product = publicProduct(row);
-      await this.publish(identity.clientId, "erp:product.changed", { productPublicId: publicId, operation: "updated", occurredAt: new Date().toISOString() });
+      await this.publish(identity.clientId, "erp:product.changed", {
+        productPublicId: publicId,
+        operation: "updated",
+        occurredAt: new Date().toISOString(),
+      });
       return product;
-    } catch (error) { if (dbCode(error) === "ER_DUP_ENTRY") throw new ErpDomainError("CONFLICT", "SKU ou código de barras já cadastrado neste tenant."); throw error; }
+    } catch (error) {
+      if (connection) await connection.rollback();
+      if (dbCode(error) === "ER_DUP_ENTRY") {
+        throw new ErpDomainError("CONFLICT", "SKU ou código de barras já cadastrado neste tenant.");
+      }
+      throw error;
+    } finally {
+      if (connection) connection.release();
+    }
   }
+
   async setProductActive(identity: Identity, publicId: string, active: boolean) {
     this.assertWrite(identity);
-    if (!await this.repository.setProductActive(identity.clientId, publicId, identity.userId, active)) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado.");
-    await this.publish(identity.clientId, "erp:product.changed", { productPublicId: publicId, operation: active ? "activated" : "deactivated", occurredAt: new Date().toISOString() });
-    return { ok: true };
+    const current = await this.repository.findProduct(identity.clientId, publicId);
+    if (!current) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado.");
+
+    const connection = await this.getConnection();
+    try {
+      if (connection) await connection.beginTransaction();
+
+      const updated = await this.repository.setProductActive(
+        identity.clientId,
+        publicId,
+        identity.userId,
+        active,
+        connection ?? undefined
+      );
+      if (!updated) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado.");
+
+      const action: ProductAuditAction = active ? "product_activated" : "product_deactivated";
+      const summary = active
+        ? `Produto ativado: ${current.name}`
+        : `Produto desativado: ${current.name}`;
+
+      const actorName = identity.userName?.trim() || identity.userId;
+
+      await this.auditRepository.record(
+        {
+          clientId: identity.clientId,
+          productId: current.id,
+          entityType: "product",
+          entityPublicId: current.public_id,
+          action,
+          actorUserId: identity.userId,
+          actorNameSnapshot: actorName,
+          actorRole: identity.role,
+          summary,
+          changesJson: {
+            active: { before: current.active === 1, after: active },
+          },
+        },
+        connection
+      );
+
+      if (connection) await connection.commit();
+
+      await this.publish(identity.clientId, "erp:product.changed", {
+        productPublicId: publicId,
+        operation: active ? "activated" : "deactivated",
+        occurredAt: new Date().toISOString(),
+      });
+      return { ok: true };
+    } catch (error) {
+      if (connection) await connection.rollback();
+      throw error;
+    } finally {
+      if (connection) connection.release();
+    }
   }
   async summary(identity: Identity) {
     const result = await this.repository.summary(identity.clientId); const metrics = result.metrics;

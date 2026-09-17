@@ -1945,6 +1945,55 @@ export const erpProductSuppliers = mysqlTable(
   ]
 );
 
+export const erpProductAuditLogs = mysqlTable(
+  "erp_product_audit_logs",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    productId: bigint("product_id", { mode: "number" }).notNull(),
+    entityType: mysqlEnum("entity_type", [
+      "product",
+      "variant",
+      "supplier_association",
+    ]).notNull(),
+    entityPublicId: varchar("entity_public_id", { length: 36 }).notNull(),
+    action: varchar({ length: 60 }).notNull(),
+    actorUserId: varchar("actor_user_id", { length: 80 }).notNull(),
+    actorNameSnapshot: varchar("actor_name_snapshot", { length: 180 }).notNull(),
+    actorRole: varchar("actor_role", { length: 20 }).notNull(),
+    summary: varchar({ length: 255 }).notNull(),
+    changesJson: json("changes_json"),
+    metadataJson: json("metadata_json"),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_epal_tenant_public").on(table.clientId, table.publicId),
+    index("idx_epal_tenant_product_created").on(
+      table.clientId,
+      table.productId,
+      table.createdAt
+    ),
+    index("idx_epal_tenant_entity").on(
+      table.clientId,
+      table.entityType,
+      table.entityPublicId
+    ),
+    index("idx_epal_tenant_created").on(table.clientId, table.createdAt),
+    index("idx_epal_tenant_actor").on(table.clientId, table.actorUserId),
+    foreignKey({
+      name: "fk_epal_product",
+      columns: [table.clientId, table.productId],
+      foreignColumns: [
+        erpProducts.clientId as AnyMySqlColumn,
+        erpProducts.id as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
+  ]
+);
+
 export const erpPurchaseOrderSequences = mysqlTable(
   "erp_purchase_order_sequences",
   {
