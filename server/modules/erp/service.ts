@@ -205,11 +205,30 @@ export class ErpService {
     if (!normalized) {
       throw new ErpDomainError("VALIDATION", "Código de barras inválido.");
     }
-    const row = await this.repository.findProductByBarcode(identity.clientId, normalized);
+    let row = await this.repository.findProductByBarcode(identity.clientId, normalized);
+    let matchedVariantPublicId: string | null = null;
+
+    if (!row && typeof this.variants?.findByBarcode === "function") {
+      try {
+        const variant = await this.variants.findByBarcode(identity.clientId, normalized);
+        if (variant) {
+          matchedVariantPublicId = variant.public_id;
+          row = await this.repository.findProduct(identity.clientId, variant.product_public_id);
+        }
+      } catch {
+        row = null;
+      }
+    }
+
     if (!row) {
       throw new ErpDomainError("NOT_FOUND", "Produto não encontrado para o código de barras informado.");
     }
-    return this.assembleProduct(identity, row);
+
+    const assembled = await this.assembleProduct(identity, row);
+    return {
+      ...assembled,
+      matchedVariantPublicId,
+    };
   }
 
   async createProduct(identity: Identity, command: ProductCommand) {

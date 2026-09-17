@@ -1580,7 +1580,11 @@ export const erpProductVariants = mysqlTable(
     clientId: varchar("client_id", { length: 80 }).notNull(),
     productId: bigint("product_id", { mode: "number" }).notNull(),
     sku: varchar({ length: 80 }).notNull(),
+    barcode: varchar({ length: 80 }),
     name: varchar({ length: 180 }),
+    costPriceCents: bigint("cost_price_cents", { mode: "number" })
+      .default(0)
+      .notNull(),
     salePriceCents: bigint("sale_price_cents", { mode: "number" }),
     combinationHash: varchar("combination_hash", { length: 64 }),
     active: tinyint().default(1).notNull(),
@@ -1598,6 +1602,7 @@ export const erpProductVariants = mysqlTable(
     uniqueIndex("uq_epv_tenant_public").on(table.clientId, table.publicId),
     uniqueIndex("uq_epv_tenant_id").on(table.clientId, table.id),
     uniqueIndex("uq_epv_tenant_sku").on(table.clientId, table.sku),
+    uniqueIndex("uq_epv_tenant_barcode").on(table.clientId, table.barcode),
     uniqueIndex("uq_epv_product_combination").on(
       table.clientId,
       table.productId,

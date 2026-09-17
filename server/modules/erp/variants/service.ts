@@ -3,7 +3,7 @@ import type { PoolConnection } from "mysql2/promise";
 import { runPostCommitBestEffort } from "../../../_core/post-commit";
 import { emitOperationalTenantEvent } from "../../whatsapp/socket/whatsapp.socket";
 import { AttributeRepository } from "../attributes/repository";
-import { normalizeSku, type OperationalRole } from "../contracts";
+import { normalizeBarcode, normalizeSku, type OperationalRole } from "../contracts";
 import { ErpDomainError } from "../errors";
 import { ErpRepository } from "../repository";
 import {
@@ -75,7 +75,9 @@ export function variantPublic(
     productPublicId: row.product_public_id,
     productName: row.product_name,
     sku: row.sku,
+    barcode: row.barcode ?? null,
     name: row.name,
+    costPriceCents: Number(row.cost_price_cents ?? 0),
     salePriceCents,
     productSalePriceCents,
     effectivePriceCents,
@@ -171,12 +173,38 @@ export class VariantService {
     return variantPublic(row, attributes);
   }
 
+  async findBySku(clientId: string, sku: string) {
+    const normalized = normalizeSku(sku);
+    if (!normalized) return null;
+    return this.repository.findBySku(clientId, normalized);
+  }
+
+  async findByBarcode(clientId: string, barcode: string) {
+    const normalized = normalizeBarcode(barcode);
+    if (!normalized) return null;
+    return this.repository.findByBarcode(clientId, normalized);
+  }
+
   async create(identity: Identity, input: VariantInput) {
     this.assertWrite(identity);
 
     const normalizedSkuVal = normalizeSku(input.sku);
     if (!normalizedSkuVal) {
       throw new ErpDomainError("VALIDATION", "SKU da variante é obrigatório.");
+    }
+
+    const normalizedBarcode = normalizeBarcode(input.barcode ?? null);
+    if (normalizedBarcode) {
+      const existingWithBarcode = await this.repository.findByBarcode(
+        identity.clientId,
+        normalizedBarcode
+      );
+      if (existingWithBarcode) {
+        throw new ErpDomainError(
+          "CONFLICT",
+          "Código de barras já cadastrado em uma variante deste tenant."
+        );
+      }
     }
 
     // 1. Cross-table SKU check: check other variants
@@ -276,7 +304,9 @@ export class VariantService {
         product.id,
         {
           sku: normalizedSkuVal,
+          barcode: normalizedBarcode,
           name: input.name ?? null,
+          costPriceCents: input.costPriceCents ?? 0,
           salePriceCents: input.salePriceCents ?? null,
           combinationHash,
           active: input.active,
@@ -300,7 +330,9 @@ export class VariantService {
           summary: `Variante criada: SKU ${row.sku}${row.name ? ` (${row.name})` : ""}`,
           changesJson: {
             sku: { before: null, after: row.sku },
+            barcode: { before: null, after: row.barcode ?? null },
             name: { before: null, after: row.name ?? null },
+            costPriceCents: { before: null, after: Number(row.cost_price_cents ?? 0) },
             salePriceCents: {
               before: null,
               after:
@@ -336,9 +368,16 @@ export class VariantService {
     } catch (error) {
       if (connection) await connection.rollback();
       if (dbCode(error) === "ER_DUP_ENTRY") {
+        const message = String((error as any)?.message ?? "");
+        if (message.includes("uq_epv_tenant_barcode")) {
+          throw new ErpDomainError(
+            "CONFLICT",
+            "Código de barras já cadastrado em uma variante deste tenant."
+          );
+        }
         throw new ErpDomainError(
           "CONFLICT",
-          "SKU ou combinação de atributos já cadastrada para este produto."
+          "SKU, código de barras ou combinação de atributos já cadastrada para este produto."
         );
       }
       throw error;
@@ -361,7 +400,9 @@ export class VariantService {
 
     const updates: {
       sku?: string;
+      barcode?: string | null;
       name?: string | null;
+      costPriceCents?: number;
       salePriceCents?: number | null;
       active?: boolean;
     } = {};
@@ -402,8 +443,35 @@ export class VariantService {
       }
     }
 
+    if (input.barcode !== undefined) {
+      const normalizedBarcode = normalizeBarcode(input.barcode);
+      if (normalizedBarcode !== (current.barcode ?? null)) {
+        if (normalizedBarcode) {
+          const existingWithBarcode = await this.repository.findByBarcode(
+            identity.clientId,
+            normalizedBarcode,
+            publicId
+          );
+          if (existingWithBarcode) {
+            throw new ErpDomainError(
+              "CONFLICT",
+              "Código de barras já cadastrado em outra variante deste tenant."
+            );
+          }
+        }
+        updates.barcode = normalizedBarcode;
+      }
+    }
+
     if (input.name !== undefined) {
       updates.name = input.name;
+    }
+
+    if (input.costPriceCents !== undefined) {
+      if (input.costPriceCents < 0 || !Number.isInteger(input.costPriceCents)) {
+        throw new ErpDomainError("VALIDATION", "Preço de custo deve ser um inteiro não-negativo.");
+      }
+      updates.costPriceCents = input.costPriceCents;
     }
 
     if (input.salePriceCents !== undefined) {
@@ -439,7 +507,9 @@ export class VariantService {
 
       const beforeFields: Record<string, unknown> = {
         sku: current.sku,
+        barcode: current.barcode ?? null,
         name: current.name ?? null,
+        costPriceCents: Number(current.cost_price_cents ?? 0),
         salePriceCents:
           current.sale_price_cents !== null && current.sale_price_cents !== undefined
             ? Number(current.sale_price_cents)
@@ -449,7 +519,9 @@ export class VariantService {
 
       const afterFields: Record<string, unknown> = {
         sku: updated.sku,
+        barcode: updated.barcode ?? null,
         name: updated.name ?? null,
+        costPriceCents: Number(updated.cost_price_cents ?? 0),
         salePriceCents:
           updated.sale_price_cents !== null && updated.sale_price_cents !== undefined
             ? Number(updated.sale_price_cents)
@@ -508,9 +580,16 @@ export class VariantService {
     } catch (error) {
       if (connection) await connection.rollback();
       if (dbCode(error) === "ER_DUP_ENTRY") {
+        const message = String((error as any)?.message ?? "");
+        if (message.includes("uq_epv_tenant_barcode")) {
+          throw new ErpDomainError(
+            "CONFLICT",
+            "Código de barras já cadastrado em outra variante deste tenant."
+          );
+        }
         throw new ErpDomainError(
           "CONFLICT",
-          "SKU já cadastrado neste tenant."
+          "SKU ou código de barras já cadastrado neste tenant."
         );
       }
       throw error;

@@ -11,7 +11,9 @@ export type VariantRow = RowDataPacket & {
   product_name: string;
   product_sale_price_cents: number;
   sku: string;
+  barcode: string | null;
   name: string | null;
+  cost_price_cents: number;
   sale_price_cents: number | null;
   combination_hash: string | null;
   active: number;
@@ -54,9 +56,9 @@ export class VariantRepository {
       parameters.push(options.productPublicId);
     }
     if (options.search) {
-      conditions.push("(v.name LIKE ? OR v.sku LIKE ? OR p.name LIKE ?)");
+      conditions.push("(v.name LIKE ? OR v.sku LIKE ? OR v.barcode LIKE ? OR p.name LIKE ?)");
       const raw = `%${options.search}%`;
-      parameters.push(raw, raw, raw);
+      parameters.push(raw, raw, raw, raw);
     }
     if (options.active !== undefined) {
       conditions.push("v.active = ?");
@@ -123,6 +125,32 @@ export class VariantRepository {
   ): Promise<VariantRow | null> {
     const conditions = ["v.client_id = ?", "v.sku = ?"];
     const parameters: string[] = [clientId, sku];
+    if (excludePublicId) {
+      conditions.push("v.public_id <> ?");
+      parameters.push(excludePublicId);
+    }
+    const [rows] = await connection.execute<VariantRow[]>(
+      `SELECT v.*,
+              p.public_id AS product_public_id,
+              p.name AS product_name,
+              p.sale_price_cents AS product_sale_price_cents
+       FROM erp_product_variants v
+       INNER JOIN erp_products p ON p.client_id = v.client_id AND p.id = v.product_id
+       WHERE ${conditions.join(" AND ")}
+       LIMIT 1`,
+      parameters
+    );
+    return rows[0] ?? null;
+  }
+
+  async findByBarcode(
+    clientId: string,
+    barcode: string,
+    excludePublicId?: string,
+    connection: Pool | PoolConnection = this.database()
+  ): Promise<VariantRow | null> {
+    const conditions = ["v.client_id = ?", "v.barcode = ?"];
+    const parameters: string[] = [clientId, barcode];
     if (excludePublicId) {
       conditions.push("v.public_id <> ?");
       parameters.push(excludePublicId);
@@ -263,7 +291,9 @@ export class VariantRepository {
     productId: number,
     data: {
       sku: string;
+      barcode?: string | null;
       name?: string | null;
+      costPriceCents?: number;
       salePriceCents?: number | null;
       combinationHash?: string | null;
       active?: boolean;
@@ -274,14 +304,16 @@ export class VariantRepository {
     if (connection) {
       const [insertResult] = await connection.execute<ResultSetHeader>(
         `INSERT INTO erp_product_variants
-          (public_id, client_id, product_id, sku, name, sale_price_cents, combination_hash, active, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (public_id, client_id, product_id, sku, barcode, name, cost_price_cents, sale_price_cents, combination_hash, active, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           publicId,
           clientId,
           productId,
           data.sku,
+          data.barcode ?? null,
           data.name ?? null,
+          data.costPriceCents ?? 0,
           data.salePriceCents ?? null,
           data.combinationHash ?? null,
           data.active ?? true ? 1 : 0,
@@ -311,14 +343,16 @@ export class VariantRepository {
 
       const [insertResult] = await conn.execute<ResultSetHeader>(
         `INSERT INTO erp_product_variants
-          (public_id, client_id, product_id, sku, name, sale_price_cents, combination_hash, active, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (public_id, client_id, product_id, sku, barcode, name, cost_price_cents, sale_price_cents, combination_hash, active, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           publicId,
           clientId,
           productId,
           data.sku,
+          data.barcode ?? null,
           data.name ?? null,
+          data.costPriceCents ?? 0,
           data.salePriceCents ?? null,
           data.combinationHash ?? null,
           data.active ?? true ? 1 : 0,
@@ -356,7 +390,9 @@ export class VariantRepository {
     userId: string,
     data: {
       sku?: string;
+      barcode?: string | null;
       name?: string | null;
+      costPriceCents?: number;
       salePriceCents?: number | null;
       active?: boolean;
     },
@@ -369,9 +405,17 @@ export class VariantRepository {
       updates.push("sku = ?");
       parameters.push(data.sku);
     }
+    if (data.barcode !== undefined) {
+      updates.push("barcode = ?");
+      parameters.push(data.barcode);
+    }
     if (data.name !== undefined) {
       updates.push("name = ?");
       parameters.push(data.name);
+    }
+    if (data.costPriceCents !== undefined) {
+      updates.push("cost_price_cents = ?");
+      parameters.push(data.costPriceCents);
     }
     if (data.salePriceCents !== undefined) {
       updates.push("sale_price_cents = ?");

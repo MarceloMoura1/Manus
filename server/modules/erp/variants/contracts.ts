@@ -23,7 +23,9 @@ export function computeCombinationHash(
 export const variantInput = z.object({
   productPublicId: z.string().uuid(),
   sku: z.string().trim().min(1).max(80),
+  barcode: z.string().trim().max(80).nullable().optional(),
   name: z.string().trim().min(1).max(180).nullable().optional(),
+  costPriceCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional().default(0),
   salePriceCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
   attributeValuePublicIds: z.array(z.string().uuid()).optional().default([]),
   active: z.boolean().optional().default(true),
@@ -31,7 +33,9 @@ export const variantInput = z.object({
 
 export const variantUpdateInput = z.object({
   sku: z.string().trim().min(1).max(80).optional(),
+  barcode: z.string().trim().max(80).nullable().optional(),
   name: z.string().trim().min(1).max(180).nullable().optional(),
+  costPriceCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   salePriceCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
   active: z.boolean().optional(),
 });
