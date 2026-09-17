@@ -6,6 +6,8 @@ import { ErpDomainError, erpTrpcCode } from "./errors";
 import { ErpService } from "./service";
 import { categoriesRouter } from "./categories/router";
 import { brandsRouter } from "./brands/router";
+import { attributesRouter } from "./attributes/router";
+import { variantsRouter } from "./variants/router";
 import { suppliersRouter } from "./suppliers/router";
 import { purchasesRouter } from "./purchases/router";
 import { salesRouter } from "./sales/router";
@@ -26,6 +28,8 @@ export const erpRouter = router({
   summary: megadeskProcedure.query(({ ctx }) => runErp(() => service.summary(identity(ctx)))),
   categories: categoriesRouter,
   brands: brandsRouter,
+  attributes: attributesRouter,
+  variants: variantsRouter,
   suppliers: suppliersRouter,
   purchases: purchasesRouter,
   sales: salesRouter,

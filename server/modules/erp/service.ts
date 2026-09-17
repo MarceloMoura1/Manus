@@ -8,6 +8,7 @@ import { ErpRepository, type MovementRow, type ProductListOptions, type ProductR
 
 import { CategoryRepository } from "./categories/repository";
 import { BrandRepository } from "./brands/repository";
+import { VariantRepository } from "./variants/repository";
 
 type ProductCommand = {
   name: string; sku: string; barcode: string | null; description: string | null; category: string | null;
@@ -50,7 +51,8 @@ export class ErpService {
     private readonly wait: (milliseconds: number) => Promise<void> = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
     private readonly publisher: ErpEventPublisher = socketPublisher,
     private readonly categories = new CategoryRepository(),
-    private readonly brands = new BrandRepository()
+    private readonly brands = new BrandRepository(),
+    private readonly variants = new VariantRepository()
   ) {}
   private assertWrite(identity: Identity) { if (!canWriteErp(identity.role)) throw new ErpDomainError("FORBIDDEN", "Seu perfil não permite alterar o ERP."); }
   private async publish(clientId: string, event: "erp:product.changed" | "erp:stock.changed", payload: ErpEvent) { await runPostCommitBestEffort([() => this.publisher.publish(clientId, event, payload)]); }
@@ -60,8 +62,8 @@ export class ErpService {
     command: ProductCommand,
     current?: ProductRow
   ): Promise<{ categoryId: number | null; brandId: number | null }> {
-    let resolvedCategoryId: number | null = current?.category_id ?? null;
-    let resolvedBrandId: number | null = current?.brand_id ?? null;
+    let resolvedCategoryId: number | null = current ? current.category_id : null;
+    let resolvedBrandId: number | null = current ? current.brand_id : null;
 
     if (command.categoryPublicId !== undefined) {
       if (command.categoryPublicId === null) {
@@ -90,10 +92,15 @@ export class ErpService {
   async getProduct(identity: Identity, publicId: string) { const row = await this.repository.findProduct(identity.clientId, publicId); if (!row) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado."); return publicProduct(row); }
   async createProduct(identity: Identity, command: ProductCommand) {
     this.assertWrite(identity);
+    const normalized = normalizedProduct(command);
+    const variantWithSku = await this.variants.findBySku(identity.clientId, normalized.sku);
+    if (variantWithSku) {
+      throw new ErpDomainError("CONFLICT", "SKU já cadastrado em uma variante deste tenant.");
+    }
     const { categoryId, brandId } = await this.resolveCategoryAndBrand(identity.clientId, command);
     try {
       const row = await this.repository.createProduct(identity.clientId, identity.userId, randomUUID(), {
-        ...normalizedProduct(command),
+        ...normalized,
         categoryId,
         brandId,
       });
@@ -107,10 +114,17 @@ export class ErpService {
     this.assertWrite(identity);
     const current = await this.repository.findProduct(identity.clientId, publicId);
     if (!current) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado.");
+    const normalized = normalizedProduct(command);
+    if (normalized.sku !== current.sku) {
+      const variantWithSku = await this.variants.findBySku(identity.clientId, normalized.sku);
+      if (variantWithSku) {
+        throw new ErpDomainError("CONFLICT", "SKU já cadastrado em uma variante deste tenant.");
+      }
+    }
     const { categoryId, brandId } = await this.resolveCategoryAndBrand(identity.clientId, command, current);
     try {
       const row = await this.repository.updateProduct(identity.clientId, publicId, identity.userId, {
-        ...normalizedProduct(command),
+        ...normalized,
         categoryId,
         brandId,
       });

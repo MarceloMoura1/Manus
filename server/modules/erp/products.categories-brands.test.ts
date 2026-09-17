@@ -38,6 +38,7 @@ describe("Product Categories & Brands Integration Rules", () => {
   let productRepo: any;
   let categoryRepo: any;
   let brandRepo: any;
+  let variantRepo: any;
   let publisher: any;
   let service: ErpService;
 
@@ -68,13 +69,17 @@ describe("Product Categories & Brands Integration Rules", () => {
       find: vi.fn(),
       findById: vi.fn(),
     };
+    variantRepo = {
+      findBySku: vi.fn().mockResolvedValue(null),
+    };
     publisher = { publish: vi.fn() };
     service = new ErpService(
       productRepo,
       undefined,
       publisher,
       categoryRepo,
-      brandRepo
+      brandRepo,
+      variantRepo
     );
   });
 

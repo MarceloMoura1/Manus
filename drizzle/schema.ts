@@ -1498,6 +1498,175 @@ export const erpProducts = mysqlTable(
   ]
 );
 
+export const erpProductAttributeTypes = mysqlTable(
+  "erp_product_attribute_types",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    name: varchar({ length: 120 }).notNull(),
+    slug: varchar({ length: 120 }).notNull(),
+    active: tinyint().default(1).notNull(),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    updatedBy: varchar("updated_by", { length: 80 }),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_epat_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_epat_tenant_id").on(table.clientId, table.id),
+    uniqueIndex("uq_epat_tenant_name").on(table.clientId, table.name),
+    uniqueIndex("uq_epat_tenant_slug").on(table.clientId, table.slug),
+    index("idx_epat_tenant_active").on(table.clientId, table.active),
+  ]
+);
+
+export const erpProductAttributeValues = mysqlTable(
+  "erp_product_attribute_values",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    attributeTypeId: bigint("attribute_type_id", { mode: "number" }).notNull(),
+    name: varchar({ length: 120 }).notNull(),
+    slug: varchar({ length: 120 }).notNull(),
+    active: tinyint().default(1).notNull(),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    updatedBy: varchar("updated_by", { length: 80 }),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_epav_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_epav_tenant_id").on(table.clientId, table.id),
+    uniqueIndex("uq_epav_tenant_type_name").on(
+      table.clientId,
+      table.attributeTypeId,
+      table.name
+    ),
+    uniqueIndex("uq_epav_tenant_type_slug").on(
+      table.clientId,
+      table.attributeTypeId,
+      table.slug
+    ),
+    index("idx_epav_tenant_type").on(table.clientId, table.attributeTypeId),
+    index("idx_epav_tenant_active").on(table.clientId, table.active),
+    foreignKey({
+      name: "fk_epav_attribute_type",
+      columns: [table.clientId, table.attributeTypeId],
+      foreignColumns: [
+        erpProductAttributeTypes.clientId as AnyMySqlColumn,
+        erpProductAttributeTypes.id as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const erpProductVariants = mysqlTable(
+  "erp_product_variants",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    productId: bigint("product_id", { mode: "number" }).notNull(),
+    sku: varchar({ length: 80 }).notNull(),
+    name: varchar({ length: 180 }),
+    salePriceCents: bigint("sale_price_cents", { mode: "number" }),
+    combinationHash: varchar("combination_hash", { length: 64 }),
+    active: tinyint().default(1).notNull(),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    updatedBy: varchar("updated_by", { length: 80 }),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_epv_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_epv_tenant_id").on(table.clientId, table.id),
+    uniqueIndex("uq_epv_tenant_sku").on(table.clientId, table.sku),
+    uniqueIndex("uq_epv_product_combination").on(
+      table.clientId,
+      table.productId,
+      table.combinationHash
+    ),
+    index("idx_epv_tenant_product").on(table.clientId, table.productId),
+    index("idx_epv_tenant_active").on(table.clientId, table.active),
+    foreignKey({
+      name: "fk_epv_product",
+      columns: [table.clientId, table.productId],
+      foreignColumns: [
+        erpProducts.clientId as AnyMySqlColumn,
+        erpProducts.id as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const erpProductVariantAttributeValues = mysqlTable(
+  "erp_product_variant_attribute_values",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    variantId: bigint("variant_id", { mode: "number" }).notNull(),
+    attributeTypeId: bigint("attribute_type_id", { mode: "number" }).notNull(),
+    attributeValueId: bigint("attribute_value_id", { mode: "number" }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_epvav_variant_type").on(
+      table.clientId,
+      table.variantId,
+      table.attributeTypeId
+    ),
+    uniqueIndex("uq_epvav_variant_value").on(
+      table.clientId,
+      table.variantId,
+      table.attributeValueId
+    ),
+    index("idx_epvav_tenant_value").on(table.clientId, table.attributeValueId),
+    foreignKey({
+      name: "fk_epvav_variant",
+      columns: [table.clientId, table.variantId],
+      foreignColumns: [
+        erpProductVariants.clientId as AnyMySqlColumn,
+        erpProductVariants.id as AnyMySqlColumn,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "fk_epvav_attribute_type",
+      columns: [table.clientId, table.attributeTypeId],
+      foreignColumns: [
+        erpProductAttributeTypes.clientId as AnyMySqlColumn,
+        erpProductAttributeTypes.id as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_epvav_attribute_value",
+      columns: [table.clientId, table.attributeValueId],
+      foreignColumns: [
+        erpProductAttributeValues.clientId as AnyMySqlColumn,
+        erpProductAttributeValues.id as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
+  ]
+);
+
 export const erpProductMedia = mysqlTable(
   "erp_product_media",
   {
