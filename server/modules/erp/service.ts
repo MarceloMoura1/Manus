@@ -6,7 +6,15 @@ import { canWriteErp, millisQuantity, normalizeBarcode, normalizeQuantity, norma
 import { ErpDomainError } from "./errors";
 import { ErpRepository, type MovementRow, type ProductListOptions, type ProductRow } from "./repository";
 
-type ProductCommand = { name: string; sku: string; barcode: string | null; description: string | null; category: string | null; unit: "unit" | "kg" | "liter" | "meter"; costPriceCents: number; salePriceCents: number; minimumStock: string };
+import { CategoryRepository } from "./categories/repository";
+import { BrandRepository } from "./brands/repository";
+
+type ProductCommand = {
+  name: string; sku: string; barcode: string | null; description: string | null; category: string | null;
+  categoryPublicId?: string | null;
+  brandPublicId?: string | null;
+  unit: "unit" | "kg" | "liter" | "meter"; costPriceCents: number; salePriceCents: number; minimumStock: string;
+};
 type MovementCommand = { productPublicId: string; type: "initial" | "manual_in" | "manual_out" | "adjustment_in" | "adjustment_out"; quantity: string; reason: string; idempotencyKey: string };
 type Identity = { clientId: string; userId: string; role: OperationalRole };
 type ErpEvent = { productPublicId: string; movementPublicId?: string; operation: "created" | "updated" | "activated" | "deactivated" | "movement_created" | "movement_reversed"; occurredAt: string };
@@ -21,20 +29,74 @@ export function projectStockBalance(previous: string, quantity: string, directio
   return millisQuantity(projected);
 }
 function normalizedProduct(input: ProductCommand): ProductCommand { return { ...input, name: input.name.trim().replace(/\s+/g, " "), sku: normalizeSku(input.sku), barcode: normalizeBarcode(input.barcode), description: input.description?.trim() || null, category: input.category?.trim() || null, minimumStock: normalizeQuantity(input.minimumStock) }; }
-function publicProduct(row: ProductRow) { return { publicId: row.public_id, name: row.name, sku: row.sku, barcode: row.barcode, description: row.description, category: row.category, unit: row.unit, costPriceCents: Number(row.cost_price_cents), salePriceCents: Number(row.sale_price_cents), minimumStock: row.minimum_stock, active: row.active === 1, hasImage: row.primary_media_id !== null, quantity: row.quantity, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function publicProduct(row: ProductRow) {
+  return {
+    publicId: row.public_id, name: row.name, sku: row.sku, barcode: row.barcode, description: row.description,
+    category: row.category,
+    categoryId: row.category_id ?? null,
+    categoryPublicId: row.category_public_id ?? null,
+    categoryDetails: row.category_public_id ? { publicId: row.category_public_id, name: row.category_name ?? "" } : null,
+    brandId: row.brand_id ?? null,
+    brandPublicId: row.brand_public_id ?? null,
+    brandDetails: row.brand_public_id ? { publicId: row.brand_public_id, name: row.brand_name ?? "" } : null,
+    unit: row.unit, costPriceCents: Number(row.cost_price_cents), salePriceCents: Number(row.sale_price_cents), minimumStock: row.minimum_stock, active: row.active === 1, hasImage: row.primary_media_id !== null, quantity: row.quantity, createdAt: row.created_at, updatedAt: row.updated_at,
+  };
+}
 function publicMovement(row: MovementRow) { return { publicId: row.public_id, productPublicId: row.product_public_id, productName: row.product_name, sku: row.sku, type: row.type, direction: row.direction, quantity: row.quantity, previousBalance: row.previous_balance, resultingBalance: row.resulting_balance, reason: row.reason, referenceType: row.reference_type, referenceId: row.reference_id, createdBy: row.created_by, createdAt: row.created_at, reversed: row.reversed === 1, reversalPublicId: row.reversal_public_id ?? null }; }
 
 export class ErpService {
-  constructor(private readonly repository = new ErpRepository(), private readonly wait: (milliseconds: number) => Promise<void> = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)), private readonly publisher: ErpEventPublisher = socketPublisher) {}
+  constructor(
+    private readonly repository = new ErpRepository(),
+    private readonly wait: (milliseconds: number) => Promise<void> = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
+    private readonly publisher: ErpEventPublisher = socketPublisher,
+    private readonly categories = new CategoryRepository(),
+    private readonly brands = new BrandRepository()
+  ) {}
   private assertWrite(identity: Identity) { if (!canWriteErp(identity.role)) throw new ErpDomainError("FORBIDDEN", "Seu perfil não permite alterar o ERP."); }
   private async publish(clientId: string, event: "erp:product.changed" | "erp:stock.changed", payload: ErpEvent) { await runPostCommitBestEffort([() => this.publisher.publish(clientId, event, payload)]); }
+
+  private async resolveCategoryAndBrand(
+    clientId: string,
+    command: ProductCommand,
+    current?: ProductRow
+  ): Promise<{ categoryId: number | null; brandId: number | null }> {
+    let resolvedCategoryId: number | null = current?.category_id ?? null;
+    let resolvedBrandId: number | null = current?.brand_id ?? null;
+
+    if (command.categoryPublicId !== undefined) {
+      if (command.categoryPublicId === null) {
+        resolvedCategoryId = null;
+      } else {
+        const cat = await this.categories.find(clientId, command.categoryPublicId);
+        if (!cat) throw new ErpDomainError("NOT_FOUND", "Categoria não encontrada neste tenant.");
+        resolvedCategoryId = cat.id;
+      }
+    }
+
+    if (command.brandPublicId !== undefined) {
+      if (command.brandPublicId === null) {
+        resolvedBrandId = null;
+      } else {
+        const br = await this.brands.find(clientId, command.brandPublicId);
+        if (!br) throw new ErpDomainError("NOT_FOUND", "Marca não encontrada neste tenant.");
+        resolvedBrandId = br.id;
+      }
+    }
+
+    return { categoryId: resolvedCategoryId, brandId: resolvedBrandId };
+  }
 
   async listProducts(identity: Identity, options: ProductListOptions) { const result = await this.repository.listProducts(identity.clientId, options); return { ...result, items: result.items.map(publicProduct), page: options.page, pageSize: options.pageSize, totalPages: Math.ceil(result.total / options.pageSize), canWrite: canWriteErp(identity.role) }; }
   async getProduct(identity: Identity, publicId: string) { const row = await this.repository.findProduct(identity.clientId, publicId); if (!row) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado."); return publicProduct(row); }
   async createProduct(identity: Identity, command: ProductCommand) {
     this.assertWrite(identity);
+    const { categoryId, brandId } = await this.resolveCategoryAndBrand(identity.clientId, command);
     try {
-      const row = await this.repository.createProduct(identity.clientId, identity.userId, randomUUID(), normalizedProduct(command));
+      const row = await this.repository.createProduct(identity.clientId, identity.userId, randomUUID(), {
+        ...normalizedProduct(command),
+        categoryId,
+        brandId,
+      });
       if (!row) throw new Error("Product insert unavailable");
       const product = publicProduct(row);
       await this.publish(identity.clientId, "erp:product.changed", { productPublicId: product.publicId, operation: "created", occurredAt: new Date().toISOString() });
@@ -43,8 +105,15 @@ export class ErpService {
   }
   async updateProduct(identity: Identity, publicId: string, command: ProductCommand) {
     this.assertWrite(identity);
+    const current = await this.repository.findProduct(identity.clientId, publicId);
+    if (!current) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado.");
+    const { categoryId, brandId } = await this.resolveCategoryAndBrand(identity.clientId, command, current);
     try {
-      const row = await this.repository.updateProduct(identity.clientId, publicId, identity.userId, normalizedProduct(command));
+      const row = await this.repository.updateProduct(identity.clientId, publicId, identity.userId, {
+        ...normalizedProduct(command),
+        categoryId,
+        brandId,
+      });
       if (!row) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado.");
       const product = publicProduct(row);
       await this.publish(identity.clientId, "erp:product.changed", { productPublicId: publicId, operation: "updated", occurredAt: new Date().toISOString() });

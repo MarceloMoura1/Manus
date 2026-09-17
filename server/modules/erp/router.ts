@@ -4,6 +4,8 @@ import { megadeskProcedure, router } from "../../_core/trpc";
 import { productInput, productListInput, productPublicId, stockListInput, stockMovementInput } from "./contracts";
 import { ErpDomainError, erpTrpcCode } from "./errors";
 import { ErpService } from "./service";
+import { categoriesRouter } from "./categories/router";
+import { brandsRouter } from "./brands/router";
 import { suppliersRouter } from "./suppliers/router";
 import { purchasesRouter } from "./purchases/router";
 import { salesRouter } from "./sales/router";
@@ -22,6 +24,8 @@ export async function runErp<T>(operation: () => Promise<T>): Promise<T> { try {
 
 export const erpRouter = router({
   summary: megadeskProcedure.query(({ ctx }) => runErp(() => service.summary(identity(ctx)))),
+  categories: categoriesRouter,
+  brands: brandsRouter,
   suppliers: suppliersRouter,
   purchases: purchasesRouter,
   sales: salesRouter,

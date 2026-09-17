@@ -8,6 +8,8 @@ export const productPublicId = z.string().uuid();
 export const productInput = z.object({
   name: z.string().trim().min(2).max(180), sku: z.string().trim().min(1).max(80),
   barcode: optionalText(80), description: optionalText(2_000), category: optionalText(120),
+  categoryPublicId: z.string().uuid().nullable().optional(),
+  brandPublicId: z.string().uuid().nullable().optional(),
   unit: z.enum(erpUnits), costPriceCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   salePriceCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   minimumStock: z.string().trim().regex(/^\d{1,15}(?:\.\d{1,3})?$/),
@@ -15,7 +17,10 @@ export const productInput = z.object({
 
 export const productListInput = z.object({
   search: z.string().trim().max(120).default(""), active: z.boolean().optional(),
-  category: z.string().trim().max(120).optional(), stock: z.enum(["all", "low", "empty", "available", "normal"]).default("all"),
+  category: z.string().trim().max(120).optional(),
+  categoryPublicId: z.string().uuid().optional(),
+  brandPublicId: z.string().uuid().optional(),
+  stock: z.enum(["all", "low", "empty", "available", "normal"]).default("all"),
   sort: z.enum(["name", "sku", "createdAt", "stock"]).default("name"), direction: z.enum(["asc", "desc"]).default("asc"),
   page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(100).default(20),
 });

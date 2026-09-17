@@ -3,7 +3,10 @@ import { getPool } from "../../db";
 
 export type ProductRow = RowDataPacket & {
   id: number; public_id: string; client_id: string; name: string; sku: string; barcode: string | null;
-  description: string | null; category: string | null; unit: "unit" | "kg" | "liter" | "meter";
+  description: string | null; category: string | null; category_id: number | null;
+  category_public_id?: string | null; category_name?: string | null;
+  brand_id: number | null; brand_public_id?: string | null; brand_name?: string | null;
+  unit: "unit" | "kg" | "liter" | "meter";
   cost_price_cents: number; sale_price_cents: number; minimum_stock: string; active: number;
   primary_media_id: number | null;
   created_by: string; updated_by: string | null; created_at: string; updated_at: string; quantity: string;
@@ -16,7 +19,12 @@ export type MovementRow = RowDataPacket & {
   payload_hash: string; reversal_of: number | null; created_by: string; created_at: string; reversed?: number; reversal_public_id?: string | null;
 };
 
-export type ProductListOptions = { search: string; active?: boolean; category?: string; stock: "all" | "low" | "empty" | "available" | "normal"; sort: "name" | "sku" | "createdAt" | "stock"; direction: "asc" | "desc"; page: number; pageSize: number };
+export type ProductListOptions = {
+  search: string; active?: boolean; category?: string;
+  categoryId?: number; categoryPublicId?: string; brandId?: number; brandPublicId?: string;
+  stock: "all" | "low" | "empty" | "available" | "normal";
+  sort: "name" | "sku" | "createdAt" | "stock"; direction: "asc" | "desc"; page: number; pageSize: number;
+};
 
 export class ErpRepository {
   constructor(private pool?: Pool) {}
@@ -30,35 +38,39 @@ export class ErpRepository {
     if (options.search) { conditions.push("(p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)"); const value = `%${options.search}%`; values.push(value, value, value); }
     if (options.active !== undefined) { conditions.push("p.active = ?"); values.push(options.active ? 1 : 0); }
     if (options.category) { conditions.push("p.category = ?"); values.push(options.category); }
+    if (options.categoryId) { conditions.push("p.category_id = ?"); values.push(options.categoryId); }
+    if (options.categoryPublicId) { conditions.push("cat.public_id = ?"); values.push(options.categoryPublicId); }
+    if (options.brandId) { conditions.push("p.brand_id = ?"); values.push(options.brandId); }
+    if (options.brandPublicId) { conditions.push("br.public_id = ?"); values.push(options.brandPublicId); }
     if (options.stock === "empty") conditions.push("COALESCE(b.quantity, 0) = 0");
     if (options.stock === "low") conditions.push("COALESCE(b.quantity, 0) > 0 AND COALESCE(b.quantity, 0) <= p.minimum_stock");
     if (options.stock === "available") conditions.push("COALESCE(b.quantity, 0) > 0");
     if (options.stock === "normal") conditions.push("COALESCE(b.quantity, 0) > p.minimum_stock");
     const where = conditions.join(" AND ");
     const order = { name: "p.name", sku: "p.sku", createdAt: "p.created_at", stock: "quantity" }[options.sort];
-    const [countRows] = await this.database().execute<RowDataPacket[]>(`SELECT COUNT(*) total FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id WHERE ${where}`, values);
-    const [rows] = await this.database().execute<ProductRow[]>(`SELECT p.*, COALESCE(b.quantity, '0.000') quantity FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id WHERE ${where} ORDER BY ${order} ${options.direction === "desc" ? "DESC" : "ASC"} LIMIT ${limit} OFFSET ${offset}`, values);
+    const [countRows] = await this.database().execute<RowDataPacket[]>(`SELECT COUNT(*) total FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id LEFT JOIN erp_product_categories cat ON cat.client_id=p.client_id AND cat.id=p.category_id LEFT JOIN erp_product_brands br ON br.client_id=p.client_id AND br.id=p.brand_id WHERE ${where}`, values);
+    const [rows] = await this.database().execute<ProductRow[]>(`SELECT p.*, COALESCE(b.quantity, '0.000') quantity, cat.public_id AS category_public_id, cat.name AS category_name, br.public_id AS brand_public_id, br.name AS brand_name FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id LEFT JOIN erp_product_categories cat ON cat.client_id=p.client_id AND cat.id=p.category_id LEFT JOIN erp_product_brands br ON br.client_id=p.client_id AND br.id=p.brand_id WHERE ${where} ORDER BY ${order} ${options.direction === "desc" ? "DESC" : "ASC"} LIMIT ${limit} OFFSET ${offset}`, values);
     return { items: rows, total: Number(countRows[0]?.total ?? 0) };
   }
 
   async findProduct(clientId: string, publicId: string, connection: Pool | PoolConnection = this.database(), lock = false): Promise<ProductRow | null> {
-    const [rows] = await connection.execute<ProductRow[]>(`SELECT p.*, COALESCE(b.quantity, '0.000') quantity FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id WHERE p.client_id=? AND p.public_id=? LIMIT 1${lock ? " FOR UPDATE" : ""}`, [clientId, publicId]);
+    const [rows] = await connection.execute<ProductRow[]>(`SELECT p.*, COALESCE(b.quantity, '0.000') quantity, cat.public_id AS category_public_id, cat.name AS category_name, br.public_id AS brand_public_id, br.name AS brand_name FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id LEFT JOIN erp_product_categories cat ON cat.client_id=p.client_id AND cat.id=p.category_id LEFT JOIN erp_product_brands br ON br.client_id=p.client_id AND br.id=p.brand_id WHERE p.client_id=? AND p.public_id=? LIMIT 1${lock ? " FOR UPDATE" : ""}`, [clientId, publicId]);
     return rows[0] ?? null;
   }
 
-  async createProduct(clientId: string, userId: string, publicId: string, input: { name: string; sku: string; barcode: string | null; description: string | null; category: string | null; unit: string; costPriceCents: number; salePriceCents: number; minimumStock: string }) {
+  async createProduct(clientId: string, userId: string, publicId: string, input: { name: string; sku: string; barcode: string | null; description: string | null; category: string | null; categoryId: number | null; brandId: number | null; unit: string; costPriceCents: number; salePriceCents: number; minimumStock: string }) {
     const connection = await this.database().getConnection();
     try {
       await connection.beginTransaction();
-      const [result] = await connection.execute<ResultSetHeader>("INSERT INTO erp_products (public_id,client_id,name,sku,barcode,description,category,unit,cost_price_cents,sale_price_cents,minimum_stock,active,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?)", [publicId, clientId, input.name, input.sku, input.barcode, input.description, input.category, input.unit, input.costPriceCents, input.salePriceCents, input.minimumStock, userId]);
+      const [result] = await connection.execute<ResultSetHeader>("INSERT INTO erp_products (public_id,client_id,name,sku,barcode,description,category,category_id,brand_id,unit,cost_price_cents,sale_price_cents,minimum_stock,active,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)", [publicId, clientId, input.name, input.sku, input.barcode, input.description, input.category, input.categoryId, input.brandId, input.unit, input.costPriceCents, input.salePriceCents, input.minimumStock, userId]);
       await connection.execute("INSERT INTO erp_stock_balances (client_id,product_id,quantity,version) VALUES (?,?,0,0)", [clientId, result.insertId]);
       await connection.commit();
     } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); }
     return this.findProduct(clientId, publicId);
   }
 
-  async updateProduct(clientId: string, publicId: string, userId: string, input: { name: string; sku: string; barcode: string | null; description: string | null; category: string | null; unit: string; costPriceCents: number; salePriceCents: number; minimumStock: string }) {
-    const [result] = await this.database().execute<ResultSetHeader>("UPDATE erp_products SET name=?,sku=?,barcode=?,description=?,category=?,unit=?,cost_price_cents=?,sale_price_cents=?,minimum_stock=?,updated_by=? WHERE client_id=? AND public_id=?", [input.name, input.sku, input.barcode, input.description, input.category, input.unit, input.costPriceCents, input.salePriceCents, input.minimumStock, userId, clientId, publicId]);
+  async updateProduct(clientId: string, publicId: string, userId: string, input: { name: string; sku: string; barcode: string | null; description: string | null; category: string | null; categoryId: number | null; brandId: number | null; unit: string; costPriceCents: number; salePriceCents: number; minimumStock: string }) {
+    const [result] = await this.database().execute<ResultSetHeader>("UPDATE erp_products SET name=?,sku=?,barcode=?,description=?,category=?,category_id=?,brand_id=?,unit=?,cost_price_cents=?,sale_price_cents=?,minimum_stock=?,updated_by=? WHERE client_id=? AND public_id=?", [input.name, input.sku, input.barcode, input.description, input.category, input.categoryId, input.brandId, input.unit, input.costPriceCents, input.salePriceCents, input.minimumStock, userId, clientId, publicId]);
     return result.affectedRows > 0 ? this.findProduct(clientId, publicId) : null;
   }
 
