@@ -12,6 +12,7 @@ export const REQUIRED_RUNTIME_MAIN_TABLES = [
   "megadesk_evolution_sessions", "megadesk_domain_ia_conversations",
   "megadesk_domain_ia_conversation_history", "megadesk_ia_token_usage",
   "megadesk_operational_sessions",
+  "erp_product_categories", "erp_product_brands",
   "erp_products", "erp_stock_balances", "erp_stock_movements", "erp_suppliers", "erp_purchase_order_sequences",
   "erp_purchase_orders", "erp_purchase_order_items", "erp_purchase_order_history", "erp_purchase_order_receipts", "erp_purchase_order_receipt_items",
   "erp_sale_order_sequences", "erp_sale_orders", "erp_sale_order_items", "erp_sale_order_history", "erp_sale_order_fulfillments", "erp_sale_order_fulfillment_items",

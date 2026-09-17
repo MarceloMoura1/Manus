@@ -1345,6 +1345,77 @@ export const megadeskUserShortcuts = mysqlTable(
   ]
 );
 
+export const erpProductCategories = mysqlTable(
+  "erp_product_categories",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    parentId: bigint("parent_id", { mode: "number" }),
+    depth: tinyint().default(0).notNull(),
+    name: varchar({ length: 120 }).notNull(),
+    slug: varchar({ length: 120 }).notNull(),
+    active: tinyint().default(1).notNull(),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    updatedBy: varchar("updated_by", { length: 80 }),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_epc_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_epc_tenant_id").on(table.clientId, table.id),
+    uniqueIndex("uq_epc_tenant_slug").on(table.clientId, table.slug),
+    uniqueIndex("uq_epc_tenant_name_parent").on(
+      table.clientId,
+      table.parentId,
+      table.name
+    ),
+    index("idx_epc_tenant_active").on(table.clientId, table.active),
+    index("idx_epc_tenant_parent").on(table.clientId, table.parentId),
+    foreignKey({
+      name: "fk_epc_parent",
+      columns: [table.clientId, table.parentId],
+      foreignColumns: [
+        table.clientId as AnyMySqlColumn,
+        table.id as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const erpProductBrands = mysqlTable(
+  "erp_product_brands",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    name: varchar({ length: 120 }).notNull(),
+    slug: varchar({ length: 120 }).notNull(),
+    active: tinyint().default(1).notNull(),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    updatedBy: varchar("updated_by", { length: 80 }),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_epb_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_epb_tenant_id").on(table.clientId, table.id),
+    uniqueIndex("uq_epb_tenant_name").on(table.clientId, table.name),
+    uniqueIndex("uq_epb_tenant_slug").on(table.clientId, table.slug),
+    index("idx_epb_tenant_active").on(table.clientId, table.active),
+  ]
+);
+
 export const erpProducts = mysqlTable(
   "erp_products",
   {
@@ -1356,6 +1427,8 @@ export const erpProducts = mysqlTable(
     barcode: varchar({ length: 80 }),
     description: text(),
     category: varchar({ length: 120 }),
+    categoryId: bigint("category_id", { mode: "number" }),
+    brandId: bigint("brand_id", { mode: "number" }),
     unit: mysqlEnum(["unit", "kg", "liter", "meter"]).notNull(),
     costPriceCents: bigint("cost_price_cents", { mode: "number" })
       .default(0)
@@ -1395,6 +1468,8 @@ export const erpProducts = mysqlTable(
       table.clientId,
       table.primaryMediaId
     ),
+    index("idx_erp_products_category").on(table.clientId, table.categoryId),
+    index("idx_erp_products_brand").on(table.clientId, table.brandId),
     foreignKey({
       name: "fk_erp_products_primary_media",
       columns: [table.clientId, table.id, table.primaryMediaId],
@@ -1402,6 +1477,22 @@ export const erpProducts = mysqlTable(
         erpProductMedia.clientId as AnyMySqlColumn,
         erpProductMedia.productId as AnyMySqlColumn,
         erpProductMedia.id as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_products_category",
+      columns: [table.clientId, table.categoryId],
+      foreignColumns: [
+        erpProductCategories.clientId as AnyMySqlColumn,
+        erpProductCategories.id as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_products_brand",
+      columns: [table.clientId, table.brandId],
+      foreignColumns: [
+        erpProductBrands.clientId as AnyMySqlColumn,
+        erpProductBrands.id as AnyMySqlColumn,
       ],
     }).onDelete("restrict"),
   ]

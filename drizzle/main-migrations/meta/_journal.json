@@ -178,6 +178,13 @@
       "when": 1789417319005,
       "tag": "0024_plain_umar",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1789613473733,
+      "tag": "0025_material_serpent_society",
+      "breakpoints": true
     }
   ]
 }
