@@ -19,11 +19,13 @@ import {
   Info,
   Layers,
   Package,
+  Plus,
   ShieldAlert,
   Tag,
   Truck,
   User,
 } from "lucide-react";
+import { ProductVariantDialog, type ProductVariantItem } from "./ProductVariantDialog";
 
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../../server/routers";
@@ -174,6 +176,13 @@ export type ProductDetailViewProps = {
     refetch?: () => void;
   };
   onRetry?: () => void;
+  onAddVariant?: () => void;
+  onEditVariant?: (variant: NonNullable<ProductDetail>["variants"][number]) => void;
+  onToggleVariantActive?: (variant: NonNullable<ProductDetail>["variants"][number]) => void;
+  onDeleteVariant?: (variant: NonNullable<ProductDetail>["variants"][number]) => void;
+  variantActionPending?: boolean;
+  variantActionMessage?: string | null;
+  variantActionError?: string | null;
 };
 
 export function ProductDetailView({
@@ -188,6 +197,13 @@ export function ProductDetailView({
   suppliersState,
   historyState,
   onRetry,
+  onAddVariant,
+  onEditVariant,
+  onToggleVariantActive,
+  onDeleteVariant,
+  variantActionPending,
+  variantActionMessage,
+  variantActionError,
 }: ProductDetailViewProps) {
   // 1. Estado de Carregamento
   if (isLoading) {
@@ -468,10 +484,56 @@ export function ProductDetailView({
         {/* ABA 2: VARIANTES */}
         {currentTab === "variants" && (
           <div className="space-y-4" data-testid="tab-variants-content">
+            {/* Barra de Ações de Variantes */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">Variantes do Produto</h2>
+                <p className="text-xs text-slate-500">
+                  Gerencie as variações comerciais (tamanhos, cores, voltagens) com SKUs e preços próprios.
+                </p>
+              </div>
+              {canWrite && onAddVariant && (
+                <Button
+                  size="sm"
+                  onClick={onAddVariant}
+                  data-testid="add-variant-btn"
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  Nova variante
+                </Button>
+              )}
+            </div>
+
+            {variantActionMessage && (
+              <p
+                role="status"
+                className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-800"
+                data-testid="variant-action-message"
+              >
+                {variantActionMessage}
+              </p>
+            )}
+
+            {variantActionError && (
+              <p
+                role="alert"
+                className="rounded-lg bg-red-50 border border-red-200 p-3 text-xs text-red-800"
+                data-testid="variant-action-error"
+              >
+                {sanitizeErrorMessage(variantActionError)}
+              </p>
+            )}
+
             {product.variants?.length === 0 ? (
               <ErpEmptyState
                 title="Nenhuma variante cadastrada para este produto."
                 description="Produtos simples não possuem variantes. Cadastre variantes quando o produto tiver opções de tamanho, cor ou outros atributos."
+                action={
+                  canWrite && onAddVariant
+                    ? { label: "Adicionar primeira variante", onClick: onAddVariant }
+                    : undefined
+                }
               />
             ) : (
               <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -484,6 +546,9 @@ export function ProductDetailView({
                       <th className="p-3.5 text-right">Preço Efetivo</th>
                       <th className="p-3.5 text-right">Custo Próprio</th>
                       <th className="p-3.5 text-center">Status</th>
+                      {canWrite && (onEditVariant || onToggleVariantActive || onDeleteVariant) && (
+                        <th className="p-3.5 text-right">Ações</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -516,6 +581,48 @@ export function ProductDetailView({
                               label={v.active ? "Ativo" : "Inativo"}
                             />
                           </td>
+                          {canWrite && (onEditVariant || onToggleVariantActive || onDeleteVariant) && (
+                            <td className="p-3.5 text-right whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-1.5">
+                                {onEditVariant && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 px-2.5 text-xs"
+                                    data-testid={`edit-variant-btn-${v.publicId}`}
+                                    onClick={() => onEditVariant(v)}
+                                    disabled={variantActionPending}
+                                  >
+                                    Editar
+                                  </Button>
+                                )}
+                                {onToggleVariantActive && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 px-2.5 text-xs"
+                                    data-testid={`toggle-variant-active-btn-${v.publicId}`}
+                                    onClick={() => onToggleVariantActive(v)}
+                                    disabled={variantActionPending}
+                                  >
+                                    {v.active ? "Inativar" : "Ativar"}
+                                  </Button>
+                                )}
+                                {onDeleteVariant && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 px-2.5 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 border-red-200"
+                                    data-testid={`delete-variant-btn-${v.publicId}`}
+                                    onClick={() => onDeleteVariant(v)}
+                                    disabled={variantActionPending}
+                                  >
+                                    Excluir
+                                  </Button>
+                                )}
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       );
                     })}
@@ -704,6 +811,12 @@ export function ProductDetailPanel({
   canWrite?: boolean;
 }) {
   const [currentTab, setCurrentTab] = React.useState<"general" | "variants" | "suppliers" | "history">("general");
+  const [variantModalOpen, setVariantModalOpen] = React.useState(false);
+  const [selectedVariant, setSelectedVariant] = React.useState<ProductVariantItem | null>(null);
+  const [variantActionMessage, setVariantActionMessage] = React.useState<string | null>(null);
+  const [variantActionError, setVariantActionError] = React.useState<string | null>(null);
+
+  const utils = trpc.useUtils();
 
   const productQuery = trpc.erp.products.detail.useQuery({ publicId: productPublicId });
 
@@ -717,29 +830,108 @@ export function ProductDetailPanel({
     { enabled: currentTab === "history" }
   );
 
+  const setActiveMutation = trpc.erp.variants.setActive.useMutation();
+  const deleteMutation = trpc.erp.variants.delete.useMutation();
+
+  const actionRunningRef = React.useRef(false);
+  const variantActionPending = setActiveMutation.isPending || deleteMutation.isPending;
+
+  const handleAddVariant = () => {
+    setSelectedVariant(null);
+    setVariantActionMessage(null);
+    setVariantActionError(null);
+    setVariantModalOpen(true);
+  };
+
+  const handleEditVariant = (v: NonNullable<ProductDetail>["variants"][number]) => {
+    setSelectedVariant(v);
+    setVariantActionMessage(null);
+    setVariantActionError(null);
+    setVariantModalOpen(true);
+  };
+
+  const handleToggleVariantActive = async (v: NonNullable<ProductDetail>["variants"][number]) => {
+    if (actionRunningRef.current || variantActionPending) return;
+    actionRunningRef.current = true;
+    try {
+      setVariantActionError(null);
+      await setActiveMutation.mutateAsync({
+        publicId: v.publicId,
+        active: !v.active,
+      });
+      await utils.erp.products.detail.invalidate({ publicId: productPublicId });
+      setVariantActionMessage(v.active ? `Variante ${v.sku} inativada com sucesso.` : `Variante ${v.sku} ativada com sucesso.`);
+    } catch (err) {
+      setVariantActionError(err instanceof Error ? err.message : "Erro ao alterar status da variante.");
+    } finally {
+      actionRunningRef.current = false;
+    }
+  };
+
+  const handleDeleteVariant = async (v: NonNullable<ProductDetail>["variants"][number]) => {
+    if (actionRunningRef.current || variantActionPending) return;
+    if (!window.confirm(`Deseja realmente excluir a variante ${v.sku}? Esta ação não pode ser desfeita.`)) {
+      return;
+    }
+    actionRunningRef.current = true;
+    try {
+      setVariantActionError(null);
+      await deleteMutation.mutateAsync({ publicId: v.publicId });
+      await utils.erp.products.detail.invalidate({ publicId: productPublicId });
+      setVariantActionMessage(`Variante ${v.sku} excluída com sucesso.`);
+    } catch (err) {
+      setVariantActionError(err instanceof Error ? err.message : "Erro ao excluir variante.");
+    } finally {
+      actionRunningRef.current = false;
+    }
+  };
+
   return (
-    <ProductDetailView
-      product={productQuery.data}
-      isLoading={productQuery.isLoading}
-      error={productQuery.error}
-      onBack={onBack}
-      onEdit={onEdit}
-      canWrite={canWrite}
-      currentTab={currentTab}
-      onTabChange={setCurrentTab}
-      suppliersState={{
-        isLoading: suppliersQuery.isLoading,
-        error: suppliersQuery.error,
-        items: suppliersQuery.data?.items,
-        refetch: () => void suppliersQuery.refetch(),
-      }}
-      historyState={{
-        isLoading: historyQuery.isLoading,
-        error: historyQuery.error,
-        items: historyQuery.data?.items,
-        refetch: () => void historyQuery.refetch(),
-      }}
-      onRetry={() => void productQuery.refetch()}
-    />
+    <>
+      <ProductDetailView
+        product={productQuery.data}
+        isLoading={productQuery.isLoading}
+        error={productQuery.error}
+        onBack={onBack}
+        onEdit={onEdit}
+        canWrite={canWrite}
+        currentTab={currentTab}
+        onTabChange={setCurrentTab}
+        suppliersState={{
+          isLoading: suppliersQuery.isLoading,
+          error: suppliersQuery.error,
+          items: suppliersQuery.data?.items,
+          refetch: () => void suppliersQuery.refetch(),
+        }}
+        historyState={{
+          isLoading: historyQuery.isLoading,
+          error: historyQuery.error,
+          items: historyQuery.data?.items,
+          refetch: () => void historyQuery.refetch(),
+        }}
+        onRetry={() => void productQuery.refetch()}
+        onAddVariant={handleAddVariant}
+        onEditVariant={handleEditVariant}
+        onToggleVariantActive={handleToggleVariantActive}
+        onDeleteVariant={handleDeleteVariant}
+        variantActionPending={variantActionPending}
+        variantActionMessage={variantActionMessage}
+        variantActionError={variantActionError}
+      />
+
+      <ProductVariantDialog
+        open={variantModalOpen}
+        onOpenChange={setVariantModalOpen}
+        productPublicId={productPublicId}
+        variant={selectedVariant}
+        onSuccess={() => {
+          setVariantActionMessage(
+            selectedVariant
+              ? "Variante atualizada com sucesso."
+              : "Variante cadastrada com sucesso."
+          );
+        }}
+      />
+    </>
   );
 }
