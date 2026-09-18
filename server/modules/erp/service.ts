@@ -53,7 +53,7 @@ function publicProduct(row: ProductRow) {
     unit: row.unit, costPriceCents: Number(row.cost_price_cents), salePriceCents: Number(row.sale_price_cents), minimumStock: row.minimum_stock, active: row.active === 1, hasImage: row.primary_media_id !== null, quantity: row.quantity, createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
-function publicMovement(row: MovementRow) { return { publicId: row.public_id, productPublicId: row.product_public_id, productName: row.product_name, sku: row.sku, type: row.type, direction: row.direction, quantity: row.quantity, previousBalance: row.previous_balance, resultingBalance: row.resulting_balance, reason: row.reason, referenceType: row.reference_type, referenceId: row.reference_id, createdBy: row.created_by, createdAt: row.created_at, reversed: row.reversed === 1, reversalPublicId: row.reversal_public_id ?? null }; }
+function publicMovement(row: MovementRow) { return { publicId: row.public_id, productPublicId: row.product_public_id, productName: row.product_name, sku: row.sku, unit: row.unit, type: row.type, direction: row.direction, quantity: row.quantity, previousBalance: row.previous_balance, resultingBalance: row.resulting_balance, reason: row.reason, referenceType: row.reference_type, referenceId: row.reference_id, createdBy: row.created_by, createdAt: row.created_at, reversed: row.reversed === 1, reversalPublicId: row.reversal_public_id ?? null }; }
 
 export class ErpService {
   constructor(
@@ -567,7 +567,7 @@ export class ErpService {
         await connection.beginTransaction();
         const replay = await this.findIdempotent(connection, identity.clientId, idempotencyKey);
         if (replay) { if (replay.payload_hash !== payloadHash) throw new ErpDomainError("IDEMPOTENCY_CONFLICT", "Esta operação já foi usada com dados diferentes."); await connection.commit(); return { movement: publicMovement(replay), changed: false }; }
-        const [originalRows] = await connection.execute<MovementRow[]>("SELECT m.*,p.public_id product_public_id,p.name product_name,p.sku FROM erp_stock_movements m INNER JOIN erp_products p ON p.id=m.product_id AND p.client_id=m.client_id WHERE m.client_id=? AND m.public_id=? FOR UPDATE", [identity.clientId, movementPublicId]);
+        const [originalRows] = await connection.execute<MovementRow[]>("SELECT m.*,p.public_id product_public_id,p.name product_name,p.sku,p.unit FROM erp_stock_movements m INNER JOIN erp_products p ON p.id=m.product_id AND p.client_id=m.client_id WHERE m.client_id=? AND m.public_id=? FOR UPDATE", [identity.clientId, movementPublicId]);
         const original = originalRows[0];
         if (!original) throw new ErpDomainError("NOT_FOUND", "Movimentação não encontrada.");
         if (original.type === "reversal") throw new ErpDomainError("VALIDATION", "Um estorno não pode ser estornado.");
@@ -591,7 +591,7 @@ export class ErpService {
     return outcome.movement;
   }
 
-  private async findIdempotent(connection: PoolConnection, clientId: string, key: string): Promise<MovementRow | null> { const [rows] = await connection.execute<MovementRow[]>("SELECT m.*,p.public_id product_public_id,p.name product_name,p.sku FROM erp_stock_movements m INNER JOIN erp_products p ON p.id=m.product_id AND p.client_id=m.client_id WHERE m.client_id=? AND m.idempotency_key=? LIMIT 1 FOR UPDATE", [clientId, key]); return rows[0] ?? null; }
-  private async findByPublicId(connection: PoolConnection, clientId: string, publicId: string): Promise<MovementRow | null> { const [rows] = await connection.execute<MovementRow[]>("SELECT m.*,p.public_id product_public_id,p.name product_name,p.sku FROM erp_stock_movements m INNER JOIN erp_products p ON p.id=m.product_id AND p.client_id=m.client_id WHERE m.client_id=? AND m.public_id=? LIMIT 1", [clientId, publicId]); return rows[0] ?? null; }
+  private async findIdempotent(connection: PoolConnection, clientId: string, key: string): Promise<MovementRow | null> { const [rows] = await connection.execute<MovementRow[]>("SELECT m.*,p.public_id product_public_id,p.name product_name,p.sku,p.unit FROM erp_stock_movements m INNER JOIN erp_products p ON p.id=m.product_id AND p.client_id=m.client_id WHERE m.client_id=? AND m.idempotency_key=? LIMIT 1 FOR UPDATE", [clientId, key]); return rows[0] ?? null; }
+  private async findByPublicId(connection: PoolConnection, clientId: string, publicId: string): Promise<MovementRow | null> { const [rows] = await connection.execute<MovementRow[]>("SELECT m.*,p.public_id product_public_id,p.name product_name,p.sku,p.unit FROM erp_stock_movements m INNER JOIN erp_products p ON p.id=m.product_id AND p.client_id=m.client_id WHERE m.client_id=? AND m.public_id=? LIMIT 1", [clientId, publicId]); return rows[0] ?? null; }
   private async withRetry<T>(operation: () => Promise<T>): Promise<T> { for (let attempt = 0; attempt < 3; attempt += 1) { try { return await operation(); } catch (error) { if (!isRetryableStockError(error) || attempt === 2) throw error; await this.wait(20 * (attempt + 1)); } } throw new Error("Unreachable retry state"); }
 }

@@ -14,6 +14,7 @@ export type ProductRow = RowDataPacket & {
 
 export type MovementRow = RowDataPacket & {
   id: number; public_id: string; client_id: string; product_id: number; product_public_id: string; product_name: string; sku: string;
+  unit: "unit" | "kg" | "liter" | "meter";
   type: string; direction: "in" | "out"; quantity: string; previous_balance: string; resulting_balance: string;
   reason: string; reference_type: string | null; reference_id: string | null; idempotency_key: string;
   payload_hash: string; reversal_of: number | null; created_by: string; created_at: string; reversed?: number; reversal_public_id?: string | null;
@@ -229,7 +230,7 @@ export class ErpRepository {
     if (filters.to) { conditions.push("m.created_at<=?"); values.push(filters.to); }
     const where = conditions.join(" AND ");
     const [countRows] = await this.database().execute<RowDataPacket[]>(`SELECT COUNT(*) total FROM erp_stock_movements m INNER JOIN erp_products p ON p.id=m.product_id AND p.client_id=m.client_id WHERE ${where}`, values);
-    const [rows] = await this.database().execute<MovementRow[]>(`SELECT m.*,p.public_id product_public_id,p.name product_name,p.sku,EXISTS(SELECT 1 FROM erp_stock_movements reversal WHERE reversal.client_id=m.client_id AND reversal.reversal_of=m.id) reversed,(SELECT reversal.public_id FROM erp_stock_movements reversal WHERE reversal.client_id=m.client_id AND reversal.reversal_of=m.id LIMIT 1) reversal_public_id FROM erp_stock_movements m INNER JOIN erp_products p ON p.id=m.product_id AND p.client_id=m.client_id WHERE ${where} ORDER BY m.created_at DESC,m.id DESC LIMIT ${limit} OFFSET ${offset}`, values);
+    const [rows] = await this.database().execute<MovementRow[]>(`SELECT m.*,p.public_id product_public_id,p.name product_name,p.sku,p.unit,EXISTS(SELECT 1 FROM erp_stock_movements reversal WHERE reversal.client_id=m.client_id AND reversal.reversal_of=m.id) reversed,(SELECT reversal.public_id FROM erp_stock_movements reversal WHERE reversal.client_id=m.client_id AND reversal.reversal_of=m.id LIMIT 1) reversal_public_id FROM erp_stock_movements m INNER JOIN erp_products p ON p.id=m.product_id AND p.client_id=m.client_id WHERE ${where} ORDER BY m.created_at DESC,m.id DESC LIMIT ${limit} OFFSET ${offset}`, values);
     return { items: rows, total: Number(countRows[0]?.total ?? 0) };
   }
 
