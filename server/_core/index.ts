@@ -36,6 +36,7 @@ export const MEGADESK_CORS_ALLOWED_HEADERS = [
   "x-user-role",
   "x-trpc-source",
   "Cookie",
+  "x-client-attempt-id",
   "x-megadesk-incoming-bubble-color",
   "x-megadesk-outgoing-bubble-color",
 ] as const;

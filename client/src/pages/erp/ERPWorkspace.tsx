@@ -19,6 +19,7 @@ import { ErpPageHeader } from "@/components/erp/ErpPageHeader";
 import { Pagination } from "@/components/erp/Pagination";
 import { ErpEmptyState } from "@/components/erp/ErpEmptyState";
 import { ProductDetailPanel } from "./ProductDetailPanel";
+import { productMediaUrl } from "@/lib/trpc-url";
 import {
   ProductFormDialog,
   type ProductForm,
@@ -131,12 +132,40 @@ function Summary({ onNavigate }: { onNavigate: (section: ErpSection) => void }) 
   </div>;
 }
 
-function ProductThumbnail({product,className="h-16 w-16",version=0}:{product:{publicId:string;name:string;hasImage?:boolean};className?:string;version?:number}) {
-  const [failed,setFailed]=React.useState(false);
-  React.useEffect(()=>setFailed(false),[product.publicId,product.hasImage,version]);
-  const frame=`${className} shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm`;
-  if(!product.hasImage||failed)return <div className={`${frame} flex items-center justify-center`} data-testid="product-image-placeholder" aria-label={`Sem foto para ${product.name}`}><ImageIcon className="h-5 w-5 text-slate-400"/></div>;
-  return <img src={`/api/products/${product.publicId}/image?variant=thumbnail&v=${version}`} alt={`Foto de ${product.name}`} loading="lazy" decoding="async" className={`${frame} object-cover`} onError={()=>setFailed(true)}/>;
+export function ProductThumbnail({
+  product,
+  className = "h-16 w-16",
+  version = 0,
+}: {
+  product: { publicId: string; name: string; hasImage?: boolean | null };
+  className?: string;
+  version?: number;
+}) {
+  const [failed, setFailed] = React.useState(false);
+  React.useEffect(() => setFailed(false), [product.publicId, product.hasImage, version]);
+  const frame = `${className} shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm`;
+  if (!product.hasImage || failed) {
+    return (
+      <div
+        className={`${frame} flex items-center justify-center`}
+        data-testid="product-image-placeholder"
+        aria-label={`Sem foto para ${product.name}`}
+      >
+        <ImageIcon className="h-5 w-5 text-slate-400" />
+      </div>
+    );
+  }
+  return (
+    <img
+      src={productMediaUrl(`/api/products/${product.publicId}/image?variant=thumbnail&v=${version}`)}
+      crossOrigin="use-credentials"
+      alt={`Foto de ${product.name}`}
+      loading="lazy"
+      decoding="async"
+      className={`${frame} object-cover`}
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 function Products() {
@@ -179,7 +208,7 @@ function Products() {
       if (photo || removePhoto) {
         setMediaPending(true);
         try {
-          const response = await fetch(`/api/products/${product.publicId}/image`,
+          const response = await fetch(productMediaUrl(`/api/products/${product.publicId}/image`),
             photo
               ? {
                   method: "PUT",
@@ -222,7 +251,28 @@ function Products() {
       setMediaPending(false);
     }
   };
-  const edit = (product: NonNullable<typeof query.data>["items"][number]) => {clearPhoto();setPhotoPreview(product.hasImage?`/api/products/${product.publicId}/image?variant=thumbnail&v=${mediaVersions[product.publicId]??0}`:null);setForm({ publicId:product.publicId,name:product.name,sku:product.sku,barcode:product.barcode??"",category:product.categoryRelational?.name??product.category??"",categoryPublicId:product.categoryPublicId??product.categoryRelational?.publicId??null,brandPublicId:product.brandPublicId??product.brand?.publicId??null,unit:product.unit,cost:(product.costPriceCents/100).toFixed(2).replace(".",","),sale:(product.salePriceCents/100).toFixed(2).replace(".",","),minimumStock:product.minimumStock,description:product.description??"" });};
+  const edit = (product: NonNullable<typeof query.data>["items"][number]) => {
+    clearPhoto();
+    setPhotoPreview(
+      product.hasImage
+        ? productMediaUrl(`/api/products/${product.publicId}/image?variant=thumbnail&v=${mediaVersions[product.publicId] ?? 0}`)
+        : null
+    );
+    setForm({
+      publicId: product.publicId,
+      name: product.name,
+      sku: product.sku,
+      barcode: product.barcode ?? "",
+      category: product.categoryRelational?.name ?? product.category ?? "",
+      categoryPublicId: product.categoryPublicId ?? product.categoryRelational?.publicId ?? null,
+      brandPublicId: product.brandPublicId ?? product.brand?.publicId ?? null,
+      unit: product.unit,
+      cost: (product.costPriceCents / 100).toFixed(2).replace(".", ","),
+      sale: (product.salePriceCents / 100).toFixed(2).replace(".", ","),
+      minimumStock: product.minimumStock,
+      description: product.description ?? "",
+    });
+  };
   const reset = () => { setSearch("");setActive("all");setCategory("");setStock("all");setSort("name");setDirection("asc");setPage(1); };
   const canWrite=query.data?.canWrite===true;
 
@@ -294,24 +344,7 @@ function Products() {
         <p className="text-3xl font-bold tracking-tight">{query.data?.total ?? 0}<span className="ml-2 text-sm font-medium text-slate-300">itens</span></p>
       </div>
     </section>
-    {viewMode === "table" && query.data?.items.length ? (
-      <section aria-label="Destaques do catálogo" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {query.data.items.slice(0,4).map(product => (
-          <article
-            key={product.publicId}
-            onClick={() => setSelectedProductPublicId(product.publicId)}
-            className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm cursor-pointer hover:border-blue-400 hover:shadow-md transition-all"
-          >
-            <ProductThumbnail product={product} className="h-20 w-20" version={mediaVersions[product.publicId]}/>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-bold text-slate-950">{product.name}</p>
-              <p className="mt-1 truncate text-xs text-slate-500">{product.sku}</p>
-              <p className="mt-2 text-sm font-bold text-slate-900">{money.format(product.salePriceCents/100)}</p>
-            </div>
-          </article>
-        ))}
-      </section>
-    ) : null}
+
     {message&&<p role="status" className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">{message}</p>}
     <div className="grid gap-3 rounded-2xl border bg-white p-4 sm:grid-cols-2 xl:grid-cols-4">
       <label className="relative sm:col-span-2"><span className="sr-only">Pesquisar produtos</span><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400"/><Input className="pl-9" value={search} onChange={e=>{setSearch(e.target.value);resetPage()}} placeholder="Nome, SKU ou código de barras"/></label>

@@ -35,3 +35,12 @@ export function resolveUserPersonalizationBackgroundUrl(value: string, hostname 
   if (!isUserPersonalizationBackgroundPath(value)) return value;
   return `${userPersonalizationBackgroundUrl(hostname)}${value.slice(USER_PERSONALIZATION_BACKGROUND_PATH.length)}`;
 }
+
+export function productMediaUrl(
+  path: string,
+  hostname = typeof window === "undefined" ? "localhost" : window.location.hostname || "localhost",
+): string {
+  const apiOrigin = trpcBaseUrl(hostname).replace(/\/api\/trpc$/, "");
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${apiOrigin}${normalizedPath}`;
+}

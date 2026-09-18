@@ -786,8 +786,8 @@ describe("ProductDetailPanel — P1-A9 Adversarial Hardening Suite", () => {
     expect(markupLoadingB).not.toContain("MOU-ERG-001");
   });
 
-  // A10: Product Images Section & Gallery Render
-  it("A10. renderiza seção de Imagens do Produto com foto principal e aviso de gap de schema", () => {
+  // A10: Product Images Section renders gallery UI — migration tech text MUST NOT be visible
+  it("A10. renderiza seção de Imagens do Produto sem texto técnico de migration exposto", () => {
     const markup = renderToStaticMarkup(
       React.createElement(ProductDetailView, {
         product: baseProduct,
@@ -800,8 +800,10 @@ describe("ProductDetailPanel — P1-A9 Adversarial Hardening Suite", () => {
     expect(markup).toContain("data-testid=\"product-images-section\"");
     expect(markup).toContain("Galeria de Imagens");
     expect(markup).toContain("Principal");
-    expect(markup).toContain("0030");
-    expect(markup).toContain("P1_GALLERY_SCHEMA_GAP=YES");
+    // Texto técnico de migration NÃO deve estar exposto ao usuário final
+    expect(markup).not.toContain("Migration 0030");
+    expect(markup).not.toContain("P1_GALLERY_SCHEMA_GAP=YES");
+    expect(markup).not.toContain("0030_robust_umar");
   });
 
   // A11: Upload and Zoom Controls Presence when canWrite is true
@@ -847,5 +849,108 @@ describe("ProductDetailPanel — P1-A9 Adversarial Hardening Suite", () => {
     expect(markup).toContain("data-testid=\"gallery-thumbnails-strip\"");
     expect(markup).toContain("data-testid=\"gallery-thumb-primary\"");
     expect(markup).toContain("Principal");
+  });
+});
+
+describe("ProductDetailPanel — fetch credentials & URL correctness (static source scan)", () => {
+  it("CREDENTIALS_INCLUDE: todos os fetch de product-media usam credentials: include", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const source = fs.readFileSync(
+      path.resolve(process.cwd(), "client/src/pages/erp/ProductDetailPanel.tsx"),
+      "utf8"
+    );
+
+    const fetchBlocks = source.split("await fetch(").slice(1).map(block => block.slice(0, 400));
+    expect(fetchBlocks.length).toBeGreaterThanOrEqual(5);
+    for (const block of fetchBlocks) {
+      expect(block, `fetch sem credentials: ${block.slice(0, 120)}`).toMatch(/credentials:\s*["']include["']/);
+      expect(block, `fetch sem productMediaUrl: ${block.slice(0, 120)}`).toContain("productMediaUrl");
+    }
+  });
+
+  it("TECHNICAL_MIGRATION_TEXT_REMOVED: texto técnico da migration 0030 não está no source", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const source = fs.readFileSync(
+      path.resolve(process.cwd(), "client/src/pages/erp/ProductDetailPanel.tsx"),
+      "utf8"
+    );
+    expect(source).not.toContain("Migration 0030");
+    expect(source).not.toContain("P1_GALLERY_SCHEMA_GAP=YES");
+    expect(source).not.toContain("0030_robust_umar");
+    expect(source).not.toContain("Galeria Multi-Imagem Ativa");
+  });
+
+  it("ATTEMPT_ID: header x-client-attempt-id está presente nos fetch de upload POST e PUT", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const source = fs.readFileSync(
+      path.resolve(process.cwd(), "client/src/pages/erp/ProductDetailPanel.tsx"),
+      "utf8"
+    );
+    const attemptIdCount = (source.match(/x-client-attempt-id/g) ?? []).length;
+    expect(attemptIdCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it("IMG_TAGS_USE_CROSS_ORIGIN: tags img da galeria usam crossOrigin use-credentials e productMediaUrl", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const source = fs.readFileSync(
+      path.resolve(process.cwd(), "client/src/pages/erp/ProductDetailPanel.tsx"),
+      "utf8"
+    );
+    const imgMatches = source.match(/<img[\s\S]*?src=\{productMediaUrl\([\s\S]*?\)\}[\s\S]*?\/>/g) ?? [];
+    expect(imgMatches.length).toBeGreaterThanOrEqual(4);
+    for (const img of imgMatches) {
+      expect(img).toContain('crossOrigin="use-credentials"');
+    }
+  });
+});
+
+describe("ERPWorkspace — Products view mode correctness (static source scan)", () => {
+  it("LIST_MODE_HAS_NO_PRODUCT_CARD_STRIP: não existe seção de Destaques do catálogo condicionada a viewMode=table", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const source = fs.readFileSync(
+      path.resolve(process.cwd(), "client/src/pages/erp/ERPWorkspace.tsx"),
+      "utf8"
+    );
+    expect(source).not.toContain('viewMode === "table" && query.data?.items.length');
+    expect(source).not.toContain('aria-label="Destaques do catálogo"');
+  });
+
+  it("CATALOG_VISUAL_HAS_CARDS: cards de catálogo visual estão condicionados a viewMode=cards", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const source = fs.readFileSync(
+      path.resolve(process.cwd(), "client/src/pages/erp/ERPWorkspace.tsx"),
+      "utf8"
+    );
+    expect(source).toContain('viewMode === "cards"');
+    expect(source).toContain('data-testid="catalog-visual-grid"');
+    expect(source).toContain('data-testid="product-catalog-card"');
+  });
+
+  it("FORM_UPLOAD_CREDENTIALS: fetch de upload no ERPWorkspace usa credentials: include e productMediaUrl", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const source = fs.readFileSync(
+      path.resolve(process.cwd(), "client/src/pages/erp/ERPWorkspace.tsx"),
+      "utf8"
+    );
+    expect(source).toContain('credentials: "include"');
+    expect(source).toContain('"x-client-attempt-id"');
+    expect(source).toContain('productMediaUrl(`/api/products/${product.publicId}/image`)');
+  });
+
+  it("PRODUCT_THUMBNAIL_USES_CROSS_ORIGIN: ProductThumbnail usa crossOrigin use-credentials", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const source = fs.readFileSync(
+      path.resolve(process.cwd(), "client/src/pages/erp/ERPWorkspace.tsx"),
+      "utf8"
+    );
+    expect(source).toContain('crossOrigin="use-credentials"');
   });
 });

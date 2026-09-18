@@ -1,5 +1,6 @@
 import React from "react";
 import { trpc } from "@/lib/trpc";
+import { productMediaUrl } from "@/lib/trpc-url";
 import { formatDateTime } from "@/lib/conversationDateTime";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -848,7 +849,7 @@ export function ProductImageGallerySection({
 
   const loadGallery = React.useCallback(async () => {
     try {
-      const res = await fetch(`/api/products/${productPublicId}/images`);
+      const res = await fetch(productMediaUrl(`/api/products/${productPublicId}/images`), { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
         if (typeof data === "object" && data !== null && "items" in data && Array.isArray(data.items)) {
@@ -902,9 +903,13 @@ export function ProductImageGallerySection({
     setFeedbackError(null);
     setFeedbackSuccess(null);
     try {
-      const res = await fetch(`/api/products/${productPublicId}/images`, {
+      const res = await fetch(productMediaUrl(`/api/products/${productPublicId}/images`), {
         method: "POST",
-        headers: { "Content-Type": file.type },
+        credentials: "include",
+        headers: {
+          "Content-Type": file.type,
+          "x-client-attempt-id": crypto.randomUUID(),
+        },
         body: file,
       });
       if (!res.ok) {
@@ -955,9 +960,13 @@ export function ProductImageGallerySection({
     setFeedbackError(null);
     setFeedbackSuccess(null);
     try {
-      const res = await fetch(`/api/products/${productPublicId}/image`, {
+      const res = await fetch(productMediaUrl(`/api/products/${productPublicId}/image`), {
         method: "PUT",
-        headers: { "Content-Type": file.type },
+        credentials: "include",
+        headers: {
+          "Content-Type": file.type,
+          "x-client-attempt-id": crypto.randomUUID(),
+        },
         body: file,
       });
       if (!res.ok) {
@@ -998,8 +1007,9 @@ export function ProductImageGallerySection({
     setFeedbackError(null);
     setFeedbackSuccess(null);
     try {
-      const res = await fetch(`/api/products/${productPublicId}/images/${activeItem.mediaId}/primary`, {
+      const res = await fetch(productMediaUrl(`/api/products/${productPublicId}/images/${activeItem.mediaId}/primary`), {
         method: "PUT",
+        credentials: "include",
       });
       if (!res.ok) {
         let errMsg = "Não foi possível definir como foto principal.";
@@ -1041,8 +1051,9 @@ export function ProductImageGallerySection({
     setFeedbackError(null);
     setFeedbackSuccess(null);
     try {
-      const res = await fetch(`/api/products/${productPublicId}/images/${activeItem.mediaId}`, {
+      const res = await fetch(productMediaUrl(`/api/products/${productPublicId}/images/${activeItem.mediaId}`), {
         method: "DELETE",
+        credentials: "include",
       });
       if (!res.ok) {
         let errMsg = "Não foi possível remover a imagem.";
@@ -1109,7 +1120,8 @@ export function ProductImageGallerySection({
           {activeItem ? (
             <>
               <img
-                src={`/api/products/${productPublicId}/images/${activeItem.mediaId}?v=${timestamp}`}
+                src={productMediaUrl(`/api/products/${productPublicId}/images/${activeItem.mediaId}?v=${timestamp}`)}
+                crossOrigin="use-credentials"
                 alt={`${productName} — Imagem`}
                 className="h-full w-full object-contain p-3 transition-transform duration-300 group-hover:scale-[1.02] cursor-pointer"
                 onClick={() => setZoomOpen(true)}
@@ -1136,7 +1148,8 @@ export function ProductImageGallerySection({
           ) : hasImage ? (
             <>
               <img
-                src={`/api/products/${productPublicId}/image?v=${timestamp}`}
+                src={productMediaUrl(`/api/products/${productPublicId}/image?v=${timestamp}`)}
+                crossOrigin="use-credentials"
                 alt={`${productName} — Imagem Principal`}
                 className="h-full w-full object-contain p-3 transition-transform duration-300 group-hover:scale-[1.02] cursor-pointer"
                 onClick={() => setZoomOpen(true)}
@@ -1281,7 +1294,8 @@ export function ProductImageGallerySection({
                     title={it.isPrimary ? "Foto Principal" : `Foto ${idx + 1}`}
                   >
                     <img
-                      src={`/api/products/${productPublicId}/images/${it.mediaId}?variant=thumbnail&v=${timestamp}`}
+                      src={productMediaUrl(`/api/products/${productPublicId}/images/${it.mediaId}?variant=thumbnail&v=${timestamp}`)}
+                      crossOrigin="use-credentials"
                       alt={`Miniatura ${idx + 1}`}
                       className="h-full w-full object-cover"
                     />
@@ -1301,7 +1315,8 @@ export function ProductImageGallerySection({
                 title="Foto Principal"
               >
                 <img
-                  src={`/api/products/${productPublicId}/image?variant=thumbnail&v=${timestamp}`}
+                  src={productMediaUrl(`/api/products/${productPublicId}/image?variant=thumbnail&v=${timestamp}`)}
+                  crossOrigin="use-credentials"
                   alt="Miniatura Principal"
                   className="h-full w-full object-cover"
                 />
@@ -1326,15 +1341,7 @@ export function ProductImageGallerySection({
             )}
           </div>
 
-          <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3 text-xs text-blue-900 space-y-1 mt-2">
-            <div className="flex items-center gap-1.5 font-semibold text-blue-950">
-              <Info className="h-3.5 w-3.5 text-blue-700 shrink-0" />
-              <span>Galeria Multi-Imagem Ativa (Migration 0030)</span>
-            </div>
-            <p className="text-[11px] leading-relaxed text-blue-800">
-              A migration 0030 resolveu a restrição de unicidade anterior (P1_GALLERY_SCHEMA_GAP=YES). Agora o catálogo suporta múltiplos arquivos por produto com ordenação determinística e seleção canônica da foto principal.
-            </p>
-          </div>
+
         </div>
       </div>
 
@@ -1364,7 +1371,8 @@ export function ProductImageGallerySection({
             </div>
             <div className="flex items-center justify-center p-4">
               <img
-                src={`/api/products/${productPublicId}/images/${activeItem.mediaId}?v=${timestamp}`}
+                src={productMediaUrl(`/api/products/${productPublicId}/images/${activeItem.mediaId}?v=${timestamp}`)}
+                crossOrigin="use-credentials"
                 alt={productName}
                 className="max-h-[75vh] w-auto object-contain rounded-xl"
               />

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isUserPersonalizationBackgroundPath,
+  productMediaUrl,
   resolveUserPersonalizationBackgroundUrl,
   ticketAttachmentUrl,
   trpcBaseUrl,
@@ -19,6 +20,10 @@ describe("tRPC transport URL", () => {
         .toBe("https://api.megadesk.online/api/user-personalization/background");
       expect(ticketAttachmentUrl("ticket a", "attachment/b", hostname))
         .toBe("https://api.megadesk.online/api/chamados/ticket%20a/attachments/attachment%2Fb/file");
+      expect(productMediaUrl("/api/products/prod-123/images", hostname))
+        .toBe("https://api.megadesk.online/api/products/prod-123/images");
+      expect(productMediaUrl("api/products/prod-123/image?variant=thumbnail", hostname))
+        .toBe("https://api.megadesk.online/api/products/prod-123/image?variant=thumbnail");
     },
   );
 
@@ -28,6 +33,10 @@ describe("tRPC transport URL", () => {
       .toBe("/api/trpc/megadesk.sendAttachment");
     expect(ticketAttachmentUrl("ticket-a", "attachment-a", hostname))
       .toBe("/api/chamados/ticket-a/attachments/attachment-a/file");
+    expect(productMediaUrl("/api/products/prod-123/images", hostname))
+      .toBe("/api/products/prod-123/images");
+    expect(productMediaUrl("api/products/prod-123/image?variant=thumbnail", hostname))
+      .toBe("/api/products/prod-123/image?variant=thumbnail");
   });
 
   it("keeps an opaque custom-image revision on the authenticated API origin", () => {
