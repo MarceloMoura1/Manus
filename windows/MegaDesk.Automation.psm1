@@ -994,16 +994,26 @@ function Get-MegaDeskMigrationDeltaState {
     if ($expectedNewMigrationPaths.Count -gt 0 -and (($mainMigrations -join "`n") -cne ($expectedNewMigrationPaths -join "`n"))) {
       return [pscustomobject]@{ status = 'DIVERGENT'; migrations = @(); message = 'Journal candidato e arquivos SQL novos divergem.'; classification = 'DIVERGENT' }
     }
-    # A canonical migration validator change is permitted only when the
-    # accompanying historical snapshot repair is independently proven safe.
+    # A canonical migration validator change is permitted when:
+    # 1. An accompanying historical snapshot repair is independently proven safe, OR
+    # 2. It accompanies verified new canonical MAIN migrations (with no divergent historical repair).
+    $hasSingleCanonicalMigrationsChange = @($changes | Where-Object { $_ -ceq 'server/_core/canonical-migrations.ts' }).Count -eq 1
     $isSafeMetadataRepairCompanion =
       [string]$historicalRepair.status -eq 'SAFE_METADATA_ONLY_REPAIR' -and
-      @($changes | Where-Object { $_ -ceq 'server/_core/canonical-migrations.ts' }).Count -eq 1
+      $hasSingleCanonicalMigrationsChange
+    $isVerifiedNewMigrationCompanion =
+      $hasSingleCanonicalMigrationsChange -and
+      $mainMigrations.Count -gt 0 -and
+      $expectedNewMigrationPaths.Count -gt 0 -and
+      (($mainMigrations -join "`n") -ceq ($expectedNewMigrationPaths -join "`n")) -and
+      [string]$historicalRepair.status -in @('NONE', 'SAFE_METADATA_ONLY_REPAIR')
+    $isAllowedCanonicalMigrationsCompanion = $isSafeMetadataRepairCompanion -or $isVerifiedNewMigrationCompanion
+
     $unsupportedChanges = @($changes | Where-Object {
       $_ -notmatch '^drizzle/main-migrations/[0-9]{4}_[A-Za-z0-9_]+\.sql$' -and
       $_ -notmatch '^drizzle/main-migrations/meta/(?:_journal|[0-9]{4}_snapshot)\.json$' -and
       $_ -ne 'drizzle/schema.ts' -and
-      (-not ($isSafeMetadataRepairCompanion -and $_ -ceq 'server/_core/canonical-migrations.ts'))
+      (-not ($isAllowedCanonicalMigrationsCompanion -and $_ -ceq 'server/_core/canonical-migrations.ts'))
     })
     if ($unsupportedChanges.Count -ne 0) {
       return [pscustomobject]@{ status = 'DIVERGENT'; migrations = @(); message = 'Delta de banco nao representa exclusivamente migrations MAIN canonicas verificaveis.'; classification = 'DIVERGENT' }

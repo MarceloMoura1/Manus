@@ -2880,6 +2880,106 @@ Describe 'MegaDesk verified MAIN migration gate' {
     $updater | Should Not Match 'Get-MegaDeskMigrationChanges'
     $publish | Should Not Match 'Get-MegaDeskMigrationChanges'
   }
+
+  It 'allows canonical migration validator companion when accompanying verified new MAIN migrations (Case 2)' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @(
+        'drizzle/schema.ts',
+        'drizzle/main-migrations/0018_clean_union_jack.sql',
+        'drizzle/main-migrations/meta/_journal.json',
+        'drizzle/main-migrations/meta/0018_snapshot.json',
+        'server/_core/canonical-migrations.ts'
+      ) }
+      Mock Invoke-MegaDeskGit { $global:MegaDeskMigrationGateTo }
+      Mock Get-MegaDeskMainMigrationIdentity { $global:MegaDeskMigration0018 }
+      Mock Get-MegaDeskAppliedMainMigrationJournal { [pscustomobject]@{ database = 'megadesk_local'; hashes = @() } }
+      Mock Get-MegaDeskHistoricalSnapshotRepairState { [pscustomobject]@{ status = 'NONE'; message = 'no historical repair'; repairedTags = @(); newMigrationPaths = @('drizzle/main-migrations/0018_clean_union_jack.sql') } }
+
+      $result = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
+      $result.status | Should Be 'PENDING'
+      $result.classification | Should Be 'NONE'
+
+      Mock Get-MegaDeskAppliedMainMigrationJournal { [pscustomobject]@{ database = 'megadesk_local'; hashes = @($global:MegaDeskMigration0018.sha256) } }
+      Mock Test-MegaDeskKnownMainMigrationPhysicalStructure { $true }
+      $appliedResult = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
+      $appliedResult.status | Should Be 'APPLIED_MATCH'
+    }
+  }
+
+  It 'blocks canonical migration validator when it appears alone without new migrations (Case 3)' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @('server/_core/canonical-migrations.ts') }
+      $result = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
+      $result.status | Should Be 'DIVERGENT'
+      $result.message | Should Match 'Delta de banco nao contem migration MAIN nova verificavel'
+    }
+  }
+
+  It 'blocks canonical migration validator when accompanied by schema only without migrations' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @('drizzle/schema.ts', 'server/_core/canonical-migrations.ts') }
+      $result = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
+      $result.status | Should Be 'DIVERGENT'
+      $result.message | Should Match 'Delta de banco nao contem migration MAIN nova verificavel'
+    }
+  }
+
+  It 'blocks canonical migration validator when accompanied by arbitrary files (Case 4)' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @(
+        'drizzle/main-migrations/0018_clean_union_jack.sql',
+        'drizzle/main-migrations/meta/_journal.json',
+        'drizzle/main-migrations/meta/0018_snapshot.json',
+        'server/_core/canonical-migrations.ts',
+        'scripts/arbitrary-script.ts'
+      ) }
+      Mock Get-MegaDeskHistoricalSnapshotRepairState { [pscustomobject]@{ status = 'NONE'; message = 'no historical repair'; repairedTags = @(); newMigrationPaths = @('drizzle/main-migrations/0018_clean_union_jack.sql') } }
+      $result = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
+      $result.status | Should Be 'DIVERGENT'
+      $result.message | Should Match 'Delta de banco nao representa exclusivamente migrations MAIN canonicas verificaveis'
+    }
+  }
+
+  It 'blocks canonical migration validator when SQL migration is non-canonical or divergent from journal (Case 5)' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @(
+        'drizzle/main-migrations/0018_clean_union_jack.sql',
+        'server/_core/canonical-migrations.ts'
+      ) }
+      Mock Get-MegaDeskHistoricalSnapshotRepairState { [pscustomobject]@{ status = 'NONE'; message = 'no historical repair'; repairedTags = @(); newMigrationPaths = @('drizzle/main-migrations/0019_different.sql') } }
+      $result = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
+      $result.status | Should Be 'DIVERGENT'
+      $result.message | Should Match 'Journal candidato e arquivos SQL novos divergem'
+    }
+  }
+
+  It 'blocks canonical migration validator when historical migration mutation occurs (Case 6)' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @(
+        'drizzle/main-migrations/0018_clean_union_jack.sql',
+        'server/_core/canonical-migrations.ts'
+      ) }
+      Mock Get-MegaDeskHistoricalSnapshotRepairState { [pscustomobject]@{ status = 'DIVERGENT'; message = 'SQL historico divergente para: 0017_historical'; repairedTags = @(); newMigrationPaths = @() } }
+      $result = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
+      $result.status | Should Be 'DIVERGENT'
+      $result.message | Should Match 'SQL historico divergente'
+    }
+  }
+}
+
+Describe 'MegaDesk verified MAIN migration real release delta' {
+  It 'classifies real release delta correctly as PENDING instead of DIVERGENT (Case 10)' {
+    $realFrom = 'a7152643b0ba56352a4eea14832be23c0ed58b0f'
+    $realTo = 'f6fd0e3be14ada57d2506cefd987d0762ac76a97'
+    $result = & (Get-Module $moduleName) {
+      param($fromSha, $toSha)
+      Get-MegaDeskMigrationDeltaState -FromSha $fromSha -ToSha $toSha
+    } $realFrom $realTo
+    $result.status | Should Be 'PENDING'
+    $result.status | Should Not Be 'DIVERGENT'
+    $result.migrations.Count | Should Be 5
+    $result.message | Should Match '0025_material_serpent_society'
+  }
 }
 
 Describe 'MegaDesk MAIN migration readonly query input transport' {
