@@ -1,6 +1,7 @@
 import React from 'react';
 import { CheckCircle, Edit, FileText, Flag, Users, Share2, MessageSquare, User } from 'lucide-react';
 import { parseTicketActivityMetadata, type TicketActivityMetadata, type TicketActivityType, type TicketFieldChange } from '@shared/chamados-activity';
+import { ticketAttachmentUrl } from '@/lib/trpc-url';
 
 export interface ActivityItem {
   id: string;
@@ -176,7 +177,7 @@ function shouldRenderActivityDescription(metadata: TicketActivityMetadata | null
 
 function attachmentHref(chamadoId: string | undefined, attachmentId: string): string | null {
   if (!chamadoId || !uuid.test(chamadoId) || !uuid.test(attachmentId)) return null;
-  return `/api/chamados/${encodeURIComponent(chamadoId)}/attachments/${encodeURIComponent(attachmentId)}/file`;
+  return ticketAttachmentUrl(chamadoId, attachmentId);
 }
 
 export const TimelineActivity: React.FC<TimelineActivityProps> = ({ activities, chamadoId }) => {

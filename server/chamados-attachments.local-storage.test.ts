@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -181,6 +181,82 @@ describe.sequential("local ticket attachment storage", () => {
     expect(await listTicketAttachments(chamadoId, tenantId, controlled.pool)).toEqual([]);
     await expect(readTicketAttachment(tenantId, chamadoId, uploaded.attachmentId, { pool: controlled.pool, storage }))
       .rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it.each([
+    {
+      label: "PNG",
+      attempt: "33333333-3333-4333-8333-333333333333",
+      fileName: "captura.png",
+      mimeType: "image/png",
+      bytes: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+    },
+    {
+      label: "PDF",
+      attempt: "44444444-4444-4444-8444-444444444444",
+      fileName: "relatorio.pdf",
+      mimeType: "application/pdf",
+      bytes: Buffer.from("%PDF-1.7\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF", "utf8"),
+    },
+  ])("persists and privately reads an authenticated $label fixture without duplicate activity", async fixture => {
+    const controlled = controlledPool();
+    const storage = createLocalTicketAttachmentStorage(root);
+    const input = {
+      chamadoId,
+      clientId: tenantId,
+      actor,
+      clientAttemptId: fixture.attempt,
+      fileName: fixture.fileName,
+      declaredMimeType: fixture.mimeType,
+      fileBase64: fixture.bytes.toString("base64"),
+    };
+
+    const uploaded = await uploadTicketAttachment(input, { pool: controlled.pool, storage });
+    const replay = await uploadTicketAttachment(input, { pool: controlled.pool, storage });
+    const read = await readTicketAttachment(tenantId, chamadoId, uploaded.attachmentId, { pool: controlled.pool, storage });
+
+    expect(replay).toEqual({ attachmentId: uploaded.attachmentId, reused: true });
+    expect(read).toMatchObject({ bytes: fixture.bytes, mimeType: fixture.mimeType, fileName: fixture.fileName, inline: true });
+    expect(controlled.activities).toHaveLength(1);
+    expect(controlled.activities[0]).toMatchObject({
+      actionType: "attachment_added",
+      metadata: { eventType: "attachment_added", attachmentId: uploaded.attachmentId },
+    });
+  });
+
+  it("returns a controlled local-storage failure when active metadata points to a missing file", async () => {
+    const controlled = controlledPool();
+    const storage = createLocalTicketAttachmentStorage(root);
+    const bytes = Buffer.from("missing file fixture", "utf8");
+    const uploaded = await uploadTicketAttachment({
+      chamadoId,
+      clientId: tenantId,
+      actor,
+      clientAttemptId: "55555555-5555-4555-8555-555555555555",
+      fileName: "missing.txt",
+      declaredMimeType: "text/plain",
+      fileBase64: bytes.toString("base64"),
+    }, { pool: controlled.pool, storage });
+    const row = controlled.attachments.get(uploaded.attachmentId)!;
+    await rm(resolveTicketAttachmentPath(root, row.storageKey));
+
+    await expect(readTicketAttachment(tenantId, chamadoId, uploaded.attachmentId, { pool: controlled.pool, storage }))
+      .rejects.toMatchObject({ stage: "local_storage", kind: "internal" });
+  });
+
+  it("blocks an intermediate symlink from escaping the private storage root", async () => {
+    const outside = await mkdtemp(path.join(tmpdir(), `megadesk-attachment-outside-${process.pid}-`));
+    const key = "ticket-attachments/22/22222222-2222-4222-8222-222222222222";
+    try {
+      await mkdir(path.join(outside, "22"), { recursive: true });
+      await writeFile(path.join(outside, "22", "22222222-2222-4222-8222-222222222222"), "outside");
+      await symlink(outside, path.join(root, "ticket-attachments"), process.platform === "win32" ? "junction" : "dir");
+
+      await expect(createLocalTicketAttachmentStorage(root).readExact!(key))
+        .rejects.toMatchObject<TicketAttachmentStorageError>({ stage: "directory" });
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 
   it("compensates a failed write without metadata, activity, final object or temporary file", async () => {

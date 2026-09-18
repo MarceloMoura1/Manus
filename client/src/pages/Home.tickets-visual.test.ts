@@ -1,5 +1,6 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 
@@ -82,6 +83,14 @@ beforeEach(() => {
 });
 
 describe("Chamados visual workspace", () => {
+  it("keeps attachment cards out of the history header and leaves attachments in the timeline", () => {
+    const source = readFileSync(new URL("./Home.tsx", import.meta.url), "utf8");
+
+    expect(source).not.toContain('data-testid="ticket-attachments-list"');
+    expect(source).not.toContain('data-testid={`ticket-attachment-remove-${attachment.attachmentId}`}');
+    expect(source).toContain("<TimelineActivity activities={selectedChamado.activities} chamadoId={selectedChamado.id} />");
+  });
+
   it("keeps the frozen light cards and pagination while rendering the premium ticket list", () => {
     ticketState.tickets = [{
       id: "ticket-1",

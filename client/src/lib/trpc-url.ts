@@ -22,6 +22,15 @@ export function userPersonalizationBackgroundUrl(hostname = window.location.host
   return `${trpcBaseUrl(hostname).replace(/\/api\/trpc$/, "")}${USER_PERSONALIZATION_BACKGROUND_PATH}`;
 }
 
+export function ticketAttachmentUrl(
+  chamadoId: string,
+  attachmentId: string,
+  hostname = typeof window === "undefined" ? "localhost" : window.location.hostname || "localhost",
+): string {
+  const apiOrigin = trpcBaseUrl(hostname).replace(/\/api\/trpc$/, "");
+  return `${apiOrigin}/api/chamados/${encodeURIComponent(chamadoId)}/attachments/${encodeURIComponent(attachmentId)}/file`;
+}
+
 export function resolveUserPersonalizationBackgroundUrl(value: string, hostname = window.location.hostname): string {
   if (!isUserPersonalizationBackgroundPath(value)) return value;
   return `${userPersonalizationBackgroundUrl(hostname)}${value.slice(USER_PERSONALIZATION_BACKGROUND_PATH.length)}`;

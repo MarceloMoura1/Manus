@@ -22,6 +22,7 @@ import { ConversationDetailsPanel } from "@/components/ConversationDetailsPanel"
 import { ConversationListItem } from "@/components/ConversationListItem";
 import { ConversationActivityEvent } from "@/components/ConversationActivityEvent";
 import { formatConversationTime, formatDate, formatTime } from "@/lib/conversationDateTime";
+import { ticketAttachmentUrl } from "@/lib/trpc-url";
 import { composeConversationTimeline, reconcileConversationMessages } from "@/lib/conversationTimeline";
 import { messageReplyPreview, replyAuthor, replyPreview, type ConversationReplyPreview } from "@/lib/conversationQuote";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -1860,7 +1861,7 @@ function formatTicketAttachmentSize(size: number | null) {
 }
 
 export function ticketAttachmentPrivateHref(chamadoId: string, attachmentId: string) {
-  return `/api/chamados/${encodeURIComponent(chamadoId)}/attachments/${encodeURIComponent(attachmentId)}/file`;
+  return ticketAttachmentUrl(chamadoId, attachmentId);
 }
 
 export function TicketAttachmentsPanel({
@@ -3301,16 +3302,6 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
           <div className="mx-4 mt-6 grid gap-6 sm:mx-6 lg:mx-8 lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)]">
             <section data-testid="ticket-history-panel" aria-labelledby="ticket-history-heading" className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 id="ticket-history-heading" className="flex items-center gap-2 text-lg font-semibold text-slate-900"><span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><MessageSquare className="h-4 w-4" /></span>Histórico do Chamado</h2>
-              {activeAttachments.length ? (
-                <div data-testid="ticket-attachments-list" className="mt-4 space-y-2">
-                  {activeAttachments.map(attachment => (
-                    <div key={attachment.attachmentId} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-100 bg-emerald-50/40 px-3 py-2.5">
-                      <div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{attachment.fileName}</p><p className="text-xs text-slate-500">{attachment.mimeType || 'Arquivo'} · {attachment.fileSize == null ? 'Tamanho indisponível' : `${(attachment.fileSize / 1024).toFixed(1)} KB`}</p></div>
-                      <div className="flex items-center gap-2">{attachment.canView ? <a data-testid={`ticket-attachment-view-${attachment.attachmentId}`} href={`/api/chamados/${selectedChamado.id}/attachments/${attachment.attachmentId}/file`} target="_blank" rel="noreferrer" className="rounded-md border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100">Visualizar arquivo</a> : <span className="text-xs font-medium text-slate-500">{attachment.legacy ? 'Anexo legado não disponível' : 'Indisponível'}</span>}{attachment.state === 'active' ? <button type="button" data-testid={`ticket-attachment-remove-${attachment.attachmentId}`} onClick={() => void handleTicketAttachmentRemove(attachment)} disabled={removeAttachmentMutation.isPending} className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50">Remover do chamado</button> : null}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
               <div className="mt-6">
                 {selectedChamado.activities && selectedChamado.activities.length > 0 ? (
                   <TimelineActivity activities={selectedChamado.activities} chamadoId={selectedChamado.id} />

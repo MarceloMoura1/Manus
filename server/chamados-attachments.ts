@@ -130,6 +130,11 @@ export class TicketAttachmentStorageError extends Error {
   }
 }
 
+function isMissingStoragePath(error: unknown): boolean {
+  if (error instanceof TicketAttachmentStorageError) return isMissingStoragePath(error.cause);
+  return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+}
+
 export function resolveTicketAttachmentPath(root: string, key: string): string {
   if (!root || !path.isAbsolute(root) || !validStorageKey(key)) {
     throw new TicketAttachmentStorageError("root");
@@ -165,6 +170,16 @@ async function prepareTicketAttachmentDirectory(root: string, target: string): P
   } catch (cause) {
     if (cause instanceof TicketAttachmentStorageError) throw cause;
     throw new TicketAttachmentStorageError("directory", cause);
+  }
+}
+
+function assertTicketAttachmentDirectoryChain(root: string, target: string): void {
+  assertPrivateDirectory(root, "root");
+  const relativeDirectory = path.relative(root, path.dirname(target));
+  let current = root;
+  for (const segment of relativeDirectory.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    assertPrivateDirectory(current, "directory");
   }
 }
 
@@ -226,18 +241,23 @@ export function createLocalTicketAttachmentStorage(root = productMediaRoot()): T
     async readExact(key) {
       const target = resolveTicketAttachmentPath(canonicalRoot, key);
       try {
+        assertTicketAttachmentDirectoryChain(canonicalRoot, target);
         const info = lstatSync(target);
         if (!info.isFile() || info.isSymbolicLink()) throw new Error("Unsafe attachment object");
         return { bytes: await readFile(target) };
       } catch (cause) {
+        if (cause instanceof TicketAttachmentStorageError) throw cause;
         throw new TicketAttachmentStorageError("read", cause);
       }
     },
     async removeExact(key) {
       const target = resolveTicketAttachmentPath(canonicalRoot, key);
       try {
+        assertTicketAttachmentDirectoryChain(canonicalRoot, target);
         await rm(target, { force: true });
       } catch (cause) {
+        if (isMissingStoragePath(cause)) return;
+        if (cause instanceof TicketAttachmentStorageError) throw cause;
         throw new TicketAttachmentStorageError("remove", cause);
       }
     },
@@ -277,6 +297,19 @@ function safeFileName(value: string): string {
   const normalized = value.normalize("NFKC").replace(/[\\/:*?"<>|\x00-\x1F\x7F]/g, "_").trim();
   if (!normalized || normalized === "." || normalized === "..") throw new TicketAttachmentError("BAD_FILE", "Nome de arquivo inválido.");
   return normalized.slice(0, 255);
+}
+
+export function ticketAttachmentContentDisposition(fileName: string, inline: boolean): string {
+  const normalized = safeFileName(fileName);
+  const fallback = normalized
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x20-\x7E]/g, "_")
+    .replace(/["\\]/g, "_") || "arquivo";
+  const encoded = [...Buffer.from(normalized, "utf8")]
+    .map(byte => `%${byte.toString(16).padStart(2, "0").toUpperCase()}`)
+    .join("");
+  return `${inline ? "inline" : "attachment"}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
 function declaredTextMime(value: string): "text/plain" | "text/csv" {
@@ -576,18 +609,21 @@ export function logTicketAttachmentReadFailure(
   });
 }
 
-export function registerTicketAttachmentRoutes(app: Express): void {
-  app.get("/api/chamados/:chamadoId/attachments/:attachmentId/file", async (req: Request, res: Response) => {
-    const identity = await resolveOperationalSessionReadOnly(req);
+export function createTicketAttachmentFileHandler(
+  resolveIdentity: typeof resolveOperationalSessionReadOnly = resolveOperationalSessionReadOnly,
+  readAttachment: typeof readTicketAttachment = readTicketAttachment,
+) {
+  return async (req: Request, res: Response): Promise<void> => {
+    const identity = await resolveIdentity(req);
     if (!identity) { res.status(401).end(); return; }
     try {
-      const attachment = await readTicketAttachment(identity.tenantId, req.params.chamadoId, req.params.attachmentId);
+      const attachment = await readAttachment(identity.tenantId, req.params.chamadoId, req.params.attachmentId);
       res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Content-Security-Policy", "sandbox");
       res.setHeader("Content-Type", attachment.mimeType);
       res.setHeader("Content-Length", String(attachment.bytes.length));
-      res.setHeader("Content-Disposition", `${attachment.inline ? "inline" : "attachment"}; filename=\"${attachment.fileName.replace(/[\"\r\n]/g, "_")}\"`);
+      res.setHeader("Content-Disposition", ticketAttachmentContentDisposition(attachment.fileName, attachment.inline));
       res.status(200).send(attachment.bytes);
     } catch (error) {
       logTicketAttachmentReadFailure(error, {
@@ -597,5 +633,9 @@ export function registerTicketAttachmentRoutes(app: Express): void {
       });
       res.status(ticketAttachmentReadHttpStatus(error)).end();
     }
-  });
+  };
+}
+
+export function registerTicketAttachmentRoutes(app: Express): void {
+  app.get("/api/chamados/:chamadoId/attachments/:attachmentId/file", createTicketAttachmentFileHandler());
 }
