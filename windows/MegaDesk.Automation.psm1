@@ -3167,11 +3167,14 @@ function Invoke-MegaDeskUpdaterV2 {
 function Invoke-MegaDeskPreparedReleasePublish {
   param(
     [Parameter(Mandatory = $true)][string]$ExpectedBranch,
+    [Parameter(Mandatory = $false)][string]$Confirmation,
     [object[]]$PublicChecks = @(),
     [switch]$TestMode,
     [ValidateRange(1, 90)][int]$LocalTimeoutSeconds = 90,
     [ValidateRange(1, 60)][int]$PublicTimeoutSeconds = 60
   )
+  $hasExplicitConfirmation = $PSBoundParameters.ContainsKey('Confirmation')
+  $explicitConfirmation = if ($hasExplicitConfirmation) { [string]$Confirmation } else { $null }
   return Invoke-WithMegaDeskLifecycleLock {
 
   if ($TestMode) { Assert-MegaDeskTestChecks -Checks $PublicChecks }
@@ -3205,7 +3208,11 @@ function Invoke-MegaDeskPreparedReleasePublish {
     Write-Host 'Migration delta:     NONE'
     Write-Host 'Release metadata:    PASS'
     Write-Host 'Runtime guard:       PASS'
-    $confirmation = Read-Host 'Digite "publicar" para ativar esta release. Digite qualquer outra coisa para cancelar'
+    if ($hasExplicitConfirmation) {
+      $confirmation = $explicitConfirmation
+    } else {
+      $confirmation = Read-Host 'Digite "publicar" para ativar esta release. Digite qualquer outra coisa para cancelar'
+    }
     if ($confirmation -cne 'publicar') {
       Write-Host 'CANCELADO - NENHUMA ALTERACAO REALIZADA'
       return [pscustomobject]@{ status = 'CANCELLED'; candidateSha = $candidateRelease.sha; activeSha = $activeRelease.sha }
