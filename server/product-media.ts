@@ -150,11 +150,25 @@ export class ProductMediaService {
       const isFirst = product.primary_media_id === null;
       const shouldSetPrimary = isFirst || Boolean(options.setAsPrimary) || Boolean(options.replacePrimary);
 
+      let oldTargetId: number | null = null;
+      let oldKeysToRemove: { storageKey: string; thumbnailStorageKey: string } | null = null;
       if (options.replacePrimary && product.primary_media_id) {
-        await a.execute(
-          "UPDATE erp_product_media SET state='pending_delete',pending_delete_at=NOW() WHERE id=? AND client_id=? AND state='active' AND id!=?",
+        const [oldRows] = await a.execute<RowDataPacket[]>(
+          "SELECT id, storage_key, thumbnail_storage_key FROM erp_product_media WHERE id=? AND client_id=? AND state='active' AND id!=? LIMIT 1 FOR UPDATE",
           [product.primary_media_id, identity.tenantId, media.id]
         );
+        const oldTarget = oldRows[0];
+        if (oldTarget) {
+          await a.execute(
+            "UPDATE erp_product_media SET state='pending_delete', pending_delete_at=NOW() WHERE id=? AND client_id=?",
+            [oldTarget.id, identity.tenantId]
+          );
+          oldTargetId = Number(oldTarget.id);
+          oldKeysToRemove = {
+            storageKey: String(oldTarget.storage_key),
+            thumbnailStorageKey: String(oldTarget.thumbnail_storage_key),
+          };
+        }
       }
 
       if (shouldSetPrimary) {
@@ -162,6 +176,22 @@ export class ProductMediaService {
       }
 
       await a.commit();
+
+      if (oldKeysToRemove && oldTargetId) {
+        try {
+          await Promise.all([
+            this.removeFile(resolveMediaPath(this.root, oldKeysToRemove.storageKey)),
+            this.removeFile(resolveMediaPath(this.root, oldKeysToRemove.thumbnailStorageKey)),
+          ]);
+          await this.pool.execute(
+            "UPDATE erp_product_media SET state='deleted', deleted_at=NOW() WHERE id=? AND client_id=? AND state='pending_delete'",
+            [oldTargetId, identity.tenantId]
+          );
+        } catch {
+          // Unlink failed: row remains in 'pending_delete' with pending_delete_at preserved for reconciler
+        }
+      }
+
       return { mediaId: media.media_id, isPrimary: shouldSetPrimary };
     } catch(error){await a.rollback();throw error;} finally{a.release();}
   }
@@ -205,22 +235,23 @@ export class ProductMediaService {
     if (!["admin", "manager"].includes(identity.role)) throw new ProductMediaError("FORBIDDEN", "Seu perfil não permite alterar produtos.");
 
     const c = await this.pool.getConnection();
+    let keysToRemove: { storageKey: string; thumbnailStorageKey: string } | null = null;
     try {
       await c.beginTransaction();
       const product = await this.product(c, identity.tenantId, productPublicId, true);
       if (!product) throw new ProductMediaError("NOT_FOUND", "Produto não encontrado.");
 
       const [mediaRows] = await c.execute<RowDataPacket[]>(
-        "SELECT id, media_id FROM erp_product_media WHERE media_id=? AND product_id=? AND client_id=? AND state='active' LIMIT 1 FOR UPDATE",
+        "SELECT id, media_id, storage_key, thumbnail_storage_key FROM erp_product_media WHERE media_id=? AND product_id=? AND client_id=? AND state='active' LIMIT 1 FOR UPDATE",
         [mediaPublicId, product.id, identity.tenantId]
       );
       const target = mediaRows[0];
       if (!target) throw new ProductMediaError("NOT_FOUND", "Imagem não encontrada neste produto.");
 
-      await c.execute(
-        "UPDATE erp_product_media SET state='pending_delete', pending_delete_at=NOW() WHERE id=? AND client_id=?",
-        [target.id, identity.tenantId]
-      );
+      keysToRemove = {
+        storageKey: String(target.storage_key),
+        thumbnailStorageKey: String(target.thumbnail_storage_key),
+      };
 
       let newPrimaryMediaId: string | null = null;
       if (Number(product.primary_media_id) === Number(target.id)) {
@@ -243,7 +274,28 @@ export class ProductMediaService {
         }
       }
 
+      await c.execute(
+        "UPDATE erp_product_media SET state='pending_delete', pending_delete_at=NOW() WHERE id=? AND client_id=?",
+        [target.id, identity.tenantId]
+      );
+
       await c.commit();
+
+      if (keysToRemove) {
+        try {
+          await Promise.all([
+            this.removeFile(resolveMediaPath(this.root, keysToRemove.storageKey)),
+            this.removeFile(resolveMediaPath(this.root, keysToRemove.thumbnailStorageKey)),
+          ]);
+          await this.pool.execute(
+            "UPDATE erp_product_media SET state='deleted', deleted_at=NOW() WHERE id=? AND client_id=? AND state='pending_delete'",
+            [target.id, identity.tenantId]
+          );
+        } catch {
+          // Unlink failed: row remains in 'pending_delete' with pending_delete_at preserved for reconciler
+        }
+      }
+
       return { ok: true, removedMediaId: mediaPublicId, newPrimaryMediaId };
     } catch (err) {
       await c.rollback();
@@ -258,33 +310,65 @@ export class ProductMediaService {
     if (!["admin", "manager"].includes(identity.role))
       throw new ProductMediaError("FORBIDDEN", "Seu perfil não permite alterar produtos.");
     const c = await this.pool.getConnection();
+    let targetId: number | null = null;
+    let keysToRemove: { storageKey: string; thumbnailStorageKey: string } | null = null;
     try {
       await c.beginTransaction();
       const product = await this.product(c, identity.tenantId, productPublicId, true);
       if (!product) throw new ProductMediaError("NOT_FOUND", "Produto não encontrado.");
       if (product.primary_media_id) {
-        await c.execute(
-          "UPDATE erp_product_media SET state='pending_delete', pending_delete_at=NOW() WHERE id=? AND client_id=? AND state='active'",
+        const [mediaRows] = await c.execute<RowDataPacket[]>(
+          "SELECT id, storage_key, thumbnail_storage_key FROM erp_product_media WHERE id=? AND client_id=? AND state='active' LIMIT 1 FOR UPDATE",
           [product.primary_media_id, identity.tenantId]
         );
-        const [nextRows] = await c.execute<RowDataPacket[]>(
-          "SELECT id FROM erp_product_media WHERE product_id=? AND client_id=? AND state='active' AND id!=? ORDER BY display_order ASC, id ASC LIMIT 1 FOR UPDATE",
-          [product.id, identity.tenantId, product.primary_media_id]
-        );
-        const next = nextRows[0];
-        if (next) {
-          await c.execute(
-            "UPDATE erp_products SET primary_media_id=? WHERE id=? AND client_id=?",
-            [next.id, product.id, identity.tenantId]
+        const target = mediaRows[0];
+        if (target) {
+          targetId = Number(target.id);
+          keysToRemove = {
+            storageKey: String(target.storage_key),
+            thumbnailStorageKey: String(target.thumbnail_storage_key),
+          };
+
+          const [nextRows] = await c.execute<RowDataPacket[]>(
+            "SELECT id FROM erp_product_media WHERE product_id=? AND client_id=? AND state='active' AND id!=? ORDER BY display_order ASC, id ASC LIMIT 1 FOR UPDATE",
+            [product.id, identity.tenantId, target.id]
           );
-        } else {
+          const next = nextRows[0];
+          if (next) {
+            await c.execute(
+              "UPDATE erp_products SET primary_media_id=? WHERE id=? AND client_id=?",
+              [next.id, product.id, identity.tenantId]
+            );
+          } else {
+            await c.execute(
+              "UPDATE erp_products SET primary_media_id=NULL WHERE id=? AND client_id=?",
+              [product.id, identity.tenantId]
+            );
+          }
+
           await c.execute(
-            "UPDATE erp_products SET primary_media_id=NULL WHERE id=? AND client_id=?",
-            [product.id, identity.tenantId]
+            "UPDATE erp_product_media SET state='pending_delete', pending_delete_at=NOW() WHERE id=? AND client_id=?",
+            [target.id, identity.tenantId]
           );
         }
       }
       await c.commit();
+
+      if (keysToRemove && targetId) {
+        try {
+          await Promise.all([
+            this.removeFile(resolveMediaPath(this.root, keysToRemove.storageKey)),
+            this.removeFile(resolveMediaPath(this.root, keysToRemove.thumbnailStorageKey)),
+          ]);
+          await this.pool.execute(
+            "UPDATE erp_product_media SET state='deleted', deleted_at=NOW() WHERE id=? AND client_id=? AND state='pending_delete'",
+            [targetId, identity.tenantId]
+          );
+        } catch {
+          // Unlink failed: row remains in 'pending_delete' for reconciler
+        }
+      }
+
       return { ok: true };
     } catch (e) {
       await c.rollback();
@@ -405,7 +489,7 @@ async function handleRead(req:Request,res:Response,deps:ProductMediaRouteDepende
     res.setHeader("Content-Length",String(info.size));
     res.setHeader("Content-Disposition","inline");
     res.setHeader("X-Content-Type-Options","nosniff");
-    res.setHeader("Cache-Control","private, max-age=300");
+    res.setHeader("Cache-Control","private, no-cache, must-revalidate");
     res.sendFile(media.path);
   }catch(e){
     res.status(status(e)).json({error:"Imagem não encontrada."});
@@ -436,7 +520,7 @@ async function handleReadMedia(req:Request,res:Response,deps:ProductMediaRouteDe
     res.setHeader("Content-Length",String(info.size));
     res.setHeader("Content-Disposition","inline");
     res.setHeader("X-Content-Type-Options","nosniff");
-    res.setHeader("Cache-Control","private, max-age=300");
+    res.setHeader("Cache-Control","private, no-cache, must-revalidate");
     res.sendFile(media.path);
   }catch(e){
     res.status(status(e)).json({error:"Imagem não encontrada."});

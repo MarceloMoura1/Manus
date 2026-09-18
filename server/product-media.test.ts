@@ -150,3 +150,228 @@ describe("product media reconciliation ownership",()=>{
     expect(state.state).toBe("deleted");expect(state.files.size).toBe(0);
   });
 });
+
+describe("product media deleteMedia & remove physical lifecycle", () => {
+  const prodPublicId = "11111111-1111-4111-8111-111111111111";
+  const mediaAId = "22222222-2222-4222-8222-222222222222";
+  const mediaBId = "33333333-3333-4333-8333-333333333333";
+  const identity = { tenantId: "tenant-a", userId: "user-a", role: "admin" };
+
+  it("DELETE_PRIMARY_PROMOTES_NEXT & DELETED_MEDIA_PHYSICAL_PAYLOAD_REMOVED: removes files and promotes next", async () => {
+    const deletedFiles: string[] = [];
+    const executedSql: string[] = [];
+
+    const mockConn: any = {
+      beginTransaction: async () => {},
+      commit: async () => {},
+      rollback: async () => {},
+      release: () => {},
+      execute: async (sql: string, params: any[]) => {
+        executedSql.push(sql);
+        if (sql.includes("SELECT id,primary_media_id FROM erp_products")) {
+          return [[{ id: 1, primary_media_id: 10 }], []];
+        }
+        if (sql.includes("SELECT id, media_id, storage_key, thumbnail_storage_key FROM erp_product_media")) {
+          return [[{ id: 10, media_id: mediaAId, storage_key: "objects/22/22222222-2222-4222-8222-222222222222.webp", thumbnail_storage_key: "thumbnails/22/22222222-2222-4222-8222-222222222222.webp" }], []];
+        }
+        if (sql.includes("ORDER BY display_order ASC, id ASC LIMIT 1 FOR UPDATE")) {
+          return [[{ id: 20, media_id: mediaBId }], []];
+        }
+        if (sql.includes("UPDATE erp_products SET primary_media_id=?")) {
+          return [{ affectedRows: 1 }, []];
+        }
+        if (sql.includes("UPDATE erp_product_media SET state='pending_delete'")) {
+          return [{ affectedRows: 1 }, []];
+        }
+        return [[], []];
+      },
+    };
+
+    const mockPool: any = {
+      getConnection: async () => mockConn,
+      execute: async (sql: string) => {
+        executedSql.push(sql);
+        return [{ affectedRows: 1 }, []];
+      },
+    };
+
+    const service = Object.create(ProductMediaService.prototype) as ProductMediaService;
+    Object.assign(service, {
+      pool: mockPool,
+      root: "C:\\safe-media",
+      removeFile: async (file: string) => {
+        deletedFiles.push(file);
+      },
+    });
+
+    const result = await service.deleteMedia(identity, prodPublicId, mediaAId);
+
+    expect(result.ok).toBe(true);
+    expect(result.removedMediaId).toBe(mediaAId);
+    expect(result.newPrimaryMediaId).toBe(mediaBId);
+
+    // Assert physical file deletion was called for both storage and thumbnail
+    expect(deletedFiles).toHaveLength(2);
+    expect(deletedFiles[0]).toContain(mediaAId);
+    expect(deletedFiles[1]).toContain(mediaAId);
+
+    // Assert SQL queries updated primary product and transitioned media state
+    expect(executedSql.some(s => s.includes("UPDATE erp_products SET primary_media_id=?"))).toBe(true);
+    expect(executedSql.some(s => s.includes("UPDATE erp_product_media SET state='pending_delete'"))).toBe(true);
+    expect(executedSql.some(s => s.includes("UPDATE erp_product_media SET state='deleted'"))).toBe(true);
+  });
+
+  it("DELETE_LAST_IMAGE_RESULTS_IN_PLACEHOLDER: sets primary_media_id to NULL when last image deleted", async () => {
+    const deletedFiles: string[] = [];
+    const executedSql: string[] = [];
+
+    const mockConn: any = {
+      beginTransaction: async () => {},
+      commit: async () => {},
+      rollback: async () => {},
+      release: () => {},
+      execute: async (sql: string) => {
+        executedSql.push(sql);
+        if (sql.includes("SELECT id,primary_media_id FROM erp_products")) {
+          return [[{ id: 1, primary_media_id: 10 }], []];
+        }
+        if (sql.includes("SELECT id, media_id, storage_key, thumbnail_storage_key FROM erp_product_media")) {
+          return [[{ id: 10, media_id: mediaAId, storage_key: "objects/22/22222222-2222-4222-8222-222222222222.webp", thumbnail_storage_key: "thumbnails/22/22222222-2222-4222-8222-222222222222.webp" }], []];
+        }
+        if (sql.includes("ORDER BY display_order ASC, id ASC LIMIT 1 FOR UPDATE")) {
+          return [[], []];
+        }
+        if (sql.includes("UPDATE erp_products SET primary_media_id=NULL")) {
+          return [{ affectedRows: 1 }, []];
+        }
+        if (sql.includes("UPDATE erp_product_media SET state='pending_delete'")) {
+          return [{ affectedRows: 1 }, []];
+        }
+        return [[], []];
+      },
+    };
+
+    const mockPool: any = {
+      getConnection: async () => mockConn,
+      execute: async (sql: string) => {
+        executedSql.push(sql);
+        return [{ affectedRows: 1 }, []];
+      },
+    };
+
+    const service = Object.create(ProductMediaService.prototype) as ProductMediaService;
+    Object.assign(service, {
+      pool: mockPool,
+      root: "C:\\safe-media",
+      removeFile: async (file: string) => {
+        deletedFiles.push(file);
+      },
+    });
+
+    const result = await service.deleteMedia(identity, prodPublicId, mediaAId);
+
+    expect(result.ok).toBe(true);
+    expect(result.removedMediaId).toBe(mediaAId);
+    expect(result.newPrimaryMediaId).toBeNull();
+    expect(deletedFiles).toHaveLength(2);
+    expect(executedSql.some(s => s.includes("UPDATE erp_products SET primary_media_id=NULL"))).toBe(true);
+    expect(executedSql.some(s => s.includes("UPDATE erp_product_media SET state='pending_delete'"))).toBe(true);
+    expect(executedSql.some(s => s.includes("UPDATE erp_product_media SET state='deleted'"))).toBe(true);
+  });
+
+  it("DELETE_UNLINK_FAILURE_IS_RECOVERABLE: when removeFile throws, state stays pending_delete for reconciler", async () => {
+    const executedSql: string[] = [];
+
+    const mockConn: any = {
+      beginTransaction: async () => {},
+      commit: async () => {},
+      rollback: async () => {},
+      release: () => {},
+      execute: async (sql: string) => {
+        executedSql.push(sql);
+        if (sql.includes("SELECT id,primary_media_id FROM erp_products")) {
+          return [[{ id: 1, primary_media_id: 10 }], []];
+        }
+        if (sql.includes("SELECT id, media_id, storage_key, thumbnail_storage_key FROM erp_product_media")) {
+          return [[{ id: 10, media_id: mediaAId, storage_key: "objects/22/22222222-2222-4222-8222-222222222222.webp", thumbnail_storage_key: "thumbnails/22/22222222-2222-4222-8222-222222222222.webp" }], []];
+        }
+        if (sql.includes("ORDER BY display_order ASC, id ASC LIMIT 1 FOR UPDATE")) {
+          return [[], []];
+        }
+        return [{ affectedRows: 1 }, []];
+      },
+    };
+
+    const mockPool: any = {
+      getConnection: async () => mockConn,
+      execute: async (sql: string) => {
+        executedSql.push(sql);
+        return [{ affectedRows: 1 }, []];
+      },
+    };
+
+    const service = Object.create(ProductMediaService.prototype) as ProductMediaService;
+    Object.assign(service, {
+      pool: mockPool,
+      root: "C:\\safe-media",
+      removeFile: async () => {
+        throw new Error("EPERM: operation not permitted (file locked by antivirus/process)");
+      },
+    });
+
+    // deleteMedia should succeed logically for the user without unhandled crash
+    const result = await service.deleteMedia(identity, prodPublicId, mediaAId);
+    expect(result.ok).toBe(true);
+
+    // But state in DB MUST remain pending_delete so reconciler can recover it!
+    expect(executedSql.some(s => s.includes("UPDATE erp_product_media SET state='pending_delete'"))).toBe(true);
+    // Crucially: it must NOT have been marked deleted
+    expect(executedSql.some(s => s.includes("UPDATE erp_product_media SET state='deleted'"))).toBe(false);
+  });
+
+  it("remove: single-endpoint legacy delete also physically removes files and finalizes state", async () => {
+    const deletedFiles: string[] = [];
+    const executedSql: string[] = [];
+
+    const mockConn: any = {
+      beginTransaction: async () => {},
+      commit: async () => {},
+      rollback: async () => {},
+      release: () => {},
+      execute: async (sql: string) => {
+        executedSql.push(sql);
+        if (sql.includes("SELECT id,primary_media_id FROM erp_products")) {
+          return [[{ id: 1, primary_media_id: 10 }], []];
+        }
+        if (sql.includes("SELECT id, storage_key, thumbnail_storage_key FROM erp_product_media")) {
+          return [[{ id: 10, storage_key: "objects/22/22222222-2222-4222-8222-222222222222.webp", thumbnail_storage_key: "thumbnails/22/22222222-2222-4222-8222-222222222222.webp" }], []];
+        }
+        if (sql.includes("ORDER BY display_order ASC, id ASC LIMIT 1 FOR UPDATE")) {
+          return [[], []];
+        }
+        return [{ affectedRows: 1 }, []];
+      },
+    };
+
+    const mockPool: any = {
+      getConnection: async () => mockConn,
+      execute: async (sql: string) => {
+        executedSql.push(sql);
+        return [{ affectedRows: 1 }, []];
+      },
+    };
+
+    const service = Object.create(ProductMediaService.prototype) as ProductMediaService;
+    Object.assign(service, {
+      pool: mockPool,
+      root: "C:\\safe-media",
+      removeFile: async (f: string) => { deletedFiles.push(f); },
+    });
+
+    const result = await service.remove(identity, prodPublicId);
+    expect(result.ok).toBe(true);
+    expect(deletedFiles).toHaveLength(2);
+    expect(executedSql.some(s => s.includes("UPDATE erp_product_media SET state='pending_delete'"))).toBe(true);
+    expect(executedSql.some(s => s.includes("UPDATE erp_product_media SET state='deleted'"))).toBe(true);
+  });
+});

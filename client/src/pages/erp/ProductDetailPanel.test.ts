@@ -953,4 +953,45 @@ describe("ERPWorkspace — Products view mode correctness (static source scan)",
     );
     expect(source).toContain('crossOrigin="use-credentials"');
   });
+
+  it("PRIMARY_CHANGE_UPDATES_PARENT & NO_RELOAD: ERPWorkspace wires onProductMediaChanged and bumps mediaVersions", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const workspaceSource = fs.readFileSync(
+      path.resolve(process.cwd(), "client/src/pages/erp/ERPWorkspace.tsx"),
+      "utf8"
+    );
+    const panelSource = fs.readFileSync(
+      path.resolve(process.cwd(), "client/src/pages/erp/ProductDetailPanel.tsx"),
+      "utf8"
+    );
+
+    // ProductDetailPanel accepts onProductMediaChanged and triggers it
+    expect(panelSource).toContain("onProductMediaChanged?: (productPublicId: string) => void");
+    expect(panelSource).toContain("onProductMediaChanged?.(productPublicId)");
+
+    // ERPWorkspace connects onProductMediaChanged to bump mediaVersions and invalidate/refetch
+    expect(workspaceSource).toContain("onProductMediaChanged={(pubId) => {");
+    expect(workspaceSource).toContain("setMediaVersions");
+    expect(workspaceSource).toContain("utils.erp.products.list.invalidate()");
+
+    // ProductThumbnail uses resolved version based on mediaVersions or product.updatedAt
+    expect(workspaceSource).toContain("const resolvedVersion = version || (product.updatedAt ? new Date(product.updatedAt).getTime() : 0)");
+    expect(workspaceSource).toContain("v=${resolvedVersion}");
+  });
+
+  it("CATALOG_AND_LIST_SHARE_CANONICAL_PRIMARY: tanto lista quanto catalogo usam ProductThumbnail com version", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const workspaceSource = fs.readFileSync(
+      path.resolve(process.cwd(), "client/src/pages/erp/ERPWorkspace.tsx"),
+      "utf8"
+    );
+
+    // Card do catálogo visual passa mediaVersions
+    expect(workspaceSource).toMatch(/data-testid="product-catalog-card"[\s\S]*?<ProductThumbnail[\s\S]*?version=\{mediaVersions\[product\.publicId\]\}/);
+
+    // Linha da tabela de lista passa mediaVersions
+    expect(workspaceSource).toMatch(/<td className="p-3 font-medium">[\s\S]*?<ProductThumbnail[\s\S]*?version=\{mediaVersions\[product\.publicId\]\}/);
+  });
 });

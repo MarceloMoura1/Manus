@@ -137,12 +137,13 @@ export function ProductThumbnail({
   className = "h-16 w-16",
   version = 0,
 }: {
-  product: { publicId: string; name: string; hasImage?: boolean | null };
+  product: { publicId: string; name: string; hasImage?: boolean | null; updatedAt?: string | Date };
   className?: string;
   version?: number;
 }) {
   const [failed, setFailed] = React.useState(false);
-  React.useEffect(() => setFailed(false), [product.publicId, product.hasImage, version]);
+  const resolvedVersion = version || (product.updatedAt ? new Date(product.updatedAt).getTime() : 0);
+  React.useEffect(() => setFailed(false), [product.publicId, product.hasImage, resolvedVersion]);
   const frame = `${className} shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm`;
   if (!product.hasImage || failed) {
     return (
@@ -157,7 +158,7 @@ export function ProductThumbnail({
   }
   return (
     <img
-      src={productMediaUrl(`/api/products/${product.publicId}/image?variant=thumbnail&v=${version}`)}
+      src={productMediaUrl(`/api/products/${product.publicId}/image?variant=thumbnail&v=${resolvedVersion}`)}
       crossOrigin="use-credentials"
       alt={`Foto de ${product.name}`}
       loading="lazy"
@@ -280,7 +281,10 @@ function Products() {
     return (
       <ProductDetailPanel
         productPublicId={selectedProductPublicId}
-        onBack={() => setSelectedProductPublicId(null)}
+        onBack={() => {
+          setSelectedProductPublicId(null);
+          void query.refetch();
+        }}
         onEdit={(prod) => {
           setSelectedProductPublicId(null);
           clearPhoto();
@@ -299,6 +303,14 @@ function Products() {
             minimumStock: prod.minimumStock,
             description: prod.description ?? "",
           });
+        }}
+        onProductMediaChanged={(pubId) => {
+          setMediaVersions((prev) => ({
+            ...prev,
+            [pubId]: (prev[pubId] ?? 0) + 1,
+          }));
+          void utils.erp.products.list.invalidate();
+          void query.refetch();
         }}
         canWrite={canWrite}
       />

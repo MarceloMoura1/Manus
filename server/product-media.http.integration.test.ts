@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import express from "express";
 import sharp from "sharp";
 import { lstat, mkdir, rm, writeFile, stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
@@ -99,6 +100,18 @@ describe("isolated product media HTTP contract & multi-image gallery", () => {
           const isFirst = productItems.length === 0;
           const shouldBePrimary = isFirst || Boolean(options.setAsPrimary) || Boolean(options.replacePrimary);
 
+          if (options.replacePrimary) {
+            const oldPrimary = productItems.find(m => m.isPrimary);
+            if (oldPrimary) {
+              const oldIdx = dbMedia.indexOf(oldPrimary);
+              if (oldIdx !== -1) dbMedia.splice(oldIdx, 1);
+              await Promise.allSettled([
+                rm(path.join(root, ...oldPrimary.storageKey.split("/")), { force: true }),
+                rm(path.join(root, ...oldPrimary.thumbnailKey.split("/")), { force: true }),
+              ]);
+            }
+          }
+
           if (shouldBePrimary) {
             for (const item of productItems) {
               item.isPrimary = false;
@@ -172,8 +185,13 @@ describe("isolated product media HTTP contract & multi-image gallery", () => {
         async deleteMedia(identity, publicId, mediaPublicId) {
           const idx = dbMedia.findIndex(m => m.tenantId === identity.tenantId && m.productPublicId === publicId && m.mediaId === mediaPublicId);
           if (idx === -1) throw new ProductMediaError("NOT_FOUND", "Imagem não encontrada neste produto.");
-          const wasPrimary = dbMedia[idx].isPrimary;
+          const target = dbMedia[idx];
+          const wasPrimary = target.isPrimary;
           dbMedia.splice(idx, 1);
+          await Promise.allSettled([
+            rm(path.join(root, ...target.storageKey.split("/")), { force: true }),
+            rm(path.join(root, ...target.thumbnailKey.split("/")), { force: true }),
+          ]);
           let newPrimaryMediaId: string | null = null;
           if (wasPrimary) {
             const remaining = dbMedia.filter(m => m.tenantId === identity.tenantId && m.productPublicId === publicId);
@@ -187,7 +205,14 @@ describe("isolated product media HTTP contract & multi-image gallery", () => {
 
         async remove(identity, publicId) {
           const idx = dbMedia.findIndex(m => m.tenantId === identity.tenantId && m.productPublicId === publicId && m.isPrimary);
-          if (idx !== -1) dbMedia.splice(idx, 1);
+          if (idx !== -1) {
+            const target = dbMedia[idx];
+            dbMedia.splice(idx, 1);
+            await Promise.allSettled([
+              rm(path.join(root, ...target.storageKey.split("/")), { force: true }),
+              rm(path.join(root, ...target.thumbnailKey.split("/")), { force: true }),
+            ]);
+          }
           return { ok: true };
         },
 
@@ -457,5 +482,118 @@ describe("isolated product media HTTP contract & multi-image gallery", () => {
     expect(res.headers.get("access-control-allow-credentials")).toBe("true");
     const allowHeaders = res.headers.get("access-control-allow-headers") ?? "";
     expect(allowHeaders.toLowerCase()).toContain("x-client-attempt-id");
+  });
+
+  // -------------------------------------------------------------------------
+  // 15: DELETED_MEDIA_PHYSICAL_PAYLOAD_REMOVED & NO_ORPHAN_ACCUMULATION
+  // -------------------------------------------------------------------------
+  it("15: DELETED_MEDIA_PHYSICAL_PAYLOAD_REMOVED & REUPLOAD_AFTER_DELETE_NO_ORPHAN_ACCUMULATION", async () => {
+    // 1. Upload imagem A
+    const resA = await request(`/api/products/${productPreExisting}/images`, {
+      method: "POST",
+      headers: { "Content-Type": "image/jpeg", "x-client-attempt-id": randomUUID() },
+      body: sampleImageBytes,
+    });
+    expect(resA.status).toBe(200);
+    const bodyA = await resA.json();
+    const mediaAId = bodyA.mediaId;
+
+    // Verificar arquivo físico existe no storage
+    const shardA = mediaAId.slice(0, 2);
+    const objPathA = path.join(root, "objects", shardA, `${mediaAId}.webp`);
+    const thumbPathA = path.join(root, "thumbnails", shardA, `${mediaAId}.webp`);
+    expect(existsSync(objPathA)).toBe(true);
+    expect(existsSync(thumbPathA)).toBe(true);
+
+    // 2. Executa DELETE na imagem A
+    const delRes = await request(`/api/products/${productPreExisting}/images/${mediaAId}`, {
+      method: "DELETE",
+    });
+    expect(delRes.status).toBe(200);
+
+    // 3. Confirma que a mídia não aparece mais na API
+    const getRes = await request(`/api/products/${productPreExisting}/images/${mediaAId}`);
+    expect(getRes.status).toBe(404);
+
+    // 4. Confirma que os arquivos físicos foram removidos (sem resíduo órfão)
+    expect(existsSync(objPathA)).toBe(false);
+    expect(existsSync(thumbPathA)).toBe(false);
+
+    // 5. Re-upload: faz upload de nova imagem B no mesmo produto
+    const resB = await request(`/api/products/${productPreExisting}/images`, {
+      method: "POST",
+      headers: { "Content-Type": "image/jpeg", "x-client-attempt-id": randomUUID() },
+      body: sampleImageBytes,
+    });
+    expect(resB.status).toBe(200);
+    const bodyB = await resB.json();
+    const mediaBId = bodyB.mediaId;
+
+    // Apenas os arquivos de B devem existir, os de A continuam inexistentes
+    const shardB = mediaBId.slice(0, 2);
+    const objPathB = path.join(root, "objects", shardB, `${mediaBId}.webp`);
+    const thumbPathB = path.join(root, "thumbnails", shardB, `${mediaBId}.webp`);
+    expect(existsSync(objPathB)).toBe(true);
+    expect(existsSync(thumbPathB)).toBe(true);
+    expect(existsSync(objPathA)).toBe(false);
+    expect(existsSync(thumbPathA)).toBe(false);
+
+    // Limpeza
+    await request(`/api/products/${productPreExisting}/images/${mediaBId}`, { method: "DELETE" });
+  });
+
+  // -------------------------------------------------------------------------
+  // 16: CACHE_CONTROL: GET de mídia retorna headers para prevenir cache stale
+  // -------------------------------------------------------------------------
+  it("16: GET de mídia retorna Cache-Control private, no-cache, must-revalidate", async () => {
+    const res = await request(`/api/products/${productA}/image`);
+    expect(res.status).toBe(200);
+    const cacheControl = res.headers.get("cache-control") ?? "";
+    expect(cacheControl).toContain("no-cache");
+    expect(cacheControl).toContain("must-revalidate");
+  });
+
+  // -------------------------------------------------------------------------
+  // 17: CROSS_TENANT_DELETE_PROTECTION
+  // -------------------------------------------------------------------------
+  it("17: CROSS_TENANT_DELETE_PROTECTION: tenant-b não consegue deletar mídia de tenant-a", async () => {
+    const res = await fetch(`${base}/api/products/${productA}/images/${firstMediaId}`, {
+      method: "DELETE",
+      headers: { "x-test-session": "tenant-b" },
+    });
+    // Deve retornar 404 (isolamento multi-tenant seguro)
+    expect(res.status).toBe(404);
+
+    // Mídia de tenant-a continua intacta
+    const checkRes = await request(`/api/products/${productA}/images/${firstMediaId}`);
+    expect(checkRes.status).toBe(200);
+  });
+
+  // -------------------------------------------------------------------------
+  // 18: DELETE_LAST_IMAGE_RESULTS_IN_PLACEHOLDER_AND_404_CANONICAL
+  // -------------------------------------------------------------------------
+  it("18: DELETE_LAST_IMAGE: ao deletar a última foto, o endpoint canônico retorna 404", async () => {
+    const listBefore = await request(`/api/products/${productA}/images`);
+    const { items } = await listBefore.json();
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const isLast = i === items.length - 1;
+      const delRes = await request(`/api/products/${productA}/images/${it.mediaId}`, { method: "DELETE" });
+      expect(delRes.status).toBe(200);
+      const data = await delRes.json();
+      expect(data.ok).toBe(true);
+      if (isLast) {
+        expect(data.newPrimaryMediaId).toBeNull();
+      }
+    }
+
+    // GET da rota canônica principal agora deve retornar 404
+    const canonicalRes = await request(`/api/products/${productA}/image`);
+    expect(canonicalRes.status).toBe(404);
+
+    // Listagem da galeria agora deve ser vazia
+    const listRes = await request(`/api/products/${productA}/images`);
+    const listData = await listRes.json();
+    expect(listData.items).toHaveLength(0);
   });
 });

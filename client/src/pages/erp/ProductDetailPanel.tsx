@@ -869,7 +869,10 @@ export function ProductImageGallerySection({
             }
           }
           setItems(validItems);
+          setHasImage(validItems.length > 0);
         }
+      } else {
+        setHasImage(false);
       }
     } catch {
       // ignore
@@ -888,7 +891,7 @@ export function ProductImageGallerySection({
 
   const handleUploadAdditional = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || actionPending) return;
 
     if (file.size > 5 * 1024 * 1024) {
       setFeedbackError("A imagem deve ter no máximo 5MB.");
@@ -945,7 +948,7 @@ export function ProductImageGallerySection({
 
   const handleReplacePrimary = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || actionPending) return;
 
     if (file.size > 5 * 1024 * 1024) {
       setFeedbackError("A imagem deve ter no máximo 5MB.");
@@ -1001,7 +1004,7 @@ export function ProductImageGallerySection({
   };
 
   const handleSetPrimary = async () => {
-    if (!activeItem || activeItem.isPrimary) return;
+    if (!activeItem || activeItem.isPrimary || actionPending) return;
 
     setActionPending(true);
     setFeedbackError(null);
@@ -1038,7 +1041,7 @@ export function ProductImageGallerySection({
   };
 
   const handleDeleteActive = async () => {
-    if (!activeItem) return;
+    if (!activeItem || actionPending) return;
 
     const isPrimary = activeItem.isPrimary;
     const confirmText = isPrimary
@@ -1389,11 +1392,13 @@ export function ProductDetailPanel({
   onBack,
   onEdit,
   canWrite,
+  onProductMediaChanged,
 }: {
   productPublicId: string;
   onBack: () => void;
   onEdit?: (product: ProductDetail) => void;
   canWrite?: boolean;
+  onProductMediaChanged?: (productPublicId: string) => void;
 }) {
   const [currentTab, setCurrentTab] = React.useState<"general" | "variants" | "suppliers" | "history">("general");
   const [variantModalOpen, setVariantModalOpen] = React.useState(false);
@@ -1505,6 +1510,7 @@ export function ProductDetailPanel({
         onImagesChanged={() => {
           void utils.erp.products.detail.invalidate({ publicId: productPublicId });
           void utils.erp.products.list.invalidate();
+          onProductMediaChanged?.(productPublicId);
         }}
       />
 
