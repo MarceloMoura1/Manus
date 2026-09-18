@@ -76,6 +76,8 @@ describe("ProductFormDialog (P1-A10 Relational Category & Brand Integration)", (
     removePhoto: false,
     onPhotoSelect: () => {},
     onPhotoRemove: () => {},
+    onOpenNewCategory: () => {},
+    onOpenNewBrand: () => {},
   };
 
   // -------------------------------------------------------------------------
@@ -665,6 +667,35 @@ describe("ProductFormDialog (P1-A10 Relational Category & Brand Integration)", (
     expect(markupPending).toContain('id="product-barcode-input"');
     expect(markupPending).toContain('for="product-category-select"');
     expect(markupPending).toContain('for="product-brand-select"');
+  });
+
+  // -------------------------------------------------------------------------
+  // 25. Inline Category & Brand Creation Buttons
+  // -------------------------------------------------------------------------
+  it("25. renderiza botões '+ Nova categoria' e '+ Nova marca' com acessibilidade e data-testids", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ProductFormContent, {
+        ...defaultProps,
+      })
+    );
+
+    expect(markup).toContain('data-testid="btn-new-category"');
+    expect(markup).toContain("+ Nova categoria");
+    expect(markup).toContain('data-testid="btn-new-brand"');
+    expect(markup).toContain("+ Nova marca");
+  });
+
+  it("26. botões '+ Nova categoria' e '+ Nova marca' ficam desabilitados quando pending=true", () => {
+    const markupPending = renderToStaticMarkup(
+      React.createElement(ProductFormContent, {
+        ...defaultProps,
+        pending: true,
+      })
+    );
+
+    // Both buttons should be disabled
+    expect(markupPending).toMatch(/<button[^>]*data-testid="btn-new-category"[^>]*disabled|<button[^>]*disabled[^>]*data-testid="btn-new-category"/);
+    expect(markupPending).toMatch(/<button[^>]*data-testid="btn-new-brand"[^>]*disabled|<button[^>]*disabled[^>]*data-testid="btn-new-brand"/);
   });
 
   // -------------------------------------------------------------------------

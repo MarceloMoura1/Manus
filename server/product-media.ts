@@ -11,7 +11,7 @@ import { resolveOperationalSessionReadOnly } from "./_core/megadesk-session";
 
 export const PRODUCT_MEDIA_MAX_BYTES = 5 * 1024 * 1024;
 export const PRODUCT_MEDIA_MAX_PIXELS = 40_000_000;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Identity = { tenantId: string; userId: string; role: string };
 type MediaRow = RowDataPacket & { id:number; media_id:string; client_id:string; product_id:number; storage_key:string; thumbnail_storage_key:string; mime_type:string; byte_size:number; sha256:string; width:number; height:number; state:string };
 
@@ -19,6 +19,10 @@ export class ProductMediaError extends Error { constructor(public code: "BAD_IMA
 
 function validateProductId(productPublicId:string) {
   if (!UUID.test(productPublicId)) throw new ProductMediaError("BAD_IMAGE","Requisição de mídia inválida.");
+}
+
+function validateMediaId(mediaId: string) {
+  if (!UUID.test(mediaId)) throw new ProductMediaError("BAD_IMAGE", "Identificador de mídia inválido.");
 }
 
 function validateMediaRoot(root:string):string {
@@ -71,15 +75,50 @@ async function atomicWrite(target:string, data:Buffer) {
   const temp = `${target}.${randomUUID()}.tmp`;
   const handle = await open(temp, "wx", 0o600);
   try { await handle.writeFile(data); await handle.sync(); } finally { await handle.close(); }
-  try { await rename(temp, target); } catch (error) { await rm(temp,{force:true}); throw error; }
+  try {
+    try { await rm(target, { force: true }); } catch {}
+    await rename(temp, target);
+  } catch (error) { await rm(temp,{force:true}); throw error; }
 }
+
+export type ProductMediaUploadOptions = {
+  setAsPrimary?: boolean;
+  replacePrimary?: boolean;
+};
 
 export class ProductMediaService {
   constructor(private pool:Pool=getPool(), private root=productMediaRoot(), private removeFile:(file:string)=>Promise<void>=(file)=>rm(file,{force:true})) { this.root=validateMediaRoot(root); }
   private async product(connection:Pool|PoolConnection, clientId:string, publicId:string, lock=false) {
     const [rows]=await connection.execute<RowDataPacket[]>(`SELECT id,primary_media_id FROM erp_products WHERE client_id=? AND public_id=? LIMIT 1${lock?" FOR UPDATE":""}`,[clientId,publicId]); return rows[0]??null;
   }
-  async upload(identity:Identity, productPublicId:string, attemptId:string, bytes:Buffer) {
+
+  async list(identity: Identity, productPublicId: string) {
+    validateProductId(productPublicId);
+    const [products] = await this.pool.execute<RowDataPacket[]>(
+      "SELECT id, primary_media_id FROM erp_products WHERE client_id=? AND public_id=? LIMIT 1",
+      [identity.tenantId, productPublicId]
+    );
+    const product = products[0];
+    if (!product) throw new ProductMediaError("NOT_FOUND", "Produto não encontrado.");
+
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      "SELECT id, media_id, width, height, byte_size, mime_type, display_order, created_at FROM erp_product_media WHERE client_id=? AND product_id=? AND state='active' ORDER BY display_order ASC, id ASC",
+      [identity.tenantId, product.id]
+    );
+
+    return rows.map((r) => ({
+      mediaId: String(r.media_id),
+      isPrimary: Number(r.id) === Number(product.primary_media_id),
+      displayOrder: Number(r.display_order ?? 0),
+      width: Number(r.width),
+      height: Number(r.height),
+      byteSize: Number(r.byte_size),
+      mimeType: String(r.mime_type),
+      createdAt: String(r.created_at),
+    }));
+  }
+
+  async upload(identity:Identity, productPublicId:string, attemptId:string, bytes:Buffer, options: ProductMediaUploadOptions = {}) {
     validateProductId(productPublicId);
     if (!UUID.test(attemptId)) throw new ProductMediaError("BAD_IMAGE","Requisição de mídia inválida.");
     if (!['admin','manager'].includes(identity.role)) throw new ProductMediaError("FORBIDDEN","Seu perfil não permite alterar produtos.");
@@ -88,7 +127,7 @@ export class ProductMediaService {
     try { await c.beginTransaction(); const product=await this.product(c,identity.tenantId,productPublicId,true); if(!product) throw new ProductMediaError("NOT_FOUND","Produto não encontrado.");
       const [existing]=await c.execute<MediaRow[]>("SELECT * FROM erp_product_media WHERE client_id=? AND client_attempt_id=? LIMIT 1 FOR UPDATE",[identity.tenantId,attemptId]);
       if(existing[0]) { if(existing[0].product_id!==product.id||existing[0].sha256!==image.sha256) throw new ProductMediaError("CONFLICT","Esta tentativa já foi usada com outro arquivo."); media=existing[0]; }
-      else { await c.execute("INSERT INTO erp_product_media(media_id,client_id,product_id,storage_key,thumbnail_storage_key,mime_type,byte_size,sha256,width,height,state,client_attempt_id,created_by) VALUES(?,?,?,?,?,'image/webp',?,?,?,?, 'staged',?,?) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)",[mediaId,identity.tenantId,product.id,storageKey,thumbnailStorageKey,image.main.length,image.sha256,image.width,image.height,attemptId,identity.userId]); const [created]=await c.execute<MediaRow[]>("SELECT * FROM erp_product_media WHERE client_id=? AND client_attempt_id=? FOR UPDATE",[identity.tenantId,attemptId]); media=created[0]; if(media.product_id!==product.id||media.sha256!==image.sha256) throw new ProductMediaError("CONFLICT","Esta tentativa já foi usada com outro arquivo."); }
+      else { await c.execute("INSERT INTO erp_product_media(media_id,client_id,product_id,storage_key,thumbnail_storage_key,mime_type,byte_size,sha256,width,height,state,client_attempt_id,created_by,display_order) VALUES(?,?,?,?,?,'image/webp',?,?,?,?, 'staged',?,?,0) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)",[mediaId,identity.tenantId,product.id,storageKey,thumbnailStorageKey,image.main.length,image.sha256,image.width,image.height,attemptId,identity.userId]); const [created]=await c.execute<MediaRow[]>("SELECT * FROM erp_product_media WHERE client_id=? AND client_attempt_id=? FOR UPDATE",[identity.tenantId,attemptId]); media=created[0]; if(media.product_id!==product.id||media.sha256!==image.sha256) throw new ProductMediaError("CONFLICT","Esta tentativa já foi usada com outro arquivo."); }
       await c.commit();
     } catch(error){await c.rollback();throw error;} finally{c.release();}
     if(media.state==="active") return {mediaId:media.media_id};
@@ -98,24 +137,347 @@ export class ProductMediaService {
       if(current[0].state!=="staged")throw new ProductMediaError("CONFLICT","A mídia não pode mais ser ativada.");
       try { await atomicWrite(resolveMediaPath(this.root,current[0].storage_key),image.main); await atomicWrite(resolveMediaPath(this.root,current[0].thumbnail_storage_key),image.thumbnail); }
       catch { throw new ProductMediaError("STORAGE","Não foi possível armazenar a imagem com segurança."); }
-      if(product.primary_media_id&&product.primary_media_id!==media.id) await a.execute("UPDATE erp_product_media SET state='pending_delete',pending_delete_at=NOW() WHERE id=? AND client_id=? AND state='active'",[product.primary_media_id,identity.tenantId]);
-      await a.execute("UPDATE erp_products SET primary_media_id=? WHERE id=? AND client_id=?",[media.id,product.id,identity.tenantId]); const [activated]=await a.execute<any>("UPDATE erp_product_media SET state='active',activated_at=COALESCE(activated_at,NOW()),pending_delete_at=NULL WHERE id=? AND client_id=? AND state='staged'",[media.id,identity.tenantId]); if(activated.affectedRows!==1)throw new ProductMediaError("CONFLICT","A mídia não pode mais ser ativada."); await a.commit(); return {mediaId:media.media_id};
+
+      const [orderRows] = await a.execute<RowDataPacket[]>(
+        "SELECT COALESCE(MAX(display_order), -1) + 1 AS next_order FROM erp_product_media WHERE product_id=? AND client_id=? AND state='active'",
+        [product.id, identity.tenantId]
+      );
+      const nextOrder = Number(orderRows[0]?.next_order ?? 0);
+
+      const [activated]=await a.execute<any>("UPDATE erp_product_media SET state='active',activated_at=COALESCE(activated_at,NOW()),pending_delete_at=NULL,display_order=? WHERE id=? AND client_id=? AND state='staged'",[nextOrder,media.id,identity.tenantId]);
+      if(activated.affectedRows!==1)throw new ProductMediaError("CONFLICT","A mídia não pode mais ser ativada.");
+
+      const isFirst = product.primary_media_id === null;
+      const shouldSetPrimary = isFirst || Boolean(options.setAsPrimary) || Boolean(options.replacePrimary);
+
+      if (options.replacePrimary && product.primary_media_id) {
+        await a.execute(
+          "UPDATE erp_product_media SET state='pending_delete',pending_delete_at=NOW() WHERE id=? AND client_id=? AND state='active' AND id!=?",
+          [product.primary_media_id, identity.tenantId, media.id]
+        );
+      }
+
+      if (shouldSetPrimary) {
+        await a.execute("UPDATE erp_products SET primary_media_id=? WHERE id=? AND client_id=?",[media.id,product.id,identity.tenantId]);
+      }
+
+      await a.commit();
+      return { mediaId: media.media_id, isPrimary: shouldSetPrimary };
     } catch(error){await a.rollback();throw error;} finally{a.release();}
   }
-  async remove(identity:Identity, productPublicId:string) { validateProductId(productPublicId); if(!['admin','manager'].includes(identity.role)) throw new ProductMediaError("FORBIDDEN","Seu perfil não permite alterar produtos."); const c=await this.pool.getConnection(); try{await c.beginTransaction();const product=await this.product(c,identity.tenantId,productPublicId,true);if(!product)throw new ProductMediaError("NOT_FOUND","Produto não encontrado.");if(product.primary_media_id){await c.execute("UPDATE erp_products SET primary_media_id=NULL WHERE id=? AND client_id=?",[product.id,identity.tenantId]);await c.execute("UPDATE erp_product_media SET state='pending_delete',pending_delete_at=NOW() WHERE id=? AND client_id=? AND state='active'",[product.primary_media_id,identity.tenantId]);}await c.commit();return{ok:true};}catch(e){await c.rollback();throw e;}finally{c.release();} }
+
+  async setPrimary(identity: Identity, productPublicId: string, mediaPublicId: string) {
+    validateProductId(productPublicId);
+    validateMediaId(mediaPublicId);
+    if (!["admin", "manager"].includes(identity.role)) throw new ProductMediaError("FORBIDDEN", "Seu perfil não permite alterar produtos.");
+
+    const c = await this.pool.getConnection();
+    try {
+      await c.beginTransaction();
+      const product = await this.product(c, identity.tenantId, productPublicId, true);
+      if (!product) throw new ProductMediaError("NOT_FOUND", "Produto não encontrado.");
+
+      const [mediaRows] = await c.execute<RowDataPacket[]>(
+        "SELECT id, media_id FROM erp_product_media WHERE media_id=? AND product_id=? AND client_id=? AND state='active' LIMIT 1 FOR UPDATE",
+        [mediaPublicId, product.id, identity.tenantId]
+      );
+      const target = mediaRows[0];
+      if (!target) throw new ProductMediaError("NOT_FOUND", "Imagem não encontrada neste produto.");
+
+      await c.execute(
+        "UPDATE erp_products SET primary_media_id=? WHERE id=? AND client_id=?",
+        [target.id, product.id, identity.tenantId]
+      );
+
+      await c.commit();
+      return { ok: true, primaryMediaId: mediaPublicId };
+    } catch (err) {
+      await c.rollback();
+      throw err;
+    } finally {
+      c.release();
+    }
+  }
+
+  async deleteMedia(identity: Identity, productPublicId: string, mediaPublicId: string) {
+    validateProductId(productPublicId);
+    validateMediaId(mediaPublicId);
+    if (!["admin", "manager"].includes(identity.role)) throw new ProductMediaError("FORBIDDEN", "Seu perfil não permite alterar produtos.");
+
+    const c = await this.pool.getConnection();
+    try {
+      await c.beginTransaction();
+      const product = await this.product(c, identity.tenantId, productPublicId, true);
+      if (!product) throw new ProductMediaError("NOT_FOUND", "Produto não encontrado.");
+
+      const [mediaRows] = await c.execute<RowDataPacket[]>(
+        "SELECT id, media_id FROM erp_product_media WHERE media_id=? AND product_id=? AND client_id=? AND state='active' LIMIT 1 FOR UPDATE",
+        [mediaPublicId, product.id, identity.tenantId]
+      );
+      const target = mediaRows[0];
+      if (!target) throw new ProductMediaError("NOT_FOUND", "Imagem não encontrada neste produto.");
+
+      await c.execute(
+        "UPDATE erp_product_media SET state='pending_delete', pending_delete_at=NOW() WHERE id=? AND client_id=?",
+        [target.id, identity.tenantId]
+      );
+
+      let newPrimaryMediaId: string | null = null;
+      if (Number(product.primary_media_id) === Number(target.id)) {
+        const [nextRows] = await c.execute<RowDataPacket[]>(
+          "SELECT id, media_id FROM erp_product_media WHERE product_id=? AND client_id=? AND state='active' AND id!=? ORDER BY display_order ASC, id ASC LIMIT 1 FOR UPDATE",
+          [product.id, identity.tenantId, target.id]
+        );
+        const next = nextRows[0];
+        if (next) {
+          await c.execute(
+            "UPDATE erp_products SET primary_media_id=? WHERE id=? AND client_id=?",
+            [next.id, product.id, identity.tenantId]
+          );
+          newPrimaryMediaId = String(next.media_id);
+        } else {
+          await c.execute(
+            "UPDATE erp_products SET primary_media_id=NULL WHERE id=? AND client_id=?",
+            [product.id, identity.tenantId]
+          );
+        }
+      }
+
+      await c.commit();
+      return { ok: true, removedMediaId: mediaPublicId, newPrimaryMediaId };
+    } catch (err) {
+      await c.rollback();
+      throw err;
+    } finally {
+      c.release();
+    }
+  }
+
+  async remove(identity: Identity, productPublicId: string) {
+    validateProductId(productPublicId);
+    if (!["admin", "manager"].includes(identity.role))
+      throw new ProductMediaError("FORBIDDEN", "Seu perfil não permite alterar produtos.");
+    const c = await this.pool.getConnection();
+    try {
+      await c.beginTransaction();
+      const product = await this.product(c, identity.tenantId, productPublicId, true);
+      if (!product) throw new ProductMediaError("NOT_FOUND", "Produto não encontrado.");
+      if (product.primary_media_id) {
+        await c.execute(
+          "UPDATE erp_product_media SET state='pending_delete', pending_delete_at=NOW() WHERE id=? AND client_id=? AND state='active'",
+          [product.primary_media_id, identity.tenantId]
+        );
+        const [nextRows] = await c.execute<RowDataPacket[]>(
+          "SELECT id FROM erp_product_media WHERE product_id=? AND client_id=? AND state='active' AND id!=? ORDER BY display_order ASC, id ASC LIMIT 1 FOR UPDATE",
+          [product.id, identity.tenantId, product.primary_media_id]
+        );
+        const next = nextRows[0];
+        if (next) {
+          await c.execute(
+            "UPDATE erp_products SET primary_media_id=? WHERE id=? AND client_id=?",
+            [next.id, product.id, identity.tenantId]
+          );
+        } else {
+          await c.execute(
+            "UPDATE erp_products SET primary_media_id=NULL WHERE id=? AND client_id=?",
+            [product.id, identity.tenantId]
+          );
+        }
+      }
+      await c.commit();
+      return { ok: true };
+    } catch (e) {
+      await c.rollback();
+      throw e;
+    } finally {
+      c.release();
+    }
+  }
+
   async read(clientId:string, productPublicId:string, thumbnail:boolean){validateProductId(productPublicId);for(let attempt=0;attempt<3;attempt++){const [rows]=await this.pool.execute<MediaRow[]>(`SELECT m.* FROM erp_products p INNER JOIN erp_product_media m ON m.id=p.primary_media_id AND m.client_id=p.client_id AND m.product_id=p.id AND m.state='active' WHERE p.client_id=? AND p.public_id=? LIMIT 1`,[clientId,productPublicId]);if(rows[0]){const key=thumbnail?rows[0].thumbnail_storage_key:rows[0].storage_key;return{path:resolveMediaPath(this.root,key),mimeType:rows[0].mime_type};}if(attempt<2)await new Promise(resolve=>setTimeout(resolve,10));}throw new ProductMediaError("NOT_FOUND","Imagem não encontrada.");}
+
+  async readByMediaId(clientId: string, productPublicId: string, mediaPublicId: string, thumbnail: boolean) {
+    validateProductId(productPublicId);
+    validateMediaId(mediaPublicId);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const [rows] = await this.pool.execute<MediaRow[]>(
+        `SELECT m.* FROM erp_products p INNER JOIN erp_product_media m ON m.media_id=? AND m.client_id=p.client_id AND m.product_id=p.id AND m.state='active' WHERE p.client_id=? AND p.public_id=? LIMIT 1`,
+        [mediaPublicId, clientId, productPublicId]
+      );
+      if (rows[0]) {
+        const key = thumbnail ? rows[0].thumbnail_storage_key : rows[0].storage_key;
+        return { path: resolveMediaPath(this.root, key), mimeType: rows[0].mime_type };
+      }
+      if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    throw new ProductMediaError("NOT_FOUND", "Imagem não encontrada.");
+  }
+
+  async reorder(identity: Identity, productPublicId: string, mediaIdsOrder: string[]) {
+    validateProductId(productPublicId);
+    for (const mid of mediaIdsOrder) validateMediaId(mid);
+    if (!["admin", "manager"].includes(identity.role)) throw new ProductMediaError("FORBIDDEN", "Seu perfil não permite alterar produtos.");
+
+    const c = await this.pool.getConnection();
+    try {
+      await c.beginTransaction();
+      const product = await this.product(c, identity.tenantId, productPublicId, true);
+      if (!product) throw new ProductMediaError("NOT_FOUND", "Produto não encontrado.");
+
+      for (let i = 0; i < mediaIdsOrder.length; i++) {
+        await c.execute(
+          "UPDATE erp_product_media SET display_order=? WHERE media_id=? AND product_id=? AND client_id=? AND state='active'",
+          [i, mediaIdsOrder[i], product.id, identity.tenantId]
+        );
+      }
+      await c.commit();
+      return { ok: true };
+    } catch (err) {
+      await c.rollback();
+      throw err;
+    } finally {
+      c.release();
+    }
+  }
+
   async reconcile(graceMs=24*60*60*1000,limit=100){const boundedGraceMicros=Math.trunc(Math.max(-60_000,Math.min(30*24*60*60*1000,Number.isFinite(graceMs)?graceMs:24*60*60*1000))*1_000);const boundedLimit=Math.max(1,Math.min(500,Math.trunc(limit)));const [candidates]=await this.pool.execute<MediaRow[]>(`SELECT m.* FROM erp_product_media m LEFT JOIN erp_products p ON p.primary_media_id=m.id AND p.client_id=m.client_id WHERE m.state IN ('staged','pending_delete') AND COALESCE(m.pending_delete_at,m.created_at)<DATE_SUB(NOW(6),INTERVAL ${boundedGraceMicros} MICROSECOND) AND p.id IS NULL ORDER BY m.id LIMIT ${boundedLimit}`);let deleted=0;for(const candidate of candidates){const c=await this.pool.getConnection();try{await c.beginTransaction();const [products]=await c.execute<RowDataPacket[]>("SELECT id,primary_media_id FROM erp_products WHERE id=? AND client_id=? FOR UPDATE",[candidate.product_id,candidate.client_id]);if(!products[0]||products[0].primary_media_id===candidate.id){await c.rollback();continue;}const [rows]=await c.execute<MediaRow[]>(`SELECT * FROM erp_product_media WHERE id=? AND client_id=? AND state IN ('staged','pending_delete') AND COALESCE(pending_delete_at,created_at)<DATE_SUB(NOW(6),INTERVAL ${boundedGraceMicros} MICROSECOND) FOR UPDATE`,[candidate.id,candidate.client_id]);const row=rows[0];if(!row){await c.rollback();continue;}for(const key of [row.storage_key,row.thumbnail_storage_key])await this.removeFile(resolveMediaPath(this.root,key));const [result]=await c.execute<any>("UPDATE erp_product_media SET state='deleted',deleted_at=NOW() WHERE id=? AND client_id=? AND state IN ('staged','pending_delete')",[row.id,row.client_id]);if(result.affectedRows!==1)throw new ProductMediaError("CONFLICT","A mídia não pôde ser reconciliada.");await c.commit();deleted++;}catch(error){await c.rollback();throw error;}finally{c.release();}}return{examined:candidates.length,deleted};}
 }
 
 function status(error:unknown){return error instanceof ProductMediaError?error.code==="FORBIDDEN"?403:error.code==="NOT_FOUND"?404:error.code==="TOO_LARGE"?413:error.code==="CONFLICT"?409:400:500;}
-type ProductMediaRouteService=Pick<ProductMediaService,"upload"|"remove"|"read">;
+export type ProductMediaRouteService = Pick<
+  ProductMediaService,
+  "upload" | "remove" | "read" | "list" | "setPrimary" | "deleteMedia" | "readByMediaId" | "reorder"
+>;
 export type ProductMediaRouteDependencies={resolveIdentity:(req:Request)=>Promise<Identity|null>;createService:()=>ProductMediaRouteService};
 const defaultRouteDependencies:ProductMediaRouteDependencies={resolveIdentity:identity,createService:()=>new ProductMediaService()};
+
 export function registerProductMediaRoutes(app:Express,deps:ProductMediaRouteDependencies=defaultRouteDependencies){
   const raw=express.raw({type:["image/jpeg","image/png","image/webp","application/octet-stream"],limit:PRODUCT_MEDIA_MAX_BYTES});
-  app.put("/api/products/:productId/image",raw,(req,res)=>void handleUpload(req,res,deps)); app.delete("/api/products/:productId/image",(req,res)=>void handleRemove(req,res,deps)); app.get("/api/products/:productId/image",(req,res)=>void handleRead(req,res,deps));
+
+  // Legacy primary image endpoints
+  app.put("/api/products/:productId/image",raw,(req,res)=>void handleUpload(req,res,deps,{replacePrimary:true}));
+  app.delete("/api/products/:productId/image",(req,res)=>void handleRemove(req,res,deps));
+  app.get("/api/products/:productId/image",(req,res)=>void handleRead(req,res,deps));
+
+  // Multi-image gallery endpoints
+  app.get("/api/products/:productId/images",(req,res)=>void handleListGallery(req,res,deps));
+  app.post("/api/products/:productId/images",raw,(req,res)=>void handleUpload(req,res,deps,{replacePrimary:false}));
+  app.get("/api/products/:productId/images/:mediaId",(req,res)=>void handleReadMedia(req,res,deps));
+  app.put("/api/products/:productId/images/:mediaId/primary",(req,res)=>void handleSetPrimary(req,res,deps));
+  app.delete("/api/products/:productId/images/:mediaId",(req,res)=>void handleDeleteMedia(req,res,deps));
+  app.put("/api/products/:productId/images/order",express.json(),(req,res)=>void handleReorder(req,res,deps));
 }
+
 async function identity(req:Request):Promise<Identity|null>{const x=await resolveOperationalSessionReadOnly(req);return x?{tenantId:x.tenantId,userId:x.userId,role:x.role}:null;}
-async function handleUpload(req:Request,res:Response,deps:ProductMediaRouteDependencies){try{const i=await deps.resolveIdentity(req);if(!i){res.status(401).end();return;}validateProductId(req.params.productId);const attempt=String(req.header("x-client-attempt-id")??"");const result=await deps.createService().upload(i,req.params.productId,attempt,Buffer.isBuffer(req.body)?req.body:Buffer.alloc(0));res.status(200).json(result);}catch(e){res.status(status(e)).json({error:e instanceof ProductMediaError?e.message:"Não foi possível salvar a imagem."});}}
-async function handleRemove(req:Request,res:Response,deps:ProductMediaRouteDependencies){try{const i=await deps.resolveIdentity(req);if(!i){res.status(401).end();return;}validateProductId(req.params.productId);res.json(await deps.createService().remove(i,req.params.productId));}catch(e){res.status(status(e)).json({error:e instanceof ProductMediaError?e.message:"Não foi possível remover a imagem."});}}
-async function handleRead(req:Request,res:Response,deps:ProductMediaRouteDependencies){try{const i=await deps.resolveIdentity(req);if(!i){res.status(401).end();return;}validateProductId(req.params.productId);const media=await deps.createService().read(i.tenantId,req.params.productId,req.query.variant==="thumbnail");const info=await stat(media.path);res.setHeader("Content-Type",media.mimeType);res.setHeader("Content-Length",String(info.size));res.setHeader("Content-Disposition","inline");res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("Cache-Control","private, max-age=300");res.sendFile(media.path);}catch(e){res.status(status(e)).json({error:"Imagem não encontrada."});}}
+
+async function handleUpload(req:Request,res:Response,deps:ProductMediaRouteDependencies,options:ProductMediaUploadOptions={}){
+  try{
+    const i=await deps.resolveIdentity(req);
+    if(!i){res.status(401).end();return;}
+    validateProductId(req.params.productId);
+    const attempt=String(req.header("x-client-attempt-id")??randomUUID());
+    const result=await deps.createService().upload(i,req.params.productId,attempt,Buffer.isBuffer(req.body)?req.body:Buffer.alloc(0),options);
+    res.status(200).json(result);
+  }catch(e){
+    res.status(status(e)).json({error:e instanceof ProductMediaError?e.message:"Não foi possível salvar a imagem."});
+  }
+}
+
+async function handleRemove(req:Request,res:Response,deps:ProductMediaRouteDependencies){
+  try{
+    const i=await deps.resolveIdentity(req);
+    if(!i){res.status(401).end();return;}
+    validateProductId(req.params.productId);
+    res.json(await deps.createService().remove(i,req.params.productId));
+  }catch(e){
+    res.status(status(e)).json({error:e instanceof ProductMediaError?e.message:"Não foi possível remover a imagem."});
+  }
+}
+
+async function handleRead(req:Request,res:Response,deps:ProductMediaRouteDependencies){
+  try{
+    const i=await deps.resolveIdentity(req);
+    if(!i){res.status(401).end();return;}
+    validateProductId(req.params.productId);
+    const media=await deps.createService().read(i.tenantId,req.params.productId,req.query.variant==="thumbnail");
+    const info=await stat(media.path);
+    res.setHeader("Content-Type",media.mimeType);
+    res.setHeader("Content-Length",String(info.size));
+    res.setHeader("Content-Disposition","inline");
+    res.setHeader("X-Content-Type-Options","nosniff");
+    res.setHeader("Cache-Control","private, max-age=300");
+    res.sendFile(media.path);
+  }catch(e){
+    res.status(status(e)).json({error:"Imagem não encontrada."});
+  }
+}
+
+async function handleListGallery(req:Request,res:Response,deps:ProductMediaRouteDependencies){
+  try{
+    const i=await deps.resolveIdentity(req);
+    if(!i){res.status(401).end();return;}
+    validateProductId(req.params.productId);
+    const items=await deps.createService().list(i,req.params.productId);
+    res.status(200).json({items});
+  }catch(e){
+    res.status(status(e)).json({error:e instanceof ProductMediaError?e.message:"Não foi possível listar as imagens."});
+  }
+}
+
+async function handleReadMedia(req:Request,res:Response,deps:ProductMediaRouteDependencies){
+  try{
+    const i=await deps.resolveIdentity(req);
+    if(!i){res.status(401).end();return;}
+    validateProductId(req.params.productId);
+    validateMediaId(req.params.mediaId);
+    const media=await deps.createService().readByMediaId(i.tenantId,req.params.productId,req.params.mediaId,req.query.variant==="thumbnail");
+    const info=await stat(media.path);
+    res.setHeader("Content-Type",media.mimeType);
+    res.setHeader("Content-Length",String(info.size));
+    res.setHeader("Content-Disposition","inline");
+    res.setHeader("X-Content-Type-Options","nosniff");
+    res.setHeader("Cache-Control","private, max-age=300");
+    res.sendFile(media.path);
+  }catch(e){
+    res.status(status(e)).json({error:"Imagem não encontrada."});
+  }
+}
+
+async function handleSetPrimary(req:Request,res:Response,deps:ProductMediaRouteDependencies){
+  try{
+    const i=await deps.resolveIdentity(req);
+    if(!i){res.status(401).end();return;}
+    validateProductId(req.params.productId);
+    validateMediaId(req.params.mediaId);
+    const result=await deps.createService().setPrimary(i,req.params.productId,req.params.mediaId);
+    res.status(200).json(result);
+  }catch(e){
+    res.status(status(e)).json({error:e instanceof ProductMediaError?e.message:"Não foi possível definir a foto principal."});
+  }
+}
+
+async function handleDeleteMedia(req:Request,res:Response,deps:ProductMediaRouteDependencies){
+  try{
+    const i=await deps.resolveIdentity(req);
+    if(!i){res.status(401).end();return;}
+    validateProductId(req.params.productId);
+    validateMediaId(req.params.mediaId);
+    const result=await deps.createService().deleteMedia(i,req.params.productId,req.params.mediaId);
+    res.status(200).json(result);
+  }catch(e){
+    res.status(status(e)).json({error:e instanceof ProductMediaError?e.message:"Não foi possível remover a imagem."});
+  }
+}
+
+async function handleReorder(req:Request,res:Response,deps:ProductMediaRouteDependencies){
+  try{
+    const i=await deps.resolveIdentity(req);
+    if(!i){res.status(401).end();return;}
+    validateProductId(req.params.productId);
+    const mediaIds = Array.isArray(req.body?.mediaIds) ? (req.body.mediaIds as string[]) : [];
+    const result=await deps.createService().reorder(i,req.params.productId,mediaIds);
+    res.status(200).json(result);
+  }catch(e){
+    res.status(status(e)).json({error:e instanceof ProductMediaError?e.message:"Não foi possível reordenar as imagens."});
+  }
+}

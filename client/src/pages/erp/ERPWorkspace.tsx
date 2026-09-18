@@ -5,7 +5,7 @@ import { formatDateTime } from "@/lib/conversationDateTime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertCircle, Boxes, Image as ImageIcon, PackagePlus, Search, Trash2, TrendingDown, Upload, WalletCards } from "lucide-react";
+import { AlertCircle, Boxes, Image as ImageIcon, LayoutGrid, LayoutList, PackagePlus, Search, Trash2, TrendingDown, Upload, WalletCards } from "lucide-react";
 import { SuppliersPage } from "./SuppliersPage";
 import { ClientesPage } from "../ClientesPage";
 import type { CrmWhatsAppIntent } from "../../../../shared/crm";
@@ -141,6 +141,7 @@ function ProductThumbnail({product,className="h-16 w-16",version=0}:{product:{pu
 
 function Products() {
   const utils = trpc.useUtils();
+  const [viewMode, setViewMode] = React.useState<"table" | "cards">("table");
   const [search,setSearch]=React.useState(""); const [active,setActive]=React.useState<"all"|"active"|"inactive">("all"); const [category,setCategory]=React.useState(""); const [stock,setStock]=React.useState<"all"|"empty"|"low"|"normal">("all"); const [sort,setSort]=React.useState<"name"|"sku"|"createdAt"|"stock">("name"); const [direction,setDirection]=React.useState<"asc"|"desc">("asc"); const [page,setPage]=React.useState(1); const [pageSize,setPageSize]=React.useState(20); const [form,setForm]=React.useState<ProductForm|null>(null); const [message,setMessage]=React.useState(""); const [photo,setPhoto]=React.useState<File|null>(null); const [photoPreview,setPhotoPreview]=React.useState<string|null>(null); const [removePhoto,setRemovePhoto]=React.useState(false); const [mediaPending,setMediaPending]=React.useState(false); const [mediaVersions,setMediaVersions]=React.useState<Record<string,number>>({});
   const [selectedProductPublicId, setSelectedProductPublicId] = React.useState<string | null>(null);
   React.useEffect(()=>()=>{if(photoPreview?.startsWith("blob:"))URL.revokeObjectURL(photoPreview)},[photoPreview]);
@@ -153,7 +154,74 @@ function Products() {
   const submittingRef = React.useRef(false);
   const pending=create.isPending||update.isPending||mediaPending;
   const clearPhoto=()=>{if(photoPreview?.startsWith("blob:"))URL.revokeObjectURL(photoPreview);setPhoto(null);setPhotoPreview(null);setRemovePhoto(false)};
-  const submit = async (event: React.FormEvent) => { event.preventDefault(); if(!form||pending||submittingRef.current) return; submittingRef.current = true; const command=prepareProductCommand(form); if(command.costPriceCents<0||command.salePriceCents<0){submittingRef.current = false;setMessage("Informe valores monetários válidos.");return;} try{const product=form.publicId?await update.mutateAsync({...command,publicId:form.publicId}):await create.mutateAsync(command);if(photo||removePhoto){setMediaPending(true);const response=await fetch(`/api/products/${product.publicId}/image`,photo?{method:"PUT",credentials:"include",headers:{"Content-Type":photo.type||"application/octet-stream","x-client-attempt-id":crypto.randomUUID()},body:photo}:{method:"DELETE",credentials:"include"});if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.error||"Não foi possível salvar a foto.");}setMediaVersions(current=>({...current,[product.publicId]:(current[product.publicId]??0)+1}));}clearPhoto();await done(form.publicId?"Produto atualizado com sucesso.":"Produto cadastrado com sucesso.");}catch(error){setMessage(error instanceof Error?error.message:"Não foi possível salvar o produto.");}finally{submittingRef.current = false;setMediaPending(false);} };
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if(!form || pending || submittingRef.current) return;
+    submittingRef.current = true;
+    const command = prepareProductCommand(form);
+    if (command.costPriceCents < 0 || command.salePriceCents < 0) {
+      submittingRef.current = false;
+      setMessage("Informe valores monetários válidos.");
+      return;
+    }
+    const isNew = !form.publicId;
+    try {
+      const product = form.publicId
+        ? await update.mutateAsync({ ...command, publicId: form.publicId })
+        : await create.mutateAsync(command);
+
+      // Once persisted, immediately bind publicId so any retry acts as update
+      if (isNew && product?.publicId) {
+        setForm(curr => curr ? { ...curr, publicId: product.publicId } : null);
+      }
+
+      let photoUploadWarning: string | null = null;
+      if (photo || removePhoto) {
+        setMediaPending(true);
+        try {
+          const response = await fetch(`/api/products/${product.publicId}/image`,
+            photo
+              ? {
+                  method: "PUT",
+                  credentials: "include",
+                  headers: {
+                    "Content-Type": photo.type || "application/octet-stream",
+                    "x-client-attempt-id": crypto.randomUUID(),
+                  },
+                  body: photo,
+                }
+              : { method: "DELETE", credentials: "include" }
+          );
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            photoUploadWarning = body.error || "Não foi possível salvar a foto.";
+          } else {
+            setMediaVersions(current => ({
+              ...current,
+              [product.publicId]: (current[product.publicId] ?? 0) + 1,
+            }));
+          }
+        } catch (mediaErr) {
+          photoUploadWarning = mediaErr instanceof Error ? mediaErr.message : "Falha na comunicação de mídia.";
+        }
+      }
+      clearPhoto();
+      if (photoUploadWarning) {
+        await done(
+          isNew
+            ? `Produto cadastrado com sucesso! Aviso de foto: ${photoUploadWarning}`
+            : `Produto atualizado com sucesso! Aviso de foto: ${photoUploadWarning}`
+        );
+      } else {
+        await done(isNew ? "Produto cadastrado com sucesso." : "Produto atualizado com sucesso.");
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível salvar o produto.");
+    } finally {
+      submittingRef.current = false;
+      setMediaPending(false);
+    }
+  };
   const edit = (product: NonNullable<typeof query.data>["items"][number]) => {clearPhoto();setPhotoPreview(product.hasImage?`/api/products/${product.publicId}/image?variant=thumbnail&v=${mediaVersions[product.publicId]??0}`:null);setForm({ publicId:product.publicId,name:product.name,sku:product.sku,barcode:product.barcode??"",category:product.categoryRelational?.name??product.category??"",categoryPublicId:product.categoryPublicId??product.categoryRelational?.publicId??null,brandPublicId:product.brandPublicId??product.brand?.publicId??null,unit:product.unit,cost:(product.costPriceCents/100).toFixed(2).replace(".",","),sale:(product.salePriceCents/100).toFixed(2).replace(".",","),minimumStock:product.minimumStock,description:product.description??"" });};
   const reset = () => { setSearch("");setActive("all");setCategory("");setStock("all");setSort("name");setDirection("asc");setPage(1); };
   const canWrite=query.data?.canWrite===true;
@@ -189,11 +257,61 @@ function Products() {
 
   return <div className="space-y-5" data-testid="erp-products-page">
     <ErpPageHeader title="Produtos" eyebrow="Catálogo" actions={canWrite&&<Button onClick={()=>{clearPhoto();setForm({...emptyProduct})}}>Novo produto</Button>} />
-    <section aria-label="Visão do catálogo" className="flex flex-wrap items-end justify-between gap-4 rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-950 to-slate-800 p-5 text-white shadow-sm">
-      <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-200">Catálogo visual</p><p className="mt-2 text-sm text-slate-200">Fotos, preço e disponibilidade reunidos para uma leitura rápida.</p></div>
-      <p className="text-3xl font-bold tracking-tight">{query.data?.total ?? 0}<span className="ml-2 text-sm font-medium text-slate-300">itens</span></p>
+    <section aria-label="Visão do catálogo" className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-950 to-slate-800 p-5 text-white shadow-sm">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-200">Catálogo visual</p>
+        <p className="mt-2 text-sm text-slate-200">Fotos, preço e disponibilidade reunidos para uma leitura rápida.</p>
+      </div>
+      <div className="flex items-center gap-4">
+        <div className="flex items-center rounded-xl bg-white/10 p-1 border border-white/10" role="group" aria-label="Modo de visualização">
+          <button
+            type="button"
+            onClick={() => setViewMode("table")}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+              viewMode === "table"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-300 hover:text-white"
+            }`}
+            data-testid="view-mode-table"
+          >
+            <LayoutList className="h-4 w-4" />
+            Lista
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("cards")}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+              viewMode === "cards"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-300 hover:text-white"
+            }`}
+            data-testid="view-mode-cards"
+          >
+            <LayoutGrid className="h-4 w-4" />
+            Catálogo visual
+          </button>
+        </div>
+        <p className="text-3xl font-bold tracking-tight">{query.data?.total ?? 0}<span className="ml-2 text-sm font-medium text-slate-300">itens</span></p>
+      </div>
     </section>
-    {query.data?.items.length?<section aria-label="Destaques do catálogo" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{query.data.items.slice(0,4).map(product=><article key={product.publicId} className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"><ProductThumbnail product={product} className="h-20 w-20" version={mediaVersions[product.publicId]}/><div className="min-w-0"><p className="truncate text-sm font-bold text-slate-950">{product.name}</p><p className="mt-1 truncate text-xs text-slate-500">{product.sku}</p><p className="mt-2 text-sm font-bold text-slate-900">{money.format(product.salePriceCents/100)}</p></div></article>)}</section>:null}
+    {viewMode === "table" && query.data?.items.length ? (
+      <section aria-label="Destaques do catálogo" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {query.data.items.slice(0,4).map(product => (
+          <article
+            key={product.publicId}
+            onClick={() => setSelectedProductPublicId(product.publicId)}
+            className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm cursor-pointer hover:border-blue-400 hover:shadow-md transition-all"
+          >
+            <ProductThumbnail product={product} className="h-20 w-20" version={mediaVersions[product.publicId]}/>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-slate-950">{product.name}</p>
+              <p className="mt-1 truncate text-xs text-slate-500">{product.sku}</p>
+              <p className="mt-2 text-sm font-bold text-slate-900">{money.format(product.salePriceCents/100)}</p>
+            </div>
+          </article>
+        ))}
+      </section>
+    ) : null}
     {message&&<p role="status" className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">{message}</p>}
     <div className="grid gap-3 rounded-2xl border bg-white p-4 sm:grid-cols-2 xl:grid-cols-4">
       <label className="relative sm:col-span-2"><span className="sr-only">Pesquisar produtos</span><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400"/><Input className="pl-9" value={search} onChange={e=>{setSearch(e.target.value);resetPage()}} placeholder="Nome, SKU ou código de barras"/></label>
@@ -205,8 +323,124 @@ function Products() {
       <Filter label="Itens por página" value={String(pageSize)} onChange={value=>{setPageSize(Number(value));resetPage()}} options={[["10","10 por página"],["20","20 por página"],["50","50 por página"]]}/>
       <Button variant="outline" onClick={reset}>Limpar filtros</Button>
     </div>
-    {query.isLoading?<StateMessage title="Carregando produtos…"/>:query.error?<StateMessage title={query.error.message||"Erro ao carregar produtos."} retry={()=>void query.refetch()}/>:query.data?.items.length===0?<StateMessage title={search||category||active!=="all"||stock!=="all"?"Nenhum produto corresponde aos filtros.":"Nenhum produto cadastrado."}/>:<div className="hidden overflow-x-auto rounded-2xl border bg-white md:block"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-slate-50"><tr>{["Produto","SKU","Categoria","Custo","Venda","Saldo","Mínimo","Status","Ações"].map(x=><th key={x} className="p-3">{x}</th>)}</tr></thead><tbody>{query.data?.items.map(product=><tr key={product.publicId} className="border-t"><td className="p-3 font-medium"><div className="flex items-center gap-3"><ProductThumbnail product={product} version={mediaVersions[product.publicId]}/><span>{product.name}</span></div></td><td className="p-3">{product.sku}</td><td className="p-3">{product.category??"—"}</td><td className="p-3">{money.format(product.costPriceCents/100)}</td><td className="p-3">{money.format(product.salePriceCents/100)}</td><td className="p-3">{formatQuantity(product.quantity)}</td><td className="p-3">{formatQuantity(product.minimumStock)}</td><td className="p-3">{product.active?"Ativo":"Inativo"}</td><td className="p-3"><div className="flex gap-2"><Button size="sm" variant="outline" onClick={()=>setSelectedProductPublicId(product.publicId)}>Detalhes</Button>{canWrite&&<><Button size="sm" variant="outline" onClick={()=>edit(product)}>Editar</Button><Button size="sm" variant="outline" onClick={()=>status.mutate({publicId:product.publicId,active:!product.active})} disabled={status.isPending}>{product.active?"Inativar":"Ativar"}</Button></>}</div></td></tr>)}</tbody></table></div>}
-    {query.data?.items.length?<div className="grid gap-3 md:hidden">{query.data.items.map(product=><article key={product.publicId} className="rounded-2xl border bg-white p-4"><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><ProductThumbnail product={product} className="h-16 w-16" version={mediaVersions[product.publicId]}/><div className="min-w-0"><p className="truncate font-semibold">{product.name}</p><p className="truncate text-xs text-slate-500">{product.sku}</p></div></div><span className="rounded-full bg-slate-100 px-2 py-1 text-xs">{product.active?"Ativo":"Inativo"}</span></div><dl className="mt-4 grid grid-cols-2 gap-2 text-sm"><div><dt className="text-slate-500">Categoria</dt><dd>{product.category??"—"}</dd></div><div><dt className="text-slate-500">Saldo</dt><dd>{formatQuantity(product.quantity)}</dd></div><div><dt className="text-slate-500">Custo</dt><dd>{money.format(product.costPriceCents/100)}</dd></div><div><dt className="text-slate-500">Venda</dt><dd>{money.format(product.salePriceCents/100)}</dd></div></dl><div className="mt-4 flex gap-2"><Button size="sm" variant="outline" onClick={()=>setSelectedProductPublicId(product.publicId)}>Detalhes</Button>{canWrite&&<><Button size="sm" variant="outline" onClick={()=>edit(product)}>Editar</Button><Button size="sm" variant="outline" onClick={()=>status.mutate({publicId:product.publicId,active:!product.active})}>{product.active?"Inativar":"Ativar"}</Button></>}</div></article>)}</div>:null}
+    {query.isLoading ? (
+      <StateMessage title="Carregando produtos…"/>
+    ) : query.error ? (
+      <StateMessage title={query.error.message||"Erro ao carregar produtos."} retry={()=>void query.refetch()}/>
+    ) : query.data?.items.length === 0 ? (
+      <StateMessage title={search||category||active!=="all"||stock!=="all"?"Nenhum produto corresponde aos filtros.":"Nenhum produto cadastrado."}/>
+    ) : viewMode === "cards" ? (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" data-testid="catalog-visual-grid">
+        {query.data?.items.map(product => (
+          <article
+            key={product.publicId}
+            data-testid="product-catalog-card"
+            onClick={() => setSelectedProductPublicId(product.publicId)}
+            className="group flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:border-blue-400 hover:shadow-lg transition-all duration-200 cursor-pointer"
+          >
+            <div>
+              <div className="overflow-hidden rounded-xl bg-slate-100 mb-3 aspect-[4/3] flex items-center justify-center">
+                <ProductThumbnail product={product} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-200" version={mediaVersions[product.publicId]}/>
+              </div>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate font-bold text-slate-950 text-sm">{product.name}</p>
+                  <p className="mt-0.5 truncate text-xs font-mono text-slate-500">{product.sku}</p>
+                </div>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${product.active ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-slate-100 text-slate-600"}`}>
+                  {product.active ? "Ativo" : "Inativo"}
+                </span>
+              </div>
+              {product.category && (
+                <p className="mt-1.5 text-xs text-slate-500 truncate">{product.category}</p>
+              )}
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-slate-100 flex items-end justify-between gap-2">
+              <div>
+                <span className="text-[11px] text-slate-400 block font-medium">Preço de venda</span>
+                <span className="text-base font-bold text-slate-900">{money.format(product.salePriceCents/100)}</span>
+              </div>
+              <div className="text-right">
+                <span className="text-[11px] text-slate-400 block font-medium">Saldo</span>
+                <span className="text-xs font-bold text-slate-700">{formatQuantity(product.quantity)} {product.unit}</span>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    ) : (
+      <>
+        <div className="hidden overflow-x-auto rounded-2xl border bg-white md:block">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead className="bg-slate-50">
+              <tr>{["Produto","SKU","Categoria","Custo","Venda","Saldo","Mínimo","Status","Ações"].map(x=><th key={x} className="p-3">{x}</th>)}</tr>
+            </thead>
+            <tbody>
+              {query.data?.items.map(product => (
+                <tr key={product.publicId} className="border-t">
+                  <td className="p-3 font-medium">
+                    <div className="flex items-center gap-3">
+                      <ProductThumbnail product={product} version={mediaVersions[product.publicId]}/>
+                      <span>{product.name}</span>
+                    </div>
+                  </td>
+                  <td className="p-3">{product.sku}</td>
+                  <td className="p-3">{product.category??"—"}</td>
+                  <td className="p-3">{money.format(product.costPriceCents/100)}</td>
+                  <td className="p-3">{money.format(product.salePriceCents/100)}</td>
+                  <td className="p-3">{formatQuantity(product.quantity)}</td>
+                  <td className="p-3">{formatQuantity(product.minimumStock)}</td>
+                  <td className="p-3">{product.active?"Ativo":"Inativo"}</td>
+                  <td className="p-3">
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" onClick={()=>setSelectedProductPublicId(product.publicId)}>Detalhes</Button>
+                      {canWrite && (
+                        <>
+                          <Button size="sm" variant="outline" onClick={()=>edit(product)}>Editar</Button>
+                          <Button size="sm" variant="outline" onClick={()=>status.mutate({publicId:product.publicId,active:!product.active})} disabled={status.isPending}>{product.active?"Inativar":"Ativar"}</Button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="grid gap-3 md:hidden">
+          {query.data?.items.map(product => (
+            <article key={product.publicId} className="rounded-2xl border bg-white p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <ProductThumbnail product={product} className="h-16 w-16" version={mediaVersions[product.publicId]}/>
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold">{product.name}</p>
+                    <p className="truncate text-xs text-slate-500">{product.sku}</p>
+                  </div>
+                </div>
+                <span className="rounded-full bg-slate-100 px-2 py-1 text-xs">{product.active?"Ativo":"Inativo"}</span>
+              </div>
+              <dl className="mt-4 grid grid-cols-2 gap-2 text-sm">
+                <div><dt className="text-slate-500">Categoria</dt><dd>{product.category??"—"}</dd></div>
+                <div><dt className="text-slate-500">Saldo</dt><dd>{formatQuantity(product.quantity)}</dd></div>
+                <div><dt className="text-slate-500">Custo</dt><dd>{money.format(product.costPriceCents/100)}</dd></div>
+                <div><dt className="text-slate-500">Venda</dt><dd>{money.format(product.salePriceCents/100)}</dd></div>
+              </dl>
+              <div className="mt-4 flex gap-2">
+                <Button size="sm" variant="outline" onClick={()=>setSelectedProductPublicId(product.publicId)}>Detalhes</Button>
+                {canWrite && (
+                  <>
+                    <Button size="sm" variant="outline" onClick={()=>edit(product)}>Editar</Button>
+                    <Button size="sm" variant="outline" onClick={()=>status.mutate({publicId:product.publicId,active:!product.active})}>{product.active?"Inativar":"Ativar"}</Button>
+                  </>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      </>
+    )}
     {query.data&&<Pagination page={page} totalPages={query.data.totalPages} onPage={setPage}/>}
     <ProductFormDialog
       open={Boolean(form)}

@@ -17,6 +17,7 @@ export type TrpcContext = {
   operationalUserRole?: OperationalIdentity["role"];
   operationalSessionId?: string;
   operationalPermissions?: string[];
+  userName?: string;
 };
 
 async function tryMegaAdminSession(req: CreateExpressContextOptions["req"]): Promise<User | null> {
@@ -110,5 +111,6 @@ export async function createContext(
     operationalUserRole: operationalSession?.role,
     operationalSessionId: operationalSession?.sessionId,
     operationalPermissions: operationalSession?.permissions,
+    userName: operationalSession?.userName,
   };
 }

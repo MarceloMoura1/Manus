@@ -53,6 +53,34 @@ describe("private product media processing", () => {
     await expect(service.upload(identity,"invalid","aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",Buffer.from("x"))).rejects.toMatchObject({code:"BAD_IMAGE"});
     await expect(service.read("tenant-a","invalid",false)).rejects.toMatchObject({code:"BAD_IMAGE"});
     await expect(service.remove(identity,"invalid")).rejects.toMatchObject({code:"BAD_IMAGE"});
+    await expect(service.list(identity, "invalid")).rejects.toMatchObject({code:"BAD_IMAGE"});
+    await expect(service.setPrimary(identity, "invalid", "123e4567-e89b-12d3-a456-426614174000")).rejects.toMatchObject({code:"BAD_IMAGE"});
+    await expect(service.setPrimary(identity, "123e4567-e89b-12d3-a456-426614174000", "invalid")).rejects.toMatchObject({code:"BAD_IMAGE"});
+    await expect(service.deleteMedia(identity, "invalid", "123e4567-e89b-12d3-a456-426614174000")).rejects.toMatchObject({code:"BAD_IMAGE"});
+    await expect(service.deleteMedia(identity, "123e4567-e89b-12d3-a456-426614174000", "invalid")).rejects.toMatchObject({code:"BAD_IMAGE"});
+    await expect(service.readByMediaId("tenant-a", "invalid", "123e4567-e89b-12d3-a456-426614174000", false)).rejects.toMatchObject({code:"BAD_IMAGE"});
+    await expect(service.readByMediaId("tenant-a", "123e4567-e89b-12d3-a456-426614174000", "invalid", false)).rejects.toMatchObject({code:"BAD_IMAGE"});
+  });
+
+  it("enforces role permissions on gallery write operations (setPrimary, deleteMedia, reorder)", async () => {
+    const service = Object.create(ProductMediaService.prototype) as ProductMediaService;
+    const operatorIdentity = { tenantId: "tenant-a", userId: "user-op", role: "operator" };
+    const validProd = "123e4567-e89b-12d3-a456-426614174000";
+    const validMedia = "223e4567-e89b-12d3-a456-426614174000";
+
+    await expect(service.setPrimary(operatorIdentity, validProd, validMedia)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.deleteMedia(operatorIdentity, validProd, validMedia)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(service.reorder(operatorIdentity, validProd, [validMedia])).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("accepts legacy UUIDs (e.g. MySQL UUID() v1) without rejecting with BAD_IMAGE", async () => {
+    const legacyV1 = "6ccd780c-baba-1026-9564-0040f4311e29";
+    const service = Object.create(ProductMediaService.prototype) as ProductMediaService;
+    const identity = { tenantId: "tenant-a", userId: "user-a", role: "admin" };
+    // Should NOT throw BAD_IMAGE on product ID validation, will proceed to internal steps (and fail with something else or mock)
+    (service as any).product = async () => null;
+    (service as any).pool = { getConnection: async () => ({ beginTransaction: async () => {}, rollback: async () => {}, release: () => {} }) };
+    await expect(service.upload(identity, legacyV1, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Buffer.from("x"))).rejects.not.toMatchObject({ message: "Requisição de mídia inválida." });
   });
 });
 

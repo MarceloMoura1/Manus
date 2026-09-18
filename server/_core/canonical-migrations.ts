@@ -142,7 +142,7 @@ function validateStrongCanonicalContract(folder: string, sqlFiles: string[], ent
     .filter((file) => !dataRepairFiles.has(file))
     .map((file) => readFileSync(resolve(folder, file), "utf8"))
     .join("\n");
-  if (/^\s*(?:DROP|TRUNCATE|DELETE|UPDATE|INSERT)\b/im.test(baselineSql) || /^\s*ALTER\s+TABLE[\s\S]*?\bDROP\b/im.test(baselineSql)) {
+  if (/^\s*(?:DROP\s+(?!INDEX\b)|TRUNCATE|DELETE|UPDATE|INSERT)\b/im.test(baselineSql) || /^\s*ALTER\s+TABLE[\s\S]*?\bDROP\s+(?!INDEX\b|KEY\b|CONSTRAINT\b)\b/im.test(baselineSql)) {
     throw new Error("Operação destrutiva proibida na baseline canônica.");
   }
   const combinedSql = sqlFiles.map((file) => readFileSync(resolve(folder, file), "utf8")).join("\n");

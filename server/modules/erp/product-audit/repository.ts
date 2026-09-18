@@ -23,6 +23,7 @@ export type ProductAuditRow = RowDataPacket & {
   actor_user_id: string;
   actor_name_snapshot: string;
   actor_role: string;
+  user_name?: string | null;
   summary: string;
   changes_json: unknown;
   metadata_json: unknown;
@@ -213,9 +214,10 @@ export class ProductAuditRepository {
     );
 
     const [rows] = await executor.execute<ProductAuditRow[]>(
-      `SELECT a.*, p.public_id AS product_public_id
+      `SELECT a.*, p.public_id AS product_public_id, u.name AS user_name
        FROM erp_product_audit_logs a
        INNER JOIN erp_products p ON p.client_id = a.client_id AND p.id = a.product_id
+       LEFT JOIN megadesk_domain_client_users u ON u.client_id = a.client_id AND u.user_id = a.actor_user_id
        WHERE ${whereClause}
        ORDER BY a.created_at DESC, a.id DESC
        LIMIT ${limit} OFFSET ${offset}`,
@@ -238,9 +240,10 @@ export class ProductAuditRepository {
     if (!executor) return null;
 
     const [rows] = await executor.execute<ProductAuditRow[]>(
-      `SELECT a.*, p.public_id AS product_public_id
+      `SELECT a.*, p.public_id AS product_public_id, u.name AS user_name
        FROM erp_product_audit_logs a
        INNER JOIN erp_products p ON p.client_id = a.client_id AND p.id = a.product_id
+       LEFT JOIN megadesk_domain_client_users u ON u.client_id = a.client_id AND u.user_id = a.actor_user_id
        WHERE a.client_id = ? AND a.product_id = ? AND a.public_id = ?
        LIMIT 1`,
       [clientId, productId, publicId]

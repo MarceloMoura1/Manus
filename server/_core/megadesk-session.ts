@@ -14,6 +14,7 @@ export type OperationalIdentity = {
   role: "admin" | "manager" | "agent" | "viewer";
   permissions: string[];
   userEmail: string;
+  userName?: string;
 };
 
 export type StoredOperationalSession = OperationalIdentity & {
@@ -95,7 +96,7 @@ export class MysqlOperationalSessionRepository implements OperationalSessionRepo
   async findByTokenHash(tokenHash: string): Promise<StoredOperationalSession | null> {
     const rows = resultRows(await getPool().execute(
       `SELECT s.id, s.token_hash, s.user_id, s.client_id, s.session_version, s.created_at, s.expires_at, s.last_used_at, s.revoked_at,
-              u.email, u.role, u.status AS user_status, u.permissions_json,
+              u.name AS user_name, u.email, u.role, u.status AS user_status, u.permissions_json,
               c.status AS tenant_status, c.access_released
        FROM megadesk_operational_sessions s
        INNER JOIN megadesk_domain_client_users u ON u.user_id = s.user_id AND u.client_id = s.client_id
@@ -118,6 +119,7 @@ export class MysqlOperationalSessionRepository implements OperationalSessionRepo
       lastUsedAt: dateValue(row.last_used_at),
       revokedAt: row.revoked_at == null ? null : dateValue(row.revoked_at),
       userEmail: String(row.email).trim().toLowerCase(),
+      userName: row.user_name ? String(row.user_name).trim() : undefined,
       role,
       permissions: parsePermissions(row.permissions_json),
       userStatus: String(row.user_status),
@@ -219,7 +221,7 @@ export async function resolveOperationalSession(req: Pick<Request, "headers">, r
   if (!session || session.revokedAt || session.expiresAt.getTime() <= now.getTime()) return null;
   if (session.tenantStatus !== "active" || !session.accessReleased || session.userStatus !== "active") return null;
   if (now.getTime() - session.lastUsedAt.getTime() >= LAST_USED_WRITE_INTERVAL_MS) await repository.touch(session.sessionId, now);
-  return { sessionId: session.sessionId, userId: session.userId, tenantId: session.tenantId, role: session.role, permissions: session.permissions, userEmail: session.userEmail };
+  return { sessionId: session.sessionId, userId: session.userId, tenantId: session.tenantId, role: session.role, permissions: session.permissions, userEmail: session.userEmail, userName: session.userName };
 }
 
 /** Authentication-only variant for endpoints that must never write while resolving a session. */
@@ -229,7 +231,7 @@ export async function resolveOperationalSessionReadOnly(req: Pick<Request, "head
   const session = await repository.findByTokenHash(hashOperationalSessionToken(token));
   if (!session || session.revokedAt || session.expiresAt.getTime() <= now.getTime()) return null;
   if (session.tenantStatus !== "active" || !session.accessReleased || session.userStatus !== "active") return null;
-  return { sessionId: session.sessionId, userId: session.userId, tenantId: session.tenantId, role: session.role, permissions: session.permissions, userEmail: session.userEmail };
+  return { sessionId: session.sessionId, userId: session.userId, tenantId: session.tenantId, role: session.role, permissions: session.permissions, userEmail: session.userEmail, userName: session.userName };
 }
 
 export async function revokeOperationalSession(req: Pick<Request, "headers">, repository: OperationalSessionRepository = defaultRepository()): Promise<boolean> {

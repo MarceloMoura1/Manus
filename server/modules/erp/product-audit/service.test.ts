@@ -155,5 +155,37 @@ describe("ProductAuditService Domain Rules & Tenant Isolation", () => {
 
       expect(auditRepo.find).not.toHaveBeenCalled();
     });
+
+    it("resolves human name when actor_name_snapshot is a UUID technical id", async () => {
+      erpRepo.findProduct.mockResolvedValue({ id: 10, public_id: "prod-uuid-1" });
+      const row = mockAuditRow({
+        actor_name_snapshot: "user-2fbdc1cd-fc40-4ba2-87ff-b59fa3b0c735",
+        user_name: "Marcelo Moura",
+      });
+      auditRepo.find.mockResolvedValue(row);
+
+      const result = await service.detail(adminA, {
+        productPublicId: "prod-uuid-1",
+        auditPublicId: "audit-uuid-1",
+      });
+
+      expect(result.actor.name).toBe("Marcelo Moura");
+    });
+
+    it("falls back to 'Usuário não disponível' when actor is a technical id and user is deleted", async () => {
+      erpRepo.findProduct.mockResolvedValue({ id: 10, public_id: "prod-uuid-1" });
+      const row = mockAuditRow({
+        actor_name_snapshot: "user-2fbdc1cd-fc40-4ba2-87ff-b59fa3b0c735",
+        user_name: null,
+      });
+      auditRepo.find.mockResolvedValue(row);
+
+      const result = await service.detail(adminA, {
+        productPublicId: "prod-uuid-1",
+        auditPublicId: "audit-uuid-1",
+      });
+
+      expect(result.actor.name).toBe("Usuário não disponível");
+    });
   });
 });

@@ -122,6 +122,8 @@ export type ProductFormDialogViewProps = {
   brands: BrandOptionItem[];
   brandsLoading?: boolean;
   brandsError?: string | null;
+  onOpenNewCategory?: () => void;
+  onOpenNewBrand?: () => void;
 };
 
 function FormField({
@@ -168,6 +170,8 @@ export type ProductFormContentProps = {
   brands: BrandOptionItem[];
   brandsLoading?: boolean;
   brandsError?: string | null;
+  onOpenNewCategory?: () => void;
+  onOpenNewBrand?: () => void;
 };
 
 export function ProductFormContent({
@@ -187,6 +191,8 @@ export function ProductFormContent({
   brands,
   brandsLoading,
   brandsError,
+  onOpenNewCategory,
+  onOpenNewBrand,
 }: ProductFormContentProps) {
   // Detecta se o produto tem categoria textual legada sem relação formal
   const hasLegacyCategory = Boolean(form.category && !form.categoryPublicId);
@@ -312,12 +318,25 @@ export function ProductFormContent({
 
       {/* Seletor Relacional de Categoria */}
       <div className="sm:col-span-1">
-        <label
-          htmlFor="product-category-select"
-          className="text-sm font-medium text-slate-700"
-        >
-          Categoria
-        </label>
+        <div className="flex items-center justify-between">
+          <label
+            htmlFor="product-category-select"
+            className="text-sm font-medium text-slate-700"
+          >
+            Categoria
+          </label>
+          {onOpenNewCategory && (
+            <button
+              type="button"
+              onClick={onOpenNewCategory}
+              disabled={pending}
+              className="text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline disabled:opacity-50"
+              data-testid="btn-new-category"
+            >
+              + Nova categoria
+            </button>
+          )}
+        </div>
         <select
           id="product-category-select"
           data-testid="product-category-select"
@@ -403,12 +422,25 @@ export function ProductFormContent({
 
       {/* Seletor Relacional de Marca */}
       <div className="sm:col-span-1">
-        <label
-          htmlFor="product-brand-select"
-          className="text-sm font-medium text-slate-700"
-        >
-          Marca
-        </label>
+        <div className="flex items-center justify-between">
+          <label
+            htmlFor="product-brand-select"
+            className="text-sm font-medium text-slate-700"
+          >
+            Marca
+          </label>
+          {onOpenNewBrand && (
+            <button
+              type="button"
+              onClick={onOpenNewBrand}
+              disabled={pending}
+              className="text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline disabled:opacity-50"
+              data-testid="btn-new-brand"
+            >
+              + Nova marca
+            </button>
+          )}
+        </div>
         <select
           id="product-brand-select"
           data-testid="product-brand-select"
@@ -544,6 +576,8 @@ export function ProductFormDialogView({
   brands,
   brandsLoading,
   brandsError,
+  onOpenNewCategory,
+  onOpenNewBrand,
 }: ProductFormDialogViewProps) {
   if (!form) return null;
 
@@ -572,7 +606,219 @@ export function ProductFormDialogView({
           brands={brands}
           brandsLoading={brandsLoading}
           brandsError={brandsError}
+          onOpenNewCategory={onOpenNewCategory}
+          onOpenNewBrand={onOpenNewBrand}
         />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function CategoryCreateModal({
+  open,
+  onOpenChange,
+  categories,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  categories: CategoryOptionItem[];
+  onCreated: (cat: { publicId: string; name: string }) => void;
+}) {
+  const [name, setName] = React.useState("");
+  const [parentPublicId, setParentPublicId] = React.useState<string>("");
+  const [error, setError] = React.useState<string | null>(null);
+  const createCategory = trpc.erp.categories.create.useMutation();
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setName("");
+      setParentPublicId("");
+      setError(null);
+    }
+    onOpenChange(nextOpen);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (trimmed.length < 2) {
+      setError("O nome da categoria deve ter no mínimo 2 caracteres.");
+      return;
+    }
+    if (trimmed.length > 120) {
+      setError("O nome da categoria deve ter no máximo 120 caracteres.");
+      return;
+    }
+    setError(null);
+    try {
+      const res = await createCategory.mutateAsync({
+        name: trimmed,
+        parentPublicId: parentPublicId ? parentPublicId : null,
+      });
+      onCreated({ publicId: res.publicId, name: res.name });
+      handleOpenChange(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível criar a categoria.");
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="bg-white sm:max-w-md" data-testid="category-create-dialog">
+        <DialogHeader>
+          <DialogTitle>Nova Categoria</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <label htmlFor="new-category-name" className="block text-sm font-medium text-slate-700">
+            Nome da categoria
+            <Input
+              id="new-category-name"
+              data-testid="new-category-name-input"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="Ex: Calçados Esportivos"
+              className="mt-1"
+              required
+              minLength={2}
+              maxLength={120}
+              autoFocus
+            />
+          </label>
+          <label htmlFor="new-category-parent" className="block text-sm font-medium text-slate-700">
+            Categoria pai (opcional)
+            <select
+              id="new-category-parent"
+              data-testid="new-category-parent-select"
+              value={parentPublicId}
+              onChange={e => setParentPublicId(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-sm text-slate-900 shadow-sm"
+            >
+              <option value="">Nenhuma (categoria raiz)</option>
+              {categories.map(cat => (
+                <option key={cat.publicId} value={cat.publicId}>
+                  {formatCategoryOptionLabel(cat)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {error && (
+            <p role="alert" className="text-sm text-red-600" data-testid="category-create-error">
+              {sanitizeErrorMessage(error)}
+            </p>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleOpenChange(false)}
+              disabled={createCategory.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              disabled={createCategory.isPending || name.trim().length < 2}
+              data-testid="submit-new-category"
+            >
+              {createCategory.isPending ? "Criando…" : "Salvar categoria"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function BrandCreateModal({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated: (brand: { publicId: string; name: string }) => void;
+}) {
+  const [name, setName] = React.useState("");
+  const [error, setError] = React.useState<string | null>(null);
+  const createBrand = trpc.erp.brands.create.useMutation();
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setName("");
+      setError(null);
+    }
+    onOpenChange(nextOpen);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (trimmed.length < 2) {
+      setError("O nome da marca deve ter no mínimo 2 caracteres.");
+      return;
+    }
+    if (trimmed.length > 120) {
+      setError("O nome da marca deve ter no máximo 120 caracteres.");
+      return;
+    }
+    setError(null);
+    try {
+      const res = await createBrand.mutateAsync({
+        name: trimmed,
+      });
+      onCreated({ publicId: res.publicId, name: res.name });
+      handleOpenChange(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível criar a marca.");
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="bg-white sm:max-w-md" data-testid="brand-create-dialog">
+        <DialogHeader>
+          <DialogTitle>Nova Marca</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <label htmlFor="new-brand-name" className="block text-sm font-medium text-slate-700">
+            Nome da marca
+            <Input
+              id="new-brand-name"
+              data-testid="new-brand-name-input"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="Ex: Nike, Logitech"
+              className="mt-1"
+              required
+              minLength={2}
+              maxLength={120}
+              autoFocus
+            />
+          </label>
+          {error && (
+            <p role="alert" className="text-sm text-red-600" data-testid="brand-create-error">
+              {sanitizeErrorMessage(error)}
+            </p>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleOpenChange(false)}
+              disabled={createBrand.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              disabled={createBrand.isPending || name.trim().length < 2}
+              data-testid="submit-new-brand"
+            >
+              {createBrand.isPending ? "Criando…" : "Salvar marca"}
+            </Button>
+          </div>
+        </form>
       </DialogContent>
     </Dialog>
   );
@@ -617,6 +863,9 @@ export function ProductFormDialog({
   categoriesOverride,
   brandsOverride,
 }: ProductFormDialogProps) {
+  const [categoryModalOpen, setCategoryModalOpen] = React.useState(false);
+  const [brandModalOpen, setBrandModalOpen] = React.useState(false);
+
   // Busca lista de categorias e marcas reais pelo tRPC
   const categoriesQuery = trpc.erp.categories.list.useQuery(
     { pageSize: 100 },
@@ -640,24 +889,51 @@ export function ProductFormDialog({
     brandsOverride?.error?.message ?? brandsQuery.error?.message;
 
   return (
-    <ProductFormDialogView
-      open={open}
-      onOpenChange={onOpenChange}
-      form={form}
-      setForm={setForm}
-      onSubmit={onSubmit}
-      pending={pending}
-      errorMessage={errorMessage}
-      photoPreview={photoPreview}
-      removePhoto={removePhoto}
-      onPhotoSelect={onPhotoSelect}
-      onPhotoRemove={onPhotoRemove}
-      categories={categories}
-      categoriesLoading={categoriesLoading}
-      categoriesError={categoriesError}
-      brands={brands}
-      brandsLoading={brandsLoading}
-      brandsError={brandsError}
-    />
+    <>
+      <ProductFormDialogView
+        open={open}
+        onOpenChange={onOpenChange}
+        form={form}
+        setForm={setForm}
+        onSubmit={onSubmit}
+        pending={pending}
+        errorMessage={errorMessage}
+        photoPreview={photoPreview}
+        removePhoto={removePhoto}
+        onPhotoSelect={onPhotoSelect}
+        onPhotoRemove={onPhotoRemove}
+        categories={categories}
+        categoriesLoading={categoriesLoading}
+        categoriesError={categoriesError}
+        brands={brands}
+        brandsLoading={brandsLoading}
+        brandsError={brandsError}
+        onOpenNewCategory={() => setCategoryModalOpen(true)}
+        onOpenNewBrand={() => setBrandModalOpen(true)}
+      />
+      <CategoryCreateModal
+        open={categoryModalOpen}
+        onOpenChange={setCategoryModalOpen}
+        categories={categories}
+        onCreated={cat => {
+          setForm(curr =>
+            curr
+              ? { ...curr, categoryPublicId: cat.publicId, category: cat.name }
+              : null
+          );
+          void categoriesQuery.refetch();
+        }}
+      />
+      <BrandCreateModal
+        open={brandModalOpen}
+        onOpenChange={setBrandModalOpen}
+        onCreated={brand => {
+          setForm(curr =>
+            curr ? { ...curr, brandPublicId: brand.publicId } : null
+          );
+          void brandsQuery.refetch();
+        }}
+      />
+    </>
   );
 }

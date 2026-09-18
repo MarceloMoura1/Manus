@@ -32,7 +32,15 @@ function parseJsonField<T>(value: unknown): T | null {
   return null;
 }
 
+const USER_UUID_PATTERN = /^(user-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function productAuditPublic(row: ProductAuditRow): PublicProductAuditLog {
+  const snapshot = row.actor_name_snapshot?.trim();
+  const isTechnicalId = !snapshot || USER_UUID_PATTERN.test(snapshot) || snapshot === row.actor_user_id;
+  const displayName = isTechnicalId
+    ? (row.user_name?.trim() || "Usuário não disponível")
+    : snapshot;
+
   return {
     publicId: row.public_id,
     productPublicId: row.product_public_id ?? "",
@@ -41,7 +49,7 @@ export function productAuditPublic(row: ProductAuditRow): PublicProductAuditLog 
     action: row.action,
     actor: {
       userId: row.actor_user_id,
-      name: row.actor_name_snapshot,
+      name: displayName,
       role: row.actor_role,
     },
     summary: row.summary,

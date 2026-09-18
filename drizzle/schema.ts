@@ -1693,6 +1693,7 @@ export const erpProductMedia = mysqlTable(
     sha256: varchar({ length: 64 }).notNull(),
     width: int().notNull(),
     height: int().notNull(),
+    displayOrder: int("display_order").default(0).notNull(),
     state: mysqlEnum(["staged", "active", "pending_delete", "deleted"])
       .default("staged")
       .notNull(),
@@ -1723,7 +1724,12 @@ export const erpProductMedia = mysqlTable(
       table.productId,
       table.id
     ),
-    uniqueIndex("uq_epm_one_active").on(table.clientId, table.activeProductId),
+    index("idx_epm_tenant_product_order").on(
+      table.clientId,
+      table.productId,
+      table.displayOrder,
+      table.id
+    ),
     index("idx_epm_tenant_product_state").on(
       table.clientId,
       table.productId,

@@ -785,4 +785,67 @@ describe("ProductDetailPanel — P1-A9 Adversarial Hardening Suite", () => {
     expect(markupLoadingB).not.toContain("Mouse Ergonômico");
     expect(markupLoadingB).not.toContain("MOU-ERG-001");
   });
+
+  // A10: Product Images Section & Gallery Render
+  it("A10. renderiza seção de Imagens do Produto com foto principal e aviso de gap de schema", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ProductDetailView, {
+        product: baseProduct,
+        currentTab: "general",
+        canWrite: true,
+      })
+    );
+
+    expect(markup).toContain("Imagens do Produto");
+    expect(markup).toContain("data-testid=\"product-images-section\"");
+    expect(markup).toContain("Galeria de Imagens");
+    expect(markup).toContain("Principal");
+    expect(markup).toContain("0030");
+    expect(markup).toContain("P1_GALLERY_SCHEMA_GAP=YES");
+  });
+
+  // A11: Upload and Zoom Controls Presence when canWrite is true
+  it("A11. disponibiliza controles de upload e zoom da foto quando canWrite é true", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ProductDetailView, {
+        product: baseProduct,
+        currentTab: "general",
+        canWrite: true,
+      })
+    );
+
+    expect(markup).toContain("data-testid=\"upload-product-image-btn\"");
+    expect(markup).toContain("data-testid=\"zoom-product-image-btn\"");
+  });
+
+  // A12: Read-only mode hides upload and modification buttons
+  it("A12. oculta botões de adicionar e substituir imagem quando canWrite é false (modo somente leitura)", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ProductDetailView, {
+        product: baseProduct,
+        currentTab: "general",
+        canWrite: false,
+      })
+    );
+
+    expect(markup).toContain("Imagens do Produto");
+    expect(markup).toContain("data-testid=\"product-images-section\"");
+    expect(markup).not.toContain("data-testid=\"upload-product-image-btn\"");
+    expect(markup).not.toContain("data-testid=\"gallery-add-placeholder\"");
+  });
+
+  // A13: Gallery Thumbnail Strip rendering
+  it("A13. renderiza a faixa de miniaturas da galeria e o indicador da foto principal", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ProductDetailView, {
+        product: baseProduct,
+        currentTab: "general",
+        canWrite: true,
+      })
+    );
+
+    expect(markup).toContain("data-testid=\"gallery-thumbnails-strip\"");
+    expect(markup).toContain("data-testid=\"gallery-thumb-primary\"");
+    expect(markup).toContain("Principal");
+  });
 });

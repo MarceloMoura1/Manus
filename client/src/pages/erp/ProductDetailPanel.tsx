@@ -16,13 +16,17 @@ import {
   DollarSign,
   Edit,
   History,
+  Image as ImageIcon,
   Info,
   Layers,
+  Maximize2,
   Package,
   Plus,
   ShieldAlert,
   Tag,
+  Trash2,
   Truck,
+  Upload,
   User,
 } from "lucide-react";
 import { ProductVariantDialog, type ProductVariantItem } from "./ProductVariantDialog";
@@ -183,6 +187,7 @@ export type ProductDetailViewProps = {
   variantActionPending?: boolean;
   variantActionMessage?: string | null;
   variantActionError?: string | null;
+  onImagesChanged?: () => void;
 };
 
 export function ProductDetailView({
@@ -204,6 +209,7 @@ export function ProductDetailView({
   variantActionPending,
   variantActionMessage,
   variantActionError,
+  onImagesChanged,
 }: ProductDetailViewProps) {
   // 1. Estado de Carregamento
   if (isLoading) {
@@ -352,6 +358,14 @@ export function ProductDetailView({
                 <p className="mt-1 text-xs text-slate-500">Gatilho para alerta de reposição</p>
               </div>
             </div>
+
+            {/* IMAGENS DO PRODUTO */}
+            <ProductImageGallerySection
+              productPublicId={product.publicId}
+              productName={product.name}
+              canWrite={canWrite}
+              onImagesChanged={onImagesChanged}
+            />
 
             {/* Identificação e Taxonomia */}
             <div className="grid gap-6 lg:grid-cols-2">
@@ -799,6 +813,569 @@ export function ProductDetailView({
   );
 }
 
+export type ProductGalleryItem = {
+  mediaId: string;
+  isPrimary: boolean;
+  displayOrder: number;
+  width: number;
+  height: number;
+  byteSize: number;
+  mimeType: string;
+  createdAt: string;
+};
+
+export function ProductImageGallerySection({
+  productPublicId,
+  productName,
+  canWrite,
+  onImagesChanged,
+}: {
+  productPublicId: string;
+  productName: string;
+  canWrite?: boolean;
+  onImagesChanged?: () => void;
+}) {
+  const [items, setItems] = React.useState<ProductGalleryItem[]>([]);
+  const [selectedMediaId, setSelectedMediaId] = React.useState<string | null>(null);
+  const [hasImage, setHasImage] = React.useState(true);
+  const [timestamp, setTimestamp] = React.useState(1);
+  const [zoomOpen, setZoomOpen] = React.useState(false);
+  const [actionPending, setActionPending] = React.useState(false);
+  const [feedbackError, setFeedbackError] = React.useState<string | null>(null);
+  const [feedbackSuccess, setFeedbackSuccess] = React.useState<string | null>(null);
+  const addInputRef = React.useRef<HTMLInputElement | null>(null);
+  const replaceInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const loadGallery = React.useCallback(async () => {
+    try {
+      const res = await fetch(`/api/products/${productPublicId}/images`);
+      if (res.ok) {
+        const data = await res.json();
+        if (typeof data === "object" && data !== null && "items" in data && Array.isArray(data.items)) {
+          const validItems: ProductGalleryItem[] = [];
+          for (const it of data.items) {
+            if (typeof it === "object" && it !== null && "mediaId" in it && typeof it.mediaId === "string") {
+              validItems.push({
+                mediaId: it.mediaId,
+                isPrimary: Boolean(it.isPrimary),
+                displayOrder: Number(it.displayOrder ?? 0),
+                width: Number(it.width ?? 0),
+                height: Number(it.height ?? 0),
+                byteSize: Number(it.byteSize ?? 0),
+                mimeType: typeof it.mimeType === "string" ? it.mimeType : "image/webp",
+                createdAt: typeof it.createdAt === "string" ? it.createdAt : "",
+              });
+            }
+          }
+          setItems(validItems);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [productPublicId]);
+
+  React.useEffect(() => {
+    void loadGallery();
+  }, [loadGallery]);
+
+  const activeItem =
+    items.find(it => it.mediaId === selectedMediaId) ||
+    items.find(it => it.isPrimary) ||
+    items[0] ||
+    null;
+
+  const handleUploadAdditional = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setFeedbackError("A imagem deve ter no máximo 5MB.");
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setFeedbackError("Formato não suportado. Use JPG, PNG ou WEBP.");
+      return;
+    }
+
+    setActionPending(true);
+    setFeedbackError(null);
+    setFeedbackSuccess(null);
+    try {
+      const res = await fetch(`/api/products/${productPublicId}/images`, {
+        method: "POST",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      if (!res.ok) {
+        let errMsg = "Não foi possível adicionar a imagem à galeria.";
+        try {
+          const errData = await res.json();
+          if (
+            typeof errData === "object" &&
+            errData !== null &&
+            "error" in errData &&
+            typeof errData.error === "string"
+          ) {
+            errMsg = errData.error;
+          }
+        } catch {}
+        throw new Error(errMsg);
+      }
+      const data = await res.json();
+      if (typeof data === "object" && data !== null && "mediaId" in data && typeof data.mediaId === "string") {
+        setSelectedMediaId(data.mediaId);
+      }
+      setTimestamp(Date.now());
+      await loadGallery();
+      onImagesChanged?.();
+      setFeedbackSuccess("Imagem adicionada à galeria com sucesso.");
+    } catch (err) {
+      setFeedbackError(err instanceof Error ? err.message : "Erro ao enviar imagem.");
+    } finally {
+      setActionPending(false);
+      if (addInputRef.current) addInputRef.current.value = "";
+    }
+  };
+
+  const handleReplacePrimary = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setFeedbackError("A imagem deve ter no máximo 5MB.");
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setFeedbackError("Formato não suportado. Use JPG, PNG ou WEBP.");
+      return;
+    }
+
+    setActionPending(true);
+    setFeedbackError(null);
+    setFeedbackSuccess(null);
+    try {
+      const res = await fetch(`/api/products/${productPublicId}/image`, {
+        method: "PUT",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      if (!res.ok) {
+        let errMsg = "Não foi possível salvar a imagem principal.";
+        try {
+          const errData = await res.json();
+          if (
+            typeof errData === "object" &&
+            errData !== null &&
+            "error" in errData &&
+            typeof errData.error === "string"
+          ) {
+            errMsg = errData.error;
+          }
+        } catch {}
+        throw new Error(errMsg);
+      }
+      const data = await res.json();
+      if (typeof data === "object" && data !== null && "mediaId" in data && typeof data.mediaId === "string") {
+        setSelectedMediaId(data.mediaId);
+      }
+      setTimestamp(Date.now());
+      await loadGallery();
+      onImagesChanged?.();
+      setFeedbackSuccess("Foto principal atualizada com sucesso.");
+    } catch (err) {
+      setFeedbackError(err instanceof Error ? err.message : "Erro ao alterar foto principal.");
+    } finally {
+      setActionPending(false);
+      if (replaceInputRef.current) replaceInputRef.current.value = "";
+    }
+  };
+
+  const handleSetPrimary = async () => {
+    if (!activeItem || activeItem.isPrimary) return;
+
+    setActionPending(true);
+    setFeedbackError(null);
+    setFeedbackSuccess(null);
+    try {
+      const res = await fetch(`/api/products/${productPublicId}/images/${activeItem.mediaId}/primary`, {
+        method: "PUT",
+      });
+      if (!res.ok) {
+        let errMsg = "Não foi possível definir como foto principal.";
+        try {
+          const errData = await res.json();
+          if (
+            typeof errData === "object" &&
+            errData !== null &&
+            "error" in errData &&
+            typeof errData.error === "string"
+          ) {
+            errMsg = errData.error;
+          }
+        } catch {}
+        throw new Error(errMsg);
+      }
+      setTimestamp(Date.now());
+      await loadGallery();
+      onImagesChanged?.();
+      setFeedbackSuccess("Foto principal atualizada com sucesso.");
+    } catch (err) {
+      setFeedbackError(err instanceof Error ? err.message : "Erro ao definir foto principal.");
+    } finally {
+      setActionPending(false);
+    }
+  };
+
+  const handleDeleteActive = async () => {
+    if (!activeItem) return;
+
+    const isPrimary = activeItem.isPrimary;
+    const confirmText = isPrimary
+      ? "Deseja realmente remover a foto principal? Se houver outras fotos na galeria, a próxima se tornará a foto principal."
+      : "Deseja realmente remover esta imagem da galeria?";
+
+    if (!window.confirm(confirmText)) return;
+
+    setActionPending(true);
+    setFeedbackError(null);
+    setFeedbackSuccess(null);
+    try {
+      const res = await fetch(`/api/products/${productPublicId}/images/${activeItem.mediaId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        let errMsg = "Não foi possível remover a imagem.";
+        try {
+          const errData = await res.json();
+          if (
+            typeof errData === "object" &&
+            errData !== null &&
+            "error" in errData &&
+            typeof errData.error === "string"
+          ) {
+            errMsg = errData.error;
+          }
+        } catch {}
+        throw new Error(errMsg);
+      }
+      setSelectedMediaId(null);
+      setTimestamp(Date.now());
+      await loadGallery();
+      onImagesChanged?.();
+      setFeedbackSuccess("Imagem removida com sucesso.");
+    } catch (err) {
+      setFeedbackError(err instanceof Error ? err.message : "Erro ao remover imagem.");
+    } finally {
+      setActionPending(false);
+    }
+  };
+
+  return (
+    <section
+      className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4"
+      data-testid="product-images-section"
+    >
+      <div className="flex items-center justify-between border-b pb-3">
+        <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+          <ImageIcon className="h-4 w-4 text-slate-500" />
+          Imagens do Produto
+        </h2>
+        <span className="text-xs text-slate-500 font-medium">
+          {items.length === 0
+            ? "Nenhuma imagem cadastrada"
+            : items.length === 1
+            ? "1 imagem cadastrada"
+            : `${items.length} imagens na galeria`}
+        </span>
+      </div>
+
+      {feedbackSuccess && (
+        <p className="rounded-lg bg-emerald-50 border border-emerald-200 p-2.5 text-xs text-emerald-800" role="status">
+          {feedbackSuccess}
+        </p>
+      )}
+
+      {feedbackError && (
+        <p className="rounded-lg bg-red-50 border border-red-200 p-2.5 text-xs text-red-800" role="alert">
+          {feedbackError}
+        </p>
+      )}
+
+      {/* ÁREA PRINCIPAL DA GALERIA */}
+      <div className="space-y-4">
+        {/* GRANDE VISUALIZADOR DA FOTO SELECIONADA */}
+        <div className="relative w-full max-w-2xl mx-auto aspect-[16/10] sm:aspect-[16/9] rounded-2xl border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center group shadow-inner">
+          {activeItem ? (
+            <>
+              <img
+                src={`/api/products/${productPublicId}/images/${activeItem.mediaId}?v=${timestamp}`}
+                alt={`${productName} — Imagem`}
+                className="h-full w-full object-contain p-3 transition-transform duration-300 group-hover:scale-[1.02] cursor-pointer"
+                onClick={() => setZoomOpen(true)}
+                data-testid="main-product-image"
+              />
+              <button
+                type="button"
+                onClick={() => setZoomOpen(true)}
+                className="absolute bottom-3 right-3 p-2 rounded-xl bg-slate-900/70 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-slate-900 shadow-md"
+                title="Ampliar imagem"
+                data-testid="zoom-product-image-btn"
+              >
+                <Maximize2 className="h-4 w-4" />
+              </button>
+              {activeItem.isPrimary && (
+                <div
+                  className="absolute top-3 left-3 bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow-sm flex items-center gap-1.5"
+                  data-testid="badge-primary-image"
+                >
+                  <span>★ Foto Principal</span>
+                </div>
+              )}
+            </>
+          ) : hasImage ? (
+            <>
+              <img
+                src={`/api/products/${productPublicId}/image?v=${timestamp}`}
+                alt={`${productName} — Imagem Principal`}
+                className="h-full w-full object-contain p-3 transition-transform duration-300 group-hover:scale-[1.02] cursor-pointer"
+                onClick={() => setZoomOpen(true)}
+                onError={() => setHasImage(false)}
+                data-testid="main-product-image"
+              />
+              <button
+                type="button"
+                onClick={() => setZoomOpen(true)}
+                className="absolute bottom-3 right-3 p-2 rounded-xl bg-slate-900/70 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-slate-900 shadow-md"
+                title="Ampliar imagem"
+                data-testid="zoom-product-image-btn"
+              >
+                <Maximize2 className="h-4 w-4" />
+              </button>
+              <div
+                className="absolute top-3 left-3 bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow-sm flex items-center gap-1.5"
+                data-testid="badge-primary-image"
+              >
+                <span>★ Foto Principal</span>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center justify-center text-slate-400 p-6 text-center">
+              <ImageIcon className="h-14 w-14 stroke-1 mb-2 text-slate-300" />
+              <p className="text-sm font-semibold text-slate-600">Nenhuma imagem cadastrada</p>
+              <p className="text-xs text-slate-400 mt-1 max-w-xs">
+                Adicione fotos do produto para enriquecer o catálogo e facilitar as vendas.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* BARRA DE AÇÕES PARA A IMAGEM SELECIONADA */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+          <div className="flex items-center gap-2">
+            {canWrite && (
+              <>
+                <input
+                  type="file"
+                  ref={addInputRef}
+                  className="hidden"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handleUploadAdditional}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs font-medium"
+                  onClick={() => addInputRef.current?.click()}
+                  disabled={actionPending}
+                  data-testid="upload-product-image-btn"
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  Adicionar foto
+                </Button>
+
+                {activeItem && activeItem.isPrimary && (
+                  <>
+                    <input
+                      type="file"
+                      ref={replaceInputRef}
+                      className="hidden"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={handleReplacePrimary}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs font-medium"
+                      onClick={() => replaceInputRef.current?.click()}
+                      disabled={actionPending}
+                      data-testid="replace-primary-image-btn"
+                      title="Substituir foto principal por um novo arquivo"
+                    >
+                      <Upload className="h-3.5 w-3.5 mr-1" />
+                      Substituir foto principal
+                    </Button>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {activeItem && canWrite && !activeItem.isPrimary && (
+              <Button
+                size="sm"
+                variant="default"
+                className="h-8 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white"
+                onClick={handleSetPrimary}
+                disabled={actionPending}
+                data-testid="btn-set-primary-media"
+              >
+                Definir como principal
+              </Button>
+            )}
+
+            {activeItem && canWrite && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                onClick={handleDeleteActive}
+                disabled={actionPending}
+                title="Remover imagem selecionada"
+                data-testid="btn-delete-media"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1" />
+                Remover imagem
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* FAIXA DE MINIATURAS (THUMBNAILS STRIP) */}
+        <div className="space-y-2 pt-2 border-t">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+              Galeria de Imagens
+            </span>
+            <span className="text-[11px] text-slate-400">
+              Clique em uma miniatura para visualizá-la ou gerenciá-la
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5" data-testid="gallery-thumbnails-strip">
+            {items.length > 0 ? (
+              items.map((it, idx) => {
+                const isSelected = activeItem?.mediaId === it.mediaId;
+                return (
+                  <button
+                    key={it.mediaId}
+                    type="button"
+                    onClick={() => setSelectedMediaId(it.mediaId)}
+                    className={`relative h-20 w-20 rounded-xl overflow-hidden border-2 transition-all group bg-slate-50 flex items-center justify-center ${
+                      isSelected
+                        ? "border-blue-600 ring-2 ring-blue-600/30 shadow-md scale-105"
+                        : "border-slate-200 hover:border-slate-400 opacity-80 hover:opacity-100"
+                    }`}
+                    data-testid={it.isPrimary ? "gallery-thumb-primary" : `gallery-thumb-${it.mediaId}`}
+                    title={it.isPrimary ? "Foto Principal" : `Foto ${idx + 1}`}
+                  >
+                    <img
+                      src={`/api/products/${productPublicId}/images/${it.mediaId}?variant=thumbnail&v=${timestamp}`}
+                      alt={`Miniatura ${idx + 1}`}
+                      className="h-full w-full object-cover"
+                    />
+                    {it.isPrimary && (
+                      <span className="absolute bottom-0 inset-x-0 bg-blue-600 text-[9px] font-bold text-white text-center py-0.5 uppercase tracking-wider">
+                        Principal
+                      </span>
+                    )}
+                  </button>
+                );
+              })
+            ) : hasImage ? (
+              <button
+                type="button"
+                className="relative h-20 w-20 rounded-xl overflow-hidden border-2 border-blue-600 ring-2 ring-blue-600/30 shadow-md scale-105 bg-slate-50 flex items-center justify-center"
+                data-testid="gallery-thumb-primary"
+                title="Foto Principal"
+              >
+                <img
+                  src={`/api/products/${productPublicId}/image?variant=thumbnail&v=${timestamp}`}
+                  alt="Miniatura Principal"
+                  className="h-full w-full object-cover"
+                />
+                <span className="absolute bottom-0 inset-x-0 bg-blue-600 text-[9px] font-bold text-white text-center py-0.5 uppercase tracking-wider">
+                  Principal
+                </span>
+              </button>
+            ) : null}
+
+            {canWrite && (
+              <button
+                type="button"
+                onClick={() => addInputRef.current?.click()}
+                disabled={actionPending}
+                className="h-20 w-20 rounded-xl border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50/50 flex flex-col items-center justify-center text-slate-400 hover:text-blue-600 transition-colors disabled:opacity-50"
+                data-testid="gallery-add-placeholder"
+                title="Adicionar foto à galeria"
+              >
+                <Plus className="h-5 w-5 mb-0.5" />
+                <span className="text-[10px] font-semibold">+ Adicionar</span>
+              </button>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3 text-xs text-blue-900 space-y-1 mt-2">
+            <div className="flex items-center gap-1.5 font-semibold text-blue-950">
+              <Info className="h-3.5 w-3.5 text-blue-700 shrink-0" />
+              <span>Galeria Multi-Imagem Ativa (Migration 0030)</span>
+            </div>
+            <p className="text-[11px] leading-relaxed text-blue-800">
+              A migration 0030 resolveu a restrição de unicidade anterior (P1_GALLERY_SCHEMA_GAP=YES). Agora o catálogo suporta múltiplos arquivos por produto com ordenação determinística e seleção canônica da foto principal.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Modal de Zoom / Lightbox */}
+      {zoomOpen && activeItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 animate-in fade-in"
+          onClick={() => setZoomOpen(false)}
+          data-testid="image-zoom-modal"
+        >
+          <div
+            className="relative max-w-4xl max-h-[90vh] bg-white rounded-2xl p-4 shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-slate-900">{productName}</span>
+                {activeItem.isPrimary && (
+                  <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    ★ Principal
+                  </span>
+                )}
+              </div>
+              <Button size="sm" variant="ghost" className="h-8 px-2.5 text-xs font-semibold" onClick={() => setZoomOpen(false)}>
+                ✕ Fechar
+              </Button>
+            </div>
+            <div className="flex items-center justify-center p-4">
+              <img
+                src={`/api/products/${productPublicId}/images/${activeItem.mediaId}?v=${timestamp}`}
+                alt={productName}
+                className="max-h-[75vh] w-auto object-contain rounded-xl"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function ProductDetailPanel({
   productPublicId,
   onBack,
@@ -917,6 +1494,10 @@ export function ProductDetailPanel({
         variantActionPending={variantActionPending}
         variantActionMessage={variantActionMessage}
         variantActionError={variantActionError}
+        onImagesChanged={() => {
+          void utils.erp.products.detail.invalidate({ publicId: productPublicId });
+          void utils.erp.products.list.invalidate();
+        }}
       />
 
       <ProductVariantDialog
