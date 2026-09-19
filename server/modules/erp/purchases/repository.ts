@@ -67,6 +67,10 @@ export class PurchaseRepository {
       where.push("o.status=?");
       values.push(o.status);
     }
+    if (o.supplierPublicId) {
+      where.push("s.public_id=?");
+      values.push(o.supplierPublicId);
+    }
     if (o.from) {
       where.push("DATE(o.created_at)>=?");
       values.push(o.from);
@@ -82,7 +86,7 @@ export class PurchaseRepository {
         total: "o.total_cents",
       }[o.sort];
     const [count] = await this.db().execute<RowDataPacket[]>(
-      `SELECT COUNT(*) total FROM erp_purchase_orders o WHERE ${sqlWhere}`,
+      `SELECT COUNT(*) total FROM erp_purchase_orders o INNER JOIN erp_suppliers s ON s.id=o.supplier_id AND s.client_id=o.client_id WHERE ${sqlWhere}`,
       values
     );
     const [rows] = await this.db().execute<OrderRow[]>(

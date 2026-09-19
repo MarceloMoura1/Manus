@@ -58,6 +58,7 @@ export const purchaseDraftInput = z
   });
 export const purchaseListInput = z.object({
   search: z.string().trim().max(180).default(""),
+  supplierPublicId: z.string().uuid().optional(),
   status: z.enum(purchaseStatuses).optional(),
   from: z.string().date().optional(),
   to: z.string().date().optional(),
