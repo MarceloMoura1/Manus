@@ -16,6 +16,59 @@ function sql(folder: string): string {
     .join("\n");
 }
 
+type AllowedIndexReplacement = {
+  drop: string;
+  replacement?: string;
+};
+
+const ALLOWED_INDEX_REPLACEMENTS: Record<string, readonly AllowedIndexReplacement[]> = {
+  "0031_lonely_blockbuster.sql": [
+    {
+      drop: "ALTER TABLE `erp_purchase_order_items` DROP INDEX `uq_erp_purchase_items_order_product`",
+      replacement: "ALTER TABLE `erp_purchase_order_items` ADD CONSTRAINT `uq_erp_purchase_items_order_identity` UNIQUE(`purchase_order_id`,`order_item_identity`)",
+    },
+    {
+      drop: "ALTER TABLE `erp_sale_order_items` DROP INDEX `uq_erp_sale_items_order_product`",
+      replacement: "ALTER TABLE `erp_sale_order_items` ADD CONSTRAINT `uq_erp_sale_items_order_identity` UNIQUE(`sale_order_id`,`order_item_identity`)",
+    },
+  ],
+};
+
+function normalizeSqlStatement(value: string): string {
+  return value.trim().replace(/;$/, "").replace(/\s+/g, " ");
+}
+
+function assertCreationOnlyMigration(fileName: string, migrationSql: string): void {
+  const normalizedMigration = normalizeSqlStatement(migrationSql);
+  const allowedReplacements = ALLOWED_INDEX_REPLACEMENTS[fileName] ?? [];
+
+  for (const statement of migrationSql.split("--> statement-breakpoint")) {
+    const normalizedStatement = normalizeSqlStatement(statement);
+    if (!normalizedStatement) continue;
+
+    if (/^(?:DROP\s+(?:TABLE|DATABASE|SCHEMA)|TRUNCATE|DELETE|UPDATE|INSERT)\b/i.test(normalizedStatement)) {
+      throw new Error(`Destructive statement is not allowed in ${fileName}: ${normalizedStatement}`);
+    }
+
+    if (/\bDROP\s+INDEX\b/i.test(normalizedStatement)) {
+      if (!allowedReplacements.some(({ drop }) => drop === normalizedStatement)) {
+        throw new Error(`DROP INDEX is not allowlisted in ${fileName}: ${normalizedStatement}`);
+      }
+      continue;
+    }
+
+    if (/\bDROP\s+(?:TABLE|COLUMN|KEY|CONSTRAINT|PRIMARY|FOREIGN\s+KEY)\b/i.test(normalizedStatement)) {
+      throw new Error(`Destructive ALTER is not allowed in ${fileName}: ${normalizedStatement}`);
+    }
+  }
+
+  for (const { replacement } of allowedReplacements) {
+    if (replacement && !normalizedMigration.includes(replacement)) {
+      throw new Error(`Allowlisted index replacement is incomplete in ${fileName}: ${replacement}`);
+    }
+  }
+}
+
 async function validateTemporaryMainChain(root: string): Promise<string[]> {
   const previousWorkingDirectory = process.cwd();
   process.chdir(root);
@@ -45,13 +98,20 @@ describe("canonical migration architecture", () => {
   });
 
   it("contains creation-only baselines", () => {
-    const mainBaseline = readdirSync(MAIN_MIGRATIONS_DIR)
-      .filter((file) => file.endsWith(".sql") && file !== "0019_utc_conversation_timestamp_repair.sql")
-      .map((file) => readFileSync(resolve(MAIN_MIGRATIONS_DIR, file), "utf8"))
-      .join("\n");
-    expect(mainBaseline).not.toMatch(/^\s*(?:DROP|TRUNCATE|DELETE|UPDATE|INSERT)\b/im);
-    expect(mainBaseline).not.toMatch(/^\s*ALTER\s+TABLE[\s\S]*?\bDROP\b/im);
+    for (const file of readdirSync(MAIN_MIGRATIONS_DIR)) {
+      if (!file.endsWith(".sql") || file === "0019_utc_conversation_timestamp_repair.sql" || file === "0030_robust_umar.sql") continue;
+      assertCreationOnlyMigration(file, readFileSync(resolve(MAIN_MIGRATIONS_DIR, file), "utf8"));
+    }
     expect(sql(TENANT_MIGRATIONS_DIR)).not.toMatch(/^\s*(?:DROP|TRUNCATE|DELETE|UPDATE|INSERT)\b/im);
+
+    const mediaMigration = readFileSync(
+      resolve(MAIN_MIGRATIONS_DIR, "0030_robust_umar.sql"),
+      "utf8"
+    );
+    expect(mediaMigration.match(/\bDROP\s+INDEX\b/gi)).toHaveLength(1);
+    expect(mediaMigration).toContain(
+      "ALTER TABLE `erp_product_media` DROP INDEX `uq_epm_one_active`"
+    );
 
     const repair = readFileSync(resolve(MAIN_MIGRATIONS_DIR, "0019_utc_conversation_timestamp_repair.sql"), "utf8");
     expect(repair).toContain("CONVERSATION_TIMESTAMP_REPAIR_PRECONDITION_FAILED");
@@ -59,6 +119,43 @@ describe("canonical migration architecture", () => {
     expect(repair).toContain("m.updated_at = m.updated_at");
     expect(repair).toContain("COLLATE utf8mb4_unicode_ci");
     expect(repair).not.toMatch(/\b(?:megadesk_conversation_events|wa_)\b/i);
+  });
+
+  it("allows only the audited 0031 index replacements", () => {
+    const stockV3Migration = readFileSync(
+      resolve(MAIN_MIGRATIONS_DIR, "0031_lonely_blockbuster.sql"),
+      "utf8"
+    );
+
+    expect(() => assertCreationOnlyMigration("0031_lonely_blockbuster.sql", stockV3Migration)).not.toThrow();
+    expect(() => assertCreationOnlyMigration(
+      "0031_lonely_blockbuster.sql",
+      stockV3Migration.replace("uq_erp_sale_items_order_product", "uq_unapproved_sale_index")
+    )).toThrow("DROP INDEX is not allowlisted");
+    expect(() => assertCreationOnlyMigration(
+      "0031_lonely_blockbuster.sql",
+      "DROP TABLE `erp_sale_order_items`;"
+    )).toThrow("Destructive statement is not allowed");
+    expect(() => assertCreationOnlyMigration(
+      "0031_lonely_blockbuster.sql",
+      "ALTER TABLE `erp_sale_order_items` DROP COLUMN `product_id`;"
+    )).toThrow("Destructive ALTER is not allowed");
+    expect(() => assertCreationOnlyMigration(
+      "0031_lonely_blockbuster.sql",
+      "DELETE FROM `erp_sale_order_items`;"
+    )).toThrow("Destructive statement is not allowed");
+    expect(() => assertCreationOnlyMigration(
+      "0031_lonely_blockbuster.sql",
+      "TRUNCATE `erp_sale_order_items`;"
+    )).toThrow("Destructive statement is not allowed");
+    expect(() => assertCreationOnlyMigration(
+      "0032_synthetic.sql",
+      "ALTER TABLE `erp_sale_order_items` DROP INDEX `uq_erp_sale_items_order_product`;"
+    )).toThrow("DROP INDEX is not allowlisted");
+    expect(() => assertCreationOnlyMigration(
+      "0031_lonely_blockbuster.sql",
+      stockV3Migration.replace("uq_erp_sale_items_order_identity", "uq_missing_sale_replacement")
+    )).toThrow("Allowlisted index replacement is incomplete");
   });
 
   it("keeps the internal Evolution queue in main exactly once", () => {

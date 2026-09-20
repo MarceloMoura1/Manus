@@ -69,6 +69,7 @@ export type StockMovementView = {
   referenceType: string | null;
   referenceId: string | null;
   createdBy: string;
+  responsibleDisplayName: string;
   createdAt: string | Date;
   reversed: boolean;
   reversalPublicId: string | null;
@@ -555,7 +556,7 @@ export function StockPage() {
                   <div className="flex items-center justify-between gap-3 xl:block"><p className="text-xs font-medium text-slate-500 dark:text-slate-400">{formatDateTime(item.createdAt)}</p><div className="mt-0 xl:mt-2"><StockStatusBadge movement={item} /></div></div>
                   <div className="min-w-0"><p className="truncate font-bold text-slate-950 dark:text-slate-50">{item.productName}</p><p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">SKU {item.sku}</p><span className={`mt-2 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${movementTone(item.type, item.direction)}`}><DirectionIcon aria-hidden="true" className="h-3.5 w-3.5" />{movementTypeLabel(item.type)}</span></div>
                   <div className="rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-900"><p className="text-xl font-bold text-slate-950 dark:text-slate-50">{signedMovementQuantity(item)}</p><p className="mt-1 flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300"><span>{formatStockQuantity(item.previousBalance)}</span><ArrowRight aria-hidden="true" className="h-3.5 w-3.5 text-slate-400" /><span>{formatStockQuantity(item.resultingBalance)} {stockUnitShortLabel(item.unit)}</span></p></div>
-                  <div className="min-w-0"><p className="line-clamp-2 text-sm text-slate-700 dark:text-slate-200">{item.reason}</p><p className="mt-1.5 break-all text-xs text-slate-500 dark:text-slate-400">{movementReferenceLabel(item.referenceType)} · {item.createdBy}</p></div>
+                  <div className="min-w-0"><p className="line-clamp-2 text-sm text-slate-700 dark:text-slate-200">{item.reason}</p><p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">{movementReferenceLabel(item.referenceType)} · {item.responsibleDisplayName}</p></div>
                   <MovementActions movement={item} canWrite={canWrite} onDetail={() => setDetail(item)} onReverse={() => startReversal(item)} />
                 </article>
               );
@@ -579,7 +580,7 @@ export function StockPage() {
                 <div className="sm:col-span-2"><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Motivo</dt><dd className="mt-1 whitespace-pre-wrap text-slate-800 dark:text-slate-200">{detail.reason}</dd></div>
                 <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Data e hora</dt><dd className="mt-1 text-slate-800 dark:text-slate-200">{formatDateTime(detail.createdAt)}</dd></div>
                 <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Origem</dt><dd className="mt-1 text-slate-800 dark:text-slate-200">{movementReferenceLabel(detail.referenceType)}</dd></div>
-                <div className="sm:col-span-2"><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Responsável</dt><dd className="mt-1 break-all text-slate-800 dark:text-slate-200">{detail.createdBy}</dd></div>
+                <div className="sm:col-span-2"><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Responsável</dt><dd className="mt-1 text-slate-800 dark:text-slate-200">{detail.responsibleDisplayName}</dd></div>
                 {detail.referenceId && <div className="sm:col-span-2"><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Referência</dt><dd className="mt-1 break-all font-mono text-xs text-slate-700 dark:text-slate-300">{detail.referenceId}</dd></div>}
                 {detail.reversalPublicId && <div className="sm:col-span-2"><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Movimentação compensatória</dt><dd className="mt-1 break-all font-mono text-xs text-slate-700 dark:text-slate-300">{detail.reversalPublicId}</dd></div>}
               </dl>

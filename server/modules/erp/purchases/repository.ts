@@ -6,8 +6,9 @@ import type {
   RowDataPacket,
 } from "mysql2/promise";
 import { getPool } from "../../../db";
-import { millisQuantity, quantityMillis } from "../contracts";
+import { hasDuplicateResolvedInventoryItem, millisQuantity, quantityMillis } from "../contracts";
 import { ErpDomainError } from "../errors";
+import { InventoryRepository } from "../inventory/repository";
 import {
   canTransitionPurchase,
   lineTotalCents,
@@ -40,6 +41,8 @@ type ItemRow = RowDataPacket & {
   id: number;
   public_id: string;
   product_id: number;
+  inventory_item_id: number | null;
+  inventory_item_public_id?: string | null;
   product_public_id: string;
   product_name_snapshot: string;
   sku_snapshot: string;
@@ -53,6 +56,9 @@ export class PurchaseRepository {
   constructor(private pool?: Pool) {}
   private db() {
     return (this.pool ??= getPool());
+  }
+  private inventory() {
+    return new InventoryRepository(this.db());
   }
   async list(clientId: string, o: PurchaseListInput) {
     const limit = integer(o.pageSize, 1, 100),
@@ -111,7 +117,11 @@ export class PurchaseRepository {
     const order = orders[0];
     if (!order) return null;
     const [items] = await connection.execute<ItemRow[]>(
-      "SELECT i.*,p.public_id product_public_id FROM erp_purchase_order_items i INNER JOIN erp_products p ON p.id=i.product_id WHERE i.purchase_order_id=? ORDER BY i.id",
+      `SELECT i.*,p.public_id product_public_id,ii.public_id inventory_item_public_id
+       FROM erp_purchase_order_items i
+       INNER JOIN erp_products p ON p.id=i.product_id
+       LEFT JOIN erp_inventory_items ii ON ii.id=i.inventory_item_id AND ii.product_id=i.product_id
+       WHERE i.purchase_order_id=? ORDER BY i.id`,
       [order.id]
     );
     const [history] = await connection.execute<RowDataPacket[]>(
@@ -123,6 +133,7 @@ export class PurchaseRepository {
       items: items.map(i => ({
         publicId: i.public_id,
         productPublicId: i.product_public_id,
+        inventoryItemPublicId: i.inventory_item_public_id ?? null,
         productName: i.product_name_snapshot,
         sku: i.sku_snapshot,
         quantity: i.quantity,
@@ -135,6 +146,7 @@ export class PurchaseRepository {
   private async validateReferences(
     c: PoolConnection,
     clientId: string,
+    userId: string,
     input: PurchaseDraftInput
   ) {
     const [suppliers] = await c.execute<RowDataPacket[]>(
@@ -151,10 +163,11 @@ export class PurchaseRepository {
       quantity: string;
       unitCostCents: number;
       lineTotalCents: number;
+      inventoryItemId: number;
     }> = [];
     for (const item of input.items) {
       const [rows] = await c.execute<RowDataPacket[]>(
-        "SELECT id,public_id,name,sku FROM erp_products WHERE client_id=? AND public_id=? AND active=1 LIMIT 1",
+        "SELECT id,public_id,name,sku,minimum_stock FROM erp_products WHERE client_id=? AND public_id=? AND active=1 LIMIT 1",
         [clientId, item.productPublicId]
       );
       if (!rows[0])
@@ -162,14 +175,24 @@ export class PurchaseRepository {
           "INACTIVE_PRODUCT",
           "Produto ativo não encontrado."
         );
+      const inventoryItem = await this.inventory().resolveForOperation(c, {
+        clientId,
+        productId: Number(rows[0].id),
+        requestedPublicId: item.inventoryItemPublicId ?? null,
+        userId,
+        productMinimumStock: String(rows[0].minimum_stock ?? "0.000"),
+      });
       products.push({
         id: Number(rows[0].id),
         name: String(rows[0].name),
         sku: String(rows[0].sku),
         ...item,
         lineTotalCents: lineTotalCents(item.quantity, item.unitCostCents),
+        inventoryItemId: inventoryItem.id,
       });
     }
+    if (hasDuplicateResolvedInventoryItem(products))
+      throw new ErpDomainError("CONFLICT", "Inventory item duplicado no pedido.");
     return { supplier: suppliers[0], products };
   }
   async save(
@@ -183,7 +206,7 @@ export class PurchaseRepository {
     let target = publicId ?? randomUUID();
     try {
       await c.beginTransaction();
-      const refs = await this.validateReferences(c, clientId, input);
+      const refs = await this.validateReferences(c, clientId, userId, input);
       if (publicId) {
         const current = await this.detail(clientId, publicId, c, true);
         if (!current)
@@ -241,11 +264,12 @@ export class PurchaseRepository {
       for (const p of refs.products) {
         total += p.lineTotalCents;
         await c.execute(
-          "INSERT INTO erp_purchase_order_items(public_id,purchase_order_id,product_id,product_name_snapshot,sku_snapshot,quantity,unit_cost_cents,line_total_cents) VALUES(?,?,?,?,?,?,?,?)",
+          "INSERT INTO erp_purchase_order_items(public_id,purchase_order_id,product_id,inventory_item_id,product_name_snapshot,sku_snapshot,quantity,unit_cost_cents,line_total_cents) VALUES(?,?,?,?,?,?,?,?,?)",
           [
             randomUUID(),
             id,
             p.id,
+            p.inventoryItemId,
             p.name,
             p.sku,
             p.quantity,
@@ -386,6 +410,12 @@ export class PurchaseRepository {
           "Todos os itens do pedido devem permanecer vinculados ao tenant."
         );
       for (const item of items) {
+        if (item.inventory_item_id === null) {
+          throw new ErpDomainError(
+            "CONFLICT",
+            "Item de compra ainda nÃ£o possui identidade de estoque preparada."
+          );
+        }
         await c.execute(
           "INSERT IGNORE INTO erp_stock_balances(client_id,product_id,quantity,version) VALUES(?,?,0,0)",
           [clientId, item.product_id]
@@ -395,21 +425,28 @@ export class PurchaseRepository {
           [clientId, item.product_id]
         );
         const previous = quantityMillis(String(balances[0].quantity)),
-          result = previous + quantityMillis(item.quantity);
+          result = previous + quantityMillis(item.quantity),
+          itemPrevious = quantityMillis(
+            await this.inventory().lockBalance(c, clientId, item.inventory_item_id)
+          ),
+          itemResult = itemPrevious + quantityMillis(item.quantity);
         const movementId = randomUUID(),
           itemKey = `${key}:${item.public_id}`,
           hash = createHash("sha256")
             .update(`${publicId}:${item.public_id}:${item.quantity}`)
             .digest("hex");
         const [movement] = await c.execute<ResultSetHeader>(
-          "INSERT INTO erp_stock_movements(public_id,client_id,product_id,type,direction,quantity,previous_balance,resulting_balance,reason,reference_type,reference_id,idempotency_key,payload_hash,created_by) VALUES(?,?,?,'purchase_in','in',?,?,?,'Recebimento integral de compra','purchase',?,?,?,?)",
+          "INSERT INTO erp_stock_movements(public_id,client_id,product_id,inventory_item_id,type,direction,quantity,previous_balance,resulting_balance,inventory_previous_balance,inventory_resulting_balance,reason,reference_type,reference_id,idempotency_key,payload_hash,created_by) VALUES(?,?,?,?,'purchase_in','in',?,?,?,?,?,'Recebimento integral de compra','purchase',?,?,?,?)",
           [
             movementId,
             clientId,
             item.product_id,
+            item.inventory_item_id,
             item.quantity,
             millisQuantity(previous),
             millisQuantity(result),
+            millisQuantity(itemPrevious),
+            millisQuantity(itemResult),
             publicId,
             itemKey,
             hash,
@@ -420,12 +457,19 @@ export class PurchaseRepository {
           "UPDATE erp_stock_balances SET quantity=?,version=version+1 WHERE client_id=? AND product_id=?",
           [millisQuantity(result), clientId, item.product_id]
         );
+        await this.inventory().setBalance(
+          c,
+          clientId,
+          item.inventory_item_id,
+          millisQuantity(itemResult)
+        );
         await c.execute(
-          "INSERT INTO erp_purchase_order_receipt_items(receipt_id,purchase_order_item_id,product_id,quantity,stock_movement_id) VALUES(?,?,?,?,?)",
+          "INSERT INTO erp_purchase_order_receipt_items(receipt_id,purchase_order_item_id,product_id,inventory_item_id,quantity,stock_movement_id) VALUES(?,?,?,?,?,?)",
           [
             receipt.insertId,
             item.id,
             item.product_id,
+            item.inventory_item_id,
             item.quantity,
             movement.insertId,
           ]

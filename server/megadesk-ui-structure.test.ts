@@ -9,6 +9,7 @@ const metricWebhookSource = readFileSync(resolve(process.cwd(), "server/metricWe
 const dbSource = readFileSync(resolve(process.cwd(), "server/db.ts"), "utf8");
 const botConfigSource = readFileSync(resolve(process.cwd(), "client/src/pages/BotConfigPage.tsx"), "utf8");
 const erpSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/ERPWorkspace.tsx"), "utf8");
+const stockSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/StockPage.tsx"), "utf8");
 const suppliersSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/SuppliersPage.tsx"), "utf8");
 const purchasesSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/PurchasesPage.tsx"), "utf8");
 const fiscalSource = readFileSync(resolve(process.cwd(), "client/src/pages/erp/FiscalPage.tsx"), "utf8");
@@ -24,7 +25,7 @@ describe("MegaDesk UI structure", () => {
     expect(homeSource).not.toContain("Pedido #PED-100");
     expect(erpSource).toContain("trpc.erp.summary.useQuery");
     expect(erpSource).toContain("trpc.erp.products.list.useQuery");
-    expect(erpSource).toContain("trpc.erp.stock.list.useQuery");
+    expect(stockSource).toContain("trpc.erp.stock.list.useQuery");
     expect(erpSource).toContain("erp:supplier.changed");
     expect(suppliersSource).toContain("trpc.erp.suppliers.list.useQuery");
     expect(erpSource).toContain('label:"Fornecedores"');

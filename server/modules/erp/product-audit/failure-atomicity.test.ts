@@ -124,6 +124,9 @@ describe("P1-A5 Failure Atomicity Tests across Transaction Boundaries", () => {
       const mockVariants = {
         findBySku: vi.fn().mockResolvedValue(null),
       };
+      const inventoryRepo = {
+        createSimpleForProduct: vi.fn().mockResolvedValue({ id: 90 }),
+      };
 
       erpService = new ErpService(
         erpRepo,
@@ -132,7 +135,9 @@ describe("P1-A5 Failure Atomicity Tests across Transaction Boundaries", () => {
         undefined,
         undefined,
         mockVariants as any,
-        auditRepo
+        auditRepo,
+        undefined,
+        inventoryRepo as any
       );
     });
 
@@ -258,6 +263,7 @@ describe("P1-A5 Failure Atomicity Tests across Transaction Boundaries", () => {
     let attributeRepo: any;
     let auditRepo: any;
     let publisher: any;
+    let inventoryRepo: any;
     let variantService: VariantService;
 
     beforeEach(() => {
@@ -329,13 +335,19 @@ describe("P1-A5 Failure Atomicity Tests across Transaction Boundaries", () => {
           callOrder.push("websocketPublish");
         }),
       };
+      inventoryRepo = {
+        prepareSimpleItemForFirstVariant: vi.fn().mockResolvedValue("removed"),
+        createVariantForProduct: vi.fn().mockResolvedValue({ id: 91 }),
+        setVariantItemActive: vi.fn().mockResolvedValue(undefined),
+      };
 
       variantService = new VariantService(
         variantRepo,
         erpRepo,
         attributeRepo,
         publisher,
-        auditRepo
+        auditRepo,
+        inventoryRepo
       );
     });
 

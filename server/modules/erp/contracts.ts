@@ -40,6 +40,7 @@ export type ProductByBarcodeInput = z.infer<typeof productByBarcodeInput>;
 
 export const stockMovementInput = z.object({
   productPublicId, type: z.enum(stockMovementTypes),
+  inventoryItemPublicId: z.string().uuid().nullable().optional(),
   quantity: z.string().trim().regex(/^\d{1,15}(?:\.\d{1,3})?$/),
   reason: z.string().trim().min(3).max(500), idempotencyKey: z.string().uuid(),
 });
@@ -56,5 +57,15 @@ export function normalizeBarcode(value: string | null): string | null { const no
 export function normalizeQuantity(value: string): string { const [whole, fraction = ""] = value.split("."); return `${BigInt(whole)}.${fraction.padEnd(3, "0")}`; }
 export function quantityMillis(value: string): bigint { const [whole, fraction] = normalizeQuantity(value).split("."); return BigInt(whole) * 1_000n + BigInt(fraction); }
 export function millisQuantity(value: bigint): string { const sign = value < 0n ? "-" : ""; const absolute = value < 0n ? -value : value; return `${sign}${absolute / 1_000n}.${String(absolute % 1_000n).padStart(3, "0")}`; }
+export function hasDuplicateResolvedInventoryItem(
+  items: readonly { inventoryItemId: number }[]
+): boolean {
+  const seen = new Set<number>();
+  for (const item of items) {
+    if (seen.has(item.inventoryItemId)) return true;
+    seen.add(item.inventoryItemId);
+  }
+  return false;
+}
 export type OperationalRole = "admin" | "manager" | "agent" | "viewer";
 export function canWriteErp(role: OperationalRole): boolean { return role === "admin" || role === "manager"; }

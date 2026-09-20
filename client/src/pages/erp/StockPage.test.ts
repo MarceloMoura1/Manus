@@ -114,6 +114,8 @@ describe("ERP Estoque — painel operacional", () => {
     }
     expect(movementReferenceLabel("purchase")).toBe("Compra");
     expect(movementReferenceLabel(null)).toBe("Sem referência externa");
+    expect(stockSource).toContain("detail.responsibleDisplayName");
+    expect(stockSource).not.toContain("{detail.createdBy}");
   });
 
   it("18. só oferece reversão isolada aos tipos permitidos pelo backend", () => {

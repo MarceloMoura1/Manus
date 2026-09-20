@@ -73,6 +73,7 @@ describe("P1-A8: Variant Barcode & Cost Parity with Symmetric Catalog Lookups", 
   let attributeRepo: any;
   let auditRepo: any;
   let publisher: any;
+  let inventoryRepo: any;
   let variantService: VariantService;
   let erpService: ErpService;
   let mockConnection: any;
@@ -126,6 +127,11 @@ describe("P1-A8: Variant Barcode & Cost Parity with Symmetric Catalog Lookups", 
     };
 
     publisher = { publish: vi.fn() };
+    inventoryRepo = {
+      prepareSimpleItemForFirstVariant: vi.fn().mockResolvedValue("removed"),
+      createVariantForProduct: vi.fn().mockResolvedValue({ id: 901 }),
+      setVariantItemActive: vi.fn().mockResolvedValue(undefined),
+    };
 
     const categoryRepo = {
       find: vi.fn(),
@@ -146,7 +152,8 @@ describe("P1-A8: Variant Barcode & Cost Parity with Symmetric Catalog Lookups", 
       productRepo,
       attributeRepo,
       publisher,
-      auditRepo
+      auditRepo,
+      inventoryRepo
     );
 
     erpService = new ErpService(

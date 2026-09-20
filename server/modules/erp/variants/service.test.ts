@@ -50,6 +50,7 @@ describe("VariantService Domain Rules", () => {
   let productRepo: any;
   let attributeRepo: any;
   let publisher: any;
+  let inventoryRepo: any;
   let service: VariantService;
 
   beforeEach(() => {
@@ -94,13 +95,19 @@ describe("VariantService Domain Rules", () => {
     const auditRepo = {
       record: vi.fn().mockResolvedValue({ id: 1 }),
     };
+    inventoryRepo = {
+      prepareSimpleItemForFirstVariant: vi.fn().mockResolvedValue("removed"),
+      createVariantForProduct: vi.fn().mockResolvedValue({ id: 99 }),
+      setVariantItemActive: vi.fn().mockResolvedValue(undefined),
+    };
 
     service = new VariantService(
       variantRepo,
       productRepo,
       attributeRepo,
       publisher,
-      auditRepo as any
+      auditRepo as any,
+      inventoryRepo
     );
   });
 

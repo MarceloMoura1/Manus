@@ -40,6 +40,9 @@ async function clean() {
     "DELETE FROM erp_sale_order_sequences WHERE client_id IN (?,?)",
     "DELETE FROM erp_stock_movements WHERE client_id IN (?,?)",
     "DELETE FROM erp_stock_balances WHERE client_id IN (?,?)",
+    "DELETE FROM erp_product_audit_logs WHERE client_id IN (?,?)",
+    "DELETE b FROM erp_inventory_item_balances b INNER JOIN erp_inventory_items i ON i.client_id=b.client_id AND i.id=b.inventory_item_id WHERE i.client_id IN (?,?)",
+    "DELETE FROM erp_inventory_items WHERE client_id IN (?,?)",
     "DELETE FROM erp_products WHERE client_id IN (?,?)",
     "DELETE FROM megadesk_crm_clients WHERE client_id IN (?,?)",
   ])
@@ -495,7 +498,7 @@ physical("ERP sales MySQL behavior matrix", () => {
   it("16 rejects duplicate products and persists half-up server totals", async () => {
     const f = await fixture(), s = new SaleService(new SaleRepository(), silent);
     const duplicate = { crmClientId:f.customer.crmClientId, items:[{ productPublicId:f.product.publicId,quantity:"1",unitPriceCents:1 },{ productPublicId:f.product.publicId,quantity:"1",unitPriceCents:1 }] };
-    expect(() => saleDraftInput.parse(duplicate)).toThrow("Produto duplicado");
+    expect(() => saleDraftInput.parse(duplicate)).toThrow("Inventory item duplicado");
     expect(lineTotalCents("0.500", 1)).toBe(1);
     const order = await s.create(adminA, { ...draft(f.customer.crmClientId, f.product.publicId), items: [{ productPublicId: f.product.publicId, quantity: "0.500", unitPriceCents: 1 }] });
     expect(order.totalCents).toBe(1);

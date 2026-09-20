@@ -6,6 +6,7 @@ import { AttributeRepository } from "../attributes/repository";
 import { normalizeBarcode, normalizeSku, type OperationalRole } from "../contracts";
 import { ErpDomainError } from "../errors";
 import { ErpRepository } from "../repository";
+import { InventoryRepository } from "../inventory/repository";
 import {
   calculateEffectivePrice,
   canWriteVariants,
@@ -111,7 +112,8 @@ export class VariantService {
     private readonly productRepository = new ErpRepository(),
     private readonly attributeRepository = new AttributeRepository(),
     private readonly publisher: VariantEventPublisher = socketPublisher,
-    private readonly auditRepository = new ProductAuditRepository()
+    private readonly auditRepository = new ProductAuditRepository(),
+    private readonly inventoryRepository = new InventoryRepository()
   ) {}
 
   private assertWrite(identity: Identity) {
@@ -315,6 +317,20 @@ export class VariantService {
         connection ?? undefined
       );
 
+      if (connection) {
+        await this.inventoryRepository.prepareSimpleItemForFirstVariant(connection, {
+          clientId: identity.clientId,
+          productId: product.id,
+        });
+        await this.inventoryRepository.createVariantForProduct(connection, {
+          clientId: identity.clientId,
+          productId: product.id,
+          variantId: row.id,
+          active: row.active === 1,
+          userId: identity.userId,
+        });
+      }
+
       const actorName = identity.userName?.trim() || identity.userId;
 
       await this.auditRepository.record(
@@ -503,6 +519,15 @@ export class VariantService {
       );
       if (!updated) {
         throw new ErpDomainError("NOT_FOUND", "Variante não encontrada neste tenant.");
+      }
+
+      if (connection && updates.active !== undefined) {
+        await this.inventoryRepository.setVariantItemActive(
+          connection,
+          identity.clientId,
+          updated.id,
+          updates.active
+        );
       }
 
       const beforeFields: Record<string, unknown> = {
@@ -756,6 +781,15 @@ export class VariantService {
         throw new ErpDomainError("NOT_FOUND", "Variante não encontrada neste tenant.");
       }
 
+      if (connection) {
+        await this.inventoryRepository.setVariantItemActive(
+          connection,
+          identity.clientId,
+          current.id,
+          active
+        );
+      }
+
       const action: VariantAuditAction = active ? "variant_activated" : "variant_deactivated";
       const summary = active
         ? `Variante ativada: SKU ${current.sku}`
@@ -856,6 +890,15 @@ export class VariantService {
       return { ok: true };
     } catch (error) {
       if (connection) await connection.rollback();
+      if (
+        dbCode(error) === "ER_ROW_IS_REFERENCED_2" ||
+        dbCode(error) === "ER_ROW_IS_REFERENCED"
+      ) {
+        throw new ErpDomainError(
+          "CONFLICT",
+          "A variante possui identidade ou histÃ³rico de estoque e nÃ£o pode ser excluÃ­da. Desative-a para preservar a auditoria."
+        );
+      }
       throw error;
     } finally {
       if (connection) connection.release();

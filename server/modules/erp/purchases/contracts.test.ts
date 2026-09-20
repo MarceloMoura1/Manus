@@ -7,6 +7,7 @@ import {
   purchaseDraftInput,
   purchaseEvent,
 } from "./contracts";
+import { hasDuplicateResolvedInventoryItem } from "../contracts";
 describe("purchase contracts", () => {
   it("rounds half-up without floats", () => {
     expect(lineTotalCents("1.005", 101)).toBe(102);
@@ -36,7 +37,24 @@ describe("purchase contracts", () => {
           { productPublicId: id, quantity: "2", unitCostCents: 1 },
         ],
       })
-    ).toThrow("Produto duplicado");
+    ).toThrow("Inventory item duplicado");
+  });
+  it("accepts distinct variants of the same product", () => {
+    const productPublicId = crypto.randomUUID();
+    expect(() =>
+      purchaseDraftInput.parse({
+        supplierPublicId: crypto.randomUUID(),
+        items: [
+          { productPublicId, inventoryItemPublicId: crypto.randomUUID(), quantity: "1", unitCostCents: 1 },
+          { productPublicId, inventoryItemPublicId: crypto.randomUUID(), quantity: "2", unitCostCents: 1 },
+        ],
+      })
+    ).not.toThrow();
+  });
+  it("rejects only duplicate resolved inventory identity", () => {
+    expect(hasDuplicateResolvedInventoryItem([{ inventoryItemId: 1 }])).toBe(false);
+    expect(hasDuplicateResolvedInventoryItem([{ inventoryItemId: 1 }, { inventoryItemId: 2 }])).toBe(false);
+    expect(hasDuplicateResolvedInventoryItem([{ inventoryItemId: 1 }, { inventoryItemId: 1 }])).toBe(true);
   });
   it("enforces transitions", () => {
     expect(canTransitionPurchase("draft", "approved")).toBe(true);

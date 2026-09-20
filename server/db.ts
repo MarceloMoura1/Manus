@@ -44,6 +44,7 @@ export const REQUIRED_MAIN_TABLES = [
 	"megadesk_domain_ia_conversation_history", "megadesk_ia_token_usage",
 	"megadesk_tenant_provisioning_requests", "megadesk_operational_sessions",
 	"erp_products", "erp_stock_balances", "erp_stock_movements",
+	"erp_inventory_items", "erp_inventory_item_balances",
 ] as const;
 
 export const REQUIRED_MAIN_COLUMNS = {
@@ -58,7 +59,9 @@ export const REQUIRED_MAIN_COLUMNS = {
 	megadesk_operational_sessions: ["id", "token_hash", "user_id", "client_id", "expires_at", "revoked_at"],
 	erp_products: ["id", "public_id", "client_id", "sku", "cost_price_cents", "minimum_stock", "active"],
 	erp_stock_balances: ["client_id", "product_id", "quantity", "version"],
-	erp_stock_movements: ["public_id", "client_id", "product_id", "type", "quantity", "idempotency_key", "payload_hash", "reversal_of"],
+	erp_inventory_items: ["public_id", "client_id", "product_id", "variant_id", "kind", "minimum_stock"],
+	erp_inventory_item_balances: ["client_id", "inventory_item_id", "quantity", "version"],
+	erp_stock_movements: ["public_id", "client_id", "product_id", "inventory_item_id", "inventory_previous_balance", "inventory_resulting_balance", "type", "quantity", "idempotency_key", "payload_hash", "reversal_of"],
 } as const;
 
 export async function verifyMainSchema(pool: Pick<mysql.Pool, "execute"> = getPool()): Promise<void> {

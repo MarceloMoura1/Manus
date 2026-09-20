@@ -5,6 +5,7 @@ import {
   index,
   uniqueIndex,
   foreignKey,
+  check,
   varchar,
   char,
   timestamp,
@@ -1601,6 +1602,11 @@ export const erpProductVariants = mysqlTable(
   table => [
     uniqueIndex("uq_epv_tenant_public").on(table.clientId, table.publicId),
     uniqueIndex("uq_epv_tenant_id").on(table.clientId, table.id),
+    uniqueIndex("uq_epv_tenant_product_id").on(
+      table.clientId,
+      table.productId,
+      table.id
+    ),
     uniqueIndex("uq_epv_tenant_sku").on(table.clientId, table.sku),
     uniqueIndex("uq_epv_tenant_barcode").on(table.clientId, table.barcode),
     uniqueIndex("uq_epv_product_combination").on(
@@ -1617,6 +1623,108 @@ export const erpProductVariants = mysqlTable(
         erpProducts.clientId as AnyMySqlColumn,
         erpProducts.id as AnyMySqlColumn,
       ],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const erpInventoryItems = mysqlTable(
+  "erp_inventory_items",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    productId: bigint("product_id", { mode: "number" }).notNull(),
+    variantId: bigint("variant_id", { mode: "number" }),
+    kind: mysqlEnum(["simple", "variant", "legacy_unallocated"]).notNull(),
+    active: tinyint().default(1).notNull(),
+    minimumStock: decimal("minimum_stock", { precision: 18, scale: 3 }),
+    legacyReason: varchar("legacy_reason", { length: 120 }),
+    legacyCostSnapshotCents: bigint("legacy_cost_snapshot_cents", {
+      mode: "number",
+    }),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+    simpleProductId: bigint("simple_product_id", { mode: "number" })
+      .generatedAlwaysAs(
+        sql`CASE WHEN ${sql.identifier("kind")} = 'simple' THEN ${sql.identifier("product_id")} ELSE NULL END`
+      ),
+    variantItemId: bigint("variant_item_id", { mode: "number" })
+      .generatedAlwaysAs(
+        sql`CASE WHEN ${sql.identifier("kind")} = 'variant' THEN ${sql.identifier("variant_id")} ELSE NULL END`
+      ),
+    legacyProductId: bigint("legacy_product_id", { mode: "number" })
+      .generatedAlwaysAs(
+        sql`CASE WHEN ${sql.identifier("kind")} = 'legacy_unallocated' THEN ${sql.identifier("product_id")} ELSE NULL END`
+      ),
+  },
+  table => [
+    uniqueIndex("uq_eii_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_eii_tenant_id").on(table.clientId, table.id),
+    uniqueIndex("uq_eii_simple_product").on(
+      table.clientId,
+      table.simpleProductId
+    ),
+    uniqueIndex("uq_eii_variant").on(table.clientId, table.variantItemId),
+    uniqueIndex("uq_eii_legacy_product").on(
+      table.clientId,
+      table.legacyProductId
+    ),
+    index("idx_eii_tenant_product").on(table.clientId, table.productId),
+    index("idx_eii_tenant_active").on(table.clientId, table.active),
+    foreignKey({
+      name: "fk_eii_product",
+      columns: [table.clientId, table.productId],
+      foreignColumns: [erpProducts.clientId, erpProducts.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_eii_variant_product",
+      columns: [table.clientId, table.productId, table.variantId],
+      foreignColumns: [
+        erpProductVariants.clientId,
+        erpProductVariants.productId,
+        erpProductVariants.id,
+      ],
+    }).onDelete("restrict"),
+    check(
+      "ck_eii_kind_variant",
+      sql`((${table.kind} = 'variant' AND ${table.variantId} IS NOT NULL) OR (${table.kind} IN ('simple', 'legacy_unallocated') AND ${table.variantId} IS NULL))`
+    ),
+    check(
+      "ck_eii_legacy_metadata",
+      sql`((${table.kind} = 'legacy_unallocated' AND ${table.legacyReason} IS NOT NULL) OR (${table.kind} <> 'legacy_unallocated' AND ${table.legacyReason} IS NULL AND ${table.legacyCostSnapshotCents} IS NULL))`
+    ),
+  ]
+);
+
+export const erpInventoryItemBalances = mysqlTable(
+  "erp_inventory_item_balances",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    inventoryItemId: bigint("inventory_item_id", { mode: "number" }).notNull(),
+    quantity: decimal({ precision: 18, scale: 3 }).default("0.000").notNull(),
+    version: int().default(0).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_eiib_tenant_item").on(
+      table.clientId,
+      table.inventoryItemId
+    ),
+    index("idx_eiib_tenant").on(table.clientId),
+    foreignKey({
+      name: "fk_eiib_inventory_item",
+      columns: [table.clientId, table.inventoryItemId],
+      foreignColumns: [erpInventoryItems.clientId, erpInventoryItems.id],
     }).onDelete("restrict"),
   ]
 );
@@ -1780,6 +1888,7 @@ export const erpStockMovements = mysqlTable(
     publicId: varchar("public_id", { length: 36 }).notNull(),
     clientId: varchar("client_id", { length: 80 }).notNull(),
     productId: bigint("product_id", { mode: "number" }).notNull(),
+    inventoryItemId: bigint("inventory_item_id", { mode: "number" }),
     type: mysqlEnum([
       "initial",
       "manual_in",
@@ -1800,6 +1909,14 @@ export const erpStockMovements = mysqlTable(
       precision: 18,
       scale: 3,
     }).notNull(),
+    inventoryPreviousBalance: decimal("inventory_previous_balance", {
+      precision: 18,
+      scale: 3,
+    }),
+    inventoryResultingBalance: decimal("inventory_resulting_balance", {
+      precision: 18,
+      scale: 3,
+    }),
     reason: varchar({ length: 500 }).notNull(),
     referenceType: mysqlEnum("reference_type", [
       "manual",
@@ -1840,6 +1957,16 @@ export const erpStockMovements = mysqlTable(
       table.clientId,
       table.createdAt
     ),
+    index("idx_erp_stock_movement_tenant_item_date").on(
+      table.clientId,
+      table.inventoryItemId,
+      table.createdAt
+    ),
+    foreignKey({
+      name: "fk_erp_stock_movement_inventory_item",
+      columns: [table.clientId, table.inventoryItemId],
+      foreignColumns: [erpInventoryItems.clientId, erpInventoryItems.id],
+    }).onDelete("restrict"),
   ]
 );
 
@@ -2090,6 +2217,11 @@ export const erpPurchaseOrderItems = mysqlTable(
     publicId: varchar("public_id", { length: 36 }).notNull(),
     purchaseOrderId: bigint("purchase_order_id", { mode: "number" }).notNull(),
     productId: bigint("product_id", { mode: "number" }).notNull(),
+    inventoryItemId: bigint("inventory_item_id", { mode: "number" }),
+    orderItemIdentity: varchar("order_item_identity", { length: 96 })
+      .generatedAlwaysAs(
+        sql`CASE WHEN ${sql.identifier("inventory_item_id")} IS NULL THEN CONCAT('product:', ${sql.identifier("product_id")}) ELSE CONCAT('inventory:', ${sql.identifier("inventory_item_id")}) END`
+      ),
     productNameSnapshot: varchar("product_name_snapshot", {
       length: 180,
     }).notNull(),
@@ -2110,10 +2242,11 @@ export const erpPurchaseOrderItems = mysqlTable(
       table.purchaseOrderId,
       table.publicId
     ),
-    uniqueIndex("uq_erp_purchase_items_order_product").on(
+    uniqueIndex("uq_erp_purchase_items_order_identity").on(
       table.purchaseOrderId,
-      table.productId
+      table.orderItemIdentity
     ),
+    index("idx_erp_purchase_items_inventory_item").on(table.inventoryItemId),
     foreignKey({
       name: "fk_erp_poi_order",
       columns: [table.purchaseOrderId],
@@ -2210,6 +2343,7 @@ export const erpPurchaseOrderReceiptItems = mysqlTable(
       mode: "number",
     }).notNull(),
     productId: bigint("product_id", { mode: "number" }).notNull(),
+    inventoryItemId: bigint("inventory_item_id", { mode: "number" }),
     quantity: decimal({ precision: 18, scale: 3 }).notNull(),
     stockMovementId: bigint("stock_movement_id", { mode: "number" }).notNull(),
     createdAt: timestamp("created_at", { mode: "string" })
@@ -2223,6 +2357,9 @@ export const erpPurchaseOrderReceiptItems = mysqlTable(
     ),
     uniqueIndex("uq_erp_purchase_receipt_items_stock_movement").on(
       table.stockMovementId
+    ),
+    index("idx_erp_purchase_receipt_items_inventory_item").on(
+      table.inventoryItemId
     ),
     foreignKey({
       name: "fk_erp_pori_receipt",
@@ -2332,6 +2469,11 @@ export const erpSaleOrderItems = mysqlTable(
     publicId: varchar("public_id", { length: 36 }).notNull(),
     saleOrderId: bigint("sale_order_id", { mode: "number" }).notNull(),
     productId: bigint("product_id", { mode: "number" }).notNull(),
+    inventoryItemId: bigint("inventory_item_id", { mode: "number" }),
+    orderItemIdentity: varchar("order_item_identity", { length: 96 })
+      .generatedAlwaysAs(
+        sql`CASE WHEN ${sql.identifier("inventory_item_id")} IS NULL THEN CONCAT('product:', ${sql.identifier("product_id")}) ELSE CONCAT('inventory:', ${sql.identifier("inventory_item_id")}) END`
+      ),
     productNameSnapshot: varchar("product_name_snapshot", {
       length: 180,
     }).notNull(),
@@ -2352,10 +2494,11 @@ export const erpSaleOrderItems = mysqlTable(
       table.saleOrderId,
       table.publicId
     ),
-    uniqueIndex("uq_erp_sale_items_order_product").on(
+    uniqueIndex("uq_erp_sale_items_order_identity").on(
       table.saleOrderId,
-      table.productId
+      table.orderItemIdentity
     ),
+    index("idx_erp_sale_items_inventory_item").on(table.inventoryItemId),
     foreignKey({
       name: "fk_erp_soi_order",
       columns: [table.saleOrderId],
@@ -2450,6 +2593,7 @@ export const erpSaleOrderFulfillmentItems = mysqlTable(
     fulfillmentId: bigint("fulfillment_id", { mode: "number" }).notNull(),
     saleOrderItemId: bigint("sale_order_item_id", { mode: "number" }).notNull(),
     productId: bigint("product_id", { mode: "number" }).notNull(),
+    inventoryItemId: bigint("inventory_item_id", { mode: "number" }),
     quantity: decimal({ precision: 18, scale: 3 }).notNull(),
     stockMovementId: bigint("stock_movement_id", { mode: "number" }).notNull(),
     createdAt: timestamp("created_at", { mode: "string" })
@@ -2463,6 +2607,9 @@ export const erpSaleOrderFulfillmentItems = mysqlTable(
     ),
     uniqueIndex("uq_erp_sale_fulfillment_item_movement").on(
       table.stockMovementId
+    ),
+    index("idx_erp_sale_fulfillment_item_inventory_item").on(
+      table.inventoryItemId
     ),
     foreignKey({
       name: "fk_erp_sofi_fulfillment",

@@ -24,6 +24,7 @@ import { financeRouter } from "./finance/router";
 import { fiscalRouter } from "./fiscal/router";
 import { reportsRouter } from "./reports/router";
 import { productAuditRouter } from "./product-audit/router";
+import { inventoryRouter } from "./inventory/router";
 
 const service = new ErpService();
 type ErpContext = {
@@ -58,6 +59,7 @@ export const erpRouter = router({
   finance: financeRouter,
   fiscal: fiscalRouter,
   reports: reportsRouter,
+  inventory: inventoryRouter,
   products: router({
     list: megadeskProcedure.input(productListInput).query(({ input, ctx }) => runErp(() => service.listProducts(identity(ctx), input))),
     detail: megadeskProcedure.input(z.object({ publicId: productPublicId })).query(({ input, ctx }) => runErp(() => service.getProduct(identity(ctx), input.publicId))),

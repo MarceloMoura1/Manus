@@ -25,6 +25,7 @@ const quantity = z
   .refine(v => quantityMillis(v) > 0n, "Quantidade deve ser maior que zero.");
 const item = z.object({
   productPublicId: z.string().uuid(),
+  inventoryItemPublicId: z.string().uuid().nullish(),
   quantity,
   unitCostCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
 });
@@ -47,13 +48,14 @@ export const purchaseDraftInput = z
   .superRefine((v, c) => {
     const seen = new Set<string>();
     v.items.forEach((x, i) => {
-      if (seen.has(x.productPublicId))
+      const identity = `${x.productPublicId}:${x.inventoryItemPublicId ?? "product-only"}`;
+      if (seen.has(identity))
         c.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["items", i, "productPublicId"],
-          message: "Produto duplicado no pedido.",
+          path: ["items", i, "inventoryItemPublicId"],
+          message: "Inventory item duplicado no pedido.",
         });
-      seen.add(x.productPublicId);
+      seen.add(identity);
     });
   });
 export const purchaseListInput = z.object({

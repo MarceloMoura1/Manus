@@ -17,6 +17,7 @@ import {
   type ProductAuditAction,
 } from "./product-audit/contracts";
 import { ProductAuditRepository } from "./product-audit/repository";
+import { InventoryRepository } from "./inventory/repository";
 
 type ProductCommand = {
   name: string; sku: string; barcode: string | null; description: string | null; category: string | null;
@@ -24,7 +25,7 @@ type ProductCommand = {
   brandPublicId?: string | null;
   unit: "unit" | "kg" | "liter" | "meter"; costPriceCents: number; salePriceCents: number; minimumStock: string;
 };
-type MovementCommand = { productPublicId: string; type: "initial" | "manual_in" | "manual_out" | "adjustment_in" | "adjustment_out"; quantity: string; reason: string; idempotencyKey: string };
+type MovementCommand = { productPublicId: string; inventoryItemPublicId?: string | null; type: "initial" | "manual_in" | "manual_out" | "adjustment_in" | "adjustment_out"; quantity: string; reason: string; idempotencyKey: string };
 type Identity = { clientId: string; userId: string; role: OperationalRole; userName?: string };
 type ErpEvent = { productPublicId: string; movementPublicId?: string; operation: "created" | "updated" | "activated" | "deactivated" | "movement_created" | "movement_reversed"; occurredAt: string };
 export type ErpEventPublisher = { publish(clientId: string, event: "erp:product.changed" | "erp:stock.changed", payload: ErpEvent): void | Promise<void> };
@@ -53,7 +54,7 @@ function publicProduct(row: ProductRow) {
     unit: row.unit, costPriceCents: Number(row.cost_price_cents), salePriceCents: Number(row.sale_price_cents), minimumStock: row.minimum_stock, active: row.active === 1, hasImage: row.primary_media_id !== null, quantity: row.quantity, createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
-function publicMovement(row: MovementRow) { return { publicId: row.public_id, productPublicId: row.product_public_id, productName: row.product_name, sku: row.sku, unit: row.unit, type: row.type, direction: row.direction, quantity: row.quantity, previousBalance: row.previous_balance, resultingBalance: row.resulting_balance, reason: row.reason, referenceType: row.reference_type, referenceId: row.reference_id, createdBy: row.created_by, createdAt: row.created_at, reversed: row.reversed === 1, reversalPublicId: row.reversal_public_id ?? null }; }
+function publicMovement(row: MovementRow) { return { publicId: row.public_id, productPublicId: row.product_public_id, productName: row.product_name, sku: row.sku, unit: row.unit, inventoryItemPublicId: row.inventory_item_public_id ?? null, inventoryItemKind: row.inventory_item_kind ?? null, type: row.type, direction: row.direction, quantity: row.quantity, previousBalance: row.previous_balance, resultingBalance: row.resulting_balance, inventoryPreviousBalance: row.inventory_previous_balance ?? null, inventoryResultingBalance: row.inventory_resulting_balance ?? null, reason: row.reason, referenceType: row.reference_type, referenceId: row.reference_id, createdBy: row.created_by, responsibleDisplayName: row.responsible_name?.trim() || "Usuário indisponível", createdAt: row.created_at, reversed: row.reversed === 1, reversalPublicId: row.reversal_public_id ?? null }; }
 
 export class ErpService {
   constructor(
@@ -64,7 +65,8 @@ export class ErpService {
     private readonly brands = new BrandRepository(),
     private readonly variants = new VariantRepository(),
     private readonly auditRepository = new ProductAuditRepository(),
-    private readonly productSuppliers = new ProductSupplierRepository()
+    private readonly productSuppliers = new ProductSupplierRepository(),
+    private readonly inventory = new InventoryRepository()
   ) {}
   private assertWrite(identity: Identity) { if (!canWriteErp(identity.role)) throw new ErpDomainError("FORBIDDEN", "Seu perfil não permite alterar o ERP."); }
   private async publish(clientId: string, event: "erp:product.changed" | "erp:stock.changed", payload: ErpEvent) { await runPostCommitBestEffort([() => this.publisher.publish(clientId, event, payload)]); }
@@ -268,6 +270,15 @@ export class ErpService {
             }
           );
       if (!row) throw new Error("Product insert unavailable");
+
+      if (connection) {
+        await this.inventory.createSimpleForProduct(connection, {
+          clientId: identity.clientId,
+          productId: row.id,
+          minimumStock: row.minimum_stock,
+          userId: identity.userId,
+        });
+      }
 
       const actorName = identity.userName?.trim() || identity.userId;
 
@@ -528,7 +539,7 @@ export class ErpService {
     this.assertWrite(identity);
     if (quantityMillis(command.quantity) <= 0n) throw new ErpDomainError("VALIDATION", "A quantidade deve ser positiva.");
     const normalized = { ...command, quantity: normalizeQuantity(command.quantity), reason: command.reason.trim() };
-    const payloadHash = createHash("sha256").update(JSON.stringify({ productPublicId: command.productPublicId, type: command.type, quantity: normalized.quantity, reason: normalized.reason })).digest("hex");
+    const payloadHash = createHash("sha256").update(JSON.stringify({ productPublicId: command.productPublicId, inventoryItemPublicId: command.inventoryItemPublicId ?? null, type: command.type, quantity: normalized.quantity, reason: normalized.reason })).digest("hex");
     const outcome = await this.withRetry(() => this.moveInTransaction(identity, normalized, payloadHash));
     if (outcome.changed) await this.publish(identity.clientId, "erp:stock.changed", { productPublicId: outcome.movement.productPublicId, movementPublicId: outcome.movement.publicId, operation: "movement_created", occurredAt: new Date().toISOString() });
     return outcome.movement;
@@ -543,14 +554,24 @@ export class ErpService {
       const product = await this.repository.findProduct(identity.clientId, command.productPublicId, connection, true);
       if (!product) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado.");
       if (product.active !== 1) throw new ErpDomainError("INACTIVE_PRODUCT", "Produto inativo não aceita movimentação manual.");
+      const inventoryItem = await this.inventory.resolveForOperation(connection, {
+        clientId: identity.clientId,
+        productId: product.id,
+        requestedPublicId: command.inventoryItemPublicId,
+        userId: identity.userId,
+        productMinimumStock: product.minimum_stock,
+      });
       await connection.execute("INSERT IGNORE INTO erp_stock_balances (client_id,product_id,quantity,version) VALUES (?,?,0,0)", [identity.clientId, product.id]);
       const [balanceRows] = await connection.execute<RowDataPacket[]>("SELECT quantity FROM erp_stock_balances WHERE client_id=? AND product_id=? FOR UPDATE", [identity.clientId, product.id]);
       const previous = quantityMillis(String(balanceRows[0]?.quantity ?? "0"));
       const direction = command.type === "manual_out" || command.type === "adjustment_out" ? "out" : "in";
       const resulting = quantityMillis(projectStockBalance(millisQuantity(previous), command.quantity, direction));
+      const inventoryPrevious = quantityMillis(await this.inventory.lockBalance(connection, identity.clientId, inventoryItem.id));
+      const inventoryResulting = quantityMillis(projectStockBalance(millisQuantity(inventoryPrevious), command.quantity, direction));
       const publicId = randomUUID();
-      await connection.execute("INSERT INTO erp_stock_movements (public_id,client_id,product_id,type,direction,quantity,previous_balance,resulting_balance,reason,reference_type,idempotency_key,payload_hash,created_by) VALUES (?,?,?,?,?,?,?,?,?,'manual',?,?,?)", [publicId, identity.clientId, product.id, command.type, direction, command.quantity, millisQuantity(previous), millisQuantity(resulting), command.reason, command.idempotencyKey, payloadHash, identity.userId]);
+      await connection.execute("INSERT INTO erp_stock_movements (public_id,client_id,product_id,inventory_item_id,type,direction,quantity,previous_balance,resulting_balance,inventory_previous_balance,inventory_resulting_balance,reason,reference_type,idempotency_key,payload_hash,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'manual',?,?,?)", [publicId, identity.clientId, product.id, inventoryItem.id, command.type, direction, command.quantity, millisQuantity(previous), millisQuantity(resulting), millisQuantity(inventoryPrevious), millisQuantity(inventoryResulting), command.reason, command.idempotencyKey, payloadHash, identity.userId]);
       await connection.execute("UPDATE erp_stock_balances SET quantity=?,version=version+1 WHERE client_id=? AND product_id=?", [millisQuantity(resulting), identity.clientId, product.id]);
+      await this.inventory.setBalance(connection, identity.clientId, inventoryItem.id, millisQuantity(inventoryResulting));
       const movement = await this.findByPublicId(connection, identity.clientId, publicId);
       if (!movement) throw new Error("Pending movement unavailable");
       await connection.commit();
@@ -573,14 +594,19 @@ export class ErpService {
         if (original.type === "reversal") throw new ErpDomainError("VALIDATION", "Um estorno não pode ser estornado.");
         if (original.type === "purchase_in") throw new ErpDomainError("CONFLICT", "Recebimentos de compra não podem ser revertidos isoladamente.");
         if (original.type === "sale_out") throw new ErpDomainError("CONFLICT", "Baixas de venda não podem ser revertidas isoladamente.");
+        if (original.inventory_item_id === null) throw new ErpDomainError("CONFLICT", "Movimentação ainda não vinculada a inventory item.");
         const [existing] = await connection.execute<RowDataPacket[]>("SELECT id FROM erp_stock_movements WHERE client_id=? AND reversal_of=? LIMIT 1", [identity.clientId, original.id]);
         if (existing.length) throw new ErpDomainError("ALREADY_REVERSED", "Movimentação já estornada.");
         const [balanceRows] = await connection.execute<RowDataPacket[]>("SELECT quantity FROM erp_stock_balances WHERE client_id=? AND product_id=? FOR UPDATE", [identity.clientId, original.product_id]);
         const previous = quantityMillis(String(balanceRows[0]?.quantity ?? "0")); const amount = quantityMillis(original.quantity); const direction = original.direction === "in" ? "out" : "in"; const resulting = direction === "in" ? previous + amount : previous - amount;
         if (resulting < 0n) throw new ErpDomainError("INSUFFICIENT_STOCK", "O saldo atual não permite este estorno.");
+        const inventoryPrevious = quantityMillis(await this.inventory.lockBalance(connection, identity.clientId, original.inventory_item_id));
+        const inventoryResulting = direction === "in" ? inventoryPrevious + amount : inventoryPrevious - amount;
+        if (inventoryResulting < 0n) throw new ErpDomainError("INSUFFICIENT_STOCK", "O saldo do inventory item não permite este estorno.");
         const publicId = randomUUID();
-        await connection.execute("INSERT INTO erp_stock_movements (public_id,client_id,product_id,type,direction,quantity,previous_balance,resulting_balance,reason,reference_type,reference_id,idempotency_key,payload_hash,reversal_of,created_by) VALUES (?,?,?,?,?,?,?,?,?,'movement',?,?,?,?,?)", [publicId, identity.clientId, original.product_id, "reversal", direction, original.quantity, millisQuantity(previous), millisQuantity(resulting), reason.trim(), movementPublicId, idempotencyKey, payloadHash, original.id, identity.userId]);
+        await connection.execute("INSERT INTO erp_stock_movements (public_id,client_id,product_id,inventory_item_id,type,direction,quantity,previous_balance,resulting_balance,inventory_previous_balance,inventory_resulting_balance,reason,reference_type,reference_id,idempotency_key,payload_hash,reversal_of,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'movement',?,?,?,?,?)", [publicId, identity.clientId, original.product_id, original.inventory_item_id, "reversal", direction, original.quantity, millisQuantity(previous), millisQuantity(resulting), millisQuantity(inventoryPrevious), millisQuantity(inventoryResulting), reason.trim(), movementPublicId, idempotencyKey, payloadHash, original.id, identity.userId]);
         await connection.execute("UPDATE erp_stock_balances SET quantity=?,version=version+1 WHERE client_id=? AND product_id=?", [millisQuantity(resulting), identity.clientId, original.product_id]);
+        await this.inventory.setBalance(connection, identity.clientId, original.inventory_item_id, millisQuantity(inventoryResulting));
         const movement = await this.findByPublicId(connection, identity.clientId, publicId);
         if (!movement) throw new Error("Pending reversal unavailable");
         await connection.commit();
@@ -591,7 +617,7 @@ export class ErpService {
     return outcome.movement;
   }
 
-  private async findIdempotent(connection: PoolConnection, clientId: string, key: string): Promise<MovementRow | null> { const [rows] = await connection.execute<MovementRow[]>("SELECT m.*,p.public_id product_public_id,p.name product_name,p.sku,p.unit FROM erp_stock_movements m INNER JOIN erp_products p ON p.id=m.product_id AND p.client_id=m.client_id WHERE m.client_id=? AND m.idempotency_key=? LIMIT 1 FOR UPDATE", [clientId, key]); return rows[0] ?? null; }
-  private async findByPublicId(connection: PoolConnection, clientId: string, publicId: string): Promise<MovementRow | null> { const [rows] = await connection.execute<MovementRow[]>("SELECT m.*,p.public_id product_public_id,p.name product_name,p.sku,p.unit FROM erp_stock_movements m INNER JOIN erp_products p ON p.id=m.product_id AND p.client_id=m.client_id WHERE m.client_id=? AND m.public_id=? LIMIT 1", [clientId, publicId]); return rows[0] ?? null; }
+  private async findIdempotent(connection: PoolConnection, clientId: string, key: string): Promise<MovementRow | null> { const [rows] = await connection.execute<MovementRow[]>("SELECT m.*,p.public_id product_public_id,p.name product_name,p.sku,p.unit,ii.public_id inventory_item_public_id,ii.kind inventory_item_kind,u.name responsible_name FROM erp_stock_movements m INNER JOIN erp_products p ON p.id=m.product_id AND p.client_id=m.client_id LEFT JOIN erp_inventory_items ii ON ii.client_id=m.client_id AND ii.id=m.inventory_item_id LEFT JOIN megadesk_domain_client_users u ON u.client_id=m.client_id AND u.user_id=m.created_by WHERE m.client_id=? AND m.idempotency_key=? LIMIT 1 FOR UPDATE", [clientId, key]); return rows[0] ?? null; }
+  private async findByPublicId(connection: PoolConnection, clientId: string, publicId: string): Promise<MovementRow | null> { const [rows] = await connection.execute<MovementRow[]>("SELECT m.*,p.public_id product_public_id,p.name product_name,p.sku,p.unit,ii.public_id inventory_item_public_id,ii.kind inventory_item_kind,u.name responsible_name FROM erp_stock_movements m INNER JOIN erp_products p ON p.id=m.product_id AND p.client_id=m.client_id LEFT JOIN erp_inventory_items ii ON ii.client_id=m.client_id AND ii.id=m.inventory_item_id LEFT JOIN megadesk_domain_client_users u ON u.client_id=m.client_id AND u.user_id=m.created_by WHERE m.client_id=? AND m.public_id=? LIMIT 1", [clientId, publicId]); return rows[0] ?? null; }
   private async withRetry<T>(operation: () => Promise<T>): Promise<T> { for (let attempt = 0; attempt < 3; attempt += 1) { try { return await operation(); } catch (error) { if (!isRetryableStockError(error) || attempt === 2) throw error; await this.wait(20 * (attempt + 1)); } } throw new Error("Unreachable retry state"); }
 }
