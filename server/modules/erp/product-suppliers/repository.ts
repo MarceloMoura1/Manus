@@ -22,6 +22,8 @@ export type ProductSupplierRow = RowDataPacket & {
   updated_by: string | null;
   created_at: string;
   updated_at: string;
+  created_by_name?: string | null;
+  updated_by_name?: string | null;
 };
 
 export class ProductSupplierRepository {
@@ -80,10 +82,12 @@ export class ProductSupplierRepository {
               p.sku AS product_sku,
               s.public_id AS supplier_public_id,
               s.legal_name AS supplier_legal_name,
-              s.trade_name AS supplier_trade_name
+              s.trade_name AS supplier_trade_name,
+              COALESCE(u_created.name, u_created.email) AS created_by_name
        FROM erp_product_suppliers ps
        INNER JOIN erp_products p ON p.client_id = ps.client_id AND p.id = ps.product_id
        INNER JOIN erp_suppliers s ON s.client_id = ps.client_id AND s.id = ps.supplier_id
+       LEFT JOIN megadesk_domain_client_users u_created ON u_created.client_id = ps.client_id AND u_created.user_id = ps.created_by
        WHERE ${where}
        ORDER BY ps.is_preferred DESC, s.legal_name ASC
        LIMIT ${limit} OFFSET ${offset}`,
@@ -109,10 +113,12 @@ export class ProductSupplierRepository {
               p.sku AS product_sku,
               s.public_id AS supplier_public_id,
               s.legal_name AS supplier_legal_name,
-              s.trade_name AS supplier_trade_name
+              s.trade_name AS supplier_trade_name,
+              COALESCE(u_created.name, u_created.email) AS created_by_name
        FROM erp_product_suppliers ps
        INNER JOIN erp_products p ON p.client_id = ps.client_id AND p.id = ps.product_id
        INNER JOIN erp_suppliers s ON s.client_id = ps.client_id AND s.id = ps.supplier_id
+       LEFT JOIN megadesk_domain_client_users u_created ON u_created.client_id = ps.client_id AND u_created.user_id = ps.created_by
        WHERE ps.client_id = ? AND ps.public_id = ?
        LIMIT 1${lock ? " FOR UPDATE" : ""}`,
       [clientId, publicId]

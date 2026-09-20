@@ -704,4 +704,133 @@ describe("ProductSupplierService Domain Rules", () => {
       mockConnection
     );
   });
+
+  // 33. Cardinality: One product can be linked to multiple suppliers concurrently (many-to-many)
+  it("33. allows one product to be linked to multiple suppliers concurrently", async () => {
+    productRepo.findProduct.mockResolvedValue({ id: 10, public_id: "prod-uuid-1", name: "Product P" });
+    supplierRepo.find.mockImplementation(async (_clientId: string, publicId: string) => {
+      if (publicId === "supp-uuid-a") return { id: 21, public_id: "supp-uuid-a", legal_name: "Supplier A" };
+      if (publicId === "supp-uuid-b") return { id: 22, public_id: "supp-uuid-b", legal_name: "Supplier B" };
+      return null;
+    });
+
+    // Link 1: Product P -> Supplier A
+    repo.findByProductAndSupplier.mockResolvedValueOnce(null);
+    repo.create.mockResolvedValueOnce(
+      mockProductSupplierRow({
+        id: 101,
+        public_id: "ps-uuid-101",
+        product_id: 10,
+        supplier_id: 21,
+        supplier_public_id: "supp-uuid-a",
+        is_preferred: 1,
+        active: 1,
+      })
+    );
+
+    const linkA = await service.create(adminA, {
+      productPublicId: "prod-uuid-1",
+      supplierPublicId: "supp-uuid-a",
+      isPreferred: true,
+      active: true,
+    });
+    expect(linkA.publicId).toBe("ps-uuid-101");
+    expect(linkA.isPreferred).toBe(true);
+
+    // Link 2: Product P -> Supplier B (coexists with Supplier A)
+    repo.findByProductAndSupplier.mockResolvedValueOnce(null);
+    repo.create.mockResolvedValueOnce(
+      mockProductSupplierRow({
+        id: 102,
+        public_id: "ps-uuid-102",
+        product_id: 10,
+        supplier_id: 22,
+        supplier_public_id: "supp-uuid-b",
+        is_preferred: 0,
+        active: 1,
+      })
+    );
+
+    const linkB = await service.create(adminA, {
+      productPublicId: "prod-uuid-1",
+      supplierPublicId: "supp-uuid-b",
+      isPreferred: false,
+      active: true,
+    });
+    expect(linkB.publicId).toBe("ps-uuid-102");
+    expect(linkB.isPreferred).toBe(false);
+    expect(linkB.active).toBe(true);
+
+    // Listing suppliers for Product P returns both suppliers
+    repo.list.mockResolvedValueOnce({
+      items: [
+        mockProductSupplierRow({ id: 101, public_id: "ps-uuid-101", supplier_id: 21, supplier_public_id: "supp-uuid-a", is_preferred: 1 }),
+        mockProductSupplierRow({ id: 102, public_id: "ps-uuid-102", supplier_id: 22, supplier_public_id: "supp-uuid-b", is_preferred: 0 }),
+      ],
+      total: 2,
+    });
+
+    const listResult = await service.list(adminA, { productPublicId: "prod-uuid-1", page: 1, pageSize: 50, search: "" });
+    expect(listResult.items).toHaveLength(2);
+    expect(listResult.items[0].supplierPublicId).toBe("supp-uuid-a");
+    expect(listResult.items[1].supplierPublicId).toBe("supp-uuid-b");
+  });
+
+  // 34. Preferred supplier semantics: preferred does not mean exclusive
+  it("34. switching preferred supplier to Supplier B unsets preferred on Supplier A without deleting or deactivating it", async () => {
+    // Current state: Supplier B is active but not preferred
+    repo.find.mockResolvedValue(
+      mockProductSupplierRow({
+        id: 102,
+        public_id: "ps-uuid-102",
+        product_id: 10,
+        supplier_id: 22,
+        is_preferred: 0,
+        active: 1,
+      })
+    );
+    repo.setPreferred.mockResolvedValue(
+      mockProductSupplierRow({
+        id: 102,
+        public_id: "ps-uuid-102",
+        product_id: 10,
+        supplier_id: 22,
+        is_preferred: 1,
+        active: 1,
+      })
+    );
+
+    const updatedB = await service.setPreferred(adminA, "ps-uuid-102", true);
+
+    expect(repo.setPreferred).toHaveBeenCalledWith(
+      "tenant-a",
+      "ps-uuid-102",
+      "admin-a",
+      true,
+      mockConnection
+    );
+    expect(updatedB.isPreferred).toBe(true);
+    expect(updatedB.active).toBe(true);
+
+    // Also verify via service.update with isPreferred: true
+    repo.update.mockResolvedValue(
+      mockProductSupplierRow({
+        id: 102,
+        public_id: "ps-uuid-102",
+        product_id: 10,
+        supplier_id: 22,
+        is_preferred: 1,
+        active: 1,
+      })
+    );
+    const updatedViaUpdate = await service.update(adminA, "ps-uuid-102", { isPreferred: true });
+    expect(repo.clearPreferredForProduct).toHaveBeenCalledWith(
+      "tenant-a",
+      10,
+      102,
+      mockConnection
+    );
+    expect(updatedViaUpdate.isPreferred).toBe(true);
+    expect(updatedViaUpdate.active).toBe(true);
+  });
 });

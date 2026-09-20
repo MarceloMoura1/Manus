@@ -71,6 +71,7 @@ export function productSupplierPublic(row: ProductSupplierRow) {
     active: row.active === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    createdByName: row.created_by_name ?? null,
   };
 }
 

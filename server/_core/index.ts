@@ -17,6 +17,7 @@ import { registerConversationMediaBridge } from "../conversation-media-bridge";
 import { registerProductMediaRoutes } from "../product-media";
 import { registerUserPersonalizationRoutes } from "../user-personalization";
 import { registerTicketAttachmentRoutes } from "../chamados-attachments";
+import { registerSupplierFileRoutes } from "../modules/erp/suppliers/files-router";
 import { startTicketAttachmentReconciler } from "../chamados-attachment-reconciler";
 
 // ─── Domínios permitidos (CORS) ───────────────────────────────────────────────
@@ -102,6 +103,7 @@ async function startServer() {
   registerProductMediaRoutes(app);
   registerUserPersonalizationRoutes(app);
   registerTicketAttachmentRoutes(app);
+  registerSupplierFileRoutes(app);
 
   // ─── Webhooks ─────────────────────────────────────────────────────────────
   // Meta WhatsApp Business API

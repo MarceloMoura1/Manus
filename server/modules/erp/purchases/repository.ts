@@ -36,6 +36,7 @@ type OrderRow = RowDataPacket & {
   cancellation_reason: string | null;
   created_at: string;
   updated_at: string;
+  created_by_name?: string | null;
 };
 type ItemRow = RowDataPacket & {
   id: number;
@@ -96,7 +97,13 @@ export class PurchaseRepository {
       values
     );
     const [rows] = await this.db().execute<OrderRow[]>(
-      `SELECT o.*,s.public_id supplier_public_id FROM erp_purchase_orders o INNER JOIN erp_suppliers s ON s.id=o.supplier_id AND s.client_id=o.client_id WHERE ${sqlWhere} ORDER BY ${order} ${o.direction === "asc" ? "ASC" : "DESC"},o.id DESC LIMIT ${limit} OFFSET ${offset}`,
+      `SELECT o.*, s.public_id supplier_public_id, COALESCE(u_created.name, u_created.email) AS created_by_name
+       FROM erp_purchase_orders o
+       INNER JOIN erp_suppliers s ON s.id=o.supplier_id AND s.client_id=o.client_id
+       LEFT JOIN megadesk_domain_client_users u_created ON u_created.client_id=o.client_id AND u_created.user_id=o.created_by
+       WHERE ${sqlWhere}
+       ORDER BY ${order} ${o.direction === "asc" ? "ASC" : "DESC"}, o.id DESC
+       LIMIT ${limit} OFFSET ${offset}`,
       values
     );
     return {
@@ -111,7 +118,12 @@ export class PurchaseRepository {
     lock = false
   ) {
     const [orders] = await connection.execute<OrderRow[]>(
-      `SELECT o.*,s.public_id supplier_public_id FROM erp_purchase_orders o INNER JOIN erp_suppliers s ON s.id=o.supplier_id AND s.client_id=o.client_id WHERE o.client_id=? AND o.public_id=? LIMIT 1${lock ? " FOR UPDATE" : ""}`,
+      `SELECT o.*, s.public_id supplier_public_id, COALESCE(u_created.name, u_created.email) AS created_by_name
+       FROM erp_purchase_orders o
+       INNER JOIN erp_suppliers s ON s.id=o.supplier_id AND s.client_id=o.client_id
+       LEFT JOIN megadesk_domain_client_users u_created ON u_created.client_id=o.client_id AND u_created.user_id=o.created_by
+       WHERE o.client_id=? AND o.public_id=?
+       LIMIT 1${lock ? " FOR UPDATE" : ""}`,
       [clientId, publicId]
     );
     const order = orders[0];
@@ -510,5 +522,6 @@ function publicOrder(r: OrderRow) {
     cancellationReason: r.cancellation_reason,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    createdByName: r.created_by_name ?? null,
   };
 }

@@ -826,10 +826,13 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone }: {
   }, [crmCustomerQuery.data, crmHandoffState, crmIntent]);
 
   React.useEffect(() => {
-    if (crmHandoffState !== 'resolving' || !crmCustomerQuery.isError) return;
+    if (crmHandoffState !== 'resolving' || !crmCustomerQuery.isError || !crmIntent) return;
+    const phoneToPreFill = crmIntent.phone;
     setCrmIntent(null);
-    setCrmHandoffState('error');
-  }, [crmCustomerQuery.isError, crmHandoffState]);
+    setCrmHandoffState('idle');
+    setNewAttendancePhone(phoneToPreFill);
+    setNewAttendanceOpen(true);
+  }, [crmCustomerQuery.isError, crmHandoffState, crmIntent]);
 
   React.useEffect(() => {
     if (waConnected !== false || crmHandoffState === 'idle') return;

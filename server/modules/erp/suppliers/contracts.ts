@@ -1,23 +1,71 @@
 import { z } from "zod";
 import type { OperationalRole } from "../contracts";
+import { isValidCpf, isValidCnpj } from "@shared/br-documents";
 
 export const supplierPersonTypes = ["legal", "individual"] as const;
 export const supplierPublicId = z.string().uuid();
 const optionalText = (max: number) => z.string().trim().max(max).optional().transform(value => value || null);
-const optionalEmail = z.union([z.string().trim().email().max(254), z.literal("")]).optional().transform(value => value || null);
+const optionalEmail = z.string().trim().max(254).optional().transform(value => value || null);
 
 export const supplierInput = z.object({
-  legalName: z.string().trim().min(2).max(180), tradeName: optionalText(180), personType: z.enum(supplierPersonTypes),
-  taxId: z.string().trim().max(24).optional().transform(value => value || null), stateRegistration: optionalText(40),
-  email: optionalEmail, phone: optionalText(30), contactName: optionalText(120),
-  postalCode: z.string().trim().max(12).optional().transform(value => value || null), street: optionalText(180),
-  addressNumber: optionalText(30), addressComplement: optionalText(120), district: optionalText(120), city: optionalText(120),
-  state: z.string().trim().max(2).optional().transform(value => value || null), notes: optionalText(4_000),
+  legalName: z.string().trim().max(180),
+  tradeName: optionalText(180),
+  personType: z.enum(supplierPersonTypes),
+  taxId: z.string().trim().max(24).optional().transform(value => value || null),
+  stateRegistration: optionalText(40),
+  email: optionalEmail,
+  phone: optionalText(30),
+  contactName: optionalText(120),
+  postalCode: z.string().trim().max(12).optional().transform(value => value || null),
+  street: optionalText(180),
+  addressNumber: optionalText(30),
+  addressComplement: optionalText(120),
+  district: optionalText(120),
+  city: optionalText(120),
+  state: z.string().trim().max(2).optional().transform(value => value || null),
+  notes: optionalText(4_000),
 }).superRefine((value, context) => {
   const taxId = normalizeTaxId(value.taxId);
-  if (taxId && taxId.length !== (value.personType === "legal" ? 14 : 11)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["taxId"], message: value.personType === "legal" ? "CNPJ deve conter 14 dígitos." : "CPF deve conter 11 dígitos." });
-  if (value.state && !/^[A-Za-z]{2}$/.test(value.state)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["state"], message: "UF deve conter duas letras." });
-  const postalCode = normalizeDigits(value.postalCode); if (postalCode && postalCode.length !== 8) context.addIssue({ code: z.ZodIssueCode.custom, path: ["postalCode"], message: "CEP deve conter 8 dígitos." });
+  if (value.personType === "legal") {
+    if (!value.legalName || value.legalName.trim().length < 2) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["legalName"], message: "Informe a razão social." });
+    }
+    if (!value.tradeName || value.tradeName.trim().length === 0) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["tradeName"], message: "Informe o nome fantasia." });
+    }
+    if (!taxId || !isValidCnpj(taxId)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["taxId"], message: "CNPJ inválido." });
+    }
+  } else {
+    if (!value.legalName || value.legalName.trim().length < 2) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["legalName"], message: "Informe o nome completo." });
+    }
+    if (!taxId || !isValidCpf(taxId)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["taxId"], message: "CPF inválido." });
+    }
+  }
+
+  const hasPhone = Boolean(value.phone && value.phone.trim().length > 0);
+  const hasEmail = Boolean(value.email && value.email.trim().length > 0);
+  if (!hasPhone && !hasEmail) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["phone"], message: "Informe pelo menos um telefone ou e-mail." });
+  }
+
+  if (value.email && value.email.trim().length > 0) {
+    const emailResult = z.string().email().safeParse(value.email.trim());
+    if (!emailResult.success) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["email"], message: "E-mail inválido." });
+    }
+  }
+
+  if (value.state && !/^[A-Za-z]{2}$/.test(value.state.trim())) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["state"], message: "UF deve conter duas letras." });
+  }
+
+  const postalCode = normalizeDigits(value.postalCode);
+  if (postalCode && postalCode.length !== 8) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["postalCode"], message: "CEP deve conter 8 dígitos." });
+  }
 });
 
 export const supplierListInput = z.object({

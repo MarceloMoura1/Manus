@@ -29,11 +29,13 @@ import {
   Calendar,
   DollarSign,
   TrendingUp,
+  UploadCloud,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { formatDate, formatDateTime } from "@/lib/conversationDateTime";
 import { productMediaUrl } from "@/lib/trpc-url";
 import { normalizeContactPhone, formatContactPhone } from "../../../../shared/contact-phone";
+import { isValidCpf, isValidCnpj } from "../../../../shared/br-documents";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -94,6 +96,8 @@ export type SupplierItem = {
   active: boolean;
   createdAt: string;
   updatedAt: string;
+  createdByName?: string | null;
+  updatedByName?: string | null;
 };
 
 type SupplierTab = "geral" | "produtos" | "compras" | "timeline" | "arquivos";
@@ -106,7 +110,7 @@ export type SuppliersPageProps = {
   initialSelectedId?: string;
 };
 
-type SupplierFormData = {
+export type SupplierFormData = {
   publicId?: string;
   legalName: string;
   tradeName: string;
@@ -159,6 +163,8 @@ export function SuppliersPage({
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "active" | "inactive">("all");
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(initialSelectedId ?? null);
+  const [userExplicitlyClosed, setUserExplicitlyClosed] = useState(false);
+  const initialSelectionDone = React.useRef(Boolean(initialSelectedId));
   const [page, setPage] = useState(1);
   const [pageSize] = useState(50);
   const [showFormModal, setShowFormModal] = useState(false);
@@ -182,12 +188,15 @@ export function SuppliersPage({
     [suppliers, selectedSupplierId]
   );
 
-  // Auto-selecionar o primeiro em viewport desktop se nada selecionado
+  // Auto-selecionar o primeiro em viewport desktop no carregamento inicial se nada selecionado.
+  // Se o usuário fechou explicitamente a seleção, NÃO reabrir automaticamente após refetch ou filtros.
   React.useEffect(() => {
+    if (initialSelectionDone.current || userExplicitlyClosed) return;
     if (!selectedSupplierId && suppliers.length > 0 && typeof window !== "undefined" && window.innerWidth >= 1024) {
+      initialSelectionDone.current = true;
       setSelectedSupplierId(suppliers[0].publicId);
     }
-  }, [suppliers, selectedSupplierId]);
+  }, [suppliers, selectedSupplierId, userExplicitlyClosed]);
 
   // Exportar CSV
   const handleExportCsv = () => {
@@ -367,7 +376,10 @@ export function SuppliersPage({
                 <button
                   key={supplier.publicId}
                   type="button"
-                  onClick={() => setSelectedSupplierId(supplier.publicId)}
+                  onClick={() => {
+                    setSelectedSupplierId(supplier.publicId);
+                    setUserExplicitlyClosed(false);
+                  }}
                   className={cn(
                     "group w-full rounded-2xl border p-3 text-left shadow-xs transition-all duration-150",
                     isSelected
@@ -434,7 +446,10 @@ export function SuppliersPage({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white dark:bg-slate-900 overflow-hidden">
           <SupplierDetailPanel
             supplier={selectedSupplier}
-            onClose={() => setSelectedSupplierId(null)}
+            onClose={() => {
+              setSelectedSupplierId(null);
+              setUserExplicitlyClosed(true);
+            }}
             onEdit={() => {
               setEditSupplierData(selectedSupplier);
               setShowFormModal(true);
@@ -444,6 +459,7 @@ export function SuppliersPage({
             whatsappConnected={whatsappConnected}
             canStartConversation={canStartConversation}
             onClientNavigate={onClientNavigate}
+            canWrite={suppliersQuery.data?.canWrite !== false}
           />
         </div>
       ) : (
@@ -473,7 +489,10 @@ export function SuppliersPage({
             await utils.erp.suppliers.invalidate();
             setShowFormModal(false);
             setEditSupplierData(null);
-            if (newPublicId) setSelectedSupplierId(newPublicId);
+            if (newPublicId) {
+              setSelectedSupplierId(newPublicId);
+              setUserExplicitlyClosed(false);
+            }
           }}
         />
       )}
@@ -492,6 +511,7 @@ function SupplierDetailPanel({
   whatsappConnected,
   canStartConversation,
   onClientNavigate,
+  canWrite = true,
 }: {
   supplier: SupplierItem;
   onClose: () => void;
@@ -501,6 +521,7 @@ function SupplierDetailPanel({
   whatsappConnected: boolean;
   canStartConversation: boolean;
   onClientNavigate?: (intent: any) => void;
+  canWrite?: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<SupplierTab>("geral");
   const [actionPending, setActionPending] = useState(false);
@@ -513,7 +534,15 @@ function SupplierDetailPanel({
       toast.error("Fornecedor não possui telefone válido para WhatsApp.");
       return;
     }
-    if (canStartConversation && onClientNavigate) {
+    if (!whatsappConnected) {
+      toast.error("WhatsApp desconectado. Conecte o WhatsApp nas configurações para iniciar conversas.");
+      return;
+    }
+    if (!canStartConversation) {
+      toast.error("Seu perfil não possui permissão para iniciar conversas.");
+      return;
+    }
+    if (onClientNavigate) {
       onClientNavigate({
         crmClientId: supplier.publicId,
         phone: phoneNorm.value,
@@ -521,7 +550,11 @@ function SupplierDetailPanel({
       });
       return;
     }
-    window.open(`https://wa.me/${phoneNorm.value}`, "_blank", "noopener,noreferrer");
+    window.dispatchEvent(
+      new CustomEvent("megadesk-navigate", {
+        detail: { route: "active-attendance", phone: phoneNorm.value },
+      })
+    );
   };
 
   const tabs: Array<{ id: SupplierTab; label: string; icon: React.ReactNode }> = [
@@ -593,9 +626,16 @@ function SupplierDetailPanel({
             {hasValidPhone && (
               <button
                 type="button"
+                disabled={!whatsappConnected || !canStartConversation}
                 onClick={handleOpenWhatsApp}
-                className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 dark:hover:bg-emerald-900/80 shadow-xs"
-                title="Conversar pelo WhatsApp"
+                className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 dark:hover:bg-emerald-900/80 shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
+                title={
+                  !whatsappConnected
+                    ? "WhatsApp desconectado"
+                    : !canStartConversation
+                      ? "Sem permissão para iniciar conversas"
+                      : "Conversar pelo WhatsApp"
+                }
               >
                 <Smartphone className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span className="hidden sm:inline">WhatsApp</span>
@@ -673,7 +713,7 @@ function SupplierDetailPanel({
         {activeTab === "produtos" && <TabProducts supplier={supplier} />}
         {activeTab === "compras" && <TabPurchases supplier={supplier} onNavigate={onNavigate} />}
         {activeTab === "timeline" && <TabTimeline supplier={supplier} />}
-        {activeTab === "arquivos" && <TabFiles supplier={supplier} />}
+        {activeTab === "arquivos" && <TabFiles supplier={supplier} canWrite={canWrite} />}
       </div>
     </div>
   );
@@ -1309,6 +1349,16 @@ function TabPurchases({ supplier, onNavigate }: { supplier: SupplierItem; onNavi
 
 // ─── Aba: Timeline ────────────────────────────────────────────────────────────
 
+export function formatActorName(name?: string | null): string {
+  if (!name) return "Usuário indisponível";
+  const trimmed = name.trim();
+  if (!trimmed) return "Usuário indisponível";
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)) {
+    return "Usuário indisponível";
+  }
+  return trimmed;
+}
+
 function TabTimeline({ supplier }: { supplier: SupplierItem }) {
   const productsQuery = trpc.erp.productSuppliers.list.useQuery({
     supplierPublicId: supplier.publicId,
@@ -1318,6 +1368,11 @@ function TabTimeline({ supplier }: { supplier: SupplierItem }) {
   const purchasesQuery = trpc.erp.purchases.list.useQuery({
     supplierPublicId: supplier.publicId,
     pageSize: 50,
+  });
+
+  const filesQuery = trpc.erp.suppliers.files.list.useQuery({
+    supplierPublicId: supplier.publicId,
+    includeDeleted: true,
   });
 
   const timelineEvents = useMemo(() => {
@@ -1339,7 +1394,7 @@ function TabTimeline({ supplier }: { supplier: SupplierItem }) {
       date: supplier.createdAt,
       title: "Fornecedor Cadastrado",
       description: `Cadastro inicial de ${supplier.tradeName || supplier.legalName} concluído.`,
-      actor: "Usuário indisponível",
+      actor: formatActorName(supplier.createdByName),
       icon: <Building2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />,
       color: "bg-blue-100 dark:bg-blue-950/60",
     });
@@ -1351,7 +1406,7 @@ function TabTimeline({ supplier }: { supplier: SupplierItem }) {
         date: supplier.updatedAt,
         title: "Cadastro Atualizado",
         description: "Informações cadastrais ou comerciais foram atualizadas.",
-        actor: "Usuário indisponível",
+        actor: formatActorName(supplier.updatedByName || supplier.createdByName),
         icon: <Edit3 className="h-3.5 w-3.5 text-slate-600 dark:text-slate-400" />,
         color: "bg-slate-100 dark:bg-slate-800",
       });
@@ -1364,7 +1419,7 @@ function TabTimeline({ supplier }: { supplier: SupplierItem }) {
         date: prod.createdAt,
         title: "Produto Vinculado",
         description: `Produto "${prod.productName}" (SKU: ${prod.productSku}) associado a este fornecedor.`,
-        actor: "Usuário indisponível",
+        actor: formatActorName((prod as any).createdByName),
         icon: <Boxes className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />,
         color: "bg-purple-100 dark:bg-purple-950/60",
       });
@@ -1377,7 +1432,7 @@ function TabTimeline({ supplier }: { supplier: SupplierItem }) {
         date: po.createdAt,
         title: `Pedido ${po.orderNumber} Criado`,
         description: `Ordem de compra no valor de ${formatMoneyCents(po.totalCents)} emitida.`,
-        actor: "Usuário indisponível",
+        actor: formatActorName((po as any).createdByName),
         icon: <ShoppingBag className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />,
         color: "bg-emerald-100 dark:bg-emerald-950/60",
       });
@@ -1387,16 +1442,40 @@ function TabTimeline({ supplier }: { supplier: SupplierItem }) {
           date: po.receivedAt,
           title: `Pedido ${po.orderNumber} Recebido`,
           description: "Mercadorias recebidas e integradas ao estoque.",
-          actor: "Usuário indisponível",
+          actor: formatActorName((po as any).createdByName),
           icon: <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />,
           color: "bg-emerald-100 dark:bg-emerald-950/60",
         });
       }
     }
 
+    // Eventos de documentos anexados e removidos
+    for (const file of filesQuery.data ?? []) {
+      list.push({
+        id: `file-up-${file.publicId}`,
+        date: file.createdAt,
+        title: "Documento Adicionado",
+        description: `"${file.fileName}" anexado`,
+        actor: formatActorName(file.createdByName),
+        icon: <Paperclip className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />,
+        color: "bg-indigo-100 dark:bg-indigo-950/60",
+      });
+      if (file.state === "deleted" && file.deletedAt) {
+        list.push({
+          id: `file-del-${file.publicId}`,
+          date: file.deletedAt,
+          title: "Documento Removido",
+          description: `"${file.fileName}" removido`,
+          actor: formatActorName(file.deletedByName || file.createdByName),
+          icon: <Trash2 className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400" />,
+          color: "bg-rose-100 dark:bg-rose-950/60",
+        });
+      }
+    }
+
     list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return list;
-  }, [supplier, productsQuery.data, purchasesQuery.data]);
+  }, [supplier, productsQuery.data, purchasesQuery.data, filesQuery.data]);
 
   return (
     <div className="space-y-4">
@@ -1434,43 +1513,607 @@ function TabTimeline({ supplier }: { supplier: SupplierItem }) {
 
 // ─── Aba: Arquivos ────────────────────────────────────────────────────────────
 
-function TabFiles({ supplier }: { supplier: SupplierItem }) {
+const FILE_CATEGORIES = [
+  { id: "all", label: "Todos" },
+  { id: "contracts", label: "Contratos" },
+  { id: "invoices", label: "Notas Fiscais" },
+  { id: "price_tables", label: "Tabelas de Preço" },
+  { id: "fiscal_documents", label: "Documentos Fiscais" },
+  { id: "other", label: "Outros" },
+] as const;
+
+type FileCategoryOption = (typeof FILE_CATEGORIES)[number]["id"];
+
+function formatFileSize(bytes: number): string {
+  if (!bytes || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getFileCategoryBadgeClass(category: string): string {
+  switch (category) {
+    case "contracts":
+      return "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800";
+    case "invoices":
+      return "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800";
+    case "price_tables":
+      return "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800";
+    case "fiscal_documents":
+      return "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800";
+    default:
+      return "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700";
+  }
+}
+
+function TabFiles({ supplier, canWrite = true }: { supplier: SupplierItem; canWrite?: boolean }) {
+  const utils = trpc.useUtils();
+  const [selectedCategory, setSelectedCategory] = useState<FileCategoryOption>("all");
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [fileToDelete, setFileToDelete] = useState<any | null>(null);
+
+  const filesQuery = trpc.erp.suppliers.files.list.useQuery({
+    supplierPublicId: supplier.publicId,
+  });
+
+  const uploadMutation = trpc.erp.suppliers.files.upload.useMutation({
+    onSuccess: async () => {
+      toast.success("Documento anexado com sucesso!");
+      setIsUploadModalOpen(false);
+      await Promise.all([
+        filesQuery.refetch(),
+        utils.erp.suppliers.files.list.invalidate(),
+      ]);
+    },
+    onError: (err) => {
+      toast.error(err.message || "Falha ao anexar documento.");
+    },
+  });
+
+  const deleteMutation = trpc.erp.suppliers.files.delete.useMutation({
+    onSuccess: async () => {
+      toast.success("Documento excluído com sucesso!");
+      setFileToDelete(null);
+      await Promise.all([
+        filesQuery.refetch(),
+        utils.erp.suppliers.files.list.invalidate(),
+      ]);
+    },
+    onError: (err) => {
+      toast.error(err.message || "Falha ao excluir documento.");
+    },
+  });
+
+  const allFiles = filesQuery.data ?? [];
+  const filteredFiles = useMemo(() => {
+    if (selectedCategory === "all") return allFiles;
+    return allFiles.filter(f => f.category === selectedCategory);
+  }, [allFiles, selectedCategory]);
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: allFiles.length };
+    for (const cat of FILE_CATEGORIES) {
+      if (cat.id !== "all") {
+        counts[cat.id] = allFiles.filter(f => f.category === cat.id).length;
+      }
+    }
+    return counts;
+  }, [allFiles]);
+
   return (
     <div className="space-y-4">
-      <div>
-        <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Documentos e Anexos Comerciais</h3>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          Centralização de tabelas de preços, propostas, contratos e documentações fiscais.
-        </p>
+      {/* Top Header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Documentos e Anexos Comerciais</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Armazenamento estritamente privado, autenticado e isolado por tenant de propostas, tabelas de preço, notas e contratos.
+          </p>
+        </div>
+
+        {canWrite && (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => setIsUploadModalOpen(true)}
+            className="flex items-center gap-1.5 self-start sm:self-auto rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-700"
+          >
+            <UploadCloud className="h-4 w-4" />
+            Anexar Documento
+          </Button>
+        )}
       </div>
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white p-8 text-center shadow-xs dark:border-slate-800 dark:bg-slate-900">
-        <Paperclip className="mx-auto mb-3 h-10 w-10 text-slate-300 dark:text-slate-600" />
-        <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">Armazenamento de Documentos</h4>
-        <p className="mx-auto mt-1 max-w-md text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-          O MegaDesk mantém armazenamento estritamente privado, autenticado e isolado por tenant.
-          O provisionamento deste repositório documental seguro para fornecedores está catalogado e
-          aguardando o gate de infraestrutura correspondente.
-        </p>
-
-        <div className="mt-6 flex flex-wrap justify-center gap-2">
-          {["Tabelas de Preços", "Catálogos em PDF", "Contratos de Fornecimento", "Documentos Fiscais / CNPJ"].map(
-            (cat) => (
+      {/* Category Filter Pills */}
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-100 dark:border-slate-800 pb-2">
+        {FILE_CATEGORIES.map(cat => {
+          const count = categoryCounts[cat.id] ?? 0;
+          const isSelected = selectedCategory === cat.id;
+          return (
+            <button
+              key={cat.id}
+              type="button"
+              onClick={() => setSelectedCategory(cat.id)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+                isSelected
+                  ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
+              )}
+            >
+              <span>{cat.label}</span>
               <span
-                key={cat}
-                className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                className={cn(
+                  "rounded-full px-1.5 py-0.2 text-[10px] font-semibold",
+                  isSelected
+                    ? "bg-slate-700 text-white dark:bg-slate-300 dark:text-slate-900"
+                    : "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                )}
               >
-                {cat}
+                {count}
               </span>
-            )
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Document List or Empty State */}
+      {filesQuery.isLoading ? (
+        <div className="flex items-center justify-center p-8 text-xs text-slate-400">
+          <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Carregando documentos...
+        </div>
+      ) : filteredFiles.length === 0 ? (
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-8 text-center shadow-xs dark:border-slate-800 dark:bg-slate-900">
+          <Paperclip className="mx-auto mb-3 h-10 w-10 text-slate-300 dark:text-slate-600" />
+          <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+            {selectedCategory === "all" ? "Nenhum documento anexado" : "Nenhum documento nesta categoria"}
+          </h4>
+          <p className="mx-auto mt-1 max-w-md text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+            {selectedCategory === "all"
+              ? "Anexe contratos, notas fiscais, tabelas de preço e outros arquivos comerciais para centralizar a documentação deste fornecedor."
+              : "Não há arquivos arquivados sob esta categoria específica. Selecione outra categoria ou envie um novo arquivo."}
+          </p>
+          {canWrite && selectedCategory === "all" && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => setIsUploadModalOpen(true)}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-700"
+            >
+              <UploadCloud className="h-4 w-4" />
+              Anexar primeiro documento
+            </Button>
+          )}
+          {selectedCategory !== "all" && (
+            <button
+              type="button"
+              onClick={() => setSelectedCategory("all")}
+              className="mt-3 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+            >
+              Ver todos os documentos
+            </button>
           )}
         </div>
-      </div>
+      ) : (
+        <div className="divide-y divide-slate-100 rounded-xl border border-slate-200/80 bg-white shadow-xs dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+          {filteredFiles.map(file => (
+            <div
+              key={file.publicId}
+              className="flex flex-col gap-3 p-3.5 sm:flex-row sm:items-center sm:justify-between transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/50"
+            >
+              <div className="flex items-start gap-3 min-w-0 flex-1">
+                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 border border-blue-100 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-900">
+                  <FileText className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100" title={file.fileName}>
+                      {file.fileName}
+                    </span>
+                    <span
+                      className={cn(
+                        "rounded-md border px-2 py-0.5 text-[10px] font-semibold",
+                        getFileCategoryBadgeClass(file.category)
+                      )}
+                    >
+                      {file.categoryLabel}
+                    </span>
+                  </div>
+                  {file.description && (
+                    <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1">
+                      {file.description}
+                    </p>
+                  )}
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-400 dark:text-slate-500">
+                    <span>{formatFileSize(file.sizeBytes)}</span>
+                    <span>•</span>
+                    <span>{formatDateTime(file.createdAt)}</span>
+                    <span>•</span>
+                    <span>Enviado por: {formatActorName(file.createdByName)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 self-end sm:self-center">
+                <a
+                  href={file.downloadUrl}
+                  download={file.fileName}
+                  className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
+                  title="Baixar arquivo"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Baixar</span>
+                </a>
+
+                {canWrite && (
+                  <button
+                    type="button"
+                    onClick={() => setFileToDelete(file)}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-transparent text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 dark:hover:border-rose-900/50 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 transition-colors"
+                    title="Remover documento"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Modal de Upload */}
+      {isUploadModalOpen && (
+        <SupplierFileUploadDialog
+          open={isUploadModalOpen}
+          onClose={() => setIsUploadModalOpen(false)}
+          supplier={supplier}
+          isPending={uploadMutation.isPending}
+          onSubmit={async (data) => {
+            await uploadMutation.mutateAsync(data);
+          }}
+        />
+      )}
+
+      {/* Modal de Confirmação de Exclusão */}
+      {fileToDelete && (
+        <Dialog open={Boolean(fileToDelete)} onOpenChange={() => setFileToDelete(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-rose-600">
+                <AlertTriangle className="h-5 w-5" />
+                Excluir Documento
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 py-2 text-xs text-slate-600 dark:text-slate-300">
+              <p>
+                Tem certeza que deseja remover o documento <strong>"{fileToDelete.fileName}"</strong>?
+              </p>
+              <p className="text-[11px] text-slate-400">
+                O arquivo será desativado e não poderá mais ser acessado para download. O evento de remoção será registrado na timeline do fornecedor.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setFileToDelete(null)}
+                disabled={deleteMutation.isPending}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="bg-rose-600 hover:bg-rose-700 text-white"
+                onClick={() => {
+                  deleteMutation.mutate({
+                    supplierPublicId: supplier.publicId,
+                    filePublicId: fileToDelete.publicId,
+                  });
+                }}
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending ? "Excluindo..." : "Confirmar Exclusão"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
 
+function SupplierFileUploadDialog({
+  open,
+  onClose,
+  supplier,
+  isPending,
+  onSubmit,
+}: {
+  open: boolean;
+  onClose: () => void;
+  supplier: SupplierItem;
+  isPending: boolean;
+  onSubmit: (data: {
+    supplierPublicId: string;
+    fileName: string;
+    category: "contracts" | "invoices" | "price_tables" | "fiscal_documents" | "other";
+    description?: string | null;
+    mimeType: string;
+    base64: string;
+  }) => Promise<void>;
+}) {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [category, setCategory] = useState<"contracts" | "invoices" | "price_tables" | "fiscal_documents" | "other">("contracts");
+  const [description, setDescription] = useState("");
+  const [dragActive, setDragActive] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleFileChange = (file: File | null) => {
+    setErrorMsg(null);
+    if (!file) {
+      setSelectedFile(null);
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setErrorMsg("O arquivo excede o limite máximo permitido de 20 MB.");
+      return;
+    }
+    setSelectedFile(file);
+  };
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFileChange(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedFile) {
+      setErrorMsg("Selecione um arquivo para upload.");
+      return;
+    }
+
+    try {
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const res = reader.result as string;
+          const base64 = res.split(",")[1];
+          if (!base64) reject(new Error("Falha ao codificar arquivo em base64."));
+          else resolve(base64);
+        };
+        reader.onerror = () => reject(new Error("Erro ao ler arquivo."));
+      });
+      reader.readAsDataURL(selectedFile);
+      const base64 = await base64Promise;
+
+      await onSubmit({
+        supplierPublicId: supplier.publicId,
+        fileName: selectedFile.name,
+        category,
+        description: description.trim() || null,
+        mimeType: selectedFile.type || "application/octet-stream",
+        base64,
+      });
+    } catch (err: any) {
+      setErrorMsg(err.message || "Erro durante o processamento do arquivo.");
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <UploadCloud className="h-4 w-4 text-blue-600" />
+            Anexar Documento ao Fornecedor
+          </DialogTitle>
+        </DialogHeader>
+
+        <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+          {/* Dropzone */}
+          <div
+            onDragEnter={handleDrag}
+            onDragLeave={handleDrag}
+            onDragOver={handleDrag}
+            onDrop={handleDrop}
+            className={cn(
+              "relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 text-center transition-colors cursor-pointer",
+              dragActive
+                ? "border-blue-500 bg-blue-50/50 dark:border-blue-400 dark:bg-blue-950/20"
+                : "border-slate-200 bg-slate-50/60 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-slate-800/60"
+            )}
+            onClick={() => document.getElementById("file-upload-input")?.click()}
+          >
+            <input
+              id="file-upload-input"
+              type="file"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  handleFileChange(e.target.files[0]);
+                }
+              }}
+              accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.txt,.docx,.xlsx"
+            />
+            <UploadCloud className="mb-2 h-8 w-8 text-slate-400 dark:text-slate-500" />
+            {selectedFile ? (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate max-w-xs">
+                  {selectedFile.name}
+                </p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {formatFileSize(selectedFile.size)} • Clique para trocar
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Arraste e solte o arquivo aqui, ou <span className="text-blue-600 underline">procure</span>
+                </p>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                  PDF, Imagens (PNG/JPG/WEBP), Planilhas (XLSX/CSV) ou Word (DOCX) até 20 MB
+                </p>
+              </div>
+            )}
+          </div>
+
+          {errorMsg && (
+            <div className="rounded-lg bg-rose-50 p-2.5 text-xs text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          {/* Categoria */}
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Categoria do Documento</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value as any)}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              disabled={isPending}
+            >
+              <option value="contracts">Contratos</option>
+              <option value="invoices">Notas Fiscais</option>
+              <option value="price_tables">Tabelas de Preço</option>
+              <option value="fiscal_documents">Documentos Fiscais</option>
+              <option value="other">Outros</option>
+            </select>
+          </div>
+
+          {/* Descrição opcional */}
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Descrição ou Observações (opcional)</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Ex: Tabela de preços para o 2º semestre de 2026..."
+              rows={2}
+              maxLength={500}
+              className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              disabled={isPending}
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onClose}
+              disabled={isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5"
+              disabled={isPending || !selectedFile}
+            >
+              {isPending ? (
+                <>
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Enviando...
+                </>
+              ) : (
+                <>
+                  <UploadCloud className="h-3.5 w-3.5" /> Enviar Documento
+                </>
+              )}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Modal: Cadastro / Edição de Fornecedor ───────────────────────────────────
+
+export function validateSupplierForm(form: SupplierFormData): Record<string, string> {
+  const errors: Record<string, string> = {};
+  const isPJ = form.personType === "legal";
+  const rawTaxId = (form.taxId || "").replace(/\D/g, "");
+
+  // 1. Razão Social / Nome Completo
+  if (!form.legalName.trim()) {
+    errors.legalName = isPJ ? "Informe a razão social." : "Informe o nome completo.";
+  } else if (form.legalName.trim().length < 2) {
+    errors.legalName = "Nome deve ter pelo menos 2 caracteres.";
+  }
+
+  // 2. Nome Fantasia (obrigatório para PJ, opcional para PF)
+  if (isPJ && !form.tradeName.trim()) {
+    errors.tradeName = "Informe o nome fantasia.";
+  }
+
+  // 3. Documento (CNPJ para PJ, CPF para PF)
+  if (!rawTaxId) {
+    errors.taxId = isPJ ? "Informe o CNPJ." : "Informe o CPF.";
+  } else if (isPJ) {
+    if (!isValidCnpj(rawTaxId)) {
+      errors.taxId = "CNPJ inválido.";
+    }
+  } else {
+    if (!isValidCpf(rawTaxId)) {
+      errors.taxId = "CPF inválido.";
+    }
+  }
+
+  // 4. Canal de contato: pelo menos telefone OU e-mail
+  const hasPhone = Boolean(form.phone.trim());
+  const hasEmail = Boolean(form.email.trim());
+
+  if (!hasPhone && !hasEmail) {
+    errors.contact = "Informe pelo menos um telefone ou e-mail.";
+    errors.phone = "Informe pelo menos um telefone ou e-mail.";
+    errors.email = "Informe pelo menos um telefone ou e-mail.";
+  } else {
+    if (hasPhone) {
+      const norm = normalizeContactPhone(form.phone);
+      if (norm.status === "invalid") {
+        errors.phone = "Telefone inválido.";
+      }
+    }
+    if (hasEmail) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+        errors.email = "E-mail inválido.";
+      }
+    }
+  }
+
+  // 5. CEP (opcional, mas se preenchido deve ter 8 dígitos)
+  if (form.postalCode.trim()) {
+    const cepDigits = form.postalCode.replace(/\D/g, "");
+    if (cepDigits.length !== 8) {
+      errors.postalCode = "CEP deve conter 8 dígitos.";
+    }
+  }
+
+  // 6. UF (opcional, mas se preenchido deve ter 2 letras)
+  if (form.state.trim() && !/^[A-Za-z]{2}$/.test(form.state.trim())) {
+    errors.state = "UF deve conter 2 letras.";
+  }
+
+  return errors;
+}
 
 function SupplierFormDialog({
   open,
@@ -1509,35 +2152,81 @@ function SupplierFormDialog({
   });
 
   const [pending, setPending] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const createMutation = trpc.erp.suppliers.create.useMutation();
   const updateMutation = trpc.erp.suppliers.update.useMutation();
 
   const setField = <K extends keyof SupplierFormData>(key: K, value: SupplierFormData[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+    if (fieldErrors[key] || fieldErrors.contact) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        if (key === "phone" || key === "email") {
+          delete next.contact;
+          delete next.phone;
+          delete next.email;
+        }
+        return next;
+      });
+    }
+    if (summaryError) {
+      setSummaryError(null);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const errors = validateSupplierForm(form);
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      const firstError = Object.values(errors)[0];
+      setSummaryError(firstError || "Corrija os campos destacados antes de salvar.");
+      toast.error(firstError || "Existem campos pendentes ou inválidos.");
+      return;
+    }
+
     setPending(true);
+    setSummaryError(null);
+
+    const payload = {
+      ...form,
+      tradeName: form.tradeName.trim() || (form.personType === "individual" ? form.legalName.trim() : form.tradeName.trim()),
+    };
 
     try {
       if (form.publicId) {
         const res = await updateMutation.mutateAsync({
           publicId: form.publicId,
-          ...form,
+          ...payload,
         });
         toast.success("Fornecedor atualizado com sucesso!");
         await onSuccess(res.publicId);
       } else {
         const res = await createMutation.mutateAsync({
-          ...form,
+          ...payload,
         });
         toast.success("Fornecedor cadastrado com sucesso!");
         await onSuccess(res.publicId);
       }
     } catch (err: any) {
-      toast.error(err.message || "Erro ao salvar fornecedor.");
+      const msg = err.message || "Erro ao salvar fornecedor.";
+      if (err.data?.zodError?.fieldErrors) {
+        const backendErrors: Record<string, string> = {};
+        for (const [k, v] of Object.entries(err.data.zodError.fieldErrors)) {
+          if (Array.isArray(v) && v.length > 0) {
+            backendErrors[k] = v[0] as string;
+          }
+        }
+        setFieldErrors(backendErrors);
+        const first = Object.values(backendErrors)[0];
+        setSummaryError(first || msg);
+      } else {
+        setSummaryError(msg);
+      }
+      toast.error(msg);
     } finally {
       setPending(false);
     }
@@ -1553,6 +2242,12 @@ function SupplierFormDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 pt-2 text-xs">
+          {summaryError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+              <p className="font-semibold">{summaryError}</p>
+            </div>
+          )}
+
           {/* SEÇÃO: IDENTIFICAÇÃO */}
           <section className="space-y-3">
             <h4 className="font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 text-[10px]">
@@ -1577,47 +2272,70 @@ function SupplierFormDialog({
 
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  {form.personType === "legal" ? "CNPJ" : "CPF"}
+                  {form.personType === "legal" ? "CNPJ" : "CPF"} <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
                   value={form.taxId}
                   onChange={(e) => setField("taxId", e.target.value)}
                   placeholder={form.personType === "legal" ? "00.000.000/0000-00" : "000.000.000-00"}
-                  className="w-full rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950 p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={cn(
+                    "w-full rounded-lg border bg-white dark:bg-slate-950 p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2",
+                    fieldErrors.taxId
+                      ? "border-red-500 focus:ring-red-500"
+                      : "border-slate-200 dark:border-slate-700 focus:ring-blue-500"
+                  )}
                 />
+                {fieldErrors.taxId && (
+                  <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{fieldErrors.taxId}</p>
+                )}
               </div>
 
               <div className="sm:col-span-2">
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Razão Social / Nome Completo <span className="text-red-500">*</span>
+                  {form.personType === "legal" ? "Razão Social" : "Nome Completo"} <span className="text-red-500">*</span>
                 </label>
                 <input
-                  required
                   type="text"
                   value={form.legalName}
                   onChange={(e) => setField("legalName", e.target.value)}
-                  placeholder="Nome oficial ou razão social registrada"
-                  className="w-full rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950 p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder={form.personType === "legal" ? "Razão social registrada" : "Nome completo da pessoa física"}
+                  className={cn(
+                    "w-full rounded-lg border bg-white dark:bg-slate-950 p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2",
+                    fieldErrors.legalName
+                      ? "border-red-500 focus:ring-red-500"
+                      : "border-slate-200 dark:border-slate-700 focus:ring-blue-500"
+                  )}
                 />
+                {fieldErrors.legalName && (
+                  <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{fieldErrors.legalName}</p>
+                )}
               </div>
 
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Nome Fantasia
+                  Nome Fantasia {form.personType === "legal" ? <span className="text-red-500">*</span> : <span className="text-slate-400 font-normal">(Opcional)</span>}
                 </label>
                 <input
                   type="text"
                   value={form.tradeName}
                   onChange={(e) => setField("tradeName", e.target.value)}
-                  placeholder="Nome comercial ou de marca"
-                  className="w-full rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950 p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder={form.personType === "legal" ? "Nome comercial ou de marca" : "Nome comercial (opcional)"}
+                  className={cn(
+                    "w-full rounded-lg border bg-white dark:bg-slate-950 p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2",
+                    fieldErrors.tradeName
+                      ? "border-red-500 focus:ring-red-500"
+                      : "border-slate-200 dark:border-slate-700 focus:ring-blue-500"
+                  )}
                 />
+                {fieldErrors.tradeName && (
+                  <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{fieldErrors.tradeName}</p>
+                )}
               </div>
 
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Inscrição Estadual
+                  Inscrição Estadual <span className="text-slate-400 font-normal">(Opcional)</span>
                 </label>
                 <input
                   type="text"
@@ -1646,13 +2364,21 @@ function SupplierFormDialog({
                   value={form.phone}
                   onChange={(e) => setField("phone", e.target.value)}
                   placeholder="(00) 00000-0000"
-                  className="w-full rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950 p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={cn(
+                    "w-full rounded-lg border bg-white dark:bg-slate-950 p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2",
+                    fieldErrors.phone
+                      ? "border-red-500 focus:ring-red-500"
+                      : "border-slate-200 dark:border-slate-700 focus:ring-blue-500"
+                  )}
                 />
+                {fieldErrors.phone && (
+                  <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{fieldErrors.phone}</p>
+                )}
               </div>
 
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Contato Principal
+                  Contato Principal <span className="text-slate-400 font-normal">(Opcional)</span>
                 </label>
                 <input
                   type="text"
@@ -1672,8 +2398,16 @@ function SupplierFormDialog({
                   value={form.email}
                   onChange={(e) => setField("email", e.target.value)}
                   placeholder="vendas@fornecedor.com.br"
-                  className="w-full rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950 p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={cn(
+                    "w-full rounded-lg border bg-white dark:bg-slate-950 p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2",
+                    fieldErrors.email
+                      ? "border-red-500 focus:ring-red-500"
+                      : "border-slate-200 dark:border-slate-700 focus:ring-blue-500"
+                  )}
                 />
+                {fieldErrors.email && (
+                  <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{fieldErrors.email}</p>
+                )}
               </div>
             </div>
           </section>
@@ -1681,26 +2415,34 @@ function SupplierFormDialog({
           {/* SEÇÃO: ENDEREÇO */}
           <section className="space-y-3">
             <h4 className="font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 text-[10px]">
-              3. Endereço
+              3. Endereço <span className="text-slate-400 font-normal text-[9px] lowercase">(opcional)</span>
             </h4>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  CEP
+                  CEP <span className="text-slate-400 font-normal">(Opcional)</span>
                 </label>
                 <input
                   type="text"
                   value={form.postalCode}
                   onChange={(e) => setField("postalCode", e.target.value)}
                   placeholder="00000-000"
-                  className="w-full rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950 p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={cn(
+                    "w-full rounded-lg border bg-white dark:bg-slate-950 p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2",
+                    fieldErrors.postalCode
+                      ? "border-red-500 focus:ring-red-500"
+                      : "border-slate-200 dark:border-slate-700 focus:ring-blue-500"
+                  )}
                 />
+                {fieldErrors.postalCode && (
+                  <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{fieldErrors.postalCode}</p>
+                )}
               </div>
 
               <div className="sm:col-span-2">
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Logradouro (Rua / Av.)
+                  Logradouro (Rua / Av.) <span className="text-slate-400 font-normal">(Opcional)</span>
                 </label>
                 <input
                   type="text"
@@ -1713,7 +2455,7 @@ function SupplierFormDialog({
 
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Número
+                  Número <span className="text-slate-400 font-normal">(Opcional)</span>
                 </label>
                 <input
                   type="text"
@@ -1726,7 +2468,7 @@ function SupplierFormDialog({
 
               <div className="sm:col-span-2">
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Complemento
+                  Complemento <span className="text-slate-400 font-normal">(Opcional)</span>
                 </label>
                 <input
                   type="text"
@@ -1739,7 +2481,7 @@ function SupplierFormDialog({
 
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Bairro
+                  Bairro <span className="text-slate-400 font-normal">(Opcional)</span>
                 </label>
                 <input
                   type="text"
@@ -1752,7 +2494,7 @@ function SupplierFormDialog({
 
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Cidade
+                  Cidade <span className="text-slate-400 font-normal">(Opcional)</span>
                 </label>
                 <input
                   type="text"
@@ -1765,7 +2507,7 @@ function SupplierFormDialog({
 
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  UF
+                  UF <span className="text-slate-400 font-normal">(Opcional)</span>
                 </label>
                 <input
                   type="text"
@@ -1773,8 +2515,16 @@ function SupplierFormDialog({
                   value={form.state}
                   onChange={(e) => setField("state", e.target.value.toUpperCase())}
                   placeholder="SP"
-                  className="w-full rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950 p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={cn(
+                    "w-full rounded-lg border bg-white dark:bg-slate-950 p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2",
+                    fieldErrors.state
+                      ? "border-red-500 focus:ring-red-500"
+                      : "border-slate-200 dark:border-slate-700 focus:ring-blue-500"
+                  )}
                 />
+                {fieldErrors.state && (
+                  <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{fieldErrors.state}</p>
+                )}
               </div>
             </div>
           </section>
@@ -1782,7 +2532,7 @@ function SupplierFormDialog({
           {/* SEÇÃO: OBSERVAÇÕES */}
           <section className="space-y-3">
             <h4 className="font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 text-[10px]">
-              4. Observações Comerciais
+              4. Observações Comerciais <span className="text-slate-400 font-normal text-[9px] lowercase">(opcional)</span>
             </h4>
             <textarea
               rows={3}
@@ -1797,7 +2547,7 @@ function SupplierFormDialog({
             <Button type="button" variant="outline" size="sm" onClick={onClose}>
               Cancelar
             </Button>
-            <Button type="submit" size="sm" disabled={pending || !form.legalName.trim()}>
+            <Button type="submit" size="sm" disabled={pending}>
               {pending ? "Salvando..." : supplier ? "Salvar Alterações" : "Cadastrar Fornecedor"}
             </Button>
           </div>

@@ -2083,6 +2083,53 @@ export const erpProductSuppliers = mysqlTable(
   ]
 );
 
+export const erpSupplierFiles = mysqlTable(
+  "erp_supplier_files",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    supplierId: bigint("supplier_id", { mode: "number" }).notNull(),
+    fileName: varchar("file_name", { length: 255 }).notNull(),
+    category: varchar({ length: 64 }).notNull(),
+    description: text(),
+    mimeType: varchar("mime_type", { length: 128 }).notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    sha256: varchar({ length: 64 }).notNull(),
+    storageKey: varchar("storage_key", { length: 255 }).notNull(),
+    state: mysqlEnum("state", ["active", "deleted"]).default("active").notNull(),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    deletedBy: varchar("deleted_by", { length: 80 }),
+    deletedAt: timestamp("deleted_at", { mode: "string" }),
+  },
+  (table): MySqlTableExtraConfigValue[] => [
+    uniqueIndex("uq_esf_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_esf_storage_key").on(table.storageKey),
+    index("idx_esf_lookup").on(
+      table.clientId,
+      table.supplierId,
+      table.state,
+      table.createdAt
+    ),
+    foreignKey({
+      name: "fk_esf_tenant",
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId as AnyMySqlColumn],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_esf_supplier",
+      columns: [table.clientId, table.supplierId],
+      foreignColumns: [
+        erpSuppliers.clientId as AnyMySqlColumn,
+        erpSuppliers.id as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
+  ]
+);
+
 export const erpProductAuditLogs = mysqlTable(
   "erp_product_audit_logs",
   {
