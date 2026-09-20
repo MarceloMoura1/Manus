@@ -2871,11 +2871,12 @@ Describe 'MegaDesk verified MAIN migration gate' {
     }
   }
 
-  It 'uses the same asserted gate from updater and quick publish' {
+  It 'uses the guarded migration pipeline in updater and the asserted gate in quick publish' {
     $source = Get-Content -LiteralPath (Get-Module $moduleName).Path -Raw
     $updater = [regex]::Match($source, 'function Invoke-MegaDeskUpdaterV2 \{.*?(?=function Invoke-MegaDeskPreparedReleasePublish)', [System.Text.RegularExpressions.RegexOptions]::Singleline).Value
     $publish = [regex]::Match($source, 'function Invoke-MegaDeskPreparedReleasePublish \{.*?(?=function Backup-MegaDeskDist)', [System.Text.RegularExpressions.RegexOptions]::Singleline).Value
-    $updater | Should Match 'Assert-MegaDeskMigrationDeltaState'
+    $updater | Should Match 'Get-MegaDeskPendingCanonicalMainMigrations'
+    $updater | Should Match 'Invoke-MegaDeskMainMigrationPipeline'
     $publish | Should Match 'Assert-MegaDeskMigrationDeltaState'
     $updater | Should Not Match 'Get-MegaDeskMigrationChanges'
     $publish | Should Not Match 'Get-MegaDeskMigrationChanges'
@@ -3089,9 +3090,12 @@ Describe 'MegaDesk update preparation only' {
         Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskUpdateActive; path = 'C:\active' } }
         Mock Assert-MegaDeskCandidateDescendsFromActive { }
         Mock Set-MegaDeskOperationState { param($Status, $CandidateSha, $Kind, $Message) $script:transitions += $Status; $script:testState.operation = [pscustomobject]@{ kind = 'UPDATE'; status = $Status; candidateSha = $CandidateSha; message = $Message }; $script:testState }
-        Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
+        Mock Assert-MegaDeskRuntimeMainMigrationConfig { 'C:\canonical-config\.env.local' }
+        Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'NONE'; pending = @(); journal = $null } }
+        Mock Invoke-MegaDeskMainMigrationPipeline { [pscustomobject]@{ status = 'NONE'; backup = $null; migrations = @() } }
         Mock Test-MegaDeskDependencyDiff { $false }
         Mock Invoke-MegaDeskIsolatedBuild { [pscustomobject]@{ sha = $global:MegaDeskUpdateCandidate; path = 'C:\candidate' } }
+        Mock Assert-MegaDeskCandidateLaunchReadiness { }
         Mock Assert-MegaDeskNoSourceMutation { }
         Mock Assert-MegaDeskCandidateHeadUnchanged { } -ParameterFilter { $global:MegaDeskUpdatePreparationMockScope -eq 'ready-preparation' }
         Mock Read-Host { throw 'Atualizar nao deve pedir confirmacao de publicacao.' }
@@ -3129,9 +3133,12 @@ Describe 'MegaDesk update preparation only' {
         Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskUpdateActive; path = 'C:\active' } }
         Mock Assert-MegaDeskCandidateDescendsFromActive { }
         Mock Set-MegaDeskOperationState { param($Status, $CandidateSha, $Kind, $Message) $script:transitions += $Status; $script:testState.operation = [pscustomobject]@{ kind = 'UPDATE'; status = $Status; candidateSha = $CandidateSha; message = $Message }; $script:testState }
-        Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
+        Mock Assert-MegaDeskRuntimeMainMigrationConfig { 'C:\canonical-config\.env.local' }
+        Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'NONE'; pending = @(); journal = $null } }
+        Mock Invoke-MegaDeskMainMigrationPipeline { [pscustomobject]@{ status = 'NONE'; backup = $null; migrations = @() } }
         Mock Test-MegaDeskDependencyDiff { $false }
         Mock Invoke-MegaDeskIsolatedBuild { [pscustomobject]@{ sha = $global:MegaDeskUpdateCandidate; path = 'C:\candidate' } }
+        Mock Assert-MegaDeskCandidateLaunchReadiness { }
         Mock Assert-MegaDeskNoSourceMutation { }
         Mock Assert-MegaDeskCandidateHeadUnchanged { throw 'HEAD Git mudou durante a preparacao.' } -ParameterFilter { $global:MegaDeskUpdatePreparationMockScope -eq 'head-changed-after-build' }
         Mock Invoke-MegaDeskReleaseSwitch { throw 'switch must not run' }
@@ -3143,6 +3150,37 @@ Describe 'MegaDesk update preparation only' {
       }
     } finally {
       $global:MegaDeskUpdatePreparationMockScope = $null
+    }
+  }
+
+  It 'marks the update FAILED and blocks publication when canonical migration execution fails' {
+    $global:MegaDeskUpdateCandidate = '9999999999999999999999999999999999999999'
+    $global:MegaDeskUpdateActive = '8888888888888888888888888888888888888888'
+    InModuleScope $moduleName {
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskUpdateActive; path = 'C:\active' }; previousRelease = $null; operation = $null }
+      $script:transitions = @()
+      Mock Assert-MegaDeskToolchain { }
+      Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskUpdateCandidate; branch = 'release/updater-v2-bootstrap' } }
+      Mock Assert-MegaDeskRecoverableState { $script:testState }
+      Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskUpdateActive; path = 'C:\active' } }
+      Mock Assert-MegaDeskCandidateDescendsFromActive { }
+      Mock Assert-MegaDeskRuntimeMainMigrationConfig { 'C:\canonical-config\.env.local' }
+      Mock Set-MegaDeskOperationState { param($Status, $CandidateSha, $Kind, $Message) $script:transitions += $Status; $script:testState.operation = [pscustomobject]@{ kind = 'UPDATE'; status = $Status; candidateSha = $CandidateSha; message = $Message }; $script:testState }
+      Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'PENDING'; pending = @([pscustomobject]@{ tag = '0031_fixture' }); journal = $null } }
+      Mock Test-MegaDeskDependencyDiff { $false }
+      Mock Invoke-MegaDeskIsolatedBuild { [pscustomobject]@{ sha = $global:MegaDeskUpdateCandidate; path = 'C:\candidate' } }
+      Mock Assert-MegaDeskCandidateLaunchReadiness { }
+      Mock Invoke-MegaDeskMainMigrationPipeline { throw 'canonical SQL failure' }
+      Mock Invoke-MegaDeskReleaseSwitch { throw 'publication must not run' }
+      Mock Start-MegaDeskNode { throw 'runtime must not start' }
+      Mock Stop-MegaDeskManagedProcess { throw 'runtime must not stop' }
+      Mock Write-MegaDeskLog { }
+
+      { Invoke-MegaDeskUpdaterV2 -ExpectedBranch 'release/updater-v2-bootstrap' } | Should Throw 'canonical SQL failure'
+      $script:transitions | Should Be @('PREPARING', 'FAILED')
+      Assert-MockCalled Invoke-MegaDeskReleaseSwitch -Times 0 -Exactly -Scope It
+      Assert-MockCalled Start-MegaDeskNode -Times 0 -Exactly -Scope It
+      Assert-MockCalled Stop-MegaDeskManagedProcess -Times 0 -Exactly -Scope It
     }
   }
 
@@ -5526,6 +5564,116 @@ Describe 'MegaDesk isolated worktree runtime configuration and publisher launch 
       $objStr.Contains($secretToken) | Should Be $false
       $jsonStr = $preflight | ConvertTo-Json -Depth 5
       $jsonStr.Contains($secretToken) | Should Be $false
+    }
+  }
+}
+
+Describe 'MegaDesk guarded MAIN migration pipeline' {
+  BeforeEach {
+    $global:MegaDeskPipelineFrom = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $global:MegaDeskPipelineTo = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $global:MegaDeskPipelineBackup = [pscustomobject]@{ id = 'main-fixture.sql'; createdAt = '2026-09-20T00:00:00.000Z'; database = 'megadesk_local'; sizeBytes = [int64]42; sha256 = ('a' * 64) }
+    $global:MegaDeskPipelinePending = [pscustomobject]@{ idx = 31; tag = '0031_lonely_blockbuster'; path = 'drizzle/main-migrations/0031_lonely_blockbuster.sql'; sha256 = ('b' * 64) }
+  }
+
+  It 'pending=none skips backup and canonical migration execution' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'NONE'; pending = @(); journal = $null } }
+      Mock New-MegaDeskMainMigrationBackup { throw 'backup must not run' }
+      Mock Invoke-MegaDeskCanonicalMainMigrationCommand { throw 'migration must not run' }
+      (Invoke-MegaDeskMainMigrationPipeline -FromSha $global:MegaDeskPipelineFrom -ToSha $global:MegaDeskPipelineTo).status | Should Be 'NONE'
+      Assert-MockCalled New-MegaDeskMainMigrationBackup -Times 0 -Exactly -Scope It
+      Assert-MockCalled Invoke-MegaDeskCanonicalMainMigrationCommand -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'creates and records backup before applying pending migration then revalidates' {
+    InModuleScope $moduleName {
+      $script:planCalls = 0; $script:order = @()
+      $script:testState = [pscustomobject]@{ operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'PREPARING'; candidateSha = $global:MegaDeskPipelineTo; switchAttempted = $false } }
+      Mock Get-MegaDeskPendingCanonicalMainMigrations {
+        $script:planCalls++
+        if ($script:planCalls -eq 1) { return [pscustomobject]@{ status = 'PENDING'; pending = @($global:MegaDeskPipelinePending); journal = $null } }
+        return [pscustomobject]@{ status = 'NONE'; pending = @(); journal = $null }
+      }
+      Mock Assert-MegaDeskRuntimeMainMigrationConfig { 'C:\canonical-config\.env.local' }
+      Mock New-MegaDeskMainMigrationBackup { $script:order += 'backup'; $global:MegaDeskPipelineBackup }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Set-MegaDeskOperationMainMigrationBackup { $script:order += 'metadata' }
+      Mock Invoke-MegaDeskCanonicalMainMigrationCommand { param($Mode) if ($Mode -eq 'APPLY') { $script:order += 'apply' } }
+      (Invoke-MegaDeskMainMigrationPipeline -FromSha $global:MegaDeskPipelineFrom -ToSha $global:MegaDeskPipelineTo).status | Should Be 'APPLIED_MATCH'
+      $script:order | Should Be @('backup', 'metadata', 'apply')
+      Assert-MockCalled Invoke-MegaDeskCanonicalMainMigrationCommand -ParameterFilter { $Mode -eq 'APPLY' } -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'blocks migration on backup creation failure' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'PENDING'; pending = @($global:MegaDeskPipelinePending); journal = $null } }
+      Mock Assert-MegaDeskRuntimeMainMigrationConfig { 'C:\canonical-config\.env.local' }
+      Mock New-MegaDeskMainMigrationBackup { throw 'dump failed' }
+      Mock Invoke-MegaDeskCanonicalMainMigrationCommand { throw 'migration must not run' }
+      { Invoke-MegaDeskMainMigrationPipeline -FromSha $global:MegaDeskPipelineFrom -ToSha $global:MegaDeskPipelineTo } | Should Throw 'dump failed'
+      Assert-MockCalled Invoke-MegaDeskCanonicalMainMigrationCommand -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'blocks migration on backup verification failure' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'PENDING'; pending = @($global:MegaDeskPipelinePending); journal = $null } }
+      Mock Assert-MegaDeskRuntimeMainMigrationConfig { 'C:\canonical-config\.env.local' }
+      Mock New-MegaDeskMainMigrationBackup { throw 'backup verification failed' }
+      Mock Invoke-MegaDeskCanonicalMainMigrationCommand { throw 'migration must not run' }
+      { Invoke-MegaDeskMainMigrationPipeline -FromSha $global:MegaDeskPipelineFrom -ToSha $global:MegaDeskPipelineTo } | Should Throw 'backup verification failed'
+      Assert-MockCalled Invoke-MegaDeskCanonicalMainMigrationCommand -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'rejects hash mismatch and unknown physical journal entries before backup' {
+    InModuleScope $moduleName {
+      $entries = @([pscustomobject]@{ idx = 0; tag = '0000_baseline'; sha256 = ('a' * 64) })
+      Mock Get-MegaDeskCanonicalMainMigrationEntries { $entries }
+      { Assert-MegaDeskMainMigrationJournalPrefix -Journal ([pscustomobject]@{ database = 'megadesk_local'; hashes = @('c' * 64) }) } | Should Throw 'diverge'
+      { Assert-MegaDeskMainMigrationJournalPrefix -Journal ([pscustomobject]@{ database = 'megadesk_local'; hashes = @(('a' * 64), ('b' * 64)) }) } | Should Throw 'desconhecidas'
+    }
+  }
+
+  It 'does not touch active runtime when canonical SQL application fails' {
+    InModuleScope $moduleName {
+      $script:testState = [pscustomobject]@{ operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'PREPARING'; candidateSha = $global:MegaDeskPipelineTo; switchAttempted = $false } }
+      Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'PENDING'; pending = @($global:MegaDeskPipelinePending); journal = $null } }
+      Mock Assert-MegaDeskRuntimeMainMigrationConfig { 'C:\canonical-config\.env.local' }
+      Mock New-MegaDeskMainMigrationBackup { $global:MegaDeskPipelineBackup }
+      Mock Get-MegaDeskState { $script:testState }
+      Mock Set-MegaDeskOperationMainMigrationBackup { }
+      Mock Invoke-MegaDeskCanonicalMainMigrationCommand { param($Mode) if ($Mode -eq 'APPLY') { throw 'canonical SQL failure' } }
+      Mock Stop-MegaDeskManagedProcess { throw 'runtime must not be stopped' }
+      Mock Invoke-MegaDeskReleaseSwitch { throw 'publisher must not run' }
+      { Invoke-MegaDeskMainMigrationPipeline -FromSha $global:MegaDeskPipelineFrom -ToSha $global:MegaDeskPipelineTo } | Should Throw 'canonical SQL failure'
+      Assert-MockCalled Stop-MegaDeskManagedProcess -Times 0 -Exactly -Scope It
+      Assert-MockCalled Invoke-MegaDeskReleaseSwitch -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'is idempotent after journal revalidation reports no pending migration' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'NONE'; pending = @(); journal = $null } }
+      Mock New-MegaDeskMainMigrationBackup { throw 'backup must not run on retry' }
+      Mock Invoke-MegaDeskCanonicalMainMigrationCommand { throw 'apply must not rerun on retry' }
+      (Invoke-MegaDeskMainMigrationPipeline -FromSha $global:MegaDeskPipelineFrom -ToSha $global:MegaDeskPipelineTo).status | Should Be 'NONE'
+      Assert-MockCalled New-MegaDeskMainMigrationBackup -Times 0 -Exactly -Scope It
+      Assert-MockCalled Invoke-MegaDeskCanonicalMainMigrationCommand -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'keeps secrets out of backup metadata and loads the canonical env file in the child process' {
+    InModuleScope $moduleName {
+      $secret = 'DATABASE_PASSWORD_DO_NOT_LEAK_98765'
+      (($global:MegaDeskPipelineBackup | ConvertTo-Json -Depth 5).Contains($secret)) | Should Be $false
+      $source = Get-Content -LiteralPath (Get-Module MegaDesk.Automation).Path -Raw
+      $source | Should Match 'Resolve-MegaDeskRuntimeConfigRoot -RequireEnvFile'
+      $source | Should Match '--env-file='
+      $source | Should Match 'Nenhum restore automatico de banco'
     }
   }
 }

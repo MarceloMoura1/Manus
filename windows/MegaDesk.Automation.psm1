@@ -9,6 +9,7 @@ $script:RuntimeConfigFile = Join-Path $script:StateDirectory 'runtime-config.jso
 $script:RuntimeConfigRoot = $null
 $script:LogPath = Join-Path $script:RuntimeRoot 'automation.log'
 $script:BackupRoot = Join-Path $script:RuntimeRoot 'backups'
+$script:MainMigrationBackupRoot = Join-Path $script:BackupRoot 'main-migrations'
 $script:ReleaseRoot = Join-Path $script:RuntimeRoot 'releases'
 $script:StagingRoot = Join-Path $script:RuntimeRoot 'staging'
 $script:DiagnosticsRoot = Join-Path $script:RuntimeRoot 'diagnostics'
@@ -229,7 +230,7 @@ public static class MegaDeskNodeNativeLauncher {
 }
 
 function Initialize-MegaDeskRuntime {
-  foreach ($path in @($script:RuntimeRoot, $script:StateDirectory, $script:BackupRoot, $script:ReleaseRoot, $script:StagingRoot, $script:DiagnosticsRoot, $script:NodeDiagnosticsRoot)) {
+  foreach ($path in @($script:RuntimeRoot, $script:StateDirectory, $script:BackupRoot, $script:MainMigrationBackupRoot, $script:ReleaseRoot, $script:StagingRoot, $script:DiagnosticsRoot, $script:NodeDiagnosticsRoot)) {
     if (-not (Test-Path -LiteralPath $path)) {
       New-Item -ItemType Directory -Path $path -Force | Out-Null
     }
@@ -251,6 +252,7 @@ function Set-MegaDeskAutomationPaths {
   $script:RuntimeConfigFile = Join-Path $script:StateDirectory 'runtime-config.json'
   $script:LogPath = Join-Path $script:RuntimeRoot 'automation.log'
   $script:BackupRoot = Join-Path $script:RuntimeRoot 'backups'
+  $script:MainMigrationBackupRoot = Join-Path $script:BackupRoot 'main-migrations'
   $script:ReleaseRoot = Join-Path $script:RuntimeRoot 'releases'
   $script:StagingRoot = Join-Path $script:RuntimeRoot 'staging'
   $script:DiagnosticsRoot = Join-Path $script:RuntimeRoot 'diagnostics'
@@ -712,6 +714,7 @@ function New-MegaDeskOperationRecord {
     [string]$CandidateSha = '',
     [AllowNull()][string]$BaselineSha = $null,
     [Parameter(Mandatory = $true)][bool]$SwitchAttempted,
+    [AllowNull()]$MainMigrationBackup = $null,
     [string]$Message = ''
   )
   return [pscustomobject]@{
@@ -720,6 +723,7 @@ function New-MegaDeskOperationRecord {
     candidateSha = $CandidateSha
     baselineSha = $BaselineSha
     switchAttempted = $SwitchAttempted
+    mainMigrationBackup = $MainMigrationBackup
     updatedAt = (Get-Date).ToUniversalTime().ToString('o')
     message = $Message
   }
@@ -731,9 +735,11 @@ function Set-MegaDeskOperationState {
     [string]$CandidateSha = '',
     [ValidateSet('UPDATE', 'BOOTSTRAP_ZERO')][string]$Kind = '',
     [AllowNull()][string]$BaselineSha = $null,
+    [AllowNull()]$MainMigrationBackup = $null,
     [string]$Message = ''
   )
   $baselineWasBound = $PSBoundParameters.ContainsKey('BaselineSha')
+  $mainMigrationBackupWasBound = $PSBoundParameters.ContainsKey('MainMigrationBackup')
   return Invoke-WithMegaDeskLifecycleLock {
     Update-MegaDeskState -AllowedFields operation -AllowNewOperation -Mutation {
       param($state)
@@ -775,7 +781,8 @@ function Set-MegaDeskOperationState {
         }
       }
       $resolvedBaselineSha = if ($baselineWasBound) { $BaselineSha } elseif ($Kind -eq 'UPDATE') { $null } elseif ($null -ne $state.operation -and $state.operation.PSObject.Properties.Name -contains 'baselineSha') { $state.operation.baselineSha } else { $null }
-      $state.operation = New-MegaDeskOperationRecord -Status $Status -Kind $resolvedKind -CandidateSha $CandidateSha -BaselineSha $resolvedBaselineSha -SwitchAttempted $switchAttempted -Message $Message
+      $resolvedMainMigrationBackup = if ($mainMigrationBackupWasBound) { $MainMigrationBackup } elseif ($null -ne $state.operation -and $state.operation.PSObject.Properties.Name -contains 'mainMigrationBackup') { $state.operation.mainMigrationBackup } else { $null }
+      $state.operation = New-MegaDeskOperationRecord -Status $Status -Kind $resolvedKind -CandidateSha $CandidateSha -BaselineSha $resolvedBaselineSha -SwitchAttempted $switchAttempted -MainMigrationBackup $resolvedMainMigrationBackup -Message $Message
     }
   }
 }
@@ -1177,6 +1184,189 @@ function Get-MegaDeskAppliedMainMigrationJournal {
     throw 'Journal fisico MAIN ausente ou possui identidade de migration invalida.'
   }
   return [pscustomobject]@{ database = 'megadesk_local'; hashes = $hashes }
+}
+
+function Get-MegaDeskCanonicalMainMigrationEntries {
+  $journalPath = Join-Path $script:ProjectRoot 'drizzle\main-migrations\meta\_journal.json'
+  try { $journal = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json } catch { throw 'Journal canonico MAIN invalido ou indisponivel.' }
+  if ($null -eq $journal.entries -or @($journal.entries).Count -eq 0) { throw 'Journal canonico MAIN nao contem entries.' }
+
+  $entries = @()
+  foreach ($entry in @($journal.entries | Sort-Object idx)) {
+    if ($null -eq $entry.idx -or [int]$entry.idx -ne $entries.Count -or [string]::IsNullOrWhiteSpace([string]$entry.tag)) {
+      throw 'Journal canonico MAIN fora de ordem.'
+    }
+    $identity = Get-MegaDeskMainMigrationIdentity -RelativePath ('drizzle/main-migrations/{0}.sql' -f [string]$entry.tag)
+    $entries += [pscustomobject]@{ idx = [int]$entry.idx; path = $identity.path; tag = $identity.tag; sha256 = $identity.sha256 }
+  }
+  return $entries
+}
+
+function Assert-MegaDeskMainMigrationJournalPrefix {
+  param([Parameter(Mandatory = $true)]$Journal)
+  if ([string]$Journal.database -cne 'megadesk_local') { throw 'Identidade do journal MAIN divergiu.' }
+  $entries = @(Get-MegaDeskCanonicalMainMigrationEntries)
+  $hashes = @($Journal.hashes)
+  if ($hashes.Count -gt $entries.Count) { throw 'Journal fisico MAIN possui migrations desconhecidas.' }
+  for ($index = 0; $index -lt $hashes.Count; $index++) {
+    if ([string]$hashes[$index] -cne [string]$entries[$index].sha256) {
+      throw ('Journal fisico MAIN diverge da cadeia canonica na posicao {0}.' -f $index)
+    }
+  }
+  return [pscustomobject]@{ entries = $entries; appliedCount = $hashes.Count }
+}
+
+function Get-MegaDeskPendingCanonicalMainMigrations {
+  param([Parameter(Mandatory = $true)][string]$FromSha, [Parameter(Mandatory = $true)][string]$ToSha)
+  $delta = Get-MegaDeskMigrationDeltaState -FromSha $FromSha -ToSha $ToSha
+  if ([string]$delta.status -eq 'NONE') { return [pscustomobject]@{ status = 'NONE'; pending = @(); journal = $null } }
+  if ([string]$delta.status -notin @('PENDING', 'APPLIED_MATCH')) {
+    throw ('Migration MAIN bloqueada ({0}): {1}' -f $delta.status, $delta.message)
+  }
+
+  $journal = Get-MegaDeskAppliedMainMigrationJournal
+  $chain = Assert-MegaDeskMainMigrationJournalPrefix -Journal $journal
+  $candidateTags = @($delta.migrations | ForEach-Object { [string]$_.tag })
+  $candidateEntries = @($chain.entries | Where-Object { $candidateTags -contains [string]$_.tag })
+  if ($candidateEntries.Count -ne @($delta.migrations).Count) { throw 'Migration MAIN candidata nao corresponde ao journal canonico.' }
+
+  $pending = @($candidateEntries | Where-Object { $journal.hashes -notcontains $_.sha256 } | Sort-Object idx)
+  if ([string]$delta.status -eq 'APPLIED_MATCH' -and $pending.Count -ne 0) { throw 'Journal MAIN reportou aplicado, mas a cadeia canonica ainda possui pendencia.' }
+  if ([string]$delta.status -eq 'PENDING' -and $pending.Count -eq 0) { throw 'Migration MAIN pendente sem identidade canonica executavel.' }
+  return [pscustomobject]@{ status = if ($pending.Count -eq 0) { 'NONE' } else { 'PENDING' }; pending = $pending; journal = $journal }
+}
+
+function New-MegaDeskMainMigrationBackup {
+  param([Parameter(Mandatory = $true)][string]$EnvironmentPath)
+  Assert-DockerAndMySql
+  if ((Get-MegaDeskMainMigrationContainerImage) -ne 'mysql:8.0') { throw 'Identidade da imagem MySQL principal nao comprovada.' }
+  if (-not (Test-Path -LiteralPath $EnvironmentPath -PathType Leaf)) { throw 'Arquivo de ambiente canonico ausente para backup MAIN.' }
+
+  Initialize-MegaDeskRuntime
+  $backupDirectory = Assert-MegaDeskPathInside -Path $script:MainMigrationBackupRoot -Root $script:BackupRoot -Label 'Diretorio de backup MAIN'
+  $id = 'main-{0}-{1}.sql' -f (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ'), [guid]::NewGuid().ToString('N')
+  $destination = Assert-MegaDeskPathInside -Path (Join-Path $backupDirectory $id) -Root $backupDirectory -Label 'Backup MAIN'
+  $temporary = Assert-MegaDeskPathInside -Path (Join-Path $backupDirectory ('.{0}.{1}.tmp' -f $id, [guid]::NewGuid().ToString('N'))) -Root $backupDirectory -Label 'Backup MAIN temporario'
+  $process = $null
+  $stream = $null
+  try {
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = 'docker'
+    $startInfo.Arguments = 'exec megadesk-local-mysql sh -lc "MYSQL_PWD=$MYSQL_PASSWORD exec mysqldump -u$MYSQL_USER --database=$MYSQL_DATABASE --single-transaction --routines --triggers --set-gtid-purged=OFF"'
+    $startInfo.WorkingDirectory = $script:ProjectRoot
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = Start-MegaDeskProcess -StartInfo $startInfo
+    $stream = [System.IO.File]::Open($temporary, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    $copyTask = $process.StandardOutput.BaseStream.CopyToAsync($stream)
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $copyTask.GetAwaiter().GetResult()
+    $stream.Flush($true)
+    $stream.Dispose(); $stream = $null
+    $null = $stderrTask.Result
+    if ($process.ExitCode -ne 0) { throw ('Backup MAIN canonico falhou (exit {0}).' -f $process.ExitCode) }
+    $info = Get-Item -LiteralPath $temporary -Force
+    if ($info.Length -le 0) { throw 'Backup MAIN canonico vazio.' }
+    [System.IO.File]::Move($temporary, $destination)
+    $verification = [System.IO.File]::Open($destination, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    try {
+      if ($verification.Length -le 0) { throw 'Backup MAIN canonico nao e legivel ou esta vazio.' }
+    } finally { $verification.Dispose() }
+    $size = (Get-Item -LiteralPath $destination -Force).Length
+    $sha256 = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($size -le 0 -or $sha256 -notmatch '^[0-9a-f]{64}$') { throw 'Verificacao do backup MAIN falhou.' }
+    return [pscustomobject]@{ id = $id; createdAt = (Get-Date).ToUniversalTime().ToString('o'); database = 'megadesk_local'; sizeBytes = [int64]$size; sha256 = $sha256 }
+  } finally {
+    if ($null -ne $stream) { $stream.Dispose() }
+    if (Test-MegaDeskPhysicalPathExists -Path $temporary) { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+    if ($null -ne $process) { $process.Dispose() }
+  }
+}
+
+function Invoke-MegaDeskCanonicalMainMigrationCommand {
+  param(
+    [Parameter(Mandatory = $true)][ValidateSet('VERIFY', 'APPLY')][string]$Mode,
+    [Parameter(Mandatory = $true)][string]$EnvironmentPath
+  )
+  $node = Get-Command node -ErrorAction SilentlyContinue
+  if ($null -eq $node) { throw 'node.exe nao foi encontrado no PATH.' }
+  $tsxCli = Join-Path $script:ProjectRoot 'node_modules\tsx\dist\cli.mjs'
+  $migrationScript = Join-Path $script:ProjectRoot 'scripts\canonical-migrations.ts'
+  if (-not (Test-Path -LiteralPath $tsxCli -PathType Leaf) -or -not (Test-Path -LiteralPath $migrationScript -PathType Leaf)) { throw 'Executor canonico de migrations indisponivel.' }
+  $command = if ($Mode -eq 'VERIFY') { 'verify-main-runtime' } else { 'apply-main' }
+  $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $startInfo.FileName = $node.Source
+  $startInfo.Arguments = '--env-file="{0}" "{1}" "{2}" {3}' -f $EnvironmentPath, $tsxCli, $migrationScript, $command
+  $startInfo.WorkingDirectory = $script:ProjectRoot
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+  $startInfo.EnvironmentVariables.Remove('DATABASE_URL')
+  $startInfo.EnvironmentVariables.Remove('MAIN_DATABASE_URL')
+  if ($Mode -eq 'APPLY') { $startInfo.EnvironmentVariables['ALLOW_MAIN_MIGRATION'] = '1' }
+  $process = $null
+  try {
+    $process = Start-MegaDeskProcess -StartInfo $startInfo
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $null = $stdoutTask.Result
+    $null = $stderrTask.Result
+    if ($process.ExitCode -ne 0) { throw ('Executor canonico MAIN falhou no modo {0} (exit {1}).' -f $Mode, $process.ExitCode) }
+  } finally {
+    if ($null -ne $process) { $process.Dispose() }
+  }
+}
+
+function Assert-MegaDeskRuntimeMainMigrationConfig {
+  $runtimeConfigRoot = Resolve-MegaDeskRuntimeConfigRoot -RequireEnvFile
+  $environmentPath = Join-Path $runtimeConfigRoot '.env.local'
+  Invoke-MegaDeskCanonicalMainMigrationCommand -Mode VERIFY -EnvironmentPath $environmentPath
+  return $environmentPath
+}
+
+function Set-MegaDeskOperationMainMigrationBackup {
+  param([Parameter(Mandatory = $true)]$Backup)
+  foreach ($property in @('id', 'createdAt', 'database', 'sizeBytes', 'sha256')) {
+    if (-not ($Backup.PSObject.Properties.Name -contains $property)) { throw "Metadata do backup MAIN sem $property." }
+  }
+  if ([string]$Backup.database -cne 'megadesk_local' -or [int64]$Backup.sizeBytes -le 0 -or [string]$Backup.sha256 -notmatch '^[0-9a-f]{64}$') {
+    throw 'Metadata do backup MAIN invalida.'
+  }
+  return Invoke-WithMegaDeskLifecycleLock {
+    Update-MegaDeskState -AllowedFields operation -Mutation {
+      param($state)
+      if ($null -eq $state.operation -or [string]$state.operation.kind -ne 'UPDATE' -or [string]$state.operation.status -ne 'PREPARING' -or (Get-MegaDeskOperationSwitchAttempted -Operation $state.operation) -ne $false) {
+        throw 'Metadata de backup MAIN fora de uma preparacao UPDATE valida.'
+      }
+      $safeBackup = [pscustomobject]@{ id = [string]$Backup.id; createdAt = [string]$Backup.createdAt; database = 'megadesk_local'; sizeBytes = [int64]$Backup.sizeBytes; sha256 = [string]$Backup.sha256 }
+      $state.operation | Add-Member -NotePropertyName mainMigrationBackup -NotePropertyValue $safeBackup -Force
+      $state.operation.updatedAt = (Get-Date).ToUniversalTime().ToString('o')
+    }
+  }
+}
+
+function Invoke-MegaDeskMainMigrationPipeline {
+  param(
+    [Parameter(Mandatory = $true)][string]$FromSha,
+    [Parameter(Mandatory = $true)][string]$ToSha,
+    [string]$EnvironmentPath = ''
+  )
+  $plan = Get-MegaDeskPendingCanonicalMainMigrations -FromSha $FromSha -ToSha $ToSha
+  if ($plan.pending.Count -eq 0) { return [pscustomobject]@{ status = 'NONE'; backup = $null; migrations = @() } }
+  $resolvedEnvironmentPath = if ([string]::IsNullOrWhiteSpace($EnvironmentPath)) { Assert-MegaDeskRuntimeMainMigrationConfig } else { $EnvironmentPath }
+  $backup = New-MegaDeskMainMigrationBackup -EnvironmentPath $resolvedEnvironmentPath
+  $current = Get-MegaDeskState
+  if ($null -eq $current.operation -or [string]$current.operation.status -ne 'PREPARING') { throw 'Backup MAIN criado fora de uma preparacao valida; migrations recusadas.' }
+  Set-MegaDeskOperationMainMigrationBackup -Backup $backup | Out-Null
+  Invoke-MegaDeskCanonicalMainMigrationCommand -Mode APPLY -EnvironmentPath $resolvedEnvironmentPath
+  $after = Get-MegaDeskPendingCanonicalMainMigrations -FromSha $FromSha -ToSha $ToSha
+  if ($after.pending.Count -ne 0) { throw 'Executor MAIN concluiu sem eliminar todas as migrations pendentes.' }
+  return [pscustomobject]@{ status = 'APPLIED_MATCH'; backup = $backup; migrations = $plan.pending }
 }
 
 function Test-MegaDeskKnownMainMigrationPhysicalStructure {
@@ -3350,10 +3540,11 @@ function Invoke-MegaDeskUpdaterV2 {
     $activeRelease = Assert-MegaDeskActiveRelease -State $state
     $candidateSha = $git.sha
     Assert-MegaDeskCandidateDescendsFromActive -ActiveReleaseSha ([string]$activeRelease.sha) -CandidateReleaseSha $candidateSha
+    $runtimeMainEnvironmentPath = Assert-MegaDeskRuntimeMainMigrationConfig
     Set-MegaDeskOperationState -Status 'PREPARING' -Kind 'UPDATE' -CandidateSha $candidateSha -Message 'Preflight do updater v2 iniciado.' | Out-Null
 
-    $migrationGate = Assert-MegaDeskMigrationDeltaState -FromSha ([string]$activeRelease.sha) -ToSha $candidateSha
-    Write-MegaDeskLog ('Migration gate do updater: {0}.' -f $migrationGate.status)
+    $migrationPlan = Get-MegaDeskPendingCanonicalMainMigrations -FromSha ([string]$activeRelease.sha) -ToSha $candidateSha
+    Write-MegaDeskLog ('Migration preflight do updater: {0}.' -f $migrationPlan.status)
     if (Test-MegaDeskDependencyDiff -FromSha $activeRelease.sha -ToSha $candidateSha) {
       Write-MegaDeskLog 'Dependencias mudaram entre releases; executando install frozen controlado.'
       Invoke-MegaDeskFrozenInstall
@@ -3368,6 +3559,8 @@ function Invoke-MegaDeskUpdaterV2 {
 
     $candidateRelease = Invoke-MegaDeskIsolatedBuild -Sha $candidateSha
     Assert-MegaDeskCandidateLaunchReadiness -CandidateRelease $candidateRelease -Port $script:RuntimePort | Out-Null
+    $migrationExecution = Invoke-MegaDeskMainMigrationPipeline -FromSha ([string]$activeRelease.sha) -ToSha $candidateSha -EnvironmentPath $runtimeMainEnvironmentPath
+    Write-MegaDeskLog ('Migration pipeline do updater: {0}.' -f $migrationExecution.status)
     Assert-MegaDeskNoSourceMutation
     Assert-MegaDeskCandidateHeadUnchanged -CandidateSha $candidateSha
     Set-MegaDeskOperationState -Status 'READY' -CandidateSha $candidateSha -Message 'Release candidata pronta para switch.' | Out-Null
@@ -3383,7 +3576,7 @@ function Invoke-MegaDeskUpdaterV2 {
         Set-MegaDeskOperationState -Status 'FAILED' -CandidateSha $candidateSha -Message 'Preparacao ou confirmacao falhou.' | Out-Null
       }
     } catch { }
-    Write-MegaDeskLog ("Atualizacao v2 bloqueada ou falhou: {0}" -f $failure)
+    Write-MegaDeskLog ("Atualizacao v2 bloqueada ou falhou: {0}. Nenhum restore automatico de banco e executado; uma falha parcial de DDL exige recuperacao supervisionada a partir do backup preservado." -f $failure)
     throw $failure
   }
   }
