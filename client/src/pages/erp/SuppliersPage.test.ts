@@ -8,6 +8,10 @@ import {
   formatActorName,
   validateSupplierForm,
   type SupplierFormData,
+  getSuppliersSelectionStorageKey,
+  readSuppliersSelection,
+  writeSuppliersSelection,
+  SUPPLIERS_SELECTION_STORAGE_KEY_PREFIX,
 } from "./SuppliersPage";
 
 const suppliersSource = fs.readFileSync(
@@ -474,5 +478,201 @@ describe("ERP Fornecedores V2 — Suíte de Testes Estruturais e de Domínio", (
     expect(homeSource).toContain("setCrmHandoffState('idle');");
     expect(homeSource).toContain("setNewAttendancePhone(phoneToPreFill);");
     expect(homeSource).toContain("setNewAttendanceOpen(true);");
+  });
+
+  // 31. UX Fornecedores: X fecha detalhe e persiste NONE
+  it("31. clicar no X fecha o painel de detalhe e persiste o estado NONE no sessionStorage", () => {
+    expect(suppliersSource).toContain("writeSuppliersSelection(sessionStorage, selectionStorageKey, { kind: \"none\" });");
+    const mockStorage = new Map<string, string>();
+    const storageKey = getSuppliersSelectionStorageKey("tenant-123");
+    writeSuppliersSelection(
+      { getItem: (k) => mockStorage.get(k) ?? null, setItem: (k, v) => mockStorage.set(k, v) },
+      storageKey,
+      { kind: "none" }
+    );
+    const restored = readSuppliersSelection(
+      { getItem: (k) => mockStorage.get(k) ?? null },
+      storageKey
+    );
+    expect(restored).toEqual({ kind: "none" });
+  });
+
+  // 32. UX Fornecedores: Refetch não reabre fornecedor fechado
+  it("32. refetch da lista não reabre fornecedor quando o usuário fechou explicitamente", () => {
+    expect(suppliersSource).toContain("if (userExplicitlyClosed) return;");
+    expect(suppliersSource).toContain("userExplicitlyClosed");
+  });
+
+  // 33. UX Fornecedores: Filtro não reabre fornecedor fechado
+  it("33. alteração de filtros não reabre fornecedor quando o estado está NONE", () => {
+    expect(suppliersSource).toContain("const [userExplicitlyClosed, setUserExplicitlyClosed] = useState<boolean>(() => {");
+    expect(suppliersSource).toContain("initialPersisted?.kind === \"none\"");
+  });
+
+  // 34. UX Fornecedores: Mobile close continua funcionando
+  it("34. botão fechar/voltar no mobile invoca o mesmo fluxo seguro de fechamento", () => {
+    expect(suppliersSource).toContain("title=\"Voltar para a lista\"");
+    expect(suppliersSource).toContain("onClick={onClose}");
+  });
+
+  // 35. UX Fornecedores: SELECTED -> navegar para outra página -> voltar restaura mesmo fornecedor
+  it("35. SELECTED preserva o fornecedor selecionado durante a navegação e restaura ao retornar", () => {
+    const mockStorage = new Map<string, string>();
+    const storageKey = getSuppliersSelectionStorageKey("tenant-abc");
+    writeSuppliersSelection(
+      { getItem: (k) => mockStorage.get(k) ?? null, setItem: (k, v) => mockStorage.set(k, v) },
+      storageKey,
+      { kind: "selected", id: "supp-target-456" }
+    );
+    const restored = readSuppliersSelection(
+      { getItem: (k) => mockStorage.get(k) ?? null },
+      storageKey
+    );
+    expect(restored).toEqual({ kind: "selected", id: "supp-target-456" });
+    expect(suppliersSource).toContain("initialPersisted?.kind === \"selected\") return initialPersisted.id;");
+  });
+
+  // 36. UX Fornecedores: NONE -> navegar para outra página -> voltar continua NONE
+  it("36. NONE preserva o fechamento durante a navegação e não auto-seleciona o primeiro ao voltar", () => {
+    const mockStorage = new Map<string, string>();
+    const storageKey = getSuppliersSelectionStorageKey("tenant-abc");
+    writeSuppliersSelection(
+      { getItem: (k) => mockStorage.get(k) ?? null, setItem: (k, v) => mockStorage.set(k, v) },
+      storageKey,
+      { kind: "none" }
+    );
+    const restored = readSuppliersSelection(
+      { getItem: (k) => mockStorage.get(k) ?? null },
+      storageKey
+    );
+    expect(restored).toEqual({ kind: "none" });
+    expect(suppliersSource).toContain("return initialPersisted?.kind === \"none\";");
+  });
+
+  // 37. UX Fornecedores: Fornecedor salvo inexistente degrada para NONE sem selecionar primeiro item (CASO C)
+  it("37. fornecedor salvo que não existe mais degrada de forma segura para NONE sem selecionar o primeiro", () => {
+    expect(suppliersSource).toContain("const exists = suppliers.some((s) => s.publicId === selectedSupplierId);");
+    expect(suppliersSource).toContain("writeSuppliersSelection(sessionStorage, selectionStorageKey, { kind: \"none\" });");
+    expect(suppliersSource).toContain("setSelectedSupplierId(null);");
+    expect(suppliersSource).toContain("setUserExplicitlyClosed(true);");
+  });
+
+  // 38. UX Fornecedores: Isolamento estrito por tenant e por usuário/sessão
+  it("38. chaves de persistência de seleção são estritamente isoladas por tenant e usuário", () => {
+    const keyA = getSuppliersSelectionStorageKey("tenant-A");
+    const keyB = getSuppliersSelectionStorageKey("tenant-B");
+    expect(keyA).not.toBe(keyB);
+    expect(keyA).toBe(`${SUPPLIERS_SELECTION_STORAGE_KEY_PREFIX}tenant-A`);
+    expect(keyB).toBe(`${SUPPLIERS_SELECTION_STORAGE_KEY_PREFIX}tenant-B`);
+    expect(getSuppliersSelectionStorageKey(null)).toBe(`${SUPPLIERS_SELECTION_STORAGE_KEY_PREFIX}default`);
+    expect(getSuppliersSelectionStorageKey("")).toBe(`${SUPPLIERS_SELECTION_STORAGE_KEY_PREFIX}default`);
+
+    // Isolamento contra herança de sessão após logout/login na mesma aba:
+    const keyUser1 = getSuppliersSelectionStorageKey("tenant-A", "alice@empresa.com");
+    const keyUser2 = getSuppliersSelectionStorageKey("tenant-A", "bob@empresa.com");
+    expect(keyUser1).not.toBe(keyUser2);
+    expect(keyUser1).toBe(`${SUPPLIERS_SELECTION_STORAGE_KEY_PREFIX}tenant-A_alice@empresa.com`);
+    expect(keyUser2).toBe(`${SUPPLIERS_SELECTION_STORAGE_KEY_PREFIX}tenant-A_bob@empresa.com`);
+  });
+
+  // 39. WhatsApp: Telefone explícito inicia imediatamente sem aguardar CRM lookup nem retry
+  it("39. atalho WhatsApp com telefone explícito inicia Atendimento Ativo imediatamente sem esperar CRM", () => {
+    // SuppliersPage fornece rota active-attendance e telefone normalizado
+    expect(suppliersSource).toContain('route: "active-attendance"');
+    expect(suppliersSource).toContain("phone: phoneNorm.value");
+    // SuppliersPage NÃO envia o UUID do fornecedor como crmClientId
+    expect(suppliersSource).not.toContain("crmClientId: supplier.publicId");
+    // Home.tsx detecta rota active-attendance ou ausência de crmClientId e navega de imediato
+    expect(homeSource).toContain('intent.route === "active-attendance"');
+    expect(homeSource).toContain("setActiveAttendancePhone(normalized.value);");
+    expect(homeSource).toContain('navigateToRoute("active-attendance");');
+    // crmCustomerQuery em ConversationsPage preserva política de retry padrão e não tem retry: false
+    expect(homeSource).not.toContain("retry: false");
+  });
+
+  // 40. Regressão: Fluxo normal de Clientes preservado
+  it("40. fluxo canônico de Clientes com crmClientId continua preservado", () => {
+    expect(homeSource).toContain("sessionStorage.setItem(\"megadesk-crm-whatsapp-intent\"");
+    expect(homeSource).toContain('crmHandoffState === \'composer\' && crmIntent && crmCustomerQuery.data?.client');
+    expect(homeSource).toContain("data-testid=\"crm-new-attendance-composer\"");
+    expect(homeSource).toContain("initialCrmCustomer");
+  });
+
+  // 41. WhatsApp: Telefone inválido é bloqueado antes da navegação
+  it("41. telefone inválido é bloqueado antes de qualquer navegação", () => {
+    // Em SuppliersPage: valida com normalizeContactPhone antes de navegar
+    expect(suppliersSource).toContain('const phoneNorm = normalizeContactPhone(supplier.phone);');
+    expect(suppliersSource).toContain('if (!hasValidPhone || !phoneNorm.value)');
+    expect(suppliersSource).toContain('toast.error("Fornecedor não possui telefone válido para WhatsApp.");');
+    // Em Home.tsx: valida com normalizeContactPhone antes de aceitar o intent
+    expect(homeSource).toContain('const normalized = normalizeContactPhone(intent.phone);');
+    expect(homeSource).toContain('if (normalized.status !== "valid") return;');
+  });
+
+  // 42. WhatsApp: Navegação para active-attendance sem telefone não preenche número
+  it("42. navegação para active-attendance sem telefone mantém composer vazio", () => {
+    expect(homeSource).toContain("if (phone) {");
+    expect(homeSource).toContain("setActiveAttendancePhone(validPhone);");
+  });
+
+  // 43. Persistência de Seleção: SELECTED e NONE sobrevivem ao unmount/remount
+  it("43. SELECTED e NONE são corretamente gravados e lidos da storage", () => {
+    const memoryStore: Record<string, string> = {};
+    const mockStorage = {
+      getItem: (k: string) => memoryStore[k] ?? null,
+      setItem: (k: string, v: string) => { memoryStore[k] = v; },
+    };
+
+    const key = "test-selection-key";
+    writeSuppliersSelection(mockStorage, key, { kind: "selected", id: "sup-uuid-1" });
+    expect(readSuppliersSelection(mockStorage, key)).toEqual({ kind: "selected", id: "sup-uuid-1" });
+
+    writeSuppliersSelection(mockStorage, key, { kind: "none" });
+    expect(readSuppliersSelection(mockStorage, key)).toEqual({ kind: "none" });
+  });
+
+  // 44. Resiliência: JSON corrompido em sessionStorage falha de forma segura
+  it("44. JSON corrompido ou inválido em sessionStorage retorna null com segurança", () => {
+    const mockStorage = {
+      getItem: () => "{invalid-json-content",
+    };
+    expect(readSuppliersSelection(mockStorage, "corrupted-key")).toBeNull();
+
+    const mockEmpty = {
+      getItem: () => "",
+    };
+    expect(readSuppliersSelection(mockEmpty, "empty-key")).toBeNull();
+
+    const mockUnexpected = {
+      getItem: () => JSON.stringify({ kind: "unexpected_kind" }),
+    };
+    expect(readSuppliersSelection(mockUnexpected, "unexpected-key")).toBeNull();
+  });
+
+  // 45. Degradação Segura: Fornecedor salvo deletado degrada para NONE sem reabrir primeiro
+  it("45. fornecedor stale degrada para NONE e não reabre primeiro fornecedor", () => {
+    const mockSuppliers = [
+      { publicId: "sup-valid-1", name: "Fornecedor 1" },
+      { publicId: "sup-valid-2", name: "Fornecedor 2" },
+    ];
+    const staleSupplierId = "sup-deleted-999";
+    const exists = mockSuppliers.some((s) => s.publicId === staleSupplierId);
+    expect(exists).toBe(false);
+
+    // Na implementação, se exists é false: setSelectedSupplierId(null); setUserExplicitlyClosed(true); write { kind: 'none' }
+    expect(suppliersSource).toContain("if (selectedSupplierId && suppliersQuery.isSuccess)");
+    expect(suppliersSource).toContain("const exists = suppliers.some((s) => s.publicId === selectedSupplierId);");
+    expect(suppliersSource).toContain("setUserExplicitlyClosed(true);");
+    expect(suppliersSource).toContain('writeSuppliersSelection(sessionStorage, selectionStorageKey, { kind: "none" });');
+  });
+
+  // 46. Comportamento pós-fechamento: Refetch ou filtro não reabre NONE
+  it("46. refetch ou alteração de filtros nunca reabre painel se userExplicitlyClosed for true", () => {
+    expect(suppliersSource).toContain("if (userExplicitlyClosed) return;");
+  });
+
+  // 47. Mobile: Não auto-seleciona primeiro fornecedor em viewport mobile
+  it("47. viewport mobile (< 1024) não auto-seleciona primeiro fornecedor no primeiro acesso", () => {
+    expect(suppliersSource).toContain("window.innerWidth >= 1024");
   });
 });

@@ -149,6 +149,73 @@ const EMPTY_SUPPLIER_FORM: SupplierFormData = {
   notes: "",
 };
 
+export const SUPPLIERS_SELECTION_STORAGE_KEY_PREFIX = "megadesk_suppliers_selection_";
+
+export function getSuppliersSelectionStorageKey(
+  tenantId?: string | null,
+  userIdentifier?: string | null
+): string {
+  const safeTenant = tenantId?.trim() || "default";
+  const safeUser = userIdentifier?.trim() ? `_${userIdentifier.trim().toLowerCase()}` : "";
+  return `${SUPPLIERS_SELECTION_STORAGE_KEY_PREFIX}${safeTenant}${safeUser}`;
+}
+
+export type SuppliersPersistedSelection =
+  | { kind: "selected"; id: string }
+  | { kind: "none" };
+
+export function readSuppliersSelection(
+  storage: Pick<Storage, "getItem"> | null | undefined,
+  storageKey: string
+): SuppliersPersistedSelection | null {
+  try {
+    if (!storage) return null;
+    const raw = storage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      if (parsed.kind === "none") return { kind: "none" };
+      if (parsed.kind === "selected" && typeof parsed.id === "string" && parsed.id.trim()) {
+        return { kind: "selected", id: parsed.id.trim() };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeSuppliersSelection(
+  storage: Pick<Storage, "setItem"> | null | undefined,
+  storageKey: string,
+  state: SuppliersPersistedSelection
+): void {
+  try {
+    if (!storage) return;
+    storage.setItem(storageKey, JSON.stringify(state));
+  } catch {
+    // ignore quota errors
+  }
+}
+
+function getSessionIdentity(): { tenantId: string; userIdentifier: string } {
+  try {
+    if (typeof window === "undefined") return { tenantId: "", userIdentifier: "" };
+    const raw = localStorage.getItem("megadesk_session_v1") || sessionStorage.getItem("megadesk_session_v1");
+    if (!raw) return { tenantId: "", userIdentifier: "" };
+    const parsed = JSON.parse(raw);
+    const tenantId = typeof parsed?.clientId === "string" ? parsed.clientId : "";
+    const userIdentifier = typeof parsed?.userEmail === "string" && parsed.userEmail.trim()
+      ? parsed.userEmail.trim()
+      : typeof parsed?.userId === "string" && parsed.userId.trim()
+        ? parsed.userId.trim()
+        : "";
+    return { tenantId, userIdentifier };
+  } catch {
+    return { tenantId: "", userIdentifier: "" };
+  }
+}
+
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
 export function SuppliersPage({
@@ -160,11 +227,31 @@ export function SuppliersPage({
 }: SuppliersPageProps = {}) {
   const utils = trpc.useUtils();
 
+  const { tenantId, userIdentifier } = useMemo(() => getSessionIdentity(), []);
+  const selectionStorageKey = useMemo(
+    () => getSuppliersSelectionStorageKey(tenantId, userIdentifier),
+    [tenantId, userIdentifier]
+  );
+
+  const initialPersisted = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    return readSuppliersSelection(sessionStorage, selectionStorageKey);
+  }, [selectionStorageKey]);
+
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "active" | "inactive">("all");
-  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(initialSelectedId ?? null);
-  const [userExplicitlyClosed, setUserExplicitlyClosed] = useState(false);
-  const initialSelectionDone = React.useRef(Boolean(initialSelectedId));
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(() => {
+    if (initialSelectedId) return initialSelectedId;
+    if (initialPersisted?.kind === "selected") return initialPersisted.id;
+    return null;
+  });
+  const [userExplicitlyClosed, setUserExplicitlyClosed] = useState<boolean>(() => {
+    if (initialSelectedId) return false;
+    return initialPersisted?.kind === "none";
+  });
+  const initialSelectionDone = React.useRef<boolean>(
+    Boolean(initialSelectedId) || initialPersisted !== null
+  );
   const [page, setPage] = useState(1);
   const [pageSize] = useState(50);
   const [showFormModal, setShowFormModal] = useState(false);
@@ -188,15 +275,38 @@ export function SuppliersPage({
     [suppliers, selectedSupplierId]
   );
 
-  // Auto-selecionar o primeiro em viewport desktop no carregamento inicial se nada selecionado.
-  // Se o usuário fechou explicitamente a seleção, NÃO reabrir automaticamente após refetch ou filtros.
   React.useEffect(() => {
-    if (initialSelectionDone.current || userExplicitlyClosed) return;
-    if (!selectedSupplierId && suppliers.length > 0 && typeof window !== "undefined" && window.innerWidth >= 1024) {
-      initialSelectionDone.current = true;
-      setSelectedSupplierId(suppliers[0].publicId);
+    if (initialSelectedId) {
+      setSelectedSupplierId(initialSelectedId);
+      setUserExplicitlyClosed(false);
+      writeSuppliersSelection(sessionStorage, selectionStorageKey, { kind: "selected", id: initialSelectedId });
     }
-  }, [suppliers, selectedSupplierId, userExplicitlyClosed]);
+  }, [initialSelectedId, selectionStorageKey]);
+
+  // Preservar estado de seleção / auto-selecionar no primeiro acesso da sessão
+  React.useEffect(() => {
+    if (userExplicitlyClosed) return;
+
+    if (!initialSelectionDone.current) {
+      initialSelectionDone.current = true;
+      if (!selectedSupplierId && suppliers.length > 0 && typeof window !== "undefined" && window.innerWidth >= 1024) {
+        const firstId = suppliers[0].publicId;
+        setSelectedSupplierId(firstId);
+        writeSuppliersSelection(sessionStorage, selectionStorageKey, { kind: "selected", id: firstId });
+      }
+      return;
+    }
+
+    // CASO C: se o fornecedor selecionado não existe mais no resultado após query concluída
+    if (selectedSupplierId && suppliersQuery.isSuccess) {
+      const exists = suppliers.some((s) => s.publicId === selectedSupplierId);
+      if (!exists) {
+        setSelectedSupplierId(null);
+        setUserExplicitlyClosed(true);
+        writeSuppliersSelection(sessionStorage, selectionStorageKey, { kind: "none" });
+      }
+    }
+  }, [suppliers, selectedSupplierId, userExplicitlyClosed, suppliersQuery.isSuccess, selectionStorageKey]);
 
   // Exportar CSV
   const handleExportCsv = () => {
@@ -379,6 +489,7 @@ export function SuppliersPage({
                   onClick={() => {
                     setSelectedSupplierId(supplier.publicId);
                     setUserExplicitlyClosed(false);
+                    writeSuppliersSelection(sessionStorage, selectionStorageKey, { kind: "selected", id: supplier.publicId });
                   }}
                   className={cn(
                     "group w-full rounded-2xl border p-3 text-left shadow-xs transition-all duration-150",
@@ -449,6 +560,7 @@ export function SuppliersPage({
             onClose={() => {
               setSelectedSupplierId(null);
               setUserExplicitlyClosed(true);
+              writeSuppliersSelection(sessionStorage, selectionStorageKey, { kind: "none" });
             }}
             onEdit={() => {
               setEditSupplierData(selectedSupplier);
@@ -492,6 +604,7 @@ export function SuppliersPage({
             if (newPublicId) {
               setSelectedSupplierId(newPublicId);
               setUserExplicitlyClosed(false);
+              writeSuppliersSelection(sessionStorage, selectionStorageKey, { kind: "selected", id: newPublicId });
             }
           }}
         />
@@ -544,7 +657,7 @@ function SupplierDetailPanel({
     }
     if (onClientNavigate) {
       onClientNavigate({
-        crmClientId: supplier.publicId,
+        route: "active-attendance",
         phone: phoneNorm.value,
         channel: "whatsapp",
       });

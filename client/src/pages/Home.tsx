@@ -4235,10 +4235,15 @@ function Shell() {
   );
   const whatsappConnected = whatsappStatusQuery.data?.status === 'connected' && whatsappStatusQuery.data.providerReachable !== false;
   const canStartConversation = !!session?.permissions.includes("conversations");
-  const handleClientNavigate = React.useCallback((intent: CrmWhatsAppIntent) => {
+  const handleClientNavigate = React.useCallback((intent: (CrmWhatsAppIntent & { route?: string }) | { route: "active-attendance"; phone: string; channel?: string; crmClientId?: string }) => {
     if (!canStartConversation || !whatsappConnected) return;
     const normalized = normalizeContactPhone(intent.phone);
     if (normalized.status !== "valid") return;
+    if (("route" in intent && intent.route === "active-attendance") || !("crmClientId" in intent) || !intent.crmClientId) {
+      setActiveAttendancePhone(normalized.value);
+      navigateToRoute("active-attendance");
+      return;
+    }
     sessionStorage.setItem("megadesk-crm-whatsapp-intent", JSON.stringify({ ...intent, phone: normalized.value }));
     navigateToRoute("conversations");
   }, [canStartConversation, navigateToRoute, whatsappConnected]);
@@ -4281,7 +4286,9 @@ function Shell() {
           ? detail.phone.trim()
           : localStorage.getItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
         if (phone) {
-          setActiveAttendancePhone(phone);
+          const norm = normalizeContactPhone(phone);
+          const validPhone = norm.status === "valid" ? norm.value : phone;
+          setActiveAttendancePhone(validPhone);
           localStorage.removeItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
         }
         const route = detail.route === "clients" ? "erp-clients" : detail.route as RouteId;
