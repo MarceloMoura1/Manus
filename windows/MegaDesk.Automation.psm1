@@ -5,6 +5,8 @@ $script:ProjectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..
 $script:RuntimeRoot = Join-Path $env:LOCALAPPDATA 'MegaDesk'
 $script:StateDirectory = Join-Path $script:RuntimeRoot 'state'
 $script:StatePath = Join-Path $script:StateDirectory 'updater-state.json'
+$script:RuntimeConfigFile = Join-Path $script:StateDirectory 'runtime-config.json'
+$script:RuntimeConfigRoot = $null
 $script:LogPath = Join-Path $script:RuntimeRoot 'automation.log'
 $script:BackupRoot = Join-Path $script:RuntimeRoot 'backups'
 $script:ReleaseRoot = Join-Path $script:RuntimeRoot 'releases'
@@ -239,12 +241,14 @@ function Set-MegaDeskAutomationPaths {
   param(
     [Parameter(Mandatory = $true)][string]$RuntimeRoot,
     [Parameter(Mandatory = $true)][string]$ProjectRoot,
-    [Parameter(Mandatory = $true)][ValidateRange(1025, 65535)][int]$Port
+    [Parameter(Mandatory = $true)][ValidateRange(1025, 65535)][int]$Port,
+    [Parameter(Mandatory = $false)][string]$RuntimeConfigRoot = ''
   )
   if ($Port -eq 3000) { throw 'O modo de teste exige porta diferente de 3000.' }
   $script:RuntimeRoot = [System.IO.Path]::GetFullPath($RuntimeRoot)
   $script:StateDirectory = Join-Path $script:RuntimeRoot 'state'
   $script:StatePath = Join-Path $script:StateDirectory 'updater-state.json'
+  $script:RuntimeConfigFile = Join-Path $script:StateDirectory 'runtime-config.json'
   $script:LogPath = Join-Path $script:RuntimeRoot 'automation.log'
   $script:BackupRoot = Join-Path $script:RuntimeRoot 'backups'
   $script:ReleaseRoot = Join-Path $script:RuntimeRoot 'releases'
@@ -252,7 +256,224 @@ function Set-MegaDeskAutomationPaths {
   $script:DiagnosticsRoot = Join-Path $script:RuntimeRoot 'diagnostics'
   $script:NodeDiagnosticsRoot = Join-Path $script:DiagnosticsRoot 'node'
   $script:ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
+  $script:RuntimeConfigRoot = if (-not [string]::IsNullOrWhiteSpace($RuntimeConfigRoot)) { [System.IO.Path]::GetFullPath($RuntimeConfigRoot) } else { $script:ProjectRoot }
   $script:RuntimePort = $Port
+}
+
+function Get-MegaDeskRuntimeConfigFile {
+  return $script:RuntimeConfigFile
+}
+
+function Save-MegaDeskRuntimeConfig {
+  param([Parameter(Mandatory = $true)][string]$RuntimeConfigRoot)
+  if ([string]::IsNullOrWhiteSpace($RuntimeConfigRoot)) { return }
+  $canonicalRoot = ConvertTo-MegaDeskCanonicalPath -Path $RuntimeConfigRoot
+  if (-not (Test-Path -LiteralPath $canonicalRoot -PathType Container)) { return }
+  Initialize-MegaDeskRuntime
+  $configObject = [ordered]@{
+    runtimeConfigRoot = $canonicalRoot
+    updatedAt = (Get-Date).ToUniversalTime().ToString('o')
+  }
+  $json = $configObject | ConvertTo-Json -Depth 4
+  $tempFile = Join-Path $script:StateDirectory ('.runtime-config-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+  try {
+    [System.IO.File]::WriteAllText($tempFile, $json, [System.Text.Encoding]::UTF8)
+    if (Test-Path -LiteralPath $script:RuntimeConfigFile -PathType Leaf) {
+      [System.IO.File]::Replace($tempFile, $script:RuntimeConfigFile, $null, $true)
+    } else {
+      [System.IO.File]::Move($tempFile, $script:RuntimeConfigFile)
+    }
+  } catch {
+  } finally {
+    if (Test-Path -LiteralPath $tempFile) { Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue }
+  }
+}
+
+function Test-MegaDeskReadableEnvLocal {
+  param([Parameter(Mandatory = $true)][string]$Directory)
+  if ([string]::IsNullOrWhiteSpace($Directory)) { return $false }
+  $envPath = Join-Path $Directory '.env.local'
+  if (-not (Test-Path -LiteralPath $envPath -PathType Leaf)) { return $false }
+  try {
+    $fileStream = [System.IO.File]::Open($envPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    $fileStream.Dispose()
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Resolve-MegaDeskRuntimeConfigRoot {
+  [CmdletBinding()]
+  param([switch]$RequireEnvFile)
+
+  $isValidCandidate = {
+    param([string]$path, [switch]$requireEnv)
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    if (-not (Test-Path -LiteralPath $path -PathType Container)) { return $false }
+    if ($path.StartsWith($script:ReleaseRoot, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    if ($requireEnv) {
+      return (Test-MegaDeskReadableEnvLocal -Directory $path)
+    }
+    return $true
+  }
+
+  if ($null -ne $script:RuntimeConfigRoot -and -not [string]::IsNullOrWhiteSpace([string]$script:RuntimeConfigRoot)) {
+    $candidate = ConvertTo-MegaDeskCanonicalPath -Path $script:RuntimeConfigRoot
+    if (& $isValidCandidate $candidate $RequireEnvFile) {
+      return $candidate
+    }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($env:MEGADESK_RUNTIME_CONFIG_ROOT)) {
+    $candidate = ConvertTo-MegaDeskCanonicalPath -Path $env:MEGADESK_RUNTIME_CONFIG_ROOT
+    if (& $isValidCandidate $candidate $RequireEnvFile) {
+      return $candidate
+    }
+  }
+
+  if (Test-Path -LiteralPath $script:RuntimeConfigFile -PathType Leaf) {
+    try {
+      $configJson = Get-Content -LiteralPath $script:RuntimeConfigFile -Raw | ConvertFrom-Json
+      if ($null -ne $configJson -and ($configJson.PSObject.Properties.Name -contains 'runtimeConfigRoot') -and -not [string]::IsNullOrWhiteSpace([string]$configJson.runtimeConfigRoot)) {
+        $candidate = ConvertTo-MegaDeskCanonicalPath -Path ([string]$configJson.runtimeConfigRoot)
+        if (& $isValidCandidate $candidate $RequireEnvFile) {
+          return $candidate
+        }
+      }
+    } catch { }
+  }
+
+  try {
+    $state = Get-MegaDeskState
+    if ($null -ne $state.node) {
+      if ($state.node.PSObject.Properties.Name -contains 'environmentPath' -and -not [string]::IsNullOrWhiteSpace([string]$state.node.environmentPath)) {
+        $candidate = Split-Path -Parent (ConvertTo-MegaDeskCanonicalPath -Path ([string]$state.node.environmentPath))
+        if (& $isValidCandidate $candidate $RequireEnvFile) {
+          Save-MegaDeskRuntimeConfig -RuntimeConfigRoot $candidate
+          return $candidate
+        }
+      }
+      if ($state.node.PSObject.Properties.Name -contains 'projectRoot' -and -not [string]::IsNullOrWhiteSpace([string]$state.node.projectRoot)) {
+        $candidate = ConvertTo-MegaDeskCanonicalPath -Path ([string]$state.node.projectRoot)
+        if (& $isValidCandidate $candidate $RequireEnvFile) {
+          Save-MegaDeskRuntimeConfig -RuntimeConfigRoot $candidate
+          return $candidate
+        }
+      }
+    }
+    if ($null -ne $state.cloudflared -and $state.cloudflared.PSObject.Properties.Name -contains 'projectRoot' -and -not [string]::IsNullOrWhiteSpace([string]$state.cloudflared.projectRoot)) {
+      $candidate = ConvertTo-MegaDeskCanonicalPath -Path ([string]$state.cloudflared.projectRoot)
+      if (& $isValidCandidate $candidate $RequireEnvFile) {
+        Save-MegaDeskRuntimeConfig -RuntimeConfigRoot $candidate
+        return $candidate
+      }
+    }
+  } catch { }
+
+  try {
+    $commonDir = (Invoke-MegaDeskGit -Arguments @('rev-parse', '--git-common-dir') -FailureMessage '' -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if (-not [string]::IsNullOrWhiteSpace($commonDir)) {
+      $trimmedCommonDir = $commonDir.Trim()
+      $commonPath = if ([System.IO.Path]::IsPathRooted($trimmedCommonDir)) { $trimmedCommonDir } else { Join-Path $script:ProjectRoot $trimmedCommonDir }
+      $candidate = [System.IO.Path]::GetFullPath($commonPath).TrimEnd('\', '/')
+      if ($candidate.EndsWith('.git', [StringComparison]::OrdinalIgnoreCase)) {
+        $candidate = [System.IO.Path]::GetFullPath((Join-Path $candidate '..'))
+      }
+      if (& $isValidCandidate $candidate $RequireEnvFile) {
+        Save-MegaDeskRuntimeConfig -RuntimeConfigRoot $candidate
+        return $candidate
+      }
+    }
+  } catch { }
+
+  if (& $isValidCandidate $script:ProjectRoot $RequireEnvFile) {
+    Save-MegaDeskRuntimeConfig -RuntimeConfigRoot $script:ProjectRoot
+    return $script:ProjectRoot
+  }
+
+  if ($RequireEnvFile) {
+    throw 'Raiz de configuracao runtime nao resolvida: .env.local ausente fora da release.'
+  }
+
+  return $script:ProjectRoot
+}
+
+function Assert-MegaDeskCandidateLaunchReadiness {
+  param(
+    [Parameter(Mandatory = $true)]$CandidateRelease,
+    [Parameter(Mandatory = $false)]$ActiveRelease = $null,
+    [ValidateRange(1025, 65535)][int]$Port = $script:RuntimePort
+  )
+
+  if ($null -eq $CandidateRelease -or [string]::IsNullOrWhiteSpace([string]$CandidateRelease.path)) {
+    throw 'Preflight de launch da candidate recusado: informacoes da release candidata ausentes.'
+  }
+
+  if (-not (Test-Path -LiteralPath $CandidateRelease.path -PathType Container)) {
+    throw ("Preflight de launch da candidate recusado: diretorio da release nao encontrado em {0}." -f $CandidateRelease.path)
+  }
+
+  $releaseJson = Join-Path $CandidateRelease.path 'release.json'
+  if (-not (Test-Path -LiteralPath $releaseJson -PathType Leaf)) {
+    throw 'Preflight de launch da candidate recusado: release.json ausente na release.'
+  }
+
+  $scriptPath = Join-Path $CandidateRelease.path 'dist\index.js'
+  if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+    throw 'Preflight de launch da candidate recusado: dist\index.js ausente na release.'
+  }
+
+  $publicPath = Join-Path $CandidateRelease.path 'dist\public'
+  if (-not (Test-Path -LiteralPath $publicPath -PathType Container)) {
+    throw 'Preflight de launch da candidate recusado: dist\public ausente na release.'
+  }
+
+  $nodeModulesPath = Join-Path $CandidateRelease.path 'node_modules'
+  if (-not (Test-Path -LiteralPath $nodeModulesPath -PathType Container)) {
+    throw 'Preflight de launch da candidate recusado: dependencias node_modules ausentes na release.'
+  }
+
+  $node = Get-Command node -ErrorAction SilentlyContinue
+  if ($null -eq $node) {
+    throw 'Preflight de launch da candidate recusado: node.exe nao foi encontrado no PATH.'
+  }
+
+  $runtimeConfigRoot = $null
+  try {
+    $runtimeConfigRoot = Resolve-MegaDeskRuntimeConfigRoot -RequireEnvFile
+  } catch {
+    throw ("Preflight de launch da candidate recusado: {0}" -f $_.Exception.Message)
+  }
+  $environmentFile = Join-Path $runtimeConfigRoot '.env.local'
+  if (-not (Test-Path -LiteralPath $environmentFile -PathType Leaf)) {
+    throw ("Preflight de launch da candidate recusado: .env.local ausente na raiz de configuracao ({0})." -f $runtimeConfigRoot)
+  }
+  try {
+    $fileStream = [System.IO.File]::Open($environmentFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    $fileStream.Dispose()
+  } catch {
+    throw ("Preflight de launch da candidate recusado: .env.local inacessivel: {0}" -f $_.Exception.Message)
+  }
+
+  if ($Port -lt 1025 -or $Port -gt 65535) {
+    throw ("Preflight de launch da candidate recusado: porta {0} invalida." -f $Port)
+  }
+
+  if ($null -ne $ActiveRelease -and -not [string]::IsNullOrWhiteSpace([string]$ActiveRelease.path)) {
+    $activeScript = Join-Path $ActiveRelease.path 'dist\index.js'
+    if (-not (Test-Path -LiteralPath $activeScript -PathType Leaf)) {
+      throw 'Preflight de launch da candidate recusado: release ativa para rollback nao possui dist\index.js.'
+    }
+  }
+
+  return [pscustomobject]@{
+    status = 'READY'
+    candidateSha = [string]$CandidateRelease.sha
+    runtimeConfigRoot = $runtimeConfigRoot
+    environmentPath = $environmentFile
+    scriptPath = $scriptPath
+  }
 }
 
 function Get-MegaDeskRuntimeLayout {
@@ -1928,7 +2149,7 @@ function Start-MegaDeskProcess {
 }
 
 function New-ManagedProcessRecord {
-  param($Process, [string]$ExecutablePath, [ValidateSet('node', 'cloudflared')][string]$Kind, [string]$ConfigPath = '', [string]$ScriptPath = '', [string]$EnvironmentPath = '', [string]$ReleaseSha = '', [Nullable[int]]$Port = $null, [string]$StdoutPath = '', [string]$StderrPath = '', [string]$DiagnosticInvocationId = '', [string]$ExitTelemetryPath = '')
+  param($Process, [string]$ExecutablePath, [ValidateSet('node', 'cloudflared')][string]$Kind, [string]$ConfigPath = '', [string]$ScriptPath = '', [string]$EnvironmentPath = '', [string]$ReleaseSha = '', [Nullable[int]]$Port = $null, [string]$StdoutPath = '', [string]$StderrPath = '', [string]$DiagnosticInvocationId = '', [string]$ExitTelemetryPath = '', [string]$ProjectRoot = '')
   if ($Kind -eq 'node' -and ($null -eq $Port -or $Port -lt 1 -or $Port -gt 65535)) { throw 'Node exige porta valida no record de identidade.' }
   if ($Kind -eq 'cloudflared' -and $null -ne $Port) { throw 'Cloudflared nao pode registrar ownership da porta do Node.' }
   $snapshot = $null
@@ -1938,11 +2159,12 @@ function New-ManagedProcessRecord {
   }
   if ($null -eq $snapshot) { throw "Processo $Kind encerrou antes de ser registrado." }
   $startedAtUtc = (ConvertTo-MegaDeskProcessStartUtc -Value $snapshot.CreationDate).ToString('o')
+  $resolvedProjectRoot = if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) { ConvertTo-MegaDeskCanonicalPath -Path $ProjectRoot } elseif (-not [string]::IsNullOrWhiteSpace($script:RuntimeConfigRoot)) { ConvertTo-MegaDeskCanonicalPath -Path $script:RuntimeConfigRoot } else { $script:ProjectRoot }
   return [pscustomobject]@{
     pid = [int]$Process.Id
     executablePath = ConvertTo-MegaDeskCanonicalPath -Path $ExecutablePath
     startedAtUtc = $startedAtUtc
-    projectRoot = $script:ProjectRoot
+    projectRoot = $resolvedProjectRoot
     configPath = $ConfigPath
     scriptPath = if ([string]::IsNullOrWhiteSpace($ScriptPath)) { '' } else { ConvertTo-MegaDeskCanonicalPath -Path $ScriptPath }
     environmentPath = if ([string]::IsNullOrWhiteSpace($EnvironmentPath)) { '' } else { ConvertTo-MegaDeskCanonicalPath -Path $EnvironmentPath }
@@ -2027,7 +2249,8 @@ function Start-MegaDeskNode {
   $scriptPath = Join-Path $release.path 'dist\index.js'
   $workingDirectory = $release.path
   if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) { throw 'Artefato Node da release nao encontrado.' }
-  $environmentFile = Join-Path $script:ProjectRoot '.env.local'
+  $runtimeConfigRoot = Resolve-MegaDeskRuntimeConfigRoot -RequireEnvFile
+  $environmentFile = Join-Path $runtimeConfigRoot '.env.local'
   if (-not (Test-Path -LiteralPath $environmentFile -PathType Leaf)) { throw '.env.local obrigatorio ausente fora da release.' }
   $launch = New-MegaDeskNodeLaunchSpec -ExecutablePath $node.Source -EnvironmentPath $environmentFile -ScriptPath $scriptPath
   $environmentOverrides = @{
@@ -2042,7 +2265,7 @@ function Start-MegaDeskNode {
   Assert-MegaDeskNodeStartAuthorization -AuthorizationMode $AuthorizationMode -ReleaseSha $ReleaseSha -RequireNodeAbsent | Out-Null
   $process = Start-MegaDeskNativeNodeProcess -Launch $launch -WorkingDirectory $workingDirectory -EnvironmentOverrides $environmentOverrides -StdoutPath $diagnostics.stdoutPath -StderrPath $diagnostics.stderrPath
   try {
-    $record = New-ManagedProcessRecord -Process $process -ExecutablePath $launch.executablePath -Kind node -ScriptPath $launch.scriptPath -EnvironmentPath $launch.environmentPath -ReleaseSha $ReleaseSha -Port $Port -StdoutPath $diagnostics.stdoutPath -StderrPath $diagnostics.stderrPath -DiagnosticInvocationId $diagnostics.invocationId -ExitTelemetryPath $diagnostics.exitTelemetryPath
+    $record = New-ManagedProcessRecord -Process $process -ExecutablePath $launch.executablePath -Kind node -ScriptPath $launch.scriptPath -EnvironmentPath $launch.environmentPath -ReleaseSha $ReleaseSha -Port $Port -StdoutPath $diagnostics.stdoutPath -StderrPath $diagnostics.stderrPath -DiagnosticInvocationId $diagnostics.invocationId -ExitTelemetryPath $diagnostics.exitTelemetryPath -ProjectRoot $runtimeConfigRoot
   } catch {
     throw ("CRITICO: identidade do Node iniciado nao pode ser comprovada: {0}. Nenhum encerramento por PID foi tentado; intervencao manual e necessaria." -f $_.Exception.Message)
   }
@@ -2702,6 +2925,7 @@ function Invoke-MegaDeskReleaseSwitch {
   $startedCandidateRecord = $null
   $oldProcessStopped = $false
   try {
+    Assert-MegaDeskCandidateLaunchReadiness -CandidateRelease $CandidateRelease -ActiveRelease $PreviousRelease -Port $script:RuntimePort | Out-Null
     Set-MegaDeskOperationState -Status 'SWITCHING' -CandidateSha ([string]$CandidateRelease.sha) -Message 'Switch de codigo iniciado.' | Out-Null
     $state = Get-MegaDeskState
     $runtime = Resolve-MegaDeskReleaseSwitchNodeStatus -State $state
@@ -3143,6 +3367,7 @@ function Invoke-MegaDeskUpdaterV2 {
     }
 
     $candidateRelease = Invoke-MegaDeskIsolatedBuild -Sha $candidateSha
+    Assert-MegaDeskCandidateLaunchReadiness -CandidateRelease $candidateRelease -Port $script:RuntimePort | Out-Null
     Assert-MegaDeskNoSourceMutation
     Assert-MegaDeskCandidateHeadUnchanged -CandidateSha $candidateSha
     Set-MegaDeskOperationState -Status 'READY' -CandidateSha $candidateSha -Message 'Release candidata pronta para switch.' | Out-Null
@@ -3193,6 +3418,7 @@ function Invoke-MegaDeskPreparedReleasePublish {
     $candidateSha = [string]$selection.candidateReleaseSha
     $candidateRelease = Get-MegaDeskRelease -Sha $candidateSha
     Assert-MegaDeskPreparedReleaseMetadata -Release $candidateRelease -CandidateReleaseSha $candidateSha
+    Assert-MegaDeskCandidateLaunchReadiness -CandidateRelease $candidateRelease -ActiveRelease $activeRelease -Port $script:RuntimePort | Out-Null
 
     $migrationGate = Assert-MegaDeskMigrationDeltaState -FromSha ([string]$activeRelease.sha) -ToSha $candidateSha
     Write-MegaDeskLog ('Migration gate da publicacao: {0}.' -f $migrationGate.status)
@@ -3275,5 +3501,6 @@ Export-ModuleMember -Function @(
   'Start-MegaDeskNode', 'Start-MegaDeskTunnel', 'Wait-MegaDeskLocal', 'Write-MegaDeskNodeExitTelemetry',
   'Wait-MegaDeskPublicEndpoints', 'Undo-MegaDeskInvocation', 'Stop-MegaDeskManagedProcess',
   'Backup-MegaDeskDist', 'Restore-MegaDeskDist', 'Invoke-MegaDeskUpdaterV2', 'Invoke-MegaDeskPreparedReleasePublish', 'Invoke-MegaDeskBootstrapZero',
-  'Invoke-MegaDeskBootstrapFailedRecovery'
+  'Invoke-MegaDeskBootstrapFailedRecovery',
+  'Resolve-MegaDeskRuntimeConfigRoot', 'Assert-MegaDeskCandidateLaunchReadiness', 'Save-MegaDeskRuntimeConfig', 'Get-MegaDeskRuntimeConfigFile'
 )
