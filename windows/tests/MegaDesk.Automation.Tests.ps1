@@ -2780,7 +2780,7 @@ Describe 'MegaDesk verified MAIN migration gate' {
     }
   }
 
-  It 'allows the canonical migration validator companion only with a proved metadata-only repair' {
+  It 'keeps release validator code outside the canonical database graph' {
     InModuleScope $moduleName {
       $utcRepair = [pscustomobject]@{ path = 'drizzle/main-migrations/0019_utc_conversation_timestamp_repair.sql'; tag = '0019_utc_conversation_timestamp_repair'; sha256 = ('c' * 64) }
       Mock Get-MegaDeskMigrationChanges { @(
@@ -2800,7 +2800,7 @@ Describe 'MegaDesk verified MAIN migration gate' {
       $result.classification | Should Be 'SAFE_METADATA_ONLY_REPAIR'
 
       Mock Get-MegaDeskMigrationChanges { @('drizzle/main-migrations/0019_utc_conversation_timestamp_repair.sql', 'server/_core/canonical-migrations.ts', 'server/other-db-code.ts') }
-      (Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo).status | Should Be 'DIVERGENT'
+      (Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo).status | Should Be 'APPLIED_MATCH'
     }
   }
 
@@ -2907,12 +2907,13 @@ Describe 'MegaDesk verified MAIN migration gate' {
     }
   }
 
-  It 'blocks canonical migration validator when it appears alone without new migrations (Case 3)' {
+  It 'treats canonical validator code alone as a release-only delta (Case 3)' {
     InModuleScope $moduleName {
       Mock Get-MegaDeskMigrationChanges { @('server/_core/canonical-migrations.ts') }
+      Mock Get-MegaDeskAppliedMainMigrationJournal { throw 'release-only code must not query journal' }
       $result = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
-      $result.status | Should Be 'DIVERGENT'
-      $result.message | Should Match 'Delta de banco nao contem migration MAIN nova verificavel'
+      $result.status | Should Be 'NONE'
+      Assert-MockCalled Get-MegaDeskAppliedMainMigrationJournal -Times 0 -Exactly -Scope It
     }
   }
 
@@ -2925,20 +2926,67 @@ Describe 'MegaDesk verified MAIN migration gate' {
     }
   }
 
-  It 'blocks canonical migration validator when accompanied by arbitrary files (Case 4)' {
+  It 'allows normal release code alongside a verified canonical MAIN migration (Case 4)' {
     InModuleScope $moduleName {
       Mock Get-MegaDeskMigrationChanges { @(
         'drizzle/main-migrations/0018_clean_union_jack.sql',
         'drizzle/main-migrations/meta/_journal.json',
         'drizzle/main-migrations/meta/0018_snapshot.json',
         'server/_core/canonical-migrations.ts',
-        'scripts/arbitrary-script.ts'
+        'scripts/canonical-migrations.ts',
+        'client/src/pages/erp/StockPage.tsx'
+      ) }
+      Mock Get-MegaDeskHistoricalSnapshotRepairState { [pscustomobject]@{ status = 'NONE'; message = 'no historical repair'; repairedTags = @(); newMigrationPaths = @('drizzle/main-migrations/0018_clean_union_jack.sql') } }
+      Mock Invoke-MegaDeskGit { $global:MegaDeskMigrationGateTo }
+      Mock Get-MegaDeskMainMigrationIdentity { $global:MegaDeskMigration0018 }
+      Mock Get-MegaDeskAppliedMainMigrationJournal { [pscustomobject]@{ database = 'megadesk_local'; hashes = @() } }
+      $result = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
+      $result.status | Should Be 'PENDING'
+    }
+  }
+
+  It 'rejects an unregistered MAIN SQL file even when normal release code is present' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @(
+        'drizzle/main-migrations/0018_clean_union_jack.sql',
+        'drizzle/main-migrations/0099_unregistered.sql',
+        'scripts/canonical-migrations.ts'
       ) }
       Mock Get-MegaDeskHistoricalSnapshotRepairState { [pscustomobject]@{ status = 'NONE'; message = 'no historical repair'; repairedTags = @(); newMigrationPaths = @('drizzle/main-migrations/0018_clean_union_jack.sql') } }
       $result = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
       $result.status | Should Be 'DIVERGENT'
-      $result.message | Should Match 'Delta de banco nao representa exclusivamente migrations MAIN canonicas verificaveis'
+      $result.message | Should Match 'Journal candidato e arquivos SQL novos divergem'
     }
+  }
+
+  It 'rejects an arbitrary file inside the canonical migration directory' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @(
+        'drizzle/main-migrations/0018_clean_union_jack.sql',
+        'drizzle/main-migrations/README.txt',
+        'client/src/pages/erp/StockPage.tsx'
+      ) }
+      Mock Get-MegaDeskHistoricalSnapshotRepairState { [pscustomobject]@{ status = 'NONE'; message = 'no historical repair'; repairedTags = @(); newMigrationPaths = @('drizzle/main-migrations/0018_clean_union_jack.sql') } }
+      $result = Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo
+      $result.status | Should Be 'DIVERGENT'
+      $result.message | Should Match 'exclusivamente migrations MAIN canonicas verificaveis'
+    }
+  }
+
+  It 'rejects a candidate journal addition without its matching SQL delta' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskMigrationChanges { @('drizzle/main-migrations/meta/_journal.json', 'drizzle/main-migrations/meta/0018_snapshot.json') }
+      Mock Get-MegaDeskHistoricalSnapshotRepairState { [pscustomobject]@{ status = 'NONE'; message = 'no historical repair'; repairedTags = @(); newMigrationPaths = @('drizzle/main-migrations/0018_clean_union_jack.sql') } }
+      (Get-MegaDeskMigrationDeltaState -FromSha $global:MegaDeskMigrationGateFrom -ToSha $global:MegaDeskMigrationGateTo).status | Should Be 'DIVERGENT'
+    }
+  }
+
+  It 'keeps the migration delta collector scoped to canonical database content' {
+    $source = Get-Content -LiteralPath (Get-Module $moduleName).Path -Raw
+    $collector = [regex]::Match($source, 'function Get-MegaDeskMigrationChanges \{.*?(?=function Get-MegaDeskMainMigrationIdentity)', [System.Text.RegularExpressions.RegexOptions]::Singleline).Value
+    $collector | Should Match "'drizzle/main-migrations'"
+    $collector | Should Not Match 'scripts/canonical-migrations.ts'
+    $collector | Should Not Match 'server/_core/canonical-migrations.ts'
   }
 
   It 'blocks canonical migration validator when SQL migration is non-canonical or divergent from journal (Case 5)' {
@@ -5674,6 +5722,88 @@ Describe 'MegaDesk guarded MAIN migration pipeline' {
       $source | Should Match 'Resolve-MegaDeskRuntimeConfigRoot -RequireEnvFile'
       $source | Should Match '--env-file='
       $source | Should Match 'Nenhum restore automatico de banco'
+    }
+  }
+}
+
+Describe 'MegaDesk disposable MAIN migration target isolation' {
+  BeforeEach {
+    $global:MegaDeskDisposableBackupRoot = Join-Path $TestDrive 'disposable-backups'
+    New-Item -ItemType Directory -Path $global:MegaDeskDisposableBackupRoot -Force | Out-Null
+    $global:MegaDeskDisposableUrl = 'mysql://fixture:synthetic@127.0.0.1:33319/megadesk_test_updater_0031'
+  }
+
+  It 'accepts only the canonical production identity' {
+    InModuleScope $moduleName {
+      $target = New-MegaDeskProductionMainMigrationTarget -EnvironmentPath 'C:\canonical\.env.local'
+      (Assert-MegaDeskMainMigrationTarget -Target $target).database | Should Be 'megadesk_local'
+      (Assert-MegaDeskMainMigrationTarget -Target $target).container | Should Be 'megadesk-local-mysql'
+    }
+  }
+
+  It 'rejects a noncanonical production database or container' {
+    InModuleScope $moduleName {
+      $databaseTarget = New-MegaDeskProductionMainMigrationTarget
+      $databaseTarget.database = 'megadesk_test_updater_0031'
+      { Assert-MegaDeskMainMigrationTarget -Target $databaseTarget } | Should Throw 'invalida'
+      $containerTarget = New-MegaDeskProductionMainMigrationTarget
+      $containerTarget.container = 'megadesk-updater-0031-rehearsal'
+      { Assert-MegaDeskMainMigrationTarget -Target $containerTarget } | Should Throw 'invalida'
+    }
+  }
+
+  It 'requires explicit disposable opt-in and rejects ambiguous targets' {
+    InModuleScope $moduleName {
+      { New-MegaDeskDisposableMainMigrationTarget -DisposableOptIn:$false -Container 'megadesk-updater-0031-rehearsal' -Database 'megadesk_test_updater_0031' -DatabaseUrl $global:MegaDeskDisposableUrl -BackupDirectory $global:MegaDeskDisposableBackupRoot } | Should Throw 'opt-in'
+      { New-MegaDeskDisposableMainMigrationTarget -DisposableOptIn -Container '' -Database 'megadesk_test_updater_0031' -DatabaseUrl $global:MegaDeskDisposableUrl -BackupDirectory $global:MegaDeskDisposableBackupRoot } | Should Throw
+    }
+  }
+
+  It 'rejects MAIN and Evolution identities in disposable mode' {
+    InModuleScope $moduleName {
+      { New-MegaDeskDisposableMainMigrationTarget -DisposableOptIn -Container 'megadesk-updater-0031-rehearsal' -Database 'megadesk_local' -DatabaseUrl 'mysql://fixture:synthetic@127.0.0.1:33319/megadesk_local' -BackupDirectory $global:MegaDeskDisposableBackupRoot } | Should Throw 'megadesk_test_'
+      foreach ($protected in @('megadesk-local-mysql', 'megadesk-evolution', 'megadesk-evolution-db')) {
+        { New-MegaDeskDisposableMainMigrationTarget -DisposableOptIn -Container $protected -Database 'megadesk_test_updater_0031' -DatabaseUrl $global:MegaDeskDisposableUrl -BackupDirectory $global:MegaDeskDisposableBackupRoot } | Should Throw 'protegido'
+      }
+    }
+  }
+
+  It 'uses the exact same disposable target for backup and canonical migration' {
+    InModuleScope $moduleName {
+      $target = New-MegaDeskDisposableMainMigrationTarget -DisposableOptIn -Container 'megadesk-updater-0031-rehearsal' -Database 'megadesk_test_updater_0031' -DatabaseUrl $global:MegaDeskDisposableUrl -BackupDirectory $global:MegaDeskDisposableBackupRoot
+      $script:plans = 0; $script:backupTarget = $null; $script:migrationTarget = $null
+      Mock Get-MegaDeskPendingCanonicalMainMigrations { $script:plans++; if ($script:plans -eq 1) { [pscustomobject]@{ status = 'PENDING'; pending = @([pscustomobject]@{ tag = '0031_fixture' }); journal = $null } } else { [pscustomobject]@{ status = 'NONE'; pending = @(); journal = $null } } }
+      Mock New-MegaDeskMainMigrationBackup { param($Target) $script:backupTarget = $Target; [pscustomobject]@{ id = 'fixture.sql'; createdAt = '2026-09-20T00:00:00Z'; database = 'megadesk_test_updater_0031'; container = 'megadesk-updater-0031-rehearsal'; sizeBytes = [int64]1; sha256 = ('a' * 64) } }
+      Mock Invoke-MegaDeskCanonicalMainMigrationCommand { param($Mode, $Target) if ($Mode -eq 'APPLY') { $script:migrationTarget = $Target } }
+      (Invoke-MegaDeskDisposableMigrationRehearsal -FromSha ('a' * 40) -ToSha ('b' * 40) -Target $target).status | Should Be 'READY'
+      $script:backupTarget | Should Be $target
+      $script:migrationTarget | Should Be $target
+    }
+  }
+
+  It 'passes the resolved target into the delta guard before any journal read' {
+    InModuleScope $moduleName {
+      $source = Get-Content -LiteralPath (Get-Module 'MegaDesk.Automation').Path -Raw
+      $planner = [regex]::Match($source, 'function Get-MegaDeskPendingCanonicalMainMigrations \{.*?(?=function New-MegaDeskMainMigrationBackup)', [System.Text.RegularExpressions.RegexOptions]::Singleline).Value
+      $planner | Should Match 'Get-MegaDeskMigrationDeltaState -FromSha \$FromSha -ToSha \$ToSha -Target \$resolvedTarget -AllowDisposable:\$AllowDisposable'
+    }
+  }
+
+  It 'keeps target URLs out of command lines and logs' {
+    InModuleScope $moduleName {
+      $source = Get-Content -LiteralPath (Get-Module MegaDesk.Automation).Path -Raw
+      $source | Should Match 'MEGADESK_DISPOSABLE_MIGRATION_TARGET_URL'
+      $source | Should Match 'EnvironmentVariables\[''MEGADESK_DISPOSABLE_MIGRATION_TARGET_URL''\]'
+      $source | Should Not Match 'Arguments.*databaseUrl'
+    }
+  }
+
+  It 'uses the valid mysqldump database option for the guarded backup' {
+    InModuleScope $moduleName {
+      $source = Get-Content -LiteralPath (Get-Module MegaDesk.Automation).Path -Raw
+      $backup = [regex]::Match($source, 'function New-MegaDeskMainMigrationBackup \{.*?(?=function Invoke-MegaDeskCanonicalMainMigrationCommand)', [System.Text.RegularExpressions.RegexOptions]::Singleline).Value
+      $backup | Should Match 'mysqldump -u\$MYSQL_USER --databases \$MYSQL_DATABASE'
+      $backup | Should Not Match 'mysqldump -u\$MYSQL_USER --database='
     }
   }
 }

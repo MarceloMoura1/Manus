@@ -893,7 +893,11 @@ function Assert-MegaDeskNoSourceMutation {
 
 function Get-MegaDeskMigrationChanges {
   param([Parameter(Mandatory = $true)][string]$FromSha, [Parameter(Mandatory = $true)][string]$ToSha)
-  $paths = @('drizzle/schema.ts', 'drizzle/main-migrations', 'drizzle/tenant-schema.ts', 'drizzle/tenant-migrations', 'scripts/canonical-migrations.ts', 'server/_core/canonical-migrations.ts')
+  # This is the canonical database graph delta, not the complete release delta.
+  # Executor and validator implementation changes are release code: they cannot
+  # make migration contents canonical. The journal, SQL and snapshot blobs below
+  # are instead verified directly at both Git endpoints.
+  $paths = @('drizzle/schema.ts', 'drizzle/main-migrations', 'drizzle/tenant-schema.ts', 'drizzle/tenant-migrations')
   return @(Invoke-MegaDeskGit -Arguments (@('diff', '--name-only', "$FromSha..$ToSha", '--') + $paths) -FailureMessage 'Falha ao inspecionar alteracoes de banco.')
 }
 
@@ -1124,16 +1128,67 @@ function Get-MegaDeskHistoricalSnapshotRepairState {
   }
 }
 
-function Get-MegaDeskMainMigrationContainerImage {
-  $image = @(& docker inspect --format '{{.Config.Image}}' megadesk-local-mysql 2>$null)
-  if ($LASTEXITCODE -ne 0 -or $image.Count -ne 1 -or $image[0].Trim() -ne 'mysql:8.0') { throw 'Identidade da imagem MySQL principal nao comprovada.' }
+function New-MegaDeskProductionMainMigrationTarget {
+  param([string]$EnvironmentPath = '')
+  return [pscustomobject]@{
+    mode = 'PRODUCTION'; container = 'megadesk-local-mysql'; database = 'megadesk_local'; environmentPath = $EnvironmentPath; databaseUrl = $null; backupDirectory = $script:MainMigrationBackupRoot; disposableOptIn = $false
+  }
+}
+
+function New-MegaDeskDisposableMainMigrationTarget {
+  param(
+    [Parameter(Mandatory = $true)][switch]$DisposableOptIn,
+    [Parameter(Mandatory = $true)][string]$Container,
+    [Parameter(Mandatory = $true)][string]$Database,
+    [Parameter(Mandatory = $true)][string]$DatabaseUrl,
+    [Parameter(Mandatory = $true)][string]$BackupDirectory
+  )
+  if (-not $DisposableOptIn) { throw 'Target descartavel exige opt-in explicito.' }
+  if ([string]::IsNullOrWhiteSpace($Container) -or [string]::IsNullOrWhiteSpace($Database) -or [string]::IsNullOrWhiteSpace($DatabaseUrl) -or [string]::IsNullOrWhiteSpace($BackupDirectory)) { throw 'Target descartavel ambiguo.' }
+  if ($Container -in @('megadesk-local-mysql', 'megadesk-evolution', 'megadesk-evolution-db')) { throw 'Target descartavel nao pode usar container protegido.' }
+  if ($Database -ceq 'megadesk_local' -or $Database -notmatch '^megadesk_test_[a-z0-9_]+$') { throw 'Target descartavel exige database megadesk_test_ nao protegido.' }
+  if ($Container -notmatch '^megadesk-[a-z0-9-]+$') { throw 'Nome de container descartavel invalido.' }
+  try { $uri = [System.Uri]$DatabaseUrl } catch { throw 'URL do target descartavel invalida.' }
+  if ($uri.Scheme -cne 'mysql' -or [string]::IsNullOrWhiteSpace($uri.Host) -or $uri.AbsolutePath.Trim('/') -cne $Database) { throw 'URL do target descartavel nao confirma database.' }
+  if (-not (Test-Path -LiteralPath $BackupDirectory -PathType Container)) { throw 'Diretorio de backup descartavel ausente.' }
+  return [pscustomobject]@{
+    mode = 'DISPOSABLE'; container = $Container; database = $Database; environmentPath = ''; databaseUrl = $DatabaseUrl; backupDirectory = [System.IO.Path]::GetFullPath($BackupDirectory); disposableOptIn = $true
+  }
+}
+
+function Assert-MegaDeskMainMigrationTarget {
+  param([Parameter(Mandatory = $true)]$Target, [switch]$AllowDisposable)
+  foreach ($property in @('mode', 'container', 'database', 'environmentPath', 'databaseUrl', 'backupDirectory', 'disposableOptIn')) {
+    if (-not ($Target.PSObject.Properties.Name -contains $property)) { throw 'Target de migration incompleto ou ambiguo.' }
+  }
+  if ([string]$Target.mode -ceq 'PRODUCTION') {
+    if ([string]$Target.container -cne 'megadesk-local-mysql' -or [string]$Target.database -cne 'megadesk_local' -or [bool]$Target.disposableOptIn) { throw 'Identidade MAIN de producao invalida.' }
+    return $Target
+  }
+  if ([string]$Target.mode -cne 'DISPOSABLE' -or -not $AllowDisposable -or -not [bool]$Target.disposableOptIn) { throw 'Modo descartavel sem opt-in explicito recusado.' }
+  if ([string]$Target.container -in @('megadesk-local-mysql', 'megadesk-evolution', 'megadesk-evolution-db') -or [string]$Target.database -ceq 'megadesk_local' -or [string]$Target.database -notmatch '^megadesk_test_[a-z0-9_]+$') { throw 'Identidade descartavel protegida ou invalida.' }
+  return $Target
+}
+
+function Get-MegaDeskMigrationContainerImage {
+  param([Parameter(Mandatory = $true)]$Target)
+  $resolvedTarget = Assert-MegaDeskMainMigrationTarget -Target $Target -AllowDisposable:([string]$Target.mode -ceq 'DISPOSABLE')
+  $image = @(& docker inspect --format '{{.Config.Image}}' ([string]$resolvedTarget.container) 2>$null)
+  if ($LASTEXITCODE -ne 0 -or $image.Count -ne 1 -or [string]::IsNullOrWhiteSpace($image[0])) { throw 'Identidade da imagem MySQL alvo nao comprovada.' }
+  if ([string]$resolvedTarget.mode -ceq 'PRODUCTION' -and $image[0].Trim() -ne 'mysql:8.0') { throw 'Identidade da imagem MySQL principal nao comprovada.' }
   return $image[0].Trim()
 }
 
+function Get-MegaDeskMainMigrationContainerImage {
+  return Get-MegaDeskMigrationContainerImage -Target (New-MegaDeskProductionMainMigrationTarget)
+}
+
 function Invoke-MegaDeskMainMigrationReadOnlyQuery {
-  param([Parameter(Mandatory = $true)][string]$Sql)
+  param([Parameter(Mandatory = $true)][string]$Sql, $Target = $null, [switch]$AllowDisposable)
+  if ($null -eq $Target) { $Target = New-MegaDeskProductionMainMigrationTarget }
+  $resolvedTarget = Assert-MegaDeskMainMigrationTarget -Target $Target -AllowDisposable:$AllowDisposable
   Assert-DockerAndMySql
-  if ((Get-MegaDeskMainMigrationContainerImage) -ne 'mysql:8.0') { throw 'Identidade da imagem MySQL principal nao comprovada.' }
+  $null = Get-MegaDeskMigrationContainerImage -Target $resolvedTarget
 
   # SQL is carried only on stdin.  In particular, it is never embedded in a
   # native command-line argument: Windows PowerShell 5.1 otherwise strips the
@@ -1142,7 +1197,7 @@ function Invoke-MegaDeskMainMigrationReadOnlyQuery {
   # diagnostic stderr cross the process boundary.
   $startInfo = New-Object System.Diagnostics.ProcessStartInfo
   $startInfo.FileName = 'docker'
-  $startInfo.Arguments = 'exec -i megadesk-local-mysql sh -lc "MYSQL_PWD=$MYSQL_PASSWORD exec mysql -u$MYSQL_USER --database=$MYSQL_DATABASE --batch --skip-column-names"'
+  $startInfo.Arguments = 'exec -i {0} sh -lc "MYSQL_PWD=$MYSQL_PASSWORD exec mysql -u$MYSQL_USER --database=$MYSQL_DATABASE --batch --skip-column-names"' -f [string]$resolvedTarget.container
   $startInfo.WorkingDirectory = $script:ProjectRoot
   $startInfo.UseShellExecute = $false
   $startInfo.CreateNoWindow = $true
@@ -1171,7 +1226,7 @@ function Invoke-MegaDeskMainMigrationReadOnlyQuery {
 
     $output = @($stdout -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
     if ($output.Count -lt 1) { throw 'Consulta readonly do journal MAIN falhou: stdout vazio.' }
-    if ($output[0] -ne 'megadesk_local') { throw 'Banco MAIN inesperado; verificacao de migration recusada.' }
+    if ($output[0] -cne [string]$resolvedTarget.database) { throw 'Banco alvo inesperado; verificacao de migration recusada.' }
     return @($output | Select-Object -Skip 1)
   } finally {
     if ($null -ne $process) { $process.Dispose() }
@@ -1179,11 +1234,14 @@ function Invoke-MegaDeskMainMigrationReadOnlyQuery {
 }
 
 function Get-MegaDeskAppliedMainMigrationJournal {
-  $hashes = @(Invoke-MegaDeskMainMigrationReadOnlyQuery -Sql 'SELECT hash FROM __drizzle_migrations ORDER BY created_at;')
+  param($Target = $null, [switch]$AllowDisposable)
+  if ($null -eq $Target) { $Target = New-MegaDeskProductionMainMigrationTarget }
+  $resolvedTarget = Assert-MegaDeskMainMigrationTarget -Target $Target -AllowDisposable:$AllowDisposable
+  $hashes = @(Invoke-MegaDeskMainMigrationReadOnlyQuery -Sql 'SELECT hash FROM __drizzle_migrations ORDER BY created_at;' -Target $resolvedTarget -AllowDisposable:$AllowDisposable)
   if ($hashes.Count -eq 0 -or @($hashes | Where-Object { $_ -notmatch '^[0-9a-f]{64}$' }).Count -ne 0) {
     throw 'Journal fisico MAIN ausente ou possui identidade de migration invalida.'
   }
-  return [pscustomobject]@{ database = 'megadesk_local'; hashes = $hashes }
+  return [pscustomobject]@{ database = [string]$resolvedTarget.database; hashes = $hashes }
 }
 
 function Get-MegaDeskCanonicalMainMigrationEntries {
@@ -1203,8 +1261,10 @@ function Get-MegaDeskCanonicalMainMigrationEntries {
 }
 
 function Assert-MegaDeskMainMigrationJournalPrefix {
-  param([Parameter(Mandatory = $true)]$Journal)
-  if ([string]$Journal.database -cne 'megadesk_local') { throw 'Identidade do journal MAIN divergiu.' }
+  param([Parameter(Mandatory = $true)]$Journal, $Target = $null, [switch]$AllowDisposable)
+  if ($null -eq $Target) { $Target = New-MegaDeskProductionMainMigrationTarget }
+  $resolvedTarget = Assert-MegaDeskMainMigrationTarget -Target $Target -AllowDisposable:$AllowDisposable
+  if ([string]$Journal.database -cne [string]$resolvedTarget.database) { throw 'Identidade do journal MAIN divergiu.' }
   $entries = @(Get-MegaDeskCanonicalMainMigrationEntries)
   $hashes = @($Journal.hashes)
   if ($hashes.Count -gt $entries.Count) { throw 'Journal fisico MAIN possui migrations desconhecidas.' }
@@ -1217,15 +1277,17 @@ function Assert-MegaDeskMainMigrationJournalPrefix {
 }
 
 function Get-MegaDeskPendingCanonicalMainMigrations {
-  param([Parameter(Mandatory = $true)][string]$FromSha, [Parameter(Mandatory = $true)][string]$ToSha)
-  $delta = Get-MegaDeskMigrationDeltaState -FromSha $FromSha -ToSha $ToSha
+  param([Parameter(Mandatory = $true)][string]$FromSha, [Parameter(Mandatory = $true)][string]$ToSha, $Target = $null, [switch]$AllowDisposable)
+  if ($null -eq $Target) { $Target = New-MegaDeskProductionMainMigrationTarget }
+  $resolvedTarget = Assert-MegaDeskMainMigrationTarget -Target $Target -AllowDisposable:$AllowDisposable
+  $delta = Get-MegaDeskMigrationDeltaState -FromSha $FromSha -ToSha $ToSha -Target $resolvedTarget -AllowDisposable:$AllowDisposable
   if ([string]$delta.status -eq 'NONE') { return [pscustomobject]@{ status = 'NONE'; pending = @(); journal = $null } }
   if ([string]$delta.status -notin @('PENDING', 'APPLIED_MATCH')) {
     throw ('Migration MAIN bloqueada ({0}): {1}' -f $delta.status, $delta.message)
   }
 
-  $journal = Get-MegaDeskAppliedMainMigrationJournal
-  $chain = Assert-MegaDeskMainMigrationJournalPrefix -Journal $journal
+  $journal = Get-MegaDeskAppliedMainMigrationJournal -Target $resolvedTarget -AllowDisposable:$AllowDisposable
+  $chain = Assert-MegaDeskMainMigrationJournalPrefix -Journal $journal -Target $resolvedTarget -AllowDisposable:$AllowDisposable
   $candidateTags = @($delta.migrations | ForEach-Object { [string]$_.tag })
   $candidateEntries = @($chain.entries | Where-Object { $candidateTags -contains [string]$_.tag })
   if ($candidateEntries.Count -ne @($delta.migrations).Count) { throw 'Migration MAIN candidata nao corresponde ao journal canonico.' }
@@ -1237,13 +1299,16 @@ function Get-MegaDeskPendingCanonicalMainMigrations {
 }
 
 function New-MegaDeskMainMigrationBackup {
-  param([Parameter(Mandatory = $true)][string]$EnvironmentPath)
+  param([Parameter(Mandatory = $true)]$Target)
+  $allowDisposable = [string]$Target.mode -ceq 'DISPOSABLE'
+  $resolvedTarget = Assert-MegaDeskMainMigrationTarget -Target $Target -AllowDisposable:$allowDisposable
   Assert-DockerAndMySql
-  if ((Get-MegaDeskMainMigrationContainerImage) -ne 'mysql:8.0') { throw 'Identidade da imagem MySQL principal nao comprovada.' }
-  if (-not (Test-Path -LiteralPath $EnvironmentPath -PathType Leaf)) { throw 'Arquivo de ambiente canonico ausente para backup MAIN.' }
+  $null = Get-MegaDeskMigrationContainerImage -Target $resolvedTarget
+  if ([string]$resolvedTarget.mode -ceq 'PRODUCTION' -and -not (Test-Path -LiteralPath ([string]$resolvedTarget.environmentPath) -PathType Leaf)) { throw 'Arquivo de ambiente canonico ausente para backup MAIN.' }
 
-  Initialize-MegaDeskRuntime
-  $backupDirectory = Assert-MegaDeskPathInside -Path $script:MainMigrationBackupRoot -Root $script:BackupRoot -Label 'Diretorio de backup MAIN'
+  if ([string]$resolvedTarget.mode -ceq 'PRODUCTION') { Initialize-MegaDeskRuntime }
+  $backupDirectory = [System.IO.Path]::GetFullPath([string]$resolvedTarget.backupDirectory)
+  if (-not (Test-Path -LiteralPath $backupDirectory -PathType Container)) { throw 'Diretorio de backup MAIN indisponivel.' }
   $id = 'main-{0}-{1}.sql' -f (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ'), [guid]::NewGuid().ToString('N')
   $destination = Assert-MegaDeskPathInside -Path (Join-Path $backupDirectory $id) -Root $backupDirectory -Label 'Backup MAIN'
   $temporary = Assert-MegaDeskPathInside -Path (Join-Path $backupDirectory ('.{0}.{1}.tmp' -f $id, [guid]::NewGuid().ToString('N'))) -Root $backupDirectory -Label 'Backup MAIN temporario'
@@ -1252,7 +1317,7 @@ function New-MegaDeskMainMigrationBackup {
   try {
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = 'docker'
-    $startInfo.Arguments = 'exec megadesk-local-mysql sh -lc "MYSQL_PWD=$MYSQL_PASSWORD exec mysqldump -u$MYSQL_USER --database=$MYSQL_DATABASE --single-transaction --routines --triggers --set-gtid-purged=OFF"'
+    $startInfo.Arguments = 'exec {0} sh -lc "MYSQL_PWD=$MYSQL_PASSWORD exec mysqldump -u$MYSQL_USER --databases $MYSQL_DATABASE --single-transaction --routines --triggers --set-gtid-purged=OFF"' -f [string]$resolvedTarget.container
     $startInfo.WorkingDirectory = $script:ProjectRoot
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
@@ -1278,7 +1343,7 @@ function New-MegaDeskMainMigrationBackup {
     $size = (Get-Item -LiteralPath $destination -Force).Length
     $sha256 = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($size -le 0 -or $sha256 -notmatch '^[0-9a-f]{64}$') { throw 'Verificacao do backup MAIN falhou.' }
-    return [pscustomobject]@{ id = $id; createdAt = (Get-Date).ToUniversalTime().ToString('o'); database = 'megadesk_local'; sizeBytes = [int64]$size; sha256 = $sha256 }
+    return [pscustomobject]@{ id = $id; createdAt = (Get-Date).ToUniversalTime().ToString('o'); database = [string]$resolvedTarget.database; container = [string]$resolvedTarget.container; sizeBytes = [int64]$size; sha256 = $sha256 }
   } finally {
     if ($null -ne $stream) { $stream.Dispose() }
     if (Test-MegaDeskPhysicalPathExists -Path $temporary) { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
@@ -1289,17 +1354,20 @@ function New-MegaDeskMainMigrationBackup {
 function Invoke-MegaDeskCanonicalMainMigrationCommand {
   param(
     [Parameter(Mandatory = $true)][ValidateSet('VERIFY', 'APPLY')][string]$Mode,
-    [Parameter(Mandatory = $true)][string]$EnvironmentPath
+    [Parameter(Mandatory = $true)]$Target
   )
+  $allowDisposable = [string]$Target.mode -ceq 'DISPOSABLE'
+  $resolvedTarget = Assert-MegaDeskMainMigrationTarget -Target $Target -AllowDisposable:$allowDisposable
   $node = Get-Command node -ErrorAction SilentlyContinue
   if ($null -eq $node) { throw 'node.exe nao foi encontrado no PATH.' }
   $tsxCli = Join-Path $script:ProjectRoot 'node_modules\tsx\dist\cli.mjs'
   $migrationScript = Join-Path $script:ProjectRoot 'scripts\canonical-migrations.ts'
   if (-not (Test-Path -LiteralPath $tsxCli -PathType Leaf) -or -not (Test-Path -LiteralPath $migrationScript -PathType Leaf)) { throw 'Executor canonico de migrations indisponivel.' }
-  $command = if ($Mode -eq 'VERIFY') { 'verify-main-runtime' } else { 'apply-main' }
+  $command = if ($Mode -eq 'VERIFY') { if ([string]$resolvedTarget.mode -ceq 'PRODUCTION') { 'verify-main-runtime' } else { 'verify-main-target' } } else { 'apply-main' }
   $startInfo = New-Object System.Diagnostics.ProcessStartInfo
   $startInfo.FileName = $node.Source
-  $startInfo.Arguments = '--env-file="{0}" "{1}" "{2}" {3}' -f $EnvironmentPath, $tsxCli, $migrationScript, $command
+  $startInfo.Arguments = '"{0}" "{1}" {2}' -f $tsxCli, $migrationScript, $command
+  if ([string]$resolvedTarget.mode -ceq 'PRODUCTION') { $startInfo.Arguments = '--env-file="{0}" {1}' -f [string]$resolvedTarget.environmentPath, $startInfo.Arguments }
   $startInfo.WorkingDirectory = $script:ProjectRoot
   $startInfo.UseShellExecute = $false
   $startInfo.CreateNoWindow = $true
@@ -1307,6 +1375,14 @@ function Invoke-MegaDeskCanonicalMainMigrationCommand {
   $startInfo.RedirectStandardError = $true
   $startInfo.EnvironmentVariables.Remove('DATABASE_URL')
   $startInfo.EnvironmentVariables.Remove('MAIN_DATABASE_URL')
+  $startInfo.EnvironmentVariables.Remove('MEGADESK_DISPOSABLE_MIGRATION_TARGET_URL')
+  $startInfo.EnvironmentVariables.Remove('MEGADESK_DISPOSABLE_MIGRATION')
+  $startInfo.EnvironmentVariables.Remove('MEGADESK_MIGRATION_EXPECTED_DATABASE')
+  if ([string]$resolvedTarget.mode -ceq 'DISPOSABLE') {
+    $startInfo.EnvironmentVariables['MEGADESK_DISPOSABLE_MIGRATION_TARGET_URL'] = [string]$resolvedTarget.databaseUrl
+    $startInfo.EnvironmentVariables['MEGADESK_DISPOSABLE_MIGRATION'] = '1'
+    $startInfo.EnvironmentVariables['MEGADESK_MIGRATION_EXPECTED_DATABASE'] = [string]$resolvedTarget.database
+  }
   if ($Mode -eq 'APPLY') { $startInfo.EnvironmentVariables['ALLOW_MAIN_MIGRATION'] = '1' }
   $process = $null
   try {
@@ -1325,7 +1401,8 @@ function Invoke-MegaDeskCanonicalMainMigrationCommand {
 function Assert-MegaDeskRuntimeMainMigrationConfig {
   $runtimeConfigRoot = Resolve-MegaDeskRuntimeConfigRoot -RequireEnvFile
   $environmentPath = Join-Path $runtimeConfigRoot '.env.local'
-  Invoke-MegaDeskCanonicalMainMigrationCommand -Mode VERIFY -EnvironmentPath $environmentPath
+  $target = New-MegaDeskProductionMainMigrationTarget -EnvironmentPath $environmentPath
+  Invoke-MegaDeskCanonicalMainMigrationCommand -Mode VERIFY -Target $target
   return $environmentPath
 }
 
@@ -1354,27 +1431,52 @@ function Invoke-MegaDeskMainMigrationPipeline {
   param(
     [Parameter(Mandatory = $true)][string]$FromSha,
     [Parameter(Mandatory = $true)][string]$ToSha,
-    [string]$EnvironmentPath = ''
+    [string]$EnvironmentPath = '',
+    $Target = $null,
+    [switch]$DisposableRehearsal
   )
-  $plan = Get-MegaDeskPendingCanonicalMainMigrations -FromSha $FromSha -ToSha $ToSha
-  if ($plan.pending.Count -eq 0) { return [pscustomobject]@{ status = 'NONE'; backup = $null; migrations = @() } }
-  $resolvedEnvironmentPath = if ([string]::IsNullOrWhiteSpace($EnvironmentPath)) { Assert-MegaDeskRuntimeMainMigrationConfig } else { $EnvironmentPath }
-  $backup = New-MegaDeskMainMigrationBackup -EnvironmentPath $resolvedEnvironmentPath
-  $current = Get-MegaDeskState
-  if ($null -eq $current.operation -or [string]$current.operation.status -ne 'PREPARING') { throw 'Backup MAIN criado fora de uma preparacao valida; migrations recusadas.' }
-  Set-MegaDeskOperationMainMigrationBackup -Backup $backup | Out-Null
-  Invoke-MegaDeskCanonicalMainMigrationCommand -Mode APPLY -EnvironmentPath $resolvedEnvironmentPath
-  $after = Get-MegaDeskPendingCanonicalMainMigrations -FromSha $FromSha -ToSha $ToSha
+  if ($null -eq $Target) {
+    $plan = Get-MegaDeskPendingCanonicalMainMigrations -FromSha $FromSha -ToSha $ToSha
+    if ($plan.pending.Count -eq 0) { return [pscustomobject]@{ status = 'NONE'; backup = $null; migrations = @() } }
+    $resolvedEnvironmentPath = if ([string]::IsNullOrWhiteSpace($EnvironmentPath)) { Assert-MegaDeskRuntimeMainMigrationConfig } else { $EnvironmentPath }
+    $Target = New-MegaDeskProductionMainMigrationTarget -EnvironmentPath $resolvedEnvironmentPath
+  } else {
+    $allowDisposableForPlan = [string]$Target.mode -ceq 'DISPOSABLE'
+    $plan = Get-MegaDeskPendingCanonicalMainMigrations -FromSha $FromSha -ToSha $ToSha -Target $Target -AllowDisposable:$allowDisposableForPlan
+    if ($plan.pending.Count -eq 0) { return [pscustomobject]@{ status = 'NONE'; backup = $null; migrations = @() } }
+  }
+  $allowDisposable = [string]$Target.mode -ceq 'DISPOSABLE'
+  $resolvedTarget = Assert-MegaDeskMainMigrationTarget -Target $Target -AllowDisposable:$allowDisposable
+  if ([string]$resolvedTarget.mode -ceq 'DISPOSABLE' -and -not $DisposableRehearsal) { throw 'Pipeline descartavel exige opt-in de rehearsal explicito.' }
+  if ([string]$resolvedTarget.mode -ceq 'PRODUCTION' -and $DisposableRehearsal) { throw 'Rehearsal descartavel nao pode usar identidade MAIN.' }
+  if ([string]$resolvedTarget.mode -ceq 'PRODUCTION' -and [string]::IsNullOrWhiteSpace([string]$resolvedTarget.environmentPath)) { throw 'Pipeline MAIN exige configuracao runtime verificada.' }
+  $backup = New-MegaDeskMainMigrationBackup -Target $resolvedTarget
+  if ([string]$resolvedTarget.mode -ceq 'PRODUCTION') {
+    $current = Get-MegaDeskState
+    if ($null -eq $current.operation -or [string]$current.operation.status -ne 'PREPARING') { throw 'Backup MAIN criado fora de uma preparacao valida; migrations recusadas.' }
+    Set-MegaDeskOperationMainMigrationBackup -Backup $backup | Out-Null
+  }
+  Invoke-MegaDeskCanonicalMainMigrationCommand -Mode APPLY -Target $resolvedTarget
+  $after = Get-MegaDeskPendingCanonicalMainMigrations -FromSha $FromSha -ToSha $ToSha -Target $resolvedTarget -AllowDisposable:$allowDisposable
   if ($after.pending.Count -ne 0) { throw 'Executor MAIN concluiu sem eliminar todas as migrations pendentes.' }
-  return [pscustomobject]@{ status = 'APPLIED_MATCH'; backup = $backup; migrations = $plan.pending }
+  return [pscustomobject]@{ status = if ($allowDisposable) { 'READY' } else { 'APPLIED_MATCH' }; backup = $backup; migrations = $plan.pending; target = $resolvedTarget }
+}
+
+function Invoke-MegaDeskDisposableMigrationRehearsal {
+  param([Parameter(Mandatory = $true)][string]$FromSha, [Parameter(Mandatory = $true)][string]$ToSha, [Parameter(Mandatory = $true)]$Target)
+  $resolvedTarget = Assert-MegaDeskMainMigrationTarget -Target $Target -AllowDisposable
+  if ([string]$resolvedTarget.mode -cne 'DISPOSABLE') { throw 'Rehearsal exige target descartavel.' }
+  return Invoke-MegaDeskMainMigrationPipeline -FromSha $FromSha -ToSha $ToSha -Target $resolvedTarget -DisposableRehearsal
 }
 
 function Test-MegaDeskKnownMainMigrationPhysicalStructure {
-  param([Parameter(Mandatory = $true)]$Migration)
+  param([Parameter(Mandatory = $true)]$Migration, $Target = $null, [switch]$AllowDisposable)
+  if ($null -eq $Target) { $Target = New-MegaDeskProductionMainMigrationTarget }
+  $resolvedTarget = Assert-MegaDeskMainMigrationTarget -Target $Target -AllowDisposable:$AllowDisposable
   if ([string]$Migration.tag -ne '0018_clean_union_jack') { return $true }
 
   $sql = "SELECT column_name, column_type, is_nullable FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'megadesk_conversation_events' AND column_name IN ('anchor_message_id','timeline_anchor_kind') ORDER BY ordinal_position; SELECT index_name, non_unique, seq_in_index, column_name FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'megadesk_conversation_events' AND index_name = 'idx_mce_tenant_conversation_anchor' ORDER BY seq_in_index;"
-  $rows = @(Invoke-MegaDeskMainMigrationReadOnlyQuery -Sql $sql)
+  $rows = @(Invoke-MegaDeskMainMigrationReadOnlyQuery -Sql $sql -Target $resolvedTarget -AllowDisposable:$AllowDisposable)
   $tab = [string][char]9
   $expected = @(
     ('anchor_message_id' + $tab + 'varchar(100)' + $tab + 'YES'),
@@ -1387,12 +1489,26 @@ function Test-MegaDeskKnownMainMigrationPhysicalStructure {
 }
 
 function Get-MegaDeskMigrationDeltaState {
-  param([Parameter(Mandatory = $true)][string]$FromSha, [Parameter(Mandatory = $true)][string]$ToSha)
+  param(
+    [Parameter(Mandatory = $true)][string]$FromSha,
+    [Parameter(Mandatory = $true)][string]$ToSha,
+    $Target = $null,
+    [switch]$AllowDisposable
+  )
   try {
+    if ($null -eq $Target) { $Target = New-MegaDeskProductionMainMigrationTarget }
+    $resolvedTarget = Assert-MegaDeskMainMigrationTarget -Target $Target -AllowDisposable:$AllowDisposable
     $changes = @(Get-MegaDeskMigrationChanges -FromSha $FromSha -ToSha $ToSha | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ($changes.Count -eq 0) { return [pscustomobject]@{ status = 'NONE'; migrations = @(); message = 'Nenhuma alteracao de migration.' } }
 
-    $mainMigrations = @($changes | Where-Object { $_ -match '^drizzle/main-migrations/[0-9]{4}_[A-Za-z0-9_]+\.sql$' } | Sort-Object -Unique)
+    # Get-MegaDeskMigrationChanges is intentionally scoped to the database
+    # graph. Keep this filter defensive for callers and mocks: ordinary release
+    # code must not be mistaken for migration content, while every drizzle path
+    # remains subject to the canonical rules below.
+    $databaseChanges = @($changes | Where-Object { $_ -match '^drizzle/' })
+    if ($databaseChanges.Count -eq 0) { return [pscustomobject]@{ status = 'NONE'; migrations = @(); message = 'Nenhuma alteracao no grafo canonico de migrations.' } }
+
+    $mainMigrations = @($databaseChanges | Where-Object { $_ -match '^drizzle/main-migrations/[0-9]{4}_[A-Za-z0-9_]+\.sql$' } | Sort-Object -Unique)
     if ($mainMigrations.Count -eq 0) {
       return [pscustomobject]@{ status = 'DIVERGENT'; migrations = @(); message = 'Delta de banco nao contem migration MAIN nova verificavel.'; classification = 'DIVERGENT' }
     }
@@ -1405,26 +1521,10 @@ function Get-MegaDeskMigrationDeltaState {
     if ($expectedNewMigrationPaths.Count -gt 0 -and (($mainMigrations -join "`n") -cne ($expectedNewMigrationPaths -join "`n"))) {
       return [pscustomobject]@{ status = 'DIVERGENT'; migrations = @(); message = 'Journal candidato e arquivos SQL novos divergem.'; classification = 'DIVERGENT' }
     }
-    # A canonical migration validator change is permitted when:
-    # 1. An accompanying historical snapshot repair is independently proven safe, OR
-    # 2. It accompanies verified new canonical MAIN migrations (with no divergent historical repair).
-    $hasSingleCanonicalMigrationsChange = @($changes | Where-Object { $_ -ceq 'server/_core/canonical-migrations.ts' }).Count -eq 1
-    $isSafeMetadataRepairCompanion =
-      [string]$historicalRepair.status -eq 'SAFE_METADATA_ONLY_REPAIR' -and
-      $hasSingleCanonicalMigrationsChange
-    $isVerifiedNewMigrationCompanion =
-      $hasSingleCanonicalMigrationsChange -and
-      $mainMigrations.Count -gt 0 -and
-      $expectedNewMigrationPaths.Count -gt 0 -and
-      (($mainMigrations -join "`n") -ceq ($expectedNewMigrationPaths -join "`n")) -and
-      [string]$historicalRepair.status -in @('NONE', 'SAFE_METADATA_ONLY_REPAIR')
-    $isAllowedCanonicalMigrationsCompanion = $isSafeMetadataRepairCompanion -or $isVerifiedNewMigrationCompanion
-
-    $unsupportedChanges = @($changes | Where-Object {
+    $unsupportedChanges = @($databaseChanges | Where-Object {
       $_ -notmatch '^drizzle/main-migrations/[0-9]{4}_[A-Za-z0-9_]+\.sql$' -and
       $_ -notmatch '^drizzle/main-migrations/meta/(?:_journal|[0-9]{4}_snapshot)\.json$' -and
-      $_ -ne 'drizzle/schema.ts' -and
-      (-not ($isAllowedCanonicalMigrationsCompanion -and $_ -ceq 'server/_core/canonical-migrations.ts'))
+      $_ -ne 'drizzle/schema.ts'
     })
     if ($unsupportedChanges.Count -ne 0) {
       return [pscustomobject]@{ status = 'DIVERGENT'; migrations = @(); message = 'Delta de banco nao representa exclusivamente migrations MAIN canonicas verificaveis.'; classification = 'DIVERGENT' }
@@ -1436,15 +1536,15 @@ function Get-MegaDeskMigrationDeltaState {
     }
 
     $identities = @($mainMigrations | ForEach-Object { Get-MegaDeskMainMigrationIdentity -RelativePath $_ })
-    $journal = Get-MegaDeskAppliedMainMigrationJournal
-    if ([string]$journal.database -ne 'megadesk_local') {
+    $journal = Get-MegaDeskAppliedMainMigrationJournal -Target $resolvedTarget -AllowDisposable:$AllowDisposable
+    if ([string]$journal.database -cne [string]$resolvedTarget.database) {
       return [pscustomobject]@{ status = 'DIVERGENT'; migrations = $identities; message = 'Identidade do banco MAIN divergiu.'; classification = 'DIVERGENT' }
     }
     $pending = @($identities | Where-Object { $journal.hashes -notcontains $_.sha256 })
     if ($pending.Count -ne 0) {
       return [pscustomobject]@{ status = 'PENDING'; migrations = $identities; message = ('Migration MAIN sem hash fisico correspondente: ' + (($pending | ForEach-Object { $_.tag }) -join ', ')); classification = [string]$historicalRepair.status }
     }
-    $invalidStructure = @($identities | Where-Object { -not (Test-MegaDeskKnownMainMigrationPhysicalStructure -Migration $_) })
+    $invalidStructure = @($identities | Where-Object { -not (Test-MegaDeskKnownMainMigrationPhysicalStructure -Migration $_ -Target $resolvedTarget -AllowDisposable:$AllowDisposable) })
     if ($invalidStructure.Count -ne 0) {
       return [pscustomobject]@{ status = 'DIVERGENT'; migrations = $identities; message = ('Estrutura fisica divergente para: ' + (($invalidStructure | ForEach-Object { $_.tag }) -join ', ')); classification = 'DIVERGENT' }
     }
@@ -3693,7 +3793,7 @@ Export-ModuleMember -Function @(
   'Assert-MegaDeskArtifacts', 'Assert-DockerAndMySql', 'Assert-CloudflaredConfig',
   'Start-MegaDeskNode', 'Start-MegaDeskTunnel', 'Wait-MegaDeskLocal', 'Write-MegaDeskNodeExitTelemetry',
   'Wait-MegaDeskPublicEndpoints', 'Undo-MegaDeskInvocation', 'Stop-MegaDeskManagedProcess',
-  'Backup-MegaDeskDist', 'Restore-MegaDeskDist', 'Invoke-MegaDeskUpdaterV2', 'Invoke-MegaDeskPreparedReleasePublish', 'Invoke-MegaDeskBootstrapZero',
+  'Backup-MegaDeskDist', 'Restore-MegaDeskDist', 'Invoke-MegaDeskUpdaterV2', 'Invoke-MegaDeskPreparedReleasePublish', 'Invoke-MegaDeskBootstrapZero', 'New-MegaDeskDisposableMainMigrationTarget', 'Invoke-MegaDeskDisposableMigrationRehearsal',
   'Invoke-MegaDeskBootstrapFailedRecovery',
   'Resolve-MegaDeskRuntimeConfigRoot', 'Assert-MegaDeskCandidateLaunchReadiness', 'Save-MegaDeskRuntimeConfig', 'Get-MegaDeskRuntimeConfigFile'
 )
