@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { PRODUCT_MEDIA_MAX_BYTES, ProductMediaError, processProductImage, productMediaRoot, resolveMediaPath } from "./product-media";
 import { ProductMediaService } from "./product-media";
+
+const fixtureMediaRoot = path.join(tmpdir(), `megadesk-product-media-fixture-${process.pid}`);
 
 async function fixture(format: "jpeg"|"png"|"webp", width=40, height=30) {
   return sharp({ create:{ width,height,channels:3,background:{r:20,g:100,b:180} } })[format]().toBuffer();
@@ -30,13 +34,13 @@ describe("private product media processing", () => {
     expect(meta.orientation).toBeUndefined(); expect(meta.comments).toBeUndefined(); expect([result.width,result.height]).toEqual([30,60]); expect([thumb.width,thumb.height]).toEqual([320,320]);
   });
   it("accepts only opaque registered keys inside the configured root", () => {
-    const root="C:\\safe-media"; const id="123e4567-e89b-42d3-a456-426614174000";
+    const root=fixtureMediaRoot; const id="123e4567-e89b-42d3-a456-426614174000";
     expect(resolveMediaPath(root,`objects/12/${id}.webp`)).toContain(id);
     expect(()=>resolveMediaPath(root,"../../Windows/system.ini")).toThrow(ProductMediaError);
   });
   it("fails closed without an explicitly provisioned test directory", () => {
     const previousRoot=process.env.MEGADESK_MEDIA_ROOT; const previousRun=process.env.MEGADESK_MEDIA_TEST_RUN_ID;
-    const invalidRoot=`C:\\missing-media-test-run-${process.pid}`;
+    const invalidRoot=path.join(tmpdir(), `megadesk-missing-media-test-run-${process.pid}`);
     delete process.env.MEGADESK_MEDIA_ROOT; delete process.env.MEGADESK_MEDIA_TEST_RUN_ID;
     expect(()=>productMediaRoot()).toThrow(ProductMediaError);
     expect(existsSync(invalidRoot)).toBe(false);
@@ -109,14 +113,14 @@ function controlledReconcile(state:ReconcileState, removeFile?:(file:string)=>Pr
   };
   const remove=removeFile??(async(file:string)=>{state.files.delete(file);});
   const service=Object.create(ProductMediaService.prototype) as ProductMediaService;
-  Object.assign(service,{pool,root:"C:\\media",removeFile:remove});
+  Object.assign(service,{pool,root:fixtureMediaRoot,removeFile:remove});
   const reactivate=async()=>{await acquire();try{if(state.state!=="pending_delete")throw new ProductMediaError("CONFLICT","claim won");state.state="active";state.primaryMediaId=7;}finally{release();}};
   return{service,reactivate};
 }
 
 describe("product media reconciliation ownership",()=>{
-  const original="C:\\media\\objects\\77\\77777777-7777-4777-8777-777777777777.webp";
-  const thumbnail="C:\\media\\thumbnails\\77\\77777777-7777-4777-8777-777777777777.webp";
+  const original=path.join(fixtureMediaRoot,"objects","77","77777777-7777-4777-8777-777777777777.webp");
+  const thumbnail=path.join(fixtureMediaRoot,"thumbnails","77","77777777-7777-4777-8777-777777777777.webp");
 
   it("serializes two reconcilers so only one deletes the claimed media",async()=>{
     const state:ReconcileState={state:"pending_delete",primaryMediaId:null,files:new Set([original,thumbnail])};
@@ -198,7 +202,7 @@ describe("product media deleteMedia & remove physical lifecycle", () => {
     const service = Object.create(ProductMediaService.prototype) as ProductMediaService;
     Object.assign(service, {
       pool: mockPool,
-      root: "C:\\safe-media",
+      root: fixtureMediaRoot,
       removeFile: async (file: string) => {
         deletedFiles.push(file);
       },
@@ -262,7 +266,7 @@ describe("product media deleteMedia & remove physical lifecycle", () => {
     const service = Object.create(ProductMediaService.prototype) as ProductMediaService;
     Object.assign(service, {
       pool: mockPool,
-      root: "C:\\safe-media",
+      root: fixtureMediaRoot,
       removeFile: async (file: string) => {
         deletedFiles.push(file);
       },
@@ -313,7 +317,7 @@ describe("product media deleteMedia & remove physical lifecycle", () => {
     const service = Object.create(ProductMediaService.prototype) as ProductMediaService;
     Object.assign(service, {
       pool: mockPool,
-      root: "C:\\safe-media",
+      root: fixtureMediaRoot,
       removeFile: async () => {
         throw new Error("EPERM: operation not permitted (file locked by antivirus/process)");
       },
@@ -364,7 +368,7 @@ describe("product media deleteMedia & remove physical lifecycle", () => {
     const service = Object.create(ProductMediaService.prototype) as ProductMediaService;
     Object.assign(service, {
       pool: mockPool,
-      root: "C:\\safe-media",
+      root: fixtureMediaRoot,
       removeFile: async (f: string) => { deletedFiles.push(f); },
     });
 

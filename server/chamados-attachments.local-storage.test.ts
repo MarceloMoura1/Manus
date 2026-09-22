@@ -125,10 +125,17 @@ describe.sequential("local ticket attachment storage", () => {
   it("resolves the same persistent media root used by the runtime outside immutable releases", () => {
     const previous = { nodeEnv: process.env.NODE_ENV, configured: process.env.MEGADESK_MEDIA_ROOT, local: process.env.LOCALAPPDATA };
     process.env.NODE_ENV = "production";
-    delete process.env.MEGADESK_MEDIA_ROOT;
-    process.env.LOCALAPPDATA = "C:\\Users\\Synthetic\\AppData\\Local";
     try {
-      expect(productMediaRoot()).toBe(path.resolve("C:\\Users\\Synthetic\\AppData\\Local", "MegaDesk", "media"));
+      if (process.platform === "win32") {
+        delete process.env.MEGADESK_MEDIA_ROOT;
+        process.env.LOCALAPPDATA = "C:\\Users\\Synthetic\\AppData\\Local";
+        expect(productMediaRoot()).toBe(path.resolve(process.env.LOCALAPPDATA, "MegaDesk", "media"));
+      } else {
+        const configuredRoot = path.join(tmpdir(), `megadesk-runtime-media-${process.pid}`);
+        process.env.MEGADESK_MEDIA_ROOT = configuredRoot;
+        delete process.env.LOCALAPPDATA;
+        expect(productMediaRoot()).toBe(path.resolve(configuredRoot));
+      }
       expect(productMediaRoot()).not.toContain(`${path.sep}releases${path.sep}`);
     } finally {
       if (previous.nodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previous.nodeEnv;
