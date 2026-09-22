@@ -5,7 +5,7 @@ vi.mock("../db", () => ({ getPool: () => ({ execute: webhookMocks.poolExecute, g
 vi.mock("./config", () => ({ getEvolutionWebhookSecret: () => "webhook-secret" }));
 vi.mock("./session-store", () => ({ upsertSession: webhookMocks.upsertSession, instanceNameFor: (clientId: string) => `megadesk-${clientId}` }));
 
-import { canonicalEvolutionReceiptStatus, evolutionPhoneCandidates, extractEvolutionProviderName, extractEvolutionQuotedExternalMessageId, handleEvolutionWebhook, normalizeEvolutionEvent, parseEvolutionIncomingMessage, parseEvolutionMessageStatusUpdates, saveIncomingMessage, selectInboundContactName } from "./webhook";
+import { canonicalEvolutionReceiptStatus, evolutionPhoneCandidates, extractEvolutionProviderName, extractEvolutionQuotedExternalMessageId, handleEvolutionWebhook, normalizeEvolutionEvent, parseEvolutionIncomingMessage, parseEvolutionMessageStatusUpdates, prepareInboundConversationMedia, saveIncomingMessage, selectInboundContactName } from "./webhook";
 
 function responseDouble() {
   const response: any = { statusCode: 200, body: undefined };
@@ -95,6 +95,17 @@ describe("Evolution incoming content", () => {
     })).toMatchObject({ payload: { mediaData: "data:image/jpeg;base64,AQ==" } });
   });
 
+  it("converts inbound media into V2 metadata before canonical persistence", async () => {
+    const reference = { version: 2 as const, storage: "local" as const, storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin", mimeType: "image/png", byteSize: 1, sha256: "a".repeat(64) };
+    const write = vi.fn().mockResolvedValue(reference);
+    const prepared = await prepareInboundConversationMedia("tenant-a", {
+      type: "image", mediaData: "data:image/png;base64,QQ==", mimeType: "image/png", fileName: "photo.png",
+    }, write);
+    expect(write).toHaveBeenCalledWith(expect.objectContaining({ clientId: "tenant-a", bytes: Buffer.from("A"), mimeType: "image/png" }));
+    expect(prepared.reference).toEqual(reference);
+    expect(JSON.stringify(prepared)).not.toMatch(/mediaData|base64|dataUrl|data:.*;base64/i);
+  });
+
   it("converte contato em cartão acionável", () => {
     expect(parseEvolutionIncomingMessage({
       message: { contactMessage: { displayName: "Gerente", vcard: "BEGIN:VCARD\nTEL:+5541999999999\nEND:VCARD" } },
@@ -120,6 +131,33 @@ describe("Evolution incoming content", () => {
     expect(extractEvolutionQuotedExternalMessageId({
       message: { extendedTextMessage: { text: "Resposta", contextInfo: { stanzaId: "original-raw" } } },
     })).toBe("original-raw");
+  });
+});
+
+describe("Evolution inbound media persistence", () => {
+  it("compensates a newly written V2 object when canonical persistence fails", async () => {
+    const reference = { version: 2 as const, storage: "local" as const, storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin", mimeType: "image/png", byteSize: 1, sha256: "a".repeat(64) };
+    const persistenceFailure = new Error("canonical persistence failed");
+    const connection = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined), commit: vi.fn().mockResolvedValue(undefined), rollback: vi.fn().mockResolvedValue(undefined), release: vi.fn(),
+      execute: vi.fn(async (sql: string) => {
+        if (sql.includes("GET_LOCK")) return [[{ acquired: 1 }]];
+        if (sql.includes("INSERT INTO megadesk_domain_conversations_messages")) throw persistenceFailure;
+        if (sql.includes("external_message_id")) return [[]];
+        if (sql.includes("SELECT contact_id")) return [[{ contact_id: "contact-a" }]];
+        if (sql.includes("FROM megadesk_domain_conversations")) return [[{ conversation_id: "conv-a", messages_json: "[]", customer_name: "Cliente" }]];
+        return [{ affectedRows: 1 }];
+      }),
+    };
+    webhookMocks.getConnection.mockResolvedValue(connection);
+    const write = vi.fn().mockResolvedValue(reference);
+    const remove = vi.fn().mockResolvedValue(undefined);
+
+    await expect(saveIncomingMessage("tenant-a", "instance-a", "external-media-a", ["5541999999999"], "Known", "[Imagem]", new Date(),
+      { type: "image", mediaData: "data:image/png;base64,QQ==", mimeType: "image/png" }, {}, { write, remove }))
+      .rejects.toBe(persistenceFailure);
+    expect(remove).toHaveBeenCalledWith({ clientId: "tenant-a", reference });
+    expect(connection.rollback).toHaveBeenCalledOnce();
   });
 });
 

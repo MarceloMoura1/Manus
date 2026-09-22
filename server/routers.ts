@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { createHash, randomUUID } from "node:crypto";
 import { withPublicCodeRetry } from "./conversation-public-code";
-import { executeOutboundAttempt } from "./conversation-outbound";
+import { executeOutboundAttempt, OutboundPendingPersistenceError, sendOutboundConversationMediaFromPrivateStorage } from "./conversation-outbound";
 import { canonicalMessageMirror } from "./conversation-message-store";
+import { decodeConversationMediaDataUrl, removeConversationMedia, writeConversationMedia } from "./conversation-media-storage";
 
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure, megadeskProcedure } from "./_core/trpc";
@@ -946,15 +947,28 @@ export const appRouter = router({
       const replyReference = await resolveOutboundReplyReference({ clientId: ctx.tenantId, conversationId: input.conversationId,
         integrationId: outboundConversation.integrationId, replyToMessageId: input.replyToMessageId });
 
-      const { parseMediaDataUrl } = await import("./evolution/media-data");
-      const media = parseMediaDataUrl(input.dataUrl, input.mimeType);
+      const media = decodeConversationMediaDataUrl(input.dataUrl, input.mimeType);
       if (!media) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Anexo inválido." });
       }
-      const sizeBytes = Math.floor(media.base64.length * 3 / 4);
       const limits = { image: 8_000_000, sticker: 8_000_000, audio: 12_000_000, video: 20_000_000, document: 12_000_000 };
-      if (sizeBytes > limits[input.kind]) {
+      if (media.bytes.length > limits[input.kind]) {
         throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "Anexo excede o limite permitido." });
+      }
+
+      let mediaReference;
+      try {
+        mediaReference = await writeConversationMedia({
+          clientId: ctx.tenantId,
+          bytes: media.bytes,
+          mimeType: media.mimeType,
+          fileName: input.fileName,
+          // A UUID attempt is stable across a UI retry; the atomic writer only
+          // reuses the object when its contents are identical.
+          objectId: input.clientAttemptId,
+        });
+      } catch {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Não foi possível preparar o anexo com segurança." });
       }
 
       const labels = { image: "[Imagem]", video: "[Vídeo]", audio: "[Áudio]", document: "[Documento]", sticker: "[Figurinha]" };
@@ -966,9 +980,9 @@ export const appRouter = router({
         from: "agent" as const,
         type: input.kind,
         text: input.caption?.trim() || labels[input.kind],
-        mediaData: input.dataUrl,
-        mimeType: input.mimeType,
-        fileName: input.fileName || null,
+        mimeType: mediaReference.mimeType,
+        fileName: mediaReference.fileName || null,
+        byteSize: mediaReference.byteSize,
         time,
         timestamp: sentAt.toISOString(),
         agentName: operatorName,
@@ -985,21 +999,26 @@ export const appRouter = router({
           senderUserId: ctx.operationalUserId, senderNameSnapshot: operatorName, text: summary,
           timestamp: sentAt, legacyMessage: outgoingMessage,
           replyToMessageId: input.replyToMessageId ?? null,
-          mediaReference: { mediaData: input.dataUrl, mimeType: input.mimeType, fileName: input.fileName ?? null } },
-          () => evoSendAttachment({ instanceName: instanceNameFor(ctx.tenantId),
-            number: resolveOutboundRecipient(outboundConversation), kind: input.kind, dataUrl: input.dataUrl,
-            mimeType: input.mimeType, fileName: input.fileName, caption: input.caption, quoted: replyReference }));
+          mediaReference },
+          () => sendOutboundConversationMediaFromPrivateStorage({
+            clientId: ctx.tenantId, mediaReference, instanceName: instanceNameFor(ctx.tenantId),
+            number: resolveOutboundRecipient(outboundConversation), kind: input.kind,
+            caption: input.caption, quoted: replyReference,
+          }, { send: evoSendAttachment }));
         if (conversation) {
           conversation.messages.push(canonicalMessageMirror({ messageId: sent.messageId, externalMessageId: sent.externalMessageId,
             clientAttemptId: input.clientAttemptId, conversationId: input.conversationId, clientId: ctx.tenantId,
             provider: "evolution", integrationId: outboundConversation.integrationId, direction: "outbound", messageType: input.kind,
             sender: "agent", senderUserId: ctx.operationalUserId, senderNameSnapshot: operatorName, text: summary,
             status: sent.status, timestamp: sentAt, legacyMessage: outgoingMessage, replyToMessageId: input.replyToMessageId ?? null,
-            mediaReference: { mediaData: input.dataUrl, mimeType: input.mimeType, fileName: input.fileName ?? null } }) as Conversation["messages"][number]);
+            mediaReference }) as Conversation["messages"][number]);
           conversation.lastMessage = summary;
           conversation.time = time;
         }
       } catch (error) {
+        if (error instanceof OutboundPendingPersistenceError) {
+          await removeConversationMedia({ clientId: ctx.tenantId, reference: mediaReference }).catch(() => undefined);
+        }
         throw new TRPCError({ code: "BAD_GATEWAY", message: safeOutboundProviderMessage(error) });
       }
       return { ok: true, conversationId: input.conversationId, kind: input.kind };

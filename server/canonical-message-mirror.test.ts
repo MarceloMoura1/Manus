@@ -68,7 +68,7 @@ describe("canonical message mirror through global sync", () => {
       messageType: "image", sender: "agent", text: "Foto", status: "pending",
       timestamp: new Date("2026-09-02T15:01:00.000Z"), replyToMessageId: "original-media-1",
       legacyMessage: { from: "agent", type: "image", text: "Foto", time: "12:01", mediaData: heavy, mimeType: "image/png" },
-      mediaReference: { mediaData: heavy, mimeType: "image/png", fileName: "foto.png" },
+      mediaReference: { version: 2, storage: "local", storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin", mimeType: "image/png", fileName: "foto.png", byteSize: 1, sha256: "a".repeat(64) },
       providerMessageReference: { key: { id: "provider-media-1" }, message: { imageMessage: { base64: heavy } } },
     };
     const cache = canonicalMessageMirror({ ...write, externalMessageId: "provider-media-1", status: "sent" });
@@ -76,12 +76,12 @@ describe("canonical message mirror through global sync", () => {
 
     expect(cache).toMatchObject({ id: "msg-media-1", externalMessageId: "provider-media-1",
       clientAttemptId: "attempt-media-1", replyToMessageId: "original-media-1",
-      mediaReference: { storage: "normalized", messageId: "msg-media-1" } });
+      mediaReference: { storage: "private", messageId: "msg-media-1" } });
     expect(JSON.stringify(cache)).not.toContain("A".repeat(100));
     expect(state.messages()).toEqual(storedBeforeSync);
     expect(state.messages()).toHaveLength(1);
     expect(state.messages()[0]).toMatchObject({ id: "msg-media-1", replyToMessageId: "original-media-1",
-      mediaReference: { storage: "normalized", messageId: "msg-media-1" } });
+      mediaReference: { storage: "private", messageId: "msg-media-1" } });
     expect(JSON.stringify(state.messages())).not.toContain("A".repeat(100));
   });
 });

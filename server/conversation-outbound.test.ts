@@ -1,5 +1,10 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { executeOutboundAttempt, OutboundAttemptAlreadyRecordedError, OutboundReconciliationError } from "./conversation-outbound";
+import { executeOutboundAttempt, OutboundAttemptAlreadyRecordedError, OutboundPendingPersistenceError, OutboundReconciliationError, sendOutboundConversationMediaFromPrivateStorage } from "./conversation-outbound";
+import { decodeConversationMediaDataUrl, readConversationMedia, writeConversationMedia } from "./conversation-media-storage";
 
 const input = {
   messageId: "local-1", clientAttemptId: "attempt-1", conversationId: "conv-1", clientId: "tenant-a", provider: "evolution",
@@ -31,6 +36,10 @@ function pool(options: { insertError?: Error; reconciliationError?: Error; exist
   return { value: { getConnection: vi.fn(async () => connection), execute } as any, connection, execute };
 }
 
+async function temporaryRoot() {
+  return mkdtemp(path.join(os.tmpdir(), "megadesk-conversation-outbound-"));
+}
+
 describe("outbound tracked workflow", () => {
   it("commits pending before provider and reconciles the same row", async () => {
     const db = pool();
@@ -45,7 +54,7 @@ describe("outbound tracked workflow", () => {
   it("never calls provider when initial persistence fails", async () => {
     const db = pool({ insertError: new Error("database unavailable") });
     const send = vi.fn();
-    await expect(executeOutboundAttempt(db.value, input, send)).rejects.toThrow("database unavailable");
+    await expect(executeOutboundAttempt(db.value, input, send)).rejects.toBeInstanceOf(OutboundPendingPersistenceError);
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -82,5 +91,69 @@ describe("outbound tracked workflow", () => {
     await executeOutboundAttempt(db.value, { ...input, replyToMessageId: "original-1" }, async () => providerReference);
     const insert = db.connection.execute.mock.calls.find(call => String(call[0]).includes("INSERT INTO megadesk_domain_conversations_messages"));
     expect(insert?.[1][7]).toBe("original-1");
+  });
+
+  it("persists an outbound pending media row with V2 metadata only", async () => {
+    const db = pool();
+    const mediaReference = { version: 2 as const, storage: "local" as const,
+      storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin",
+      mimeType: "application/pdf", fileName: "proposal.pdf", byteSize: 3, sha256: "a".repeat(64) };
+    await executeOutboundAttempt(db.value, { ...input, messageType: "document", mediaReference }, async () => providerReference);
+    const insert = db.connection.execute.mock.calls.find(call => String(call[0]).includes("INSERT INTO megadesk_domain_conversations_messages"));
+    const serialized = String(insert?.[1][13]);
+    expect(JSON.parse(serialized)).toEqual(mediaReference);
+    expect(serialized).not.toMatch(/mediaData|base64|dataUrl|data:.*;base64/i);
+  });
+
+  it("uses the router's private-storage provider path after pending persistence and retains media when the provider fails", async () => {
+    const root = await temporaryRoot();
+    const clientAttemptId = randomUUID();
+    const bytes = Buffer.from("private attachment fixture");
+    const dataUrl = `data:application/pdf;base64,${bytes.toString("base64")}`;
+    try {
+      const decoded = decodeConversationMediaDataUrl(dataUrl, "application/pdf");
+      expect(decoded).toMatchObject({ bytes, mimeType: "application/pdf" });
+      const mediaReference = await writeConversationMedia({ clientId: "tenant-a", bytes: decoded!.bytes,
+        mimeType: decoded!.mimeType, fileName: "proposal.pdf", objectId: clientAttemptId, root });
+      const db = pool();
+      const privateRead = vi.fn((request: any) =>
+        readConversationMedia({ ...request, root }));
+      const provider = vi.fn(async (providerInput: any) => {
+        expect(db.connection.commit).toHaveBeenCalledOnce();
+        return providerReference;
+      });
+
+      await executeOutboundAttempt(db.value, {
+        ...input, messageId: "local-media", clientAttemptId, messageType: "document", mediaReference,
+        legacyMessage: { type: "document", fileName: "proposal.pdf", byteSize: bytes.length },
+      }, () => sendOutboundConversationMediaFromPrivateStorage({
+        clientId: "tenant-a", mediaReference, instanceName: "megadesk-tenant-a", number: "5541999999999",
+        kind: "document", caption: "Proposal",
+      }, { read: privateRead, send: provider }));
+
+      const insert = db.connection.execute.mock.calls.find(call => String(call[0]).includes("INSERT INTO megadesk_domain_conversations_messages"));
+      const persistedReference = String(insert?.[1][13]);
+      expect(JSON.parse(persistedReference)).toEqual(mediaReference);
+      expect(persistedReference).not.toMatch(/mediaData|base64|dataUrl|data:.*;base64/i);
+      expect(mediaReference.storageKey).toMatch(/^tenants\/tenant-a\/conversation-media\//);
+      expect(path.isAbsolute(mediaReference.storageKey)).toBe(false);
+      expect(privateRead).toHaveBeenCalledWith({ clientId: "tenant-a", reference: mediaReference });
+      expect(provider).toHaveBeenCalledWith(expect.objectContaining({ dataUrl, mimeType: "application/pdf", fileName: "proposal.pdf" }));
+
+      const failed = pool();
+      await expect(executeOutboundAttempt(failed.value, {
+        ...input, messageId: "local-media-failed", clientAttemptId: randomUUID(), messageType: "document", mediaReference,
+        legacyMessage: { type: "document", fileName: "proposal.pdf", byteSize: bytes.length },
+      }, () => sendOutboundConversationMediaFromPrivateStorage({
+        clientId: "tenant-a", mediaReference, instanceName: "megadesk-tenant-a", number: "5541999999999", kind: "document",
+      }, {
+        read: request => readConversationMedia({ ...request, root }),
+        send: async () => { throw new Error("provider unavailable"); },
+      }))).rejects.toThrow("provider unavailable");
+      await expect(readConversationMedia({ clientId: "tenant-a", reference: mediaReference, root }))
+        .resolves.toMatchObject({ bytes });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

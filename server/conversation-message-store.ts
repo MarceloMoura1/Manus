@@ -1,6 +1,7 @@
 import type { PoolConnection } from "mysql2/promise";
 import { isDuplicateConstraint } from "./conversation-public-code";
 import { normalizeProviderMessageReference, type ProviderMessageReference } from "./conversation-provider-reference";
+import { containsConversationMediaBinary } from "./conversation-media-storage";
 
 export type CanonicalMessageWrite = {
   messageId: string;
@@ -25,12 +26,23 @@ export type CanonicalMessageWrite = {
   incrementUnread?: boolean;
 };
 
+function stripTransientMediaFields(value: unknown, depth = 0): unknown {
+  if (depth > 16 || value == null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(item => stripTransientMediaFields(item, depth + 1));
+  const safe: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (key === "mediaData" || key === "base64" || key === "dataUrl") continue;
+    safe[key] = stripTransientMediaFields(nested, depth + 1);
+  }
+  return safe;
+}
+
 export function lightweightLegacyMessage(input: CanonicalMessageWrite): Record<string, unknown> {
   if (input.mediaReference == null) return input.legacyMessage;
-  const { mediaData: _mediaData, base64: _base64, dataUrl: _dataUrl, ...metadata } = input.legacyMessage as any;
+  const metadata = stripTransientMediaFields(input.legacyMessage) as Record<string, unknown>;
   return {
     ...metadata,
-    mediaReference: { storage: "normalized", messageId: input.messageId },
+    mediaReference: { storage: "private", messageId: input.messageId },
   };
 }
 
@@ -55,6 +67,11 @@ export function canonicalMessageMirror(input: CanonicalMessageWrite): Record<str
 
 /** Transitional single writer. The normalized row wins; JSON is updated only after that insert. */
 export async function persistCanonicalMessage(connection: PoolConnection, input: CanonicalMessageWrite): Promise<boolean> {
+  // V1 rows are read-only compatibility data. Every new canonical write must use
+  // metadata or a V2 local reference, never a transient provider/browser payload.
+  if (input.mediaReference != null && containsConversationMediaBinary(input.mediaReference)) {
+    throw new Error("CONVERSATION_MEDIA_BINARY_REFERENCE_FORBIDDEN");
+  }
   try {
     await connection.execute(
     `INSERT INTO megadesk_domain_conversations_messages

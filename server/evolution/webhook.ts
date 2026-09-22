@@ -13,6 +13,12 @@ import { getPool } from "../db";
 import { generateConversationPublicCode, withPublicCodeRetry } from "../conversation-public-code";
 import { persistCanonicalMessage } from "../conversation-message-store";
 import { normalizeProviderMessageReference, type ProviderMessageReference } from "../conversation-provider-reference";
+import {
+  decodeConversationMediaDataUrl,
+  removeConversationMedia,
+  type ConversationMediaReferenceV2,
+  writeConversationMedia,
+} from "../conversation-media-storage";
 import { getEvolutionWebhookSecret } from "./config";
 import { evoGetMediaBase64, normalizeEvolutionRecipient } from "./client";
 
@@ -331,6 +337,35 @@ export function parseEvolutionIncomingMessage(msg: Record<string, any>): { text:
   } };
 }
 
+type ConversationMediaWriter = typeof writeConversationMedia;
+type ConversationMediaRemover = typeof removeConversationMedia;
+type InboundMediaDependencies = { write?: ConversationMediaWriter; remove?: ConversationMediaRemover };
+
+/**
+ * Converts the provider's transient media payload into V2 metadata. This is the
+ * only inbound boundary allowed to see a Data URL; callers persist `reference`,
+ * never `payload.mediaData`.
+ */
+export async function prepareInboundConversationMedia(
+  clientId: string,
+  payload: Record<string, unknown>,
+  write: ConversationMediaWriter = writeConversationMedia,
+): Promise<{ payload: Record<string, unknown>; reference: ConversationMediaReferenceV2 | null }> {
+  const { mediaData: _mediaData, base64: _base64, dataUrl: _dataUrl, ...safePayload } = payload;
+  if (typeof _mediaData !== "string") return { payload: safePayload, reference: null };
+  const inferredMime = /^data:([^;,]+);base64,/.exec(_mediaData)?.[1] ?? "";
+  const declaredMime = typeof payload.mimeType === "string" ? payload.mimeType : inferredMime;
+  const decoded = decodeConversationMediaDataUrl(_mediaData, declaredMime);
+  if (!decoded) throw new Error("INBOUND_CONVERSATION_MEDIA_INVALID");
+  const reference = await write({
+    clientId,
+    bytes: decoded.bytes,
+    mimeType: decoded.mimeType,
+    fileName: typeof payload.fileName === "string" ? payload.fileName : undefined,
+  });
+  return { payload: safePayload, reference };
+}
+
 /** Nome de perfil já entregue pelo payload inbound oficial da Evolution. */
 export function extractEvolutionProviderName(msg: Record<string, any>): string {
   const value = typeof msg?.pushName === "string" ? msg.pushName : "";
@@ -375,12 +410,14 @@ export async function saveIncomingMessage(
   at: Date,
   payload: Record<string, unknown> = {},
   references: { providerMessageReference?: ProviderMessageReference | null; quotedExternalMessageId?: string | null } = {},
+  mediaDependencies: InboundMediaDependencies = {},
 ): Promise<"persisted" | "duplicate"> {
   const phone = phoneCandidates[0];
   const pool = getPool();
   const connection = await pool.getConnection();
   let lockName: string | null = null;
   let transactionStarted = false;
+  let storedMediaReference: ConversationMediaReferenceV2 | null = null;
   let committedEvent: { name: "conversation:message" | "conversation:new"; payload: Record<string, unknown> } | null = null;
 
   try {
@@ -402,6 +439,9 @@ export async function saveIncomingMessage(
       transactionStarted = false;
       return "duplicate";
     }
+    const preparedMedia = await prepareInboundConversationMedia(clientId, payload, mediaDependencies.write ?? writeConversationMedia);
+    payload = preparedMedia.payload;
+    storedMediaReference = preparedMedia.reference;
     const contactName = pushName || "Contato sem nome";
     await connection.execute(
       `INSERT INTO megadesk_conversation_contacts
@@ -462,13 +502,15 @@ export async function saveIncomingMessage(
         messageId: externalMessageId, externalMessageId, conversationId: convId, clientId,
         provider: "evolution", integrationId, direction: "inbound", messageType: String(payload.type ?? "text"),
         sender: "customer", text, status: "received", timestamp: at, legacyMessage: newMsg,
-        mediaReference: payload.type === "text" ? null : payload,
+        mediaReference: storedMediaReference ?? (payload.type === "text" ? null : payload),
         replyToMessageId, providerMessageReference: references.providerMessageReference ?? null,
         incrementUnread: true,
       });
       if (!inserted) {
         await connection.rollback();
         transactionStarted = false;
+        if (storedMediaReference) await (mediaDependencies.remove ?? removeConversationMedia)({ clientId, reference: storedMediaReference }).catch(() => undefined);
+        storedMediaReference = null;
         return "duplicate";
       }
 
@@ -501,13 +543,15 @@ export async function saveIncomingMessage(
         messageId: externalMessageId, externalMessageId, conversationId, clientId,
         provider: "evolution", integrationId, direction: "inbound", messageType: String(payload.type ?? "text"),
         sender: "customer", text, status: "received", timestamp: at, legacyMessage: newMsg,
-        mediaReference: payload.type === "text" ? null : payload,
+        mediaReference: storedMediaReference ?? (payload.type === "text" ? null : payload),
         providerMessageReference: references.providerMessageReference ?? null,
         incrementUnread: true,
       });
       if (!inserted) {
         await connection.rollback();
         transactionStarted = false;
+        if (storedMediaReference) await (mediaDependencies.remove ?? removeConversationMedia)({ clientId, reference: storedMediaReference }).catch(() => undefined);
+        storedMediaReference = null;
         return "duplicate";
       }
 
@@ -548,6 +592,7 @@ export async function saveIncomingMessage(
     return "persisted";
   } catch (err) {
     if (transactionStarted) await connection.rollback().catch(() => undefined);
+    if (storedMediaReference) await (mediaDependencies.remove ?? removeConversationMedia)({ clientId, reference: storedMediaReference }).catch(() => undefined);
     console.error(`[Evolution] incoming message persistence failed: clientId=${clientId}`);
     throw err;
   } finally {

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { router, megadeskProcedure } from "./_core/trpc";
 import { getPool } from "./db";
 import { readConversationHistory } from "./conversation-legacy-history";
+import { publicConversationMediaMetadata } from "./conversation-media-storage";
 
 const id = z.string().min(1).max(80);
 const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inv\u00e1lida.");
@@ -102,6 +103,7 @@ export function normalizedMessage(row: Record<string, any>) {
   if (typeof row.mediaReference === "string" && row.mediaReference) {
     try { media = JSON.parse(row.mediaReference); } catch { media = {}; }
   }
+  const publicMedia = publicConversationMediaMetadata(media, row.id);
   const replyTo = typeof row.replyToMessageId === "string" && row.replyToMessageId
     ? {
       messageId: row.replyToMessageId,
@@ -115,9 +117,14 @@ export function normalizedMessage(row: Record<string, any>) {
     }
     : null;
   const { replyMessageId: _replyMessageId, replySenderName: _replySenderName, replySender: _replySender,
-    replyDirection: _replyDirection, replyType: _replyType, replyText: _replyText, replyMediaLabel: _replyMediaLabel,
+    replyDirection: _replyDirection, replyType: _replyType, replyText: _replyText, replyMediaLabel: _replyMediaLabel, mediaReference: _unsafeMediaReference,
     ...message } = row;
-  return { ...message, ...media, mediaReference: row.mediaReference ?? null, replyTo };
+  if (publicMedia) {
+    const { mediaReference, ...metadata } = publicMedia;
+    return { ...message, ...metadata, mediaReference, replyTo };
+  }
+  const contact = media && typeof media.contact === "object" && media.contact !== null ? { contact: media.contact } : {};
+  return { ...message, ...contact, mediaReference: null, replyTo };
 }
 
 async function eligibleUser(tenantId: string, userId: string) {

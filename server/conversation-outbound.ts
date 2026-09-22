@@ -2,6 +2,7 @@ import type { Pool, PoolConnection } from "mysql2/promise";
 import { createHash } from "node:crypto";
 import { persistCanonicalMessage, type CanonicalMessageWrite } from "./conversation-message-store";
 import { normalizeProviderMessageReference, type ProviderMessageReference } from "./conversation-provider-reference";
+import { readConversationMedia, type ConversationMediaReferenceV2 } from "./conversation-media-storage";
 
 export type OutboundAttemptInput = Omit<CanonicalMessageWrite, "direction" | "status" | "externalMessageId" | "clientAttemptId"> & {
   clientAttemptId: string;
@@ -15,6 +16,49 @@ export class OutboundReconciliationError extends Error {
 
 export class OutboundAttemptAlreadyRecordedError extends Error {
   constructor(public readonly status: string) { super("OUTBOUND_ATTEMPT_ALREADY_RECORDED"); }
+}
+
+/** The pending row never committed, so a caller may safely compensate its new object. */
+export class OutboundPendingPersistenceError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : "OUTBOUND_PENDING_PERSISTENCE_FAILED", { cause });
+  }
+}
+
+type ConversationAttachmentKind = "image" | "video" | "audio" | "document" | "sticker";
+type ConversationAttachmentProviderInput = {
+  instanceName: string;
+  number: string;
+  kind: ConversationAttachmentKind;
+  dataUrl: string;
+  mimeType: string;
+  fileName?: string;
+  caption?: string;
+  quoted?: ProviderMessageReference;
+};
+
+/** The router's provider payload is built only after re-reading the private V2 object. */
+export async function sendOutboundConversationMediaFromPrivateStorage(
+  input: Omit<ConversationAttachmentProviderInput, "dataUrl" | "mimeType" | "fileName"> & {
+    clientId: string;
+    mediaReference: ConversationMediaReferenceV2;
+  },
+  dependencies: {
+    read?: typeof readConversationMedia;
+    send: (input: ConversationAttachmentProviderInput) => Promise<ProviderMessageReference>;
+  },
+): Promise<ProviderMessageReference> {
+  const stored = await (dependencies.read ?? readConversationMedia)({ clientId: input.clientId, reference: input.mediaReference });
+  return dependencies.send({
+    instanceName: input.instanceName,
+    number: input.number,
+    kind: input.kind,
+    dataUrl: `data:${stored.mimeType};base64,${stored.bytes.toString("base64")}`,
+    mimeType: stored.mimeType,
+    ...(stored.fileName ? { fileName: stored.fileName } : {}),
+    ...(input.caption !== undefined ? { caption: input.caption } : {}),
+    ...(input.quoted !== undefined ? { quoted: input.quoted } : {}),
+  });
 }
 
 async function updateDelivery(pool: Pool, input: OutboundAttemptInput, status: "sent" | "failed", externalMessageId?: string,
@@ -56,7 +100,7 @@ export async function executeOutboundAttempt(
     await connection.commit();
   } catch (error) {
     await connection.rollback().catch(() => undefined);
-    throw error;
+    throw new OutboundPendingPersistenceError(error);
   } finally {
     await connection.execute("SELECT RELEASE_LOCK(?)", [lockName]).catch(() => undefined);
     connection.release();

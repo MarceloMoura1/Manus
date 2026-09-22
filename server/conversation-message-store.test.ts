@@ -9,6 +9,12 @@ const base: CanonicalMessageWrite = {
   legacyMessage: { from: "customer", text: "hello" }, incrementUnread: true,
 };
 
+const v2Reference = {
+  version: 2 as const, storage: "local" as const,
+  storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin",
+  mimeType: "image/png", fileName: "foto.png", byteSize: 1, sha256: "a".repeat(64),
+};
+
 function connection(responses: unknown[] = [{ affectedRows: 1 }, [{ messages_json: "[]" }], { affectedRows: 1 }]) {
   const execute = vi.fn(async () => {
     const response = responses.shift();
@@ -19,12 +25,13 @@ function connection(responses: unknown[] = [{ affectedRows: 1 }, [{ messages_jso
 }
 
 describe("canonical message store", () => {
-  it("writes integration-scoped identity and media before the legacy JSON", async () => {
+  it("writes integration-scoped V2 media metadata before the legacy JSON", async () => {
     const db = connection();
-    await expect(persistCanonicalMessage(db, { ...base, messageType: "image", mediaReference: { mediaData: "data:image/png;base64,AA==", mimeType: "image/png" } })).resolves.toBe(true);
+    await expect(persistCanonicalMessage(db, { ...base, messageType: "image", mediaReference: v2Reference })).resolves.toBe(true);
     expect(db.execute).toHaveBeenCalledTimes(3);
     expect(db.execute.mock.calls[0][0]).toContain("integration_id");
     expect(db.execute.mock.calls[0][1]).toContain("instance-a");
+    expect(String(db.execute.mock.calls[0][1][13])).not.toMatch(/mediaData|base64|dataUrl|data:.*;base64/i);
     expect(db.execute.mock.calls[1][0]).toContain("FOR UPDATE");
   });
 
@@ -61,12 +68,19 @@ describe("canonical message store", () => {
     await expect(persistCanonicalMessage(connection([{ affectedRows: 1 }, [{ messages_json: "[]" }], new Error("summary")]), base)).rejects.toThrow("summary");
   });
 
-  it.each(["image", "video", "audio", "document", "sticker", "contact"])("reconstructs %s payload from media_reference", (type) => {
-    const mediaData = type === "contact" ? undefined : `data:application/octet-stream;base64,${type}`;
-    const row = normalizedMessage({ id: "msg", type, mediaReference: JSON.stringify({ mediaData, fileName: `${type}.bin`, contact: type === "contact" ? { name: "A", vcard: "VCARD" } : undefined }) });
+  it.each(["image", "video", "audio", "document", "sticker"])("returns a private pointer instead of V1 data from %s media_reference", (type) => {
+    const mediaData = `data:application/octet-stream;base64,${type}`;
+    const row = normalizedMessage({ id: "msg", type, mediaReference: JSON.stringify({ mediaData, fileName: `${type}.bin` }) });
     expect(row.type).toBe(type);
-    if (type === "contact") expect(row.contact).toEqual({ name: "A", vcard: "VCARD" });
-    else expect(row.mediaData).toBe(mediaData);
+    expect(row.mediaData).toBeUndefined();
+    expect(row.mediaReference).toEqual({ storage: "private", messageId: "msg" });
+  });
+
+  it("returns V2 metadata and a private pointer without Base64 or a storage key", () => {
+    const row = normalizedMessage({ id: "msg-v2", type: "image", mediaReference: JSON.stringify(v2Reference) });
+    expect(row).toMatchObject({ mimeType: "image/png", fileName: "foto.png", byteSize: 1,
+      mediaReference: { storage: "private", messageId: "msg-v2" } });
+    expect(JSON.stringify(row)).not.toMatch(/mediaData|base64|dataUrl|storageKey|data:.*;base64/i);
   });
 
   it("returns a lightweight quote preview without original media", () => {
@@ -80,13 +94,21 @@ describe("canonical message store", () => {
     expect(JSON.stringify(row.replyTo)).not.toContain("base64");
   });
 
-  it("keeps heavy media only in the normalized reference", () => {
+  it("keeps the legacy mirror lightweight for a V2 reference", () => {
     const heavy = "data:video/mp4;base64," + "A".repeat(1_000_000);
     const legacy = lightweightLegacyMessage({ ...base, messageType: "video",
       legacyMessage: { type: "video", mediaData: heavy, mimeType: "video/mp4", fileName: "a.mp4" },
-      mediaReference: { mediaData: heavy, mimeType: "video/mp4" } });
+      mediaReference: { ...v2Reference, mimeType: "video/mp4" } });
     expect(JSON.stringify(legacy)).not.toContain("A".repeat(100));
     expect(legacy).toMatchObject({ type: "video", mimeType: "video/mp4",
-      mediaReference: { storage: "normalized", messageId: "msg-1" } });
+      mediaReference: { storage: "private", messageId: "msg-1" } });
+  });
+
+  it("blocks every new media reference containing a transient binary field", async () => {
+    const db = connection();
+    await expect(persistCanonicalMessage(db, { ...base, messageType: "image",
+      mediaReference: { ...v2Reference, mediaData: "data:image/png;base64,AA==" } }))
+      .rejects.toThrow("CONVERSATION_MEDIA_BINARY_REFERENCE_FORBIDDEN");
+    expect(db.execute).not.toHaveBeenCalled();
   });
 });
