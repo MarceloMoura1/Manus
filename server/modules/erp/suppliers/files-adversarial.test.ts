@@ -430,10 +430,10 @@ describe("Supplier Files — Exhaustive Adversarial Hardening Suite", () => {
       }
     });
 
-    it("soft-delete is idempotent and second delete returns NOT_FOUND", async () => {
+    it("pending deletion is idempotent and second delete returns NOT_FOUND", async () => {
       const mockRepo = {
         findSupplier: vi.fn().mockResolvedValue({ id: 10, publicId: "sup-1", active: true }),
-        softDelete: vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false),
+        transitionToPendingDelete: vi.fn().mockResolvedValueOnce({ state: "pending_delete" }).mockResolvedValueOnce(null),
       } as unknown as SupplierFileRepository;
 
       const service = new SupplierFileService(mockRepo);

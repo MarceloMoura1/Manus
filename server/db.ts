@@ -3,6 +3,7 @@ import mysql from "mysql2/promise";
 import { eq, and } from "drizzle-orm";
 import { users, megadeskDomainCustomers, megadeskDomainTickets, megadeskDomainConversations, megadeskDomainChamados, megadeskDomainChamadoSequence } from "../drizzle/schema";
 import { getTestDatabaseUrl } from "./test-integration-gates";
+import { sanitizeConversationMessagesForPersistence } from "./conversation-message-store";
 
 type Database = ReturnType<typeof drizzle>;
 type UpsertUserInput = {
@@ -241,7 +242,7 @@ export async function createConversation(input: {
     status: input.status ?? "bot",  // padrão BOT: primeiro atendimento é sempre automático
     lastMessage: input.lastMessage ?? "Conversa iniciada",
     timeLabel: new Date().toLocaleString("pt-BR"),
-    messagesJson: JSON.stringify(input.messages ?? []),
+    messagesJson: JSON.stringify(sanitizeConversationMessagesForPersistence(input.messages)),
   });
   return input;
 }
@@ -485,7 +486,7 @@ export async function upsertConversationStateSnapshot(
   await connection.execute(
     "INSERT INTO megadesk_domain_conversations (conversation_id, client_id, customer_name, phone, company, status, last_message, time_label, messages_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE customer_name=VALUES(customer_name), phone=VALUES(phone), company=VALUES(company), status=CASE WHEN status = 'closed' THEN 'closed' ELSE VALUES(status) END, last_message=VALUES(last_message), time_label=VALUES(time_label)",
     [conversation.id, conversation.clientId, conversation.name, conversation.phone, conversation.company, conversation.status,
-      conversation.lastMessage, conversation.time, JSON.stringify(conversation.messages ?? [])],
+      conversation.lastMessage, conversation.time, JSON.stringify(sanitizeConversationMessagesForPersistence(conversation.messages))],
   );
 }
 
@@ -684,7 +685,10 @@ export async function createMegaDeskBackup(state: MegaDeskStructuredState) {
           backupId,
           backupDate,
           JSON.stringify(state.clients),
-          JSON.stringify(state.conversations),
+          JSON.stringify(state.conversations.map(conversation => ({
+            ...conversation,
+            messages: sanitizeConversationMessagesForPersistence(conversation.messages),
+          }))),
           JSON.stringify(state.tickets),
           JSON.stringify(state.botScripts),
           JSON.stringify(state.operationalRecords),

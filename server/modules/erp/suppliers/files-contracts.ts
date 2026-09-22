@@ -72,7 +72,7 @@ export type SupplierFileView = {
   mimeType: string;
   sizeBytes: number;
   sha256: string;
-  state: "active" | "deleted";
+  state: "active" | "pending_delete" | "deleted";
   createdBy: string;
   createdByName: string;
   createdAt: string;

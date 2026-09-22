@@ -26,20 +26,40 @@ export type CanonicalMessageWrite = {
   incrementUnread?: boolean;
 };
 
-function stripTransientMediaFields(value: unknown, depth = 0): unknown {
-  if (depth > 16 || value == null || typeof value !== "object") return value;
-  if (Array.isArray(value)) return value.map(item => stripTransientMediaFields(item, depth + 1));
+const TRANSIENT_MEDIA_FIELDS = new Set(["mediadata", "base64", "dataurl"]);
+const BINARY_DATA_URL = /^data:[^,]+;base64,[A-Za-z0-9+/=\s]*$/i;
+
+/**
+ * The compatibility mirror is never a binary transport.  This applies to all
+ * writers, including the older global-state snapshot writer, so a new Data URL
+ * cannot re-enter MySQL through a path other than the canonical media writer.
+ */
+export function stripTransientConversationMedia(value: unknown, depth = 0): unknown {
+  if (depth > 16 || value == null || typeof value !== "object") {
+    return typeof value === "string" && BINARY_DATA_URL.test(value) ? undefined : value;
+  }
+  if (Array.isArray(value)) return value
+    .map(item => stripTransientConversationMedia(item, depth + 1))
+    .filter(item => item !== undefined);
   const safe: Record<string, unknown> = {};
   for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-    if (key === "mediaData" || key === "base64" || key === "dataUrl") continue;
-    safe[key] = stripTransientMediaFields(nested, depth + 1);
+    if (TRANSIENT_MEDIA_FIELDS.has(key.toLowerCase())) continue;
+    const sanitized = stripTransientConversationMedia(nested, depth + 1);
+    if (sanitized !== undefined) safe[key] = sanitized;
   }
   return safe;
 }
 
+export function sanitizeConversationMessagesForPersistence(messages: unknown): unknown[] {
+  if (!Array.isArray(messages)) return [];
+  return messages
+    .map(message => stripTransientConversationMedia(message))
+    .filter(message => message !== undefined);
+}
+
 export function lightweightLegacyMessage(input: CanonicalMessageWrite): Record<string, unknown> {
-  if (input.mediaReference == null) return input.legacyMessage;
-  const metadata = stripTransientMediaFields(input.legacyMessage) as Record<string, unknown>;
+  const metadata = stripTransientConversationMedia(input.legacyMessage) as Record<string, unknown>;
+  if (input.mediaReference == null) return metadata;
   return {
     ...metadata,
     mediaReference: { storage: "private", messageId: input.messageId },

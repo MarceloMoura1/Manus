@@ -59,6 +59,7 @@ describe("Supplier Files — Domain Service & Atomicity", () => {
           created_at: new Date().toISOString(),
           deleted_by: null,
           deleted_at: null,
+          pending_delete_at: null,
           created_by_name: "Administrador Geral",
           deleted_by_name: null,
         } as SupplierFileRow;
@@ -79,14 +80,15 @@ describe("Supplier Files — Domain Service & Atomicity", () => {
       findByPublicId: vi.fn(async (clientId: string, supId: number, pubId: string) => {
         return memoryFiles.find(f => f.client_id === clientId && f.supplier_id === supId && f.public_id === pubId) ?? null;
       }),
-      softDelete: vi.fn(async (clientId: string, supId: number, pubId: string, userId: string) => {
-        const file = memoryFiles.find(f => f.client_id === clientId && f.supplier_id === supId && f.public_id === pubId && f.state === "active");
-        if (!file) return false;
-        file.state = "deleted";
+      transitionToPendingDelete: vi.fn(async (clientId: string, supId: number, pubId: string, userId: string) => {
+        const file = memoryFiles.find(f => f.client_id === clientId && f.supplier_id === supId && f.public_id === pubId);
+        if (!file || file.state === "deleted") return null;
+        if (file.state === "pending_delete") return file;
+        file.state = "pending_delete";
         file.deleted_by = userId;
-        file.deleted_at = new Date().toISOString();
+        file.pending_delete_at = new Date().toISOString();
         file.deleted_by_name = "Administrador Geral";
-        return true;
+        return file;
       }),
     };
 
@@ -246,30 +248,30 @@ describe("Supplier Files — Domain Service & Atomicity", () => {
     expect(list.length).toBe(1);
     expect(list[0].publicId).toBe(uploaded.publicId);
 
-    // Soft delete
+    // Logical deletion remains pending until physical cleanup is authorized.
     const deleteResult = await service.delete(
       { clientId: tenantA, userId: "admin-1", role: "admin" },
       { supplierPublicId: supplierPublicIdA, filePublicId: uploaded.publicId }
     );
     expect(deleteResult.ok).toBe(true);
 
-    // Default list excludes deleted file
+    // Default list excludes pending-delete file
     list = await service.list(
       { clientId: tenantA, userId: "user-1", role: "viewer" },
       { supplierPublicId: supplierPublicIdA }
     );
     expect(list.length).toBe(0);
 
-    // Include deleted returns the file with state 'deleted'
+    // Include deleted returns the file with state 'pending_delete'
     const listWithDeleted = await service.list(
       { clientId: tenantA, userId: "user-1", role: "viewer" },
       { supplierPublicId: supplierPublicIdA, includeDeleted: true }
     );
     expect(listWithDeleted.length).toBe(1);
-    expect(listWithDeleted[0].state).toBe("deleted");
+    expect(listWithDeleted[0].state).toBe("pending_delete");
     expect(listWithDeleted[0].deletedByName).toBe("Administrador Geral");
 
-    // Download rejects deleted file with NOT_FOUND
+    // Download rejects pending-delete file with NOT_FOUND
     await expect(
       service.getFileForDownload(
         { clientId: tenantA, userId: "user-1", role: "viewer" },
@@ -301,5 +303,16 @@ describe("Supplier Files — Domain Service & Atomicity", () => {
     expect((uploaded as any).id).toBeUndefined();
     expect(uploaded.publicId).toBeDefined();
     expect(uploaded.downloadUrl).toBe(`/api/erp/suppliers/${supplierPublicIdA}/files/${uploaded.publicId}`);
+  });
+
+  it("scopes the read-only cleanup inventory to the authenticated tenant", async () => {
+    const listEligiblePhysicalCleanup = vi.fn().mockResolvedValue([{ public_id: "fixture" }]);
+    const service = new SupplierFileService({ listEligiblePhysicalCleanup } as unknown as SupplierFileRepository);
+
+    await expect(service.inventoryPendingPhysicalCleanup(
+      { clientId: tenantA, userId: "admin-1", role: "admin" },
+      12,
+    )).resolves.toEqual({ candidates: 1 });
+    expect(listEligiblePhysicalCleanup).toHaveBeenCalledWith(tenantA, 12);
   });
 });

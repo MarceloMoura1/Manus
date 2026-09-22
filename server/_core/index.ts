@@ -4,7 +4,6 @@ import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
-import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { registerMetricWebhook } from "../metricWebhook";
 import { registerIntegrationApi } from "../integrationApi";
@@ -95,7 +94,6 @@ async function startServer() {
   // ─── CORS ─────────────────────────────────────────────────────────────────
   registerMegaDeskCors(app);
 
-  registerStorageProxy(app);
   registerOAuthRoutes(app);
   registerMetricWebhook(app);
   registerIntegrationApi(app);

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { lightweightLegacyMessage, persistCanonicalMessage, type CanonicalMessageWrite } from "./conversation-message-store";
+import { lightweightLegacyMessage, persistCanonicalMessage, sanitizeConversationMessagesForPersistence, type CanonicalMessageWrite } from "./conversation-message-store";
 import { normalizedMessage } from "./routers-conversations";
 
 const base: CanonicalMessageWrite = {
@@ -102,6 +102,29 @@ describe("canonical message store", () => {
     expect(JSON.stringify(legacy)).not.toContain("A".repeat(100));
     expect(legacy).toMatchObject({ type: "video", mimeType: "video/mp4",
       mediaReference: { storage: "private", messageId: "msg-1" } });
+  });
+
+  it("never mirrors new transient binary fields even when no V2 reference is present", () => {
+    const binary = "data:image/png;base64,QUJD";
+    const legacy = lightweightLegacyMessage({
+      ...base,
+      legacyMessage: { type: "image", mediaData: binary, nested: { base64: "QUJD" }, label: "metadata" },
+      mediaReference: null,
+    });
+    expect(legacy).toEqual({ type: "image", nested: {}, label: "metadata" });
+    expect(JSON.stringify(legacy)).not.toMatch(/mediaData|base64|data:.*;base64/i);
+  });
+
+  it("sanitizes legacy state-snapshot messages before they can reach MySQL", () => {
+    const sanitized = sanitizeConversationMessagesForPersistence([
+      { id: "legacy-1", dataUrl: "data:application/pdf;base64,QUJD", caption: "Arquivo" },
+      { id: "legacy-2", nested: { preview: "data:image/png;base64,QUJD" }, text: "ok" },
+    ]);
+    expect(sanitized).toEqual([
+      { id: "legacy-1", caption: "Arquivo" },
+      { id: "legacy-2", nested: {}, text: "ok" },
+    ]);
+    expect(JSON.stringify(sanitized)).not.toMatch(/data:.*;base64/i);
   });
 
   it("blocks every new media reference containing a transient binary field", async () => {

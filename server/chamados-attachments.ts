@@ -551,10 +551,69 @@ export async function readTicketAttachment(
   }
 }
 
+export const TICKET_ATTACHMENT_CLEANUP_LIFECYCLE_VERSION = 1;
+
+export type TicketAttachmentPhysicalCleanupInventory = { candidates: number };
+
+type TicketAttachmentPhysicalCleanupCandidate = {
+  attachmentId: string;
+  clientId: string;
+  chamadoId: string;
+  state: string;
+  cleanupLifecycleVersion: number | null;
+  physicalCleanupEligibleAt: string | null;
+};
+
+export function isEligibleTicketAttachmentPhysicalCleanupCandidate(
+  candidate: TicketAttachmentPhysicalCleanupCandidate,
+  cutoff: Date,
+): boolean {
+  return candidate.state === "pending_delete"
+    && Number(candidate.cleanupLifecycleVersion) === TICKET_ATTACHMENT_CLEANUP_LIFECYCLE_VERSION
+    && typeof candidate.physicalCleanupEligibleAt === "string"
+    && !Number.isNaN(Date.parse(candidate.physicalCleanupEligibleAt))
+    && Date.parse(candidate.physicalCleanupEligibleAt) < cutoff.getTime();
+}
+
 /**
- * Forge storage has no documented delete primitive. Reconciliation therefore
- * keeps failed uploads non-readable and observable in pending_delete rather
- * than falsely claiming that an external object was removed.
+ * Bounded dry-run inventory. It never touches metadata or storage. The
+ * eligibility marker is introduced without a backfill, which structurally
+ * excludes historical pending_delete rows from this query.
+ */
+export async function inventoryEligibleTicketAttachmentPhysicalCleanup(options: {
+  clientId: string;
+  chamadoId: string;
+  olderThanMs?: number;
+  limit?: number;
+  pool?: Pool;
+}): Promise<TicketAttachmentPhysicalCleanupInventory> {
+  if (!options.clientId?.trim() || !options.chamadoId?.trim()) {
+    throw new Error("TICKET_ATTACHMENT_CLEANUP_SCOPE_REQUIRED");
+  }
+  const olderThanMs = options.olderThanMs ?? 60 * 60 * 1000;
+  const cutoff = new Date(Date.now() - Math.max(60_000, olderThanMs));
+  const limit = Math.max(1, Math.min(1_000, options.limit ?? 100));
+  const pool = options.pool ?? getPool();
+  const [rows] = await pool.execute<Array<RowDataPacket & TicketAttachmentPhysicalCleanupCandidate>>(
+    `SELECT attachment_id AS attachmentId, client_id AS clientId, chamado_id AS chamadoId,
+            attachment_state AS state, cleanup_lifecycle_version AS cleanupLifecycleVersion,
+            physical_cleanup_eligible_at AS physicalCleanupEligibleAt
+     FROM megadesk_domain_chamado_attachments
+     WHERE client_id=? AND chamado_id=?
+       AND attachment_state='pending_delete'
+       AND cleanup_lifecycle_version=${TICKET_ATTACHMENT_CLEANUP_LIFECYCLE_VERSION}
+       AND physical_cleanup_eligible_at IS NOT NULL
+       AND physical_cleanup_eligible_at < ?
+     ORDER BY physical_cleanup_eligible_at ASC, attachment_id ASC
+     LIMIT ${limit}`,
+    [options.clientId, options.chamadoId, cutoff.toISOString().slice(0, 19).replace("T", " ")],
+  );
+  return { candidates: rows.filter(row => isEligibleTicketAttachmentPhysicalCleanupCandidate(row, cutoff)).length };
+}
+
+/**
+ * The state transition is retained for failed uploads. Physical collection is
+ * intentionally not performed here; it needs a separately authorized gate.
  */
 export async function reconcileTicketAttachmentStates(
   olderThanMs = 60 * 60 * 1000,
@@ -563,8 +622,9 @@ export async function reconcileTicketAttachmentStates(
   const cutoff = new Date(Date.now() - Math.max(60_000, olderThanMs));
   const [result] = await pool.execute<any>(
     `UPDATE megadesk_domain_chamado_attachments
-     SET attachment_state='pending_delete'
-     WHERE attachment_state='staged' AND created_at < ?`,
+     SET attachment_state='pending_delete', pending_delete_at=NOW(), physical_cleanup_eligible_at=NOW()
+     WHERE attachment_state='staged' AND cleanup_lifecycle_version=${TICKET_ATTACHMENT_CLEANUP_LIFECYCLE_VERSION}
+       AND created_at < ?`,
     [cutoff.toISOString().slice(0, 19).replace("T", " ")],
   );
   return { markedPendingDelete: Number(result.affectedRows ?? 0) };

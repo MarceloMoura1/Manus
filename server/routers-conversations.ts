@@ -127,6 +127,16 @@ export function normalizedMessage(row: Record<string, any>) {
   return { ...message, ...contact, mediaReference: null, replyTo };
 }
 
+/** HTTP media routes use the same module policy as the tRPC conversation API. */
+export function hasConversationAccess(ctx: { operationalUserRole?: string; operationalPermissions?: string[] }, permission = "conversations") {
+  try {
+    requireConversationAccess(ctx, permission);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function eligibleUser(tenantId: string, userId: string) {
   const [rows] = await getPool().execute(
     `SELECT user_id, name FROM megadesk_domain_client_users

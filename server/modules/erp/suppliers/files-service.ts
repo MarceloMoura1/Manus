@@ -131,18 +131,28 @@ export class SupplierFileService {
       throw new ErpDomainError("NOT_FOUND", "Fornecedor não encontrado.");
     }
 
-    const success = await this.repository.softDelete(
+    const file = await this.repository.transitionToPendingDelete(
       identity.clientId,
       supplier.id,
       input.filePublicId,
       identity.userId
     );
 
-    if (!success) {
+    if (!file) {
       throw new ErpDomainError("NOT_FOUND", "Arquivo não encontrado ou já excluído.");
     }
 
     return { ok: true };
+  }
+
+  /**
+   * Read-only inventory for an independently authorized physical-cleanup
+   * worker. This service deliberately has no method that deletes these files.
+   */
+  async inventoryPendingPhysicalCleanup(identity: Identity, limit = 100): Promise<{ candidates: number }> {
+    this.assertManage(identity);
+    const rows = await this.repository.listEligiblePhysicalCleanup(identity.clientId, limit);
+    return { candidates: rows.length };
   }
 
   async getFileForDownload(

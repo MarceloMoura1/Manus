@@ -1141,6 +1141,12 @@ export const megadeskDomainChamadoAttachments = mysqlTable(
       .defaultNow()
       .notNull(),
     pendingDeleteAt: timestamp("pending_delete_at", { mode: "string" }),
+    // Null marks rows that predate the guarded physical-cleanup lifecycle.
+    // Any collector must exclude null markers.
+    physicalCleanupEligibleAt: timestamp("physical_cleanup_eligible_at", { mode: "string" }),
+    // Written only by a reservation created after migration 0033. Existing
+    // rows remain null and can never acquire this provenance by reconciliation.
+    cleanupLifecycleVersion: tinyint("cleanup_lifecycle_version"),
   },
   table => [
     index("idx_mdca_att_chamado").on(table.chamadoId),
@@ -1157,6 +1163,11 @@ export const megadeskDomainChamadoAttachments = mysqlTable(
       table.clientAttemptId
     ),
     index("idx_mdca_att_state_created").on(table.state, table.createdAt),
+    index("idx_mdca_att_physical_cleanup").on(
+      table.state,
+      table.cleanupLifecycleVersion,
+      table.physicalCleanupEligibleAt
+    ),
     foreignKey({
       name: "fk_mdca_att_tenant_chamado",
       columns: [table.clientId, table.chamadoId],
@@ -2097,13 +2108,14 @@ export const erpSupplierFiles = mysqlTable(
     sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
     sha256: varchar({ length: 64 }).notNull(),
     storageKey: varchar("storage_key", { length: 255 }).notNull(),
-    state: mysqlEnum("state", ["active", "deleted"]).default("active").notNull(),
+    state: mysqlEnum("state", ["active", "pending_delete", "deleted"]).default("active").notNull(),
     createdBy: varchar("created_by", { length: 80 }).notNull(),
     createdAt: timestamp("created_at", { mode: "string" })
       .defaultNow()
       .notNull(),
     deletedBy: varchar("deleted_by", { length: 80 }),
     deletedAt: timestamp("deleted_at", { mode: "string" }),
+    pendingDeleteAt: timestamp("pending_delete_at", { mode: "string" }),
   },
   (table): MySqlTableExtraConfigValue[] => [
     uniqueIndex("uq_esf_tenant_public").on(table.clientId, table.publicId),
@@ -2114,6 +2126,7 @@ export const erpSupplierFiles = mysqlTable(
       table.state,
       table.createdAt
     ),
+    index("idx_esf_pending_delete").on(table.state, table.pendingDeleteAt),
     foreignKey({
       name: "fk_esf_tenant",
       columns: [table.clientId],

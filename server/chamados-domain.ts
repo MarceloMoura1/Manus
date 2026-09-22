@@ -446,8 +446,8 @@ export async function reserveTicketAttachment(
     const attachmentId = randomUUID();
     await connection.execute(
       `INSERT INTO megadesk_domain_chamado_attachments
-       (attachment_id, chamado_id, client_id, file_name, file_url, storage_key, file_size, mime_type, uploaded_by, uploaded_by_user_id, sha256, client_attempt_id, attachment_state, created_at)
-       VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'staged', NOW())
+       (attachment_id, chamado_id, client_id, file_name, file_url, storage_key, file_size, mime_type, uploaded_by, uploaded_by_user_id, sha256, client_attempt_id, attachment_state, created_at, cleanup_lifecycle_version)
+       VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'staged', NOW(), 1)
        ON DUPLICATE KEY UPDATE attachment_id=attachment_id`,
       [attachmentId, input.chamadoId, input.clientId, input.fileName, input.storageKey, input.fileSize, input.mimeType, actor.userName, actor.userId, input.sha256, input.clientAttemptId],
     );
@@ -518,8 +518,8 @@ export async function markTicketAttachmentPendingDelete(
 ): Promise<void> {
   await pool.execute(
     `UPDATE megadesk_domain_chamado_attachments
-     SET attachment_state='pending_delete'
-     WHERE attachment_id=? AND client_id=? AND attachment_state='staged'`,
+     SET attachment_state='pending_delete', pending_delete_at=NOW(), physical_cleanup_eligible_at=NOW()
+     WHERE attachment_id=? AND client_id=? AND attachment_state='staged' AND cleanup_lifecycle_version=1`,
     [attachmentId, clientId],
   );
 }
@@ -558,7 +558,7 @@ export async function logicallyRemoveTicketAttachment(
       sha256: string | null;
     }>>(
       `SELECT attachment_state AS state, file_name AS fileName, mime_type AS mimeType,
-              file_size AS fileSize, sha256
+              file_size AS fileSize, sha256, cleanup_lifecycle_version AS cleanupLifecycleVersion
        FROM megadesk_domain_chamado_attachments
        WHERE attachment_id=? AND chamado_id=? AND client_id=? LIMIT 1 FOR UPDATE`,
       [input.attachmentId, input.chamadoId, input.clientId],
@@ -573,7 +573,8 @@ export async function logicallyRemoveTicketAttachment(
     }
     const [result] = await connection.execute<ResultSetHeader>(
       `UPDATE megadesk_domain_chamado_attachments
-       SET attachment_state='pending_delete', pending_delete_at=NOW()
+       SET attachment_state='pending_delete', pending_delete_at=NOW(),
+           physical_cleanup_eligible_at=CASE WHEN cleanup_lifecycle_version=1 THEN NOW() ELSE NULL END
        WHERE attachment_id=? AND chamado_id=? AND client_id=? AND attachment_state='active'`,
       [input.attachmentId, input.chamadoId, input.clientId],
     );

@@ -8,6 +8,7 @@ import {
   readConversationMedia,
 } from "./conversation-media-storage";
 import { findLegacyConversationMedia } from "./conversation-legacy-history";
+import { hasConversationAccess } from "./routers-conversations";
 
 function safeName(value: unknown): string {
   return typeof value === "string" && value.length > 0 && value.length <= 255 ? value.replace(/["\r\n]/g, "_") : "arquivo";
@@ -32,8 +33,12 @@ export function createConversationMediaHandler(
   readV2: typeof readConversationMedia = readConversationMedia,
 ) {
   return async (req: Request, res: Response): Promise<void> => {
-  const identity = await resolveIdentity(req);
-  if (!identity) { res.status(401).end(); return; }
+   const identity = await resolveIdentity(req);
+   if (!identity) { res.status(401).end(); return; }
+   if (!hasConversationAccess({
+     operationalUserRole: identity.role,
+     operationalPermissions: identity.permissions,
+   })) { res.status(403).end(); return; }
   const { conversationId, messageId } = req.params;
   if (!/^[A-Za-z0-9_-]{1,100}$/.test(conversationId) || !/^[A-Za-z0-9_-]{1,100}$/.test(messageId)) { res.status(400).end(); return; }
   try {

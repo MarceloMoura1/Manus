@@ -6,7 +6,7 @@ function response() {
   res.status.mockReturnValue(res); return res;
 }
 function request(conversationId = "conv-a", messageId = "msg-a") { return { params: { conversationId, messageId }, query: { ignored: "1" }, headers: {} } as any; }
-const identity = async () => ({ tenantId: "tenant-a", userId: "user-a", sessionId: "session-a", role: "agent" as const, permissions: [], userEmail: "a@example.invalid" });
+const identity = async () => ({ tenantId: "tenant-a", userId: "user-a", sessionId: "session-a", role: "agent" as const, permissions: ["conversations"], userEmail: "a@example.invalid" });
 
 describe("conversation media bridge", () => {
   it("rejects an unauthenticated request without querying media", async () => {
@@ -24,6 +24,15 @@ describe("conversation media bridge", () => {
     expect(res.setHeader).toHaveBeenCalledWith("Content-Type", mime); expect(res.send).toHaveBeenCalledWith(Buffer.from("A"));
   });
 
+  it.each([
+    ["a viewer", { tenantId: "tenant-a", userId: "viewer", sessionId: "session-v", role: "viewer" as const, permissions: ["conversations"], userEmail: "viewer@example.invalid" }],
+    ["an operator without the module permission", { tenantId: "tenant-a", userId: "agent", sessionId: "session-p", role: "agent" as const, permissions: [], userEmail: "agent@example.invalid" }],
+  ])("rejects %s before querying private media", async (_label, deniedIdentity) => {
+    const execute = vi.fn(); const res = response();
+    await createConversationMediaHandler({ execute } as any, async () => deniedIdentity)(request(), res);
+    expect(res.status).toHaveBeenCalledWith(403); expect(execute).not.toHaveBeenCalled();
+  });
+
   it("reads V1 media that exists only in this tenant's legacy JSON", async () => {
     const legacyJson = JSON.stringify([{ id: "legacy-only", type: "image", fileName: "old.png",
       mediaData: "data:image/png;base64,QQ==" }]);
@@ -39,7 +48,7 @@ describe("conversation media bridge", () => {
   });
 
   it.each([
-    ["another tenant", request("conv-a", "legacy-only"), async () => ({ tenantId: "tenant-b", userId: "user-b", sessionId: "session-b", role: "agent" as const, permissions: [], userEmail: "b@example.invalid" }), ["conv-a", "tenant-b"]],
+    ["another tenant", request("conv-a", "legacy-only"), async () => ({ tenantId: "tenant-b", userId: "user-b", sessionId: "session-b", role: "agent" as const, permissions: ["conversations"], userEmail: "b@example.invalid" }), ["conv-a", "tenant-b"]],
     ["another conversation", request("conv-other", "legacy-only"), identity, ["conv-other", "tenant-a"]],
   ])("does not fall back to legacy JSON from %s", async (_label, req, resolveIdentity, expectedScope) => {
     const execute = vi.fn().mockResolvedValueOnce([[]]).mockResolvedValueOnce([[]]);

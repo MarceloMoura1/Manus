@@ -14,11 +14,12 @@ export type SupplierFileRow = RowDataPacket & {
   size_bytes: number;
   sha256: string;
   storage_key: string;
-  state: "active" | "deleted";
+  state: "active" | "pending_delete" | "deleted";
   created_by: string;
   created_at: string;
   deleted_by: string | null;
   deleted_at: string | null;
+  pending_delete_at: string | null;
   created_by_name?: string | null;
   deleted_by_name?: string | null;
 };
@@ -154,13 +155,36 @@ export class SupplierFileRepository {
     return rows;
   }
 
-  async softDelete(clientId: string, supplierId: number, filePublicId: string, userId: string): Promise<boolean> {
+  /**
+   * Makes a file non-readable without falsely claiming its physical object is
+   * gone. Existing deleted rows never enter this pending lifecycle.
+   */
+  async transitionToPendingDelete(clientId: string, supplierId: number, filePublicId: string, userId: string): Promise<SupplierFileRow | null> {
+    const existing = await this.findByPublicId(clientId, supplierId, filePublicId);
+    if (!existing || existing.state === "deleted") return null;
+    if (existing.state === "pending_delete") return null;
     const [result] = await this.db().execute<ResultSetHeader>(
       `UPDATE erp_supplier_files
-       SET state = 'deleted', deleted_by = ?, deleted_at = NOW()
+       SET state = 'pending_delete', pending_delete_at = NOW(), deleted_by = ?, deleted_at = NULL
        WHERE client_id = ? AND supplier_id = ? AND public_id = ? AND state = 'active'`,
       [userId, clientId, supplierId, filePublicId]
     );
-    return result.affectedRows > 0;
+    if (result.affectedRows === 0) {
+      const current = await this.findByPublicId(clientId, supplierId, filePublicId);
+      return current?.state === "pending_delete" ? current : null;
+    }
+    return this.findByPublicId(clientId, supplierId, filePublicId);
+  }
+
+  async listEligiblePhysicalCleanup(clientId: string, limit = 100): Promise<SupplierFileRow[]> {
+    const boundedLimit = Math.max(1, Math.min(1_000, limit));
+    const [rows] = await this.db().execute<SupplierFileRow[]>(
+      `SELECT * FROM erp_supplier_files
+       WHERE client_id = ? AND state = 'pending_delete' AND pending_delete_at IS NOT NULL
+       ORDER BY pending_delete_at ASC, id ASC
+       LIMIT ${boundedLimit}`,
+      [clientId],
+    );
+    return rows;
   }
 }

@@ -84,4 +84,16 @@ describe("canonical message mirror through global sync", () => {
       mediaReference: { storage: "private", messageId: "msg-media-1" } });
     expect(JSON.stringify(state.messages())).not.toContain("A".repeat(100));
   });
+
+  it("does not let a raw global-state snapshot write a new legacy Data URL", async () => {
+    const state = statefulConnection();
+    await upsertConversationStateSnapshot(state.connection as any, {
+      id: "legacy-snapshot", clientId: "tenant-a", name: "Pessoa", phone: "5511999999999", company: "",
+      status: "open", lastMessage: "Arquivo", time: "12:02",
+      messages: [{ id: "raw-media", mediaData: "data:image/png;base64,QUJD", caption: "Arquivo" }],
+    });
+    const values = (state.connection.execute as any).mock.calls[0][1] as unknown[];
+    expect(JSON.parse(String(values[8]))).toEqual([{ id: "raw-media", caption: "Arquivo" }]);
+    expect(state.messages()).toEqual([]);
+  });
 });
