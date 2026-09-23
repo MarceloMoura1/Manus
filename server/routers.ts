@@ -8,7 +8,7 @@ import { decodeConversationMediaDataUrl, removeConversationMedia, writeConversat
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure, megadeskProcedure } from "./_core/trpc";
 import { COOKIE_NAME, normalizeModuleNamesToBackend, normalizeModuleNamesToAdmin } from "@shared/const";
-import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool, createMegaDeskBackup, listMegaDeskBackups, getMegaDeskBackupInfo, applyMegaDeskBackup } from "./db";
+import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, persistMegaDeskClientUser, MegaDeskClientUserPersistenceError, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool, createMegaDeskBackup, listMegaDeskBackups, getMegaDeskBackupInfo, applyMegaDeskBackup } from "./db";
 import bcrypt from "bcryptjs";
 import { megaadminCredentials, megadeskDomainClientUsers } from "../drizzle/schema";
 import { and, eq, inArray } from "drizzle-orm";
@@ -42,6 +42,7 @@ import { hasHumanContactName, normalizeContactPhone } from "../shared/contact-ph
 import { findCrmClientForAttendance, searchCrmClientsForAttendance } from "./db-crm";
 import { findConversationContactByPhone, searchLightweightContactsForAttendance } from "./conversation-contact";
 import { ConversationReplyResolutionError, resolveConversationReplyReference } from "./conversation-reply-resolution";
+import { sanitizeMegaAdminUser } from "./megaadmin-response-sanitization";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -146,7 +147,8 @@ const tickets: TicketRecord[] = [];
 const botScripts: Array<{ id: string; clientId: string; name: string; description: string; initialMessage: string; active: boolean }> = [];
 
 const operationalRecords: OperationalRecord[] = [];
-const auditLogs: Array<{ id: string; platform: "MegaAdmin" | "MegaDesk"; action: string; clientId?: string; success: boolean | null; eventPhase: "intent" | "success" | "failure" | null; createdAt: string }> = [];
+type MegaDeskAuditLog = { id: string; platform: "MegaAdmin" | "MegaDesk"; action: string; clientId?: string; success: boolean | null; eventPhase: "intent" | "success" | "failure" | null; createdAt: string };
+const auditLogs: MegaDeskAuditLog[] = [];
 
 const defaultSyncState: MegaDeskStructuredState = { clients, conversations, tickets, botScripts, operationalRecords, auditLogs };
 let syncStateHydrated = false;
@@ -181,9 +183,72 @@ async function conversationOperatorName(clientId: string, userId: string): Promi
   return name || "Operador";
 }
 
-function audit(platform: "MegaAdmin" | "MegaDesk", action: string, clientId: string | undefined, success = true) {
-  auditLogs.unshift({ id: `audit-${Date.now()}-${auditLogs.length}`, platform, action, clientId, success, eventPhase: null, createdAt: new Date().toISOString() });
+function makeAudit(platform: "MegaAdmin" | "MegaDesk", action: string, clientId: string | undefined, success = true): MegaDeskAuditLog {
+  return { id: `audit-${randomUUID()}`, platform, action, clientId, success, eventPhase: null, createdAt: new Date().toISOString() };
+}
+
+function appendAudit(entry: MegaDeskAuditLog) {
+  auditLogs.unshift(entry);
   if (auditLogs.length > 30) auditLogs.pop();
+}
+
+function audit(platform: "MegaAdmin" | "MegaDesk", action: string, clientId: string | undefined, success = true) {
+  const entry = makeAudit(platform, action, clientId, success);
+  appendAudit(entry);
+  return entry;
+}
+
+async function persistNewClientUser(client: MegaClient, user: MegaClient["users"][number], auditEntry: MegaDeskAuditLog) {
+  await persistMegaDeskClientUser({
+    kind: "create",
+    clientId: client.clientId,
+    userId: user.id,
+    changes: {
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+      permissions: user.permissions ?? [],
+      passwordHash: user.passwordHash ?? null,
+    },
+    audit: { ...auditEntry, clientId: client.clientId },
+  });
+}
+
+async function persistExistingClientUser(
+  client: MegaClient,
+  userId: string,
+  changes: {
+    name?: string;
+    email?: string;
+    role?: "admin" | "manager" | "agent" | "viewer";
+    status?: "active" | "blocked";
+    permissions?: string[];
+  },
+  auditEntry: MegaDeskAuditLog,
+) {
+  await persistMegaDeskClientUser({
+    kind: "update",
+    clientId: client.clientId,
+    userId,
+    changes,
+    audit: { ...auditEntry, clientId: client.clientId },
+  });
+}
+
+async function persistClientUserPasswordReset(
+  client: MegaClient,
+  userId: string,
+  passwordHash: string,
+  auditEntry: MegaDeskAuditLog,
+) {
+  await persistMegaDeskClientUser({
+    kind: "reset-password",
+    clientId: client.clientId,
+    userId,
+    changes: { passwordHash },
+    audit: { ...auditEntry, clientId: client.clientId },
+  });
 }
 
 function tokenHint(token: string) {
@@ -304,8 +369,8 @@ function assertClientUserPermission(client: MegaClient, permission: string, user
   return user;
 }
 
-function sanitizeClient(client: MegaClient) {
-  return { ...client, apiToken: undefined, tokenHint: tokenHint(client.apiToken), users: client.users.map((user) => ({ ...user, permissions: resolveUserPermissions(user, client.modules) })) };
+export function sanitizeClient(client: MegaClient) {
+  return { ...client, apiToken: undefined, tokenHint: tokenHint(client.apiToken), users: client.users.map((user) => sanitizeMegaAdminUser({ ...user, permissions: resolveUserPermissions(user, client.modules) })) };
 }
 
 export const appRouter = router({
@@ -615,26 +680,12 @@ export const appRouter = router({
       const client = getClientOrThrow(input.clientId);
       const user = client.users.find((u) => u.id === input.userId);
       if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado." });
-      // Grava o hash da senha na tabela do banco
       const passwordHash = await bcrypt.hash(input.newPassword, 12);
-      const existing = await getDb().select({ userId: megadeskDomainClientUsers.userId }).from(megadeskDomainClientUsers).where(eq(megadeskDomainClientUsers.userId, user.id)).limit(1);
-      if (existing.length > 0) {
-        await getDb().update(megadeskDomainClientUsers).set({ passwordHash }).where(eq(megadeskDomainClientUsers.userId, user.id));
-      } else {
-        // Usar conexão direta ao banco para evitar conflitos de campo
-        const connection = await getPool().getConnection();
-        try {
-          await connection.execute(
-            "INSERT INTO megadesk_domain_client_users (user_id, client_id, name, email, role, status, permissions_json, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            [user.id, client.clientId, user.name, user.email.toLowerCase().trim(), user.role, user.status, JSON.stringify(user.permissions ?? []), passwordHash]
-          );
-        } finally {
-          connection.release();
-        }
-      }
-      user.passwordHash = passwordHash;
-      audit("MegaAdmin", `Senha redefinida para usuário: ${user.email}`, client.clientId);
-      await persistSyncState();
+      const updatedUser = { ...user, passwordHash };
+      const auditEntry = makeAudit("MegaAdmin", `Senha redefinida para usuário: ${user.email}`, client.clientId);
+      await persistClientUserPasswordReset(client, user.id, passwordHash, auditEntry);
+      Object.assign(user, updatedUser);
+      appendAudit(auditEntry);
       return { ok: true, message: `Senha redefinida para ${user.name}.` };
     }),
     updateClientAccess: adminProcedure.mutation(() => { throw new TRPCError({ code: "METHOD_NOT_SUPPORTED", message: "Use as operações explícitas de lifecycle." }); }),
@@ -660,51 +711,51 @@ export const appRouter = router({
       }
       // Gerar hash de senha padrão (123456) para sincronização com MegaDesk
       const defaultPasswordHash = await bcrypt.hash(Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12), 12) // Senha aleatória - usuário deve trocar no primeiro acesso;
-      const user = { id: `user-${Date.now()}`, name: input.name, email: input.email, role: input.role, status: client.accessReleased ? "active" as const : "blocked" as const, permissions: rolePermissions(input.role), passwordHash: defaultPasswordHash };
-      client.users.push(user);
-      audit("MegaAdmin", `Usuário criado: ${input.email}`, client.clientId);
-      await persistSyncState();
-      
-      // Sincronizar usuário imediatamente para a tabela megadeskDomainClientUsers
-      const connection = await getPool().getConnection();
+      const user = { id: `user-${randomUUID()}`, name: input.name, email: input.email, role: input.role, status: client.accessReleased ? "active" as const : "blocked" as const, permissions: rolePermissions(input.role), passwordHash: defaultPasswordHash };
+      const auditEntry = makeAudit("MegaAdmin", `Usuário criado: ${input.email}`, client.clientId);
       try {
-        await connection.execute(
-          "INSERT INTO megadesk_domain_client_users (user_id, client_id, name, email, role, status, permissions_json, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-          [user.id, client.clientId, user.name, user.email.toLowerCase().trim(), user.role, user.status, JSON.stringify(user.permissions ?? []), user.passwordHash]
-        );
-      } catch (err: any) {
-        // Se o usuário já existe, apenas atualizar
-        if (err.code !== "ER_DUP_ENTRY") throw err;
-      } finally {
-        connection.release();
+        await persistNewClientUser(client, user, auditEntry);
+      } catch (error) {
+        if (error instanceof MegaDeskClientUserPersistenceError && error.code === "MAX_USERS_LIMIT_REACHED") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: `Limite de usuários atingido (${client.maxUsers}). Aumente o limite nos dados do cliente.` });
+        }
+        throw error;
       }
-      
-      return { ok: true, user };
+      client.users.push(user);
+      appendAudit(auditEntry);
+      return { ok: true, user: sanitizeMegaAdminUser(user) };
     }),
     updateClientUser: adminProcedure.input(z.object({ clientId: z.string(), userId: z.string(), role: z.enum(["admin", "manager", "agent", "viewer"]).optional(), status: z.enum(["active", "blocked"]).optional() })).mutation(async ({ input }) => {
       await hydrateSyncState();
       const client = getClientOrThrow(input.clientId);
       const user = client.users.find((item) => item.id === input.userId);
       if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado para este cliente." });
+      const updatedUser = { ...user };
       if (input.role) {
-        user.role = input.role;
-        user.permissions = rolePermissions(input.role);
+        updatedUser.role = input.role;
+        updatedUser.permissions = rolePermissions(input.role);
       }
-      if (input.status) user.status = input.status;
-      audit("MegaAdmin", `Usuário atualizado: ${user.email}`, client.clientId);
-      await persistSyncState();
-      return { ok: true, user };
+      if (input.status) updatedUser.status = input.status;
+      const auditEntry = makeAudit("MegaAdmin", `Usuário atualizado: ${updatedUser.email}`, client.clientId);
+      await persistExistingClientUser(client, user.id, {
+        ...(input.role ? { role: input.role, permissions: rolePermissions(input.role) } : {}),
+        ...(input.status ? { status: input.status } : {}),
+      }, auditEntry);
+      Object.assign(user, updatedUser);
+      appendAudit(auditEntry);
+      return { ok: true, user: sanitizeMegaAdminUser(updatedUser) };
     }),
     updateUserInfo: adminProcedure.input(z.object({ clientId: z.string(), userId: z.string(), name: z.string().min(1), email: z.string().email() })).mutation(async ({ input }) => {
       await hydrateSyncState();
       const client = getClientOrThrow(input.clientId);
       const user = client.users.find((item) => item.id === input.userId);
       if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado para este cliente." });
-      user.name = input.name;
-      user.email = input.email;
-      audit("MegaAdmin", `Informações do usuário atualizadas: ${input.email}`, client.clientId);
-      await persistSyncState();
-      return { ok: true, user };
+      const updatedUser = { ...user, name: input.name, email: input.email };
+      const auditEntry = makeAudit("MegaAdmin", `Informações do usuário atualizadas: ${input.email}`, client.clientId);
+      await persistExistingClientUser(client, user.id, { name: input.name, email: input.email }, auditEntry);
+      Object.assign(user, updatedUser);
+      appendAudit(auditEntry);
+      return { ok: true, user: sanitizeMegaAdminUser(updatedUser) };
     }),
     removeClientUser: adminProcedure.input(z.object({ clientId: z.string(), userId: z.string() })).mutation(async ({ input }) => {
       await hydrateSyncState();
@@ -771,12 +822,14 @@ export const appRouter = router({
       }
       // CORREÇÃO: Normalizar permissões recebidas do MegaAdmin (underscore → hífen)
       const normalizedPermissions = normalizeModuleNamesToBackend(input.permissions);
-      user.permissions = normalizedPermissions;
-      audit("MegaAdmin", `Permissões atualizadas para usuário ${user.email}`, client.clientId);
-      await persistSyncState();
+      const updatedUser = { ...user, permissions: normalizedPermissions };
+      const auditEntry = makeAudit("MegaAdmin", `Permissões atualizadas para usuário ${updatedUser.email}`, client.clientId);
+      await persistExistingClientUser(client, user.id, { permissions: normalizedPermissions }, auditEntry);
+      Object.assign(user, updatedUser);
+      appendAudit(auditEntry);
       // Retornar permissões resolvidas (sem misturar com role)
-      const resolvedPermissions = resolveUserPermissions(user, client.modules);
-      return { ok: true, user: { ...user, permissions: resolvedPermissions } };
+      const resolvedPermissions = resolveUserPermissions(updatedUser, client.modules);
+      return { ok: true, user: sanitizeMegaAdminUser({ ...updatedUser, permissions: resolvedPermissions }) };
     }),
     deleteClient: adminProcedure
       .input(z.object({ clientId: z.string(), reason: z.enum(TENANT_QUARANTINE_REASONS) }))

@@ -43,6 +43,7 @@ describe("megaadmin.createClient", () => {
     expect(result.client.company).toBe("Empresa Teste Vitest");
     expect(result.client.maxUsers).toBe(10);
     expect(result.client.statusType).toBe("test");
+    expect(result.client.users[0]).not.toHaveProperty("passwordHash");
     expect(result.integrationToken).toBeTruthy();
   });
 

@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import { eq, and } from "drizzle-orm";
-import { users, megadeskDomainCustomers, megadeskDomainTickets, megadeskDomainConversations, megadeskDomainChamados, megadeskDomainChamadoSequence } from "../drizzle/schema";
+import { users, megadeskDomainCustomers, megadeskDomainTickets, megadeskDomainConversations, megadeskDomainChamados, megadeskDomainChamadoSequence, megadeskDomainClientUsers, megadeskDomainAuditLogs, megadeskDomainClients } from "../drizzle/schema";
 import { getTestDatabaseUrl } from "./test-integration-gates";
 import { sanitizeConversationMessagesForPersistence } from "./conversation-message-store";
 
@@ -578,7 +578,171 @@ export async function saveMegaDeskStructuredState(state: MegaDeskStructuredState
       throw error;
     } finally {
       connection.release();
+  }
+}
+
+export type MegaDeskClientUserFields = {
+  name: string;
+  email: string;
+  role: "admin" | "manager" | "agent" | "viewer";
+  status: "active" | "blocked";
+  permissions: string[];
+};
+
+type MegaDeskClientUserAudit = {
+  id: string;
+  platform: "MegaAdmin" | "MegaDesk";
+  action: string;
+  clientId: string;
+  success: boolean | null;
+  eventPhase?: "intent" | "success" | "failure" | null;
+  createdAt?: string;
+};
+
+type MegaDeskClientUserMutationBase = {
+  clientId: string;
+  userId: string;
+  audit: MegaDeskClientUserAudit;
+};
+
+export type MegaDeskClientUserPersistenceInput =
+  | (MegaDeskClientUserMutationBase & {
+      kind: "create";
+      changes: MegaDeskClientUserFields & { passwordHash: string | null };
+    })
+  | (MegaDeskClientUserMutationBase & {
+      kind: "update";
+      changes: Partial<MegaDeskClientUserFields>;
+    })
+  | (MegaDeskClientUserMutationBase & {
+      kind: "reset-password";
+      changes: { passwordHash: string };
+    });
+
+export class MegaDeskClientUserPersistenceError extends Error {
+  constructor(readonly code: "CLIENT_NOT_FOUND" | "USER_NOT_FOUND" | "USER_ALREADY_EXISTS" | "MAX_USERS_LIMIT_REACHED" | "AUDIT_CLIENT_MISMATCH") {
+    super(code);
+    this.name = "MegaDeskClientUserPersistenceError";
+  }
+}
+
+function assertAuditClientBinding(input: MegaDeskClientUserPersistenceInput) {
+  if (input.audit.clientId !== input.clientId) {
+    throw new MegaDeskClientUserPersistenceError("AUDIT_CLIENT_MISMATCH");
+  }
+}
+
+function mergeClientUserChanges(
+  existingUser: Record<string, unknown>,
+  changes: Partial<MegaDeskClientUserFields> & { passwordHash?: string | null },
+) {
+  const { permissions, passwordHash, ...fields } = changes;
+  return {
+    ...existingUser,
+    ...fields,
+    ...(permissions === undefined ? {} : { permissions: [...permissions] }),
+    ...(passwordHash === undefined ? {} : { passwordHash }),
+  };
+}
+
+export function applyMegaDeskClientUserMutationToState(
+  state: MegaDeskStructuredState,
+  input: MegaDeskClientUserPersistenceInput,
+): MegaDeskStructuredState {
+  assertAuditClientBinding(input);
+  const nextState = cloneState(state);
+  const client = nextState.clients.find((item) => item.clientId === input.clientId);
+  if (!client) throw new MegaDeskClientUserPersistenceError("CLIENT_NOT_FOUND");
+  const userIndex = client.users.findIndex((item: { id: string }) => item.id === input.userId);
+  if (input.kind === "create") {
+    if (userIndex !== -1) throw new MegaDeskClientUserPersistenceError("USER_ALREADY_EXISTS");
+    client.users.push({ id: input.userId, ...mergeClientUserChanges({}, input.changes) });
+  } else {
+    if (userIndex === -1) throw new MegaDeskClientUserPersistenceError("USER_NOT_FOUND");
+    client.users[userIndex] = { id: input.userId, ...mergeClientUserChanges(client.users[userIndex], input.changes) };
+  }
+  nextState.auditLogs = [input.audit, ...nextState.auditLogs].slice(0, 30);
+  return nextState;
+}
+
+/**
+ * Persists one MegaAdmin user mutation and its audit record atomically.
+ * It deliberately does not serialize the global structured state.
+ */
+export async function persistMegaDeskClientUser(
+  input: MegaDeskClientUserPersistenceInput,
+): Promise<void> {
+  assertAuditClientBinding(input);
+  if (!hasConfiguredDatabase()) {
+    assertStorageConfigured();
+    if (inMemoryState) inMemoryState = applyMegaDeskClientUserMutationToState(inMemoryState, input);
+    return;
+  }
+  await verifyMainSchema();
+  await getDb().transaction(async (tx) => {
+    const [client] = await tx
+      .select({ clientId: megadeskDomainClients.clientId, maxUsers: megadeskDomainClients.maxUsers })
+      .from(megadeskDomainClients)
+      .where(eq(megadeskDomainClients.clientId, input.clientId))
+      .for("update")
+      .limit(1);
+    if (!client) throw new MegaDeskClientUserPersistenceError("CLIENT_NOT_FOUND");
+
+    const [existingUser] = await tx
+      .select({ userId: megadeskDomainClientUsers.userId })
+      .from(megadeskDomainClientUsers)
+      .where(and(eq(megadeskDomainClientUsers.userId, input.userId), eq(megadeskDomainClientUsers.clientId, input.clientId)))
+      .for("update")
+      .limit(1);
+
+    if (input.kind === "create") {
+      if (existingUser) throw new MegaDeskClientUserPersistenceError("USER_ALREADY_EXISTS");
+      const tenantUsers = await tx
+        .select({ userId: megadeskDomainClientUsers.userId })
+        .from(megadeskDomainClientUsers)
+        .where(eq(megadeskDomainClientUsers.clientId, input.clientId));
+      if (tenantUsers.length >= client.maxUsers) throw new MegaDeskClientUserPersistenceError("MAX_USERS_LIMIT_REACHED");
+      await tx.insert(megadeskDomainClientUsers).values({
+        userId: input.userId,
+        clientId: input.clientId,
+        name: input.changes.name,
+        email: input.changes.email,
+        role: input.changes.role,
+        status: input.changes.status,
+        permissionsJson: JSON.stringify(input.changes.permissions),
+        passwordHash: input.changes.passwordHash,
+      });
+    } else {
+      if (!existingUser) throw new MegaDeskClientUserPersistenceError("USER_NOT_FOUND");
+      let databaseChanges: Record<string, unknown>;
+      if (input.kind === "reset-password") {
+        databaseChanges = { passwordHash: input.changes.passwordHash };
+      } else {
+        const { permissions, ...changes } = input.changes;
+        databaseChanges = {
+          ...changes,
+          ...(permissions === undefined ? {} : { permissionsJson: JSON.stringify(permissions) }),
+        };
+      }
+      if (Object.keys(databaseChanges).length > 0) {
+        await tx.update(megadeskDomainClientUsers)
+          .set(databaseChanges)
+          .where(and(eq(megadeskDomainClientUsers.userId, input.userId), eq(megadeskDomainClientUsers.clientId, input.clientId)));
+      }
     }
+
+    await tx.insert(megadeskDomainAuditLogs).values({
+      auditId: input.audit.id,
+      platform: input.audit.platform,
+      action: input.audit.action,
+      clientId: input.clientId,
+      success: input.audit.success == null ? null : input.audit.success ? 1 : 0,
+      eventPhase: input.audit.eventPhase ?? null,
+    });
+  });
+  if (inMemoryState?.clients.some((client) => client.clientId === input.clientId)) {
+    inMemoryState = applyMegaDeskClientUserMutationToState(inMemoryState, input);
+  }
 }
 
 export async function recordMegaDeskMetric(clientId: string, metricType: string, amount = 1, metadata: Record<string, unknown> = {}, source = "runtime") {
