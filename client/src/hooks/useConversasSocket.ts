@@ -28,6 +28,7 @@ type UseConversasSocketOptions = {
   onConversationClosed?: (conversationId: string) => void;
   onConversationReopened?: (conversationId: string) => void;
   onConversationAssigned?: (data: { conversationId: string; assignedUserId: string; assignedUserName?: string }) => void;
+  onConversationMessage?: (data: { conversationId: string; message: { text?: string; timestamp?: string } }) => void;
 };
 
 export function useConversasSocket({
@@ -36,6 +37,7 @@ export function useConversasSocket({
   onConversationClosed,
   onConversationReopened,
   onConversationAssigned,
+  onConversationMessage,
 }: UseConversasSocketOptions) {
   const socketRef = useRef<Socket | null>(null);
   const connectedClientIdRef = useRef<string | null>(null);
@@ -84,6 +86,13 @@ export function useConversasSocket({
     [onConversationAssigned]
   );
 
+  const handleMessage = useCallback(
+    (data: { conversationId: string; message: { text?: string; timestamp?: string } }) => {
+      onConversationMessage?.(data);
+    },
+    [onConversationMessage]
+  );
+
   useEffect(() => {
     if (!clientId) return;
 
@@ -122,18 +131,20 @@ export function useConversasSocket({
     socket.on("conversation:closed", handleClosed);
     socket.on("conversation:reopened", handleReopened);
     socket.on("conversation:assigned", handleAssigned);
+    socket.on("conversation:message", handleMessage);
 
     return () => {
       socket.off("conversation:new", handleNew);
       socket.off("conversation:closed", handleClosed);
       socket.off("conversation:reopened", handleReopened);
       socket.off("conversation:assigned", handleAssigned);
+      socket.off("conversation:message", handleMessage);
       socket.emit("wa:leave_client", clientId);
       socket.disconnect();
       socketRef.current = null;
       connectedClientIdRef.current = null;
     };
-  }, [clientId, handleNew, handleClosed, handleReopened, handleAssigned]);
+  }, [clientId, handleNew, handleClosed, handleReopened, handleAssigned, handleMessage]);
 
   return { socket: socketRef.current };
 }

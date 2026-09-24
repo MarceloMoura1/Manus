@@ -655,12 +655,30 @@ export function ConversasPage() {
     []
   );
 
+  const handleConversationMessage = useCallback(
+    (data: { conversationId: string; message: { text?: string; timestamp?: string } }) => {
+      setLocalConversations(prev => prev.map(conversation =>
+        conversation.id === data.conversationId
+          ? {
+              ...conversation,
+              lastMessage: data.message.text ?? conversation.lastMessage,
+              lastMessageAt: data.message.timestamp ? new Date(data.message.timestamp) : new Date(),
+              unreadCount: conversation.unreadCount + 1,
+              lastMessageFrom: "customer",
+            }
+          : conversation,
+      ));
+    },
+    [],
+  );
+
   useConversasSocket({
     clientId,
     onConversationNew: handleConversationNew,
     onConversationClosed: handleConversationClosed,
     onConversationReopened: handleConversationReopened,
     onConversationAssigned: handleConversationAssigned,
+    onConversationMessage: handleConversationMessage,
   });
 
   // ─── Filtragem local ────────────────────────────────────────────────────────

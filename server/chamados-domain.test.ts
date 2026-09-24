@@ -142,4 +142,18 @@ describe("chamados domain activity audit", () => {
       { eventType: "collaborator_added", collaboratorId: "new-user", collaboratorName: "Ana Souza" },
     ]);
   });
+
+  it("rejects a collaborator id that does not belong to the chamado tenant before changing collaborators", async () => {
+    const memory = memoryPool({ users: [] });
+
+    await expect(updateCollaboratorsWithActivities({
+      chamadoId: "ticket-1",
+      clientId: "tenant-a",
+      collaboratorIds: ["tenant-b-user"],
+      actor,
+    }, memory.pool)).rejects.toThrow("INVALID_TENANT_COLLABORATOR");
+
+    expect(memory.connection.execute.mock.calls.some(call => String(call[0]).startsWith("DELETE FROM megadesk_domain_chamado_collaborators"))).toBe(false);
+    expect(memory.events).toEqual([]);
+  });
 });

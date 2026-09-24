@@ -150,8 +150,11 @@ export async function handleEvolutionWebhook(req: Request, res: Response): Promi
         break;
 
       case "MESSAGES_UPSERT":
-        await handleMessagesUpsert(clientId, payload.instance, payload.data);
-        break;
+        {
+          const outcome = await handleMessagesUpsert(clientId, payload.instance, payload.data);
+          res.status(200).json({ ok: true, outcome });
+          return;
+        }
 
       case "MESSAGES_UPDATE":
         await handleMessagesUpdate(clientId, payload.instance, payload.data);
@@ -163,6 +166,11 @@ export async function handleEvolutionWebhook(req: Request, res: Response): Promi
     }
     res.status(200).json({ ok: true });
   } catch (err) {
+    if (err instanceof EvolutionWebhookPayloadError) {
+      console.warn("[Evolution Webhook] MESSAGES_UPSERT payload rejected");
+      res.status(400).json({ error: "Unprocessable MESSAGES_UPSERT payload" });
+      return;
+    }
     console.error("[Evolution Webhook] event processing failed");
     res.status(503).json({ error: "Webhook processing failed" });
   }
@@ -251,17 +259,44 @@ async function handleQRCodeUpdated(
 
 // ─── MESSAGES_UPSERT ─────────────────────────────────────────────────────────
 
+type InboundMessagesUpsertOutcome = "persisted" | "duplicate" | "ignored";
+
+class EvolutionWebhookPayloadError extends Error {}
+
+function isEvolutionMessageRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isEvolutionMessageEnvelope(value: unknown): value is Record<string, any> {
+  return isEvolutionMessageRecord(value)
+    && isEvolutionMessageRecord(value.key)
+    && isEvolutionMessageRecord(value.message);
+}
+
+export function normalizeMessagesUpsertPayload(data: unknown): Record<string, any>[] {
+  if (!isEvolutionMessageRecord(data)) {
+    throw new EvolutionWebhookPayloadError("MESSAGES_UPSERT data must be an object");
+  }
+  if (Array.isArray(data.messages)) {
+    if (!data.messages.length || !data.messages.every(isEvolutionMessageEnvelope)) {
+      throw new EvolutionWebhookPayloadError("MESSAGES_UPSERT messages must contain key and message objects");
+    }
+    return data.messages;
+  }
+  if (isEvolutionMessageEnvelope(data.messages)) return [data.messages];
+  if (isEvolutionMessageEnvelope(data)) return [data];
+  throw new EvolutionWebhookPayloadError("MESSAGES_UPSERT message envelope is unsupported");
+}
+
 async function handleMessagesUpsert(
   clientId: string,
   instanceName: string,
-  data: Record<string, any>
-): Promise<void> {
+  data: unknown,
+): Promise<InboundMessagesUpsertOutcome> {
   // Evolution pode enviar "messages" como array ou objeto único
-  const messages: any[] = Array.isArray(data?.messages)
-    ? data.messages
-    : data?.message
-    ? [data]
-    : [];
+  const messages = normalizeMessagesUpsertPayload(data);
+  let persisted = 0;
+  let duplicate = 0;
 
   for (const msg of messages) {
     // Ignorar mensagens enviadas por nós (fromMe)
@@ -297,11 +332,14 @@ async function handleMessagesUpsert(
 
     const externalMessageId = msg?.key?.id;
     if (!externalMessageId || typeof externalMessageId !== "string") continue;
-    await saveIncomingMessage(clientId, instanceName, externalMessageId, phoneCandidates, pushName, text, now, payload, {
+    const saved = await saveIncomingMessage(clientId, instanceName, externalMessageId, phoneCandidates, pushName, text, now, payload, {
       providerMessageReference: normalizeProviderMessageReference({ key: msg.key, message: msg.message }),
       quotedExternalMessageId: extractEvolutionQuotedExternalMessageId(msg),
     });
+    if (saved === "persisted") persisted += 1;
+    else duplicate += 1;
   }
+  return persisted ? "persisted" : duplicate ? "duplicate" : "ignored";
 }
 
 export function parseEvolutionIncomingMessage(msg: Record<string, any>): { text: string; payload: Record<string, unknown> } | null {

@@ -22,7 +22,6 @@ import { ConversationDetailsPanel } from "@/components/ConversationDetailsPanel"
 import { ConversationListItem } from "@/components/ConversationListItem";
 import { ConversationActivityEvent } from "@/components/ConversationActivityEvent";
 import { formatConversationTime, formatDate, formatTime } from "@/lib/conversationDateTime";
-import { ticketAttachmentUrl } from "@/lib/trpc-url";
 import { composeConversationTimeline, reconcileConversationMessages } from "@/lib/conversationTimeline";
 import { messageReplyPreview, replyAuthor, replyPreview, type ConversationReplyPreview } from "@/lib/conversationQuote";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -863,6 +862,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     socket.on('conversation:new', () => { void utils.conversations.list.invalidate(); });
     // Conversa atualizada (nova mensagem)
     socket.on('conversation:updated', () => { void utils.conversations.list.invalidate(); });
+    socket.on('conversation:message', () => { void utils.conversations.list.invalidate(); });
     // LID foi resolvido para numero real
     socket.on('lid-resolved', (data: { oldPhone: string; newPhone: string; lidId: string }) => {
       console.log(`[Socket.IO] LID resolvido: ${data.oldPhone} -> ${data.newPhone}`);
@@ -1840,78 +1840,6 @@ type TicketActivity = {
 
 // Tipo Ticket já definido acima
 
-export type TicketAttachmentListItem = {
-  attachmentId: string;
-  fileName: string;
-  fileSize: number | null;
-  mimeType: string | null;
-  uploadedBy: string;
-  createdAt: string;
-  state: string;
-  canView: boolean;
-  legacy?: boolean;
-};
-
-export function activeTicketAttachments(attachments: readonly TicketAttachmentListItem[] | undefined) {
-  return (attachments ?? []).filter(attachment => attachment.state === "active");
-}
-
-function formatTicketAttachmentSize(size: number | null) {
-  if (size == null) return "Tamanho indisponível";
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-export function ticketAttachmentPrivateHref(chamadoId: string, attachmentId: string) {
-  return ticketAttachmentUrl(chamadoId, attachmentId);
-}
-
-export function TicketAttachmentsPanel({
-  open,
-  loading,
-  chamadoId,
-  attachments,
-  removing,
-  onClose,
-  onUpload,
-  onRemove,
-}: {
-  open: boolean;
-  loading: boolean;
-  chamadoId: string;
-  attachments: readonly TicketAttachmentListItem[];
-  removing: boolean;
-  onClose: () => void;
-  onUpload: () => void;
-  onRemove: (attachment: TicketAttachmentListItem) => void;
-}) {
-  if (!open) return null;
-  const activeAttachments = activeTicketAttachments(attachments);
-
-  return (
-    <div data-testid="ticket-attachments-panel-backdrop" className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-[1px]">
-      <section data-testid="ticket-attachments-panel" role="dialog" aria-modal="true" aria-labelledby="ticket-attachments-panel-title" className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-700 dark:bg-slate-900">
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 pb-4 dark:border-slate-700">
-          <div>
-            <div className="flex items-center gap-2"><FileText className="h-5 w-5 text-emerald-600 dark:text-emerald-300" /><h3 id="ticket-attachments-panel-title" className="text-lg font-bold text-slate-900 dark:text-slate-100">Anexos do chamado</h3></div>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{loading ? "Carregando anexos ativos..." : `${activeAttachments.length} ${activeAttachments.length === 1 ? "anexo ativo" : "anexos ativos"}`}</p>
-          </div>
-          <button type="button" data-testid="ticket-attachments-panel-close" aria-label="Fechar painel de anexos" onClick={onClose} className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"><X className="h-5 w-5" /></button>
-        </header>
-
-        <div className="py-5">
-          {loading ? <div data-testid="ticket-attachments-panel-loading" role="status" className="rounded-lg border border-slate-200 bg-slate-50 p-5 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-400">Carregando anexos...</div> : null}
-          {!loading && activeAttachments.length === 0 ? <div data-testid="ticket-attachments-panel-empty" className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center dark:border-slate-700 dark:bg-slate-800/70"><FileText className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600" /><p className="mt-3 text-sm font-semibold text-slate-700 dark:text-slate-200">Nenhum anexo neste chamado.</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Arquivos ativos enviados ao chamado aparecerão aqui.</p></div> : null}
-          {!loading && activeAttachments.length > 0 ? <div data-testid="ticket-attachments-panel-list" className="space-y-3">{activeAttachments.map(attachment => <article key={attachment.attachmentId} data-testid={`ticket-attachments-panel-item-${attachment.attachmentId}`} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50/70 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-700 dark:bg-slate-800/70"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{attachment.fileName}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{attachment.mimeType || "Arquivo"} · {formatTicketAttachmentSize(attachment.fileSize)}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Enviado por {attachment.uploadedBy || "Autor não identificado"} · {[formatDate(attachment.createdAt), formatTime(attachment.createdAt)].filter(Boolean).join(" · ") || "Data indisponível"}</p></div><div className="flex shrink-0 flex-wrap gap-2">{attachment.canView ? <a data-testid={`ticket-attachments-panel-view-${attachment.attachmentId}`} href={ticketAttachmentPrivateHref(chamadoId, attachment.attachmentId)} target="_blank" rel="noreferrer" className="rounded-md border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50 dark:border-emerald-900 dark:bg-slate-900 dark:text-emerald-300">Visualizar</a> : <span className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">Indisponível</span>}<button type="button" data-testid={`ticket-attachments-panel-remove-${attachment.attachmentId}`} onClick={() => onRemove(attachment)} disabled={removing} className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">Remover do chamado</button></div></article>)}</div> : null}
-        </div>
-
-        <footer className="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4 dark:border-slate-700"><Button type="button" data-testid="ticket-attachments-panel-upload" onClick={onUpload} className="bg-emerald-600 font-semibold text-white hover:bg-emerald-700"><Paperclip className="mr-2 h-4 w-4" />Anexar arquivo</Button><Button type="button" variant="outline" onClick={onClose} className="border-slate-300 bg-white font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">Fechar</Button></footer>
-      </section>
-    </div>
-  );
-}
-
 export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => void }) {
   // Sessão MegaDesk para obter clientId
   const sessionData = React.useMemo(() => {
@@ -1932,7 +1860,6 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   const [isEditingCollaborators, setIsEditingCollaborators] = React.useState(false);
   const [showRegisterActivityModal, setShowRegisterActivityModal] = React.useState(false);
   const [activityDescription, setActivityDescription] = React.useState('');
-  const [showAttachmentsPanel, setShowAttachmentsPanel] = React.useState(false);
   const [showAttachmentsModal, setShowAttachmentsModal] = React.useState(false);
   const [ticketAttachmentFile, setTicketAttachmentFile] = React.useState<File | null>(null);
   const ticketAttachmentAttemptIdRef = React.useRef<string | null>(null);
@@ -2047,13 +1974,6 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
   const updateCollaboratorsMutation = trpc.chamados.updateCollaborators.useMutation();
   const registerActivityMutation = trpc.chamados.registerActivity.useMutation();
   const uploadAttachmentMutation = trpc.chamados.uploadAttachment.useMutation();
-  const removeAttachmentMutation = trpc.chamados.removeAttachment.useMutation();
-  const attachmentsQuery = trpc.chamados.getAttachments.useQuery(
-    { chamadoId: selectedChamado?.id || '' },
-    { enabled: !!selectedChamado?.id },
-  );
-  const activeAttachments = activeTicketAttachments((attachmentsQuery.data ?? []) as TicketAttachmentListItem[]);
-
   // Carregar usuários do cliente ao abrir o card de encaminhamento
   const getClientUsersQuery = trpc.megadesk.getClientUsers.useQuery(
     {},
@@ -2473,26 +2393,10 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
       ticketAttachmentAttemptIdRef.current = null;
       setShowAttachmentsModal(false);
       showToast('Anexo enviado com sucesso.', 'success');
-      await Promise.all([
-        attachmentsQuery.refetch(),
-        utils.chamados.getDetail.invalidate({ chamadoId: selectedChamado.id }),
-      ]);
+      await utils.chamados.getDetail.invalidate({ chamadoId: selectedChamado.id });
     } catch (error) {
       console.error('Erro ao anexar arquivo:', error);
       showToast(error instanceof Error ? error.message : 'Não foi possível anexar o arquivo.', 'error');
-    }
-  };
-
-  const handleTicketAttachmentRemove = async (attachment: { attachmentId: string; fileName: string }) => {
-    if (!selectedChamado || removeAttachmentMutation.isPending) return;
-    if (!window.confirm(`Remover "${attachment.fileName}" do chamado? O arquivo não será apagado fisicamente.`)) return;
-    try {
-      const result = await removeAttachmentMutation.mutateAsync({ chamadoId: selectedChamado.id, attachmentId: attachment.attachmentId });
-      if (result.chamado) setSelectedChamado(result.chamado);
-      await Promise.all([attachmentsQuery.refetch(), utils.chamados.getDetail.invalidate({ chamadoId: selectedChamado.id })]);
-      showToast('Anexo removido do chamado.', 'success');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Não foi possível remover o anexo.', 'error');
     }
   };
 
@@ -3267,15 +3171,6 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               <span className="text-[11px] font-medium">Encaminhar</span>
             </button>
             <div role="separator" className="my-3 w-px shrink-0 bg-slate-200"></div>
-            <button type="button" data-testid="ticket-attachments-action" data-action="attachments" onClick={() => setShowAttachmentsPanel(true)} title="Anexos" aria-haspopup="dialog" className="flex h-[58px] min-w-[82px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1.5 text-slate-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700">
-              {/* Clipe - Anexo */}
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-              </svg>
-              <span className="text-[11px] font-medium">Anexos{activeAttachments.length ? ` (${activeAttachments.length})` : ''}</span>
-            </button>
-            <div role="separator" className="my-3 w-px shrink-0 bg-slate-200"></div>
             <button type="button" data-testid="ticket-attachment-upload-action" data-action="attachment-upload" onClick={() => setShowAttachmentsModal(true)} title="Anexar arquivo" className="flex h-[58px] min-w-[92px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1.5 text-slate-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700">
               <Paperclip className="h-5 w-5" />
               <span className="text-[11px] font-medium">Anexar arquivo</span>
@@ -3371,21 +3266,6 @@ export function TicketsPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => voi
               </dl>
             </aside>
           </div>
-
-          {/* Modal de Registrar Atividade */}
-          <TicketAttachmentsPanel
-            open={showAttachmentsPanel && Boolean(selectedChamado)}
-            loading={attachmentsQuery.isLoading}
-            chamadoId={selectedChamado?.id ?? ''}
-            attachments={(attachmentsQuery.data ?? []) as TicketAttachmentListItem[]}
-            removing={removeAttachmentMutation.isPending}
-            onClose={() => setShowAttachmentsPanel(false)}
-            onUpload={() => {
-              setShowAttachmentsPanel(false);
-              setShowAttachmentsModal(true);
-            }}
-            onRemove={attachment => void handleTicketAttachmentRemove(attachment)}
-          />
 
           {showAttachmentsModal && selectedChamado && (
             <div data-testid="ticket-attachments-backdrop" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/20 p-4 backdrop-blur-[1px]">

@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const webhookMocks = vi.hoisted(() => ({ poolExecute: vi.fn(), getConnection: vi.fn(), upsertSession: vi.fn() }));
+const webhookMocks = vi.hoisted(() => ({ poolExecute: vi.fn(), getConnection: vi.fn(), upsertSession: vi.fn(), socketTo: vi.fn(), socketEmit: vi.fn() }));
 vi.mock("../db", () => ({ getPool: () => ({ execute: webhookMocks.poolExecute, getConnection: webhookMocks.getConnection }) }));
 vi.mock("./config", () => ({ getEvolutionWebhookSecret: () => "webhook-secret" }));
 vi.mock("./session-store", () => ({ upsertSession: webhookMocks.upsertSession, instanceNameFor: (clientId: string) => `megadesk-${clientId}` }));
+vi.mock("../modules/whatsapp/socket/whatsapp.socket", () => ({ getSocketIO: () => ({ to: webhookMocks.socketTo }) }));
 
-import { canonicalEvolutionReceiptStatus, evolutionPhoneCandidates, extractEvolutionProviderName, extractEvolutionQuotedExternalMessageId, handleEvolutionWebhook, normalizeEvolutionEvent, parseEvolutionIncomingMessage, parseEvolutionMessageStatusUpdates, prepareInboundConversationMedia, saveIncomingMessage, selectInboundContactName } from "./webhook";
+import { canonicalEvolutionReceiptStatus, evolutionPhoneCandidates, extractEvolutionProviderName, extractEvolutionQuotedExternalMessageId, handleEvolutionWebhook, normalizeEvolutionEvent, normalizeMessagesUpsertPayload, parseEvolutionIncomingMessage, parseEvolutionMessageStatusUpdates, prepareInboundConversationMedia, saveIncomingMessage, selectInboundContactName } from "./webhook";
 
 function responseDouble() {
   const response: any = { statusCode: 200, body: undefined };
@@ -18,6 +19,19 @@ function responseDouble() {
 describe("Evolution webhook normalization", () => {
   it("normaliza o evento real com ponto", () => {
     expect(normalizeEvolutionEvent("messages.upsert")).toBe("MESSAGES_UPSERT");
+  });
+
+  it("accepts the supported messages.upsert envelopes", () => {
+    const message = { key: { id: "message-a" }, message: { conversation: "Oi" } };
+    expect(normalizeMessagesUpsertPayload({ messages: [message] })).toEqual([message]);
+    expect(normalizeMessagesUpsertPayload({ messages: message })).toEqual([message]);
+    expect(normalizeMessagesUpsertPayload(message)).toEqual([message]);
+  });
+
+  it("rejects a MESSAGES_UPSERT envelope without an interpretable message", () => {
+    expect(() => normalizeMessagesUpsertPayload({})).toThrow("MESSAGES_UPSERT");
+    expect(() => normalizeMessagesUpsertPayload({ messages: [] })).toThrow("MESSAGES_UPSERT");
+    expect(() => normalizeMessagesUpsertPayload({ messages: [{}] })).toThrow("MESSAGES_UPSERT");
   });
 
   it("mapeia somente receipts reais da Evolution para estados canônicos", () => {
@@ -182,6 +196,31 @@ describe("Evolution webhook HTTP contract", () => {
     expect(res.json).not.toHaveBeenCalledWith({ ok: true });
   });
 
+  it("returns 400 instead of silently accepting an unsupported MESSAGES_UPSERT envelope", async () => {
+    webhookMocks.poolExecute.mockResolvedValueOnce([[{ clientId: "tenant-a" }]]);
+    const res = responseDouble();
+    await handleEvolutionWebhook({ headers: { "x-megadesk-webhook-secret": "webhook-secret" }, body: {
+      event: "MESSAGES_UPSERT", instance: "megadesk-tenant-a", data: {},
+    } } as any, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: "Unprocessable MESSAGES_UPSERT payload" });
+    expect(webhookMocks.getConnection).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges a provider-originated outbound echo as ignored without an inbound write", async () => {
+    webhookMocks.poolExecute.mockResolvedValueOnce([[{ clientId: "tenant-a" }]]);
+    const res = responseDouble();
+    await handleEvolutionWebhook({ headers: { "x-megadesk-webhook-secret": "webhook-secret" }, body: {
+      event: "MESSAGES_UPSERT", instance: "megadesk-tenant-a", data: {
+        key: { id: "outbound-echo", remoteJid: "5541995484515@s.whatsapp.net", fromMe: true },
+        message: { conversation: "Echo" },
+      },
+    } } as any, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ ok: true, outcome: "ignored" });
+    expect(webhookMocks.getConnection).not.toHaveBeenCalled();
+  });
+
   it("persists an outbound MESSAGES_UPDATE receipt without touching inbound rows", async () => {
     webhookMocks.poolExecute
       .mockResolvedValueOnce([[{ clientId: "tenant-a" }]])
@@ -216,6 +255,39 @@ describe("Evolution webhook HTTP contract", () => {
     await handleEvolutionWebhook({ headers: { "x-megadesk-webhook-secret": "webhook-secret" }, body: { event: "MESSAGES_UPSERT", instance: "megadesk-tenant-a", data: { messages: [{ key: { id: "external-a", remoteJid: "5541995484515@s.whatsapp.net", fromMe: false }, message: { conversation: "Olá" } }] } } } as any, res);
     expect(res.statusCode).toBe(200);
     expect(connection.commit).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges a direct Evolution data.message envelope only after persistence", async () => {
+    const connection = {
+      beginTransaction: vi.fn(), commit: vi.fn(), rollback: vi.fn(), release: vi.fn(),
+      execute: vi.fn()
+        .mockResolvedValueOnce([[{ acquired: 1 }]])
+        .mockResolvedValueOnce([[]])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([[{ contact_id: "contact-a" }]])
+        .mockResolvedValueOnce([[{ conversation_id: "conv-a", messages_json: "[]", customer_name: "Cliente" }]])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([[{ messages_json: "[]" }]])
+        .mockResolvedValueOnce([{}])
+        .mockResolvedValueOnce([{}]),
+    };
+    webhookMocks.poolExecute.mockResolvedValueOnce([[{ clientId: "tenant-a" }]]);
+    webhookMocks.getConnection.mockResolvedValueOnce(connection);
+    webhookMocks.socketTo.mockReturnValue({ emit: webhookMocks.socketEmit });
+    const res = responseDouble();
+    await handleEvolutionWebhook({ headers: { "x-megadesk-webhook-secret": "webhook-secret" }, body: {
+      event: "messages.upsert", instance: "megadesk-tenant-a", data: {
+        key: { id: "external-direct", remoteJid: "5541995484515@s.whatsapp.net", fromMe: false },
+        message: { conversation: "Hello" },
+      },
+    } } as any, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ ok: true, outcome: "persisted" });
+    expect(connection.commit).toHaveBeenCalledOnce();
+    const persisted = connection.execute.mock.calls.find(call => String(call[0]).includes("INSERT INTO megadesk_domain_conversations_messages"));
+    expect(persisted?.[1]).toContain("tenant-a");
+    expect(webhookMocks.socketTo).toHaveBeenCalledWith("client:tenant-a");
+    expect(webhookMocks.socketEmit).toHaveBeenCalledWith("conversation:message", expect.objectContaining({ clientId: "tenant-a", conversationId: "conv-a" }));
   });
 
   it("returns 200 after a supported event is persisted", async () => {

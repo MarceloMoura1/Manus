@@ -261,16 +261,8 @@ function getClientOrThrow(clientId: string) {
   return client;
 }
 
-function getDefaultReleasedClient() {
-  return clients.find((client) => client.accessReleased && client.status === "active") ?? clients[0];
-}
-
-function getReleasedClientOrThrow(clientId?: string, requiredModule?: string) {
-  const client = clientId
-    ? getClientOrThrow(clientId)
-    : requiredModule
-      ? (clients.find((item) => item.accessReleased && item.status === "active" && item.modules.includes(requiredModule)) ?? getDefaultReleasedClient())
-      : getDefaultReleasedClient();
+function getReleasedClientOrThrow(clientId: string, requiredModule?: string) {
+  const client = getClientOrThrow(clientId);
   if (!client.accessReleased || client.status !== "active") {
     audit("MegaDesk", "Acesso negado por cliente bloqueado no MegaAdmin", client.clientId, false);
     throw new TRPCError({ code: "FORBIDDEN", message: "Cliente sem acesso ativo liberado no MegaAdmin." });
@@ -878,9 +870,9 @@ export const appRouter = router({
     }),
   }),
   megadesk: router({
-    overview: megadeskProcedure.input(z.object({ clientId: z.string().optional(), userEmail: z.string().email() })).query(async ({ input }) => {
+    overview: megadeskProcedure.input(z.object({ clientId: z.string().optional(), userEmail: z.string().email() })).query(async ({ input, ctx }) => {
       await hydrateSyncState();
-      const client = getReleasedClientOrThrow(input.clientId);
+      const client = getReleasedClientOrThrow(ctx.tenantId);
       // Busca o usuário ativo — sem exigir nenhuma permissão específica, apenas que esteja ativo
       const activeUsers = client.users
         .map((user) => ({ ...user, permissions: resolveUserPermissions(user, client.modules) }))
@@ -1089,9 +1081,9 @@ export const appRouter = router({
       await recordMegaDeskMetric(ticket.clientId, "ticket_status_updated", 1, { ticketId: input.ticketId, status: input.status });
       return { ok: true, ticketId: input.ticketId, status: input.status, updatedAt: new Date().toISOString() };
     }),
-    saveBotScript: megadeskProcedure.input(z.object({ clientId: z.string().optional(), name: z.string().min(2), initialMessage: z.string().min(3), userEmail: z.string().email() })).mutation(async ({ input }) => {
+    saveBotScript: megadeskProcedure.input(z.object({ clientId: z.string().optional(), name: z.string().min(2), initialMessage: z.string().min(3), userEmail: z.string().email() })).mutation(async ({ input, ctx }) => {
       await hydrateSyncState();
-      const client = getReleasedClientOrThrow(input.clientId, "Bot de triagem");
+      const client = getReleasedClientOrThrow(ctx.tenantId, "Bot de triagem");
       assertClientUserPermission(client, "manage_bot", input.userEmail);
       const script = { id: `script-${Date.now()}`, clientId: client.clientId, name: input.name, description: "Roteiro criado pela interface MegaDesk", initialMessage: input.initialMessage, active: false };
       botScripts.push(script);
@@ -1099,9 +1091,9 @@ export const appRouter = router({
       await persistSyncState();
       return { ok: true, script };
     }),
-    tenantObservability: megadeskProcedure.input(z.object({ clientId: z.string().optional(), userEmail: z.string().email() })).query(async ({ input }) => {
+    tenantObservability: megadeskProcedure.input(z.object({ clientId: z.string().optional(), userEmail: z.string().email() })).query(async ({ input, ctx }) => {
       await hydrateSyncState();
-      const client = getReleasedClientOrThrow(input.clientId);
+      const client = getReleasedClientOrThrow(ctx.tenantId);
       // Verifica apenas que o usuário existe e está ativo
       const activeUsers = client.users
         .map((u) => ({ ...u, permissions: resolveUserPermissions(u, client.modules) }))
@@ -1567,7 +1559,7 @@ export const appRouter = router({
       .query(async ({ input, ctx }) => {
         try {
           await hydrateSyncState();
-          const client = getReleasedClientOrThrow(input.clientId);
+          const client = getReleasedClientOrThrow(ctx.tenantId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
           
           // Retornar todos os usuários ativos do cliente
@@ -1588,11 +1580,11 @@ export const appRouter = router({
       }),
     updateCustomerInfo: megadeskProcedure
       .input(z.object({ customerId: z.string(), name: z.string().optional(), company: z.string().optional(), clientId: z.string().min(1) }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         try {
           const { updateCustomer } = await import("./db");
           await hydrateSyncState();
-          const client = getReleasedClientOrThrow(input.clientId);
+          const client = getReleasedClientOrThrow(ctx.tenantId);
           if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Nenhum cliente configurado" });
           
           if (!input.name && !input.company) {
@@ -1622,9 +1614,9 @@ export const appRouter = router({
       }),
     getClientUsers: megadeskProcedure
       .input(z.object({ clientId: z.string().optional() }))
-      .query(async ({ input }) => {
+      .query(async ({ ctx }) => {
         await hydrateSyncState();
-        const client = getReleasedClientOrThrow(input.clientId);
+        const client = getReleasedClientOrThrow(ctx.tenantId);
         // Retornar apenas usuários ativos do cliente
         const activeUsers = client.users
           .filter((u) => u.status === "active")
