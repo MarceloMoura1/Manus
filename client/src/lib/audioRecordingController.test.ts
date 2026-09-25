@@ -94,6 +94,7 @@ describe("AudioRecordingController", () => {
   it("records, sends exactly once and preserves the initial destination", async () => {
     const h = createHarness();
     await begin(h);
+    expect(h.recorder.start).toHaveBeenCalledWith();
     expect(h.controller.decide("send")).toBe(true);
     expect(h.controller.decide("cancel")).toBe(false);
     h.recorder.finish();
@@ -103,6 +104,19 @@ describe("AudioRecordingController", () => {
     expect(h.sent[0]).toMatchObject({ tenantId: "tenant-a", conversationId: "conversation-a", userEmail: "agent@example.test", fileName: "audio-1234.webm" });
     expect(h.stream.track.stop).toHaveBeenCalled();
     expect(h.controller.getPhase()).toBe("idle");
+  });
+
+  it("records a single browser-finalized container instead of timesliced fragments", async () => {
+    const h = createHarness();
+    expect(await h.controller.start(context)).toBe(true);
+    expect(h.recorder.start).toHaveBeenCalledTimes(1);
+    expect(h.recorder.start.mock.calls[0]).toEqual([]);
+    h.controller.decide("send");
+    h.recorder.emit(new Blob(["finalized-container"], { type: h.recorder.mimeType }));
+    h.recorder.finish();
+    h.reader.complete();
+    await settle();
+    expect(h.sent).toHaveLength(1);
   });
 
   it("cancels without reading or sending and makes cancel win against a later send", async () => {

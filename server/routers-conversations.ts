@@ -5,7 +5,8 @@ import { z } from "zod";
 import { router, megadeskProcedure } from "./_core/trpc";
 import { getPool } from "./db";
 import { readConversationHistory } from "./conversation-legacy-history";
-import { publicConversationMediaMetadata } from "./conversation-media-storage";
+import { isSafeConversationMediaMime, publicConversationMediaMetadata, safeConversationMediaFileName } from "./conversation-media-storage";
+import { normalizeProviderMessageReference } from "./conversation-provider-reference";
 
 const id = z.string().min(1).max(80);
 const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inv\u00e1lida.");
@@ -104,6 +105,14 @@ export function normalizedMessage(row: Record<string, any>) {
     try { media = JSON.parse(row.mediaReference); } catch { media = {}; }
   }
   const publicMedia = publicConversationMediaMetadata(media, row.id);
+  const providerReference = normalizeProviderMessageReference(row.providerMessageReference);
+  const providerBackedMedia = providerReference && ["image", "audio", "video", "document", "sticker"].includes(row.type)
+    ? {
+      ...(isSafeConversationMediaMime(media.mimeType) ? { mimeType: media.mimeType.toLowerCase() } : {}),
+      ...(safeConversationMediaFileName(media.fileName) ? { fileName: safeConversationMediaFileName(media.fileName) } : {}),
+      mediaReference: { storage: "private", messageId: row.id },
+    }
+    : null;
   const replyTo = typeof row.replyToMessageId === "string" && row.replyToMessageId
     ? {
       messageId: row.replyToMessageId,
@@ -117,10 +126,11 @@ export function normalizedMessage(row: Record<string, any>) {
     }
     : null;
   const { replyMessageId: _replyMessageId, replySenderName: _replySenderName, replySender: _replySender,
-    replyDirection: _replyDirection, replyType: _replyType, replyText: _replyText, replyMediaLabel: _replyMediaLabel, mediaReference: _unsafeMediaReference,
+    replyDirection: _replyDirection, replyType: _replyType, replyText: _replyText, replyMediaLabel: _replyMediaLabel,
+    mediaReference: _unsafeMediaReference, providerMessageReference: _providerMessageReference,
     ...message } = row;
-  if (publicMedia) {
-    const { mediaReference, ...metadata } = publicMedia;
+  if (publicMedia || providerBackedMedia) {
+    const { mediaReference, ...metadata } = publicMedia ?? providerBackedMedia!;
     return { ...message, ...metadata, mediaReference, replyTo };
   }
   const contact = media && typeof media.contact === "object" && media.contact !== null ? { contact: media.contact } : {};
@@ -398,7 +408,8 @@ export const conversationsRouter = router({
         `SELECT m.message_id AS id, m.sender, m.message AS text, m.timestamp, m.status, m.direction,
          m.message_type AS type, m.client_attempt_id AS clientAttemptId, m.external_message_id AS externalMessageId,
          COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(m.sender_name_snapshot), '')) AS agentName,
-         m.media_reference AS mediaReference, m.reply_to_message_id AS replyToMessageId,
+         m.media_reference AS mediaReference, m.provider_message_reference AS providerMessageReference,
+         m.reply_to_message_id AS replyToMessageId,
          q.message_id AS replyMessageId, q.sender AS replySender, q.direction AS replyDirection,
          COALESCE(NULLIF(TRIM(replyUser.name), ''), NULLIF(TRIM(q.sender_name_snapshot), '')) AS replySenderName,
          q.message AS replyText, q.message_type AS replyType,
@@ -474,7 +485,8 @@ export const conversationsRouter = router({
       `SELECT m.message_id AS id, m.sender, m.message AS text, m.timestamp, m.status, m.direction,
        m.message_type AS type, m.client_attempt_id AS clientAttemptId, m.external_message_id AS externalMessageId,
        COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(m.sender_name_snapshot), '')) AS agentName,
-       m.media_reference AS mediaReference, m.reply_to_message_id AS replyToMessageId,
+       m.media_reference AS mediaReference, m.provider_message_reference AS providerMessageReference,
+       m.reply_to_message_id AS replyToMessageId,
        q.message_id AS replyMessageId, q.sender AS replySender, q.direction AS replyDirection,
        COALESCE(NULLIF(TRIM(replyUser.name), ''), NULLIF(TRIM(q.sender_name_snapshot), '')) AS replySenderName,
        q.message AS replyText, q.message_type AS replyType,

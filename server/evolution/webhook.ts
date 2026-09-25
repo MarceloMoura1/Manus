@@ -288,6 +288,39 @@ export function normalizeMessagesUpsertPayload(data: unknown): Record<string, an
   throw new EvolutionWebhookPayloadError("MESSAGES_UPSERT message envelope is unsupported");
 }
 
+const EVOLUTION_MESSAGE_WRAPPERS = [
+  "ephemeralMessage",
+  "documentWithCaptionMessage",
+  "viewOnceMessage",
+  "viewOnceMessageV2",
+  "viewOnceMessageV2Extension",
+] as const;
+
+/**
+ * Baileys wraps some real media (notably iOS audio and view-once messages) in
+ * one or more container messages. Keep the original envelope for provider
+ * downloads/quotes, but inspect the innermost content for MegaDesk metadata.
+ */
+export function unwrapEvolutionMessageContent(value: unknown): Record<string, any> {
+  let content = isEvolutionMessageRecord(value) ? value : {};
+  const visited = new Set<Record<string, any>>();
+  for (let depth = 0; depth < 8 && !visited.has(content); depth += 1) {
+    visited.add(content);
+    const wrapper = EVOLUTION_MESSAGE_WRAPPERS
+      .map(key => content[key])
+      .find(candidate => isEvolutionMessageRecord(candidate) && isEvolutionMessageRecord(candidate.message));
+    if (!wrapper) break;
+    content = wrapper.message;
+  }
+  return content;
+}
+
+/** Provider download endpoint needs the real typed message, not a Baileys wrapper. */
+export function evolutionMediaDownloadEnvelope(message: Record<string, any>): Record<string, any> {
+  const content = unwrapEvolutionMessageContent(message.message);
+  return content === message.message ? message : { ...message, message: content };
+}
+
 async function handleMessagesUpsert(
   clientId: string,
   instanceName: string,
@@ -312,7 +345,7 @@ async function handleMessagesUpsert(
     const { text, payload } = parsed;
     if (payload.type !== "text" && payload.type !== "contact" && !payload.mediaData) {
       try {
-        const downloaded = await evoGetMediaBase64(instanceName, msg);
+        const downloaded = await evoGetMediaBase64(instanceName, evolutionMediaDownloadEnvelope(msg));
         const mimeType = downloaded.mimetype || String(payload.mimeType || "application/octet-stream");
         payload.mediaData = downloaded.base64.startsWith("data:")
           ? downloaded.base64
@@ -343,20 +376,22 @@ async function handleMessagesUpsert(
 }
 
 export function parseEvolutionIncomingMessage(msg: Record<string, any>): { text: string; payload: Record<string, unknown> } | null {
-  const image = msg?.message?.imageMessage;
-  const video = msg?.message?.videoMessage;
-  const audio = msg?.message?.audioMessage;
-  const document = msg?.message?.documentMessage;
-  const sticker = msg?.message?.stickerMessage;
-  const contact = msg?.message?.contactMessage;
-  const contacts = msg?.message?.contactsArrayMessage;
-  const textualContent: string = msg?.message?.conversation || msg?.message?.extendedTextMessage?.text ||
+  const messageRoot = isEvolutionMessageRecord(msg?.message) ? msg.message : {};
+  const content = unwrapEvolutionMessageContent(messageRoot);
+  const image = content.imageMessage;
+  const video = content.videoMessage || content.ptvMessage;
+  const audio = content.audioMessage;
+  const document = content.documentMessage;
+  const sticker = content.stickerMessage;
+  const contact = content.contactMessage;
+  const contacts = content.contactsArrayMessage;
+  const textualContent: string = content.conversation || content.extendedTextMessage?.text ||
     image?.caption || video?.caption || document?.caption || "";
   const mediaNode = image || video || audio || document || sticker;
   // Na Evolution 2.3.7 com webhookBase64=true, o binário chega como irmão do
   // imageMessage/audioMessage/etc. dentro de `message.base64`.
-  const rawBase64 = mediaNode?.base64 || msg?.message?.base64 || msg?.base64 || msg?.data?.base64 || "";
-  const mimeType = mediaNode?.mimetype || mediaNode?.mimeType || "";
+  const rawBase64 = mediaNode?.base64 || content.base64 || messageRoot.base64 || msg?.base64 || msg?.data?.base64 || "";
+  const mimeType = mediaNode?.mimetype || mediaNode?.mimeType || mediaNode?.mime_type || "";
   const type = image ? "image" : video ? "video" : audio ? "audio" : document ? "document" :
     sticker ? "sticker" : contact || contacts ? "contact" : "text";
   const text: string = textualContent || (audio ? "[Áudio]" : image ? "[Imagem]" : video ? "[Vídeo]" :
@@ -370,7 +405,7 @@ export function parseEvolutionIncomingMessage(msg: Record<string, any>): { text:
     `data:${mimeType || "application/octet-stream"};base64,${rawBase64}`) : undefined;
   return { text, payload: {
     type, mediaData, mimeType: mimeType || undefined,
-    fileName: document?.fileName || document?.filename || undefined,
+    fileName: mediaNode?.fileName || mediaNode?.filename || undefined,
     contact: contactPayload,
   } };
 }

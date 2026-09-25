@@ -162,7 +162,10 @@ export class AudioRecordingController {
       this.cleanup(session, "error", false);
     };
     try {
-      recorder.start(250);
+      // Ask the browser for one finalized container on stop. Short timeslices
+      // create independently timed fragments; concatenating those fragments is
+      // known to produce invalid/huge WebM duration metadata on mobile browsers.
+      recorder.start();
       this.setPhase("recording");
       return true;
     } catch {

@@ -6,7 +6,7 @@ vi.mock("./config", () => ({ getEvolutionWebhookSecret: () => "webhook-secret" }
 vi.mock("./session-store", () => ({ upsertSession: webhookMocks.upsertSession, instanceNameFor: (clientId: string) => `megadesk-${clientId}` }));
 vi.mock("../modules/whatsapp/socket/whatsapp.socket", () => ({ getSocketIO: () => ({ to: webhookMocks.socketTo }) }));
 
-import { canonicalEvolutionReceiptStatus, evolutionPhoneCandidates, extractEvolutionProviderName, extractEvolutionQuotedExternalMessageId, handleEvolutionWebhook, normalizeEvolutionEvent, normalizeMessagesUpsertPayload, parseEvolutionIncomingMessage, parseEvolutionMessageStatusUpdates, prepareInboundConversationMedia, saveIncomingMessage, selectInboundContactName } from "./webhook";
+import { canonicalEvolutionReceiptStatus, evolutionMediaDownloadEnvelope, evolutionPhoneCandidates, extractEvolutionProviderName, extractEvolutionQuotedExternalMessageId, handleEvolutionWebhook, normalizeEvolutionEvent, normalizeMessagesUpsertPayload, parseEvolutionIncomingMessage, parseEvolutionMessageStatusUpdates, prepareInboundConversationMedia, saveIncomingMessage, selectInboundContactName } from "./webhook";
 
 function responseDouble() {
   const response: any = { statusCode: 200, body: undefined };
@@ -107,6 +107,31 @@ describe("Evolution incoming content", () => {
     expect(parseEvolutionIncomingMessage({
       message: { imageMessage: { mimetype: "image/jpeg" }, base64: "AQ==" },
     })).toMatchObject({ payload: { mediaData: "data:image/jpeg;base64,AQ==" } });
+  });
+
+  it.each([
+    ["ephemeralMessage", "audioMessage", "audio", "audio/ogg", "Áudio"],
+    ["viewOnceMessage", "imageMessage", "image", "image/jpeg", "Imagem"],
+    ["viewOnceMessageV2", "videoMessage", "video", "video/mp4", "Vídeo"],
+    ["documentWithCaptionMessage", "documentMessage", "document", "application/pdf", "Documento"],
+  ] as const)("unwraps %s before normalizing %s", (wrapper, node, type, mimeType, label) => {
+    const parsed = parseEvolutionIncomingMessage({
+      message: { [wrapper]: { message: { [node]: { mimetype: mimeType, base64: "QQ==", fileName: "safe.bin" } } } },
+    });
+    expect(parsed).toMatchObject({
+      text: `[${label}]`,
+      payload: { type, mimeType, mediaData: `data:${mimeType};base64,QQ==`, fileName: "safe.bin" },
+    });
+  });
+
+  it("unwraps an ephemeral iOS audio before requesting provider media", () => {
+    expect(evolutionMediaDownloadEnvelope({
+      key: { id: "ios-audio" },
+      message: { ephemeralMessage: { message: { audioMessage: { mimetype: "audio/ogg", mediaKey: "key" } } } },
+    })).toEqual({
+      key: { id: "ios-audio" },
+      message: { audioMessage: { mimetype: "audio/ogg", mediaKey: "key" } },
+    });
   });
 
   it("converts inbound media into V2 metadata before canonical persistence", async () => {

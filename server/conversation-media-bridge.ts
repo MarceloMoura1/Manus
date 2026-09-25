@@ -3,15 +3,20 @@ import { getPool } from "./db";
 import { resolveOperationalSessionReadOnly } from "./_core/megadesk-session";
 import {
   CONVERSATION_MEDIA_MAX_BYTES,
+  decodeConversationMediaDataUrl,
   isSafeConversationMediaMime,
   parseConversationMediaReferenceV2,
   readConversationMedia,
+  safeConversationMediaFileName,
 } from "./conversation-media-storage";
 import { findLegacyConversationMedia } from "./conversation-legacy-history";
 import { hasConversationAccess } from "./routers-conversations";
+import { normalizeProviderMessageReference } from "./conversation-provider-reference";
+import { evoGetMediaBase64 } from "./evolution/client";
+import { evolutionMediaDownloadEnvelope, parseEvolutionIncomingMessage } from "./evolution/webhook";
 
 function safeName(value: unknown): string {
-  return typeof value === "string" && value.length > 0 && value.length <= 255 ? value.replace(/["\r\n]/g, "_") : "arquivo";
+  return safeConversationMediaFileName(value) ?? "arquivo";
 }
 
 function dataUrl(value: unknown): { mime: string; bytes: Buffer } | null {
@@ -23,6 +28,45 @@ function dataUrl(value: unknown): { mime: string; bytes: Buffer } | null {
   return { mime: match[1].toLowerCase(), bytes };
 }
 
+function record(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== "string" || !value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+type ProviderMediaDownloader = typeof evoGetMediaBase64;
+
+async function downloadProviderMedia(
+  row: Record<string, any>,
+  localMetadata: Record<string, unknown>,
+  download: ProviderMediaDownloader,
+): Promise<{ bytes: Buffer; mimeType: string; fileName?: string } | null> {
+  if (row.provider !== "evolution" || typeof row.integrationId !== "string" || !row.integrationId) return null;
+  const providerReference = normalizeProviderMessageReference(row.providerMessageReference);
+  if (!providerReference) return null;
+  const parsed = parseEvolutionIncomingMessage({ message: providerReference.message });
+  const parsedMime = typeof parsed?.payload.mimeType === "string" ? parsed.payload.mimeType : "";
+  const localMime = typeof localMetadata.mimeType === "string" ? localMetadata.mimeType : "";
+  const downloadEnvelope = evolutionMediaDownloadEnvelope(providerReference);
+  const result = await download(row.integrationId, downloadEnvelope);
+  const declaredMime = result.mimetype || localMime || parsedMime;
+  if (!declaredMime) return null;
+  const encoded = result.base64.startsWith("data:")
+    ? result.base64
+    : `data:${declaredMime};base64,${result.base64}`;
+  const decoded = decodeConversationMediaDataUrl(encoded, declaredMime);
+  if (!decoded) return null;
+  const parsedFileName = typeof parsed?.payload.fileName === "string" ? parsed.payload.fileName : undefined;
+  const localFileName = typeof localMetadata.fileName === "string" ? localMetadata.fileName : undefined;
+  const fileName = result.fileName || localFileName || parsedFileName;
+  return { bytes: decoded.bytes, mimeType: decoded.mimeType, ...(fileName ? { fileName } : {}) };
+}
+
 export async function sendConversationMedia(req: Request, res: Response, pool = getPool()): Promise<void> {
   return createConversationMediaHandler(pool)(req, res);
 }
@@ -31,6 +75,7 @@ export function createConversationMediaHandler(
   pool: Pick<ReturnType<typeof getPool>, "execute">,
   resolveIdentity: typeof resolveOperationalSessionReadOnly = resolveOperationalSessionReadOnly,
   readV2: typeof readConversationMedia = readConversationMedia,
+  downloadProvider: ProviderMediaDownloader = evoGetMediaBase64,
 ) {
   return async (req: Request, res: Response): Promise<void> => {
    const identity = await resolveIdentity(req);
@@ -43,7 +88,8 @@ export function createConversationMediaHandler(
   if (!/^[A-Za-z0-9_-]{1,100}$/.test(conversationId) || !/^[A-Za-z0-9_-]{1,100}$/.test(messageId)) { res.status(400).end(); return; }
   try {
     const [rows] = await pool.execute(
-      `SELECT m.media_reference AS mediaReference, m.message_type AS messageType
+      `SELECT m.media_reference AS mediaReference, m.provider_message_reference AS providerMessageReference,
+        m.provider, m.integration_id AS integrationId, m.message_type AS messageType
        FROM megadesk_domain_conversations_messages m
        INNER JOIN megadesk_domain_conversations c ON c.conversation_id = m.conversation_id AND c.client_id = m.client_id
        WHERE m.message_id = ? AND m.conversation_id = ? AND m.client_id = ? LIMIT 1`,
@@ -54,21 +100,25 @@ export function createConversationMediaHandler(
     let fileName: unknown;
     let messageType: unknown;
     if (rows.length) {
-      let reference: Record<string, unknown>;
-      try { reference = JSON.parse(rows[0].mediaReference); } catch { res.status(404).end(); return; }
+      const reference = record(rows[0].mediaReference);
       const v2 = parseConversationMediaReferenceV2(reference);
+      let content: { bytes: Buffer; mimeType: string; fileName?: string } | null = null;
       if (v2) {
-        const content = await readV2({ clientId: identity.tenantId, reference: v2 });
-        bytes = content.bytes;
-        mimeType = content.mimeType;
-        fileName = content.fileName;
+        try {
+          content = await readV2({ clientId: identity.tenantId, reference: v2 });
+        } catch {
+          // Historical/provider fallback below remains tenant- and attendance-scoped.
+        }
       } else {
-        const content = dataUrl(reference.mediaData);
-        if (!content) { res.status(404).end(); return; }
-        bytes = content.bytes;
-        mimeType = content.mime;
-        fileName = reference.fileName;
+        const legacyContent = dataUrl(reference.mediaData);
+        if (legacyContent) content = { bytes: legacyContent.bytes, mimeType: legacyContent.mime,
+          ...(typeof reference.fileName === "string" ? { fileName: reference.fileName } : {}) };
       }
+      content ??= await downloadProviderMedia(rows[0], reference, downloadProvider);
+      if (!content) { res.status(404).end(); return; }
+      bytes = content.bytes;
+      mimeType = content.mimeType;
+      fileName = content.fileName;
       messageType = rows[0].messageType;
     } else {
       const [legacyRows] = await pool.execute(

@@ -83,6 +83,20 @@ describe("canonical message store", () => {
     expect(JSON.stringify(row)).not.toMatch(/mediaData|base64|dataUrl|storageKey|data:.*;base64/i);
   });
 
+  it.each(["image", "audio", "video", "document"])("returns a private provider-backed pointer for historical %s metadata", type => {
+    const row = normalizedMessage({
+      id: `provider-${type}`,
+      type,
+      mediaReference: JSON.stringify({ type, mimeType: type === "document" ? "application/pdf" : `${type}/test`, fileName: "safe.bin" }),
+      providerMessageReference: JSON.stringify({
+        key: { id: `external-${type}`, remoteJid: "5541999999999@s.whatsapp.net", fromMe: false },
+        message: { [`${type}Message`]: { mimetype: "application/octet-stream" } },
+      }),
+    });
+    expect(row).toMatchObject({ fileName: "safe.bin", mediaReference: { storage: "private", messageId: `provider-${type}` } });
+    expect(row.providerMessageReference).toBeUndefined();
+  });
+
   it("returns a lightweight quote preview without original media", () => {
     const row = normalizedMessage({
       id: "reply", type: "text", mediaReference: null, replyToMessageId: "original",

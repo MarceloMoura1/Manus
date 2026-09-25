@@ -91,6 +91,41 @@ describe("conversation media bridge", () => {
     expect(res.send).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["image", "imageMessage", "image/jpeg", "foto.jpg"],
+    ["audio", "audioMessage", "audio/ogg", undefined],
+    ["video", "videoMessage", "video/mp4", "video.mp4"],
+    ["document", "documentMessage", "application/pdf", "pedido.pdf"],
+  ] as const)("recovers historical %s media from Evolution through the tenant-scoped backend", async (messageType, node, mimeType, fileName) => {
+    const providerMessageReference = {
+      key: { id: `provider-${messageType}`, remoteJid: "5541999999999@s.whatsapp.net", fromMe: false },
+      message: { [node]: { mimetype: mimeType, ...(fileName ? { fileName } : {}) } },
+    };
+    const execute = vi.fn().mockResolvedValue([[{
+      mediaReference: JSON.stringify({ type: messageType, mimeType, fileName }),
+      providerMessageReference: JSON.stringify(providerMessageReference),
+      provider: "evolution", integrationId: "megadesk-tenant-a", messageType,
+    }]]);
+    const download = vi.fn().mockResolvedValue({ base64: "QQ==", mimetype: mimeType, fileName });
+    const res = response();
+    await createConversationMediaHandler({ execute } as any, identity, undefined, download)(request(), res);
+    expect(execute.mock.calls[0][1]).toEqual(["msg-a", "conv-a", "tenant-a"]);
+    expect(download).toHaveBeenCalledWith("megadesk-tenant-a", providerMessageReference);
+    expect(res.setHeader).toHaveBeenCalledWith("Content-Type", mimeType);
+    expect(res.setHeader).toHaveBeenCalledWith("Content-Disposition", expect.stringMatching(messageType === "document" ? /^attachment;/ : /^inline;/));
+    expect(res.send).toHaveBeenCalledWith(Buffer.from("A"));
+  });
+
+  it("never calls Evolution for a row outside the authenticated tenant scope", async () => {
+    const execute = vi.fn().mockResolvedValueOnce([[]]).mockResolvedValueOnce([[]]);
+    const download = vi.fn();
+    const res = response();
+    await createConversationMediaHandler({ execute } as any, identity, undefined, download)(request("conv-other", "msg-other"), res);
+    expect(execute.mock.calls[0][1]).toEqual(["msg-other", "conv-other", "tenant-a"]);
+    expect(download).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
   it("does not disclose cross-tenant, wrong-conversation, absent or forbidden media", async () => {
     for (const rows of [[], [{ mediaReference: "{}", messageType: "image" }]]) {
       const execute = vi.fn().mockResolvedValue([rows]); const res = response();
@@ -100,11 +135,11 @@ describe("conversation media bridge", () => {
   });
 
   it("uses safe attachment disposition and never writes or calls an external service", async () => {
-    const execute = vi.fn().mockResolvedValue([[{ mediaReference: JSON.stringify({ mediaData: "data:application/pdf;base64,QQ==", fileName: 'x\"\r\nInjected: yes' }), messageType: "document" }]]);
+    const execute = vi.fn().mockResolvedValue([[{ mediaReference: JSON.stringify({ mediaData: "data:application/pdf;base64,QQ==", fileName: '../x\\\"\r\nInjected: yes' }), messageType: "document" }]]);
     const res = response(); await createConversationMediaHandler({ execute } as any, identity)(request(), res);
     const disposition = res.setHeader.mock.calls.find((call: any[]) => call[0] === "Content-Disposition")?.[1] as string;
     expect(disposition).toMatch(/^attachment; filename=\".*\"$/);
-    expect(disposition.slice("attachment; filename=\"".length, -1)).not.toMatch(/[\r\n\"]/);
+    expect(disposition.slice("attachment; filename=\"".length, -1)).not.toMatch(/[\\/\r\n\"]/);
     expect(execute.mock.calls).toHaveLength(1);
   });
 });
