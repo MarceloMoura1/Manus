@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { persistCanonicalMessage, type CanonicalMessageWrite } from "./conversation-message-store";
 import { normalizeProviderMessageReference, type ProviderMessageReference } from "./conversation-provider-reference";
 import { readConversationMedia, type ConversationMediaReferenceV2 } from "./conversation-media-storage";
+import { capturePreEvolutionAudioDiagnostic } from "./audio-pre-evolution-diagnostic";
 
 export type OutboundAttemptInput = Omit<CanonicalMessageWrite, "direction" | "status" | "externalMessageId" | "clientAttemptId"> & {
   clientAttemptId: string;
@@ -46,9 +47,17 @@ export async function sendOutboundConversationMediaFromPrivateStorage(
   dependencies: {
     read?: typeof readConversationMedia;
     send: (input: ConversationAttachmentProviderInput) => Promise<ProviderMessageReference>;
+    captureAudioDiagnostic?: typeof capturePreEvolutionAudioDiagnostic;
   },
 ): Promise<ProviderMessageReference> {
   const stored = await (dependencies.read ?? readConversationMedia)({ clientId: input.clientId, reference: input.mediaReference });
+  if (input.kind === "audio") {
+    await (dependencies.captureAudioDiagnostic ?? capturePreEvolutionAudioDiagnostic)({
+      bytes: stored.bytes,
+      mimeType: stored.mimeType,
+      tenantId: input.clientId,
+    }).catch(() => null);
+  }
   return dependencies.send({
     instanceName: input.instanceName,
     number: input.number,

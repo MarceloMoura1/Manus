@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { executeOutboundAttempt, OutboundAttemptAlreadyRecordedError, OutboundPendingPersistenceError, OutboundReconciliationError, sendOutboundConversationMediaFromPrivateStorage } from "./conversation-outbound";
 import { decodeConversationMediaDataUrl, readConversationMedia, writeConversationMedia } from "./conversation-media-storage";
@@ -155,5 +155,69 @@ describe("outbound tracked workflow", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("captures the exact tenant-scoped audio buffer immediately before the unchanged provider send", async () => {
+    const bytes = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x10, 0x20]);
+    const mediaReference = { version: 2 as const, storage: "local" as const,
+      storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin",
+      mimeType: "audio/webm", fileName: "audio.webm", byteSize: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex") };
+    const events: string[] = [];
+    const captureAudioDiagnostic = vi.fn(async ({ bytes: captured, mimeType, tenantId }: { bytes: Buffer; mimeType: string; tenantId: string }) => {
+      events.push("capture");
+      expect(captured).toEqual(bytes);
+      expect(mimeType).toBe("audio/webm");
+      expect(tenantId).toBe("tenant-a");
+      return null;
+    });
+    const send = vi.fn(async providerInput => {
+      events.push("send");
+      expect(Buffer.from(providerInput.dataUrl.split(",")[1], "base64")).toEqual(bytes);
+      return providerReference;
+    });
+
+    await sendOutboundConversationMediaFromPrivateStorage({
+      clientId: "tenant-a", mediaReference, instanceName: "megadesk-tenant-a",
+      number: "5541999999999", kind: "audio",
+    }, {
+      read: vi.fn(async request => {
+        expect(request).toEqual({ clientId: "tenant-a", reference: mediaReference });
+        return { bytes, mimeType: "audio/webm", fileName: "audio.webm" };
+      }),
+      captureAudioDiagnostic,
+      send,
+    });
+
+    expect(events).toEqual(["capture", "send"]);
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it("does not capture non-audio attachments", async () => {
+    const captureAudioDiagnostic = vi.fn();
+    await sendOutboundConversationMediaFromPrivateStorage({
+      clientId: "tenant-a",
+      mediaReference: { version: 2, storage: "local", storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin", mimeType: "image/png", byteSize: 1, sha256: "a".repeat(64) },
+      instanceName: "megadesk-tenant-a", number: "5541999999999", kind: "image",
+    }, {
+      read: async () => ({ bytes: Buffer.from([1]), mimeType: "image/png" }),
+      captureAudioDiagnostic,
+      send: async () => providerReference,
+    });
+    expect(captureAudioDiagnostic).not.toHaveBeenCalled();
+  });
+
+  it("keeps the provider send unchanged if optional diagnostic capture fails", async () => {
+    const send = vi.fn(async () => providerReference);
+    await sendOutboundConversationMediaFromPrivateStorage({
+      clientId: "tenant-a",
+      mediaReference: { version: 2, storage: "local", storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin", mimeType: "audio/webm", byteSize: 1, sha256: "a".repeat(64) },
+      instanceName: "megadesk-tenant-a", number: "5541999999999", kind: "audio",
+    }, {
+      read: async () => ({ bytes: Buffer.from([1]), mimeType: "audio/webm" }),
+      captureAudioDiagnostic: async () => { throw new Error("diagnostic unavailable"); },
+      send,
+    });
+    expect(send).toHaveBeenCalledOnce();
   });
 });
