@@ -369,6 +369,22 @@ export type CrmTimelineEntry = {
   createdAt: Date | string;
 };
 
+function timelineDescriptionWithResolvedActor(row: {
+  entry_type: string;
+  description: string;
+  persisted_author?: string | null;
+  author?: string | null;
+}): string {
+  if (row.entry_type !== "edit" && row.entry_type !== "status_change") return row.description;
+  const persistedAuthor = row.persisted_author?.trim();
+  const resolvedAuthor = row.author?.trim();
+  if (!persistedAuthor || !resolvedAuthor || persistedAuthor === resolvedAuthor) return row.description;
+  const actorFragment = `por ${persistedAuthor}`;
+  const actorIndex = row.description.lastIndexOf(actorFragment);
+  if (actorIndex < 0) return row.description;
+  return `${row.description.slice(0, actorIndex)}por ${resolvedAuthor}${row.description.slice(actorIndex + actorFragment.length)}`;
+}
+
 type CrmLifecycleAuditMetadata = {
   crmClientId?: unknown;
   from?: unknown;
@@ -415,13 +431,16 @@ export async function listCrmLifecycleTimeline(
   executor: SqlExecutor = getPool(),
 ): Promise<CrmTimelineEntry[]> {
   const [rows] = await executor.execute(
-    `SELECT audit_id, action, operator_user_id, metadata_json, created_at
-       FROM megadesk_domain_audit_logs
-      WHERE client_id = ?
-        AND origin = 'crm_clients'
-        AND event_phase = 'success'
-        AND action IN ('crm_client_deactivate', 'crm_client_reactivate', 'crm_client_archive', 'crm_client_restore')
-      ORDER BY created_at DESC
+    `SELECT a.audit_id, a.action, a.operator_user_id, a.metadata_json, a.created_at,
+            COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(u.email), ''), a.operator_user_id, 'Sistema') AS author
+       FROM megadesk_domain_audit_logs a
+       LEFT JOIN megadesk_domain_client_users u
+         ON u.client_id = a.client_id AND u.user_id = a.operator_user_id
+      WHERE a.client_id = ?
+        AND a.origin = 'crm_clients'
+        AND a.event_phase = 'success'
+        AND a.action IN ('crm_client_deactivate', 'crm_client_reactivate', 'crm_client_archive', 'crm_client_restore')
+      ORDER BY a.created_at DESC
       LIMIT 100`,
     [clientId],
   ) as any[];
@@ -433,7 +452,7 @@ export async function listCrmLifecycleTimeline(
       id: `audit-${row.audit_id}`,
       type: `lifecycle_${String(row.action).replace("crm_client_", "")}`,
       description: lifecycleAuditDescription(String(row.action), metadata),
-      author: row.operator_user_id ?? null,
+      author: row.author ?? "Sistema",
       createdAt: row.created_at,
     }];
   });
@@ -445,16 +464,19 @@ export async function listCrmTimeline(
   executor: SqlExecutor = getPool(),
 ): Promise<CrmTimelineEntry[]> {
   const [rows] = await executor.execute(
-    `SELECT timeline_id, entry_type, description, author, created_at
-     FROM megadesk_crm_timeline
-     WHERE crm_client_id = ? AND client_id = ?
-     ORDER BY created_at DESC LIMIT 100`,
+    `SELECT t.timeline_id, t.entry_type, t.description, t.author AS persisted_author, t.created_at,
+            COALESCE(NULLIF(TRIM(u.name), ''), NULLIF(TRIM(t.author), ''), 'Sistema') AS author
+       FROM megadesk_crm_timeline t
+       LEFT JOIN megadesk_domain_client_users u
+         ON u.client_id = t.client_id AND LOWER(u.email) = LOWER(t.author)
+      WHERE t.crm_client_id = ? AND t.client_id = ?
+      ORDER BY t.created_at DESC LIMIT 100`,
     [crmClientId, clientId]
   ) as any[];
   return (rows as any[]).map(r => ({
     id: r.timeline_id,
     type: r.entry_type,
-    description: r.description,
+    description: timelineDescriptionWithResolvedActor(r),
     author: r.author,
     createdAt: r.created_at,
   }));

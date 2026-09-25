@@ -4435,7 +4435,7 @@ function Shell() {
           {active === "conversations" && <ConversationsPage attendanceLaunch={attendanceLaunch} attendancePhone={activeAttendancePhone} />}
           {active === "tickets" && <TicketsPage onOpenMobileMenu={() => setSidebarOpen(true)} />}
           {active === "tracking" && <TrackingPage />}
-           {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} initialCrmClientId={activeCrmClientId ?? undefined} onClientNavigate={handleClientNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
+           {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} onClientNavigate={handleClientNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
            {active === "settings" && <SettingsPageComponent layout={shellLayout.settingsPageLayout} />}
           {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
           {active === "bot-config" && <BotConfigPage />}

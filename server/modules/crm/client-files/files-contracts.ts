@@ -28,8 +28,14 @@ export const CLIENT_FILE_CATEGORY_LABELS: Record<ClientFileCategory, string> = {
 export const allowedClientFileMimeTypes = allowedSupplierFileMimeTypes;
 export { formatActorName };
 
+// CRM client identities are domain IDs stored as VARCHAR(80). New records use
+// `crm-<uuid>`, while existing tenants may still contain legacy string IDs.
+// Keep every client-files boundary aligned with the canonical CRM contract.
+export const crmClientIdSchema = z.string().trim().min(1, "Cliente obrigatório.").max(80, "Identificador do cliente inválido.");
+export const clientFilePublicIdSchema = z.string().uuid();
+
 export const clientFileUploadInput = z.object({
-  crmClientId: z.string().uuid(),
+  crmClientId: crmClientIdSchema,
   fileName: z.string().trim().min(1, "Nome do arquivo obrigatório.").max(255, "Nome do arquivo muito longo."),
   category: z.enum(clientFileCategories),
   description: z.string().trim().max(500).optional().nullable().transform(value => value || null),
@@ -40,7 +46,7 @@ export const clientFileUploadInput = z.object({
 export type ClientFileUploadInput = z.infer<typeof clientFileUploadInput>;
 
 export const clientFileListInput = z.object({
-  crmClientId: z.string().uuid(),
+  crmClientId: crmClientIdSchema,
   category: z.enum(clientFileCategories).optional(),
   includeDeleted: z.boolean().optional().default(false),
 });
@@ -48,8 +54,13 @@ export const clientFileListInput = z.object({
 export type ClientFileListInput = z.infer<typeof clientFileListInput>;
 
 export const clientFileDeleteInput = z.object({
-  crmClientId: z.string().uuid(),
-  filePublicId: z.string().uuid(),
+  crmClientId: crmClientIdSchema,
+  filePublicId: clientFilePublicIdSchema,
+});
+
+export const clientFileDownloadInput = z.object({
+  crmClientId: crmClientIdSchema,
+  filePublicId: clientFilePublicIdSchema,
 });
 
 export type ClientFileDeleteInput = z.infer<typeof clientFileDeleteInput>;

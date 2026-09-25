@@ -6,7 +6,7 @@ import { hasCrmAccess, requireCrmAccess } from "../../../crm-access";
 import { ErpDomainError, erpTrpcCode } from "../../erp/errors";
 import { buildContentDisposition } from "../../erp/suppliers/files-storage";
 import { parseHttpByteRange } from "../../erp/suppliers/files-router";
-import { clientFileDeleteInput, clientFileListInput, clientFileUploadInput } from "./files-contracts";
+import { clientFileDeleteInput, clientFileDownloadInput, clientFileListInput, clientFileUploadInput } from "./files-contracts";
 import { ClientFileService } from "./files-service";
 
 const service = new ClientFileService();
@@ -64,11 +64,12 @@ export function createClientFileDownloadHandler(
       res.status(403).end();
       return;
     }
-    const { crmClientId, filePublicId } = req.params;
-    if (!crmClientId || !filePublicId) {
+    const parsedParams = clientFileDownloadInput.safeParse(req.params);
+    if (!parsedParams.success) {
       res.status(400).end();
       return;
     }
+    const { crmClientId, filePublicId } = parsedParams.data;
     try {
       const file = await fileService.getFileForDownload(
         { clientId: session.tenantId, userId: session.userId, role: session.role },

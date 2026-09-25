@@ -65,6 +65,10 @@ function crmClientOrNotFound<T>(client: T | undefined | null): T {
   return client;
 }
 
+function timelineActor(ctx: { userName?: string; userEmail?: string }): string {
+  return ctx.userName?.trim() || ctx.userEmail?.trim() || "Sistema";
+}
+
 const crmClientInputSchema = z.object({
   customerType: z.enum(CUSTOMER_TYPES),
   companyName: z.string().trim().min(1, "Nome do cliente é obrigatório").max(255),
@@ -234,20 +238,21 @@ export const crmRouter = router({
       });
       try {
         await updateCrmClient(input.crmClientId, tenantId, input.data);
+        const actor = timelineActor(ctx);
         const statusChanged = input.data.status !== undefined && input.data.status !== existing.status;
         const updatedFields = Object.keys(input.data).filter(field => field !== "status");
         if (statusChanged) {
           await addCrmTimeline(input.crmClientId, tenantId, {
             type: "status_change",
-            description: `Status comercial alterado de ${existing.status} para ${input.data.status} por ${ctx.userEmail}.`,
-            author: ctx.userEmail,
+            description: `Status comercial alterado de ${existing.status} para ${input.data.status} por ${actor}.`,
+            author: actor,
           });
         }
         if (updatedFields.length > 0 || !statusChanged) {
           await addCrmTimeline(input.crmClientId, tenantId, {
             type: "edit",
-            description: `Cadastro editado por ${ctx.userEmail}`,
-            author: ctx.userEmail,
+            description: `Cadastro editado por ${actor}`,
+            author: actor,
           });
         }
         return { success: true };
@@ -376,7 +381,7 @@ export const crmRouter = router({
       await addCrmTimeline(input.crmClientId, tenantId, {
         type: input.type,
         description: input.description,
-        author: ctx.userEmail,
+        author: timelineActor(ctx),
       });
       return { success: true };
     }),

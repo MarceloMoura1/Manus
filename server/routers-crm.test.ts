@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   addCrmTimeline: vi.fn(),
   listCrmTimeline: vi.fn(),
   listCrmLifecycleTimeline: vi.fn(),
+  permanentlyDeleteCrmClient: vi.fn(),
   execute: vi.fn(),
 }));
 
@@ -23,6 +24,10 @@ vi.mock("./db-crm", () => ({
   listCrmLifecycleTimeline: mocks.listCrmLifecycleTimeline,
 }));
 vi.mock("./db", () => ({ getPool: () => ({ execute: mocks.execute }) }));
+vi.mock("./crm-client-lifecycle", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./crm-client-lifecycle")>()),
+  permanentlyDeleteCrmClient: mocks.permanentlyDeleteCrmClient,
+}));
 
 import { crmRouter } from "./routers-crm";
 
@@ -33,6 +38,7 @@ function context(role: "admin" | "manager" | "agent" | "viewer", permissions: st
     operationalUserRole: role,
     operationalPermissions: permissions,
     userEmail: `${role}@example.invalid`,
+    userName: role === "admin" ? "Marcelo Moura" : `${role} User`,
     req: { headers: {} },
   } as any;
 }
@@ -84,6 +90,20 @@ describe("CRM tenant and authorization contract", () => {
     await expect(
       crmRouter.createCaller(context("manager")).deletePermanently({ crmClientId: "crm-public", expectedVersion: 1 }),
     ).rejects.toMatchObject({ code: "FORBIDDEN", message: "Somente administradores podem excluir clientes definitivamente." });
+  });
+
+  it("calls the existing permanent-delete mutation with the session tenant for an administrator", async () => {
+    mocks.permanentlyDeleteCrmClient.mockResolvedValue({ success: true });
+    await expect(
+      crmRouter.createCaller(context("admin")).deletePermanently({ crmClientId: "crm-public", expectedVersion: 2 }),
+    ).resolves.toEqual({ success: true });
+    expect(mocks.permanentlyDeleteCrmClient).toHaveBeenCalledWith({
+      tenantId: "tenant-session",
+      crmClientId: "crm-public",
+      expectedVersion: 2,
+      operatorUserId: "user-admin",
+      operatorRole: "admin",
+    });
   });
 
   it("merges tenant-scoped lifecycle evidence into the CRM timeline in chronological order", async () => {
@@ -140,9 +160,22 @@ describe("CRM tenant and authorization contract", () => {
     expect(mocks.updateCrmClient).toHaveBeenCalledWith("crm-public", "tenant-session", { status: "ativo" });
     expect(mocks.addCrmTimeline).toHaveBeenCalledWith("crm-public", "tenant-session", expect.objectContaining({
       type: "status_change",
-      description: "Status comercial alterado de lead para ativo por admin@example.invalid.",
-      author: "admin@example.invalid",
+      description: "Status comercial alterado de lead para ativo por Marcelo Moura.",
+      author: "Marcelo Moura",
     }));
+  });
+
+  it("uses the human session name for manual notes and safely falls back to email", async () => {
+    mocks.getCrmClientById.mockResolvedValue({ crmClientId: "crm-public", lifecycleState: "active" });
+    mocks.addCrmTimeline.mockResolvedValue(undefined);
+
+    await crmRouter.createCaller(context("admin")).addTimelineEntry({ crmClientId: "crm-public", description: "Nome humano", type: "note" });
+    expect(mocks.addCrmTimeline).toHaveBeenLastCalledWith("crm-public", "tenant-session", expect.objectContaining({ author: "Marcelo Moura" }));
+
+    const fallbackContext = context("admin");
+    fallbackContext.userName = "";
+    await crmRouter.createCaller(fallbackContext).addTimelineEntry({ crmClientId: "crm-public", description: "Fallback", type: "note" });
+    expect(mocks.addCrmTimeline).toHaveBeenLastCalledWith("crm-public", "tenant-session", expect.objectContaining({ author: "admin@example.invalid" }));
   });
 
   it("resolves duplicates inside the session tenant without exposing identity fields", async () => {

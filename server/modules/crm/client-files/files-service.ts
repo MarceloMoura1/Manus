@@ -44,7 +44,7 @@ function toFileView(row: ClientFileRow, crmClientId: string): ClientFileView {
     deletedBy: row.deleted_by,
     deletedByName: row.deleted_by_name ? formatActorName(row.deleted_by_name) : null,
     deletedAt: row.deleted_at,
-    downloadUrl: `/api/crm/clients/${crmClientId}/files/${row.public_id}`,
+    downloadUrl: `/api/crm/clients/${encodeURIComponent(crmClientId)}/files/${encodeURIComponent(row.public_id)}`,
   };
 }
 

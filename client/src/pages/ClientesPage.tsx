@@ -926,7 +926,11 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
           expectedVersion: client.lifecycleVersion,
         });
         toast.success("Cliente excluído definitivamente.");
+        setRiskAction(null);
+        setDeletePhrase("");
+        setRiskError(null);
         await onDeleted();
+        return;
       } else {
         await lifecycleMutation.mutateAsync({
           crmClientId: client.crmClientId,
@@ -1189,14 +1193,19 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
                     <RotateCcw className="h-4 w-4" /> Restaurar cliente
                   </DropdownMenuItem>
                 )}
-                {canPermanentlyDelete && (
-                  <>
-                    <DropdownMenuSeparator className="bg-slate-200 dark:bg-slate-700" />
-                    <DropdownMenuItem variant="destructive" onSelect={() => openRiskAction("delete")}>
-                      <Trash2 className="h-4 w-4" /> Excluir cliente
-                    </DropdownMenuItem>
-                  </>
-                )}
+                <DropdownMenuSeparator className="bg-slate-200 dark:bg-slate-700" />
+                <DropdownMenuItem
+                  variant="destructive"
+                  disabled={!canPermanentlyDelete}
+                  onSelect={() => canPermanentlyDelete && openRiskAction("delete")}
+                  title={canPermanentlyDelete ? "Excluir cliente definitivamente" : "Somente administradores podem excluir clientes definitivamente"}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span className="flex flex-col">
+                    <span>Excluir cliente</span>
+                    {!canPermanentlyDelete && <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400">Somente administradores</span>}
+                  </span>
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
             <button type="button" onClick={onClose} className="hidden rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-slate-800 dark:hover:text-slate-300 lg:flex" title="Fechar painel" aria-label="Fechar perfil do cliente">
@@ -1417,7 +1426,7 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
                 Cancelar
               </AlertDialogCancel>
               <button type="button" disabled={riskPending || (riskAction === "delete" && deletePhrase !== "EXCLUIR")} onClick={() => void runRiskAction()} className={cn("min-h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-offset-slate-900", riskAction === "delete" ? "bg-red-700 hover:bg-red-800 focus-visible:ring-red-600" : "bg-blue-600 hover:bg-blue-700 focus-visible:ring-blue-500")}>
-                {riskPending ? "Processando..." : riskAction === "delete" ? "Excluir cliente" : "Confirmar"}
+                {riskPending ? "Processando..." : riskAction === "delete" ? "Excluir cliente definitivamente" : "Confirmar"}
               </button>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -1585,21 +1594,21 @@ export function ClientesPage({
       <div className={cn("flex min-h-0 min-w-0 flex-col bg-white transition-all duration-200 dark:bg-slate-900 lg:border-r lg:border-slate-200/80 dark:lg:border-slate-800", selectedClient ? "hidden flex-shrink-0 lg:flex lg:w-80 xl:w-96" : "flex-1")}>
         {/* Header da lista */}
         <div className="border-b border-slate-200/80 bg-slate-50/90 p-4 dark:border-slate-800 dark:bg-slate-900/90 sm:p-5">
-          <div className="mb-3.5 flex items-center justify-between gap-3">
+          <div className="mb-3.5 flex flex-col gap-3">
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-bold tracking-tight text-slate-950 dark:text-slate-50">Clientes</h2>
                 <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">{filteredClients.length}</span>
               </div>
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="grid w-full grid-cols-3 gap-1.5">
               {/* Botão de importar CSV */}
               <input ref={csvInputRef} type="file" accept=".csv" className="hidden" onChange={handleCsvFile} />
-              <button onClick={() => csvInputRef.current?.click()} disabled={csvImporting} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700" title="Importar clientes via CSV">
+              <button onClick={() => csvInputRef.current?.click()} disabled={csvImporting} className="flex min-w-0 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700" title="Importar clientes via CSV">
                 {csvImporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
                 {csvImporting ? "Importando..." : "CSV"}
               </button>
-              <button type="button" onClick={() => void handleCsvExport()} disabled={exportCsvQuery.isFetching} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700" title="Exportar clientes em CSV">
+              <button type="button" onClick={() => void handleCsvExport()} disabled={exportCsvQuery.isFetching} className="flex min-w-0 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700" title="Exportar clientes em CSV">
                 <Download className="w-4 h-4" />
                 Exportar
               </button>
@@ -1608,7 +1617,7 @@ export function ClientesPage({
                   setEditClient(null);
                   setShowModal(true);
                 }}
-                className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                className="flex min-w-0 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
               >
                 <Plus className="w-4 h-4" />
                 Novo
