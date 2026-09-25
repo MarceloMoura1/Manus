@@ -9,10 +9,15 @@ function request(conversationId = "conv-a", messageId = "msg-a") { return { para
 const identity = async () => ({ tenantId: "tenant-a", userId: "user-a", sessionId: "session-a", role: "agent" as const, permissions: ["conversations"], userEmail: "a@example.invalid" });
 
 describe("conversation media bridge", () => {
+  const diagnostics = () => ({ warn: vi.fn() });
+
   it("rejects an unauthenticated request without querying media", async () => {
-    const execute = vi.fn(); const res = response();
-    await createConversationMediaHandler({ execute } as any, async () => null)(request(), res);
+    const execute = vi.fn(); const res = response(); const logger = diagnostics();
+    await createConversationMediaHandler({ execute } as any, async () => null, undefined, undefined, logger, () => "corr-auth")(request(), res);
     expect(res.status).toHaveBeenCalledWith(401); expect(execute).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith("[ConversationMediaBridge] media unavailable", {
+      code: "AUTH", correlationId: "corr-auth",
+    });
   });
 
   it.each(["image/png", "audio/ogg", "video/mp4", "application/pdf", "image/webp"])("streams permitted %s privately", async mime => {
@@ -28,9 +33,12 @@ describe("conversation media bridge", () => {
     ["a viewer", { tenantId: "tenant-a", userId: "viewer", sessionId: "session-v", role: "viewer" as const, permissions: ["conversations"], userEmail: "viewer@example.invalid" }],
     ["an operator without the module permission", { tenantId: "tenant-a", userId: "agent", sessionId: "session-p", role: "agent" as const, permissions: [], userEmail: "agent@example.invalid" }],
   ])("rejects %s before querying private media", async (_label, deniedIdentity) => {
-    const execute = vi.fn(); const res = response();
-    await createConversationMediaHandler({ execute } as any, async () => deniedIdentity)(request(), res);
+    const execute = vi.fn(); const res = response(); const logger = diagnostics();
+    await createConversationMediaHandler({ execute } as any, async () => deniedIdentity, undefined, undefined, logger, () => "corr-access")(request(), res);
     expect(res.status).toHaveBeenCalledWith(403); expect(execute).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith("[ConversationMediaBridge] media unavailable", {
+      code: "ACCESS", correlationId: "corr-access",
+    });
   });
 
   it("reads V1 media that exists only in this tenant's legacy JSON", async () => {
@@ -123,6 +131,56 @@ describe("conversation media bridge", () => {
     await createConversationMediaHandler({ execute } as any, identity, undefined, download)(request("conv-other", "msg-other"), res);
     expect(execute.mock.calls[0][1]).toEqual(["msg-other", "conv-other", "tenant-a"]);
     expect(download).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  it("reports a private-storage failure internally without leaking the diagnostic in the response", async () => {
+    const reference = { version: 2, storage: "local", storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin", mimeType: "image/png", byteSize: 2, sha256: "a".repeat(64) };
+    const execute = vi.fn().mockResolvedValue([[{ mediaReference: JSON.stringify(reference), messageType: "image" }]]);
+    const logger = diagnostics(); const res = response();
+    await createConversationMediaHandler({ execute } as any, identity, async () => { throw new Error("private path must not leak"); }, undefined, logger, () => "corr-storage")(request(), res);
+    expect(logger.warn).toHaveBeenCalledWith("[ConversationMediaBridge] media unavailable", {
+      code: "PRIVATE_STORAGE_READ_FAILURE", correlationId: "corr-storage",
+    });
+    expect(res.setHeader).toHaveBeenCalledWith("X-Correlation-Id", "corr-storage");
+    expect(JSON.stringify(res.status.mock.calls)).not.toContain("private path must not leak");
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  it("reports provider fallback failure without exposing provider details", async () => {
+    const providerMessageReference = { key: { id: "provider-a" }, message: { imageMessage: { mimetype: "image/jpeg" } } };
+    const execute = vi.fn().mockResolvedValue([[{
+      mediaReference: JSON.stringify({ type: "image", mimeType: "image/jpeg" }),
+      providerMessageReference: JSON.stringify(providerMessageReference), provider: "evolution",
+      integrationId: "megadesk-tenant-a", messageType: "image",
+    }]]);
+    const logger = diagnostics(); const res = response();
+    await createConversationMediaHandler({ execute } as any, identity, undefined, async () => { throw new Error("provider URL must not leak"); }, logger, () => "corr-provider")(request(), res);
+    expect(logger.warn).toHaveBeenCalledWith("[ConversationMediaBridge] media unavailable", {
+      code: "PROVIDER_FALLBACK_FAILURE", correlationId: "corr-provider",
+    });
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toMatch(/tenant-a|provider URL|image\/jpeg/i);
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  it.each([
+    ["MESSAGE_NOT_FOUND", [], "corr-message"],
+    ["LEGACY_MEDIA_NOT_FOUND", [{ messagesJson: "[]" }], "corr-legacy"],
+  ] as const)("distinguishes %s internally while preserving a safe 404", async (code, legacyRows, correlationId) => {
+    const execute = vi.fn().mockResolvedValueOnce([[]]).mockResolvedValueOnce([legacyRows]);
+    const logger = diagnostics(); const res = response();
+    await createConversationMediaHandler({ execute } as any, identity, undefined, undefined, logger, () => correlationId)(request(), res);
+    expect(logger.warn).toHaveBeenCalledWith("[ConversationMediaBridge] media unavailable", { code, correlationId });
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  it("identifies an invalid canonical media reference internally", async () => {
+    const execute = vi.fn().mockResolvedValue([[{ mediaReference: "not-json", messageType: "image" }]]);
+    const logger = diagnostics(); const res = response();
+    await createConversationMediaHandler({ execute } as any, identity, undefined, undefined, logger, () => "corr-invalid")(request(), res);
+    expect(logger.warn).toHaveBeenCalledWith("[ConversationMediaBridge] media unavailable", {
+      code: "INVALID_MEDIA_REFERENCE", correlationId: "corr-invalid",
+    });
     expect(res.status).toHaveBeenCalledWith(404);
   });
 

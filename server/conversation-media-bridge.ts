@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from "express";
+import { randomUUID } from "crypto";
 import { getPool } from "./db";
 import { resolveOperationalSessionReadOnly } from "./_core/megadesk-session";
 import {
@@ -39,6 +40,30 @@ function record(value: unknown): Record<string, unknown> {
   }
 }
 
+export type ConversationMediaDiagnosticCode =
+  | "AUTH"
+  | "ACCESS"
+  | "MESSAGE_NOT_FOUND"
+  | "PRIVATE_STORAGE_READ_FAILURE"
+  | "PROVIDER_FALLBACK_FAILURE"
+  | "LEGACY_MEDIA_NOT_FOUND"
+  | "INVALID_MEDIA_REFERENCE"
+  | "BRIDGE_INTERNAL_FAILURE";
+
+type ConversationMediaLogger = Pick<Console, "warn">;
+
+function reportDiagnostic(
+  logger: ConversationMediaLogger,
+  code: ConversationMediaDiagnosticCode,
+  correlationId: string,
+): void {
+  try {
+    logger.warn("[ConversationMediaBridge] media unavailable", { code, correlationId });
+  } catch {
+    // Observability must never change the safe public response.
+  }
+}
+
 type ProviderMediaDownloader = typeof evoGetMediaBase64;
 
 async function downloadProviderMedia(
@@ -76,16 +101,22 @@ export function createConversationMediaHandler(
   resolveIdentity: typeof resolveOperationalSessionReadOnly = resolveOperationalSessionReadOnly,
   readV2: typeof readConversationMedia = readConversationMedia,
   downloadProvider: ProviderMediaDownloader = evoGetMediaBase64,
+  logger: ConversationMediaLogger = console,
+  createCorrelationId: () => string = randomUUID,
 ) {
   return async (req: Request, res: Response): Promise<void> => {
+   const correlationId = createCorrelationId();
+   res.setHeader("X-Correlation-Id", correlationId);
    const identity = await resolveIdentity(req);
-   if (!identity) { res.status(401).end(); return; }
+   if (!identity) { reportDiagnostic(logger, "AUTH", correlationId); res.status(401).end(); return; }
    if (!hasConversationAccess({
      operationalUserRole: identity.role,
      operationalPermissions: identity.permissions,
-   })) { res.status(403).end(); return; }
+   })) { reportDiagnostic(logger, "ACCESS", correlationId); res.status(403).end(); return; }
   const { conversationId, messageId } = req.params;
-  if (!/^[A-Za-z0-9_-]{1,100}$/.test(conversationId) || !/^[A-Za-z0-9_-]{1,100}$/.test(messageId)) { res.status(400).end(); return; }
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(conversationId) || !/^[A-Za-z0-9_-]{1,100}$/.test(messageId)) {
+    reportDiagnostic(logger, "INVALID_MEDIA_REFERENCE", correlationId); res.status(400).end(); return;
+  }
   try {
     const [rows] = await pool.execute(
       `SELECT m.media_reference AS mediaReference, m.provider_message_reference AS providerMessageReference,
@@ -107,14 +138,30 @@ export function createConversationMediaHandler(
         try {
           content = await readV2({ clientId: identity.tenantId, reference: v2 });
         } catch {
-          // Historical/provider fallback below remains tenant- and attendance-scoped.
+          reportDiagnostic(logger, "PRIVATE_STORAGE_READ_FAILURE", correlationId);
+          // Provider fallback below remains tenant- and attendance-scoped.
         }
       } else {
         const legacyContent = dataUrl(reference.mediaData);
         if (legacyContent) content = { bytes: legacyContent.bytes, mimeType: legacyContent.mime,
           ...(typeof reference.fileName === "string" ? { fileName: reference.fileName } : {}) };
       }
-      content ??= await downloadProviderMedia(rows[0], reference, downloadProvider);
+      if (!content) {
+        const providerReference = normalizeProviderMessageReference(rows[0].providerMessageReference);
+        const providerEligible = rows[0].provider === "evolution"
+          && typeof rows[0].integrationId === "string" && Boolean(rows[0].integrationId)
+          && Boolean(providerReference);
+        if (providerEligible) {
+          try {
+            content = await downloadProviderMedia(rows[0], reference, downloadProvider);
+            if (!content) reportDiagnostic(logger, "PROVIDER_FALLBACK_FAILURE", correlationId);
+          } catch {
+            reportDiagnostic(logger, "PROVIDER_FALLBACK_FAILURE", correlationId);
+          }
+        } else if (!v2) {
+          reportDiagnostic(logger, "INVALID_MEDIA_REFERENCE", correlationId);
+        }
+      }
       if (!content) { res.status(404).end(); return; }
       bytes = content.bytes;
       mimeType = content.mimeType;
@@ -126,9 +173,20 @@ export function createConversationMediaHandler(
          WHERE conversation_id = ? AND client_id = ? LIMIT 1`,
         [conversationId, identity.tenantId],
       ) as any[];
+      if (!legacyRows.length) {
+        reportDiagnostic(logger, "MESSAGE_NOT_FOUND", correlationId);
+        res.status(404).end(); return;
+      }
       const legacy = findLegacyConversationMedia(legacyRows[0]?.messagesJson, messageId);
       const content = dataUrl(legacy?.mediaData);
-      if (!legacy || !content) { res.status(404).end(); return; }
+      if (!legacy) {
+        reportDiagnostic(logger, "LEGACY_MEDIA_NOT_FOUND", correlationId);
+        res.status(404).end(); return;
+      }
+      if (!content) {
+        reportDiagnostic(logger, "INVALID_MEDIA_REFERENCE", correlationId);
+        res.status(404).end(); return;
+      }
       bytes = content.bytes;
       mimeType = content.mime;
       fileName = legacy.fileName;
@@ -140,7 +198,10 @@ export function createConversationMediaHandler(
     res.setHeader("Content-Disposition", `${attachment ? "attachment" : "inline"}; filename=\"${safeName(fileName)}\"`);
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.status(200).send(bytes);
-  } catch { res.status(404).end(); }
+  } catch {
+    reportDiagnostic(logger, "BRIDGE_INTERNAL_FAILURE", correlationId);
+    res.status(404).end();
+  }
   };
 }
 
