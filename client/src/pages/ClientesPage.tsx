@@ -6,44 +6,9 @@ import type { CustomerType, CrmWhatsAppIntent } from "../../../shared/crm";
 import { customerTypeToCsv } from "../../../shared/crm";
 import { isValidCpf, isValidCnpj, suggestCustomerType } from "../../../shared/br-documents";
 import { normalizeContactPhone, sameContactPhone } from "../../../shared/contact-phone";
-import {
-  Building2,
-  Phone,
-  Mail,
-  MapPin,
-  Search,
-  Plus,
-  User,
-  Tag,
-  FileText,
-  MessageCircle,
-  Ticket,
-  DollarSign,
-  Package,
-  Paperclip,
-  Clock,
-  Edit3,
-  X,
-  ChevronRight,
-  Briefcase,
-  Hash,
-  Globe,
-  Instagram,
-  Facebook,
-  Smartphone,
-  CheckCircle,
-  XCircle,
-  AlertCircle,
-  MinusCircle,
-  TrendingDown,
-  UploadCloud,
-  Download,
-  RefreshCw,
-  AlertTriangle,
-  CheckCircle2,
-  MessageSquare,
-  PlusCircle,
-} from "lucide-react";
+import { Building2, Phone, Mail, MapPin, Search, Plus, User, Tag, FileText, MessageCircle, Ticket, DollarSign, Package, Paperclip, Clock, Edit3, X, ChevronLeft, ChevronRight, MoreHorizontal, Archive, RotateCcw, Trash2, Briefcase, Hash, Globe, Instagram, Facebook, Smartphone, CheckCircle, XCircle, AlertCircle, MinusCircle, TrendingDown, UploadCloud, Download, RefreshCw, AlertTriangle, CheckCircle2, MessageSquare, PlusCircle } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 function cn(...classes: Array<string | false | undefined | null>) {
   return classes.filter(Boolean).join(" ");
@@ -51,12 +16,7 @@ function cn(...classes: Array<string | false | undefined | null>) {
 
 function safeLifecycleMessage(error: unknown) {
   const message = typeof error === "object" && error && "message" in error ? String(error.message) : "";
-  const allowed = [
-    "Este cliente possui histórico ou vínculos e não pode ser excluído. Arquive o cadastro para preservá-los.",
-    "O cliente foi alterado por outra pessoa. Atualize a página e tente novamente.",
-    "Esta ação não está disponível no estado atual do cliente.",
-    "Somente administradores podem excluir clientes definitivamente.",
-  ];
+  const allowed = ["Este cliente possui histórico ou vínculos e não pode ser excluído. Arquive o cadastro para preservá-los.", "O cliente foi alterado por outra pessoa. Atualize a página e tente novamente.", "Esta ação não está disponível no estado atual do cliente.", "Somente administradores podem excluir clientes definitivamente."];
   return allowed.includes(message) ? message : "Não foi possível concluir a ação. Tente novamente.";
 }
 
@@ -91,29 +51,63 @@ export type CrmClient = {
 };
 
 type ClientTab = "geral" | "chamados" | "conversas" | "timeline" | "financeiro" | "rastreamento" | "arquivos";
-type AdditionalContact = { phone: string; whatsapp: string; description?: string };
+type AdditionalContact = {
+  phone: string;
+  whatsapp: string;
+  description?: string;
+};
 
 // ─── Status config ─────────────────────────────────────────────────────────────
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  lead:        { label: "Lead",        color: "bg-blue-100 text-blue-700 border-blue-200",    icon: <TrendingDown className="w-3 h-3" /> },
-  ativo:       { label: "Ativo",       color: "bg-green-100 text-green-700 border-green-200", icon: <CheckCircle className="w-3 h-3" /> },
-  inativo:     { label: "Inativo",     color: "bg-slate-100 text-slate-600 border-slate-200", icon: <MinusCircle className="w-3 h-3" /> },
-  cancelado:   { label: "Cancelado",   color: "bg-red-100 text-red-700 border-red-200",       icon: <XCircle className="w-3 h-3" /> },
-  inadimplente:{ label: "Inadimplente",color: "bg-orange-100 text-orange-700 border-orange-200", icon: <AlertCircle className="w-3 h-3" /> },
+  lead: {
+    label: "Lead",
+    color: "border-blue-200 bg-blue-100 text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-300",
+    icon: <TrendingDown className="w-3 h-3" />,
+  },
+  ativo: {
+    label: "Ativo",
+    color: "border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
+    icon: <CheckCircle className="w-3 h-3" />,
+  },
+  inativo: {
+    label: "Inativo",
+    color: "border-slate-200 bg-slate-100 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300",
+    icon: <MinusCircle className="w-3 h-3" />,
+  },
+  cancelado: {
+    label: "Cancelado",
+    color: "border-red-200 bg-red-100 text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300",
+    icon: <XCircle className="w-3 h-3" />,
+  },
+  inadimplente: {
+    label: "Inadimplente",
+    color: "border-orange-200 bg-orange-100 text-orange-700 dark:border-orange-900 dark:bg-orange-950/50 dark:text-orange-300",
+    icon: <AlertCircle className="w-3 h-3" />,
+  },
 };
 
 const ORIGIN_CONFIG: Record<string, { label: string; icon: React.ReactNode }> = {
-  whatsapp:  { label: "WhatsApp",  icon: <Smartphone className="w-3.5 h-3.5" /> },
-  instagram: { label: "Instagram", icon: <Instagram className="w-3.5 h-3.5" /> },
-  facebook:  { label: "Facebook",  icon: <Facebook className="w-3.5 h-3.5" /> },
-  site:      { label: "Site",      icon: <Globe className="w-3.5 h-3.5" /> },
+  whatsapp: {
+    label: "WhatsApp",
+    icon: <Smartphone className="w-3.5 h-3.5" />,
+  },
+  instagram: {
+    label: "Instagram",
+    icon: <Instagram className="w-3.5 h-3.5" />,
+  },
+  facebook: { label: "Facebook", icon: <Facebook className="w-3.5 h-3.5" /> },
+  site: { label: "Site", icon: <Globe className="w-3.5 h-3.5" /> },
   indicacao: { label: "Indicação", icon: <User className="w-3.5 h-3.5" /> },
-  outro:     { label: "Outro",     icon: <Hash className="w-3.5 h-3.5" /> },
+  outro: { label: "Outro", icon: <Hash className="w-3.5 h-3.5" /> },
 };
 
 // ─── Componente de Badge de Status ────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
-  const cfg = STATUS_CONFIG[status] ?? { label: status, color: "bg-slate-100 text-slate-600 border-slate-200", icon: null };
+  const cfg = STATUS_CONFIG[status] ?? {
+    label: status,
+    color: "bg-slate-100 text-slate-600 border-slate-200",
+    icon: null,
+  };
   return (
     <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border", cfg.color)}>
       {cfg.icon}
@@ -145,22 +139,40 @@ export type CrmClientFormData = {
 
 const EMPTY_FORM: CrmClientFormData = {
   customerType: null,
-  companyName: "", responsibleName: "", cpfCnpj: "", phone: "", whatsapp: "",
-  email: "", address: "", city: "", state: "", cep: "",
-  status: "lead", origin: "outro", internalResponsible: "", tags: "", observations: "",
+  companyName: "",
+  responsibleName: "",
+  cpfCnpj: "",
+  phone: "",
+  whatsapp: "",
+  email: "",
+  address: "",
+  city: "",
+  state: "",
+  cep: "",
+  status: "lead",
+  origin: "outro",
+  internalResponsible: "",
+  tags: "",
+  observations: "",
   contacts: [],
 };
 
-const visualString = (value: unknown) => typeof value === "string" ? value : "";
+const visualString = (value: unknown) => (typeof value === "string" ? value : "");
 
 function contactsForForm(value: unknown): CrmClientFormData["contacts"] {
   if (typeof value !== "string" || !value.trim()) return [];
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.map(contact => ({
-      phone: visualString(contact?.phone), whatsapp: visualString(contact?.whatsapp), description: visualString(contact?.description),
-    })) : [];
-  } catch { return []; }
+    return Array.isArray(parsed)
+      ? parsed.map(contact => ({
+          phone: visualString(contact?.phone),
+          whatsapp: visualString(contact?.whatsapp),
+          description: visualString(contact?.description),
+        }))
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function editableClient(client: CrmClient): CrmClientFormData {
@@ -185,48 +197,200 @@ function editableClient(client: CrmClient): CrmClientFormData {
   };
 }
 
-export function ClientFormModal({
-  onClose,
-  onSaved,
-  onUseExisting,
-  onViewExisting,
-  editData,
-  initialData,
-}: {
-  onClose: () => void;
-  onSaved: (crmClientId?: string) => void | Promise<void>;
-  onUseExisting?: (client: { crmClientId: string; companyName: string }) => void | Promise<void>;
-  onViewExisting?: (client: { crmClientId: string; companyName: string }) => void;
-  editData?: CrmClient | null;
-  initialData?: Partial<CrmClientFormData>;
-}) {
+function customerTypeLabel(customerType: CustomerType | null) {
+  if (customerType === "person") return "Pessoa física";
+  if (customerType === "company") return "Pessoa jurídica";
+  return "Cadastro legado";
+}
+
+function lifecycleStateLabel(lifecycleState: CrmClient["lifecycleState"]) {
+  if (lifecycleState === "archived") return "Arquivado";
+  if (lifecycleState === "inactive") return "Inativo";
+  return "Ativo";
+}
+
+function ClientInfoField({ label, children, monospaced = false }: { label: string; children: React.ReactNode; monospaced?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <span className="text-slate-400 dark:text-slate-500">{label}</span>
+      <div className={cn("mt-0.5 break-words font-semibold text-slate-900 dark:text-slate-100", monospaced && "font-mono")}>{children || "—"}</div>
+    </div>
+  );
+}
+
+function ClientOverview({ client, whatsappConnected, canStartConversation, onSendMessage }: { client: CrmClient; whatsappConnected: boolean; canStartConversation: boolean; onSendMessage?: (intent: CrmWhatsAppIntent) => void }) {
+  const additionalContacts = contactsForForm(client.contactsJson);
+  const contactActionDisabled = !whatsappConnected || !canStartConversation;
+  const origin = ORIGIN_CONFIG[client.origin];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+          <h4 className="mb-3 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+            <Phone className="h-3.5 w-3.5" /> Contato
+          </h4>
+          <div className="space-y-2.5 text-xs">
+            <ClientInfoField label="Contato principal:">{client.responsibleName || "—"}</ClientInfoField>
+            <ClientInfoField label="Telefone:">{client.phone || "—"}</ClientInfoField>
+            <ClientInfoField label="WhatsApp:">
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 break-all">{client.whatsapp || "—"}</span>
+                {client.whatsapp && canStartConversation && (
+                  <button
+                    type="button"
+                    disabled={contactActionDisabled || normalizeContactPhone(client.whatsapp).status !== "valid"}
+                    onClick={() =>
+                      onSendMessage?.({
+                        crmClientId: client.crmClientId,
+                        phone: client.whatsapp ?? "",
+                        channel: "whatsapp",
+                      })
+                    }
+                    className="ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-emerald-700 transition-colors hover:bg-emerald-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-45 dark:text-emerald-300 dark:hover:bg-emerald-950/50"
+                    title={whatsappConnected ? "Iniciar atendimento pelo WhatsApp" : "WhatsApp desconectado"}
+                    aria-label="Iniciar atendimento pelo WhatsApp"
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </span>
+            </ClientInfoField>
+            <ClientInfoField label="E-mail:">
+              {client.email ? (
+                <a href={`mailto:${client.email}`} className="break-all text-blue-600 hover:underline dark:text-blue-400">
+                  {client.email}
+                </a>
+              ) : (
+                "—"
+              )}
+            </ClientInfoField>
+            {additionalContacts.length > 0 && (
+              <div className="space-y-2 border-t border-slate-100 pt-2.5 dark:border-slate-800">
+                <span className="block text-slate-400 dark:text-slate-500">Contatos adicionais:</span>
+                {additionalContacts.map((contact, index) => (
+                  <div key={`${contact.description ?? "contato"}-${index}`} className="flex min-w-0 items-center gap-2">
+                    <Phone className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <span className="min-w-0 flex-1 break-words font-semibold text-slate-900 dark:text-slate-100">
+                      {contact.description ? `${contact.description}: ` : ""}
+                      {contact.phone || contact.whatsapp || "—"}
+                    </span>
+                    {contact.whatsapp && canStartConversation && (
+                      <button
+                        type="button"
+                        disabled={contactActionDisabled || normalizeContactPhone(contact.whatsapp).status !== "valid"}
+                        onClick={() =>
+                          onSendMessage?.({
+                            crmClientId: client.crmClientId,
+                            phone: contact.whatsapp,
+                            channel: "whatsapp",
+                          })
+                        }
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-emerald-700 transition-colors hover:bg-emerald-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-45 dark:text-emerald-300 dark:hover:bg-emerald-950/50"
+                        title={whatsappConnected ? "Iniciar atendimento pelo WhatsApp" : "WhatsApp desconectado"}
+                        aria-label={`Iniciar atendimento pelo WhatsApp com ${contact.description || `contato adicional ${index + 1}`}`}
+                      >
+                        <MessageSquare className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+          <h4 className="mb-3 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+            <Hash className="h-3.5 w-3.5" /> Identificação cadastral
+          </h4>
+          <div className="space-y-2.5 text-xs">
+            <ClientInfoField label="Perfil:">{customerTypeLabel(client.customerType)}</ClientInfoField>
+            <ClientInfoField label={client.customerType === "person" ? "Nome:" : "Razão social:"}>{client.companyName || "—"}</ClientInfoField>
+            <ClientInfoField label={client.customerType === "person" ? "CPF:" : "CNPJ:"} monospaced>
+              {client.cpfCnpj || "—"}
+            </ClientInfoField>
+            <ClientInfoField label="Status comercial:">
+              <StatusBadge status={client.status} />
+            </ClientInfoField>
+          </div>
+        </section>
+      </div>
+
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+        <h4 className="mb-3 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+          <MapPin className="h-3.5 w-3.5" /> Endereço
+        </h4>
+        <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+          <ClientInfoField label="Endereço:">{client.address || "—"}</ClientInfoField>
+          <ClientInfoField label="Cidade / UF:">{[client.city, client.state].filter(Boolean).join(" / ") || "—"}</ClientInfoField>
+          <ClientInfoField label="CEP:" monospaced>
+            {client.cep || "—"}
+          </ClientInfoField>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+        <h4 className="mb-3 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+          <Briefcase className="h-3.5 w-3.5" /> Relacionamento
+        </h4>
+        <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-3 xl:grid-cols-5">
+          <ClientInfoField label="Cliente desde:">{formatDate(client.createdAt) || "—"}</ClientInfoField>
+          <ClientInfoField label="Última atualização:">{formatDate(client.updatedAt) || "—"}</ClientInfoField>
+          <ClientInfoField label="Última interação:">{client.lastInteractionAt ? formatDate(client.lastInteractionAt) : "—"}</ClientInfoField>
+          <ClientInfoField label="Situação:">{lifecycleStateLabel(client.lifecycleState)}</ClientInfoField>
+          <ClientInfoField label="Origem:">
+            <span className="inline-flex items-center gap-1.5">
+              {origin?.icon}
+              {origin?.label ?? client.origin ?? "—"}
+            </span>
+          </ClientInfoField>
+          <ClientInfoField label="Responsável interno:">{client.internalResponsible || "—"}</ClientInfoField>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+        <h4 className="mb-3 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+          <FileText className="h-3.5 w-3.5" /> Observações internas
+        </h4>
+        {client.observations ? <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-700 dark:text-slate-300">{client.observations}</p> : <p className="text-xs italic text-slate-400 dark:text-slate-500">Nenhuma observação interna registrada.</p>}
+      </section>
+    </div>
+  );
+}
+
+export function ClientFormModal({ onClose, onSaved, onUseExisting, onViewExisting, editData, initialData }: { onClose: () => void; onSaved: (crmClientId?: string) => void | Promise<void>; onUseExisting?: (client: { crmClientId: string; companyName: string }) => void | Promise<void>; onViewExisting?: (client: { crmClientId: string; companyName: string }) => void; editData?: CrmClient | null; initialData?: Partial<CrmClientFormData> }) {
   const titleId = React.useId();
   const [form, setForm] = useState<CrmClientFormData>(editData ? editableClient(editData) : { ...EMPTY_FORM, ...initialData });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [duplicateClient, setDuplicateClient] = useState<{ crmClientId: string; companyName: string; matchedField: "cpfCnpj" | "phone" } | null>(null);
-  const [sameWhatsapp, setSameWhatsapp] = useState(() => editData ? sameContactPhone(editData.phone, editData.whatsapp) : true);
+  const [duplicateClient, setDuplicateClient] = useState<{
+    crmClientId: string;
+    companyName: string;
+    matchedField: "cpfCnpj" | "phone";
+  } | null>(null);
+  const [sameWhatsapp, setSameWhatsapp] = useState(() => (editData ? sameContactPhone(editData.phone, editData.whatsapp) : true));
   const [showOtherWhatsapp, setShowOtherWhatsapp] = useState(() => !!editData?.whatsapp && !sameContactPhone(editData.phone, editData.whatsapp));
   const legacySuggestion = editData?.customerType === null ? suggestCustomerType(visualString(editData.cpfCnpj)) : null;
 
   const addContact = () => {
     setForm(prev => ({
       ...prev,
-      contacts: [...prev.contacts, { phone: "", whatsapp: "", description: "" }]
+      contacts: [...prev.contacts, { phone: "", whatsapp: "", description: "" }],
     }));
   };
 
   const removeContact = (index: number) => {
     setForm(prev => ({
       ...prev,
-      contacts: prev.contacts.filter((_, i) => i !== index)
+      contacts: prev.contacts.filter((_, i) => i !== index),
     }));
   };
 
   const updateContact = (index: number, field: string, value: string) => {
     setForm(prev => ({
       ...prev,
-      contacts: prev.contacts.map((c, i) => i === index ? { ...c, [field]: value } : c)
+      contacts: prev.contacts.map((c, i) => (i === index ? { ...c, [field]: value } : c)),
     }));
   };
 
@@ -236,7 +400,11 @@ export function ClientFormModal({
 
   function setField<K extends keyof CrmClientFormData>(key: K, value: CrmClientFormData[K]) {
     setForm(prev => ({ ...prev, [key]: value }));
-    setFieldErrors(prev => { const next = { ...prev }; delete next[key]; return next; });
+    setFieldErrors(prev => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
     setSubmitError(null);
     setDuplicateClient(null);
   }
@@ -246,9 +414,7 @@ export function ClientFormModal({
       setField("customerType", next);
       return;
     }
-    const message = form.customerType === "company"
-      ? "Ao mudar para Pessoa, o nome será reinterpretado, o responsável será removido e um CNPJ incompatível será limpo. Confirmar?"
-      : "Ao mudar para Empresa, o nome será reinterpretado e um CPF incompatível será limpo. Confirmar?";
+    const message = form.customerType === "company" ? "Ao mudar para Pessoa, o nome será reinterpretado, o responsável será removido e um CNPJ incompatível será limpo. Confirmar?" : "Ao mudar para Empresa, o nome será reinterpretado e um CPF incompatível será limpo. Confirmar?";
     if (!window.confirm(message)) return;
     setForm(prev => ({
       ...prev,
@@ -274,7 +440,8 @@ export function ClientFormModal({
     if (whatsapp.status === "invalid") errors.whatsapp = "WhatsApp inválido.";
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = "E-mail inválido.";
     if (Object.keys(errors).length) {
-      setFieldErrors(errors); setSubmitError("Revise os campos destacados.");
+      setFieldErrors(errors);
+      setSubmitError("Revise os campos destacados.");
       requestAnimationFrame(() => document.querySelector<HTMLElement>("[aria-invalid='true']")?.focus());
       return;
     }
@@ -282,19 +449,37 @@ export function ClientFormModal({
     const data = {
       ...form,
       customerType,
-      companyName: form.companyName.trim(), responsibleName: form.responsibleName.trim(), cpfCnpj: form.cpfCnpj.trim(),
-      phone: phone.value ?? "", whatsapp: whatsapp.value ?? "", email: form.email.trim(), address: form.address.trim(),
-      city: form.city.trim(), state: form.state.trim(), cep: form.cep.trim(), internalResponsible: form.internalResponsible.trim(),
-      tags: form.tags.trim(), observations: form.observations.trim(),
-      contacts: form.contacts.map(contact => ({ phone: contact.phone.trim(), whatsapp: contact.whatsapp.trim(), description: contact.description?.trim() || "" })),
+      companyName: form.companyName.trim(),
+      responsibleName: form.responsibleName.trim(),
+      cpfCnpj: form.cpfCnpj.trim(),
+      phone: phone.value ?? "",
+      whatsapp: whatsapp.value ?? "",
+      email: form.email.trim(),
+      address: form.address.trim(),
+      city: form.city.trim(),
+      state: form.state.trim(),
+      cep: form.cep.trim(),
+      internalResponsible: form.internalResponsible.trim(),
+      tags: form.tags.trim(),
+      observations: form.observations.trim(),
+      contacts: form.contacts.map(contact => ({
+        phone: contact.phone.trim(),
+        whatsapp: contact.whatsapp.trim(),
+        description: contact.description?.trim() || "",
+      })),
     };
     try {
       if (editData) {
-        await updateMutation.mutateAsync({ crmClientId: editData.crmClientId, data });
-        await onSaved(editData.crmClientId); toast.success("Cliente atualizado com sucesso!");
+        await updateMutation.mutateAsync({
+          crmClientId: editData.crmClientId,
+          data,
+        });
+        await onSaved(editData.crmClientId);
+        toast.success("Cliente atualizado com sucesso!");
       } else {
         const result = await createMutation.mutateAsync({ data });
-        await onSaved(result.crmClientId); toast.success("Cliente cadastrado com sucesso!");
+        await onSaved(result.crmClientId);
+        toast.success("Cliente cadastrado com sucesso!");
       }
       onClose();
     } catch (error) {
@@ -303,13 +488,17 @@ export function ClientFormModal({
         const duplicate = await utils.crm.findDuplicate.fetch({ cpfCnpj: data.cpfCnpj, phone: data.phone }).catch(() => null);
         setDuplicateClient(duplicate);
         const duplicateField = duplicate?.matchedField ?? (data.cpfCnpj ? "cpfCnpj" : "phone");
-        setFieldErrors(prev => ({ ...prev, [duplicateField]: "Já existe um cadastro com este dado." }));
+        setFieldErrors(prev => ({
+          ...prev,
+          [duplicateField]: "Já existe um cadastro com este dado.",
+        }));
         setSubmitError("Já existe um cadastro. Vincule ou visualize o cadastro existente, ou altere os dados do novo cadastro.");
         requestAnimationFrame(() => document.querySelector<HTMLElement>("[aria-invalid='true']")?.focus());
         return;
       }
       const message = "Não foi possível salvar o cliente. Tente novamente.";
-      setSubmitError(message); toast.error(message);
+      setSubmitError(message);
+      toast.error(message);
     }
   }
 
@@ -337,7 +526,25 @@ export function ClientFormModal({
         </div>
 
         <form noValidate onSubmit={handleSubmit} className="p-6 space-y-6">
-          {submitError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"><p>{submitError}</p>{duplicateClient && <div className="mt-3 flex flex-col gap-2 sm:flex-row">{onUseExisting && <button type="button" onClick={() => void onUseExisting(duplicateClient)} className="min-h-9 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white">Vincular cadastro existente</button>}{onViewExisting && <button type="button" onClick={() => onViewExisting(duplicateClient)} className="min-h-9 rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-slate-700">Visualizar perfil</button>}</div>}</div>}
+          {submitError && (
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <p>{submitError}</p>
+              {duplicateClient && (
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  {onUseExisting && (
+                    <button type="button" onClick={() => void onUseExisting(duplicateClient)} className="min-h-9 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white">
+                      Vincular cadastro existente
+                    </button>
+                  )}
+                  {onViewExisting && (
+                    <button type="button" onClick={() => onViewExisting(duplicateClient)} className="min-h-9 rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-slate-700">
+                      Visualizar perfil
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {/* Dados Básicos */}
           <section>
             <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-4 flex items-center gap-2">
@@ -346,68 +553,107 @@ export function ClientFormModal({
             <fieldset className="mb-4">
               <legend className="mb-2 text-sm font-medium text-slate-700">Tipo de cliente *</legend>
               <div className="grid grid-cols-2 gap-3" role="radiogroup" aria-label="Tipo de cliente">
-                {(["person", "company"] as const).map(type => <button key={type} type="button" role="radio" aria-checked={form.customerType === type} onClick={() => selectCustomerType(type)} className={cn("rounded-lg border px-4 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500", form.customerType === type ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-700")}>{type === "person" ? "Pessoa" : "Empresa"}</button>)}
+                {(["person", "company"] as const).map(type => (
+                  <button key={type} type="button" role="radio" aria-checked={form.customerType === type} onClick={() => selectCustomerType(type)} className={cn("rounded-lg border px-4 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500", form.customerType === type ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-700")}>
+                    {type === "person" ? "Pessoa" : "Empresa"}
+                  </button>
+                ))}
               </div>
-              {fieldErrors.customerType && <p id="customer-type-error" className="mt-1 text-xs text-red-600">{fieldErrors.customerType}</p>}
+              {fieldErrors.customerType && (
+                <p id="customer-type-error" className="mt-1 text-xs text-red-600">
+                  {fieldErrors.customerType}
+                </p>
+              )}
               {legacySuggestion && !form.customerType && <p className="mt-2 text-sm text-amber-700">Sugestão pelo documento: {legacySuggestion === "person" ? "Pessoa" : "Empresa"}. Confirme uma opção para salvar.</p>}
             </fieldset>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">{form.customerType === "person" ? "Nome completo" : "Nome da empresa"} *</label>
-                <input aria-label={form.customerType === "person" ? "Nome completo" : "Nome da empresa"} aria-invalid={!!fieldErrors.companyName} aria-describedby={fieldErrors.companyName ? "company-name-error" : undefined} autoComplete={form.customerType === "person" ? "name" : "organization"} type="text" value={form.companyName} onChange={e => setField("companyName", e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  />
-                {fieldErrors.companyName && <p id="company-name-error" className="mt-1 text-xs text-red-600">{fieldErrors.companyName}</p>}
+                <input aria-label={form.customerType === "person" ? "Nome completo" : "Nome da empresa"} aria-invalid={!!fieldErrors.companyName} aria-describedby={fieldErrors.companyName ? "company-name-error" : undefined} autoComplete={form.customerType === "person" ? "name" : "organization"} type="text" value={form.companyName} onChange={e => setField("companyName", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+                {fieldErrors.companyName && (
+                  <p id="company-name-error" className="mt-1 text-xs text-red-600">
+                    {fieldErrors.companyName}
+                  </p>
+                )}
               </div>
-              {form.customerType === "company" && <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Nome do Responsável</label>
-                <input aria-label="Nome do Responsável" type="text" value={form.responsibleName} onChange={e => setField("responsibleName", e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
-              </div>}
+              {form.customerType === "company" && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Nome do Responsável</label>
+                  <input aria-label="Nome do Responsável" type="text" value={form.responsibleName} onChange={e => setField("responsibleName", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">{form.customerType === "person" ? "CPF" : "CNPJ"} (opcional)</label>
-                <input aria-label={form.customerType === "person" ? "CPF" : "CNPJ"} aria-invalid={!!fieldErrors.cpfCnpj} aria-describedby={fieldErrors.cpfCnpj ? "document-error" : undefined} inputMode="numeric" type="text" value={form.cpfCnpj} onChange={e => setField("cpfCnpj", e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
-                {fieldErrors.cpfCnpj && <p id="document-error" className="mt-1 text-xs text-red-600">{fieldErrors.cpfCnpj}</p>}
+                <input aria-label={form.customerType === "person" ? "CPF" : "CNPJ"} aria-invalid={!!fieldErrors.cpfCnpj} aria-describedby={fieldErrors.cpfCnpj ? "document-error" : undefined} inputMode="numeric" type="text" value={form.cpfCnpj} onChange={e => setField("cpfCnpj", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+                {fieldErrors.cpfCnpj && (
+                  <p id="document-error" className="mt-1 text-xs text-red-600">
+                    {fieldErrors.cpfCnpj}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Telefone principal (opcional)</label>
-                <input aria-label="Telefone principal" aria-invalid={!!fieldErrors.phone} aria-describedby={fieldErrors.phone ? "phone-error" : undefined} autoComplete="tel" inputMode="tel" type="text" value={form.phone} onChange={e => setField("phone", e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
-                {fieldErrors.phone && <p id="phone-error" className="mt-1 text-xs text-red-600">{fieldErrors.phone}</p>}
+                <input aria-label="Telefone principal" aria-invalid={!!fieldErrors.phone} aria-describedby={fieldErrors.phone ? "phone-error" : undefined} autoComplete="tel" inputMode="tel" type="text" value={form.phone} onChange={e => setField("phone", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+                {fieldErrors.phone && (
+                  <p id="phone-error" className="mt-1 text-xs text-red-600">
+                    {fieldErrors.phone}
+                  </p>
+                )}
               </div>
-              <div className="sm:col-span-2 space-y-2"><label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={sameWhatsapp} onChange={e => { setSameWhatsapp(e.target.checked); if (e.target.checked) setShowOtherWhatsapp(false); }} /> Este número também é WhatsApp</label>{!sameWhatsapp && !showOtherWhatsapp && <button type="button" className="text-sm font-medium text-blue-600" onClick={() => setShowOtherWhatsapp(true)}>Adicionar outro número de WhatsApp</button>}{!sameWhatsapp && showOtherWhatsapp && <div><label className="block text-sm font-medium text-slate-700 mb-1">Número do WhatsApp (opcional)</label><input aria-label="Número do WhatsApp" aria-invalid={!!fieldErrors.whatsapp} aria-describedby={fieldErrors.whatsapp ? "whatsapp-error" : undefined} autoComplete="tel" inputMode="tel" value={form.whatsapp} onChange={e => setField("whatsapp", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />{fieldErrors.whatsapp && <p id="whatsapp-error" className="mt-1 text-xs text-red-600">{fieldErrors.whatsapp}</p>}</div>}</div>
+              <div className="sm:col-span-2 space-y-2">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={sameWhatsapp}
+                    onChange={e => {
+                      setSameWhatsapp(e.target.checked);
+                      if (e.target.checked) setShowOtherWhatsapp(false);
+                    }}
+                  />{" "}
+                  Este número também é WhatsApp
+                </label>
+                {!sameWhatsapp && !showOtherWhatsapp && (
+                  <button type="button" className="text-sm font-medium text-blue-600" onClick={() => setShowOtherWhatsapp(true)}>
+                    Adicionar outro número de WhatsApp
+                  </button>
+                )}
+                {!sameWhatsapp && showOtherWhatsapp && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Número do WhatsApp (opcional)</label>
+                    <input aria-label="Número do WhatsApp" aria-invalid={!!fieldErrors.whatsapp} aria-describedby={fieldErrors.whatsapp ? "whatsapp-error" : undefined} autoComplete="tel" inputMode="tel" value={form.whatsapp} onChange={e => setField("whatsapp", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+                    {fieldErrors.whatsapp && (
+                      <p id="whatsapp-error" className="mt-1 text-xs text-red-600">
+                        {fieldErrors.whatsapp}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">E-mail</label>
-                <input aria-label="E-mail" aria-invalid={!!fieldErrors.email} aria-describedby={fieldErrors.email ? "email-error" : undefined} type="email" value={form.email} onChange={e => setField("email", e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  autoComplete="email" />
-                {fieldErrors.email && <p id="email-error" className="mt-1 text-xs text-red-600">{fieldErrors.email}</p>}
+                <input aria-label="E-mail" aria-invalid={!!fieldErrors.email} aria-describedby={fieldErrors.email ? "email-error" : undefined} type="email" value={form.email} onChange={e => setField("email", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" autoComplete="email" />
+                {fieldErrors.email && (
+                  <p id="email-error" className="mt-1 text-xs text-red-600">
+                    {fieldErrors.email}
+                  </p>
+                )}
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">Endereço</label>
-                <input aria-label="Endereço" type="text" value={form.address} onChange={e => setField("address", e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  autoComplete="street-address" />
+                <input aria-label="Endereço" type="text" value={form.address} onChange={e => setField("address", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" autoComplete="street-address" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Cidade</label>
-                <input aria-label="Cidade" type="text" value={form.city} onChange={e => setField("city", e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  autoComplete="address-level2" />
+                <input aria-label="Cidade" type="text" value={form.city} onChange={e => setField("city", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" autoComplete="address-level2" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Estado</label>
-                  <input aria-label="Estado" type="text" value={form.state} onChange={e => setField("state", e.target.value.toUpperCase().slice(0, 2))}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    autoComplete="address-level1" maxLength={2} />
+                  <input aria-label="Estado" type="text" value={form.state} onChange={e => setField("state", e.target.value.toUpperCase().slice(0, 2))} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" autoComplete="address-level1" maxLength={2} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">CEP</label>
-                  <input aria-label="CEP" type="text" value={form.cep} onChange={e => setField("cep", e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    autoComplete="postal-code" />
+                  <input aria-label="CEP" type="text" value={form.cep} onChange={e => setField("cep", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" autoComplete="postal-code" />
                 </div>
               </div>
             </div>
@@ -421,8 +667,7 @@ export function ClientFormModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
-                <select aria-label="Status" value={form.status} onChange={e => setField("status", e.target.value as CrmClientFormData["status"])}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white">
+                <select aria-label="Status" value={form.status} onChange={e => setField("status", e.target.value as CrmClientFormData["status"])} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white">
                   <option value="lead">Lead</option>
                   <option value="ativo">Ativo</option>
                   <option value="inativo">Inativo</option>
@@ -432,8 +677,7 @@ export function ClientFormModal({
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Origem</label>
-                <select aria-label="Origem" value={form.origin} onChange={e => setField("origin", e.target.value as CrmClientFormData["origin"])}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white">
+                <select aria-label="Origem" value={form.origin} onChange={e => setField("origin", e.target.value as CrmClientFormData["origin"])} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white">
                   <option value="whatsapp">WhatsApp</option>
                   <option value="instagram">Instagram</option>
                   <option value="facebook">Facebook</option>
@@ -444,15 +688,11 @@ export function ClientFormModal({
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">Responsável Interno</label>
-                <input aria-label="Responsável Interno" type="text" value={form.internalResponsible} onChange={e => setField("internalResponsible", e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  />
+                <input aria-label="Responsável Interno" type="text" value={form.internalResponsible} onChange={e => setField("internalResponsible", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">Tags</label>
-                <input aria-label="Tags" type="text" value={form.tags} onChange={e => setField("tags", e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  />
+                <input aria-label="Tags" type="text" value={form.tags} onChange={e => setField("tags", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
               </div>
             </div>
           </section>
@@ -463,11 +703,7 @@ export function ClientFormModal({
               <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-2">
                 <Phone className="w-4 h-4 text-slate-400" /> Contatos Adicionais
               </h3>
-              <button
-                type="button"
-                onClick={addContact}
-                className="px-3 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors text-sm font-medium flex items-center gap-1"
-              >
+              <button type="button" onClick={addContact} className="px-3 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors text-sm font-medium flex items-center gap-1">
                 <Plus className="w-4 h-4" /> Adicionar
               </button>
             </div>
@@ -477,45 +713,22 @@ export function ClientFormModal({
                   <div key={idx} className="p-4 border border-slate-200 rounded-lg bg-slate-50">
                     <div className="flex items-start justify-between mb-3">
                       <span className="text-sm font-medium text-slate-600">Contato {idx + 1}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeContact(idx)}
-                        className="p-1 text-red-400 hover:bg-red-50 rounded transition-colors"
-                        title="Remover contato"
-                      >
+                      <button type="button" onClick={() => removeContact(idx)} className="p-1 text-red-400 hover:bg-red-50 rounded transition-colors" title="Remover contato">
                         <X className="w-4 h-4" />
                       </button>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1">Telefone</label>
-                        <input
-                          aria-label={`Telefone do contato ${idx + 1}`}
-                          type="text"
-                          value={contact.phone}
-                          onChange={e => updateContact(idx, "phone", e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                        />
+                        <input aria-label={`Telefone do contato ${idx + 1}`} type="text" value={contact.phone} onChange={e => updateContact(idx, "phone", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1">WhatsApp</label>
-                        <input
-                          aria-label={`WhatsApp do contato ${idx + 1}`}
-                          type="text"
-                          value={contact.whatsapp}
-                          onChange={e => updateContact(idx, "whatsapp", e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                        />
+                        <input aria-label={`WhatsApp do contato ${idx + 1}`} type="text" value={contact.whatsapp} onChange={e => updateContact(idx, "whatsapp", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
                       </div>
                       <div className="sm:col-span-2">
                         <label className="block text-xs font-medium text-slate-600 mb-1">Descrição (opcional)</label>
-                        <input
-                          aria-label={`Descrição do contato ${idx + 1}`}
-                          type="text"
-                          value={contact.description || ""}
-                          onChange={e => updateContact(idx, "description", e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                        />
+                        <input aria-label={`Descrição do contato ${idx + 1}`} type="text" value={contact.description || ""} onChange={e => updateContact(idx, "description", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
                       </div>
                     </div>
                   </div>
@@ -531,27 +744,31 @@ export function ClientFormModal({
             <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-4 flex items-center gap-2">
               <FileText className="w-4 h-4 text-slate-400" /> Observações Internas
             </h3>
-            <textarea
-              aria-label="Observações Internas"
-              value={form.observations}
-              onChange={e => setField("observations", e.target.value)}
-              rows={4}
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none"
-            />
+            <textarea aria-label="Observações Internas" value={form.observations} onChange={e => setField("observations", e.target.value)} rows={4} className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none" />
           </section>
 
           {/* Botões */}
           <div className="flex gap-3 pt-2">
-            <button type="button" onClick={onClose}
-              className="flex-1 px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-colors font-medium text-sm">
+            <button type="button" onClick={onClose} className="flex-1 px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-colors font-medium text-sm">
               Cancelar
             </button>
-            <button type="submit" disabled={isLoading}
-              className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium text-sm disabled:opacity-60 flex items-center justify-center gap-2">
+            <button type="submit" disabled={isLoading} className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium text-sm disabled:opacity-60 flex items-center justify-center gap-2">
               {isLoading ? (
-                <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Salvando...</>
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Salvando...
+                </>
               ) : (
-                <>{editData ? <><Edit3 className="w-4 h-4" /> Salvar Alterações</> : <><Plus className="w-4 h-4" /> Cadastrar Cliente</>}</>
+                <>
+                  {editData ? (
+                    <>
+                      <Edit3 className="w-4 h-4" /> Salvar Alterações
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-4 h-4" /> Cadastrar Cliente
+                    </>
+                  )}
+                </>
               )}
             </button>
           </div>
@@ -562,25 +779,7 @@ export function ClientFormModal({
 }
 
 // ─── Painel de Detalhes do Cliente ─────────────────────────────────────────────
-function ClientDetailPanel({
-  client,
-  onEdit,
-  onClose,
-  onSendMessage,
-  whatsappConnected,
-  canStartConversation,
-  onLifecycleChanged,
-  onDeleted,
-}: {
-  client: CrmClient;
-  onEdit: () => void;
-  onClose: () => void;
-  onSendMessage?: (intent: CrmWhatsAppIntent) => void;
-  whatsappConnected: boolean;
-  canStartConversation: boolean;
-  onLifecycleChanged: () => Promise<void>;
-  onDeleted: () => Promise<void>;
-}) {
+function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappConnected, canStartConversation, onLifecycleChanged, onDeleted }: { client: CrmClient; onEdit: () => void; onClose: () => void; onSendMessage?: (intent: CrmWhatsAppIntent) => void; whatsappConnected: boolean; canStartConversation: boolean; onLifecycleChanged: () => Promise<void>; onDeleted: () => Promise<void> }) {
   const [activeTab, setActiveTab] = useState<ClientTab>("geral");
   const [newTimelineNote, setNewTimelineNote] = useState("");
   const [riskAction, setRiskAction] = useState<"deactivate" | "reactivate" | "archive" | "restore" | "delete" | null>(null);
@@ -588,111 +787,276 @@ function ClientDetailPanel({
   const lifecycleMutation = trpc.crm.changeLifecycle.useMutation();
   const deleteMutation = trpc.crm.deletePermanently.useMutation();
   const riskPending = lifecycleMutation.isPending || deleteMutation.isPending;
-  const lifecycleLabel = client.lifecycleState === "archived" ? "Arquivado" : client.lifecycleState === "inactive" ? "Inativo" : "Ativo";
+  const lifecycleLabel = lifecycleStateLabel(client.lifecycleState);
+  const whatsappPhone = client.whatsapp || client.phone || "";
+  const normalizedWhatsApp = normalizeContactPhone(whatsappPhone);
+  const hasValidWhatsApp = normalizedWhatsApp.status === "valid";
   const runRiskAction = async () => {
     if (!riskAction || riskPending) return;
     try {
       if (riskAction === "delete") {
         if (deletePhrase !== "EXCLUIR") return;
-        await deleteMutation.mutateAsync({ crmClientId: client.crmClientId, expectedVersion: client.lifecycleVersion });
+        await deleteMutation.mutateAsync({
+          crmClientId: client.crmClientId,
+          expectedVersion: client.lifecycleVersion,
+        });
         toast.success("Cliente excluído definitivamente.");
         await onDeleted();
       } else {
-        await lifecycleMutation.mutateAsync({ crmClientId: client.crmClientId, action: riskAction, expectedVersion: client.lifecycleVersion });
+        await lifecycleMutation.mutateAsync({
+          crmClientId: client.crmClientId,
+          action: riskAction,
+          expectedVersion: client.lifecycleVersion,
+        });
         toast.success("Estado do cliente atualizado.");
         await onLifecycleChanged();
       }
-      setRiskAction(null); setDeletePhrase("");
-    } catch (error) { toast.error(safeLifecycleMessage(error)); }
+      setRiskAction(null);
+      setDeletePhrase("");
+    } catch (error) {
+      toast.error(safeLifecycleMessage(error));
+    }
   };
 
   const tabs: { id: ClientTab; label: string; icon: React.ReactNode }[] = [
-    { id: "geral",        label: "Geral",        icon: <User className="w-4 h-4" /> },
-    { id: "chamados",     label: "Chamados",     icon: <Ticket className="w-4 h-4" /> },
-    { id: "conversas",    label: "Conversas",    icon: <MessageCircle className="w-4 h-4" /> },
-    { id: "timeline",    label: "Timeline",     icon: <Clock className="w-4 h-4" /> },
-    { id: "financeiro",   label: "Financeiro",   icon: <DollarSign className="w-4 h-4" /> },
-    { id: "rastreamento", label: "Rastreamento", icon: <Package className="w-4 h-4" /> },
-    { id: "arquivos",     label: "Arquivos",     icon: <Paperclip className="w-4 h-4" /> },
+    { id: "geral", label: "Geral", icon: <User className="w-4 h-4" /> },
+    { id: "chamados", label: "Chamados", icon: <Ticket className="w-4 h-4" /> },
+    {
+      id: "conversas",
+      label: "Conversas",
+      icon: <MessageCircle className="w-4 h-4" />,
+    },
+    { id: "timeline", label: "Timeline", icon: <Clock className="w-4 h-4" /> },
+    {
+      id: "financeiro",
+      label: "Financeiro",
+      icon: <DollarSign className="w-4 h-4" />,
+    },
+    {
+      id: "rastreamento",
+      label: "Rastreamento",
+      icon: <Package className="w-4 h-4" />,
+    },
+    {
+      id: "arquivos",
+      label: "Arquivos",
+      icon: <Paperclip className="w-4 h-4" />,
+    },
   ];
 
   // Queries das abas
-  const chamadosQuery = trpc.crm.getChamados.useQuery(
-    { crmClientId: client.crmClientId },
-    { enabled: activeTab === "chamados", refetchOnWindowFocus: false }
-  );
-  const conversasQuery = trpc.crm.getConversas.useQuery(
-    { crmClientId: client.crmClientId },
-    { enabled: activeTab === "conversas", refetchOnWindowFocus: false }
-  );
-  const timelineQuery = trpc.crm.getTimeline.useQuery(
-    { crmClientId: client.crmClientId },
-    { enabled: activeTab === "timeline", refetchOnWindowFocus: false }
-  );
+  const chamadosQuery = trpc.crm.getChamados.useQuery({ crmClientId: client.crmClientId }, { enabled: activeTab === "chamados", refetchOnWindowFocus: false });
+  const conversasQuery = trpc.crm.getConversas.useQuery({ crmClientId: client.crmClientId }, { enabled: activeTab === "conversas", refetchOnWindowFocus: false });
+  const timelineQuery = trpc.crm.getTimeline.useQuery({ crmClientId: client.crmClientId }, { enabled: activeTab === "timeline", refetchOnWindowFocus: false });
   const addTimelineMutation = trpc.crm.addTimelineEntry.useMutation({
-    onSuccess() { timelineQuery.refetch(); setNewTimelineNote(""); toast.success("Nota adicionada!"); },
-    onError(err) { toast.error(err.message); },
+    onSuccess() {
+      timelineQuery.refetch();
+      setNewTimelineNote("");
+      toast.success("Nota adicionada!");
+    },
+    onError(err) {
+      toast.error(err.message);
+    },
   });
 
-  const tags = client.tags ? client.tags.split(",").map(t => t.trim()).filter(Boolean) : [];
+  const tags = client.tags
+    ? client.tags
+        .split(",")
+        .map(t => t.trim())
+        .filter(Boolean)
+    : [];
+  const clientTimelineEvents = useMemo(() => {
+    type ClientTimelineEvent = {
+      id: string;
+      date: Date | string;
+      title: string;
+      description: string;
+      actor: string;
+      icon: React.ReactNode;
+      color: string;
+    };
+
+    const events: ClientTimelineEvent[] = [
+      {
+        id: `client-created-${client.crmClientId}`,
+        date: client.createdAt,
+        title: "Cliente cadastrado",
+        description: `Cadastro inicial de ${client.companyName} concluído.`,
+        actor: "Sistema",
+        icon: <Building2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />,
+        color: "bg-blue-100 dark:bg-blue-950/60",
+      },
+    ];
+
+    if (new Date(client.updatedAt).getTime() > new Date(client.createdAt).getTime()) {
+      events.push({
+        id: `client-updated-${client.crmClientId}`,
+        date: client.updatedAt,
+        title: "Cadastro atualizado",
+        description: "Informações cadastrais ou de relacionamento foram atualizadas.",
+        actor: "Sistema",
+        icon: <Edit3 className="h-3.5 w-3.5 text-slate-600 dark:text-slate-400" />,
+        color: "bg-slate-100 dark:bg-slate-800",
+      });
+    }
+
+    const entryStyles: Record<string, Omit<ClientTimelineEvent, "id" | "date" | "description" | "actor">> = {
+      note: {
+        title: "Nota registrada",
+        icon: <MessageSquare className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />,
+        color: "bg-amber-100 dark:bg-amber-950/60",
+      },
+      call: {
+        title: "Ligação registrada",
+        icon: <Phone className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />,
+        color: "bg-blue-100 dark:bg-blue-950/60",
+      },
+      meeting: {
+        title: "Reunião registrada",
+        icon: <User className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />,
+        color: "bg-purple-100 dark:bg-purple-950/60",
+      },
+      email: {
+        title: "E-mail registrado",
+        icon: <Mail className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />,
+        color: "bg-indigo-100 dark:bg-indigo-950/60",
+      },
+      edit: {
+        title: "Cadastro atualizado",
+        icon: <Edit3 className="h-3.5 w-3.5 text-slate-600 dark:text-slate-400" />,
+        color: "bg-slate-100 dark:bg-slate-800",
+      },
+      status_change: {
+        title: "Status atualizado",
+        icon: <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />,
+        color: "bg-emerald-100 dark:bg-emerald-950/60",
+      },
+      other: {
+        title: "Atividade registrada",
+        icon: <Clock className="h-3.5 w-3.5 text-slate-600 dark:text-slate-400" />,
+        color: "bg-slate-100 dark:bg-slate-800",
+      },
+    };
+
+    for (const entry of timelineQuery.data?.entries ?? []) {
+      const style = entryStyles[String(entry.type)] ?? entryStyles.other;
+      events.push({
+        id: entry.id,
+        date: entry.createdAt,
+        title: style.title,
+        description: entry.description,
+        actor: entry.author || "Sistema",
+        icon: style.icon,
+        color: style.color,
+      });
+    }
+
+    return events.sort((left, right) => new Date(right.date).getTime() - new Date(left.date).getTime());
+  }, [client, timelineQuery.data?.entries]);
 
   return (
     <div className="flex flex-col h-full">
       {/* Header do painel */}
-      <div className="p-5 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white">
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center flex-shrink-0">
-              <Building2 className="w-6 h-6 text-blue-600" />
+      <div className="border-b border-slate-200/80 bg-gradient-to-r from-slate-50/90 to-white p-4 dark:border-slate-800 dark:from-slate-900 dark:to-slate-900/90 sm:p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <button type="button" onClick={onClose} className="mr-1 mt-1 rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-slate-400 dark:hover:bg-slate-800 lg:hidden" title="Voltar para a lista" aria-label="Voltar para a lista de clientes">
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-blue-200/60 bg-blue-100 text-blue-700 shadow-xs dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300">
+              <Building2 className="h-6 w-6" />
             </div>
-            <div>
-              <h2 className="text-lg font-bold text-slate-900 leading-tight">{client.companyName}</h2>
-              {client.responsibleName && (
-                <p className="text-sm text-slate-500 flex items-center gap-1">
-                  <User className="w-3.5 h-3.5" /> {client.responsibleName}
-                </p>
-              )}
+            <div className="min-w-0">
+              <h2 className="truncate text-lg font-bold leading-tight tracking-tight text-slate-950 dark:text-slate-50">{client.companyName}</h2>
+              <p className="mt-0.5 flex items-center gap-1 truncate text-xs font-medium text-slate-500 dark:text-slate-400">
+                <User className="h-3.5 w-3.5 shrink-0" /> {client.responsibleName || customerTypeLabel(client.customerType)}
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="rounded-full border border-slate-200/60 bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">{customerTypeLabel(client.customerType)}</span>
+                <span className={cn("rounded-full border px-2.5 py-0.5 text-[11px] font-bold", client.lifecycleState === "active" ? "border-emerald-200/60 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300" : client.lifecycleState === "inactive" ? "border-slate-200/60 bg-slate-100 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400" : "border-amber-200/60 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300")}>{lifecycleLabel}</span>
+                <StatusBadge status={client.status} />
+                {client.origin && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                    {ORIGIN_CONFIG[client.origin]?.icon}
+                    {ORIGIN_CONFIG[client.origin]?.label ?? client.origin}
+                  </span>
+                )}
+                {tags.map(tag => (
+                  <span key={tag} className="inline-flex items-center gap-1 rounded-full border border-purple-200 bg-purple-100 px-2.5 py-0.5 text-[11px] font-medium text-purple-700 dark:border-purple-900 dark:bg-purple-950/50 dark:text-purple-300">
+                    <Tag className="h-3 w-3" /> {tag}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-1">
-            <button type="button" disabled={client.lifecycleState === "archived"} onClick={onEdit} className="p-2 hover:bg-slate-100 rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40" title={client.lifecycleState === "archived" ? "Restaure o cliente antes de editar" : "Editar"}>
-              <Edit3 className="w-4 h-4 text-slate-500" />
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+            {hasValidWhatsApp && (
+              <button
+                type="button"
+                disabled={!whatsappConnected || !canStartConversation}
+                onClick={() =>
+                  onSendMessage?.({
+                    crmClientId: client.crmClientId,
+                    phone: normalizedWhatsApp.value,
+                    channel: "whatsapp",
+                  })
+                }
+                className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-xs transition-colors hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 dark:hover:bg-emerald-900/80"
+                title={!whatsappConnected ? "WhatsApp desconectado" : !canStartConversation ? "Sem permissão para iniciar conversas" : "Conversar pelo WhatsApp"}
+              >
+                <Smartphone className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span className="hidden sm:inline">WhatsApp</span>
+              </button>
+            )}
+            <button type="button" disabled={client.lifecycleState === "archived"} onClick={onEdit} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-xs transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700" title={client.lifecycleState === "archived" ? "Restaure o cliente antes de editar" : "Editar cliente"}>
+              <Edit3 className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
+              <span>Editar</span>
             </button>
-            <button type="button" onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg transition-colors" title="Fechar">
-              <X className="w-4 h-4 text-slate-500" />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-xs transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700" title="Mais ações" aria-label="Mais ações administrativas">
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+                <DropdownMenuLabel className="text-xs text-slate-500 dark:text-slate-400">Mais ações</DropdownMenuLabel>
+                {client.lifecycleState === "active" && (
+                  <DropdownMenuItem onSelect={() => setRiskAction("deactivate")}>
+                    <XCircle className="h-4 w-4" /> Inativar cliente
+                  </DropdownMenuItem>
+                )}
+                {client.lifecycleState === "inactive" && (
+                  <DropdownMenuItem onSelect={() => setRiskAction("reactivate")}>
+                    <CheckCircle className="h-4 w-4" /> Ativar cliente
+                  </DropdownMenuItem>
+                )}
+                {client.lifecycleState !== "archived" && (
+                  <DropdownMenuItem onSelect={() => setRiskAction("archive")}>
+                    <Archive className="h-4 w-4" /> Arquivar cliente
+                  </DropdownMenuItem>
+                )}
+                {client.lifecycleState === "archived" && (
+                  <DropdownMenuItem onSelect={() => setRiskAction("restore")}>
+                    <RotateCcw className="h-4 w-4" /> Restaurar cliente
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator className="bg-slate-200 dark:bg-slate-700" />
+                <DropdownMenuItem variant="destructive" onSelect={() => setRiskAction("delete")}>
+                  <Trash2 className="h-4 w-4" /> Excluir cliente
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <button type="button" onClick={onClose} className="hidden rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-slate-800 dark:hover:text-slate-300 lg:flex" title="Fechar painel" aria-label="Fechar perfil do cliente">
+              <X className="h-4 w-4" />
             </button>
           </div>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <StatusBadge status={client.status} />
-          <span className={cn("inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold", client.lifecycleState === "active" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : client.lifecycleState === "inactive" ? "border-slate-200 bg-slate-100 text-slate-700" : "border-amber-200 bg-amber-50 text-amber-800")}>{lifecycleLabel}</span>
-          {client.origin && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
-              {ORIGIN_CONFIG[client.origin]?.icon}
-              {ORIGIN_CONFIG[client.origin]?.label ?? client.origin}
-            </span>
-          )}
-          {tags.map(tag => (
-            <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 border border-purple-200">
-              <Tag className="w-3 h-3" /> {tag}
-            </span>
-          ))}
         </div>
       </div>
 
       {/* Abas */}
-      <div className="flex gap-1 px-4 pt-3 border-b border-slate-200 overflow-x-auto">
+      <div className="flex gap-1 overflow-x-auto border-b border-slate-200/80 bg-white px-4 pt-2 dark:border-slate-800 dark:bg-slate-900">
         {tabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-t-lg transition-colors whitespace-nowrap border-b-2",
-              activeTab === tab.id
-                ? "text-blue-600 border-blue-500 bg-blue-50"
-                : "text-slate-500 border-transparent hover:text-slate-700 hover:bg-slate-50"
-            )}
-          >
+          <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} className={cn("flex items-center gap-1.5 whitespace-nowrap rounded-t-lg border-b-2 px-3.5 py-2 text-xs font-semibold transition-colors", activeTab === tab.id ? "border-blue-600 bg-blue-50/70 text-blue-700 dark:border-blue-500 dark:bg-blue-950/40 dark:text-blue-300" : "border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-200")}>
             {tab.icon}
             {tab.label}
           </button>
@@ -700,148 +1064,8 @@ function ClientDetailPanel({
       </div>
 
       {/* Conteúdo das abas */}
-      <div className="flex-1 overflow-y-auto p-5">
-        {activeTab === "geral" && (
-          <div className="space-y-5">
-            {/* Informações de contato */}
-            <div>
-              <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Contato</h4>
-              <div className="space-y-2">
-                {client.phone && (
-                  <div className="flex items-center gap-2 text-sm text-slate-700 group">
-                    <Phone className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                    <span>{client.phone}</span>
-                  </div>
-                )}
-                {client.whatsapp && (
-                  <div className="flex items-center gap-2 text-sm text-slate-700 group">
-                    <Smartphone className="w-4 h-4 text-green-500 flex-shrink-0" />
-                    <span>{client.whatsapp}</span>
-                    <span className="text-xs text-green-600 font-medium" title="Número declarado como WhatsApp">WhatsApp</span>
-                    {canStartConversation && <button
-                      type="button"
-                      disabled={!whatsappConnected || normalizeContactPhone(client.whatsapp).status !== "valid"}
-                      onClick={() => onSendMessage?.({ crmClientId: client.crmClientId, phone: client.whatsapp ?? "", channel: "whatsapp" })}
-                      className="ml-auto p-1 hover:bg-slate-100 rounded disabled:cursor-not-allowed disabled:opacity-40"
-                      title={whatsappConnected ? "Iniciar atendimento pelo WhatsApp" : "WhatsApp desconectado"}
-                    >
-                      <MessageSquare className="w-4 h-4 text-blue-500" />
-                    </button>}
-                  </div>
-                )}
-                {client.email && (
-                  <div className="flex items-center gap-2 text-sm text-slate-700">
-                    <Mail className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                    <span>{client.email}</span>
-                  </div>
-                )}
-                {client.cpfCnpj && (
-                  <div className="flex items-center gap-2 text-sm text-slate-700">
-                    <Hash className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                    <span>{client.cpfCnpj}</span>
-                  </div>
-                )}
-
-                {/* Contatos Adicionais */}
-                {client.contactsJson && (() => {
-                  try {
-                    const contacts = JSON.parse(client.contactsJson) as AdditionalContact[];
-                    if (contacts.length > 0) {
-                      return (
-                        <>
-                          {contacts.map((contact, idx) => (
-                            <div key={idx} className="border-t border-slate-200 pt-2 mt-2">
-                              {contact.description && (
-                                <p className="text-xs font-medium text-slate-600 mb-1">{contact.description}</p>
-                              )}
-                              {contact.phone && (
-                                <div className="flex items-center gap-2 text-sm text-slate-700 group">
-                                  <Phone className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                                  <span>{contact.phone}</span>
-                                </div>
-                              )}
-                              {contact.whatsapp && (
-                                <div className="flex items-center gap-2 text-sm text-slate-700 group">
-                                  <Smartphone className="w-4 h-4 text-green-500 flex-shrink-0" />
-                                  <span>{contact.whatsapp}</span>
-                                  <span className="text-xs text-green-600 font-medium" title="Número declarado como WhatsApp">WhatsApp</span>
-                                  {canStartConversation && <button
-                                    type="button"
-                                    disabled={!whatsappConnected || normalizeContactPhone(contact.whatsapp).status !== "valid"}
-                                    onClick={() => onSendMessage?.({ crmClientId: client.crmClientId, phone: contact.whatsapp, channel: "whatsapp" })}
-                                    className="ml-auto p-1 hover:bg-slate-100 rounded disabled:cursor-not-allowed disabled:opacity-40"
-                                    title={whatsappConnected ? "Iniciar atendimento pelo WhatsApp" : "WhatsApp desconectado"}
-                                  >
-                                    <MessageSquare className="w-4 h-4 text-blue-500" />
-                                  </button>}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </>
-                      );
-                    }
-                  } catch (e) {
-                    // Se nao conseguir fazer parse, ignora
-                  }
-                  return null;
-                })()}
-              </div>
-            </div>
-
-
-            {/* Endereço */}
-            {(client.address || client.city) && (
-              <div>
-                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Endereço</h4>
-                <div className="flex items-start gap-2 text-sm text-slate-700">
-                  <MapPin className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
-                  <span>
-                    {[client.address, client.city, client.state, client.cep].filter(Boolean).join(", ")}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* Responsável interno */}
-            {client.internalResponsible && (
-              <div>
-                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Responsável Interno</h4>
-                <div className="flex items-center gap-2 text-sm text-slate-700">
-                  <User className="w-4 h-4 text-slate-400" />
-                  <span>{client.internalResponsible}</span>
-                </div>
-              </div>
-            )}
-
-            {/* Observações */}
-            {client.observations && (
-              <div>
-                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Observações Internas</h4>
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-                  <p className="text-sm text-amber-800 whitespace-pre-wrap">{client.observations}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Datas */}
-            <div>
-              <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Histórico</h4>
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2 text-xs text-slate-500">
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>Cadastrado em {formatDate(client.createdAt)}</span>
-                </div>
-                {client.lastInteractionAt && (
-                  <div className="flex items-center gap-2 text-xs text-slate-500">
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>Última interação em {formatDate(client.lastInteractionAt)}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+      <div className="flex-1 overflow-y-auto p-4 sm:p-5">
+        {activeTab === "geral" && <ClientOverview client={client} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} onSendMessage={onSendMessage} />}
 
         {activeTab === "chamados" && (
           <div className="space-y-3">
@@ -860,28 +1084,16 @@ function ClientDetailPanel({
                 <div key={c.id} className="border border-slate-200 rounded-xl p-3 hover:bg-slate-50 transition-colors">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-slate-900 text-sm truncate">#{c.number} — {c.title}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{c.customerName} · {c.company}</p>
+                      <p className="font-semibold text-slate-900 text-sm truncate">
+                        #{c.number} — {c.title}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {c.customerName} · {c.company}
+                      </p>
                     </div>
                     <div className="flex flex-col items-end gap-1">
-                      <span className={cn(
-                        "px-2 py-0.5 rounded-full text-xs font-medium",
-                        c.status === "open" ? "bg-blue-100 text-blue-700" :
-                        c.status === "in_progress" ? "bg-yellow-100 text-yellow-700" :
-                        c.status === "waiting" ? "bg-orange-100 text-orange-700" :
-                        "bg-slate-100 text-slate-600"
-                      )}>
-                        {c.status === "open" ? "Aberto" : c.status === "in_progress" ? "Em andamento" : c.status === "waiting" ? "Aguardando" : "Fechado"}
-                      </span>
-                      <span className={cn(
-                        "px-2 py-0.5 rounded-full text-xs font-medium",
-                        c.priority === "critica" ? "bg-red-100 text-red-700" :
-                        c.priority === "alta" ? "bg-orange-100 text-orange-700" :
-                        c.priority === "media" ? "bg-yellow-100 text-yellow-700" :
-                        "bg-slate-100 text-slate-600"
-                      )}>
-                        {c.priority}
-                      </span>
+                      <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", c.status === "open" ? "bg-blue-100 text-blue-700" : c.status === "in_progress" ? "bg-yellow-100 text-yellow-700" : c.status === "waiting" ? "bg-orange-100 text-orange-700" : "bg-slate-100 text-slate-600")}>{c.status === "open" ? "Aberto" : c.status === "in_progress" ? "Em andamento" : c.status === "waiting" ? "Aguardando" : "Fechado"}</span>
+                      <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", c.priority === "critica" ? "bg-red-100 text-red-700" : c.priority === "alta" ? "bg-orange-100 text-orange-700" : c.priority === "media" ? "bg-yellow-100 text-yellow-700" : "bg-slate-100 text-slate-600")}>{c.priority}</span>
                     </div>
                   </div>
                   <p className="text-xs text-slate-400 mt-1">{formatDate(c.createdAt)}</p>
@@ -909,15 +1121,12 @@ function ClientDetailPanel({
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-slate-900 text-sm truncate">{c.customerName}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{c.phone} · {c.company}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {c.phone} · {c.company}
+                      </p>
                       {c.lastMessage && <p className="text-xs text-slate-400 mt-1 truncate">{c.lastMessage}</p>}
                     </div>
-                    <span className={cn(
-                      "px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0",
-                      c.status === "open" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600"
-                    )}>
-                      {c.status === "open" ? "Aberta" : "Fechada"}
-                    </span>
+                    <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0", c.status === "open" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600")}>{c.status === "open" ? "Aberta" : "Fechada"}</span>
                   </div>
                   <p className="text-xs text-slate-400 mt-1">{c.timeLabel ?? formatDate(c.createdAt)}</p>
                 </div>
@@ -928,17 +1137,18 @@ function ClientDetailPanel({
 
         {activeTab === "timeline" && (
           <div className="space-y-4">
-            {/* Adicionar nota */}
-            <div className="border border-slate-200 rounded-xl p-3 bg-slate-50">
-              <p className="text-xs font-semibold text-slate-500 mb-2">Adicionar nota ou registro</p>
-              <textarea
-                value={newTimelineNote}
-                onChange={e => setNewTimelineNote(e.target.value)}
-                placeholder="Descreva uma interação, ligação, reunião..."
-                className="w-full text-sm border border-slate-200 rounded-lg p-2 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-                rows={2}
-              />
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Timeline de relacionamento</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Registro factual das interações e marcos deste cliente.</p>
+            </div>
+            <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300" htmlFor="client-timeline-note">
+                Adicionar nota ou registro
+              </label>
+              <textarea id="client-timeline-note" value={newTimelineNote} onChange={event => setNewTimelineNote(event.target.value)} placeholder="Descreva uma interação, ligação, reunião..." disabled={client.lifecycleState === "archived"} className="mt-2 w-full resize-none rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder-slate-500 dark:disabled:bg-slate-800" rows={2} />
+              {client.lifecycleState === "archived" && <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Restaure o cliente antes de adicionar registros.</p>}
               <button
+                type="button"
                 onClick={() => {
                   if (!newTimelineNote.trim()) return;
                   addTimelineMutation.mutate({
@@ -947,47 +1157,45 @@ function ClientDetailPanel({
                     type: "note",
                   });
                 }}
-                disabled={addTimelineMutation.isPending || !newTimelineNote.trim()}
-                className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs font-medium disabled:opacity-60"
+                disabled={client.lifecycleState === "archived" || addTimelineMutation.isPending || !newTimelineNote.trim()}
+                className="mt-2 flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-slate-900"
               >
-                <PlusCircle className="w-3.5 h-3.5" />
+                <PlusCircle className="h-3.5 w-3.5" />
                 {addTimelineMutation.isPending ? "Salvando..." : "Adicionar"}
               </button>
-            </div>
+            </section>
 
-            {/* Entradas da timeline */}
             {timelineQuery.isLoading ? (
-              <div className="flex items-center justify-center h-32">
-                <RefreshCw className="w-5 h-5 text-blue-400 animate-spin" />
+              <div className="flex h-32 items-center justify-center">
+                <RefreshCw className="h-5 w-5 animate-spin text-blue-500" />
               </div>
-            ) : (timelineQuery.data?.entries ?? []).length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-32 text-center">
-                <Clock className="w-10 h-10 text-slate-200 mb-2" />
-                <p className="text-slate-400 text-sm">Nenhum registro ainda</p>
+            ) : timelineQuery.isError ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                Não foi possível carregar a timeline.{" "}
+                <button type="button" onClick={() => void timelineQuery.refetch()} className="font-semibold underline underline-offset-2">
+                  Tentar novamente
+                </button>
+              </div>
+            ) : clientTimelineEvents.length === 0 ? (
+              <div className="flex h-32 flex-col items-center justify-center text-center">
+                <Clock className="mb-2 h-10 w-10 text-slate-200 dark:text-slate-700" />
+                <p className="text-sm text-slate-400 dark:text-slate-500">Nenhum registro ainda</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {(timelineQuery.data?.entries ?? []).map((entry: any) => (
-                  <div key={entry.id} className="flex gap-3">
+              <div className="space-y-3 pt-2">
+                {clientTimelineEvents.map((event, index) => (
+                  <div key={event.id} className="flex gap-3">
                     <div className="flex flex-col items-center">
-                      <div className={cn(
-                        "w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0",
-                        entry.type === "edit" ? "bg-blue-100" :
-                        entry.type === "note" ? "bg-amber-100" :
-                        entry.type === "status_change" ? "bg-green-100" : "bg-slate-100"
-                      )}>
-                        {entry.type === "edit" ? <Edit3 className="w-3.5 h-3.5 text-blue-600" /> :
-                         entry.type === "note" ? <MessageSquare className="w-3.5 h-3.5 text-amber-600" /> :
-                         entry.type === "status_change" ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> :
-                         <Clock className="w-3.5 h-3.5 text-slate-500" />}
-                      </div>
-                      <div className="w-px flex-1 bg-slate-200 mt-1" />
+                      <div className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-full", event.color)}>{event.icon}</div>
+                      {index !== clientTimelineEvents.length - 1 && <div className="mt-1 w-px flex-1 bg-slate-200 dark:bg-slate-800" />}
                     </div>
-                    <div className="flex-1 pb-3">
-                      <p className="text-sm text-slate-800">{entry.description}</p>
-                      <p className="text-xs text-slate-400 mt-1">
-                        {entry.author} · {formatDateTime(entry.createdAt)}
-                      </p>
+                    <div className="min-w-0 flex-1 pb-3.5">
+                      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                        <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{event.title}</p>
+                        <span className="text-[10px] text-slate-400 dark:text-slate-500">{formatDateTime(event.date)}</span>
+                      </div>
+                      <p className="mt-0.5 break-words text-xs leading-relaxed text-slate-600 dark:text-slate-300">{event.description}</p>
+                      <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">Responsável: {event.actor}</p>
                     </div>
                   </div>
                 ))}
@@ -1020,36 +1228,69 @@ function ClientDetailPanel({
           </div>
         )}
       </div>
-      <section aria-labelledby="risk-zone-title" className="border-t border-red-100 bg-red-50/40 p-4">
-        <h3 id="risk-zone-title" className="text-sm font-bold text-red-800">Zona de risco</h3>
-        <p className="mt-1 text-xs text-slate-600">O histórico e os vínculos são preservados ao inativar ou arquivar.</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {client.lifecycleState === "active" && <button type="button" onClick={() => setRiskAction("deactivate")} className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold">Inativar</button>}
-          {client.lifecycleState === "inactive" && <button type="button" onClick={() => setRiskAction("reactivate")} className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold">Reativar</button>}
-          {client.lifecycleState !== "archived" && <button type="button" onClick={() => setRiskAction("archive")} className="min-h-10 rounded-lg border border-amber-300 bg-white px-3 text-sm font-semibold text-amber-800">Arquivar</button>}
-          {client.lifecycleState === "archived" && <button type="button" onClick={() => setRiskAction("restore")} className="min-h-10 rounded-lg border border-blue-300 bg-white px-3 text-sm font-semibold text-blue-700">Restaurar</button>}
-          <button type="button" onClick={() => setRiskAction("delete")} className="min-h-10 rounded-lg bg-red-700 px-3 text-sm font-semibold text-white">Excluir</button>
-        </div>
-      </section>
-      {riskAction && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4" onMouseDown={event => { if (event.target === event.currentTarget && !riskPending) setRiskAction(null); }} onKeyDown={event => { if (event.key === "Escape" && !riskPending) setRiskAction(null); }}>
-        <div role="alertdialog" aria-modal="true" aria-labelledby="risk-dialog-title" className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
-          <h2 id="risk-dialog-title" className="text-lg font-bold text-slate-900">{riskAction === "delete" ? "Excluir cliente permanentemente" : `${riskAction === "archive" ? "Arquivar" : riskAction === "restore" ? "Restaurar" : riskAction === "deactivate" ? "Inativar" : "Reativar"} cliente`}</h2>
-          <p className="mt-2 text-sm text-slate-600">{riskAction === "delete" ? "Esta ação é permanente e só será permitida se o cadastro não possuir histórico ou vínculos." : riskAction === "archive" ? "O cliente sairá das buscas padrão, mas todo o histórico será preservado." : riskAction === "deactivate" ? "Novos vínculos e operações ficarão bloqueados até a reativação." : "O cadastro voltará ao estado operacional seguro correspondente."}</p>
-          {riskAction === "delete" && <label className="mt-4 block text-sm font-semibold text-slate-800">Digite EXCLUIR para confirmar<input autoFocus value={deletePhrase} onChange={event => setDeletePhrase(event.target.value)} className="mt-2 min-h-10 w-full rounded-lg border border-red-300 px-3 outline-none focus:ring-2 focus:ring-red-500" /></label>}
-          <div className="mt-5 flex justify-end gap-2"><button type="button" disabled={riskPending} onClick={() => { setRiskAction(null); setDeletePhrase(""); }} className="min-h-10 rounded-lg px-3 font-semibold">Cancelar</button><button type="button" disabled={riskPending || (riskAction === "delete" && deletePhrase !== "EXCLUIR")} onClick={() => void runRiskAction()} className="min-h-10 rounded-lg bg-red-700 px-4 font-semibold text-white disabled:opacity-50">{riskPending ? "Processando…" : "Confirmar"}</button></div>
-        </div>
-      </div>}
+      <AlertDialog
+        open={riskAction !== null}
+        onOpenChange={open => {
+          if (!open && !riskPending) {
+            setRiskAction(null);
+            setDeletePhrase("");
+          }
+        }}
+      >
+        {riskAction && (
+          <AlertDialogContent className="border-slate-200 bg-white text-slate-900 shadow-2xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 sm:max-w-md">
+            <AlertDialogHeader>
+              <AlertDialogTitle className={riskAction === "delete" ? "text-red-700 dark:text-red-300" : undefined}>{riskAction === "delete" ? "Excluir cliente" : `${riskAction === "archive" ? "Arquivar" : riskAction === "restore" ? "Restaurar" : riskAction === "deactivate" ? "Inativar" : "Ativar"} cliente`}</AlertDialogTitle>
+              <AlertDialogDescription className="leading-relaxed text-slate-600 dark:text-slate-300">{riskAction === "delete" ? "Esta ação é destrutiva e só será concluída se o cadastro não possuir histórico ou vínculos. Caso contrário, arquive o cliente para preservar os dados." : riskAction === "archive" ? "O cliente sairá das buscas padrão, preservando todo o histórico e os vínculos existentes." : riskAction === "deactivate" ? "Novos vínculos e operações ficarão bloqueados até a reativação." : "O cadastro voltará ao estado operacional seguro correspondente."}</AlertDialogDescription>
+            </AlertDialogHeader>
+            {riskAction === "delete" && (
+              <label className="block text-sm font-semibold text-slate-800 dark:text-slate-200" htmlFor="client-delete-confirmation">
+                Para confirmar, digite <span className="font-mono">EXCLUIR</span>
+                <input id="client-delete-confirmation" autoFocus autoComplete="off" value={deletePhrase} onChange={event => setDeletePhrase(event.target.value)} className="mt-2 min-h-10 w-full rounded-lg border border-red-300 bg-white px-3 text-slate-900 outline-none transition-colors focus:border-red-500 focus:ring-2 focus:ring-red-500/20 dark:border-red-900 dark:bg-slate-950 dark:text-slate-100" />
+              </label>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel
+                disabled={riskPending}
+                onClick={() => {
+                  setRiskAction(null);
+                  setDeletePhrase("");
+                }}
+                className="border-slate-200 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                Cancelar
+              </AlertDialogCancel>
+              <button type="button" disabled={riskPending || (riskAction === "delete" && deletePhrase !== "EXCLUIR")} onClick={() => void runRiskAction()} className={cn("min-h-10 rounded-lg px-4 text-sm font-semibold text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-offset-slate-900", riskAction === "delete" ? "bg-red-700 hover:bg-red-800 focus-visible:ring-red-600" : "bg-blue-600 hover:bg-blue-700 focus-visible:ring-blue-500")}>
+                {riskPending ? "Processando..." : riskAction === "delete" ? "Excluir cliente" : "Confirmar"}
+              </button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        )}
+      </AlertDialog>
     </div>
   );
 }
 
 // ─── Página Principal ──────────────────────────────────────────────────────────
-export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected = false, canStartConversation = false }: { initialSelectedId?: string; onNavigate?: (intent: CrmWhatsAppIntent) => void; whatsappConnected?: boolean; canStartConversation?: boolean } = {}) {
-  const handleSendMessage = useCallback((intent: CrmWhatsAppIntent) => {
-    if (onNavigate) {
-      onNavigate(intent);
-    }
-  }, [onNavigate]);
+export function ClientesPage({
+  initialSelectedId,
+  onNavigate,
+  whatsappConnected = false,
+  canStartConversation = false,
+}: {
+  initialSelectedId?: string;
+  onNavigate?: (intent: CrmWhatsAppIntent) => void;
+  whatsappConnected?: boolean;
+  canStartConversation?: boolean;
+} = {}) {
+  const handleSendMessage = useCallback(
+    (intent: CrmWhatsAppIntent) => {
+      if (onNavigate) {
+        onNavigate(intent);
+      }
+    },
+    [onNavigate]
+  );
 
   const [search, setSearch] = useState("");
   const [lifecycleFilter, setLifecycleFilter] = useState<"active" | "inactive" | "archived" | "all">("active");
@@ -1057,7 +1298,11 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
   const [showModal, setShowModal] = useState(false);
   const [editClient, setEditClient] = useState<CrmClient | null>(null);
   const [csvImporting, setCsvImporting] = useState(false);
-  const [csvResult, setCsvResult] = useState<{ imported: number; errors: number; errorMessages: string[] } | null>(null);
+  const [csvResult, setCsvResult] = useState<{
+    imported: number;
+    errors: number;
+    errorMessages: string[];
+  } | null>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
   const importCsvMutation = trpc.crm.importCsv.useMutation({
     onSuccess(result) {
@@ -1066,9 +1311,14 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
       refetch();
       toast.success(`Importação concluída: ${result.imported} clientes importados${result.errors > 0 ? `, ${result.errors} erros` : "."}`);
     },
-    onError(err) { setCsvImporting(false); toast.error(err.message); },
+    onError(err) {
+      setCsvImporting(false);
+      toast.error(err.message);
+    },
   });
-  const exportCsvQuery = trpc.crm.exportCsv.useQuery(undefined, { enabled: false });
+  const exportCsvQuery = trpc.crm.exportCsv.useQuery(undefined, {
+    enabled: false,
+  });
 
   const handleCsvExport = useCallback(async () => {
     const result = await exportCsvQuery.refetch();
@@ -1082,8 +1332,10 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
       const formulaSafe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
       return `"${formulaSafe.replace(/"/g, '""')}"`;
     };
-    const rows = result.data.rows.map((row) => [row.companyName, customerTypeToCsv(row.customerType), row.responsibleName, row.cpfCnpj, row.phone, row.whatsapp, row.email, row.address, row.city, row.state, row.cep, row.status, row.origin, row.observations].map(safeCell).join(";"));
-    const blob = new Blob([`\uFEFF${headers.join(";")}\n${rows.join("\n")}`], { type: "text/csv;charset=utf-8" });
+    const rows = result.data.rows.map(row => [row.companyName, customerTypeToCsv(row.customerType), row.responsibleName, row.cpfCnpj, row.phone, row.whatsapp, row.email, row.address, row.city, row.state, row.cep, row.status, row.origin, row.observations].map(safeCell).join(";"));
+    const blob = new Blob([`\uFEFF${headers.join(";")}\n${rows.join("\n")}`], {
+      type: "text/csv;charset=utf-8",
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -1092,49 +1344,62 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
     URL.revokeObjectURL(url);
   }, [exportCsvQuery]);
 
-  const handleCsvFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setCsvImporting(true);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      const lines = text.split(/\r?\n/).filter(l => l.trim());
-      if (lines.length < 2) { toast.error("CSV vazio ou sem dados."); setCsvImporting(false); return; }
-      const headers = lines[0].split(";").map(h => h.trim().toLowerCase());
-      const rows = lines.slice(1).map(line => {
-        const cols = line.split(";");
-        const obj: Record<string, string> = {};
-        headers.forEach((h, i) => { obj[h] = (cols[i] ?? "").trim(); });
-        return obj;
-      }).filter(r => r["empresa"] || r["companyname"] || r["nome_empresa"]);
-      if (rows.length === 0) { toast.error("Nenhum dado válido encontrado. Verifique o CSV."); setCsvImporting(false); return; }
-      const mapped = rows.map(r => ({
-        companyName: r["empresa"] || r["companyname"] || r["nome_empresa"] || "",
-        customerType: r["tipo"] || r["type"] || "",
-        responsibleName: r["responsavel"] || r["responsiblename"] || r["contato"] || "",
-        cpfCnpj: r["cnpj"] || r["cpf"] || r["cpfcnpj"] || "",
-        phone: r["telefone"] || r["phone"] || "",
-        whatsapp: r["whatsapp"] || "",
-        email: r["email"] || "",
-        address: r["endereco"] || r["address"] || "",
-        city: r["cidade"] || r["city"] || "",
-        state: (r["estado"] || r["state"] || "").slice(0, 2),
-        cep: r["cep"] || "",
-        status: r["status"] || "lead",
-        origin: r["origem"] || r["origin"] || "outro",
-        observations: r["observacoes"] || r["observations"] || "",
-      }));
-      importCsvMutation.mutate({ rows: mapped });
-    };
-    reader.readAsText(file, "UTF-8");
-    e.target.value = "";
-  }, [importCsvMutation]);
-
-  const { data, isLoading, isError, error, refetch } = trpc.crm.list.useQuery(
-    { search: search.trim() || undefined, lifecycle: lifecycleFilter },
-    { refetchOnWindowFocus: false }
+  const handleCsvFile = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setCsvImporting(true);
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const text = ev.target?.result as string;
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        if (lines.length < 2) {
+          toast.error("CSV vazio ou sem dados.");
+          setCsvImporting(false);
+          return;
+        }
+        const headers = lines[0].split(";").map(h => h.trim().toLowerCase());
+        const rows = lines
+          .slice(1)
+          .map(line => {
+            const cols = line.split(";");
+            const obj: Record<string, string> = {};
+            headers.forEach((h, i) => {
+              obj[h] = (cols[i] ?? "").trim();
+            });
+            return obj;
+          })
+          .filter(r => r["empresa"] || r["companyname"] || r["nome_empresa"]);
+        if (rows.length === 0) {
+          toast.error("Nenhum dado válido encontrado. Verifique o CSV.");
+          setCsvImporting(false);
+          return;
+        }
+        const mapped = rows.map(r => ({
+          companyName: r["empresa"] || r["companyname"] || r["nome_empresa"] || "",
+          customerType: r["tipo"] || r["type"] || "",
+          responsibleName: r["responsavel"] || r["responsiblename"] || r["contato"] || "",
+          cpfCnpj: r["cnpj"] || r["cpf"] || r["cpfcnpj"] || "",
+          phone: r["telefone"] || r["phone"] || "",
+          whatsapp: r["whatsapp"] || "",
+          email: r["email"] || "",
+          address: r["endereco"] || r["address"] || "",
+          city: r["cidade"] || r["city"] || "",
+          state: (r["estado"] || r["state"] || "").slice(0, 2),
+          cep: r["cep"] || "",
+          status: r["status"] || "lead",
+          origin: r["origem"] || r["origin"] || "outro",
+          observations: r["observacoes"] || r["observations"] || "",
+        }));
+        importCsvMutation.mutate({ rows: mapped });
+      };
+      reader.readAsText(file, "UTF-8");
+      e.target.value = "";
+    },
+    [importCsvMutation]
   );
+
+  const { data, isLoading, isError, error, refetch } = trpc.crm.list.useQuery({ search: search.trim() || undefined, lifecycle: lifecycleFilter }, { refetchOnWindowFocus: false });
 
   const clients: CrmClient[] = (data?.clients ?? []) as unknown as CrmClient[];
 
@@ -1157,53 +1422,35 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
   }, [initialSelectedId, clients, selectedClient]);
 
   return (
-    <div data-testid="clients-page" className="flex h-full min-w-0 flex-col gap-0 overflow-hidden rounded-[28px] border border-slate-200 bg-slate-100/70 shadow-sm lg:flex-row">
+    <div data-testid="clients-page" className="flex h-full min-w-0 flex-col gap-0 overflow-hidden rounded-[28px] border border-slate-200/80 bg-slate-100/70 shadow-sm dark:border-slate-800 dark:bg-slate-950/70 lg:flex-row">
       {/* ─── Lista de Clientes (esquerda) ─── */}
-      <div className={cn(
-        "flex min-h-0 min-w-0 flex-col bg-white transition-all duration-200 lg:border-r lg:border-slate-200",
-        selectedClient ? "max-h-[45%] w-full flex-shrink-0 lg:max-h-none lg:w-80" : "flex-1"
-      )}>
+      <div className={cn("flex min-h-0 min-w-0 flex-col bg-white transition-all duration-200 dark:bg-slate-900 lg:border-r lg:border-slate-200/80 dark:lg:border-slate-800", selectedClient ? "hidden flex-shrink-0 lg:flex lg:w-80 xl:w-96" : "flex-1")}>
         {/* Header da lista */}
-        <div className="border-b border-slate-200 bg-slate-50/80 p-4 sm:p-5">
-          <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="border-b border-slate-200/80 bg-slate-50/90 p-4 dark:border-slate-800 dark:bg-slate-900/90 sm:p-5">
+          <div className="mb-3.5 flex items-center justify-between gap-3">
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-blue-700">Relacionamento</p>
-              <div className="mt-1 flex items-center gap-2">
-                <h2 className="text-lg font-bold tracking-tight text-slate-950">Clientes</h2>
-                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-800">{filteredClients.length}</span>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold tracking-tight text-slate-950 dark:text-slate-50">Clientes</h2>
+                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">{filteredClients.length}</span>
               </div>
             </div>
             <div className="flex items-center gap-1.5">
               {/* Botão de importar CSV */}
-              <input
-                ref={csvInputRef}
-                type="file"
-                accept=".csv"
-                className="hidden"
-                onChange={handleCsvFile}
-              />
-              <button
-                onClick={() => csvInputRef.current?.click()}
-                disabled={csvImporting}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors text-sm font-medium disabled:opacity-60"
-                title="Importar clientes via CSV"
-              >
+              <input ref={csvInputRef} type="file" accept=".csv" className="hidden" onChange={handleCsvFile} />
+              <button onClick={() => csvInputRef.current?.click()} disabled={csvImporting} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700" title="Importar clientes via CSV">
                 {csvImporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
                 {csvImporting ? "Importando..." : "CSV"}
               </button>
-              <button
-                type="button"
-                onClick={() => void handleCsvExport()}
-                disabled={exportCsvQuery.isFetching}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors text-sm font-medium disabled:opacity-60"
-                title="Exportar clientes em CSV"
-              >
+              <button type="button" onClick={() => void handleCsvExport()} disabled={exportCsvQuery.isFetching} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700" title="Exportar clientes em CSV">
                 <Download className="w-4 h-4" />
                 Exportar
               </button>
               <button
-                onClick={() => { setEditClient(null); setShowModal(true); }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                onClick={() => {
+                  setEditClient(null);
+                  setShowModal(true);
+                }}
+                className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
               >
                 <Plus className="w-4 h-4" />
                 Novo
@@ -1213,28 +1460,40 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
 
           {/* Busca */}
           <div className="relative mb-3">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Buscar por nome, telefone, CNPJ..."
-              className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-            />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nome, telefone, CNPJ..." className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-xs text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder-slate-500" />
           </div>
 
           <div className="flex flex-wrap gap-1" aria-label="Filtrar clientes por estado">
-            {([['active','Ativos'],['inactive','Inativos'],['archived','Arquivados'],['all','Todos']] as const).map(([value,label]) => <button key={value} type="button" aria-pressed={lifecycleFilter === value} onClick={() => { setLifecycleFilter(value); setSelectedClientId(null); }} className={cn("min-h-9 rounded-lg px-2.5 text-xs font-semibold", lifecycleFilter === value ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700")}>{label}</button>)}
+            {(
+              [
+                ["active", "Ativos"],
+                ["inactive", "Inativos"],
+                ["archived", "Arquivados"],
+                ["all", "Todos"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={lifecycleFilter === value}
+                onClick={() => {
+                  setLifecycleFilter(value);
+                  setSelectedClientId(null);
+                }}
+                className={cn("min-h-7 rounded-lg px-2.5 text-xs font-semibold transition-colors", lifecycleFilter === value ? "bg-blue-600 text-white shadow-xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200/80 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700")}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-
-
         </div>
 
         {/* Lista */}
-        <div className="flex-1 space-y-2 overflow-y-auto p-2">
+        <div className="flex-1 space-y-1.5 overflow-y-auto p-2">
           {isLoading ? (
-            <div className="flex items-center justify-center h-32">
-              <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <div className="flex h-32 items-center justify-center">
+              <RefreshCw className="h-6 w-6 animate-spin text-blue-500" />
             </div>
           ) : isError ? (
             <div className="flex flex-col items-center justify-center h-48 text-center p-4" role="alert">
@@ -1248,47 +1507,23 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
           ) : filteredClients.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-center p-4">
               <Building2 className="w-12 h-12 text-slate-200 mb-3" />
-              <p className="text-slate-500 font-medium text-sm">
-                {search ? "Nenhum cliente encontrado" : "Nenhum cliente cadastrado"}
-              </p>
-              <p className="text-slate-400 text-xs mt-1">
-                {search ? "Tente outro termo de busca" : "Clique em \"Novo Cliente\" para começar"}
-              </p>
+              <p className="text-slate-500 font-medium text-sm">{search ? "Nenhum cliente encontrado" : "Nenhum cliente cadastrado"}</p>
+              <p className="text-slate-400 text-xs mt-1">{search ? "Tente outro termo de busca" : 'Clique em "Novo Cliente" para começar'}</p>
             </div>
           ) : (
             filteredClients.map(client => (
-              <button
-                key={client.crmClientId}
-                onClick={() => setSelectedClientId(client.crmClientId)}
-                className={cn(
-                  "group w-full rounded-2xl border p-4 text-left shadow-sm transition-all duration-150",
-                  selectedClientId === client.crmClientId
-                    ? "border-blue-200 bg-blue-50 ring-1 ring-blue-200"
-                    : "border-transparent bg-white hover:border-slate-200 hover:bg-slate-50"
-                )}
-              >
-                <div className="flex items-start justify-between gap-3">
+              <button key={client.crmClientId} onClick={() => setSelectedClientId(client.crmClientId)} className={cn("group w-full rounded-2xl border p-3 text-left shadow-xs transition-all duration-150", selectedClientId === client.crmClientId ? "border-blue-200 bg-blue-50/80 ring-1 ring-blue-200 dark:border-blue-800 dark:bg-blue-950/40 dark:ring-blue-800" : "border-transparent bg-white hover:border-slate-200 hover:bg-slate-50/80 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800/60")}>
+                <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-base font-bold tracking-tight text-slate-950">{client.companyName}</p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
-                        {client.customerType === "person" ? "Pessoa" : client.customerType === "company" ? "Empresa" : "Cadastro legado"}
-                      </span>
-                      <span className={cn(
-                        "rounded-full px-2.5 py-1 text-[11px] font-bold",
-                        client.lifecycleState === "active"
-                          ? "bg-emerald-50 text-emerald-700"
-                        : client.lifecycleState === "inactive"
-                            ? "bg-slate-100 text-slate-700"
-                            : "bg-amber-50 text-amber-800",
-                      )}>
-                        {client.lifecycleState === "archived" ? "Arquivado" : client.lifecycleState === "inactive" ? "Inativo" : "Ativo"}
-                      </span>
+                    <p className="truncate text-sm font-bold tracking-tight text-slate-900 dark:text-slate-100">{client.companyName}</p>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{client.customerType === "person" ? "Pessoa" : client.customerType === "company" ? "Empresa" : "Cadastro legado"}</span>
+                      <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold", client.lifecycleState === "active" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" : client.lifecycleState === "inactive" ? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400" : "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300")}>{client.lifecycleState === "archived" ? "Arquivado" : client.lifecycleState === "inactive" ? "Inativo" : "Ativo"}</span>
                       <StatusBadge status={client.status} />
                     </div>
                     {client.responsibleName && <p className="mt-3 truncate text-xs font-medium text-slate-500">Responsável: {client.responsibleName}</p>}
                   </div>
-                  <ChevronRight className="mt-1 h-4 w-4 flex-shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5" />
+                  <ChevronRight className="mt-1 h-4 w-4 flex-shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5 dark:text-slate-600" />
                 </div>
               </button>
             ))
@@ -1297,9 +1532,10 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
 
         {/* Contador */}
         {filteredClients.length > 0 && (
-          <div className="border-t border-slate-200 bg-slate-50 p-3">
-            <p className="text-xs text-slate-400 text-center">
-              {filteredClients.length} cliente{filteredClients.length !== 1 ? "s" : ""}
+          <div className="border-t border-slate-200/80 bg-slate-50 p-2.5 text-center text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
+            <p>
+              {filteredClients.length} cliente
+              {filteredClients.length !== 1 ? "s" : ""}
             </p>
           </div>
         )}
@@ -1307,20 +1543,28 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
 
       {/* ─── Painel de Detalhes (direita) ─── */}
       {selectedClient ? (
-        <div className="min-h-0 min-w-0 flex-1 bg-white overflow-hidden">
-            <ClientDetailPanel
-              client={selectedClient}
-              onEdit={() => { setEditClient(selectedClient); setShowModal(true); }}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white dark:bg-slate-900">
+          <ClientDetailPanel
+            client={selectedClient}
+            onEdit={() => {
+              setEditClient(selectedClient);
+              setShowModal(true);
+            }}
             onClose={() => setSelectedClientId(null)}
             onSendMessage={handleSendMessage}
             whatsappConnected={whatsappConnected}
             canStartConversation={canStartConversation}
-            onLifecycleChanged={async () => { await refetch(); }}
-            onDeleted={async () => { setSelectedClientId(null); await refetch(); }}
+            onLifecycleChanged={async () => {
+              await refetch();
+            }}
+            onDeleted={async () => {
+              setSelectedClientId(null);
+              await refetch();
+            }}
           />
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center bg-slate-50">
+        <div className="hidden flex-1 items-center justify-center bg-slate-50/60 p-8 dark:bg-slate-950/40 lg:flex">
           <div className="text-center">
             <Building2 className="w-16 h-16 text-slate-200 mx-auto mb-4" />
             <h3 className="text-lg font-bold text-slate-900 mb-2">Selecione um cliente</h3>
@@ -1332,13 +1576,21 @@ export function ClientesPage({ initialSelectedId, onNavigate, whatsappConnected 
       {/* ─── Modal de Cadastro/Edição ─── */}
       {showModal && (
         <ClientFormModal
-          onClose={() => { setShowModal(false); setEditClient(null); }}
-          onSaved={async () => { await refetch(); }}
-          onViewExisting={client => { setSelectedClientId(client.crmClientId); setShowModal(false); setEditClient(null); }}
+          onClose={() => {
+            setShowModal(false);
+            setEditClient(null);
+          }}
+          onSaved={async () => {
+            await refetch();
+          }}
+          onViewExisting={client => {
+            setSelectedClientId(client.crmClientId);
+            setShowModal(false);
+            setEditClient(null);
+          }}
           editData={editClient}
         />
       )}
-
     </div>
   );
 }

@@ -37,11 +37,13 @@ describe("CRM client lifecycle contract", () => {
     expect(router).toContain("requireCrmAdmin(ctx)");
   });
 
-  it("excludes non-active clients from new links and exposes lifecycle filters and safe confirmation", () => {
+  it("excludes non-active clients from new links and exposes lifecycle controls through the header menu", () => {
     expect(conversations.match(/lifecycle_state = 'active'/g)?.length).toBeGreaterThanOrEqual(3);
-    for (const label of ["Ativos", "Inativos", "Arquivados", "Todos", "Zona de risco", "Inativar", "Reativar", "Arquivar", "Restaurar", "EXCLUIR"]) {
+    for (const label of ["Ativos", "Inativos", "Arquivados", "Todos", "Mais ações", "Inativar cliente", "Ativar cliente", "Arquivar cliente", "Restaurar cliente", "EXCLUIR"]) {
       expect(clients).toContain(label);
     }
+    expect(clients).toContain("DropdownMenu");
+    expect(clients).not.toContain("risk-zone-title");
     expect(clients).not.toContain('window.confirm("Excluir');
   });
 });
