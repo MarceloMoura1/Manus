@@ -111,6 +111,7 @@ const dependencyQueries = [
   ["conversations", "SELECT COUNT(*) total FROM megadesk_domain_conversations WHERE client_id = ? AND crm_client_id = ?"],
   ["tickets", "SELECT COUNT(*) total FROM megadesk_domain_chamados WHERE clientId = ? AND customerId = ?"],
   ["timeline", "SELECT COUNT(*) total FROM megadesk_crm_timeline WHERE client_id = ? AND crm_client_id = ?"],
+  ["files", "SELECT COUNT(*) total FROM megadesk_crm_client_files WHERE client_id = ? AND crm_client_id = ? AND state <> 'deleted'"],
   ["sale_orders", "SELECT COUNT(*) total FROM erp_sale_orders WHERE client_id = ? AND crm_client_id = ?"],
   ["finance", "SELECT COUNT(*) total FROM erp_financial_entries WHERE client_id = ? AND crm_client_id = ?"],
   ["whatsapp_conversations", "SELECT COUNT(*) total FROM wa_conversations WHERE client_id = ? AND crm_client_id = ?"],
@@ -135,6 +136,13 @@ export async function permanentlyDeleteCrmClient(input: {
       const [rows] = await connection.execute<RowDataPacket[]>(sql, [input.tenantId, input.crmClientId]);
       if (Number(rows[0]?.total ?? 0) > 0) throw new CrmLifecycleError("dependencies", DEPENDENCY_MESSAGE);
     }
+    // File tombstones are retained after their physical object is removed. At
+    // this explicit hard-delete boundary they must be removed deliberately so
+    // the RESTRICT FK never masks an otherwise dependency-free client.
+    await connection.execute(
+      "DELETE FROM megadesk_crm_client_files WHERE client_id = ? AND crm_client_id = ? AND state = 'deleted'",
+      [input.tenantId, input.crmClientId],
+    );
     const [result] = await connection.execute(
       "DELETE FROM megadesk_crm_clients WHERE client_id = ? AND crm_client_id = ? AND lifecycle_version = ?",
       [input.tenantId, input.crmClientId, input.expectedVersion],

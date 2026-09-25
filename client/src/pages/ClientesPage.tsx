@@ -9,6 +9,7 @@ import { normalizeContactPhone, sameContactPhone } from "../../../shared/contact
 import { Building2, Phone, Mail, MapPin, Search, Plus, User, Tag, FileText, MessageCircle, Ticket, DollarSign, Package, Paperclip, Clock, Edit3, X, ChevronLeft, ChevronRight, MoreHorizontal, Archive, RotateCcw, Trash2, Briefcase, Hash, Globe, Instagram, Facebook, Smartphone, CheckCircle, XCircle, AlertCircle, MinusCircle, TrendingDown, UploadCloud, Download, RefreshCw, AlertTriangle, CheckCircle2, MessageSquare, PlusCircle } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 function cn(...classes: Array<string | false | undefined | null>) {
   return classes.filter(Boolean).join(" ");
@@ -16,7 +17,7 @@ function cn(...classes: Array<string | false | undefined | null>) {
 
 function safeLifecycleMessage(error: unknown) {
   const message = typeof error === "object" && error && "message" in error ? String(error.message) : "";
-  const allowed = ["Este cliente possui histórico ou vínculos e não pode ser excluído. Arquive o cadastro para preservá-los.", "O cliente foi alterado por outra pessoa. Atualize a página e tente novamente.", "Esta ação não está disponível no estado atual do cliente.", "Somente administradores podem excluir clientes definitivamente."];
+  const allowed = ["Este cliente possui histórico ou vínculos e não pode ser excluído. Arquive o cadastro para preservá-los.", "O cliente foi alterado por outra pessoa. Atualize a página e tente novamente.", "Esta ação não está disponível no estado atual do cliente.", "Somente administradores podem excluir clientes definitivamente.", "Cliente não encontrado."];
   return allowed.includes(message) ? message : "Não foi possível concluir a ação. Tente novamente.";
 }
 
@@ -779,11 +780,130 @@ export function ClientFormModal({ onClose, onSaved, onUseExisting, onViewExistin
 }
 
 // ─── Painel de Detalhes do Cliente ─────────────────────────────────────────────
-function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappConnected, canStartConversation, onLifecycleChanged, onDeleted }: { client: CrmClient; onEdit: () => void; onClose: () => void; onSendMessage?: (intent: CrmWhatsAppIntent) => void; whatsappConnected: boolean; canStartConversation: boolean; onLifecycleChanged: () => Promise<void>; onDeleted: () => Promise<void> }) {
+const CLIENT_FILE_CATEGORIES = [
+  { id: "all", label: "Todos" },
+  { id: "contracts", label: "Contratos" },
+  { id: "identification", label: "Identificação" },
+  { id: "commercial", label: "Comercial" },
+  { id: "other", label: "Outros" },
+] as const;
+
+type ClientFileCategoryOption = (typeof CLIENT_FILE_CATEGORIES)[number]["id"];
+
+function formatClientFileSize(bytes: number): string {
+  if (!bytes || bytes <= 0) return "0 B";
+  if (bytes < 1024) return String(bytes) + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function clientFileCategoryBadgeClass(category: string): string {
+  if (category === "contracts") return "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300";
+  if (category === "identification") return "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300";
+  if (category === "commercial") return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300";
+  return "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300";
+}
+
+function ClientFileUploadDialog({ client, open, pending, onClose, onSubmit }: {
+  client: CrmClient;
+  open: boolean;
+  pending: boolean;
+  onClose: () => void;
+  onSubmit: (input: { crmClientId: string; fileName: string; category: Exclude<ClientFileCategoryOption, "all">; description: string | null; mimeType: string; base64: string }) => Promise<void>;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [category, setCategory] = useState<Exclude<ClientFileCategoryOption, "all">>("contracts");
+  const [description, setDescription] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const reset = () => { setSelectedFile(null); setCategory("contracts"); setDescription(""); setError(null); setDragActive(false); };
+  const close = () => { if (!pending) { reset(); onClose(); } };
+  const chooseFile = (file?: File) => {
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) { setError("O arquivo excede o limite máximo de 20 MB."); return; }
+    setSelectedFile(file);
+    setError(null);
+  };
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedFile) { setError("Selecione um arquivo para anexar."); return; }
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Falha ao ler o arquivo."));
+        reader.onerror = () => reject(new Error("Falha ao ler o arquivo."));
+        reader.readAsDataURL(selectedFile);
+      });
+      const base64 = dataUrl.split(",")[1];
+      if (!base64) throw new Error("Falha ao codificar o arquivo.");
+      await onSubmit({ crmClientId: client.crmClientId, fileName: selectedFile.name, category, description: description.trim() || null, mimeType: selectedFile.type || "application/octet-stream", base64 });
+      reset();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Não foi possível anexar o documento.");
+    }
+  };
+  return (
+    <Dialog open={open} onOpenChange={isOpen => !isOpen && close()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader><DialogTitle className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100"><UploadCloud className="h-4 w-4 text-blue-600" />Anexar Documento ao Cliente</DialogTitle></DialogHeader>
+        <form className="space-y-4 pt-2" onSubmit={submit}>
+          <input ref={inputRef} className="hidden" type="file" accept="application/pdf,image/png,image/jpeg,image/webp,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={event => chooseFile(event.target.files?.[0])} />
+          <button type="button" onClick={() => inputRef.current?.click()} onDragEnter={event => { event.preventDefault(); setDragActive(true); }} onDragOver={event => event.preventDefault()} onDragLeave={() => setDragActive(false)} onDrop={event => { event.preventDefault(); setDragActive(false); chooseFile(event.dataTransfer.files?.[0]); }} className={cn("flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 text-center transition-colors", dragActive ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20" : "border-slate-200 hover:border-blue-400 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800")}>
+            <UploadCloud className="mb-2 h-7 w-7 text-blue-500" />
+            {selectedFile ? <><span className="max-w-full truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{selectedFile.name}</span><span className="mt-1 text-xs text-slate-500">{formatClientFileSize(selectedFile.size)}</span></> : <><span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Selecione ou arraste um arquivo</span><span className="mt-1 text-xs text-slate-500">PDF, imagens, DOCX, XLSX, CSV ou TXT até 20 MB</span></>}
+          </button>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">Categoria<select value={category} onChange={event => setCategory(event.target.value as Exclude<ClientFileCategoryOption, "all">)} className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">{CLIENT_FILE_CATEGORIES.filter(item => item.id !== "all").map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+            <label className="space-y-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">Descrição <span className="font-normal text-slate-400">(opcional)</span><input value={description} onChange={event => setDescription(event.target.value)} maxLength={500} className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" /></label>
+          </div>
+          {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">{error}</p>}
+          <div className="flex justify-end gap-2 pt-1"><button type="button" disabled={pending} onClick={close} className="min-h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">Cancelar</button><button type="submit" disabled={pending || !selectedFile} className="flex min-h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white shadow-xs hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">{pending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}{pending ? "Anexando..." : "Anexar documento"}</button></div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ClientFilesTab({ client }: { client: CrmClient }) {
+  const utils = trpc.useUtils();
+  const [selectedCategory, setSelectedCategory] = useState<ClientFileCategoryOption>("all");
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [fileToDelete, setFileToDelete] = useState<{ publicId: string; fileName: string } | null>(null);
+  const filesQuery = trpc.crm.files.list.useQuery({ crmClientId: client.crmClientId }, { refetchOnWindowFocus: false });
+  const uploadMutation = trpc.crm.files.upload.useMutation({
+    onSuccess: async () => { toast.success("Documento anexado com sucesso!"); setUploadOpen(false); await Promise.all([filesQuery.refetch(), utils.crm.files.list.invalidate()]); },
+  });
+  const deleteMutation = trpc.crm.files.delete.useMutation({
+    onSuccess: async () => { toast.success("Documento excluído com sucesso!"); setFileToDelete(null); await Promise.all([filesQuery.refetch(), utils.crm.files.list.invalidate()]); },
+    onError: error => toast.error(error.message || "Falha ao excluir documento."),
+  });
+  const allFiles = filesQuery.data ?? [];
+  const filteredFiles = useMemo(() => selectedCategory === "all" ? allFiles : allFiles.filter(file => file.category === selectedCategory), [allFiles, selectedCategory]);
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: allFiles.length };
+    for (const category of CLIENT_FILE_CATEGORIES) counts[category.id] = category.id === "all" ? allFiles.length : allFiles.filter(file => file.category === category.id).length;
+    return counts;
+  }, [allFiles]);
+  const canWrite = client.lifecycleState !== "archived";
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Documentos do Cliente</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Centralize contratos, identificação e materiais comerciais deste relacionamento.</p></div><button type="button" disabled={!canWrite} onClick={() => setUploadOpen(true)} className="flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"><UploadCloud className="h-3.5 w-3.5" />Anexar Documento</button></div>
+      {!canWrite && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">Restaure o cliente antes de anexar ou excluir documentos.</p>}
+      <div className="flex flex-wrap gap-2">{CLIENT_FILE_CATEGORIES.map(category => <button key={category.id} type="button" onClick={() => setSelectedCategory(category.id)} className={cn("rounded-full border px-3 py-1 text-xs font-semibold transition-colors", selectedCategory === category.id ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300")}>{category.label}<span className={cn("ml-1", selectedCategory === category.id ? "text-blue-100" : "text-slate-400")}>{categoryCounts[category.id] ?? 0}</span></button>)}</div>
+      {filesQuery.isLoading ? <div className="flex h-40 items-center justify-center"><RefreshCw className="h-5 w-5 animate-spin text-blue-500" /></div> : filesQuery.isError ? <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">Não foi possível carregar os documentos. <button type="button" onClick={() => void filesQuery.refetch()} className="font-semibold underline underline-offset-2">Tentar novamente</button></div> : filteredFiles.length === 0 ? <div className="flex min-h-52 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 px-5 text-center dark:border-slate-700 dark:bg-slate-900/40"><Paperclip className="mb-3 h-10 w-10 text-slate-300 dark:text-slate-600" /><p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{selectedCategory === "all" ? "Nenhum documento anexado" : "Nenhum documento nesta categoria"}</p><p className="mt-1 max-w-sm text-xs text-slate-500 dark:text-slate-400">Anexe contratos, documentos de identificação ou materiais comerciais para manter o histórico organizado.</p>{canWrite && selectedCategory === "all" && <button type="button" onClick={() => setUploadOpen(true)} className="mt-4 flex min-h-9 items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 text-xs font-semibold text-blue-700 hover:bg-blue-50 dark:border-blue-900 dark:bg-slate-900 dark:text-blue-300"><Plus className="h-3.5 w-3.5" />Anexar primeiro documento</button>}</div> : <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white dark:border-slate-800 dark:bg-slate-900">{filteredFiles.map(file => <div key={file.publicId} className="flex items-center gap-3 border-b border-slate-100 p-3 last:border-b-0 dark:border-slate-800"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300"><FileText className="h-4 w-4" /></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="max-w-full truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{file.fileName}</p><span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-bold", clientFileCategoryBadgeClass(file.category))}>{file.categoryLabel}</span></div><p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{file.description || (formatClientFileSize(file.sizeBytes) + " · " + file.createdByName)}</p></div><div className="flex shrink-0 items-center gap-1"><a href={file.downloadUrl + "?preview=1"} target="_blank" rel="noreferrer" className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-blue-700 dark:text-slate-400 dark:hover:bg-slate-800" title="Baixar ou visualizar"><Download className="h-4 w-4" /></a>{canWrite && <button type="button" onClick={() => setFileToDelete({ publicId: file.publicId, fileName: file.fileName })} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-red-50 hover:text-red-700 dark:text-slate-400 dark:hover:bg-red-950/30" title="Excluir documento"><Trash2 className="h-4 w-4" /></button>}</div></div>)}</div>}
+      <ClientFileUploadDialog client={client} open={uploadOpen} pending={uploadMutation.isPending} onClose={() => setUploadOpen(false)} onSubmit={async input => { await uploadMutation.mutateAsync(input); }} />
+      <AlertDialog open={fileToDelete !== null} onOpenChange={open => !open && !deleteMutation.isPending && setFileToDelete(null)}><AlertDialogContent className="sm:max-w-md"><AlertDialogHeader><AlertDialogTitle>Excluir documento</AlertDialogTitle><AlertDialogDescription>“{fileToDelete?.fileName}” deixará de ficar disponível para este cliente.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={deleteMutation.isPending}>Cancelar</AlertDialogCancel><button type="button" disabled={!fileToDelete || deleteMutation.isPending} onClick={() => fileToDelete && deleteMutation.mutate({ crmClientId: client.crmClientId, filePublicId: fileToDelete.publicId })} className="min-h-10 rounded-lg bg-red-700 px-4 text-sm font-semibold text-white hover:bg-red-800 disabled:opacity-60">{deleteMutation.isPending ? "Excluindo..." : "Excluir documento"}</button></AlertDialogFooter></AlertDialogContent></AlertDialog>
+    </div>
+  );
+}
+
+function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappConnected, canStartConversation, canPermanentlyDelete, onLifecycleChanged, onDeleted }: { client: CrmClient; onEdit: () => void; onClose: () => void; onSendMessage?: (intent: CrmWhatsAppIntent) => void; whatsappConnected: boolean; canStartConversation: boolean; canPermanentlyDelete: boolean; onLifecycleChanged: () => Promise<void>; onDeleted: () => Promise<void> }) {
   const [activeTab, setActiveTab] = useState<ClientTab>("geral");
   const [newTimelineNote, setNewTimelineNote] = useState("");
   const [riskAction, setRiskAction] = useState<"deactivate" | "reactivate" | "archive" | "restore" | "delete" | null>(null);
   const [deletePhrase, setDeletePhrase] = useState("");
+  const [riskError, setRiskError] = useState<string | null>(null);
   const lifecycleMutation = trpc.crm.changeLifecycle.useMutation();
   const deleteMutation = trpc.crm.deletePermanently.useMutation();
   const riskPending = lifecycleMutation.isPending || deleteMutation.isPending;
@@ -791,6 +911,11 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
   const whatsappPhone = client.whatsapp || client.phone || "";
   const normalizedWhatsApp = normalizeContactPhone(whatsappPhone);
   const hasValidWhatsApp = normalizedWhatsApp.status === "valid";
+  const openRiskAction = (action: NonNullable<typeof riskAction>) => {
+    setRiskError(null);
+    setDeletePhrase("");
+    setRiskAction(action);
+  };
   const runRiskAction = async () => {
     if (!riskAction || riskPending) return;
     try {
@@ -814,7 +939,9 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
       setRiskAction(null);
       setDeletePhrase("");
     } catch (error) {
-      toast.error(safeLifecycleMessage(error));
+      const message = safeLifecycleMessage(error);
+      setRiskError(message);
+      toast.error(message);
     }
   };
 
@@ -876,6 +1003,7 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
       color: string;
     };
 
+    const persistedEntries = timelineQuery.data?.entries ?? [];
     const events: ClientTimelineEvent[] = [
       {
         id: `client-created-${client.crmClientId}`,
@@ -888,7 +1016,8 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
       },
     ];
 
-    if (new Date(client.updatedAt).getTime() > new Date(client.createdAt).getTime()) {
+    const hasPersistedUpdate = persistedEntries.some(entry => entry.type === "edit" || entry.type === "status_change");
+    if (new Date(client.updatedAt).getTime() > new Date(client.createdAt).getTime() && !hasPersistedUpdate) {
       events.push({
         id: `client-updated-${client.crmClientId}`,
         date: client.updatedAt,
@@ -931,6 +1060,26 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
         icon: <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />,
         color: "bg-emerald-100 dark:bg-emerald-950/60",
       },
+      lifecycle_deactivate: {
+        title: "Cliente inativado",
+        icon: <XCircle className="h-3.5 w-3.5 text-slate-600 dark:text-slate-400" />,
+        color: "bg-slate-100 dark:bg-slate-800",
+      },
+      lifecycle_reactivate: {
+        title: "Cliente reativado",
+        icon: <CheckCircle className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />,
+        color: "bg-emerald-100 dark:bg-emerald-950/60",
+      },
+      lifecycle_archive: {
+        title: "Cliente arquivado",
+        icon: <Archive className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />,
+        color: "bg-amber-100 dark:bg-amber-950/60",
+      },
+      lifecycle_restore: {
+        title: "Cliente restaurado",
+        icon: <RotateCcw className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />,
+        color: "bg-blue-100 dark:bg-blue-950/60",
+      },
       other: {
         title: "Atividade registrada",
         icon: <Clock className="h-3.5 w-3.5 text-slate-600 dark:text-slate-400" />,
@@ -938,7 +1087,7 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
       },
     };
 
-    for (const entry of timelineQuery.data?.entries ?? []) {
+    for (const entry of persistedEntries) {
       const style = entryStyles[String(entry.type)] ?? entryStyles.other;
       events.push({
         id: entry.id,
@@ -1021,29 +1170,33 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
               <DropdownMenuContent align="end" className="w-56 border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
                 <DropdownMenuLabel className="text-xs text-slate-500 dark:text-slate-400">Mais ações</DropdownMenuLabel>
                 {client.lifecycleState === "active" && (
-                  <DropdownMenuItem onSelect={() => setRiskAction("deactivate")}>
+                  <DropdownMenuItem onSelect={() => openRiskAction("deactivate")}>
                     <XCircle className="h-4 w-4" /> Inativar cliente
                   </DropdownMenuItem>
                 )}
                 {client.lifecycleState === "inactive" && (
-                  <DropdownMenuItem onSelect={() => setRiskAction("reactivate")}>
+                  <DropdownMenuItem onSelect={() => openRiskAction("reactivate")}>
                     <CheckCircle className="h-4 w-4" /> Ativar cliente
                   </DropdownMenuItem>
                 )}
                 {client.lifecycleState !== "archived" && (
-                  <DropdownMenuItem onSelect={() => setRiskAction("archive")}>
+                  <DropdownMenuItem onSelect={() => openRiskAction("archive")}>
                     <Archive className="h-4 w-4" /> Arquivar cliente
                   </DropdownMenuItem>
                 )}
                 {client.lifecycleState === "archived" && (
-                  <DropdownMenuItem onSelect={() => setRiskAction("restore")}>
+                  <DropdownMenuItem onSelect={() => openRiskAction("restore")}>
                     <RotateCcw className="h-4 w-4" /> Restaurar cliente
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuSeparator className="bg-slate-200 dark:bg-slate-700" />
-                <DropdownMenuItem variant="destructive" onSelect={() => setRiskAction("delete")}>
-                  <Trash2 className="h-4 w-4" /> Excluir cliente
-                </DropdownMenuItem>
+                {canPermanentlyDelete && (
+                  <>
+                    <DropdownMenuSeparator className="bg-slate-200 dark:bg-slate-700" />
+                    <DropdownMenuItem variant="destructive" onSelect={() => openRiskAction("delete")}>
+                      <Trash2 className="h-4 w-4" /> Excluir cliente
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
             <button type="button" onClick={onClose} className="hidden rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-slate-800 dark:hover:text-slate-300 lg:flex" title="Fechar painel" aria-label="Fechar perfil do cliente">
@@ -1221,11 +1374,7 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
         )}
 
         {activeTab === "arquivos" && (
-          <div className="flex flex-col items-center justify-center h-48 text-center">
-            <Paperclip className="w-12 h-12 text-slate-200 mb-3" />
-            <p className="text-slate-500 font-medium text-sm">Arquivos e Documentos</p>
-            <p className="text-slate-400 text-xs mt-1">Contratos, PDFs, comprovantes e imagens aparecerão aqui.</p>
-          </div>
+          <ClientFilesTab client={client} />
         )}
       </div>
       <AlertDialog
@@ -1234,6 +1383,7 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
           if (!open && !riskPending) {
             setRiskAction(null);
             setDeletePhrase("");
+            setRiskError(null);
           }
         }}
       >
@@ -1243,6 +1393,11 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
               <AlertDialogTitle className={riskAction === "delete" ? "text-red-700 dark:text-red-300" : undefined}>{riskAction === "delete" ? "Excluir cliente" : `${riskAction === "archive" ? "Arquivar" : riskAction === "restore" ? "Restaurar" : riskAction === "deactivate" ? "Inativar" : "Ativar"} cliente`}</AlertDialogTitle>
               <AlertDialogDescription className="leading-relaxed text-slate-600 dark:text-slate-300">{riskAction === "delete" ? "Esta ação é destrutiva e só será concluída se o cadastro não possuir histórico ou vínculos. Caso contrário, arquive o cliente para preservar os dados." : riskAction === "archive" ? "O cliente sairá das buscas padrão, preservando todo o histórico e os vínculos existentes." : riskAction === "deactivate" ? "Novos vínculos e operações ficarão bloqueados até a reativação." : "O cadastro voltará ao estado operacional seguro correspondente."}</AlertDialogDescription>
             </AlertDialogHeader>
+            {riskError && (
+              <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+                {riskError}
+              </div>
+            )}
             {riskAction === "delete" && (
               <label className="block text-sm font-semibold text-slate-800 dark:text-slate-200" htmlFor="client-delete-confirmation">
                 Para confirmar, digite <span className="font-mono">EXCLUIR</span>
@@ -1255,6 +1410,7 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
                 onClick={() => {
                   setRiskAction(null);
                   setDeletePhrase("");
+                  setRiskError(null);
                 }}
                 className="border-slate-200 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
               >
@@ -1277,11 +1433,13 @@ export function ClientesPage({
   onNavigate,
   whatsappConnected = false,
   canStartConversation = false,
+  canPermanentlyDelete = false,
 }: {
   initialSelectedId?: string;
   onNavigate?: (intent: CrmWhatsAppIntent) => void;
   whatsappConnected?: boolean;
   canStartConversation?: boolean;
+  canPermanentlyDelete?: boolean;
 } = {}) {
   const handleSendMessage = useCallback(
     (intent: CrmWhatsAppIntent) => {
@@ -1554,6 +1712,7 @@ export function ClientesPage({
             onSendMessage={handleSendMessage}
             whatsappConnected={whatsappConnected}
             canStartConversation={canStartConversation}
+            canPermanentlyDelete={canPermanentlyDelete}
             onLifecycleChanged={async () => {
               await refetch();
             }}

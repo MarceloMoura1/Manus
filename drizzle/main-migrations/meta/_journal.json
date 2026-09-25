@@ -241,6 +241,13 @@
       "when": 1790103586905,
       "tag": "0033_fixed_zarda",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "5",
+      "when": 1790308790520,
+      "tag": "0034_cold_multiple_man",
+      "breakpoints": true
     }
   ]
 }

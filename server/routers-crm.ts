@@ -12,6 +12,7 @@ import {
   updateCrmClient,
   findDuplicateCrmClient,
   addCrmTimeline,
+  listCrmLifecycleTimeline,
   listCrmTimeline,
 } from "./db-crm";
 import { getPool } from "./db";
@@ -19,6 +20,7 @@ import { CUSTOMER_TYPES, parseCustomerType, customerTypeToCsv } from "../shared/
 import { isValidCpf, isValidCnpj } from "../shared/br-documents";
 import { normalizeContactPhone } from "../shared/contact-phone";
 import { changeCrmClientLifecycle, permanentlyDeleteCrmClient, CrmLifecycleError } from "./crm-client-lifecycle";
+import { clientFilesRouter } from "./modules/crm/client-files/files-router";
 
 const CRM_ROLES = new Set(["admin", "manager"]);
 
@@ -87,6 +89,30 @@ const crmClientInputSchema = z.object({
   })).optional().default([]),
 }).strict();
 
+const crmClientUpdateInputSchema = z.object({
+  customerType: z.enum(CUSTOMER_TYPES).optional(),
+  companyName: z.string().trim().min(1, "Nome do cliente é obrigatório").max(255).optional(),
+  responsibleName: z.string().max(180).optional(),
+  cpfCnpj: z.string().max(20).optional(),
+  phone: z.string().max(40).optional(),
+  whatsapp: z.string().max(40).optional(),
+  email: z.union([z.literal(""), z.string().email("E-mail inválido.").max(255)]).optional(),
+  address: z.string().max(255).optional(),
+  city: z.string().max(120).optional(),
+  state: z.string().max(2).optional(),
+  cep: z.string().max(10).optional(),
+  status: z.enum(["lead", "ativo", "inativo", "cancelado", "inadimplente"]).optional(),
+  origin: z.enum(["whatsapp", "instagram", "facebook", "site", "indicacao", "outro"]).optional(),
+  internalResponsible: z.string().optional(),
+  tags: z.string().optional(),
+  observations: z.string().optional(),
+  contacts: z.array(z.object({
+    phone: z.string(),
+    whatsapp: z.string(),
+    description: z.string().optional(),
+  })).optional(),
+}).strict();
+
 function validateCustomerDocument(data: z.infer<typeof crmClientInputSchema>) {
   if (data.cpfCnpj) {
     const valid = data.customerType === "person" ? isValidCpf(data.cpfCnpj) : isValidCnpj(data.cpfCnpj);
@@ -113,6 +139,7 @@ function safeCrmWriteError(error: unknown): never {
 }
 
 export const crmRouter = router({
+  files: clientFilesRouter,
   findDuplicate: megadeskProcedure
     .input(z.object({ cpfCnpj: z.string().max(20).optional().default(""), phone: z.string().max(40).optional().default("") }).strict())
     .query(async ({ input, ctx }) => {
@@ -190,7 +217,7 @@ export const crmRouter = router({
   update: megadeskProcedure
     .input(z.object({
       crmClientId: z.string().min(1),
-      data: crmClientInputSchema.partial(),
+      data: crmClientUpdateInputSchema,
     }).strict())
     .mutation(async ({ input, ctx }) => {
       const tenantId = requireCrmAccess(ctx);
@@ -207,12 +234,22 @@ export const crmRouter = router({
       });
       try {
         await updateCrmClient(input.crmClientId, tenantId, input.data);
-        // Registrar na timeline quem editou e quando
-        await addCrmTimeline(input.crmClientId, tenantId, {
-          type: "edit",
-          description: `Cadastro editado por ${ctx.userEmail}`,
-          author: ctx.userEmail,
-        });
+        const statusChanged = input.data.status !== undefined && input.data.status !== existing.status;
+        const updatedFields = Object.keys(input.data).filter(field => field !== "status");
+        if (statusChanged) {
+          await addCrmTimeline(input.crmClientId, tenantId, {
+            type: "status_change",
+            description: `Status comercial alterado de ${existing.status} para ${input.data.status} por ${ctx.userEmail}.`,
+            author: ctx.userEmail,
+          });
+        }
+        if (updatedFields.length > 0 || !statusChanged) {
+          await addCrmTimeline(input.crmClientId, tenantId, {
+            type: "edit",
+            description: `Cadastro editado por ${ctx.userEmail}`,
+            author: ctx.userEmail,
+          });
+        }
         return { success: true };
       } catch (error) { safeCrmWriteError(error); }
     }),
@@ -315,8 +352,14 @@ export const crmRouter = router({
     .query(async ({ input, ctx }) => {
       const tenantId = requireCrmAccess(ctx);
       crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
-      const entries = await listCrmTimeline(input.crmClientId, tenantId);
-      return { entries };
+      const [entries, lifecycleEntries] = await Promise.all([
+        listCrmTimeline(input.crmClientId, tenantId),
+        listCrmLifecycleTimeline(input.crmClientId, tenantId),
+      ]);
+      return {
+        entries: [...entries, ...lifecycleEntries]
+          .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
+      };
     }),
 
   // Adicionar entrada manual na timeline

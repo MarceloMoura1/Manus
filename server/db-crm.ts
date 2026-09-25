@@ -361,9 +361,90 @@ export async function addCrmTimeline(
  * Lista a timeline operacional de um cliente CRM.
  * REGRA 1: Filtra por clientId.
  */
-export async function listCrmTimeline(crmClientId: string, clientId: string) {
-  const pool = getPool();
-  const [rows] = await pool.execute(
+export type CrmTimelineEntry = {
+  id: string;
+  type: string;
+  description: string;
+  author: string | null;
+  createdAt: Date | string;
+};
+
+type CrmLifecycleAuditMetadata = {
+  crmClientId?: unknown;
+  from?: unknown;
+  to?: unknown;
+};
+
+function parseCrmLifecycleAuditMetadata(value: unknown): CrmLifecycleAuditMetadata | null {
+  if (typeof value === "string") {
+    try {
+      return parseCrmLifecycleAuditMetadata(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  }
+  return value && typeof value === "object" ? value as CrmLifecycleAuditMetadata : null;
+}
+
+function lifecycleAuditDescription(action: string, metadata: CrmLifecycleAuditMetadata): string {
+  const stateLabel: Record<string, string> = {
+    active: "ativo",
+    inactive: "inativo",
+    archived: "arquivado",
+  };
+  const from = typeof metadata.from === "string" ? stateLabel[metadata.from] : undefined;
+  const to = typeof metadata.to === "string" ? stateLabel[metadata.to] : undefined;
+  if (from && to) return `Estado operacional alterado de ${from} para ${to}.`;
+  const actionLabel: Record<string, string> = {
+    crm_client_deactivate: "Cliente inativado.",
+    crm_client_reactivate: "Cliente reativado.",
+    crm_client_archive: "Cliente arquivado.",
+    crm_client_restore: "Cliente restaurado.",
+  };
+  return actionLabel[action] ?? "Estado operacional do cliente atualizado.";
+}
+
+/**
+ * Lê somente eventos de ciclo de vida que possuem uma prova auditável no log
+ * operacional. O tenant é filtrado no banco e o CRM público é confirmado a
+ * partir do metadata gravado pela própria transação de lifecycle.
+ */
+export async function listCrmLifecycleTimeline(
+  crmClientId: string,
+  clientId: string,
+  executor: SqlExecutor = getPool(),
+): Promise<CrmTimelineEntry[]> {
+  const [rows] = await executor.execute(
+    `SELECT audit_id, action, operator_user_id, metadata_json, created_at
+       FROM megadesk_domain_audit_logs
+      WHERE client_id = ?
+        AND origin = 'crm_clients'
+        AND event_phase = 'success'
+        AND action IN ('crm_client_deactivate', 'crm_client_reactivate', 'crm_client_archive', 'crm_client_restore')
+      ORDER BY created_at DESC
+      LIMIT 100`,
+    [clientId],
+  ) as any[];
+
+  return (rows as any[]).flatMap(row => {
+    const metadata = parseCrmLifecycleAuditMetadata(row.metadata_json);
+    if (!metadata || metadata.crmClientId !== crmClientId) return [];
+    return [{
+      id: `audit-${row.audit_id}`,
+      type: `lifecycle_${String(row.action).replace("crm_client_", "")}`,
+      description: lifecycleAuditDescription(String(row.action), metadata),
+      author: row.operator_user_id ?? null,
+      createdAt: row.created_at,
+    }];
+  });
+}
+
+export async function listCrmTimeline(
+  crmClientId: string,
+  clientId: string,
+  executor: SqlExecutor = getPool(),
+): Promise<CrmTimelineEntry[]> {
+  const [rows] = await executor.execute(
     `SELECT timeline_id, entry_type, description, author, created_at
      FROM megadesk_crm_timeline
      WHERE crm_client_id = ? AND client_id = ?

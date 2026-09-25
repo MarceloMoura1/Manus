@@ -1244,9 +1244,52 @@ export const megadeskCrmClients = mysqlTable(
     index("idx_mcc_tenant_lifecycle").on(table.clientId, table.lifecycleState),
     index("idx_mcc_company").on(table.companyName),
     index("idx_mcc_phone").on(table.phone),
+    uniqueIndex("uq_mcc_tenant_crm").on(table.clientId, table.crmClientId),
     uniqueIndex("uq_mcc_tenant_document").on(table.clientId, table.cpfCnpj),
     uniqueIndex("uq_mcc_tenant_phone").on(table.clientId, table.phone),
     uniqueIndex("uq_mcc_tenant_email").on(table.clientId, table.email),
+  ]
+);
+
+export const megadeskCrmClientFiles = mysqlTable(
+  "megadesk_crm_client_files",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    crmClientId: varchar("crm_client_id", { length: 80 }).notNull(),
+    fileName: varchar("file_name", { length: 255 }).notNull(),
+    category: varchar({ length: 64 }).notNull(),
+    description: text(),
+    mimeType: varchar("mime_type", { length: 128 }).notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    sha256: varchar({ length: 64 }).notNull(),
+    storageKey: varchar("storage_key", { length: 255 }).notNull(),
+    state: mysqlEnum("state", ["active", "pending_delete", "deleted"]).default("active").notNull(),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    deletedBy: varchar("deleted_by", { length: 80 }),
+    deletedAt: timestamp("deleted_at", { mode: "string" }),
+    pendingDeleteAt: timestamp("pending_delete_at", { mode: "string" }),
+  },
+  (table): MySqlTableExtraConfigValue[] => [
+    uniqueIndex("uq_mccf_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_mccf_storage_key").on(table.storageKey),
+    index("idx_mccf_lookup").on(table.clientId, table.crmClientId, table.state, table.createdAt),
+    index("idx_mccf_pending_delete").on(table.state, table.pendingDeleteAt),
+    foreignKey({
+      name: "fk_mccf_tenant",
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId as AnyMySqlColumn],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_mccf_crm_client",
+      columns: [table.clientId, table.crmClientId],
+      foreignColumns: [
+        megadeskCrmClients.clientId as AnyMySqlColumn,
+        megadeskCrmClients.crmClientId as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
   ]
 );
 
