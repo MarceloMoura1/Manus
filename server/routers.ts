@@ -976,6 +976,7 @@ export const appRouter = router({
       dataUrl: z.string().min(20).max(30_000_000),
       mimeType: z.string().min(3).max(120),
       fileName: z.string().max(255).optional(),
+      mediaSource: z.enum(["recording", "attachment"]).optional(),
       caption: z.string().max(2000).optional(),
       userEmail: z.string().email(),
       clientAttemptId: z.string().uuid(),
@@ -1048,6 +1049,7 @@ export const appRouter = router({
           () => sendOutboundConversationMediaFromPrivateStorage({
             clientId: ctx.tenantId, mediaReference, instanceName: instanceNameFor(ctx.tenantId),
             number: resolveOutboundRecipient(outboundConversation), kind: input.kind,
+            mediaSource: input.mediaSource,
             caption: input.caption, quoted: replyReference,
           }, { send: evoSendAttachment }));
         if (conversation) {

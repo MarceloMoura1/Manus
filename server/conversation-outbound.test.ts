@@ -157,8 +157,9 @@ describe("outbound tracked workflow", () => {
     }
   });
 
-  it("captures the exact tenant-scoped audio buffer immediately before the unchanged provider send", async () => {
+  it("normalizes audio and captures the exact OGG buffer immediately before the provider send", async () => {
     const bytes = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x10, 0x20]);
+    const normalizedBytes = Buffer.from("OggS-normalized");
     const mediaReference = { version: 2 as const, storage: "local" as const,
       storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin",
       mimeType: "audio/webm", fileName: "audio.webm", byteSize: bytes.length,
@@ -166,35 +167,44 @@ describe("outbound tracked workflow", () => {
     const events: string[] = [];
     const captureAudioDiagnostic = vi.fn(async ({ bytes: captured, mimeType, tenantId }: { bytes: Buffer; mimeType: string; tenantId: string }) => {
       events.push("capture");
-      expect(captured).toEqual(bytes);
-      expect(mimeType).toBe("audio/webm");
+      expect(captured).toEqual(normalizedBytes);
+      expect(mimeType).toBe("audio/ogg");
       expect(tenantId).toBe("tenant-a");
       return null;
     });
     const send = vi.fn(async providerInput => {
       events.push("send");
-      expect(Buffer.from(providerInput.dataUrl.split(",")[1], "base64")).toEqual(bytes);
+      expect(Buffer.from(providerInput.dataUrl.split(",")[1], "base64")).toEqual(normalizedBytes);
+      expect(providerInput).toMatchObject({ mimeType: "audio/ogg", fileName: "audio.ogg" });
       return providerReference;
+    });
+    const normalizeAudio = vi.fn(async ({ bytes: source, mimeType }: { bytes: Buffer; mimeType: string }) => {
+      events.push("normalize");
+      expect(source).toEqual(bytes);
+      expect(mimeType).toBe("audio/webm");
+      return { bytes: normalizedBytes, mimeType: "audio/ogg" as const, fileName: "audio.ogg" as const };
     });
 
     await sendOutboundConversationMediaFromPrivateStorage({
       clientId: "tenant-a", mediaReference, instanceName: "megadesk-tenant-a",
-      number: "5541999999999", kind: "audio",
+      number: "5541999999999", kind: "audio", mediaSource: "recording",
     }, {
       read: vi.fn(async request => {
         expect(request).toEqual({ clientId: "tenant-a", reference: mediaReference });
         return { bytes, mimeType: "audio/webm", fileName: "audio.webm" };
       }),
       captureAudioDiagnostic,
+      normalizeAudio,
       send,
     });
 
-    expect(events).toEqual(["capture", "send"]);
+    expect(events).toEqual(["normalize", "capture", "send"]);
     expect(send).toHaveBeenCalledOnce();
   });
 
   it("does not capture non-audio attachments", async () => {
     const captureAudioDiagnostic = vi.fn();
+    const normalizeAudio = vi.fn();
     await sendOutboundConversationMediaFromPrivateStorage({
       clientId: "tenant-a",
       mediaReference: { version: 2, storage: "local", storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin", mimeType: "image/png", byteSize: 1, sha256: "a".repeat(64) },
@@ -202,9 +212,11 @@ describe("outbound tracked workflow", () => {
     }, {
       read: async () => ({ bytes: Buffer.from([1]), mimeType: "image/png" }),
       captureAudioDiagnostic,
+      normalizeAudio,
       send: async () => providerReference,
     });
     expect(captureAudioDiagnostic).not.toHaveBeenCalled();
+    expect(normalizeAudio).not.toHaveBeenCalled();
   });
 
   it("keeps the provider send unchanged if optional diagnostic capture fails", async () => {
@@ -212,12 +224,104 @@ describe("outbound tracked workflow", () => {
     await sendOutboundConversationMediaFromPrivateStorage({
       clientId: "tenant-a",
       mediaReference: { version: 2, storage: "local", storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin", mimeType: "audio/webm", byteSize: 1, sha256: "a".repeat(64) },
-      instanceName: "megadesk-tenant-a", number: "5541999999999", kind: "audio",
+      instanceName: "megadesk-tenant-a", number: "5541999999999", kind: "audio", mediaSource: "recording",
     }, {
       read: async () => ({ bytes: Buffer.from([1]), mimeType: "audio/webm" }),
+      normalizeAudio: async () => ({ bytes: Buffer.from("OggS"), mimeType: "audio/ogg", fileName: "audio.ogg" }),
       captureAudioDiagnostic: async () => { throw new Error("diagnostic unavailable"); },
       send,
     });
     expect(send).toHaveBeenCalledOnce();
+  });
+
+  it("never falls back to the original audio when normalization fails", async () => {
+    const send = vi.fn();
+    const captureAudioDiagnostic = vi.fn();
+    await expect(sendOutboundConversationMediaFromPrivateStorage({
+      clientId: "tenant-a",
+      mediaReference: { version: 2, storage: "local", storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin", mimeType: "audio/webm", byteSize: 1, sha256: "a".repeat(64) },
+      instanceName: "megadesk-tenant-a", number: "5541999999999", kind: "audio", mediaSource: "recording",
+    }, {
+      read: async () => ({ bytes: Buffer.from([1]), mimeType: "audio/webm", fileName: "recording.webm" }),
+      normalizeAudio: async () => { throw new Error("normalization failed"); },
+      captureAudioDiagnostic,
+      send,
+    })).rejects.toThrow("normalization failed");
+    expect(captureAudioDiagnostic).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it.each(["audio/webm", "audio/ogg", "audio/mp4"])("normalizes each supported MediaRecorder %s format", async mimeType => {
+    const send = vi.fn(async () => providerReference);
+    await sendOutboundConversationMediaFromPrivateStorage({
+      clientId: "tenant-a",
+      mediaReference: { version: 2, storage: "local", storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin", mimeType, byteSize: 1, sha256: "a".repeat(64) },
+      instanceName: "megadesk-tenant-a", number: "5541999999999", kind: "audio", mediaSource: "recording",
+    }, {
+      read: async () => ({ bytes: Buffer.from([1]), mimeType }),
+      normalizeAudio: async () => ({ bytes: Buffer.from("OggS"), mimeType: "audio/ogg", fileName: "audio.ogg" }),
+      captureAudioDiagnostic: async () => null,
+      send,
+    });
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      dataUrl: `data:audio/ogg;base64,${Buffer.from("OggS").toString("base64")}`,
+      mimeType: "audio/ogg",
+      fileName: "audio.ogg",
+    }));
+  });
+
+  it.each([
+    ["audio/mpeg", "existing.mp3"],
+    ["audio/ogg", "existing.ogg"],
+  ])("keeps normal %s attachments byte-identical without FFmpeg", async (mimeType, fileName) => {
+    const original = Buffer.from(`original-${mimeType}`);
+    const normalizeAudio = vi.fn();
+    const send = vi.fn(async () => providerReference);
+    await sendOutboundConversationMediaFromPrivateStorage({
+      clientId: "tenant-a",
+      mediaReference: { version: 2, storage: "local", storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin", mimeType, fileName, byteSize: original.length, sha256: "a".repeat(64) },
+      instanceName: "megadesk-tenant-a", number: "5541999999999", kind: "audio", mediaSource: "attachment",
+    }, {
+      read: async () => ({ bytes: original, mimeType, fileName }),
+      normalizeAudio,
+      captureAudioDiagnostic: async () => null,
+      send,
+    });
+    expect(normalizeAudio).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      dataUrl: `data:${mimeType};base64,${original.toString("base64")}`,
+      mimeType,
+      fileName,
+    }));
+  });
+
+  it("treats legacy clients without mediaSource as normal attachments", async () => {
+    const normalizeAudio = vi.fn();
+    await sendOutboundConversationMediaFromPrivateStorage({
+      clientId: "tenant-a",
+      mediaReference: { version: 2, storage: "local", storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin", mimeType: "audio/webm", byteSize: 1, sha256: "a".repeat(64) },
+      instanceName: "megadesk-tenant-a", number: "5541999999999", kind: "audio",
+    }, {
+      read: async () => ({ bytes: Buffer.from([1]), mimeType: "audio/webm" }),
+      normalizeAudio,
+      captureAudioDiagnostic: async () => null,
+      send: async () => providerReference,
+    });
+    expect(normalizeAudio).not.toHaveBeenCalled();
+  });
+
+  it("does not call the provider when normalization cleanup fails", async () => {
+    const send = vi.fn();
+    await expect(sendOutboundConversationMediaFromPrivateStorage({
+      clientId: "tenant-a",
+      mediaReference: { version: 2, storage: "local", storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin", mimeType: "audio/webm", byteSize: 1, sha256: "a".repeat(64) },
+      instanceName: "megadesk-tenant-a", number: "5541999999999", kind: "audio", mediaSource: "recording",
+    }, {
+      read: async () => ({ bytes: Buffer.from([1]), mimeType: "audio/webm" }),
+      normalizeAudio: async () => { throw Object.assign(new Error("OUTBOUND_AUDIO_NORMALIZATION_FAILED"), { stage: "cleanup" }); },
+      captureAudioDiagnostic: async () => null,
+      send,
+    })).rejects.toMatchObject({ stage: "cleanup" });
+    expect(send).not.toHaveBeenCalled();
   });
 });

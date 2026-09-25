@@ -4,6 +4,7 @@ import { persistCanonicalMessage, type CanonicalMessageWrite } from "./conversat
 import { normalizeProviderMessageReference, type ProviderMessageReference } from "./conversation-provider-reference";
 import { readConversationMedia, type ConversationMediaReferenceV2 } from "./conversation-media-storage";
 import { capturePreEvolutionAudioDiagnostic } from "./audio-pre-evolution-diagnostic";
+import { normalizeOutboundAudio } from "./outbound-audio-normalization";
 
 export type OutboundAttemptInput = Omit<CanonicalMessageWrite, "direction" | "status" | "externalMessageId" | "clientAttemptId"> & {
   clientAttemptId: string;
@@ -27,6 +28,7 @@ export class OutboundPendingPersistenceError extends Error {
 }
 
 type ConversationAttachmentKind = "image" | "video" | "audio" | "document" | "sticker";
+type OutboundAudioSource = "recording" | "attachment";
 type ConversationAttachmentProviderInput = {
   instanceName: string;
   number: string;
@@ -43,18 +45,23 @@ export async function sendOutboundConversationMediaFromPrivateStorage(
   input: Omit<ConversationAttachmentProviderInput, "dataUrl" | "mimeType" | "fileName"> & {
     clientId: string;
     mediaReference: ConversationMediaReferenceV2;
+    mediaSource?: OutboundAudioSource;
   },
   dependencies: {
     read?: typeof readConversationMedia;
     send: (input: ConversationAttachmentProviderInput) => Promise<ProviderMessageReference>;
     captureAudioDiagnostic?: typeof capturePreEvolutionAudioDiagnostic;
+    normalizeAudio?: typeof normalizeOutboundAudio;
   },
 ): Promise<ProviderMessageReference> {
   const stored = await (dependencies.read ?? readConversationMedia)({ clientId: input.clientId, reference: input.mediaReference });
+  const providerMedia = input.kind === "audio" && input.mediaSource === "recording"
+    ? await (dependencies.normalizeAudio ?? normalizeOutboundAudio)({ bytes: stored.bytes, mimeType: stored.mimeType })
+    : stored;
   if (input.kind === "audio") {
     await (dependencies.captureAudioDiagnostic ?? capturePreEvolutionAudioDiagnostic)({
-      bytes: stored.bytes,
-      mimeType: stored.mimeType,
+      bytes: providerMedia.bytes,
+      mimeType: providerMedia.mimeType,
       tenantId: input.clientId,
     }).catch(() => null);
   }
@@ -62,9 +69,9 @@ export async function sendOutboundConversationMediaFromPrivateStorage(
     instanceName: input.instanceName,
     number: input.number,
     kind: input.kind,
-    dataUrl: `data:${stored.mimeType};base64,${stored.bytes.toString("base64")}`,
-    mimeType: stored.mimeType,
-    ...(stored.fileName ? { fileName: stored.fileName } : {}),
+    dataUrl: `data:${providerMedia.mimeType};base64,${providerMedia.bytes.toString("base64")}`,
+    mimeType: providerMedia.mimeType,
+    ...(providerMedia.fileName ? { fileName: providerMedia.fileName } : {}),
     ...(input.caption !== undefined ? { caption: input.caption } : {}),
     ...(input.quoted !== undefined ? { quoted: input.quoted } : {}),
   });
