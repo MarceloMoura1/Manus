@@ -198,6 +198,9 @@ export function NewAttendanceFlow({ onNavigate, initialPhone, initialCrmCustomer
             dataUrl: attachmentToSend.dataUrl,
             mimeType: attachmentToSend.mimeType,
             fileName: attachmentToSend.fileName,
+            mediaSource: attachmentToSend.kind === 'audio'
+              ? (recordedAudio ? 'recording' : 'attachment')
+              : undefined,
             caption: text || undefined,
             userEmail,
             clientAttemptId: crypto.randomUUID(),

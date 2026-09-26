@@ -23,6 +23,7 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
   const eventState: TimelineMessage[] = [...(options.events ?? [])];
   let sentMessageCount = 0;
   const calls: string[] = [];
+  const attachmentInputs: Array<Record<string, unknown>> = [];
   const listInputs: Array<{ viewMode: string; status: string; search?: string; dateFrom?: string; dateTo?: string }> = [];
   const attendanceQueries: string[] = [];
   await page.addInitScript(value => {
@@ -70,6 +71,7 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
           clientAttemptId: input.clientAttemptId, status: "sent", replyTo });
       }
       if (name.includes("megadesk.sendAttachment") && input) {
+        attachmentInputs.push(input);
         sentMessageCount += 1;
         messageState.push({ id: `outbound-${sentMessageCount}`, sender: "agent", from: "agent", text: input.caption || "[Documento]",
           type: input.kind, mediaData: input.dataUrl, mimeType: input.mimeType, fileName: input.fileName,
@@ -105,7 +107,7 @@ async function mockedPage(page: Page, deepLink = false, options: { session?: typ
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(url.searchParams.get("batch") === "1" ? body : body[0]) });
   });
   await page.goto(deepLink ? "/?conversationId=conv-ui" : "/", { waitUntil: "domcontentloaded" });
-  return { calls, listInputs, attendanceQueries, messageState };
+  return { calls, listInputs, attendanceQueries, messageState, attachmentInputs };
 }
 
 test.describe("restored conversation layout with WIP lifecycle", () => {
@@ -640,6 +642,23 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     expect(calls.some(name => name.includes("megadesk.sendMessage"))).toBe(false);
   });
 
+  test("keeps an uploaded audio classified as an attachment", async ({ page }) => {
+    const { calls, attachmentInputs } = await mockedPage(page);
+    await page.getByRole("button", { name: "Novo atendimento" }).click();
+    const flow = page.getByTestId("new-attendance-flow");
+    await flow.getByLabel("Para", { exact: true }).fill("5541988888888");
+    await flow.getByText(/Usar este n.mero/, { exact: true }).click();
+    await flow.getByLabel("Nome", { exact: true }).fill("Contato com anexo de audio");
+    await flow.locator('input[type="file"]').setInputFiles({
+      name: "anexo.mp3",
+      mimeType: "audio/mpeg",
+      buffer: Buffer.from("audio anexado controlado"),
+    });
+    await flow.getByRole("button", { name: "Enviar mensagem" }).click();
+    await expect.poll(() => calls.some(name => name.includes("megadesk.sendAttachment"))).toBe(true);
+    expect(attachmentInputs.at(-1)).toMatchObject({ kind: "audio", mediaSource: "attachment" });
+  });
+
   test("records and sends the first audio through the official outbound endpoint", async ({ page }) => {
     await page.addInitScript(() => {
       Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: {
@@ -661,7 +680,7 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
       }
       Object.defineProperty(window, "MediaRecorder", { configurable: true, value: FakeMediaRecorder });
     });
-    const { calls } = await mockedPage(page);
+    const { calls, attachmentInputs } = await mockedPage(page);
     await page.getByRole("button", { name: "Novo atendimento" }).click();
     const flow = page.getByTestId("new-attendance-flow");
     await flow.getByLabel("Para", { exact: true }).fill("5541988888888");
@@ -672,6 +691,7 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await flow.getByRole("button", { name: "Enviar áudio" }).click();
     await expect.poll(() => calls.some(name => name.includes("megadesk.createConversation"))).toBe(true);
     await expect.poll(() => calls.some(name => name.includes("megadesk.sendAttachment"))).toBe(true);
+    expect(attachmentInputs.at(-1)).toMatchObject({ kind: "audio", mediaSource: "recording" });
   });
 
   test("sends an attachment and recorded audio from the active attendance composer", async ({ page }) => {
@@ -695,7 +715,7 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
       }
       Object.defineProperty(window, "MediaRecorder", { configurable: true, value: FakeMediaRecorder });
     });
-    const { calls } = await mockedPage(page);
+    const { calls, attachmentInputs } = await mockedPage(page);
     await page.getByText("Cliente UI", { exact: true }).first().click();
     const composer = page.getByTestId("conversation-composer");
     await composer.locator('input[type="file"]').setInputFiles({ name: "ativo.txt", mimeType: "text/plain", buffer: Buffer.from("anexo ativo") });
@@ -707,6 +727,8 @@ test.describe("restored conversation layout with WIP lifecycle", () => {
     await expect(composer.getByRole("button", { name: "Enviar áudio" })).toBeVisible();
     await composer.getByRole("button", { name: "Enviar áudio" }).click();
     await expect.poll(() => calls.filter(name => name.includes("megadesk.sendAttachment")).length).toBeGreaterThanOrEqual(2);
+    expect(attachmentInputs[0]?.mediaSource ?? undefined).toBeUndefined();
+    expect(attachmentInputs.at(-1)).toMatchObject({ kind: "audio", mediaSource: "recording" });
   });
 
   test("blocks a new attendance when a server-side lookup finds an active one", async ({ page }) => {
