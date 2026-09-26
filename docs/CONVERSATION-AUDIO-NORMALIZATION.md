@@ -10,8 +10,10 @@ e encoder `libopus`.
 O contrato de envio distingue `mediaSource: "recording"` de
 `mediaSource: "attachment"`. Somente o primeiro representa o Blob do
 MediaRecorder e e reconstruido para OGG/Opus. Anexos de audio permanecem com
-os bytes, MIME e nome originais. Clientes antigos sem `mediaSource` tambem sao
-tratados como anexos para preservar compatibilidade.
+os bytes, MIME e nome originais. Todo envio de audio precisa declarar uma das
+duas origens. Um audio sem `mediaSource` e rejeitado antes de storage/provider,
+pois trata-lo implicitamente como attachment poderia enviar um WebM quebrado
+do MediaRecorder sem normalizacao.
 
 No processo do app, no maximo duas normalizacoes podem executar ao mesmo tempo.
 Nao existe fila: quando a capacidade esta ocupada, o envio falha de forma
@@ -39,4 +41,7 @@ Antes de publicar esta funcionalidade, o deploy controlado deve:
 
 A captura diagnostica pre-Evolution continua desligada por padrao. Ela deve ser
 ativada apenas para um tenant explicitamente autorizado e, quando ativa, captura
-o buffer OGG normalizado que sera enviado ao provider.
+o mesmo buffer que sera enviado ao provider. Seus metadados seguros registram
+a origem do audio, se a normalizacao foi selecionada, MIME/tamanho de entrada e
+MIME/tamanho/SHA-256 de saida; nenhum conteudo, base64, tenant ou credencial e
+registrado no log.

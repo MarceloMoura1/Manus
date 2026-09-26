@@ -42,6 +42,9 @@ describe("pre-Evolution audio diagnostic capture", () => {
     const first = await capturePreEvolutionAudioDiagnostic({
       bytes, mimeType: "audio/webm;codecs=opus", tenantId: "tenant-a", environment, root, logger,
       createCorrelationId: () => correlationId,
+      mediaSource: "recording", normalizationAttempted: true,
+      inputMimeType: "audio/webm;codecs=opus", inputByteLength: bytes.length,
+      normalizationFallback: false,
     });
     const second = await capturePreEvolutionAudioDiagnostic({
       bytes: Buffer.from("second"), mimeType: "audio/webm", tenantId: "tenant-a", environment, root, logger,
@@ -54,6 +57,11 @@ describe("pre-Evolution audio diagnostic capture", () => {
       mimeType: "audio/webm",
       sha256: createHash("sha256").update(bytes).digest("hex"),
       extension: "webm",
+      mediaSource: "recording",
+      normalizationAttempted: true,
+      inputMimeType: "audio/webm",
+      inputByteLength: bytes.length,
+      normalizationFallback: false,
     });
     expect(second).toBeNull();
     const target = path.join(root, `${correlationId}.webm`);

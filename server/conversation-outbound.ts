@@ -40,6 +40,13 @@ type ConversationAttachmentProviderInput = {
   quoted?: ProviderMessageReference;
 };
 
+export class OutboundAudioSourceRequiredError extends Error {
+  constructor() {
+    super("OUTBOUND_AUDIO_SOURCE_REQUIRED");
+    this.name = "OutboundAudioSourceRequiredError";
+  }
+}
+
 /** The router's provider payload is built only after re-reading the private V2 object. */
 export async function sendOutboundConversationMediaFromPrivateStorage(
   input: Omit<ConversationAttachmentProviderInput, "dataUrl" | "mimeType" | "fileName"> & {
@@ -54,8 +61,16 @@ export async function sendOutboundConversationMediaFromPrivateStorage(
     normalizeAudio?: typeof normalizeOutboundAudio;
   },
 ): Promise<ProviderMessageReference> {
+  // An absent discriminator used to enter the attachment compatibility path,
+  // which silently sent a broken MediaRecorder WebM to Evolution. All current
+  // first-party audio call sites send an explicit source; reject ambiguous
+  // audio again at this boundary even if a caller bypasses the router schema.
+  if (input.kind === "audio" && input.mediaSource === undefined) {
+    throw new OutboundAudioSourceRequiredError();
+  }
   const stored = await (dependencies.read ?? readConversationMedia)({ clientId: input.clientId, reference: input.mediaReference });
-  const providerMedia = input.kind === "audio" && input.mediaSource === "recording"
+  const normalizationAttempted = input.kind === "audio" && input.mediaSource === "recording";
+  const providerMedia = normalizationAttempted
     ? await (dependencies.normalizeAudio ?? normalizeOutboundAudio)({ bytes: stored.bytes, mimeType: stored.mimeType })
     : stored;
   if (input.kind === "audio") {
@@ -63,6 +78,11 @@ export async function sendOutboundConversationMediaFromPrivateStorage(
       bytes: providerMedia.bytes,
       mimeType: providerMedia.mimeType,
       tenantId: input.clientId,
+      mediaSource: input.mediaSource,
+      normalizationAttempted,
+      inputMimeType: stored.mimeType,
+      inputByteLength: stored.bytes.length,
+      normalizationFallback: false,
     }).catch(() => null);
   }
   return dependencies.send({

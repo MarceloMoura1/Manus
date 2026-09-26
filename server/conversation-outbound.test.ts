@@ -165,16 +165,40 @@ describe("outbound tracked workflow", () => {
       mimeType: "audio/webm", fileName: "audio.webm", byteSize: bytes.length,
       sha256: createHash("sha256").update(bytes).digest("hex") };
     const events: string[] = [];
-    const captureAudioDiagnostic = vi.fn(async ({ bytes: captured, mimeType, tenantId }: { bytes: Buffer; mimeType: string; tenantId: string }) => {
+    const captureAudioDiagnostic = vi.fn(async ({
+      bytes: captured, mimeType, tenantId, mediaSource, normalizationAttempted,
+      inputMimeType, inputByteLength, normalizationFallback,
+    }: {
+      bytes: Buffer;
+      mimeType: string;
+      tenantId: string;
+      mediaSource?: "recording" | "attachment";
+      normalizationAttempted?: boolean;
+      inputMimeType?: string;
+      inputByteLength?: number;
+      normalizationFallback?: false;
+    }) => {
       events.push("capture");
+      expect(captured).toBe(normalizedBytes);
       expect(captured).toEqual(normalizedBytes);
       expect(mimeType).toBe("audio/ogg");
       expect(tenantId).toBe("tenant-a");
+      expect({ mediaSource, normalizationAttempted, inputMimeType, inputByteLength, normalizationFallback }).toEqual({
+        mediaSource: "recording",
+        normalizationAttempted: true,
+        inputMimeType: "audio/webm",
+        inputByteLength: bytes.length,
+        normalizationFallback: false,
+      });
       return null;
     });
     const send = vi.fn(async providerInput => {
       events.push("send");
-      expect(Buffer.from(providerInput.dataUrl.split(",")[1], "base64")).toEqual(normalizedBytes);
+      const providerBytes = Buffer.from(providerInput.dataUrl.split(",")[1], "base64");
+      expect(providerBytes).toEqual(normalizedBytes);
+      expect(createHash("sha256").update(providerBytes).digest("hex"))
+        .toBe(createHash("sha256").update(normalizedBytes).digest("hex"));
+      expect(providerBytes).not.toEqual(bytes);
       expect(providerInput).toMatchObject({ mimeType: "audio/ogg", fileName: "audio.ogg" });
       return providerReference;
     });
@@ -276,6 +300,18 @@ describe("outbound tracked workflow", () => {
   ])("keeps normal %s attachments byte-identical without FFmpeg", async (mimeType, fileName) => {
     const original = Buffer.from(`original-${mimeType}`);
     const normalizeAudio = vi.fn();
+    const captureAudioDiagnostic = vi.fn(async input => {
+      expect(input.bytes).toBe(original);
+      expect(input).toMatchObject({
+        mimeType,
+        mediaSource: "attachment",
+        normalizationAttempted: false,
+        inputMimeType: mimeType,
+        inputByteLength: original.length,
+        normalizationFallback: false,
+      });
+      return null;
+    });
     const send = vi.fn(async () => providerReference);
     await sendOutboundConversationMediaFromPrivateStorage({
       clientId: "tenant-a",
@@ -284,7 +320,7 @@ describe("outbound tracked workflow", () => {
     }, {
       read: async () => ({ bytes: original, mimeType, fileName }),
       normalizeAudio,
-      captureAudioDiagnostic: async () => null,
+      captureAudioDiagnostic,
       send,
     });
     expect(normalizeAudio).not.toHaveBeenCalled();
@@ -293,21 +329,26 @@ describe("outbound tracked workflow", () => {
       mimeType,
       fileName,
     }));
+    expect(captureAudioDiagnostic).toHaveBeenCalledOnce();
   });
 
-  it("treats legacy clients without mediaSource as normal attachments", async () => {
+  it("fails closed for ambiguous audio without mediaSource instead of sending stored WebM", async () => {
     const normalizeAudio = vi.fn();
-    await sendOutboundConversationMediaFromPrivateStorage({
+    const captureAudioDiagnostic = vi.fn(async () => null);
+    const send = vi.fn(async () => providerReference);
+    await expect(sendOutboundConversationMediaFromPrivateStorage({
       clientId: "tenant-a",
       mediaReference: { version: 2, storage: "local", storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin", mimeType: "audio/webm", byteSize: 1, sha256: "a".repeat(64) },
       instanceName: "megadesk-tenant-a", number: "5541999999999", kind: "audio",
     }, {
       read: async () => ({ bytes: Buffer.from([1]), mimeType: "audio/webm" }),
       normalizeAudio,
-      captureAudioDiagnostic: async () => null,
-      send: async () => providerReference,
-    });
+      captureAudioDiagnostic,
+      send,
+    })).rejects.toThrow("OUTBOUND_AUDIO_SOURCE_REQUIRED");
     expect(normalizeAudio).not.toHaveBeenCalled();
+    expect(captureAudioDiagnostic).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("does not call the provider when normalization cleanup fails", async () => {

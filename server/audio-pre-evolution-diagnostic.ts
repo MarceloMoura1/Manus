@@ -26,6 +26,11 @@ export type AudioPreEvolutionDiagnostic = {
   mimeType: string;
   sha256: string;
   extension: string;
+  mediaSource?: "recording" | "attachment";
+  normalizationAttempted?: boolean;
+  inputMimeType?: string;
+  inputByteLength?: number;
+  normalizationFallback?: false;
 };
 
 export function isAudioPreEvolutionCaptureEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
@@ -64,6 +69,11 @@ export async function capturePreEvolutionAudioDiagnostic(input: {
   root?: string;
   logger?: DiagnosticLogger;
   createCorrelationId?: () => string;
+  mediaSource?: "recording" | "attachment";
+  normalizationAttempted?: boolean;
+  inputMimeType?: string;
+  inputByteLength?: number;
+  normalizationFallback?: false;
 }): Promise<AudioPreEvolutionDiagnostic | null> {
   const environment = input.environment ?? process.env;
   if (!isAudioPreEvolutionCaptureEnabled(environment)
@@ -106,6 +116,11 @@ export async function capturePreEvolutionAudioDiagnostic(input: {
       mimeType,
       sha256: createHash("sha256").update(input.bytes).digest("hex"),
       extension,
+      ...(input.mediaSource !== undefined ? { mediaSource: input.mediaSource } : {}),
+      ...(input.normalizationAttempted !== undefined ? { normalizationAttempted: input.normalizationAttempted } : {}),
+      ...(input.inputMimeType !== undefined ? { inputMimeType: normalizedMime(input.inputMimeType) } : {}),
+      ...(input.inputByteLength !== undefined ? { inputByteLength: input.inputByteLength } : {}),
+      ...(input.normalizationFallback !== undefined ? { normalizationFallback: input.normalizationFallback } : {}),
     } satisfies AudioPreEvolutionDiagnostic;
     logger.info("[AudioPreEvolutionDiagnostic] captured", diagnostic);
     return diagnostic;

@@ -41,6 +41,7 @@ import { erpRouter } from "./modules/erp/router";
 import { hasHumanContactName, normalizeContactPhone } from "../shared/contact-phone";
 import { findCrmClientForAttendance, searchCrmClientsForAttendance } from "./db-crm";
 import { findConversationContactByPhone, searchLightweightContactsForAttendance } from "./conversation-contact";
+import { conversationAttachmentSendInput } from "./conversation-attachment-contract";
 import { ConversationReplyResolutionError, resolveConversationReplyReference } from "./conversation-reply-resolution";
 import { sanitizeMegaAdminUser } from "./megaadmin-response-sanitization";
 
@@ -970,18 +971,7 @@ export const appRouter = router({
 
       return { ok: true, conversationId: input.conversationId, message: input.message, sentAt: new Date().toISOString() };
     }),
-    sendAttachment: megadeskProcedure.input(z.object({
-      conversationId: z.string().min(1),
-      kind: z.enum(["image", "video", "audio", "document", "sticker"]),
-      dataUrl: z.string().min(20).max(30_000_000),
-      mimeType: z.string().min(3).max(120),
-      fileName: z.string().max(255).optional(),
-      mediaSource: z.enum(["recording", "attachment"]).optional(),
-      caption: z.string().max(2000).optional(),
-      userEmail: z.string().email(),
-      clientAttemptId: z.string().uuid(),
-      replyToMessageId: z.string().min(1).max(100).optional(),
-    })).mutation(async ({ input, ctx }) => {
+    sendAttachment: megadeskProcedure.input(conversationAttachmentSendInput).mutation(async ({ input, ctx }) => {
       await hydrateSyncState();
       const outboundConversation = await loadOutboundConversation(getPool(), ctx.tenantId, input.conversationId);
       if (!outboundConversation) {
