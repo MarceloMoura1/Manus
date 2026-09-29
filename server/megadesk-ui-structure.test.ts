@@ -95,7 +95,10 @@ describe("MegaDesk UI structure", () => {
   });
 
   it("preserva o contrato visual unificado de Atendimento com controles do lifecycle", () => {
-    expect(homeSource).toContain('active === "conversations" && <ConversationsPage attendanceLaunch={attendanceLaunch} attendancePhone={activeAttendancePhone} />');
+    expect(homeSource).toContain('active === "conversations" && <ConversationsPage');
+    expect(homeSource).toContain('attendanceLaunch={attendanceIntent.activeToken}');
+    expect(homeSource).toContain('attendancePhone={attendanceIntent.phone}');
+    expect(homeSource).toContain('onAttendanceLaunchConsumed={(launch) => {');
     expect(homeSource).not.toContain('active === "conversations" && <ConversasPage />');
     expect(homeSource).toContain("min-[900px]:w-[420px]");
     expect(homeSource).toContain('data-testid="conversation-list-panel"');

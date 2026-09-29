@@ -584,8 +584,9 @@ describe("ERP Fornecedores V2 — Suíte de Testes Estruturais e de Domínio", (
     expect(suppliersSource).not.toContain("crmClientId: supplier.publicId");
     // Home.tsx detecta rota active-attendance ou ausência de crmClientId e navega de imediato
     expect(homeSource).toContain('intent.route === "active-attendance"');
-    expect(homeSource).toContain("setActiveAttendancePhone(normalized.value);");
+    expect(homeSource).toContain("setAttendanceIntent(current => ({ ...current, phone: normalized.value }));");
     expect(homeSource).toContain('navigateToRoute("active-attendance");');
+    expect(homeSource).toContain("consumeAttendanceLaunchIntent(current, launch)");
     // crmCustomerQuery em ConversationsPage preserva política de retry padrão e não tem retry: false
     expect(homeSource).not.toContain("retry: false");
   });
@@ -612,7 +613,7 @@ describe("ERP Fornecedores V2 — Suíte de Testes Estruturais e de Domínio", (
   // 42. WhatsApp: Navegação para active-attendance sem telefone não preenche número
   it("42. navegação para active-attendance sem telefone mantém composer vazio", () => {
     expect(homeSource).toContain("if (phone) {");
-    expect(homeSource).toContain("setActiveAttendancePhone(validPhone);");
+    expect(homeSource).toContain("setAttendanceIntent(current => ({ ...current, phone: validPhone }));");
   });
 
   // 43. Persistência de Seleção: SELECTED e NONE sobrevivem ao unmount/remount

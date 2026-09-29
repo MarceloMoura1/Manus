@@ -25,6 +25,11 @@ import { formatConversationTime, formatDate, formatTime } from "@/lib/conversati
 import { composeConversationTimeline, reconcileConversationMessages } from "@/lib/conversationTimeline";
 import { messageReplyPreview, replyAuthor, replyPreview, type ConversationReplyPreview } from "@/lib/conversationQuote";
 import { useDebounce } from "@/hooks/useDebounce";
+import {
+  consumeAttendanceLaunchIntent,
+  createAttendanceLaunchIntent,
+  queueAttendanceLaunchIntent,
+} from "@/lib/attendance-launch-intent";
 import { useUserPersonalization } from "@/hooks/useUserPersonalization";
 import {
   conversationFilterStorageKey,
@@ -502,9 +507,10 @@ function DashboardPage({ setActive, indicadores }: { setActive: (route: RouteId)
   );
 }
 
-export function ConversationsPage({ attendanceLaunch, attendancePhone }: {
+export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttendanceLaunchConsumed }: {
   attendanceLaunch: number;
   attendancePhone: string;
+  onAttendanceLaunchConsumed?: (launch: number) => void;
 }) {
   const utils = trpc.useUtils();
   const { theme } = useTheme();
@@ -596,7 +602,8 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     handledAttendanceLaunch.current = attendanceLaunch;
     setNewAttendancePhone(attendancePhone);
     setNewAttendanceOpen(true);
-  }, [attendanceLaunch, attendancePhone]);
+    onAttendanceLaunchConsumed?.(attendanceLaunch);
+  }, [attendanceLaunch, attendancePhone, onAttendanceLaunchConsumed]);
 
   // Query para mensagens da conversa selecionada (lazy - só busca quando conversa é aberta)
   const { data: conversationMessageResult, refetch: refetchMessages } = trpc.conversations.messages.useQuery(
@@ -4056,14 +4063,13 @@ function Shell() {
   const mainContentRef = React.useRef<HTMLElement>(null);
   const [indicadores, setIndicadores] = useState<any>(null);
   const [activeCrmClientId, setActiveCrmClientId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("crmClientId"));
-  const [activeAttendancePhone, setActiveAttendancePhone] = useState<string>(() =>
-    localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY) === "active-attendance"
-      ? localStorage.getItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE') ?? ''
-      : '',
-  );
-  const [attendanceLaunch, setAttendanceLaunch] = useState(() =>
-    localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY) === "active-attendance" ? 1 : 0,
-  );
+  const [attendanceIntent, setAttendanceIntent] = useState(() => {
+    const restoreLegacyAttendance = localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY) === "active-attendance";
+    return createAttendanceLaunchIntent(
+      restoreLegacyAttendance,
+      restoreLegacyAttendance ? localStorage.getItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE') ?? '' : '',
+    );
+  });
   const closeMobileSidebar = React.useCallback((restoreFocus = true) => {
     setSidebarOpen(false);
     if (restoreFocus) window.setTimeout(() => sidebarTriggerRef.current?.focus(), 0);
@@ -4071,7 +4077,7 @@ function Shell() {
   const navigateToRoute = React.useCallback((route: RouteId, options?: { replace?: boolean; crmClientId?: string }) => {
     const isLegacyAttendanceRoute = route === "active-attendance";
     const targetRoute: RouteId = isLegacyAttendanceRoute ? "conversations" : route;
-    if (isLegacyAttendanceRoute) setAttendanceLaunch(current => current + 1);
+    if (isLegacyAttendanceRoute) setAttendanceIntent(current => queueAttendanceLaunchIntent(current));
     const path = targetRoute === "erp-clients"
       ? `/erp/clientes${options?.crmClientId ? `?crmClientId=${encodeURIComponent(options.crmClientId)}` : ""}`
       : targetRoute === "erp-products"
@@ -4127,7 +4133,7 @@ function Shell() {
     const normalized = normalizeContactPhone(intent.phone);
     if (normalized.status !== "valid") return;
     if (("route" in intent && intent.route === "active-attendance") || !("crmClientId" in intent) || !intent.crmClientId) {
-      setActiveAttendancePhone(normalized.value);
+      setAttendanceIntent(current => ({ ...current, phone: normalized.value }));
       navigateToRoute("active-attendance");
       return;
     }
@@ -4175,7 +4181,7 @@ function Shell() {
         if (phone) {
           const norm = normalizeContactPhone(phone);
           const validPhone = norm.status === "valid" ? norm.value : phone;
-          setActiveAttendancePhone(validPhone);
+          setAttendanceIntent(current => ({ ...current, phone: validPhone }));
           localStorage.removeItem('MEGADESK_ACTIVE_ATTENDANCE_PHONE');
         }
         const route = detail.route === "clients" ? "erp-clients" : detail.route as RouteId;
@@ -4439,7 +4445,13 @@ function Shell() {
         <main ref={mainContentRef} tabIndex={-1} className={`flex min-h-0 min-w-0 flex-1 flex-col ${shellLayout.mainContentClassName}`}>
           <ErrorBoundary key={active}>
           {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} />}
-          {active === "conversations" && <ConversationsPage attendanceLaunch={attendanceLaunch} attendancePhone={activeAttendancePhone} />}
+          {active === "conversations" && <ConversationsPage
+            attendanceLaunch={attendanceIntent.activeToken}
+            attendancePhone={attendanceIntent.phone}
+            onAttendanceLaunchConsumed={(launch) => {
+              setAttendanceIntent(current => consumeAttendanceLaunchIntent(current, launch));
+            }}
+          />}
           {active === "tickets" && <TicketsPage onOpenMobileMenu={() => setSidebarOpen(true)} />}
           {active === "tracking" && <TrackingPage />}
            {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} onClientNavigate={handleClientNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
