@@ -2736,17 +2736,337 @@ function Get-HttpStatusCode {
   }
 }
 
+function ConvertTo-MegaDeskDiagnosticText {
+  param(
+    [AllowNull()][object]$Value,
+    [ValidateRange(1, 512)][int]$MaxLength = 160,
+    [switch]$RedactSensitive
+  )
+  if ($null -eq $Value) { return '' }
+  $text = [string]$Value
+  $text = $text -replace '[\x00-\x1f\x7f]+', ' '
+  $text = $text -replace '\s+', ' '
+  if ($RedactSensitive) {
+    $text = $text -replace '(?i)"(?:authorization|cookie|set-cookie|token|secret|password|api[-_]?key)"\s*:\s*"[^"]*"', '[REDACTED]'
+    $text = $text -replace '(?i)(authorization|cookie|set-cookie|token|secret|password|api[-_]?key)\s*[:=]\s*(?:(?:bearer|basic)\s+)?[^\s,;<>]+', '[REDACTED]'
+    $text = $text -replace '(?i)\b[a-z0-9+/_=-]{32,}\b', '[REDACTED]'
+  }
+  $text = $text.Trim()
+  if ($text.Length -gt $MaxLength) { return $text.Substring(0, $MaxLength) }
+  return $text
+}
+
+function ConvertTo-MegaDeskDiagnosticSha {
+  param([AllowNull()][object]$Value)
+  if ($null -eq $Value) { return '' }
+  $sha = ([string]$Value).Trim()
+  if ($sha -match '^[0-9a-fA-F]{7,64}$') { return $sha.ToLowerInvariant() }
+  if ([string]::IsNullOrWhiteSpace($sha)) { return '' }
+  return '[INVALID_SHA_FORMAT]'
+}
+
+function Get-MegaDeskSafeRedirectLocation {
+  param([AllowNull()][object]$Value)
+  if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return '' }
+  $raw = [string]$Value
+  $uri = $null
+  if ([System.Uri]::TryCreate($raw, [System.UriKind]::Absolute, [ref]$uri)) {
+    $port = if ($uri.IsDefaultPort) { '' } else { ':' + [string]$uri.Port }
+    $path = $uri.AbsolutePath -replace '(?i)(?<=/)[a-z0-9+_=-]{24,}(?=/|$)', '[REDACTED]'
+    return ConvertTo-MegaDeskDiagnosticText -Value ('{0}://{1}{2}{3}' -f $uri.Scheme, $uri.Host, $port, $path) -MaxLength 256 -RedactSensitive
+  }
+  $withoutQuery = ($raw -split '[?#]', 2)[0]
+  return ConvertTo-MegaDeskDiagnosticText -Value $withoutQuery -MaxLength 256 -RedactSensitive
+}
+
+function Get-MegaDeskSafeResponseHeaders {
+  param([AllowNull()][object]$Response)
+  $result = [ordered]@{ cfRay = ''; cfCacheStatus = ''; server = ''; contentType = '' }
+  if ($null -eq $Response) { return [pscustomobject]$result }
+
+  foreach ($entry in @(
+      @{ Name = 'CF-Ray'; Property = 'cfRay' },
+      @{ Name = 'CF-Cache-Status'; Property = 'cfCacheStatus' },
+      @{ Name = 'Server'; Property = 'server' },
+      @{ Name = 'Content-Type'; Property = 'contentType' }
+    )) {
+    $value = $null
+    try {
+      if ($Response.PSObject.Properties.Name -contains 'Headers' -and $null -ne $Response.Headers) {
+        try { $value = $Response.Headers[$entry.Name] } catch { }
+        if ($null -eq $value -and $Response.Headers.PSObject.Methods.Name -contains 'TryGetValues') {
+          $values = $null
+          try {
+            if ($Response.Headers.TryGetValues($entry.Name, [ref]$values)) { $value = @($values) -join ',' }
+          } catch { }
+        }
+      }
+    } catch { }
+    if ($entry.Name -eq 'Content-Type' -and [string]::IsNullOrWhiteSpace([string]$value)) {
+      try {
+        if ($Response.PSObject.Properties.Name -contains 'ContentType') { $value = $Response.ContentType }
+        elseif ($Response.PSObject.Properties.Name -contains 'Content' -and $null -ne $Response.Content -and $Response.Content.PSObject.Properties.Name -contains 'Headers') {
+          $value = $Response.Content.Headers.ContentType
+        }
+      } catch { }
+    }
+    $result[$entry.Property] = ConvertTo-MegaDeskDiagnosticText -Value $value -MaxLength 256 -RedactSensitive
+  }
+  return [pscustomobject]$result
+}
+
+function Get-MegaDeskHealthResponseEvidence {
+  param([AllowNull()][object]$Response)
+  $statusCode = $null
+  if ($null -ne $Response) {
+    try {
+      if ($Response.PSObject.Properties.Name -contains 'StatusCode' -and $null -ne $Response.StatusCode) { $statusCode = [int]$Response.StatusCode }
+    } catch { }
+  }
+  $headers = Get-MegaDeskSafeResponseHeaders -Response $Response
+  $location = ''
+  if ($null -ne $Response) {
+    try {
+      if ($Response.PSObject.Properties.Name -contains 'Headers' -and $null -ne $Response.Headers) {
+        try { $location = [string]$Response.Headers['Location'] } catch { }
+        if ([string]::IsNullOrWhiteSpace($location) -and $Response.Headers.PSObject.Properties.Name -contains 'Location') {
+          $location = [string]$Response.Headers.Location
+        }
+      }
+    } catch { }
+  }
+  return [pscustomobject]@{
+    response = $Response
+    httpStatus = $statusCode
+    headers = $headers
+    redirectLocation = Get-MegaDeskSafeRedirectLocation -Value $location
+  }
+}
+
+function Get-MegaDeskHealthExceptionResponse {
+  param([Parameter(Mandatory = $true)][System.Exception]$Exception)
+  $current = $Exception
+  for ($depth = 0; $depth -lt 8 -and $null -ne $current; $depth++) {
+    try {
+      if ($current.PSObject.Properties.Name -contains 'Response' -and $null -ne $current.Response) { return $current.Response }
+    } catch { }
+    $current = $current.InnerException
+  }
+  return $null
+}
+
+function Get-MegaDeskHealthExceptionType {
+  param([AllowNull()][System.Exception]$Exception)
+  if ($null -eq $Exception) { return '' }
+  $types = New-Object 'System.Collections.Generic.List[string]'
+  $current = $Exception
+  for ($depth = 0; $depth -lt 4 -and $null -ne $current; $depth++) {
+    $typeName = $current.GetType().FullName
+    if (-not [string]::IsNullOrWhiteSpace($typeName) -and -not $types.Contains($typeName)) { [void]$types.Add($typeName) }
+    $current = $current.InnerException
+  }
+  return ConvertTo-MegaDeskDiagnosticText -Value ($types -join '>') -MaxLength 256
+}
+
+function Get-MegaDeskHealthTransportFailureClass {
+  param(
+    [Parameter(Mandatory = $true)][System.Exception]$Exception,
+    [AllowNull()][object]$HttpStatus
+  )
+  if ($null -ne $HttpStatus) {
+    $status = [int]$HttpStatus
+    if ($status -in @(301, 302, 303, 307, 308)) { return 'REDIRECT' }
+    return 'HTTP_STATUS'
+  }
+
+  $current = $Exception
+  for ($depth = 0; $depth -lt 8 -and $null -ne $current; $depth++) {
+    if ($current -is [System.TimeoutException] -or $current -is [System.Threading.Tasks.TaskCanceledException]) { return 'TIMEOUT' }
+    if ($current -is [System.Security.Authentication.AuthenticationException]) { return 'TLS' }
+    if ($current -is [System.Net.WebException]) {
+      switch ($current.Status) {
+        ([System.Net.WebExceptionStatus]::Timeout) { return 'TIMEOUT' }
+        ([System.Net.WebExceptionStatus]::NameResolutionFailure) { return 'DNS' }
+        ([System.Net.WebExceptionStatus]::ProxyNameResolutionFailure) { return 'DNS' }
+        ([System.Net.WebExceptionStatus]::TrustFailure) { return 'TLS' }
+        ([System.Net.WebExceptionStatus]::SecureChannelFailure) { return 'TLS' }
+        ([System.Net.WebExceptionStatus]::ConnectFailure) { return 'CONNECTION' }
+        ([System.Net.WebExceptionStatus]::ConnectionClosed) { return 'CONNECTION' }
+        ([System.Net.WebExceptionStatus]::KeepAliveFailure) { return 'CONNECTION' }
+        ([System.Net.WebExceptionStatus]::ReceiveFailure) { return 'CONNECTION' }
+        ([System.Net.WebExceptionStatus]::SendFailure) { return 'CONNECTION' }
+        ([System.Net.WebExceptionStatus]::PipelineFailure) { return 'CONNECTION' }
+      }
+    }
+    if ($current -is [System.Net.Sockets.SocketException]) {
+      switch ($current.SocketErrorCode) {
+        ([System.Net.Sockets.SocketError]::HostNotFound) { return 'DNS' }
+        ([System.Net.Sockets.SocketError]::TryAgain) { return 'DNS' }
+        ([System.Net.Sockets.SocketError]::NoData) { return 'DNS' }
+        ([System.Net.Sockets.SocketError]::TimedOut) { return 'TIMEOUT' }
+        default { return 'CONNECTION' }
+      }
+    }
+    $current = $current.InnerException
+  }
+  return 'UNKNOWN'
+}
+
+function New-MegaDeskHealthDiagnostic {
+  param(
+    [Parameter(Mandatory = $true)][ValidateSet('APP', 'ADMIN', 'OTHER')][string]$Endpoint,
+    [Parameter(Mandatory = $true)][ValidateSet('CONNECTION', 'DNS', 'TLS', 'TIMEOUT', 'REDIRECT', 'HTTP_STATUS', 'INVALID_JSON', 'BODY_MISMATCH', 'SHA_MISMATCH', 'UNKNOWN')][string]$FailureClass,
+    [ValidateRange(0, 2147483647)][int]$DurationMs = 0,
+    [AllowNull()][object]$Exception = $null,
+    [AllowNull()][object]$HttpStatus = $null,
+    [AllowNull()][object]$RedirectLocation = '',
+    [AllowNull()][object]$HealthStatus = '',
+    [AllowNull()][object]$ObservedSha = '',
+    [AllowNull()][object]$ExpectedSha = '',
+    [AllowNull()][object]$BodyLength = $null,
+    [AllowNull()][object]$BodyPreview = '',
+    [AllowNull()][object]$Headers = $null
+  )
+  $safeHeaders = if ($null -eq $Headers) { [pscustomobject]@{ cfRay = ''; cfCacheStatus = ''; server = ''; contentType = '' } } else { $Headers }
+  $exceptionType = if ($Exception -is [System.Exception]) { Get-MegaDeskHealthExceptionType -Exception $Exception } else { '' }
+  $statusValue = if ($null -eq $HttpStatus) { $null } else { [int]$HttpStatus }
+  $lengthValue = if ($null -eq $BodyLength) { $null } else { [int64]$BodyLength }
+  return [pscustomobject][ordered]@{
+    schemaVersion = 1
+    endpoint = $Endpoint
+    timestamp = [DateTime]::UtcNow.ToString('o')
+    durationMs = $DurationMs
+    failureClass = $FailureClass
+    exceptionType = $exceptionType
+    httpStatus = $statusValue
+    redirectLocation = Get-MegaDeskSafeRedirectLocation -Value $RedirectLocation
+    healthStatus = ConvertTo-MegaDeskDiagnosticText -Value $HealthStatus -MaxLength 64 -RedactSensitive
+    observedSha = ConvertTo-MegaDeskDiagnosticSha -Value $ObservedSha
+    expectedSha = ConvertTo-MegaDeskDiagnosticSha -Value $ExpectedSha
+    bodyLength = $lengthValue
+    bodyPreview = ConvertTo-MegaDeskDiagnosticText -Value $BodyPreview -MaxLength 160 -RedactSensitive
+    headers = [pscustomobject][ordered]@{
+      cfRay = ConvertTo-MegaDeskDiagnosticText -Value $safeHeaders.cfRay -MaxLength 256 -RedactSensitive
+      cfCacheStatus = ConvertTo-MegaDeskDiagnosticText -Value $safeHeaders.cfCacheStatus -MaxLength 256 -RedactSensitive
+      server = ConvertTo-MegaDeskDiagnosticText -Value $safeHeaders.server -MaxLength 256 -RedactSensitive
+      contentType = ConvertTo-MegaDeskDiagnosticText -Value $safeHeaders.contentType -MaxLength 256 -RedactSensitive
+    }
+  }
+}
+
+function Throw-MegaDeskHealthDiagnostic {
+  param([Parameter(Mandatory = $true)]$Diagnostic)
+  $exception = New-Object System.InvalidOperationException ('MegaDesk health check failed: {0}.' -f [string]$Diagnostic.failureClass)
+  $exception.Data['MegaDeskHealthDiagnostic'] = $Diagnostic
+  throw $exception
+}
+
+function Get-MegaDeskHealthDiagnosticFromErrorRecord {
+  param(
+    [Parameter(Mandatory = $true)]$ErrorRecord,
+    [Parameter(Mandatory = $true)][ValidateSet('APP', 'ADMIN', 'OTHER')][string]$Endpoint,
+    [string]$ExpectedSha = ''
+  )
+  $exception = $ErrorRecord.Exception
+  if ($null -ne $exception -and $null -ne $exception.Data -and $exception.Data.Contains('MegaDeskHealthDiagnostic')) {
+    return $exception.Data['MegaDeskHealthDiagnostic']
+  }
+  return New-MegaDeskHealthDiagnostic -Endpoint $Endpoint -FailureClass UNKNOWN -Exception $exception -ExpectedSha $ExpectedSha
+}
+
+function Get-MegaDeskHealthEndpointName {
+  param([Parameter(Mandatory = $true)][string]$Url)
+  try {
+    $uri = [System.Uri]$Url
+    if ($uri.Host -ieq 'app.megadesk.online') { return 'APP' }
+    if ($uri.Host -ieq 'admin.megadesk.online') { return 'ADMIN' }
+  } catch { }
+  return 'OTHER'
+}
+
+function Format-MegaDeskHealthDiagnostic {
+  param([Parameter(Mandatory = $true)]$Diagnostic, [switch]$IncludeDetail)
+  $status = if ($null -eq $Diagnostic.httpStatus) { 'NA' } else { [string]$Diagnostic.httpStatus }
+  $observedSha = if ([string]::IsNullOrWhiteSpace([string]$Diagnostic.observedSha)) { 'NONE' } else { [string]$Diagnostic.observedSha }
+  $parts = New-Object 'System.Collections.Generic.List[string]'
+  [void]$parts.Add(('endpoint={0}' -f [string]$Diagnostic.endpoint))
+  [void]$parts.Add(('failureClass={0}' -f [string]$Diagnostic.failureClass))
+  [void]$parts.Add(('status={0}' -f $status))
+  [void]$parts.Add(('observedSha={0}' -f $observedSha))
+  [void]$parts.Add(('durationMs={0}' -f [int]$Diagnostic.durationMs))
+  if ($IncludeDetail) {
+    foreach ($entry in @(
+        @{ Name = 'timestamp'; Value = $Diagnostic.timestamp },
+        @{ Name = 'exceptionType'; Value = $Diagnostic.exceptionType },
+        @{ Name = 'location'; Value = $Diagnostic.redirectLocation },
+        @{ Name = 'healthStatus'; Value = $Diagnostic.healthStatus },
+        @{ Name = 'expectedSha'; Value = $Diagnostic.expectedSha },
+        @{ Name = 'bodyLength'; Value = $Diagnostic.bodyLength },
+        @{ Name = 'bodyPreview'; Value = $Diagnostic.bodyPreview },
+        @{ Name = 'cfRay'; Value = $Diagnostic.headers.cfRay },
+        @{ Name = 'cfCacheStatus'; Value = $Diagnostic.headers.cfCacheStatus },
+        @{ Name = 'server'; Value = $Diagnostic.headers.server },
+        @{ Name = 'contentType'; Value = $Diagnostic.headers.contentType }
+      )) {
+      if ($null -ne $entry.Value -and -not [string]::IsNullOrWhiteSpace([string]$entry.Value)) {
+        [void]$parts.Add(('{0}={1}' -f $entry.Name, [string]$entry.Value))
+      }
+    }
+  }
+  return $parts -join ','
+}
+
 function Get-MegaDeskHealth {
-  param([Parameter(Mandatory = $true)][string]$Url, [int]$TimeoutSec = 15)
+  param(
+    [Parameter(Mandatory = $true)][string]$Url,
+    [int]$TimeoutSec = 15,
+    [string]$ExpectedReleaseSha = '',
+    [ValidateSet('APP', 'ADMIN', 'OTHER')][string]$Endpoint = 'OTHER'
+  )
+  $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
   try {
     $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec -MaximumRedirection 0
-    if ([int]$response.StatusCode -ne 200) { throw 'Health retornou status inesperado.' }
-    $payload = $response.Content | ConvertFrom-Json
-    if ([string]$payload.status -ne 'healthy') { throw 'Health nao reportou estado healthy.' }
-    return $payload
   } catch {
-    throw 'Health versionado indisponivel ou invalido.'
+    $stopwatch.Stop()
+    $exception = $_.Exception
+    $response = Get-MegaDeskHealthExceptionResponse -Exception $exception
+    $evidence = Get-MegaDeskHealthResponseEvidence -Response $response
+    $failureClass = Get-MegaDeskHealthTransportFailureClass -Exception $exception -HttpStatus $evidence.httpStatus
+    $diagnostic = New-MegaDeskHealthDiagnostic -Endpoint $Endpoint -FailureClass $failureClass -DurationMs ([int]$stopwatch.ElapsedMilliseconds) -Exception $exception -HttpStatus $evidence.httpStatus -RedirectLocation $evidence.redirectLocation -ExpectedSha $ExpectedReleaseSha -Headers $evidence.headers
+    Throw-MegaDeskHealthDiagnostic -Diagnostic $diagnostic
   }
+  $stopwatch.Stop()
+
+  $evidence = Get-MegaDeskHealthResponseEvidence -Response $response
+  if ($null -eq $evidence.httpStatus -or [int]$evidence.httpStatus -ne 200) {
+    $failureClass = if ($null -ne $evidence.httpStatus -and [int]$evidence.httpStatus -in @(301, 302, 303, 307, 308)) { 'REDIRECT' } elseif ($null -ne $evidence.httpStatus) { 'HTTP_STATUS' } else { 'UNKNOWN' }
+    $diagnostic = New-MegaDeskHealthDiagnostic -Endpoint $Endpoint -FailureClass $failureClass -DurationMs ([int]$stopwatch.ElapsedMilliseconds) -HttpStatus $evidence.httpStatus -RedirectLocation $evidence.redirectLocation -ExpectedSha $ExpectedReleaseSha -Headers $evidence.headers
+    Throw-MegaDeskHealthDiagnostic -Diagnostic $diagnostic
+  }
+
+  $content = if ($null -eq $response.Content) { '' } else { [string]$response.Content }
+  try {
+    $payload = $content | ConvertFrom-Json -ErrorAction Stop
+  } catch {
+    $diagnostic = New-MegaDeskHealthDiagnostic -Endpoint $Endpoint -FailureClass INVALID_JSON -DurationMs ([int]$stopwatch.ElapsedMilliseconds) -Exception $_.Exception -HttpStatus $evidence.httpStatus -ExpectedSha $ExpectedReleaseSha -BodyLength $content.Length -BodyPreview $content -Headers $evidence.headers
+    Throw-MegaDeskHealthDiagnostic -Diagnostic $diagnostic
+  }
+
+  $healthStatus = ''
+  $observedSha = ''
+  if ($null -ne $payload -and $payload.PSObject.Properties.Name -contains 'status') { $healthStatus = [string]$payload.status }
+  if ($null -ne $payload -and $payload.PSObject.Properties.Name -contains 'release' -and $null -ne $payload.release -and $payload.release.PSObject.Properties.Name -contains 'sha') {
+    $observedSha = [string]$payload.release.sha
+  }
+  if ($healthStatus -ne 'healthy' -or (-not [string]::IsNullOrWhiteSpace($ExpectedReleaseSha) -and [string]::IsNullOrWhiteSpace($observedSha))) {
+    $diagnostic = New-MegaDeskHealthDiagnostic -Endpoint $Endpoint -FailureClass BODY_MISMATCH -DurationMs ([int]$stopwatch.ElapsedMilliseconds) -HttpStatus $evidence.httpStatus -HealthStatus $healthStatus -ObservedSha $observedSha -ExpectedSha $ExpectedReleaseSha -Headers $evidence.headers
+    Throw-MegaDeskHealthDiagnostic -Diagnostic $diagnostic
+  }
+  if (-not [string]::IsNullOrWhiteSpace($ExpectedReleaseSha) -and $observedSha -ne $ExpectedReleaseSha) {
+    $diagnostic = New-MegaDeskHealthDiagnostic -Endpoint $Endpoint -FailureClass SHA_MISMATCH -DurationMs ([int]$stopwatch.ElapsedMilliseconds) -HttpStatus $evidence.httpStatus -HealthStatus $healthStatus -ObservedSha $observedSha -ExpectedSha $ExpectedReleaseSha -Headers $evidence.headers
+    Throw-MegaDeskHealthDiagnostic -Diagnostic $diagnostic
+  }
+  return $payload
 }
 
 function Get-MegaDeskNodeHealthProcessObservation {
@@ -2886,6 +3206,7 @@ function Wait-MegaDeskPublicEndpoints {
   $started = Get-Date
   $deadline = $started.AddSeconds($TimeoutSeconds)
   $attempt = 0
+  $lastHealthEvidence = @{}
   do {
     $attempt++
     $allReady = $true
@@ -2905,8 +3226,12 @@ function Wait-MegaDeskPublicEndpoints {
       $requestTimeout = [Math]::Min(3, [Math]::Floor($remainingSeconds))
       try {
         if (-not [string]::IsNullOrWhiteSpace($ExpectedReleaseSha) -and $check.Label -like 'health*') {
-          $health = Get-MegaDeskHealth -Url $check.Url -TimeoutSec $requestTimeout
-          if ([string]$health.release.sha -ne $ExpectedReleaseSha) { throw 'Health publico retornou SHA diferente da release candidata.' }
+          $endpoint = Get-MegaDeskHealthEndpointName -Url $check.Url
+          $health = Get-MegaDeskHealth -Url $check.Url -TimeoutSec $requestTimeout -ExpectedReleaseSha $ExpectedReleaseSha -Endpoint $endpoint
+          if ([string]$health.release.sha -ne $ExpectedReleaseSha) {
+            $diagnostic = New-MegaDeskHealthDiagnostic -Endpoint $endpoint -FailureClass SHA_MISMATCH -HttpStatus 200 -HealthStatus ([string]$health.status) -ObservedSha ([string]$health.release.sha) -ExpectedSha $ExpectedReleaseSha
+            Throw-MegaDeskHealthDiagnostic -Diagnostic $diagnostic
+          }
           $actual = 200
         } else {
           $actual = Get-HttpStatusCode -Url $check.Url -TimeoutSec $requestTimeout
@@ -2914,7 +3239,14 @@ function Wait-MegaDeskPublicEndpoints {
         $observations += ("{0}=HTTP {1}" -f $check.Label, $actual)
         if ($actual -ne $check.Expected) { $allReady = $false }
       } catch {
-        $observations += ("{0}=indisponivel" -f $check.Label)
+        if (-not [string]::IsNullOrWhiteSpace($ExpectedReleaseSha) -and $check.Label -like 'health*') {
+          $endpoint = Get-MegaDeskHealthEndpointName -Url $check.Url
+          $diagnostic = Get-MegaDeskHealthDiagnosticFromErrorRecord -ErrorRecord $_ -Endpoint $endpoint -ExpectedSha $ExpectedReleaseSha
+          $lastHealthEvidence[$endpoint] = $diagnostic
+          $observations += ("{0}=FAIL[{1}]" -f $check.Label, (Format-MegaDeskHealthDiagnostic -Diagnostic $diagnostic))
+        } else {
+          $observations += ("{0}=indisponivel" -f $check.Label)
+        }
         $allReady = $false
       }
     }

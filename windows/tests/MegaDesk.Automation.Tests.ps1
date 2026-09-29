@@ -3882,6 +3882,254 @@ Describe 'MegaDesk Node health diagnostics' {
   }
 }
 
+Describe 'MegaDesk public health diagnostics' -Tags @('PublicHealthDiagnostics') {
+  BeforeEach {
+    $script:port = Get-IsolatedTestPort
+    $script:runtimeRoot = Join-Path $TestDrive 'public-health-diagnostics-runtime'
+    $script:projectRoot = Join-Path $TestDrive 'public-health-diagnostics-project'
+    New-Item -ItemType Directory -Path $script:projectRoot -Force | Out-Null
+    & (Get-Module $moduleName) { param($runtimeRoot, $projectRoot, $port) Set-MegaDeskAutomationPaths -RuntimeRoot $runtimeRoot -ProjectRoot $projectRoot -Port $port } $script:runtimeRoot $script:projectRoot $script:port
+  }
+
+  It 'keeps valid health successful and returns the original payload contract' {
+    $global:MegaDeskPublicHealthValidSha = '1111111111111111111111111111111111111111'
+    InModuleScope $moduleName {
+      Mock Invoke-WebRequest {
+        [pscustomobject]@{
+          StatusCode = 200
+          Content = '{"status":"healthy","release":{"sha":"1111111111111111111111111111111111111111"},"extra":"preserved"}'
+          Headers = @{ 'Content-Type' = 'application/json' }
+        }
+      }
+
+      $payload = Get-MegaDeskHealth -Url 'https://app.megadesk.online/healthz' -TimeoutSec 3 -ExpectedReleaseSha $global:MegaDeskPublicHealthValidSha -Endpoint APP
+
+      $payload.status | Should Be 'healthy'
+      $payload.release.sha | Should Be $global:MegaDeskPublicHealthValidSha
+      $payload.extra | Should Be 'preserved'
+      Assert-MockCalled Invoke-WebRequest -Times 1 -Exactly -Scope It -ParameterFilter { $TimeoutSec -eq 3 -and $MaximumRedirection -eq 0 -and $UseBasicParsing }
+    }
+  }
+
+  It 'classifies connection failure without exposing the exception message' {
+    InModuleScope $moduleName {
+      Mock Invoke-WebRequest { throw [System.Net.WebException]::new('Authorization=must-not-leak', [System.Net.WebExceptionStatus]::ConnectFailure) }
+      $failure = $null
+      try { Get-MegaDeskHealth -Url 'https://app.megadesk.online/healthz' -TimeoutSec 3 -Endpoint APP } catch { $failure = $_ }
+
+      $diagnostic = Get-MegaDeskHealthDiagnosticFromErrorRecord -ErrorRecord $failure -Endpoint APP
+      $diagnostic.failureClass | Should Be 'CONNECTION'
+      $diagnostic.endpoint | Should Be 'APP'
+      ($diagnostic | ConvertTo-Json -Depth 6) | Should Not Match 'must-not-leak|Authorization'
+    }
+  }
+
+  It 'classifies DNS failure structurally' {
+    InModuleScope $moduleName {
+      Mock Invoke-WebRequest { throw [System.Net.WebException]::new('localized text ignored', [System.Net.WebExceptionStatus]::NameResolutionFailure) }
+      $failure = $null
+      try { Get-MegaDeskHealth -Url 'https://app.megadesk.online/healthz' -Endpoint APP } catch { $failure = $_ }
+
+      (Get-MegaDeskHealthDiagnosticFromErrorRecord -ErrorRecord $failure -Endpoint APP).failureClass | Should Be 'DNS'
+    }
+  }
+
+  It 'classifies TLS failure structurally' {
+    InModuleScope $moduleName {
+      Mock Invoke-WebRequest { throw [System.Net.WebException]::new('localized text ignored', [System.Net.WebExceptionStatus]::TrustFailure) }
+      $failure = $null
+      try { Get-MegaDeskHealth -Url 'https://admin.megadesk.online/healthz' -Endpoint ADMIN } catch { $failure = $_ }
+
+      (Get-MegaDeskHealthDiagnosticFromErrorRecord -ErrorRecord $failure -Endpoint ADMIN).failureClass | Should Be 'TLS'
+    }
+  }
+
+  It 'classifies request timeout structurally' {
+    InModuleScope $moduleName {
+      Mock Invoke-WebRequest { throw [System.Net.WebException]::new('localized text ignored', [System.Net.WebExceptionStatus]::Timeout) }
+      $failure = $null
+      try { Get-MegaDeskHealth -Url 'https://admin.megadesk.online/healthz' -TimeoutSec 3 -Endpoint ADMIN } catch { $failure = $_ }
+
+      (Get-MegaDeskHealthDiagnosticFromErrorRecord -ErrorRecord $failure -Endpoint ADMIN).failureClass | Should Be 'TIMEOUT'
+    }
+  }
+
+  It 'distinguishes a redirect and strips query secrets from Location' {
+    InModuleScope $moduleName {
+      Mock Invoke-WebRequest {
+        [pscustomobject]@{
+          StatusCode = 302
+          Content = ''
+          Headers = @{ Location = 'https://login.megadesk.online/session?token=must-not-leak'; 'Content-Type' = 'text/html' }
+        }
+      }
+      $failure = $null
+      try { Get-MegaDeskHealth -Url 'https://app.megadesk.online/healthz' -TimeoutSec 3 -Endpoint APP } catch { $failure = $_ }
+
+      $diagnostic = Get-MegaDeskHealthDiagnosticFromErrorRecord -ErrorRecord $failure -Endpoint APP
+      $diagnostic.failureClass | Should Be 'REDIRECT'
+      $diagnostic.httpStatus | Should Be 302
+      $diagnostic.redirectLocation | Should Be 'https://login.megadesk.online/session'
+      ($diagnostic | ConvertTo-Json -Depth 6) | Should Not Match 'must-not-leak|token='
+      Assert-MockCalled Invoke-WebRequest -Times 1 -Exactly -Scope It -ParameterFilter { $MaximumRedirection -eq 0 }
+    }
+  }
+
+  It 'distinguishes HTTP 5xx from transport failure' {
+    InModuleScope $moduleName {
+      Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = 503; Content = 'unavailable'; Headers = @{ 'Content-Type' = 'text/plain' } } }
+      $failure = $null
+      try { Get-MegaDeskHealth -Url 'https://app.megadesk.online/healthz' -Endpoint APP } catch { $failure = $_ }
+
+      $diagnostic = Get-MegaDeskHealthDiagnosticFromErrorRecord -ErrorRecord $failure -Endpoint APP
+      $diagnostic.failureClass | Should Be 'HTTP_STATUS'
+      $diagnostic.httpStatus | Should Be 503
+    }
+  }
+
+  It 'classifies invalid JSON with a strictly bounded sanitized preview' {
+    InModuleScope $moduleName {
+      $unsafeBody = '<html> Authorization=Bearer must-not-leak Cookie=also-secret {"token":"json-secret"} ' + ('x' * 400)
+      Mock Invoke-WebRequest {
+        [pscustomobject]@{
+          StatusCode = 200
+          Content = $unsafeBody
+          Headers = @{ 'Content-Type' = 'text/html'; 'CF-Ray' = 'abc123-GRU'; 'CF-Cache-Status' = 'DYNAMIC'; Server = 'cloudflare'; 'Set-Cookie' = 'session=must-not-leak'; Authorization = 'Bearer must-not-leak' }
+        }
+      }
+      $failure = $null
+      try { Get-MegaDeskHealth -Url 'https://app.megadesk.online/healthz' -Endpoint APP } catch { $failure = $_ }
+
+      $diagnostic = Get-MegaDeskHealthDiagnosticFromErrorRecord -ErrorRecord $failure -Endpoint APP
+      $serialized = $diagnostic | ConvertTo-Json -Depth 6
+      $diagnostic.failureClass | Should Be 'INVALID_JSON'
+      $diagnostic.bodyLength | Should Be $unsafeBody.Length
+      ($diagnostic.bodyPreview.Length -le 160) | Should Be $true
+      $serialized | Should Not Match 'must-not-leak|also-secret|json-secret|Set-Cookie|Authorization|Cookie|session='
+    }
+  }
+
+  It 'classifies a non-healthy body without logging unknown JSON fields' {
+    InModuleScope $moduleName {
+      Mock Invoke-WebRequest {
+        [pscustomobject]@{
+          StatusCode = 200
+          Content = '{"status":"degraded","release":{"sha":"2222222222222222222222222222222222222222"},"secret":"must-not-leak"}'
+          Headers = @{ 'Content-Type' = 'application/json' }
+        }
+      }
+      $failure = $null
+      try { Get-MegaDeskHealth -Url 'https://app.megadesk.online/healthz' -ExpectedReleaseSha ('2' * 40) -Endpoint APP } catch { $failure = $_ }
+
+      $diagnostic = Get-MegaDeskHealthDiagnosticFromErrorRecord -ErrorRecord $failure -Endpoint APP
+      $diagnostic.failureClass | Should Be 'BODY_MISMATCH'
+      $diagnostic.healthStatus | Should Be 'degraded'
+      ($diagnostic | ConvertTo-Json -Depth 6) | Should Not Match 'must-not-leak|secret'
+    }
+  }
+
+  It 'classifies SHA mismatch with expected and observed values' {
+    InModuleScope $moduleName {
+      Mock Invoke-WebRequest {
+        [pscustomobject]@{
+          StatusCode = 200
+          Content = '{"status":"healthy","release":{"sha":"3333333333333333333333333333333333333333"}}'
+          Headers = @{ 'Content-Type' = 'application/json' }
+        }
+      }
+      $failure = $null
+      try { Get-MegaDeskHealth -Url 'https://admin.megadesk.online/healthz' -ExpectedReleaseSha ('4' * 40) -Endpoint ADMIN } catch { $failure = $_ }
+
+      $diagnostic = Get-MegaDeskHealthDiagnosticFromErrorRecord -ErrorRecord $failure -Endpoint ADMIN
+      $diagnostic.failureClass | Should Be 'SHA_MISMATCH'
+      $diagnostic.expectedSha | Should Be ('4' * 40)
+      $diagnostic.observedSha | Should Be ('3' * 40)
+      $diagnostic.httpStatus | Should Be 200
+    }
+  }
+
+  It 'captures only the allowlisted Cloudflare and content headers' {
+    InModuleScope $moduleName {
+      Mock Invoke-WebRequest {
+        [pscustomobject]@{
+          StatusCode = 200
+          Content = '{'
+          Headers = @{ 'CF-Ray' = 'ray-GRU'; 'CF-Cache-Status' = 'DYNAMIC'; Server = 'cloudflare'; 'Content-Type' = 'application/json'; Cookie = 'cookie-secret'; Authorization = 'auth-secret'; 'Set-Cookie' = 'set-cookie-secret'; 'X-Unrelated' = 'unrelated-secret' }
+        }
+      }
+      $failure = $null
+      try { Get-MegaDeskHealth -Url 'https://app.megadesk.online/healthz' -Endpoint APP } catch { $failure = $_ }
+
+      $diagnostic = Get-MegaDeskHealthDiagnosticFromErrorRecord -ErrorRecord $failure -Endpoint APP
+      $serialized = $diagnostic | ConvertTo-Json -Depth 6
+      $diagnostic.headers.cfRay | Should Be 'ray-GRU'
+      $diagnostic.headers.cfCacheStatus | Should Be 'DYNAMIC'
+      $diagnostic.headers.server | Should Be 'cloudflare'
+      $diagnostic.headers.contentType | Should Be 'application/json'
+      $serialized | Should Not Match 'cookie-secret|auth-secret|set-cookie-secret|unrelated-secret|Set-Cookie|Authorization|Cookie|X-Unrelated'
+    }
+  }
+
+  It 'preserves the last APP and ADMIN evidence when public readiness expires' {
+    $global:MegaDeskPublicHealthExpectedSha = '5555555555555555555555555555555555555555'
+    $global:MegaDeskPublicHealthClock = [System.Collections.Generic.Queue[DateTime]]::new()
+    $clockStart = [DateTime]'2026-09-29T12:00:00Z'
+    foreach ($time in @($clockStart, $clockStart, $clockStart, $clockStart, $clockStart.AddSeconds(1))) { $global:MegaDeskPublicHealthClock.Enqueue($time) }
+    InModuleScope $moduleName {
+      $script:publicHealthLogs = New-Object 'System.Collections.Generic.List[string]'
+      Mock Get-Date { $global:MegaDeskPublicHealthClock.Dequeue() }
+      Mock Invoke-WebRequest { throw [System.Net.WebException]::new('not logged', [System.Net.WebExceptionStatus]::ConnectFailure) }
+      Mock Get-HttpStatusCode { 404 }
+      Mock Write-MegaDeskLog { param($Message) [void]$script:publicHealthLogs.Add($Message) }
+
+      $failure = $null
+      try { Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha $global:MegaDeskPublicHealthExpectedSha -TestMode -TimeoutSeconds 1 -PollIntervalSeconds 0 } catch { $failure = $_.Exception.Message }
+
+      $failure | Should Match 'lastHealthEvidence=.*endpoint=APP.*failureClass=CONNECTION.*endpoint=ADMIN.*failureClass=CONNECTION'
+      ($script:publicHealthLogs -join ' ') | Should Match 'tentativa 1:.*endpoint=APP.*failureClass=CONNECTION.*durationMs=[0-9]+.*endpoint=ADMIN.*failureClass=CONNECTION'
+      Assert-MockCalled Invoke-WebRequest -Times 2 -Exactly -Scope It
+      Assert-MockCalled Get-HttpStatusCode -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'never transforms a diagnostic failure into success' {
+    InModuleScope $moduleName {
+      Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = 500; Content = ''; Headers = @{} } }
+      $failure = $null
+      try { Get-MegaDeskHealth -Url 'https://app.megadesk.online/healthz' -Endpoint APP } catch { $failure = $_ }
+      ($null -ne $failure) | Should Be $true
+      (Get-MegaDeskHealthDiagnosticFromErrorRecord -ErrorRecord $failure -Endpoint APP).failureClass | Should Be 'HTTP_STATUS'
+      Assert-MockCalled Invoke-WebRequest -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'never transforms a valid response into failure' {
+    InModuleScope $moduleName {
+      Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = 200; Content = '{"status":"healthy","release":{"sha":"6666666666666666666666666666666666666666"}}'; Headers = @{} } }
+      $payload = Get-MegaDeskHealth -Url 'https://app.megadesk.online/healthz' -ExpectedReleaseSha ('6' * 40) -Endpoint APP
+      $payload.status | Should Be 'healthy'
+      $payload.release.sha | Should Be ('6' * 40)
+      Assert-MockCalled Invoke-WebRequest -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'keeps URLs timeout retry budget order and redirect policy unchanged' {
+    InModuleScope $moduleName {
+      $source = Get-Content -LiteralPath $ExecutionContext.SessionState.Module.Path -Raw
+      $healthBody = [regex]::Match($source, 'function Get-MegaDeskHealth \{.*?(?=function Get-MegaDeskNodeHealthProcessObservation)', [System.Text.RegularExpressions.RegexOptions]::Singleline).Value
+      $waitBody = [regex]::Match($source, 'function Wait-MegaDeskPublicEndpoints \{.*?(?=function Test-SameManagedProcessRecord)', [System.Text.RegularExpressions.RegexOptions]::Singleline).Value
+
+      $healthBody | Should Match 'Invoke-WebRequest -Uri \$Url -UseBasicParsing -TimeoutSec \$TimeoutSec -MaximumRedirection 0'
+      $waitBody | Should Match '\$TimeoutSeconds\s*=\s*60'
+      $waitBody | Should Match '\$PollIntervalSeconds\s*=\s*1'
+      $waitBody | Should Match '\[Math\]::Min\(3, \[Math\]::Floor\(\$remainingSeconds\)\)'
+      $waitBody | Should Match 'Start-Sleep -Seconds \(\[Math\]::Min\(\$PollIntervalSeconds, \[Math\]::Floor\(\$remainingSeconds\)\)\)'
+      $waitBody.IndexOf('https://app.megadesk.online/healthz') | Should BeLessThan $waitBody.IndexOf('https://admin.megadesk.online/healthz')
+      $waitBody.IndexOf('https://admin.megadesk.online/healthz') | Should BeLessThan $waitBody.LastIndexOf('https://api.megadesk.online/')
+    }
+  }
+}
+
 Describe 'MegaDesk durable switchAttempted lifecycle' {
   BeforeEach {
     $script:durablePort = Get-IsolatedTestPort
