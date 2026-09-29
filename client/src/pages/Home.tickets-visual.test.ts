@@ -34,8 +34,6 @@ vi.mock("@/lib/trpc", () => {
         updateCollaborators: { useMutation: mutation },
         registerActivity: { useMutation: mutation },
         uploadAttachment: { useMutation: mutation },
-        removeAttachment: { useMutation: mutation },
-        getAttachments: { useQuery: () => query([]) },
       },
       megadesk: {
         getClientUsers: { useQuery: () => query([]) },
@@ -48,7 +46,7 @@ vi.mock("@/lib/trpc", () => {
   };
 });
 
-import { activeTicketAttachments, filterTicketsByScope, getTicketAssignees, nextTicketSort, TicketAttachmentsPanel, TicketsPage } from "./Home";
+import { filterTicketsByScope, getTicketAssignees, nextTicketSort, TicketsPage } from "./Home";
 
 function createStorage() {
   const values = new Map<string, string>();
@@ -87,7 +85,8 @@ describe("Chamados visual workspace", () => {
     const source = readFileSync(new URL("./Home.tsx", import.meta.url), "utf8");
 
     expect(source).not.toContain('data-testid="ticket-attachments-list"');
-    expect(source).not.toContain('data-testid={`ticket-attachment-remove-${attachment.attachmentId}`}');
+    expect(source).not.toContain("TicketAttachmentsPanel");
+    expect(source).not.toContain("Remover do chamado");
     expect(source).toContain("<TimelineActivity activities={selectedChamado.activities} chamadoId={selectedChamado.id} />");
   });
 
@@ -216,51 +215,4 @@ describe("Chamados visual workspace", () => {
     expect(markup).not.toContain('data-testid="module-topbar-shell"');
   });
 
-  it("shows only active attachments in the native consultation panel", () => {
-    const attachments = [
-      { attachmentId: "active-1", fileName: "contrato.pdf", fileSize: 2048, mimeType: "application/pdf", uploadedBy: "Ana", createdAt: "2026-09-13T12:00:00.000Z", state: "active", canView: true },
-      { attachmentId: "staged-1", fileName: "staged.pdf", fileSize: 10, mimeType: "application/pdf", uploadedBy: "Ana", createdAt: "2026-09-13T12:00:00.000Z", state: "staged", canView: false },
-      { attachmentId: "legacy-1", fileName: "legacy.pdf", fileSize: 10, mimeType: "application/pdf", uploadedBy: "Ana", createdAt: "2026-09-13T12:00:00.000Z", state: "legacy", canView: false },
-      { attachmentId: "pending-1", fileName: "pending.pdf", fileSize: 10, mimeType: "application/pdf", uploadedBy: "Ana", createdAt: "2026-09-13T12:00:00.000Z", state: "pending_delete", canView: false },
-      { attachmentId: "deleted-1", fileName: "deleted.pdf", fileSize: 10, mimeType: "application/pdf", uploadedBy: "Ana", createdAt: "2026-09-13T12:00:00.000Z", state: "deleted", canView: false },
-    ] as const;
-    expect(activeTicketAttachments(attachments).map(attachment => attachment.attachmentId)).toEqual(["active-1"]);
-
-    const markup = renderToStaticMarkup(React.createElement(TicketAttachmentsPanel, {
-      open: true,
-      loading: false,
-      chamadoId: "ticket-1",
-      attachments,
-      removing: false,
-      onClose: () => undefined,
-      onUpload: () => undefined,
-      onRemove: () => undefined,
-    }));
-
-    expect(markup).toContain("Anexos do chamado");
-    expect(markup).toContain("1 anexo ativo");
-    expect(markup).toContain("contrato.pdf");
-    expect(markup).not.toContain("staged.pdf");
-    expect(markup).not.toContain("legacy.pdf");
-    expect(markup).not.toContain("pending.pdf");
-    expect(markup).not.toContain("deleted.pdf");
-    expect(markup).toContain("/api/chamados/ticket-1/attachments/active-1/file");
-    expect(markup).toContain("Visualizar");
-    expect(markup).toContain("Anexar arquivo");
-    expect(markup).toContain('data-testid="ticket-attachments-panel-close"');
-  });
-
-  it("renders loading and empty attachment panel states", () => {
-    const loadingMarkup = renderToStaticMarkup(React.createElement(TicketAttachmentsPanel, {
-      open: true, loading: true, chamadoId: "ticket-1", attachments: [], removing: false,
-      onClose: () => undefined, onUpload: () => undefined, onRemove: () => undefined,
-    }));
-    const emptyMarkup = renderToStaticMarkup(React.createElement(TicketAttachmentsPanel, {
-      open: true, loading: false, chamadoId: "ticket-1", attachments: [], removing: false,
-      onClose: () => undefined, onUpload: () => undefined, onRemove: () => undefined,
-    }));
-
-    expect(loadingMarkup).toContain("Carregando anexos...");
-    expect(emptyMarkup).toContain("Nenhum anexo neste chamado.");
-  });
 });
