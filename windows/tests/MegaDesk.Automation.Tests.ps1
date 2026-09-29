@@ -60,6 +60,23 @@ function New-MegaDeskSnapshotRepairFixture {
   }
 }
 
+function global:New-MegaDeskSyntheticBackupProcess {
+  param([byte[]]$Payload = [System.Text.Encoding]::UTF8.GetBytes('synthetic-main-backup'))
+  $outputStream = [System.IO.MemoryStream]::new($Payload, $false)
+  $errorStream = [System.IO.MemoryStream]::new([byte[]]@(), $false)
+  $process = [pscustomobject]@{
+    StandardOutput = [System.IO.StreamReader]::new($outputStream)
+    StandardError = [System.IO.StreamReader]::new($errorStream)
+    ExitCode = 0
+  }
+  $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { }
+  $process | Add-Member -MemberType ScriptMethod -Name Dispose -Value {
+    $this.StandardOutput.Dispose()
+    $this.StandardError.Dispose()
+  }
+  return $process
+}
+
 Describe 'MegaDesk daily operational shortcuts' {
   It 'starts only the active immutable release with exact health checks' {
     $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Iniciar-MegaDesk.ps1') -Raw
@@ -5722,6 +5739,155 @@ Describe 'MegaDesk guarded MAIN migration pipeline' {
       $source | Should Match 'Resolve-MegaDeskRuntimeConfigRoot -RequireEnvFile'
       $source | Should Match '--env-file='
       $source | Should Match 'Nenhum restore automatico de banco'
+    }
+  }
+}
+
+Describe 'MegaDesk MAIN backup metadata boundary' {
+  BeforeEach {
+    $global:MegaDeskBackupContractRuntime = Join-Path $TestDrive ('backup-contract-runtime-' + [guid]::NewGuid().ToString('N'))
+    $global:MegaDeskBackupContractProject = Join-Path $TestDrive ('backup-contract-project-' + [guid]::NewGuid().ToString('N'))
+    $global:MegaDeskBackupContractDirectory = Join-Path $TestDrive ('backup-contract-files-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $global:MegaDeskBackupContractProject, $global:MegaDeskBackupContractDirectory -Force | Out-Null
+    & (Get-Module $moduleName) {
+      param($runtimeRoot, $projectRoot)
+      Set-MegaDeskAutomationPaths -RuntimeRoot $runtimeRoot -ProjectRoot $projectRoot -Port 32179
+    } $global:MegaDeskBackupContractRuntime $global:MegaDeskBackupContractProject
+
+    $global:MegaDeskBackupContractTarget = [pscustomobject]@{
+      mode = 'PRODUCTION'; container = 'megadesk-local-mysql'; database = 'megadesk_local'; environmentPath = 'C:\synthetic\backup-contract.env'; databaseUrl = $null; backupDirectory = $global:MegaDeskBackupContractDirectory; disposableOptIn = $false
+    }
+    $global:MegaDeskBackupContractMetadata = [pscustomobject]@{
+      id = 'main-fixture.sql'; createdAt = '2026-09-20T00:00:00.000Z'; database = 'megadesk_local'; sizeBytes = [int64]42; sha256 = ('a' * 64)
+    }
+    $global:MegaDeskBackupContractPending = [pscustomobject]@{ idx = 33; tag = '0033_fixed_zarda'; path = 'drizzle/main-migrations/0033_fixed_zarda.sql'; sha256 = ('b' * 64) }
+  }
+
+  It 'emits exactly one public metadata object from the real producer without VoidTaskResult' {
+    InModuleScope $moduleName {
+      $disposableTarget = [pscustomobject]@{
+        mode = 'DISPOSABLE'; container = 'megadesk-updater-contract'; database = 'megadesk_test_backup_contract'; environmentPath = ''; databaseUrl = 'mysql://fixture:synthetic@127.0.0.1:33319/megadesk_test_backup_contract'; backupDirectory = $global:MegaDeskBackupContractDirectory; disposableOptIn = $true
+      }
+      $global:MegaDeskBackupContractProcess = New-MegaDeskSyntheticBackupProcess
+      Mock Assert-DockerAndMySql { }
+      Mock Get-MegaDeskMigrationContainerImage { 'mysql:8.0' }
+      Mock Start-MegaDeskProcess { $global:MegaDeskBackupContractProcess }
+
+      $outputs = @(New-MegaDeskMainMigrationBackup -Target $disposableTarget)
+
+      $outputs.Count | Should Be 1
+      $outputs[0].GetType().FullName | Should Be 'System.Management.Automation.PSCustomObject'
+      foreach ($property in @('id', 'createdAt', 'database', 'container', 'sizeBytes', 'sha256')) {
+        ($outputs[0].PSObject.Properties.Name -contains $property) | Should Be $true
+      }
+      [string]::IsNullOrWhiteSpace([string]$outputs[0].id) | Should Be $false
+      @($outputs | Where-Object { $_.GetType().FullName -eq 'System.Threading.Tasks.VoidTaskResult' }).Count | Should Be 0
+    }
+  }
+
+  It 'continues to propagate CopyToAsync failures from the real producer' {
+    InModuleScope $moduleName {
+      $disposableTarget = [pscustomobject]@{
+        mode = 'DISPOSABLE'; container = 'megadesk-updater-contract'; database = 'megadesk_test_backup_contract'; environmentPath = ''; databaseUrl = 'mysql://fixture:synthetic@127.0.0.1:33319/megadesk_test_backup_contract'; backupDirectory = $global:MegaDeskBackupContractDirectory; disposableOptIn = $true
+      }
+      $failingStream = [pscustomobject]@{}
+      $failingStream | Add-Member -MemberType ScriptMethod -Name CopyToAsync -Value { param($destination) throw 'synthetic copy failure' }
+      $failingProcess = [pscustomobject]@{
+        StandardOutput = [pscustomobject]@{ BaseStream = $failingStream }
+        StandardError = [pscustomobject]@{}
+        ExitCode = 0
+      }
+      $failingProcess | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { }
+      $failingProcess | Add-Member -MemberType ScriptMethod -Name Dispose -Value { }
+      $global:MegaDeskBackupContractProcess = $failingProcess
+      Mock Assert-DockerAndMySql { }
+      Mock Get-MegaDeskMigrationContainerImage { 'mysql:8.0' }
+      Mock Start-MegaDeskProcess { $global:MegaDeskBackupContractProcess }
+
+      { New-MegaDeskMainMigrationBackup -Target $disposableTarget } | Should Throw 'synthetic copy failure'
+    }
+  }
+
+  It 'persists the id through the valid producer caller setter path' {
+    InModuleScope $moduleName {
+      $script:backupContractPlanCalls = 0
+      Mock Get-MegaDeskPendingCanonicalMainMigrations {
+        $script:backupContractPlanCalls++
+        if ($script:backupContractPlanCalls -eq 1) { return [pscustomobject]@{ status = 'PENDING'; pending = @($global:MegaDeskBackupContractPending); journal = $null } }
+        return [pscustomobject]@{ status = 'NONE'; pending = @(); journal = $null }
+      }
+      Mock New-MegaDeskMainMigrationBackup { $global:MegaDeskBackupContractMetadata }
+      Mock Invoke-MegaDeskCanonicalMainMigrationCommand { }
+
+      Set-MegaDeskOperationState -Status 'PREPARING' -Kind 'UPDATE' -CandidateSha ('b' * 40) -Message 'synthetic backup boundary' | Out-Null
+      (Invoke-MegaDeskMainMigrationPipeline -FromSha ('a' * 40) -ToSha ('b' * 40) -Target $global:MegaDeskBackupContractTarget).status | Should Be 'APPLIED_MATCH'
+      $state = Get-MegaDeskState
+      $state.operation.mainMigrationBackup.id | Should Be $global:MegaDeskBackupContractMetadata.id
+      Assert-MockCalled Invoke-MegaDeskCanonicalMainMigrationCommand -ParameterFilter { $Mode -eq 'APPLY' } -Times 1 -Exactly -Scope It
+    }
+  }
+
+  It 'blocks zero producer outputs before the setter and APPLY' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'PENDING'; pending = @($global:MegaDeskBackupContractPending); journal = $null } }
+      Mock New-MegaDeskMainMigrationBackup { }
+      Mock Set-MegaDeskOperationMainMigrationBackup { throw 'setter must not run' }
+      Mock Invoke-MegaDeskCanonicalMainMigrationCommand { throw 'APPLY must not run' }
+
+      { Invoke-MegaDeskMainMigrationPipeline -FromSha ('a' * 40) -ToSha ('b' * 40) -Target $global:MegaDeskBackupContractTarget } | Should Throw 'esperado exatamente 1'
+      Assert-MockCalled Set-MegaDeskOperationMainMigrationBackup -Times 0 -Exactly -Scope It
+      Assert-MockCalled Invoke-MegaDeskCanonicalMainMigrationCommand -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'blocks multiple producer outputs before the setter and APPLY' {
+    InModuleScope $moduleName {
+      Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'PENDING'; pending = @($global:MegaDeskBackupContractPending); journal = $null } }
+      Mock New-MegaDeskMainMigrationBackup { $global:MegaDeskBackupContractMetadata; $global:MegaDeskBackupContractMetadata }
+      Mock Set-MegaDeskOperationMainMigrationBackup { throw 'setter must not run' }
+      Mock Invoke-MegaDeskCanonicalMainMigrationCommand { throw 'APPLY must not run' }
+
+      { Invoke-MegaDeskMainMigrationPipeline -FromSha ('a' * 40) -ToSha ('b' * 40) -Target $global:MegaDeskBackupContractTarget } | Should Throw 'esperado exatamente 1'
+      Assert-MockCalled Set-MegaDeskOperationMainMigrationBackup -Times 0 -Exactly -Scope It
+      Assert-MockCalled Invoke-MegaDeskCanonicalMainMigrationCommand -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'blocks a single metadata object without id before the setter and APPLY' {
+    InModuleScope $moduleName {
+      $missingId = [pscustomobject]@{ createdAt = '2026-09-20T00:00:00.000Z'; database = 'megadesk_local'; sizeBytes = [int64]42; sha256 = ('a' * 64) }
+      Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'PENDING'; pending = @($global:MegaDeskBackupContractPending); journal = $null } }
+      Mock New-MegaDeskMainMigrationBackup { $missingId }
+      Mock Set-MegaDeskOperationMainMigrationBackup { throw 'setter must not run' }
+      Mock Invoke-MegaDeskCanonicalMainMigrationCommand { throw 'APPLY must not run' }
+
+      { Invoke-MegaDeskMainMigrationPipeline -FromSha ('a' * 40) -ToSha ('b' * 40) -Target $global:MegaDeskBackupContractTarget } | Should Throw 'sem id antes do setter'
+      Assert-MockCalled Set-MegaDeskOperationMainMigrationBackup -Times 0 -Exactly -Scope It
+      Assert-MockCalled Invoke-MegaDeskCanonicalMainMigrationCommand -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'blocks a single metadata object with an empty id before the setter and APPLY' {
+    InModuleScope $moduleName {
+      $emptyId = [pscustomobject]@{ id = '   '; createdAt = '2026-09-20T00:00:00.000Z'; database = 'megadesk_local'; sizeBytes = [int64]42; sha256 = ('a' * 64) }
+      Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'PENDING'; pending = @($global:MegaDeskBackupContractPending); journal = $null } }
+      Mock New-MegaDeskMainMigrationBackup { $emptyId }
+      Mock Set-MegaDeskOperationMainMigrationBackup { throw 'setter must not run' }
+      Mock Invoke-MegaDeskCanonicalMainMigrationCommand { throw 'APPLY must not run' }
+
+      { Invoke-MegaDeskMainMigrationPipeline -FromSha ('a' * 40) -ToSha ('b' * 40) -Target $global:MegaDeskBackupContractTarget } | Should Throw 'id vazio antes do setter'
+      Assert-MockCalled Set-MegaDeskOperationMainMigrationBackup -Times 0 -Exactly -Scope It
+      Assert-MockCalled Invoke-MegaDeskCanonicalMainMigrationCommand -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'keeps FAILED pre-switch state eligible for the official retry transition' {
+    InModuleScope $moduleName {
+      Set-MegaDeskOperationState -Status 'PREPARING' -Kind 'UPDATE' -CandidateSha ('b' * 40) -Message 'synthetic retry' | Out-Null
+      Set-MegaDeskOperationState -Status 'FAILED' -CandidateSha ('b' * 40) -Message 'synthetic pre-switch failure' | Out-Null
+
+      { Assert-MegaDeskRecoverableState } | Should Not Throw
+      { Set-MegaDeskOperationState -Status 'PREPARING' -Kind 'UPDATE' -CandidateSha ('b' * 40) -Message 'synthetic retry' } | Should Not Throw
     }
   }
 }
