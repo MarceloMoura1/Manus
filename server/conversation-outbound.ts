@@ -2,9 +2,9 @@ import type { Pool, PoolConnection } from "mysql2/promise";
 import { createHash } from "node:crypto";
 import { persistCanonicalMessage, type CanonicalMessageWrite } from "./conversation-message-store";
 import { normalizeProviderMessageReference, type ProviderMessageReference } from "./conversation-provider-reference";
-import { readConversationMedia, type ConversationMediaReferenceV2 } from "./conversation-media-storage";
+import { readConversationMedia, writeConversationMedia, type ConversationMediaReferenceV2 } from "./conversation-media-storage";
 import { capturePreEvolutionAudioDiagnostic } from "./audio-pre-evolution-diagnostic";
-import { normalizeOutboundAudio } from "./outbound-audio-normalization";
+import { normalizeOutboundAudio, OUTBOUND_AUDIO_MIME_TYPE } from "./outbound-audio-normalization";
 
 export type OutboundAttemptInput = Omit<CanonicalMessageWrite, "direction" | "status" | "externalMessageId" | "clientAttemptId"> & {
   clientAttemptId: string;
@@ -47,18 +47,60 @@ export class OutboundAudioSourceRequiredError extends Error {
   }
 }
 
+export class OutboundRecordedAudioCanonicalMediaError extends Error {
+  constructor() {
+    super("OUTBOUND_RECORDED_AUDIO_CANONICAL_MEDIA_REQUIRED");
+    this.name = "OutboundRecordedAudioCanonicalMediaError";
+  }
+}
+
+/**
+ * Creates the one private canonical representation used by both the timeline
+ * and the provider. Only browser recordings are repaired; normal attachments
+ * and every other media kind remain byte-identical.
+ */
+export async function writeOutboundConversationMedia(
+  input: {
+    clientId: string;
+    bytes: Buffer;
+    mimeType: string;
+    fileName?: string | null;
+    objectId: string;
+    kind: ConversationAttachmentKind;
+    mediaSource?: OutboundAudioSource;
+  },
+  dependencies: {
+    normalizeAudio?: typeof normalizeOutboundAudio;
+    write?: typeof writeConversationMedia;
+  } = {},
+): Promise<ConversationMediaReferenceV2> {
+  if (input.kind === "audio" && input.mediaSource === undefined) {
+    throw new OutboundAudioSourceRequiredError();
+  }
+  const canonicalMedia = input.kind === "audio" && input.mediaSource === "recording"
+    ? await (dependencies.normalizeAudio ?? normalizeOutboundAudio)({ bytes: input.bytes, mimeType: input.mimeType })
+    : { bytes: input.bytes, mimeType: input.mimeType, ...(input.fileName ? { fileName: input.fileName } : {}) };
+  return (dependencies.write ?? writeConversationMedia)({
+    clientId: input.clientId,
+    bytes: canonicalMedia.bytes,
+    mimeType: canonicalMedia.mimeType,
+    fileName: canonicalMedia.fileName,
+    objectId: input.objectId,
+  });
+}
+
 /** The router's provider payload is built only after re-reading the private V2 object. */
 export async function sendOutboundConversationMediaFromPrivateStorage(
   input: Omit<ConversationAttachmentProviderInput, "dataUrl" | "mimeType" | "fileName"> & {
     clientId: string;
     mediaReference: ConversationMediaReferenceV2;
     mediaSource?: OutboundAudioSource;
+    recordingInput?: { mimeType: string; byteLength: number };
   },
   dependencies: {
     read?: typeof readConversationMedia;
     send: (input: ConversationAttachmentProviderInput) => Promise<ProviderMessageReference>;
     captureAudioDiagnostic?: typeof capturePreEvolutionAudioDiagnostic;
-    normalizeAudio?: typeof normalizeOutboundAudio;
   },
 ): Promise<ProviderMessageReference> {
   // An absent discriminator used to enter the attachment compatibility path,
@@ -70,9 +112,10 @@ export async function sendOutboundConversationMediaFromPrivateStorage(
   }
   const stored = await (dependencies.read ?? readConversationMedia)({ clientId: input.clientId, reference: input.mediaReference });
   const normalizationAttempted = input.kind === "audio" && input.mediaSource === "recording";
-  const providerMedia = normalizationAttempted
-    ? await (dependencies.normalizeAudio ?? normalizeOutboundAudio)({ bytes: stored.bytes, mimeType: stored.mimeType })
-    : stored;
+  if (normalizationAttempted && stored.mimeType !== OUTBOUND_AUDIO_MIME_TYPE) {
+    throw new OutboundRecordedAudioCanonicalMediaError();
+  }
+  const providerMedia = stored;
   if (input.kind === "audio") {
     await (dependencies.captureAudioDiagnostic ?? capturePreEvolutionAudioDiagnostic)({
       bytes: providerMedia.bytes,
@@ -80,8 +123,8 @@ export async function sendOutboundConversationMediaFromPrivateStorage(
       tenantId: input.clientId,
       mediaSource: input.mediaSource,
       normalizationAttempted,
-      inputMimeType: stored.mimeType,
-      inputByteLength: stored.bytes.length,
+      inputMimeType: input.recordingInput?.mimeType ?? stored.mimeType,
+      inputByteLength: input.recordingInput?.byteLength ?? stored.bytes.length,
       normalizationFallback: false,
     }).catch(() => null);
   }

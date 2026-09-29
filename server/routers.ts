@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { createHash, randomUUID } from "node:crypto";
 import { withPublicCodeRetry } from "./conversation-public-code";
-import { executeOutboundAttempt, OutboundPendingPersistenceError, sendOutboundConversationMediaFromPrivateStorage } from "./conversation-outbound";
+import { executeOutboundAttempt, OutboundPendingPersistenceError, sendOutboundConversationMediaFromPrivateStorage, writeOutboundConversationMedia } from "./conversation-outbound";
 import { canonicalMessageMirror } from "./conversation-message-store";
-import { decodeConversationMediaDataUrl, removeConversationMedia, writeConversationMedia } from "./conversation-media-storage";
+import { decodeConversationMediaDataUrl, removeConversationMedia } from "./conversation-media-storage";
 
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure, megadeskProcedure } from "./_core/trpc";
@@ -994,11 +994,13 @@ export const appRouter = router({
 
       let mediaReference;
       try {
-        mediaReference = await writeConversationMedia({
+        mediaReference = await writeOutboundConversationMedia({
           clientId: ctx.tenantId,
           bytes: media.bytes,
           mimeType: media.mimeType,
           fileName: input.fileName,
+          kind: input.kind,
+          mediaSource: input.mediaSource,
           // A UUID attempt is stable across a UI retry; the atomic writer only
           // reuses the object when its contents are identical.
           objectId: input.clientAttemptId,
@@ -1040,6 +1042,9 @@ export const appRouter = router({
             clientId: ctx.tenantId, mediaReference, instanceName: instanceNameFor(ctx.tenantId),
             number: resolveOutboundRecipient(outboundConversation), kind: input.kind,
             mediaSource: input.mediaSource,
+            ...(input.kind === "audio" && input.mediaSource === "recording"
+              ? { recordingInput: { mimeType: media.mimeType, byteLength: media.bytes.length } }
+              : {}),
             caption: input.caption, quoted: replyReference,
           }, { send: evoSendAttachment }));
         if (conversation) {

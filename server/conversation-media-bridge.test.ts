@@ -91,6 +91,28 @@ describe("conversation media bridge", () => {
     expect(JSON.stringify(res.send.mock.calls)).not.toContain("storageKey");
   });
 
+  it("returns the canonical repaired audio bytes and MIME byte-identically", async () => {
+    const bytes = Buffer.from("OggS-canonical-recording");
+    const reference = {
+      version: 2,
+      storage: "local",
+      storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin",
+      mimeType: "audio/ogg",
+      fileName: "audio.ogg",
+      byteSize: bytes.length,
+      sha256: "a".repeat(64),
+    };
+    const execute = vi.fn().mockResolvedValue([[{ mediaReference: JSON.stringify(reference), messageType: "audio" }]]);
+    const read = vi.fn().mockResolvedValue({ bytes, mimeType: "audio/ogg", fileName: "audio.ogg" });
+    const res = response();
+    await createConversationMediaHandler({ execute } as any, identity, read)(request(), res);
+    expect(read).toHaveBeenCalledWith({ clientId: "tenant-a", reference });
+    expect(res.setHeader).toHaveBeenCalledWith("Content-Type", "audio/ogg");
+    expect(res.setHeader).toHaveBeenCalledWith("Content-Disposition", 'inline; filename="audio.ogg"');
+    expect(res.send).toHaveBeenCalledWith(bytes);
+    expect(res.send.mock.calls[0][0]).toBe(bytes);
+  });
+
   it("returns a controlled 404 when a V2 object is missing", async () => {
     const execute = vi.fn().mockResolvedValue([[{ mediaReference: JSON.stringify({ version: 2, storage: "local", storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin", mimeType: "application/pdf", byteSize: 1, sha256: "a".repeat(64) }), messageType: "document" }]]);
     const res = response();

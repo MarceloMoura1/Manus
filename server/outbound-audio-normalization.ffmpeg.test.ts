@@ -1,4 +1,5 @@
 import { execFile, spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +10,8 @@ import {
   OUTBOUND_AUDIO_MIME_TYPE,
   normalizeOutboundAudio,
 } from "./outbound-audio-normalization";
+import { sendOutboundConversationMediaFromPrivateStorage, writeOutboundConversationMedia } from "./conversation-outbound";
+import { readConversationMedia, writeConversationMedia } from "./conversation-media-storage";
 
 const execFileAsync = promisify(execFile);
 const ffmpeg = OUTBOUND_AUDIO_FFMPEG_EXECUTABLE;
@@ -65,13 +68,29 @@ describe("outbound audio normalization with physical FFmpeg", () => {
       expect(Math.abs(malformedPackets[0] ?? Number.POSITIVE_INFINITY)).toBeLessThan(0.1);
       expect(malformedPackets[1]).toBeGreaterThan(4_300);
 
-      const normalized = await normalizeOutboundAudio({
+      const normalizationCalls: Buffer[] = [];
+      const mediaReference = await writeOutboundConversationMedia({
+        clientId: "tenant-a",
         bytes: await readFile(inputPath),
         mimeType: "audio/webm",
-      }, { ffmpegPath: ffmpeg, temporaryParent: root });
-      expect(normalized.mimeType).toBe(OUTBOUND_AUDIO_MIME_TYPE);
-      expect(normalized.fileName).toBe("audio.ogg");
-      await writeFile(outputPath, normalized.bytes);
+        fileName: "mobile-timestamp-gap.webm",
+        objectId: randomUUID(),
+        kind: "audio",
+        mediaSource: "recording",
+      }, {
+        normalizeAudio: async input => {
+          normalizationCalls.push(input.bytes);
+          return normalizeOutboundAudio(input, { ffmpegPath: ffmpeg, temporaryParent: root });
+        },
+        write: input => writeConversationMedia({ ...input, root }),
+      });
+      const canonical = await readConversationMedia({ clientId: "tenant-a", reference: mediaReference, root });
+      expect(mediaReference.mimeType).toBe(OUTBOUND_AUDIO_MIME_TYPE);
+      expect(mediaReference.fileName).toBe("audio.ogg");
+      expect(mediaReference.byteSize).toBe(canonical.bytes.length);
+      expect(mediaReference.sha256).toBe(createHash("sha256").update(canonical.bytes).digest("hex"));
+      expect(normalizationCalls).toHaveLength(1);
+      await writeFile(outputPath, canonical.bytes);
 
       const output = await probe(outputPath);
       const outputPackets = packetTimestamps(output);
@@ -82,6 +101,27 @@ describe("outbound audio normalization with physical FFmpeg", () => {
       expect(outputPackets.every((pts, index) => index === 0 || pts >= outputPackets[index - 1])).toBe(true);
       expect(outputDuration).toBeGreaterThan(4);
       expect(outputDuration).toBeLessThan(6);
+
+      let providerBytes = Buffer.alloc(0);
+      await sendOutboundConversationMediaFromPrivateStorage({
+        clientId: "tenant-a",
+        mediaReference,
+        instanceName: "megadesk-tenant-a",
+        number: "5541999999999",
+        kind: "audio",
+        mediaSource: "recording",
+        recordingInput: { mimeType: "audio/webm", byteLength: normalizationCalls[0].length },
+      }, {
+        read: input => readConversationMedia({ ...input, root }),
+        captureAudioDiagnostic: async () => null,
+        send: async input => {
+          providerBytes = Buffer.from(input.dataUrl.split(",")[1], "base64");
+          expect(input).toMatchObject({ mimeType: "audio/ogg", fileName: "audio.ogg" });
+          return { key: { id: "provider-physical-audio" }, message: {} };
+        },
+      });
+      expect(providerBytes).toEqual(canonical.bytes);
+      expect(normalizationCalls).toHaveLength(1);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
