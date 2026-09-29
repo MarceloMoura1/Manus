@@ -1,6 +1,8 @@
 $modulePath = Join-Path $PSScriptRoot '..\MegaDesk.Automation.psm1'
 Import-Module $modulePath -Force
 $moduleName = 'MegaDesk.Automation'
+$global:MegaDeskTestHarnessToken = [guid]::NewGuid().ToString('N')
+$env:MEGADESK_TEST_TOKEN = $global:MegaDeskTestHarnessToken
 
 function Get-IsolatedTestPort {
   foreach ($port in 32120..32180) {
@@ -9,7 +11,7 @@ function Get-IsolatedTestPort {
   throw 'Nenhuma porta temporaria livre para o teste do updater.'
 }
 
-function New-BootstrapReleaseRuntimeFixture {
+function global:New-BootstrapReleaseRuntimeFixture {
   param([string]$ReleaseRoot, [string]$Sha)
   $releasePath = Join-Path $ReleaseRoot $Sha
   New-Item -ItemType Directory -Path (Join-Path $releasePath 'dist\public') -Force | Out-Null
@@ -18,6 +20,36 @@ function New-BootstrapReleaseRuntimeFixture {
   [ordered]@{ name = 'bootstrap-fixture'; dependencies = [ordered]@{ dotenv = '1.0.0' } } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $releasePath 'package.json') -Encoding UTF8 -NoNewline
   [ordered]@{ sha = $Sha; buildStatus = 'ready'; runtime = [ordered]@{ strategy = 'pnpm-deploy-legacy-prod'; dependenciesPath = 'node_modules' } } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $releasePath 'release.json') -Encoding UTF8 -NoNewline
   return $releasePath
+}
+
+function global:New-MegaDeskIsolatedReleasePair {
+  param(
+    [Parameter(Mandatory = $true)][string]$Name,
+    [Parameter(Mandatory = $true)][string]$ActiveSha,
+    [Parameter(Mandatory = $true)][string]$CandidateSha
+  )
+  $root = Join-Path $TestDrive ($Name + '-' + [guid]::NewGuid().ToString('N'))
+  return [pscustomobject]@{
+    root = $root
+    active = [pscustomobject]@{ sha = $ActiveSha; path = (New-BootstrapReleaseRuntimeFixture -ReleaseRoot $root -Sha $ActiveSha) }
+    candidate = [pscustomobject]@{ sha = $CandidateSha; path = (New-BootstrapReleaseRuntimeFixture -ReleaseRoot $root -Sha $CandidateSha) }
+  }
+}
+
+function global:New-MegaDeskCompleteDisposableMigrationTarget {
+  param(
+    [Parameter(Mandatory = $true)][string]$Container,
+    [Parameter(Mandatory = $true)][string]$Database,
+    [Parameter(Mandatory = $true)][string]$DatabaseUrl,
+    [Parameter(Mandatory = $true)][string]$BackupDirectory
+  )
+  return & (Get-Module 'MegaDesk.Automation') {
+    param($container, $database, $databaseUrl, $backupDirectory)
+    $target = New-MegaDeskDisposableMainMigrationTarget -DisposableOptIn -Container $container -Database $database -DatabaseUrl $databaseUrl -BackupDirectory $backupDirectory
+    $target | Add-Member -MemberType NoteProperty -Name testToken -Value $script:MegaDeskExecutionContext.token
+    $target | Add-Member -MemberType NoteProperty -Name dockerLabel -Value ('megadesk.test.token=' + $script:MegaDeskExecutionContext.token)
+    return $target
+  } $Container $Database $DatabaseUrl $BackupDirectory
 }
 
 function New-MegaDeskSnapshotRepairFixture {
@@ -700,7 +732,8 @@ Describe 'MegaDesk Bootstrap Zero' {
       Mock Get-MegaDeskState { $script:testState }
       Mock Test-ManagedProcess { $false }
       Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\cloudflared.exe' } }
-      Mock Get-CimInstance { [pscustomobject]@{ ProcessId = 5252 } }
+      Mock Get-CimInstance { throw 'TEST must not enumerate global Cloudflared processes' }
+      Mock Get-MegaDeskGlobalCloudflaredPresence { [pscustomobject]@{ status = 'PRESENT'; processes = @([pscustomobject]@{ ProcessId = 5252 }) } }
       Mock Assert-MegaDeskTunnelStartAuthorization { }
       Mock Start-MegaDeskProcess { throw 'nao deve iniciar' }
       Mock Stop-Process { }
@@ -708,6 +741,7 @@ Describe 'MegaDesk Bootstrap Zero' {
       { Start-MegaDeskTunnel -AuthorizationMode BOOTSTRAP_ZERO_CANDIDATE -ReleaseSha ('a' * 40) } | Should Throw
       Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
       Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
+      Assert-MockCalled Get-CimInstance -Times 0 -Exactly -Scope It
     }
   }
 
@@ -744,6 +778,7 @@ Describe 'MegaDesk Bootstrap Zero' {
       $script:staleRecordWasPreservedUntilReplacement = $false
       Mock Get-MegaDeskState { $script:testState }
       Mock Test-ManagedProcess { $false }
+      Mock Get-MegaDeskManagedProcessStatus { 'ABSENT' }
       Mock Save-MegaDeskState {
         param($State)
         $script:saveCount++
@@ -751,7 +786,8 @@ Describe 'MegaDesk Bootstrap Zero' {
         $script:testState = $State
       }
       Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\cloudflared.exe' } }
-      Mock Get-CimInstance { @() }
+      Mock Get-CimInstance { throw 'TEST must not enumerate global Cloudflared processes' }
+      Mock Get-MegaDeskGlobalCloudflaredPresence { [pscustomobject]@{ status = 'ABSENT'; processes = @() } }
       Mock Assert-MegaDeskTunnelStartAuthorization { }
       Mock Start-MegaDeskProcess { [pscustomobject]@{ Id = 5353 } }
       Mock New-ManagedProcessRecord { $replacement }
@@ -2077,8 +2113,9 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
   }
 
   It 'clears only an absent stale Node record canonically and continues the switch without stopping a process' {
-    $old = [pscustomobject]@{ sha = '2121212121212121212121212121212121212121'; path = 'C:\isolated\old' }
-    $candidate = [pscustomobject]@{ sha = '2323232323232323232323232323232323232323'; path = 'C:\isolated\candidate' }
+    $fixture = New-MegaDeskIsolatedReleasePair -Name 'stale-node' -ActiveSha ('2121212121212121212121212121212121212121') -CandidateSha ('2323232323232323232323232323232323232323')
+    $old = $fixture.active
+    $candidate = $fixture.candidate
     $global:MegaDeskTestOld = $old
     $global:MegaDeskTestCandidate = $candidate
     InModuleScope $moduleName {
@@ -2168,8 +2205,9 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
   }
 
   It 'marks the candidate active only after the switch health calls succeed' {
-    $old = [pscustomobject]@{ sha = '2222222222222222222222222222222222222222'; path = 'C:\isolated\old' }
-    $candidate = [pscustomobject]@{ sha = '3333333333333333333333333333333333333333'; path = 'C:\isolated\candidate' }
+    $fixture = New-MegaDeskIsolatedReleasePair -Name 'switch-health' -ActiveSha ('2222222222222222222222222222222222222222') -CandidateSha ('3333333333333333333333333333333333333333')
+    $old = $fixture.active
+    $candidate = $fixture.candidate
     $global:MegaDeskTestOld = $old
     $global:MegaDeskTestCandidate = $candidate
     InModuleScope $moduleName {
@@ -2200,8 +2238,9 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
   }
 
   It 'invokes rollback when the candidate health check fails' {
-    $old = [pscustomobject]@{ sha = '4444444444444444444444444444444444444444'; path = 'C:\isolated\old' }
-    $candidate = [pscustomobject]@{ sha = '5555555555555555555555555555555555555555'; path = 'C:\isolated\candidate' }
+    $fixture = New-MegaDeskIsolatedReleasePair -Name 'switch-rollback' -ActiveSha ('4444444444444444444444444444444444444444') -CandidateSha ('5555555555555555555555555555555555555555')
+    $old = $fixture.active
+    $candidate = $fixture.candidate
     $global:MegaDeskTestOld = $old
     $global:MegaDeskTestCandidate = $candidate
     InModuleScope $moduleName {
@@ -2228,9 +2267,19 @@ Describe 'MegaDesk updater v2 isolated lifecycle' {
 }
 
 Describe 'MegaDesk publish tunnel lifecycle' {
+  BeforeEach {
+    $script:port = Get-IsolatedTestPort
+    $script:runtimeRoot = Join-Path $TestDrive ('tunnel-lifecycle-runtime-' + [guid]::NewGuid().ToString('N'))
+    $script:projectRoot = Join-Path $TestDrive ('tunnel-lifecycle-project-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $script:projectRoot -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $script:projectRoot '.env.local') -Value '' -NoNewline
+    & (Get-Module $moduleName) { param($runtimeRoot, $projectRoot, $port) Set-MegaDeskAutomationPaths -RuntimeRoot $runtimeRoot -ProjectRoot $projectRoot -Port $port } $script:runtimeRoot $script:projectRoot $script:port
+  }
+
   It 'ensures the existing managed tunnel before candidate public readiness without starting a duplicate' {
-    $old = [pscustomobject]@{ sha = '7373737373737373737373737373737373737373'; path = 'C:\isolated\old' }
-    $candidate = [pscustomobject]@{ sha = '7474747474747474747474747474747474747474'; path = 'C:\isolated\candidate' }
+    $fixture = New-MegaDeskIsolatedReleasePair -Name 'tunnel-existing' -ActiveSha ('7373737373737373737373737373737373737373') -CandidateSha ('7474747474747474747474747474747474747474')
+    $old = $fixture.active
+    $candidate = $fixture.candidate
     $global:MegaDeskTunnelLifecycleOld = $old
     $global:MegaDeskTunnelLifecycleCandidate = $candidate
     InModuleScope $moduleName {
@@ -2259,8 +2308,9 @@ Describe 'MegaDesk publish tunnel lifecycle' {
   }
 
   It 'replaces an absent stale tunnel before candidate public readiness' {
-    $old = [pscustomobject]@{ sha = '7575757575757575757575757575757575757575'; path = 'C:\isolated\old' }
-    $candidate = [pscustomobject]@{ sha = '7676767676767676767676767676767676767676'; path = 'C:\isolated\candidate' }
+    $fixture = New-MegaDeskIsolatedReleasePair -Name 'tunnel-replace' -ActiveSha ('7575757575757575757575757575757575757575') -CandidateSha ('7676767676767676767676767676767676767676')
+    $old = $fixture.active
+    $candidate = $fixture.candidate
     $global:MegaDeskTunnelLifecycleOld = $old
     $global:MegaDeskTunnelLifecycleCandidate = $candidate
     InModuleScope $moduleName {
@@ -2318,8 +2368,9 @@ Describe 'MegaDesk publish tunnel lifecycle' {
   }
 
   It 'reports a tunnel-start failure before candidate public readiness and invokes rollback' {
-    $old = [pscustomobject]@{ sha = '7979797979797979797979797979797979797979'; path = 'C:\isolated\old' }
-    $candidate = [pscustomobject]@{ sha = '8080808080808080808080808080808080808080'; path = 'C:\isolated\candidate' }
+    $fixture = New-MegaDeskIsolatedReleasePair -Name 'tunnel-failure' -ActiveSha ('7979797979797979797979797979797979797979') -CandidateSha ('8080808080808080808080808080808080808080')
+    $old = $fixture.active
+    $candidate = $fixture.candidate
     $global:MegaDeskTunnelLifecycleOld = $old
     $global:MegaDeskTunnelLifecycleCandidate = $candidate
     InModuleScope $moduleName {
@@ -3034,27 +3085,31 @@ Describe 'MegaDesk verified MAIN migration gate' {
 }
 
 Describe 'MegaDesk verified MAIN migration real release delta' {
-  It 'classifies real release delta correctly as PENDING instead of DIVERGENT (Case 10)' {
+  It 'classifies a historical release delta as DIVERGENT when its candidate is not the current HEAD' {
     $realFrom = 'a7152643b0ba56352a4eea14832be23c0ed58b0f'
     $realTo = 'f6fd0e3be14ada57d2506cefd987d0762ac76a97'
     $result = & (Get-Module $moduleName) {
       param($fromSha, $toSha)
       Get-MegaDeskMigrationDeltaState -FromSha $fromSha -ToSha $toSha
     } $realFrom $realTo
-    $result.status | Should Be 'PENDING'
-    $result.status | Should Not Be 'DIVERGENT'
-    $result.migrations.Count | Should Be 5
-    $result.message | Should Match '0025_material_serpent_society'
+    $result.status | Should Be 'DIVERGENT'
+    $result.migrations.Count | Should Be 0
+    $result.message | Should Match 'Candidate de migration nao corresponde ao HEAD local verificado'
   }
 }
 
 Describe 'MegaDesk MAIN migration readonly query input transport' {
   BeforeEach {
+    $script:runtimeRoot = Join-Path $TestDrive ('migration-query-runtime-' + [guid]::NewGuid().ToString('N'))
+    $script:projectRoot = Join-Path $TestDrive ('migration-query-project-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $script:projectRoot -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $script:projectRoot '.env.local') -Value '' -NoNewline
+    & (Get-Module $moduleName) { param($runtimeRoot, $projectRoot) Set-MegaDeskAutomationPaths -RuntimeRoot $runtimeRoot -ProjectRoot $projectRoot -Port 32179 } $script:runtimeRoot $script:projectRoot
     $global:MegaDeskMigrationQueryInput = ''
     $global:MegaDeskMigrationQueryInputClosed = $false
     $global:MegaDeskMigrationQueryStartInfo = $null
     $global:MegaDeskMigrationQueryExitCode = 0
-    $global:MegaDeskMigrationQueryStdout = "megadesk_local`nhash-row`n"
+    $global:MegaDeskMigrationQueryStdout = "megadesk_test_query`nhash-row`n"
     $global:MegaDeskMigrationQueryStderr = ''
   }
 
@@ -3070,7 +3125,7 @@ Describe 'MegaDesk MAIN migration readonly query input transport' {
       $global:MegaDeskMigrationTransportSql = $query
       InModuleScope $moduleName {
         Mock Assert-DockerAndMySql { }
-        Mock Get-MegaDeskMainMigrationContainerImage { 'mysql:8.0' }
+        Mock Get-MegaDeskMigrationContainerImage { 'mysql:8.0' }
         Mock Start-MegaDeskProcess {
           param($StartInfo)
           $global:MegaDeskMigrationQueryStartInfo = $StartInfo
@@ -3089,9 +3144,12 @@ Describe 'MegaDesk MAIN migration readonly query input transport' {
 
         $global:MegaDeskMigrationQueryInput = ''
         $global:MegaDeskMigrationQueryInputClosed = $false
-        $result = @(Invoke-MegaDeskMainMigrationReadOnlyQuery -Sql $global:MegaDeskMigrationTransportSql)
+        $backupDirectory = Join-Path $script:ProjectRoot 'migration-query-backups'
+        New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
+        $target = New-MegaDeskCompleteDisposableMigrationTarget -Container 'megadesk-query-test' -Database 'megadesk_test_query' -DatabaseUrl 'mysql://fixture:synthetic@127.0.0.1:33319/megadesk_test_query' -BackupDirectory $backupDirectory
+        $result = @(Invoke-MegaDeskMainMigrationReadOnlyQuery -Sql $global:MegaDeskMigrationTransportSql -Target $target -AllowDisposable)
 
-        $global:MegaDeskMigrationQueryStartInfo.Arguments | Should Match '^exec -i megadesk-local-mysql sh -lc '
+        $global:MegaDeskMigrationQueryStartInfo.Arguments | Should Match '^exec -i megadesk-query-test sh -lc '
         $global:MegaDeskMigrationQueryStartInfo.Arguments | Should Not Match '--execute'
         $global:MegaDeskMigrationQueryInput | Should Be ("SELECT DATABASE();`n" + $global:MegaDeskMigrationTransportSql + "`n")
         $global:MegaDeskMigrationQueryInputClosed | Should Be $true
@@ -3107,7 +3165,7 @@ Describe 'MegaDesk MAIN migration readonly query input transport' {
     $global:MegaDeskMigrationTransportSql = 'SELECT broken;'
     InModuleScope $moduleName {
       Mock Assert-DockerAndMySql { }
-      Mock Get-MegaDeskMainMigrationContainerImage { 'mysql:8.0' }
+      Mock Get-MegaDeskMigrationContainerImage { 'mysql:8.0' }
       Mock Start-MegaDeskProcess {
         $input = New-Object psobject
         $input | Add-Member -MemberType ScriptMethod -Name Write -Value { param($value) }
@@ -3122,8 +3180,11 @@ Describe 'MegaDesk MAIN migration readonly query input transport' {
         return $process
       }
 
+      $backupDirectory = Join-Path $script:ProjectRoot 'migration-query-error-backups'
+      New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
+      $target = New-MegaDeskCompleteDisposableMigrationTarget -Container 'megadesk-query-error-test' -Database 'megadesk_test_query' -DatabaseUrl 'mysql://fixture:synthetic@127.0.0.1:33319/megadesk_test_query' -BackupDirectory $backupDirectory
       $failure = $null
-      try { Invoke-MegaDeskMainMigrationReadOnlyQuery -Sql $global:MegaDeskMigrationTransportSql } catch { $failure = $_.Exception.Message }
+      try { Invoke-MegaDeskMainMigrationReadOnlyQuery -Sql $global:MegaDeskMigrationTransportSql -Target $target -AllowDisposable } catch { $failure = $_.Exception.Message }
       $failure | Should Not BeNullOrEmpty
       $failure | Should Match 'exit 17'
       $failure | Should Match 'syntax error'
@@ -3321,14 +3382,15 @@ Describe 'MegaDesk prepared release publish' {
   It 'blocks migration delta before the prompt without a runtime mutation' {
     $global:MegaDeskPreparedCandidate = 'cccccccccccccccccccccccccccccccccccccccc'
     $global:MegaDeskPreparedActive = 'dddddddddddddddddddddddddddddddddddddddd'
+    $global:MegaDeskPreparedReleaseFixture = New-MegaDeskIsolatedReleasePair -Name 'prepared-delta' -ActiveSha $global:MegaDeskPreparedActive -CandidateSha $global:MegaDeskPreparedCandidate
     InModuleScope $moduleName {
-      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active'; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = $null }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = $global:MegaDeskPreparedReleaseFixture.active.path; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = $null }
       Mock Assert-CloudflaredConfig { }
       Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; branch = 'release/updater-v2-bootstrap' } }
       Mock Assert-MegaDeskRecoverableState { $script:testState }
-      Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active' } }
+      Mock Assert-MegaDeskActiveRelease { $global:MegaDeskPreparedReleaseFixture.active }
       Mock Resolve-MegaDeskPreparedReleaseCandidate { [pscustomobject]@{ updaterHeadSha = $global:MegaDeskPreparedCandidate; candidateReleaseSha = $global:MegaDeskPreparedCandidate; source = 'HEAD preparado' } }
-      Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate' } }
+      Mock Get-MegaDeskRelease { $global:MegaDeskPreparedReleaseFixture.candidate }
       Mock Assert-MegaDeskPreparedReleaseMetadata { }
       Mock Assert-MegaDeskMigrationDeltaState { throw 'Migration delta bloqueada (PENDING): 0018_new' }
       Mock Read-Host { throw 'prompt must not be reached' }
@@ -3363,14 +3425,15 @@ Describe 'MegaDesk prepared release publish' {
   It 'cancels without state or runtime mutation and runs no heavyweight preparation' {
     $global:MegaDeskPreparedCandidate = '1111111111111111111111111111111111111111'
     $global:MegaDeskPreparedActive = '2222222222222222222222222222222222222222'
+    $global:MegaDeskPreparedReleaseFixture = New-MegaDeskIsolatedReleasePair -Name 'prepared-cancel' -ActiveSha $global:MegaDeskPreparedActive -CandidateSha $global:MegaDeskPreparedCandidate
     InModuleScope $moduleName {
-      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active'; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'FAILED'; candidateSha = $global:MegaDeskPreparedCandidate; message = 'prior failure' } }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = $global:MegaDeskPreparedReleaseFixture.active.path; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'FAILED'; candidateSha = $global:MegaDeskPreparedCandidate; switchAttempted = $false; message = 'prior failure' } }
       Mock Assert-CloudflaredConfig { }
       Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; branch = 'release/updater-v2-bootstrap' } }
       Mock Assert-MegaDeskRecoverableState { $script:testState }
-      Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active' } }
+      Mock Assert-MegaDeskActiveRelease { $global:MegaDeskPreparedReleaseFixture.active }
       Mock Resolve-MegaDeskPreparedReleaseCandidate { [pscustomobject]@{ updaterHeadSha = $global:MegaDeskPreparedCandidate; candidateReleaseSha = $global:MegaDeskPreparedCandidate; source = 'operacao UPDATE preparada anteriormente' } }
-      Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate' } }
+      Mock Get-MegaDeskRelease { $global:MegaDeskPreparedReleaseFixture.candidate }
       Mock Assert-MegaDeskPreparedReleaseMetadata { }
       Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
       Mock Read-Host { 'cancelar' }
@@ -3395,15 +3458,16 @@ Describe 'MegaDesk prepared release publish' {
   It 'accepts a valid READY UPDATE directly and delegates the switch without artificial preparation' {
     $global:MegaDeskPreparedCandidate = '1212121212121212121212121212121212121212'
     $global:MegaDeskPreparedActive = '1111111111111111111111111111111111111111'
+    $global:MegaDeskPreparedReleaseFixture = New-MegaDeskIsolatedReleasePair -Name 'prepared-ready' -ActiveSha $global:MegaDeskPreparedActive -CandidateSha $global:MegaDeskPreparedCandidate
     InModuleScope $moduleName {
-      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active'; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'READY'; candidateSha = $global:MegaDeskPreparedCandidate; switchAttempted = $false; message = 'prepared' } }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = $global:MegaDeskPreparedReleaseFixture.active.path; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'READY'; candidateSha = $global:MegaDeskPreparedCandidate; switchAttempted = $false; message = 'prepared' } }
       $script:transitions = @()
       Mock Assert-CloudflaredConfig { }
       Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; branch = 'release/updater-v2-bootstrap' } }
       Mock Assert-MegaDeskRecoverableState { $script:testState }
-      Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active' } }
+      Mock Assert-MegaDeskActiveRelease { $global:MegaDeskPreparedReleaseFixture.active }
       Mock Resolve-MegaDeskPreparedReleaseCandidate { [pscustomobject]@{ updaterHeadSha = $global:MegaDeskPreparedCandidate; candidateReleaseSha = $global:MegaDeskPreparedCandidate; source = 'operacao UPDATE preparada anteriormente' } }
-      Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate' } }
+      Mock Get-MegaDeskRelease { $global:MegaDeskPreparedReleaseFixture.candidate }
       Mock Assert-MegaDeskPreparedReleaseMetadata { }
       Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
       Mock Read-Host { 'publicar' }
@@ -3424,8 +3488,9 @@ Describe 'MegaDesk prepared release publish' {
   It 'moves a prior UPDATE FAILED state through READY before delegating the safe switch with the active release' {
     $global:MegaDeskPreparedCandidate = '3333333333333333333333333333333333333333'
     $global:MegaDeskPreparedActive = '4444444444444444444444444444444444444444'
+    $global:MegaDeskPreparedReleaseFixture = New-MegaDeskIsolatedReleasePair -Name 'prepared-failed-transition' -ActiveSha $global:MegaDeskPreparedActive -CandidateSha $global:MegaDeskPreparedCandidate
     InModuleScope $moduleName {
-      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active'; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'FAILED'; candidateSha = $global:MegaDeskPreparedCandidate; message = 'prior failure' } }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = $global:MegaDeskPreparedReleaseFixture.active.path; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'FAILED'; candidateSha = $global:MegaDeskPreparedCandidate; switchAttempted = $false; message = 'prior failure' } }
       $script:capturedPrevious = $null
       $script:transitionStatuses = @()
       $script:transitionCandidates = @()
@@ -3435,9 +3500,9 @@ Describe 'MegaDesk prepared release publish' {
       Mock Assert-CloudflaredConfig { }
       Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; branch = 'release/updater-v2-bootstrap' } }
       Mock Assert-MegaDeskRecoverableState { $script:testState }
-      Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active' } }
+      Mock Assert-MegaDeskActiveRelease { $global:MegaDeskPreparedReleaseFixture.active }
       Mock Resolve-MegaDeskPreparedReleaseCandidate { [pscustomobject]@{ updaterHeadSha = $global:MegaDeskPreparedCandidate; candidateReleaseSha = $global:MegaDeskPreparedCandidate; source = 'operacao UPDATE preparada anteriormente' } }
-      Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate' } }
+      Mock Get-MegaDeskRelease { $global:MegaDeskPreparedReleaseFixture.candidate }
       Mock Assert-MegaDeskPreparedReleaseMetadata { }
       Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
       Mock Read-Host { 'publicar' }
@@ -3469,8 +3534,9 @@ Describe 'MegaDesk prepared release publish' {
     $global:MegaDeskPreparedUpdaterHead = '1010101010101010101010101010101010101010'
     $global:MegaDeskPreparedCandidate = '6060606060606060606060606060606060606060'
     $global:MegaDeskPreparedActive = '4040404040404040404040404040404040404040'
+    $global:MegaDeskPreparedReleaseFixture = New-MegaDeskIsolatedReleasePair -Name 'prepared-failed-selection' -ActiveSha $global:MegaDeskPreparedActive -CandidateSha $global:MegaDeskPreparedCandidate
     InModuleScope $moduleName {
-      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active'; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'FAILED'; candidateSha = $global:MegaDeskPreparedCandidate; message = 'prior failure' } }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = $global:MegaDeskPreparedReleaseFixture.active.path; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'FAILED'; candidateSha = $global:MegaDeskPreparedCandidate; switchAttempted = $false; message = 'prior failure' } }
       $script:stateCandidate = ''
       $script:switchedCandidate = ''
       $script:transitionStatuses = @()
@@ -3481,9 +3547,9 @@ Describe 'MegaDesk prepared release publish' {
       Mock Assert-CloudflaredConfig { }
       Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreparedUpdaterHead; branch = 'release/updater-v2-bootstrap' } }
       Mock Assert-MegaDeskRecoverableState { $script:testState }
-      Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active' } }
+      Mock Assert-MegaDeskActiveRelease { $global:MegaDeskPreparedReleaseFixture.active }
       Mock Resolve-MegaDeskPreparedReleaseCandidate { $script:gates += 'selection'; [pscustomobject]@{ updaterHeadSha = $global:MegaDeskPreparedUpdaterHead; candidateReleaseSha = $global:MegaDeskPreparedCandidate; source = 'operacao UPDATE preparada anteriormente' } }
-      Mock Get-MegaDeskRelease { $script:gates += 'metadata'; [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate'; metadata = [pscustomobject]@{} } }
+      Mock Get-MegaDeskRelease { $script:gates += 'metadata'; $global:MegaDeskPreparedReleaseFixture.candidate }
       Mock Assert-MegaDeskPreparedReleaseMetadata { $script:gates += 'runtime' }
       Mock Assert-MegaDeskMigrationDeltaState { $script:gates += 'migration'; [pscustomobject]@{ status = 'NONE' } }
       Mock Read-Host { 'publicar' }
@@ -3520,15 +3586,16 @@ Describe 'MegaDesk prepared release publish' {
   It 'accepts non-interactive confirmation "publicar" without prompting Read-Host' {
     $global:MegaDeskPreparedCandidate = '1212121212121212121212121212121212121212'
     $global:MegaDeskPreparedActive = '1111111111111111111111111111111111111111'
+    $global:MegaDeskPreparedReleaseFixture = New-MegaDeskIsolatedReleasePair -Name 'prepared-confirm' -ActiveSha $global:MegaDeskPreparedActive -CandidateSha $global:MegaDeskPreparedCandidate
     InModuleScope $moduleName {
-      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active'; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'READY'; candidateSha = $global:MegaDeskPreparedCandidate; switchAttempted = $false; message = 'prepared' } }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = $global:MegaDeskPreparedReleaseFixture.active.path; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'READY'; candidateSha = $global:MegaDeskPreparedCandidate; switchAttempted = $false; message = 'prepared' } }
       $script:transitions = @()
       Mock Assert-CloudflaredConfig { }
       Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; branch = 'release/updater-v2-bootstrap' } }
       Mock Assert-MegaDeskRecoverableState { $script:testState }
-      Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active' } }
+      Mock Assert-MegaDeskActiveRelease { $global:MegaDeskPreparedReleaseFixture.active }
       Mock Resolve-MegaDeskPreparedReleaseCandidate { [pscustomobject]@{ updaterHeadSha = $global:MegaDeskPreparedCandidate; candidateReleaseSha = $global:MegaDeskPreparedCandidate; source = 'operacao UPDATE preparada anteriormente' } }
-      Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate' } }
+      Mock Get-MegaDeskRelease { $global:MegaDeskPreparedReleaseFixture.candidate }
       Mock Assert-MegaDeskPreparedReleaseMetadata { }
       Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
       Mock Read-Host { throw 'Read-Host must not be called when Confirmation is provided' }
@@ -3548,16 +3615,17 @@ Describe 'MegaDesk prepared release publish' {
   It 'rejects invalid non-interactive confirmation values without calling Read-Host or switching release' {
     $global:MegaDeskPreparedCandidate = '1212121212121212121212121212121212121212'
     $global:MegaDeskPreparedActive = '1111111111111111111111111111111111111111'
+    $global:MegaDeskPreparedReleaseFixture = New-MegaDeskIsolatedReleasePair -Name 'prepared-invalid-confirm' -ActiveSha $global:MegaDeskPreparedActive -CandidateSha $global:MegaDeskPreparedCandidate
     InModuleScope $moduleName {
       $invalidConfirmations = @('cancelar', 'Publicar', 'PUBLICAR', ' publicar', 'publicar ', '')
       foreach ($invalid in $invalidConfirmations) {
-        $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active'; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'READY'; candidateSha = $global:MegaDeskPreparedCandidate; switchAttempted = $false; message = 'prepared' } }
+        $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = $global:MegaDeskPreparedReleaseFixture.active.path; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'READY'; candidateSha = $global:MegaDeskPreparedCandidate; switchAttempted = $false; message = 'prepared' } }
         Mock Assert-CloudflaredConfig { }
         Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; branch = 'release/updater-v2-bootstrap' } }
         Mock Assert-MegaDeskRecoverableState { $script:testState }
-        Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active' } }
+        Mock Assert-MegaDeskActiveRelease { $global:MegaDeskPreparedReleaseFixture.active }
         Mock Resolve-MegaDeskPreparedReleaseCandidate { [pscustomobject]@{ updaterHeadSha = $global:MegaDeskPreparedCandidate; candidateReleaseSha = $global:MegaDeskPreparedCandidate; source = 'operacao UPDATE preparada anteriormente' } }
-        Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate' } }
+        Mock Get-MegaDeskRelease { $global:MegaDeskPreparedReleaseFixture.candidate }
         Mock Assert-MegaDeskPreparedReleaseMetadata { }
         Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
         Mock Read-Host { throw 'Read-Host must not be called when Confirmation is explicitly provided' }
@@ -3580,14 +3648,15 @@ Describe 'MegaDesk prepared release publish' {
   It 'releases lifecycle lock when publication is cancelled' {
     $global:MegaDeskPreparedCandidate = '1212121212121212121212121212121212121212'
     $global:MegaDeskPreparedActive = '1111111111111111111111111111111111111111'
+    $global:MegaDeskPreparedReleaseFixture = New-MegaDeskIsolatedReleasePair -Name 'prepared-lock-release' -ActiveSha $global:MegaDeskPreparedActive -CandidateSha $global:MegaDeskPreparedCandidate
     InModuleScope $moduleName {
-      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active'; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'READY'; candidateSha = $global:MegaDeskPreparedCandidate; switchAttempted = $false; message = 'prepared' } }
+      $script:testState = [pscustomobject]@{ schemaVersion = 2; node = $null; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = $global:MegaDeskPreparedReleaseFixture.active.path; activatedAt = '2026-01-01T00:00:00Z' }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'READY'; candidateSha = $global:MegaDeskPreparedCandidate; switchAttempted = $false; message = 'prepared' } }
       Mock Assert-CloudflaredConfig { }
       Mock Assert-MegaDeskGitPreflight { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; branch = 'release/updater-v2-bootstrap' } }
       Mock Assert-MegaDeskRecoverableState { $script:testState }
-      Mock Assert-MegaDeskActiveRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedActive; path = 'C:\active' } }
+      Mock Assert-MegaDeskActiveRelease { $global:MegaDeskPreparedReleaseFixture.active }
       Mock Resolve-MegaDeskPreparedReleaseCandidate { [pscustomobject]@{ updaterHeadSha = $global:MegaDeskPreparedCandidate; candidateReleaseSha = $global:MegaDeskPreparedCandidate; source = 'operacao UPDATE preparada anteriormente' } }
-      Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $global:MegaDeskPreparedCandidate; path = 'C:\candidate' } }
+      Mock Get-MegaDeskRelease { $global:MegaDeskPreparedReleaseFixture.candidate }
       Mock Assert-MegaDeskPreparedReleaseMetadata { }
       Mock Assert-MegaDeskMigrationDeltaState { [pscustomobject]@{ status = 'NONE' } }
       Mock Write-MegaDeskLog { }
@@ -4317,8 +4386,9 @@ Describe 'MegaDesk durable switchAttempted lifecycle' {
   }
 
   It 'keeps the rejected ABSENT counterexample fail-closed after candidate start throws before returning a record' {
-    $global:MegaDeskDurableOld = [pscustomobject]@{ sha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'; path = 'C:\old' }
-    $global:MegaDeskDurableCandidate = [pscustomobject]@{ sha = 'cccccccccccccccccccccccccccccccccccccccc'; path = 'C:\candidate' }
+    $fixture = New-MegaDeskIsolatedReleasePair -Name 'durable-counterexample' -ActiveSha ('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb') -CandidateSha ('cccccccccccccccccccccccccccccccccccccccc')
+    $global:MegaDeskDurableOld = $fixture.active
+    $global:MegaDeskDurableCandidate = $fixture.candidate
     $global:MegaDeskDurableMockScope = 'counterexample'
     InModuleScope $moduleName {
       $old = $global:MegaDeskDurableOld
@@ -5372,6 +5442,7 @@ Describe 'MegaDesk strict global cloudflared absence proof' {
       Mock Test-ManagedProcess { $true }
       Mock Get-MegaDeskManagedProcessStatus { 'ABSENT' }
       Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\cloudflared.exe' } }
+      Mock Get-CimInstance { throw 'TEST must not enumerate global Cloudflared processes' }
       Mock Start-MegaDeskProcess { $script:strictCloudflaredSpawnCount++; [pscustomobject]@{ Id = 5252 } }
       Mock New-ManagedProcessRecord { $script:strictCloudflaredRecord }
       Mock Save-MegaDeskState { param($State) $script:strictCloudflaredState = $State }
@@ -5389,80 +5460,83 @@ Describe 'MegaDesk strict global cloudflared absence proof' {
 
   It 'T1 permits an authorized startup only after two successful empty enumerations' {
     InModuleScope $moduleName {
-      Mock Get-CimInstance { [void]($global:MegaDeskStrictCloudflaredEnumerationCount++); @() }
+      Mock Get-MegaDeskGlobalCloudflaredPresence { [void]($global:MegaDeskStrictCloudflaredEnumerationCount++); [pscustomobject]@{ status = 'ABSENT'; processes = @() } }
 
       Start-MegaDeskTunnel -AuthorizationMode ACTIVE_START -ReleaseSha $global:MegaDeskStrictCloudflaredSha | Out-Null
 
       $global:MegaDeskStrictCloudflaredEnumerationCount | Should Be 2
       $script:strictCloudflaredSpawnCount | Should Be 1
+      Assert-MockCalled Get-CimInstance -Times 0 -Exactly -Scope It
       Assert-MockCalled Start-MegaDeskProcess -Times 1 -Exactly -Scope It
     }
   }
 
   It 'T2 blocks a successful enumeration that finds an existing cloudflared' {
     InModuleScope $moduleName {
-      Mock Get-CimInstance { [void]($global:MegaDeskStrictCloudflaredEnumerationCount++); [pscustomobject]@{ ProcessId = 6161 } }
+      Mock Get-MegaDeskGlobalCloudflaredPresence { [void]($global:MegaDeskStrictCloudflaredEnumerationCount++); [pscustomobject]@{ status = 'PRESENT'; processes = @([pscustomobject]@{ ProcessId = 6161 }) } }
 
       { Start-MegaDeskTunnel -AuthorizationMode ACTIVE_START -ReleaseSha $global:MegaDeskStrictCloudflaredSha } | Should Throw
 
       $global:MegaDeskStrictCloudflaredEnumerationCount | Should Be 1
       $script:strictCloudflaredSpawnCount | Should Be 0
+      Assert-MockCalled Get-CimInstance -Times 0 -Exactly -Scope It
       Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
     }
   }
 
   It 'T3 blocks UnauthorizedAccessException from the production global enumeration' {
     InModuleScope $moduleName {
-      Mock Get-CimInstance { [void]($global:MegaDeskStrictCloudflaredEnumerationCount++); throw [UnauthorizedAccessException]::new('access denied') }
+      Mock Get-MegaDeskGlobalCloudflaredPresence { [void]($global:MegaDeskStrictCloudflaredEnumerationCount++); [pscustomobject]@{ status = 'UNKNOWN'; processes = @() } }
 
       { Start-MegaDeskTunnel -AuthorizationMode ACTIVE_START -ReleaseSha $global:MegaDeskStrictCloudflaredSha } | Should Throw
 
       $global:MegaDeskStrictCloudflaredEnumerationCount | Should Be 1
       $script:strictCloudflaredSpawnCount | Should Be 0
-      Assert-MockCalled Get-CimInstance -Times 1 -Exactly -Scope It
+      Assert-MockCalled Get-CimInstance -Times 0 -Exactly -Scope It
       Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
     }
   }
 
   It 'T4 blocks an unexpected CIM provider failure from the production global enumeration' {
     InModuleScope $moduleName {
-      Mock Get-CimInstance { [void]($global:MegaDeskStrictCloudflaredEnumerationCount++); throw [InvalidOperationException]::new('provider failed') }
+      Mock Get-MegaDeskGlobalCloudflaredPresence { [void]($global:MegaDeskStrictCloudflaredEnumerationCount++); [pscustomobject]@{ status = 'UNKNOWN'; processes = @() } }
 
       { Start-MegaDeskTunnel -AuthorizationMode ACTIVE_START -ReleaseSha $global:MegaDeskStrictCloudflaredSha } | Should Throw
 
       $global:MegaDeskStrictCloudflaredEnumerationCount | Should Be 1
       $script:strictCloudflaredSpawnCount | Should Be 0
-      Assert-MockCalled Get-CimInstance -Times 1 -Exactly -Scope It
+      Assert-MockCalled Get-CimInstance -Times 0 -Exactly -Scope It
       Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
     }
   }
 
   It 'T5 never converts an explicit UNKNOWN result into ABSENT' {
     InModuleScope $moduleName {
-      Mock Get-CimInstance { throw [InvalidOperationException]::new('enumeration unavailable') }
+      Mock Get-MegaDeskGlobalCloudflaredPresence { [pscustomobject]@{ status = 'UNKNOWN'; processes = @() } }
 
       $presence = Get-MegaDeskGlobalCloudflaredPresence
       $presence.status | Should Be 'UNKNOWN'
       { Assert-MegaDeskGlobalCloudflaredAbsent } | Should Throw
 
       $script:strictCloudflaredSpawnCount | Should Be 0
-      Assert-MockCalled Get-CimInstance -Times 2 -Exactly -Scope It
+      Assert-MockCalled Get-CimInstance -Times 0 -Exactly -Scope It
       Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
     }
   }
 
   It 'T6 blocks when the final pre-spawn revalidation finds cloudflared after initial ABSENT' {
     InModuleScope $moduleName {
-      Mock Get-CimInstance {
+      Mock Get-MegaDeskGlobalCloudflaredPresence {
         [void]($global:MegaDeskStrictCloudflaredEnumerationCount++)
-        if ($global:MegaDeskStrictCloudflaredEnumerationCount -eq 1) { return @() }
-        return [pscustomobject]@{ ProcessId = 6262 }
+        if ($global:MegaDeskStrictCloudflaredEnumerationCount -eq 1) { return [pscustomobject]@{ status = 'ABSENT'; processes = @() } }
+        return [pscustomobject]@{ status = 'PRESENT'; processes = @([pscustomobject]@{ ProcessId = 6262 }) }
       }
 
       { Start-MegaDeskTunnel -AuthorizationMode ACTIVE_START -ReleaseSha $global:MegaDeskStrictCloudflaredSha } | Should Throw
 
       $global:MegaDeskStrictCloudflaredEnumerationCount | Should Be 2
       $script:strictCloudflaredSpawnCount | Should Be 0
+      Assert-MockCalled Get-CimInstance -Times 0 -Exactly -Scope It
       Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
     }
   }
@@ -5471,10 +5545,10 @@ Describe 'MegaDesk strict global cloudflared absence proof' {
     InModuleScope $moduleName {
       $script:strictCloudflaredState.cloudflared = $script:strictCloudflaredRecord
       $before = $script:strictCloudflaredState | ConvertTo-Json -Depth 20 -Compress
-      Mock Get-CimInstance {
+      Mock Get-MegaDeskGlobalCloudflaredPresence {
         [void]($global:MegaDeskStrictCloudflaredEnumerationCount++)
-        if ($global:MegaDeskStrictCloudflaredEnumerationCount -eq 1) { return @() }
-        throw [InvalidOperationException]::new('second enumeration failed')
+        if ($global:MegaDeskStrictCloudflaredEnumerationCount -eq 1) { return [pscustomobject]@{ status = 'ABSENT'; processes = @() } }
+        return [pscustomobject]@{ status = 'UNKNOWN'; processes = @() }
       }
 
       { Start-MegaDeskTunnel -AuthorizationMode ACTIVE_START -ReleaseSha $global:MegaDeskStrictCloudflaredSha } | Should Throw
@@ -5483,6 +5557,7 @@ Describe 'MegaDesk strict global cloudflared absence proof' {
       $script:strictCloudflaredSpawnCount | Should Be 0
       ($script:strictCloudflaredState | ConvertTo-Json -Depth 20 -Compress) | Should Be $before
       Assert-MockCalled Save-MegaDeskState -Times 0 -Exactly -Scope It
+      Assert-MockCalled Get-CimInstance -Times 0 -Exactly -Scope It
       Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
     }
   }
@@ -5491,41 +5566,42 @@ Describe 'MegaDesk strict global cloudflared absence proof' {
     InModuleScope $moduleName {
       $script:strictCloudflaredState.cloudflared = $script:strictCloudflaredRecord
       $before = $script:strictCloudflaredState | ConvertTo-Json -Depth 20 -Compress
-      Mock Get-CimInstance { throw [UnauthorizedAccessException]::new('access denied') }
+      Mock Get-MegaDeskGlobalCloudflaredPresence { [pscustomobject]@{ status = 'UNKNOWN'; processes = @() } }
 
       { Start-MegaDeskTunnel -AuthorizationMode ACTIVE_START -ReleaseSha $global:MegaDeskStrictCloudflaredSha } | Should Throw
 
       ($script:strictCloudflaredState | ConvertTo-Json -Depth 20 -Compress) | Should Be $before
       $script:strictCloudflaredSpawnCount | Should Be 0
       Assert-MockCalled Save-MegaDeskState -Times 0 -Exactly -Scope It
+      Assert-MockCalled Get-CimInstance -Times 0 -Exactly -Scope It
       Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
     }
   }
 
   It 'T9 prevents a direct exported caller from bypassing strict global enumeration' {
     InModuleScope $moduleName {
-      Mock Get-CimInstance { throw [UnauthorizedAccessException]::new('direct caller denied') }
+      Mock Get-MegaDeskGlobalCloudflaredPresence { [pscustomobject]@{ status = 'UNKNOWN'; processes = @() } }
     }
 
     { Start-MegaDeskTunnel -AuthorizationMode ACTIVE_START -ReleaseSha $global:MegaDeskStrictCloudflaredSha } | Should Throw
 
     InModuleScope $moduleName {
       $script:strictCloudflaredSpawnCount | Should Be 0
-      Assert-MockCalled Get-CimInstance -Times 1 -Exactly -Scope It
+      Assert-MockCalled Get-CimInstance -Times 0 -Exactly -Scope It
       Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
     }
   }
 
   It 'T10 starts exactly one tunnel when lifecycle Node and both absence proofs remain valid' {
     InModuleScope $moduleName {
-      Mock Get-CimInstance { [void]($global:MegaDeskStrictCloudflaredEnumerationCount++); @() }
+      Mock Get-MegaDeskGlobalCloudflaredPresence { [void]($global:MegaDeskStrictCloudflaredEnumerationCount++); [pscustomobject]@{ status = 'ABSENT'; processes = @() } }
 
       $result = Start-MegaDeskTunnel -AuthorizationMode ACTIVE_START -ReleaseSha $global:MegaDeskStrictCloudflaredSha
 
       $result | Should Be $script:strictCloudflaredRecord
       $global:MegaDeskStrictCloudflaredEnumerationCount | Should Be 2
       $script:strictCloudflaredSpawnCount | Should Be 1
-      Assert-MockCalled Get-CimInstance -Times 2 -Exactly -Scope It
+      Assert-MockCalled Get-CimInstance -Times 0 -Exactly -Scope It
       Assert-MockCalled Start-MegaDeskProcess -Times 1 -Exactly -Scope It
     }
   }
@@ -6013,9 +6089,7 @@ Describe 'MegaDesk MAIN backup metadata boundary' {
 
   It 'emits exactly one public metadata object from the real producer without VoidTaskResult' {
     InModuleScope $moduleName {
-      $disposableTarget = [pscustomobject]@{
-        mode = 'DISPOSABLE'; container = 'megadesk-updater-contract'; database = 'megadesk_test_backup_contract'; environmentPath = ''; databaseUrl = 'mysql://fixture:synthetic@127.0.0.1:33319/megadesk_test_backup_contract'; backupDirectory = $global:MegaDeskBackupContractDirectory; disposableOptIn = $true
-      }
+      $disposableTarget = New-MegaDeskCompleteDisposableMigrationTarget -Container 'megadesk-updater-contract' -Database 'megadesk_test_backup_contract' -DatabaseUrl 'mysql://fixture:synthetic@127.0.0.1:33319/megadesk_test_backup_contract' -BackupDirectory $global:MegaDeskBackupContractDirectory
       $global:MegaDeskBackupContractProcess = New-MegaDeskSyntheticBackupProcess
       Mock Assert-DockerAndMySql { }
       Mock Get-MegaDeskMigrationContainerImage { 'mysql:8.0' }
@@ -6035,9 +6109,7 @@ Describe 'MegaDesk MAIN backup metadata boundary' {
 
   It 'continues to propagate CopyToAsync failures from the real producer' {
     InModuleScope $moduleName {
-      $disposableTarget = [pscustomobject]@{
-        mode = 'DISPOSABLE'; container = 'megadesk-updater-contract'; database = 'megadesk_test_backup_contract'; environmentPath = ''; databaseUrl = 'mysql://fixture:synthetic@127.0.0.1:33319/megadesk_test_backup_contract'; backupDirectory = $global:MegaDeskBackupContractDirectory; disposableOptIn = $true
-      }
+      $disposableTarget = New-MegaDeskCompleteDisposableMigrationTarget -Container 'megadesk-updater-contract' -Database 'megadesk_test_backup_contract' -DatabaseUrl 'mysql://fixture:synthetic@127.0.0.1:33319/megadesk_test_backup_contract' -BackupDirectory $global:MegaDeskBackupContractDirectory
       $failingStream = [pscustomobject]@{}
       $failingStream | Add-Member -MemberType ScriptMethod -Name CopyToAsync -Value { param($destination) throw 'synthetic copy failure' }
       $failingProcess = [pscustomobject]@{
@@ -6218,6 +6290,159 @@ Describe 'MegaDesk disposable MAIN migration target isolation' {
       $backup = [regex]::Match($source, 'function New-MegaDeskMainMigrationBackup \{.*?(?=function Invoke-MegaDeskCanonicalMainMigrationCommand)', [System.Text.RegularExpressions.RegexOptions]::Singleline).Value
       $backup | Should Match 'mysqldump -u\$MYSQL_USER --databases \$MYSQL_DATABASE'
       $backup | Should Not Match 'mysqldump -u\$MYSQL_USER --database='
+    }
+  }
+}
+
+Describe 'MegaDesk Pester fail-closed sandbox' {
+  BeforeEach {
+    $global:MegaDeskSandboxTestRoot = $TestDrive
+    $global:MegaDeskSandboxRuntime = Join-Path $TestDrive ('sandbox-runtime-' + [guid]::NewGuid().ToString('N'))
+    $global:MegaDeskSandboxProject = Join-Path $TestDrive ('sandbox-project-' + [guid]::NewGuid().ToString('N'))
+    $global:MegaDeskSandboxPort = Get-IsolatedTestPort
+    New-Item -ItemType Directory -Path $global:MegaDeskSandboxProject -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $global:MegaDeskSandboxProject '.env.local') -Value 'SYNTHETIC_TEST_ONLY=1' -NoNewline
+    InModuleScope $moduleName {
+      Enable-MegaDeskTestContext -TestRoot $global:MegaDeskSandboxTestRoot -Token $global:MegaDeskTestHarnessToken
+      Set-MegaDeskAutomationPaths -RuntimeRoot $global:MegaDeskSandboxRuntime -ProjectRoot $global:MegaDeskSandboxProject -Port $global:MegaDeskSandboxPort -RuntimeConfigRoot $global:MegaDeskSandboxProject
+    }
+  }
+
+  It 'fails closed before a sensitive primitive when context is uninitialized' {
+    InModuleScope $moduleName {
+      $saved = $script:MegaDeskExecutionContext
+      try {
+        $script:MegaDeskExecutionContext = [pscustomobject]@{ mode = 'UNINITIALIZED'; testRoot = ''; token = ''; ownedProcesses = @{} }
+        { Initialize-MegaDeskRuntime } | Should Throw 'sem contexto explicito'
+      } finally {
+        $script:MegaDeskExecutionContext = $saved
+      }
+    }
+  }
+
+  It 'rejects canonical runtime paths and path escape before filesystem access' {
+    InModuleScope $moduleName {
+      $canonical = Join-Path $env:LOCALAPPDATA 'MegaDesk'
+      { Assert-MegaDeskExecutionContext -Operation 'negative canonical' -Paths @($canonical) } | Should Throw
+      { Assert-MegaDeskExecutionContext -Operation 'negative escape' -Paths @((Join-Path $global:MegaDeskSandboxTestRoot '..\outside')) } | Should Throw
+      foreach ($operationalPath in @(
+          (Join-Path $canonical 'state\updater-state.json'),
+          (Join-Path $canonical 'releases\candidate'),
+          (Join-Path $canonical 'staging\candidate'),
+          (Join-Path $canonical 'backups\main.sql'),
+          (Join-Path $canonical 'diagnostics\node.log')
+        )) {
+        { Assert-MegaDeskExecutionContext -Operation 'negative operational subtree' -Paths @($operationalPath) } | Should Throw
+      }
+    }
+  }
+
+  It 'rejects operational Cloudflared config and port 3000 before use' {
+    InModuleScope $moduleName {
+      { Assert-MegaDeskExecutionContext -Operation 'negative cloudflared' -Paths @((Join-Path $env:USERPROFILE '.cloudflared\config.yml')) } | Should Throw
+      { Assert-MegaDeskExecutionContext -Operation 'negative port' -Port 3000 } | Should Throw 'porta operacional 3000'
+    }
+  }
+
+  It 'rejects MAIN, Evolution, and unmarked Docker targets before Docker invocation' {
+    InModuleScope $moduleName {
+      $main = New-MegaDeskProductionMainMigrationTarget
+      { Get-MegaDeskMigrationContainerImage -Target $main } | Should Throw 'nao descartavel'
+      $evolution = [pscustomobject]@{ mode = 'DISPOSABLE'; container = 'megadesk-evolution'; database = 'megadesk_test_fixture'; environmentPath = ''; databaseUrl = 'mysql://fixture:synthetic@127.0.0.1:33319/megadesk_test_fixture'; backupDirectory = $global:MegaDeskSandboxRuntime; disposableOptIn = $true; testToken = $script:MegaDeskExecutionContext.token; dockerLabel = ('megadesk.test.token=' + $script:MegaDeskExecutionContext.token) }
+      { Get-MegaDeskMigrationContainerImage -Target $evolution } | Should Throw
+      $unmarked = [pscustomobject]@{ mode = 'DISPOSABLE'; container = 'megadesk-test-fixture'; database = 'megadesk_test_fixture'; environmentPath = ''; databaseUrl = 'mysql://fixture:synthetic@127.0.0.1:33319/megadesk_test_fixture'; backupDirectory = $global:MegaDeskSandboxRuntime; disposableOptIn = $true }
+      { Get-MegaDeskMigrationContainerImage -Target $unmarked } | Should Throw 'sem token'
+    }
+  }
+
+  It 'accepts a complete disposable Docker identity only inside the sandbox' {
+    InModuleScope $moduleName {
+      $target = [pscustomobject]@{
+        mode = 'DISPOSABLE'; container = 'megadesk-test-sandbox-0034'; database = 'megadesk_test_sandbox_0034';
+        environmentPath = ''; databaseUrl = 'mysql://fixture:synthetic@127.0.0.1:33319/megadesk_test_sandbox_0034';
+        backupDirectory = $global:MegaDeskSandboxRuntime; disposableOptIn = $true;
+        testToken = $script:MegaDeskExecutionContext.token;
+        dockerLabel = ('megadesk.test.token=' + $script:MegaDeskExecutionContext.token)
+      }
+      { Assert-MegaDeskExecutionContext -Operation 'positive disposable target' -MigrationTarget $target } | Should Not Throw
+    }
+  }
+
+  It 'can stop only a registered synthetic child process' {
+    $marker = Join-Path $global:MegaDeskSandboxProject 'owned-process.marker'
+    $escapedMarker = $marker.Replace("'", "''")
+    $escapedToken = $global:MegaDeskTestHarnessToken.Replace("'", "''")
+    $childCommand = "Set-Content -LiteralPath '$escapedMarker' -Value ('${escapedToken}:' + `$PID) -NoNewline; Start-Sleep -Seconds 30"
+    $child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList @('-NoProfile', '-NonInteractive', '-Command', $childCommand) -WindowStyle Hidden -PassThru
+    $childId = $child.Id
+    $global:MegaDeskSandboxChild = $child
+    $global:MegaDeskSandboxMarker = $marker
+    try {
+      $deadline = [DateTime]::UtcNow.AddSeconds(5)
+      while ((-not (Test-Path -LiteralPath $marker -PathType Leaf)) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 50 }
+      (Get-Content -LiteralPath $marker -Raw).Trim() | Should Be ($global:MegaDeskTestHarnessToken + ':' + $childId)
+      InModuleScope $moduleName {
+        Register-MegaDeskTestProcessOwnership -Process $global:MegaDeskSandboxChild -ExecutablePath $global:MegaDeskSandboxChild.Path -CommandIdentity $global:MegaDeskSandboxMarker
+        Stop-MegaDeskValidatedProcessHandle -ProcessHandle $global:MegaDeskSandboxChild -Kind node
+      }
+      Start-Sleep -Milliseconds 100
+      (Get-Process -Id $childId -ErrorAction SilentlyContinue) | Should BeNullOrEmpty
+    } finally {
+      $remaining = Get-Process -Id $childId -ErrorAction SilentlyContinue
+      if ($null -ne $remaining) { $remaining.Kill(); $remaining.WaitForExit(); $remaining.Dispose() }
+      try { $child.Dispose() } catch { }
+    }
+  }
+
+  It 'rejects arbitrary Node and Cloudflared PIDs before Stop-Process' {
+    InModuleScope $moduleName {
+      $handle = [System.Diagnostics.Process]::GetCurrentProcess()
+      Mock Stop-Process { throw 'must not reach Stop-Process' }
+      { Stop-MegaDeskValidatedProcessHandle -ProcessHandle $handle -Kind node } | Should Throw 'ownership registrado'
+      { Stop-MegaDeskValidatedProcessHandle -ProcessHandle $handle -Kind cloudflared } | Should Throw 'ownership registrado'
+      Assert-MockCalled Stop-Process -Times 0 -Exactly -Scope It
+      $handle.Dispose()
+    }
+  }
+
+  It 'persists state only inside the explicit test sandbox' {
+    InModuleScope $moduleName {
+      Invoke-WithMegaDeskLifecycleLock {
+        Set-MegaDeskOperationState -Status PREPARING -Kind UPDATE -CandidateSha ('a' * 40) -Message 'sandbox-only' | Out-Null
+      }
+      (Test-Path -LiteralPath $script:StatePath -PathType Leaf) | Should Be $true
+      (Test-MegaDeskPathLexicallyInside -Path $script:StatePath -Root $script:MegaDeskExecutionContext.testRoot) | Should Be $true
+      $script:RuntimePort | Should Not Be 3000
+    }
+  }
+
+  It 'does not enumerate or clean up global Cloudflared in TEST' {
+    InModuleScope $moduleName {
+      Mock Get-CimInstance { throw 'global process enumeration must not run in TEST' }
+      $presence = Get-MegaDeskGlobalCloudflaredPresence
+      $presence.status | Should Be 'ABSENT'
+      Assert-MockCalled Get-CimInstance -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'rejects a junction escape when junctions are available' {
+    $outside = Join-Path (Split-Path -Parent $global:MegaDeskSandboxTestRoot) ('outside-' + [guid]::NewGuid().ToString('N'))
+    $junction = Join-Path $global:MegaDeskSandboxRuntime 'escape'
+    New-Item -ItemType Directory -Path $global:MegaDeskSandboxRuntime, $outside -Force | Out-Null
+    try {
+      try { New-Item -ItemType Junction -Path $junction -Target $outside -ErrorAction Stop | Out-Null } catch { return }
+      InModuleScope $moduleName {
+        { Assert-MegaDeskExecutionContext -Operation 'negative junction' -Paths @((Join-Path $global:MegaDeskSandboxRuntime 'escape\target')) } | Should Throw
+      }
+    } finally {
+      if (Test-Path -LiteralPath $junction) { Remove-Item -LiteralPath $junction -Force -ErrorAction SilentlyContinue }
+      if (Test-Path -LiteralPath $outside) { Remove-Item -LiteralPath $outside -Force -ErrorAction SilentlyContinue }
+    }
+  }
+
+  It 'keeps every operational entrypoint explicit about OPERATIONAL context' {
+    foreach ($name in @('Iniciar-MegaDesk.ps1', 'Parar-MegaDesk.ps1', 'Atualizar-MegaDesk.ps1', 'Publicar-MegaDesk.ps1', 'Inicializar-UpdaterV2.ps1', 'Recuperar-UpdaterV2.ps1', 'MegaDesk.NodeExitObserver.ps1')) {
+      (Get-Content -LiteralPath (Join-Path $PSScriptRoot ('..\' + $name)) -Raw) | Should Match 'Enable-MegaDeskOperationalContext'
     }
   }
 }

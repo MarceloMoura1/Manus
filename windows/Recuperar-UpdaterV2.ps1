@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location -LiteralPath $projectRoot
 Import-Module (Join-Path $PSScriptRoot 'MegaDesk.Automation.psm1') -Force
+Enable-MegaDeskOperationalContext
 
 try {
   Invoke-MegaDeskBootstrapFailedRecovery | Out-Null

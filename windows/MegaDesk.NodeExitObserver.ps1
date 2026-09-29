@@ -8,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 
 $modulePath = Join-Path $PSScriptRoot 'MegaDesk.Automation.psm1'
 Import-Module $modulePath -Force
+Enable-MegaDeskOperationalContext
 $automationModule = Get-Module 'MegaDesk.Automation'
 if ($null -eq $automationModule) { throw 'Modulo de automacao MegaDesk indisponivel para exit telemetry.' }
 

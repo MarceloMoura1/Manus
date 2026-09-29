@@ -4,6 +4,7 @@ param()
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'MegaDesk.Automation.psm1') -Force
+Enable-MegaDeskOperationalContext
 
 try {
   Invoke-WithMegaDeskLifecycleLock {

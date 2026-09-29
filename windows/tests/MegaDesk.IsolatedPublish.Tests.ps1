@@ -1,6 +1,8 @@
 $modulePath = Join-Path $PSScriptRoot '..\MegaDesk.Automation.psm1'
 Import-Module $modulePath -Force
 $moduleName = 'MegaDesk.Automation'
+$global:MegaDeskIsolatedPublishHarnessToken = [guid]::NewGuid().ToString('N')
+$env:MEGADESK_TEST_TOKEN = $global:MegaDeskIsolatedPublishHarnessToken
 
 function global:New-BootstrapReleaseRuntimeFixture {
   param([string]$ReleaseRoot, [string]$Sha)
