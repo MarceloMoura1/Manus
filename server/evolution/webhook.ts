@@ -176,13 +176,41 @@ export async function handleEvolutionWebhook(req: Request, res: Response): Promi
   }
 }
 
-async function handleMessagesUpdate(
+export type EvolutionReceiptTelemetry = {
+  event: "evolution_receipt_update";
+  status: "pending" | "sent" | "delivered" | "read" | "played" | "failed";
+  clientId: string;
+  integrationId: string;
+  externalMessageIdHash: string;
+  receivedAt: string;
+  affectedRows: number;
+  zeroMatch: boolean;
+};
+
+type ReceiptUpdateDependencies = {
+  execute?: (sql: string, values: unknown[]) => Promise<[unknown, unknown?]>;
+  emit?: (clientId: string, event: string, data: unknown) => Promise<void>;
+  recordTelemetry?: (telemetry: EvolutionReceiptTelemetry) => void;
+  now?: () => Date;
+};
+
+export async function handleMessagesUpdate(
   clientId: string,
   integrationId: string,
   data: Record<string, any> | Record<string, any>[],
+  dependencies: ReceiptUpdateDependencies = {},
 ): Promise<void> {
+  const execute = dependencies.execute ?? (async (sql: string, values: unknown[]) => (
+    getPool().execute(sql, values) as unknown as Promise<[unknown, unknown?]>
+  ));
+  const emit = dependencies.emit ?? emitToClient;
+  const recordTelemetry = dependencies.recordTelemetry ?? ((telemetry: EvolutionReceiptTelemetry) => {
+    console.info("[Evolution Receipt]", telemetry);
+  });
+  const now = dependencies.now ?? (() => new Date());
+
   for (const update of parseEvolutionMessageStatusUpdates(data)) {
-    await getPool().execute(
+    const [result] = await execute(
       `UPDATE megadesk_domain_conversations_messages
        SET status = CASE
          WHEN status = 'failed' THEN status
@@ -199,6 +227,27 @@ async function handleMessagesUpdate(
       [update.status, update.status, update.status, update.status, update.status,
         clientId, integrationId, update.externalMessageId],
     );
+    const affectedRows = Number((result as { affectedRows?: unknown } | null)?.affectedRows ?? 0);
+    const receivedAt = now().toISOString();
+    const telemetry: EvolutionReceiptTelemetry = {
+      event: "evolution_receipt_update",
+      status: update.status,
+      clientId,
+      integrationId,
+      externalMessageIdHash: createHash("sha256").update(update.externalMessageId).digest("hex"),
+      receivedAt,
+      affectedRows,
+      zeroMatch: affectedRows === 0,
+    };
+    recordTelemetry(telemetry);
+
+    if (affectedRows > 0) {
+      await emit(clientId, "conversation:receipt", {
+        clientId,
+        status: update.status,
+        receivedAt,
+      });
+    }
   }
 }
 

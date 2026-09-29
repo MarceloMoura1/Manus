@@ -6,7 +6,7 @@ vi.mock("./config", () => ({ getEvolutionWebhookSecret: () => "webhook-secret" }
 vi.mock("./session-store", () => ({ upsertSession: webhookMocks.upsertSession, instanceNameFor: (clientId: string) => `megadesk-${clientId}` }));
 vi.mock("../modules/whatsapp/socket/whatsapp.socket", () => ({ getSocketIO: () => ({ to: webhookMocks.socketTo }) }));
 
-import { canonicalEvolutionReceiptStatus, evolutionMediaDownloadEnvelope, evolutionPhoneCandidates, extractEvolutionProviderName, extractEvolutionQuotedExternalMessageId, handleEvolutionWebhook, normalizeEvolutionEvent, normalizeMessagesUpsertPayload, parseEvolutionIncomingMessage, parseEvolutionMessageStatusUpdates, prepareInboundConversationMedia, saveIncomingMessage, selectInboundContactName } from "./webhook";
+import { canonicalEvolutionReceiptStatus, evolutionMediaDownloadEnvelope, evolutionPhoneCandidates, extractEvolutionProviderName, extractEvolutionQuotedExternalMessageId, handleEvolutionWebhook, handleMessagesUpdate, normalizeEvolutionEvent, normalizeMessagesUpsertPayload, parseEvolutionIncomingMessage, parseEvolutionMessageStatusUpdates, prepareInboundConversationMedia, saveIncomingMessage, selectInboundContactName } from "./webhook";
 
 function responseDouble() {
   const response: any = { statusCode: 200, body: undefined };
@@ -250,6 +250,7 @@ describe("Evolution webhook HTTP contract", () => {
     webhookMocks.poolExecute
       .mockResolvedValueOnce([[{ clientId: "tenant-a" }]])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
+    webhookMocks.socketTo.mockReturnValue({ emit: webhookMocks.socketEmit });
     const res = responseDouble();
     await handleEvolutionWebhook({ headers: { "x-megadesk-webhook-secret": "webhook-secret" }, body: {
       event: "messages.update", instance: "megadesk-tenant-a", data: { keyId: "provider-read", status: "READ" },
@@ -260,6 +261,90 @@ describe("Evolution webhook HTTP contract", () => {
     expect(String(sql)).toContain("WHEN status = 'read' AND ? <> 'played' THEN status");
     expect(String(sql)).toContain("WHEN status = 'delivered' AND ? IN ('pending', 'sent') THEN status");
     expect(values).toEqual(["read", "read", "read", "read", "read", "tenant-a", "megadesk-tenant-a", "provider-read"]);
+    expect(webhookMocks.socketTo).toHaveBeenCalledWith("client:tenant-a");
+    expect(webhookMocks.socketEmit).toHaveBeenCalledWith("conversation:receipt", expect.objectContaining({
+      clientId: "tenant-a",
+      status: "read",
+    }));
+  });
+
+  it.each([
+    ["SERVER_ACK", "sent"],
+    ["DELIVERY_ACK", "delivered"],
+    ["READ", "read"],
+    ["PLAYED", "played"],
+  ] as const)("records and emits the tenant-scoped %s receipt", async (providerStatus, canonicalStatus) => {
+    const execute = vi.fn().mockResolvedValue([{ affectedRows: 1 }]);
+    const emit = vi.fn().mockResolvedValue(undefined);
+    const recordTelemetry = vi.fn();
+
+    await handleMessagesUpdate("tenant-a", "instance-a", {
+      keyId: `private-provider-${canonicalStatus}`,
+      status: providerStatus,
+    }, {
+      execute,
+      emit,
+      recordTelemetry,
+      now: () => new Date("2026-09-29T20:00:00.000Z"),
+    });
+
+    expect(execute.mock.calls[0][1]).toEqual([
+      canonicalStatus, canonicalStatus, canonicalStatus, canonicalStatus, canonicalStatus,
+      "tenant-a", "instance-a", `private-provider-${canonicalStatus}`,
+    ]);
+    expect(emit).toHaveBeenCalledWith("tenant-a", "conversation:receipt", {
+      clientId: "tenant-a",
+      status: canonicalStatus,
+      receivedAt: "2026-09-29T20:00:00.000Z",
+    });
+    const telemetry = recordTelemetry.mock.calls[0][0];
+    expect(telemetry).toMatchObject({
+      event: "evolution_receipt_update",
+      status: canonicalStatus,
+      clientId: "tenant-a",
+      integrationId: "instance-a",
+      affectedRows: 1,
+      zeroMatch: false,
+    });
+    expect(telemetry.externalMessageIdHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(telemetry)).not.toContain(`private-provider-${canonicalStatus}`);
+  });
+
+  it("records an explicit zero-match without emitting a realtime update", async () => {
+    const emit = vi.fn().mockResolvedValue(undefined);
+    const recordTelemetry = vi.fn();
+    await handleMessagesUpdate("tenant-a", "instance-a", {
+      keyId: "provider-missing",
+      status: "READ",
+    }, {
+      execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }]),
+      emit,
+      recordTelemetry,
+      now: () => new Date("2026-09-29T20:00:00.000Z"),
+    });
+
+    expect(recordTelemetry).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: "tenant-a",
+      status: "read",
+      affectedRows: 0,
+      zeroMatch: true,
+    }));
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("cannot update or emit across tenants when the receipt belongs to another tenant", async () => {
+    const emit = vi.fn().mockResolvedValue(undefined);
+    const execute = vi.fn(async (_sql: string, values: unknown[]) => [{
+      affectedRows: values[5] === "tenant-owner" ? 1 : 0,
+    }]);
+
+    await handleMessagesUpdate("tenant-other", "instance-a", {
+      keyId: "provider-owned-by-tenant-owner",
+      status: "DELIVERY_ACK",
+    }, { execute, emit, recordTelemetry: vi.fn() });
+
+    expect(execute.mock.calls[0][1]).toContain("tenant-other");
+    expect(emit).not.toHaveBeenCalled();
   });
 
   it("returns 200 for a duplicate without appending it again", async () => {

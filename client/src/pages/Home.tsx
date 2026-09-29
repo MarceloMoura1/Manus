@@ -863,6 +863,11 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone }: {
     // Conversa atualizada (nova mensagem)
     socket.on('conversation:updated', () => { void utils.conversations.list.invalidate(); });
     socket.on('conversation:message', () => { void utils.conversations.list.invalidate(); });
+    socket.on('conversation:receipt', (data: { clientId?: string }) => {
+      if (data?.clientId && data.clientId !== clientId) return;
+      void utils.conversations.messages.invalidate();
+      void utils.conversations.list.invalidate();
+    });
     // LID foi resolvido para numero real
     socket.on('lid-resolved', (data: { oldPhone: string; newPhone: string; lidId: string }) => {
       console.log(`[Socket.IO] LID resolvido: ${data.oldPhone} -> ${data.newPhone}`);
