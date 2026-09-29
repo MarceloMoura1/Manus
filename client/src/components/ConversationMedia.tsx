@@ -1,6 +1,9 @@
 import React from "react";
 import { conversationMediaUrl } from "@/lib/trpc-url";
-import { ConversationMediaResource } from "@/lib/conversation-media-resource";
+import {
+  ConversationMediaResource,
+  createBrowserConversationMediaDeps,
+} from "@/lib/conversation-media-resource";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type Props = { conversationId: string; message: any; fallback: React.ReactNode };
@@ -9,9 +12,25 @@ export function ConversationMedia({ conversationId, message, fallback }: Props) 
   const [url, setUrl] = React.useState<string | null>(message.mediaData ?? null);
   const [previewOpen, setPreviewOpen] = React.useState(false);
   React.useEffect(() => {
-    if (message.mediaData || !message.mediaReference?.messageId) return;
-    const resource = new ConversationMediaResource({ fetch, createObjectURL: URL.createObjectURL, revokeObjectURL: URL.revokeObjectURL, mediaUrl: conversationMediaUrl }, setUrl);
-    void resource.resolve(conversationId, message.mediaReference.messageId);
+    if (message.mediaData) {
+      setUrl(message.mediaData);
+      return;
+    }
+
+    const messageId = message.mediaReference?.messageId;
+    if (!messageId) {
+      setUrl(null);
+      return;
+    }
+
+    const resource = new ConversationMediaResource(
+      {
+        ...createBrowserConversationMediaDeps(window),
+        mediaUrl: conversationMediaUrl,
+      },
+      setUrl,
+    );
+    void resource.resolve(conversationId, messageId);
     return () => resource.dispose();
   }, [conversationId, message.mediaData, message.mediaReference?.messageId]);
   if (!url) return <>{fallback}</>;
