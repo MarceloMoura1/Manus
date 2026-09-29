@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
   OUTBOUND_AUDIO_FFMPEG_EXECUTABLE,
+  OUTBOUND_AUDIO_FFPROBE_EXECUTABLE,
   OUTBOUND_AUDIO_MIME_TYPE,
   normalizeOutboundAudio,
 } from "./outbound-audio-normalization";
@@ -15,7 +16,7 @@ import { readConversationMedia, writeConversationMedia } from "./conversation-me
 
 const execFileAsync = promisify(execFile);
 const ffmpeg = OUTBOUND_AUDIO_FFMPEG_EXECUTABLE;
-const ffprobe = process.platform === "linux" ? "/usr/bin/ffprobe" : "ffprobe";
+const ffprobe = OUTBOUND_AUDIO_FFPROBE_EXECUTABLE;
 
 function executableAvailable(executable: string): boolean {
   const result = spawnSync(executable, ["-version"], { stdio: "ignore", windowsHide: true });
@@ -44,8 +45,14 @@ function packetTimestamps(value: Probe): number[] {
   return (value.packets ?? []).map(packet => Number(packet.pts_time)).filter(Number.isFinite);
 }
 
+function maximumPacketGap(timestamps: number[]): number {
+  return timestamps.reduce((maximum, timestamp, index) => index === 0
+    ? maximum
+    : Math.max(maximum, timestamp - timestamps[index - 1]), 0);
+}
+
 describe("outbound audio normalization with physical FFmpeg", () => {
-  physicalIt("rebuilds a WebM/Opus timeline whose second packet jumps about 4398 seconds", async () => {
+  physicalIt("rebuilds a WebM/Opus timeline containing a gap of about 4398 seconds", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "megadesk-malformed-webm-"));
     const inputPath = path.join(root, "mobile-timestamp-gap.webm");
     const outputPath = path.join(root, "normalized.ogg");
@@ -66,7 +73,7 @@ describe("outbound audio normalization with physical FFmpeg", () => {
       expect(malformed.streams?.[0]).toMatchObject({ codec_name: "opus", sample_rate: "48000" });
       expect(Number(malformed.format?.duration)).toBeGreaterThan(4_300);
       expect(Math.abs(malformedPackets[0] ?? Number.POSITIVE_INFINITY)).toBeLessThan(0.1);
-      expect(malformedPackets[1]).toBeGreaterThan(4_300);
+      expect(maximumPacketGap(malformedPackets)).toBeGreaterThan(4_300);
 
       const normalizationCalls: Buffer[] = [];
       const mediaReference = await writeOutboundConversationMedia({

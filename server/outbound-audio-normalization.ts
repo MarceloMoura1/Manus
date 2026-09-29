@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { statSync } from "node:fs";
 import { chmod, lstat, mkdtemp, open, readFile, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 
@@ -11,7 +13,51 @@ export const OUTBOUND_AUDIO_FFMPEG_STDERR_MAX_BYTES = 64 * 1024;
 export const OUTBOUND_AUDIO_MAX_CONCURRENT_NORMALIZATIONS = 2;
 export const OUTBOUND_AUDIO_MIME_TYPE = "audio/ogg";
 export const OUTBOUND_AUDIO_FILE_NAME = "audio.ogg";
-export const OUTBOUND_AUDIO_FFMPEG_EXECUTABLE = process.platform === "linux" ? "/usr/bin/ffmpeg" : "ffmpeg";
+
+type OutboundAudioRuntimeTool = "ffmpeg" | "ffprobe";
+const runtimeRequire = createRequire(import.meta.url);
+
+export function validatePackagedAudioExecutable(input: {
+  tool: OutboundAudioRuntimeTool;
+  candidate: unknown;
+  packageRoot: string;
+}): string {
+  if (typeof input.candidate !== "string" || !path.isAbsolute(input.candidate)) {
+    throw new Error(`OUTBOUND_AUDIO_RUNTIME_MISSING_${input.tool.toUpperCase()}`);
+  }
+  const packageRoot = path.resolve(input.packageRoot);
+  const candidate = path.resolve(input.candidate);
+  const relative = path.relative(packageRoot, candidate);
+  if (!relative || relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative)) {
+    throw new Error(`OUTBOUND_AUDIO_RUNTIME_INVALID_${input.tool.toUpperCase()}_PATH`);
+  }
+  let info;
+  try {
+    info = statSync(candidate);
+  } catch {
+    throw new Error(`OUTBOUND_AUDIO_RUNTIME_MISSING_${input.tool.toUpperCase()}`);
+  }
+  if (!info.isFile()) throw new Error(`OUTBOUND_AUDIO_RUNTIME_INVALID_${input.tool.toUpperCase()}_PATH`);
+  return candidate;
+}
+
+function packagedAudioExecutable(tool: OutboundAudioRuntimeTool): string {
+  const packageName = tool === "ffmpeg" ? "ffmpeg-static" : "ffprobe-static";
+  const packageRoot = path.dirname(runtimeRequire.resolve(`${packageName}/package.json`));
+  const loaded = runtimeRequire(packageName) as unknown;
+  const candidate = tool === "ffmpeg"
+    ? loaded
+    : (loaded && typeof loaded === "object" && "path" in loaded ? (loaded as { path: unknown }).path : null);
+  return validatePackagedAudioExecutable({ tool, candidate, packageRoot });
+}
+
+function outboundAudioRuntimeExecutable(tool: OutboundAudioRuntimeTool): string {
+  if (process.platform === "linux") return `/usr/bin/${tool}`;
+  return packagedAudioExecutable(tool);
+}
+
+export const OUTBOUND_AUDIO_FFMPEG_EXECUTABLE = outboundAudioRuntimeExecutable("ffmpeg");
+export const OUTBOUND_AUDIO_FFPROBE_EXECUTABLE = outboundAudioRuntimeExecutable("ffprobe");
 
 type NormalizationFailure =
   | "validation"

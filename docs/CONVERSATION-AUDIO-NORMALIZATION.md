@@ -23,6 +23,18 @@ sucesso, falha do FFmpeg, timeout, falha de output e falha de cleanup.
 O arquivo `Dockerfile.app-runtime` versiona a menor extensao da imagem atualmente
 usada pelo app (`node:22-bookworm`) e instala o pacote `ffmpeg` sem recomendações.
 
+No runtime Windows nativo, `ffmpeg-static` e `ffprobe-static` sao dependencias de
+producao fixadas e resolvidas a partir do `node_modules` da propria release
+imutavel. Nenhum lookup do `PATH` global e aceito. Os caminhos devem ser
+absolutos, apontar para arquivos existentes e permanecer dentro do pacote que
+os fornece; caso contrario, a normalizacao falha antes de storage privado,
+persistencia no banco ou chamada a Evolution. O binario nao e versionado no Git.
+
+O updater inclui essas dependencias por meio de
+`pnpm --prod deploy --legacy`. O `pnpm-workspace.yaml` autoriza somente o script
+de instalacao de `ffmpeg-static`, permitindo que `pnpm install --frozen-lockfile`
+materialize o executavel versionado antes de preparar a release.
+
 ## Integracao futura em producao
 
 A configuracao de producao permanece externa ao Git em

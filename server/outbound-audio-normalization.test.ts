@@ -5,6 +5,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   OUTBOUND_AUDIO_FFMPEG_STDERR_MAX_BYTES,
+  OUTBOUND_AUDIO_FFMPEG_EXECUTABLE,
+  OUTBOUND_AUDIO_FFPROBE_EXECUTABLE,
   OUTBOUND_AUDIO_MAX_CONCURRENT_NORMALIZATIONS,
   OUTBOUND_AUDIO_MAX_INPUT_BYTES,
   OUTBOUND_AUDIO_MAX_OUTPUT_BYTES,
@@ -12,6 +14,7 @@ import {
   OutboundAudioNormalizationLimiter,
   normalizeOutboundAudio,
   outboundAudioFfmpegArgs,
+  validatePackagedAudioExecutable,
   type AudioNormalizerExecFile,
 } from "./outbound-audio-normalization";
 
@@ -39,6 +42,33 @@ function failingExec(error: Error & { code?: string | number; killed?: boolean; 
 }
 
 describe("outbound audio normalization", () => {
+  it("resolves both runtime tools to deterministic absolute executable files", async () => {
+    const executables = [OUTBOUND_AUDIO_FFMPEG_EXECUTABLE, OUTBOUND_AUDIO_FFPROBE_EXECUTABLE];
+    for (const executable of executables) {
+      expect(path.isAbsolute(executable)).toBe(true);
+    }
+    if (process.platform === "linux") {
+      expect(executables).toEqual(["/usr/bin/ffmpeg", "/usr/bin/ffprobe"]);
+      return;
+    }
+    for (const executable of executables) {
+      expect((await stat(executable)).isFile()).toBe(true);
+    }
+  });
+
+  it("fails closed when a packaged runtime tool is absent or escapes its package", async () => {
+    const parent = await temporaryParent();
+    const present = path.join(parent, "ffmpeg.exe");
+    await writeFile(present, "synthetic executable");
+    expect(validatePackagedAudioExecutable({ tool: "ffmpeg", candidate: present, packageRoot: parent })).toBe(present);
+    expect(() => validatePackagedAudioExecutable({
+      tool: "ffmpeg", candidate: path.join(parent, "missing.exe"), packageRoot: parent,
+    })).toThrow("OUTBOUND_AUDIO_RUNTIME_MISSING_FFMPEG");
+    expect(() => validatePackagedAudioExecutable({
+      tool: "ffprobe", candidate: path.join(parent, "..", "escape.exe"), packageRoot: parent,
+    })).toThrow("OUTBOUND_AUDIO_RUNTIME_INVALID_FFPROBE_PATH");
+  });
+
   it("executes the exact safe FFmpeg timeline-rebuild strategy and returns OGG/Opus metadata", async () => {
     const parent = await temporaryParent();
     const inspect = vi.fn((file: string, args: string[], options: any) => {
