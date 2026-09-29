@@ -1566,6 +1566,40 @@ function Set-MegaDeskOperationMainMigrationBackup {
   }
 }
 
+function Assert-MegaDeskBackupMetadataContract {
+  param(
+    [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$MetadataOutputs,
+    [Parameter(Mandatory = $true)][string]$ExpectedDatabase
+  )
+  if ([string]::IsNullOrWhiteSpace($ExpectedDatabase)) { throw 'Contrato de metadata do backup exige ExpectedDatabase explicito.' }
+  if ($MetadataOutputs.Count -ne 1) {
+    throw ('Backup MAIN produziu {0} objetos de metadata; esperado exatamente 1.' -f $MetadataOutputs.Count)
+  }
+
+  $backup = $MetadataOutputs[0]
+  if ($null -eq $backup) { throw 'Metadata do backup MAIN ausente antes do setter.' }
+  foreach ($property in @('id', 'createdAt', 'database', 'sizeBytes', 'sha256')) {
+    if (-not ($backup.PSObject.Properties.Name -contains $property)) { throw "Metadata do backup MAIN sem $property antes do setter." }
+  }
+  if ([string]::IsNullOrWhiteSpace([string]$backup.id)) { throw 'Metadata do backup MAIN com id vazio antes do setter.' }
+  if ([string]::IsNullOrWhiteSpace([string]$backup.createdAt)) { throw 'Metadata do backup MAIN com createdAt vazio antes do setter.' }
+  try {
+    $null = [DateTimeOffset]::Parse([string]$backup.createdAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+  } catch {
+    throw 'Metadata do backup MAIN com createdAt invalido antes do setter.'
+  }
+  if ([string]::IsNullOrWhiteSpace([string]$backup.database)) { throw 'Metadata do backup MAIN com database vazio antes do setter.' }
+  try {
+    $backupSize = [int64]$backup.sizeBytes
+  } catch {
+    throw 'Metadata do backup MAIN invalida antes do setter.'
+  }
+  if ([string]$backup.database -cne $ExpectedDatabase -or $backupSize -le 0 -or [string]$backup.sha256 -notmatch '^[0-9a-f]{64}$') {
+    throw 'Metadata do backup MAIN invalida antes do setter.'
+  }
+  return $backup
+}
+
 function Invoke-MegaDeskMainMigrationPipeline {
   param(
     [Parameter(Mandatory = $true)][string]$FromSha,
@@ -1590,23 +1624,7 @@ function Invoke-MegaDeskMainMigrationPipeline {
   if ([string]$resolvedTarget.mode -ceq 'PRODUCTION' -and $DisposableRehearsal) { throw 'Rehearsal descartavel nao pode usar identidade MAIN.' }
   if ([string]$resolvedTarget.mode -ceq 'PRODUCTION' -and [string]::IsNullOrWhiteSpace([string]$resolvedTarget.environmentPath)) { throw 'Pipeline MAIN exige configuracao runtime verificada.' }
   $backupOutputs = @(New-MegaDeskMainMigrationBackup -Target $resolvedTarget)
-  if ($backupOutputs.Count -ne 1) {
-    throw ('Backup MAIN produziu {0} objetos de metadata; esperado exatamente 1.' -f $backupOutputs.Count)
-  }
-  $backup = $backupOutputs[0]
-  if ($null -eq $backup) { throw 'Metadata do backup MAIN ausente antes do setter.' }
-  foreach ($property in @('id', 'createdAt', 'database', 'sizeBytes', 'sha256')) {
-    if (-not ($backup.PSObject.Properties.Name -contains $property)) { throw "Metadata do backup MAIN sem $property antes do setter." }
-  }
-  if ([string]::IsNullOrWhiteSpace([string]$backup.id)) { throw 'Metadata do backup MAIN com id vazio antes do setter.' }
-  try {
-    $backupSize = [int64]$backup.sizeBytes
-  } catch {
-    throw 'Metadata do backup MAIN invalida antes do setter.'
-  }
-  if ([string]$backup.database -cne 'megadesk_local' -or $backupSize -le 0 -or [string]$backup.sha256 -notmatch '^[0-9a-f]{64}$') {
-    throw 'Metadata do backup MAIN invalida antes do setter.'
-  }
+  $backup = Assert-MegaDeskBackupMetadataContract -MetadataOutputs $backupOutputs -ExpectedDatabase ([string]$resolvedTarget.database)
   if ([string]$resolvedTarget.mode -ceq 'PRODUCTION') {
     $current = Get-MegaDeskState
     if ($null -eq $current.operation -or [string]$current.operation.status -ne 'PREPARING') { throw 'Backup MAIN criado fora de uma preparacao valida; migrations recusadas.' }

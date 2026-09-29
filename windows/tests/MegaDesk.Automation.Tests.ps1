@@ -6147,6 +6147,38 @@ Describe 'MegaDesk MAIN backup metadata boundary' {
     }
   }
 
+  It 'blocks MAIN metadata for a different database before the setter and APPLY' {
+    InModuleScope $moduleName {
+      $mismatch = [pscustomobject]@{ id = 'main-wrong-database.sql'; createdAt = '2026-09-20T00:00:00.000Z'; database = 'megadesk_test_wrong'; sizeBytes = [int64]42; sha256 = ('a' * 64) }
+      Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'PENDING'; pending = @($global:MegaDeskBackupContractPending); journal = $null } }
+      Mock New-MegaDeskMainMigrationBackup { $mismatch }
+      Mock Set-MegaDeskOperationMainMigrationBackup { throw 'setter must not run' }
+      Mock Invoke-MegaDeskCanonicalMainMigrationCommand { throw 'APPLY must not run' }
+
+      { Invoke-MegaDeskMainMigrationPipeline -FromSha ('a' * 40) -ToSha ('b' * 40) -Target $global:MegaDeskBackupContractTarget } | Should Throw 'invalida antes do setter'
+      Assert-MockCalled Set-MegaDeskOperationMainMigrationBackup -Times 0 -Exactly -Scope It
+      Assert-MockCalled Invoke-MegaDeskCanonicalMainMigrationCommand -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'rejects missing or malformed structural metadata fail-closed' {
+    InModuleScope $moduleName {
+      $cases = @(
+        [pscustomobject]@{ metadata = [pscustomobject]@{ createdAt = '2026-09-20T00:00:00.000Z'; database = 'megadesk_local'; sizeBytes = [int64]42; sha256 = ('a' * 64) } },
+        [pscustomobject]@{ metadata = [pscustomobject]@{ id = ' '; createdAt = '2026-09-20T00:00:00.000Z'; database = 'megadesk_local'; sizeBytes = [int64]42; sha256 = ('a' * 64) } },
+        [pscustomobject]@{ metadata = [pscustomobject]@{ id = 'missing-created.sql'; database = 'megadesk_local'; sizeBytes = [int64]42; sha256 = ('a' * 64) } },
+        [pscustomobject]@{ metadata = [pscustomobject]@{ id = 'bad-created.sql'; createdAt = 'not-a-timestamp'; database = 'megadesk_local'; sizeBytes = [int64]42; sha256 = ('a' * 64) } },
+        [pscustomobject]@{ metadata = [pscustomobject]@{ id = 'missing-database.sql'; createdAt = '2026-09-20T00:00:00.000Z'; sizeBytes = [int64]42; sha256 = ('a' * 64) } },
+        [pscustomobject]@{ metadata = [pscustomobject]@{ id = 'bad-size.sql'; createdAt = '2026-09-20T00:00:00.000Z'; database = 'megadesk_local'; sizeBytes = [int64]0; sha256 = ('a' * 64) } },
+        [pscustomobject]@{ metadata = [pscustomobject]@{ id = 'bad-sha.sql'; createdAt = '2026-09-20T00:00:00.000Z'; database = 'megadesk_local'; sizeBytes = [int64]42; sha256 = 'not-a-sha' } }
+      )
+      foreach ($case in $cases) {
+        { Assert-MegaDeskBackupMetadataContract -MetadataOutputs @($case.metadata) -ExpectedDatabase 'megadesk_local' } | Should Throw
+      }
+      { Assert-MegaDeskBackupMetadataContract -MetadataOutputs @($global:MegaDeskBackupContractMetadata) -ExpectedDatabase '' } | Should Throw
+    }
+  }
+
   It 'blocks zero producer outputs before the setter and APPLY' {
     InModuleScope $moduleName {
       Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'PENDING'; pending = @($global:MegaDeskBackupContractPending); journal = $null } }
@@ -6260,10 +6292,40 @@ Describe 'MegaDesk disposable MAIN migration target isolation' {
       $script:plans = 0; $script:backupTarget = $null; $script:migrationTarget = $null
       Mock Get-MegaDeskPendingCanonicalMainMigrations { $script:plans++; if ($script:plans -eq 1) { [pscustomobject]@{ status = 'PENDING'; pending = @([pscustomobject]@{ tag = '0031_fixture' }); journal = $null } } else { [pscustomobject]@{ status = 'NONE'; pending = @(); journal = $null } } }
       Mock New-MegaDeskMainMigrationBackup { param($Target) $script:backupTarget = $Target; [pscustomobject]@{ id = 'fixture.sql'; createdAt = '2026-09-20T00:00:00Z'; database = 'megadesk_test_updater_0031'; container = 'megadesk-updater-0031-rehearsal'; sizeBytes = [int64]1; sha256 = ('a' * 64) } }
+      Mock Set-MegaDeskOperationMainMigrationBackup { throw 'disposable rehearsal must not persist MAIN metadata' }
       Mock Invoke-MegaDeskCanonicalMainMigrationCommand { param($Mode, $Target) if ($Mode -eq 'APPLY') { $script:migrationTarget = $Target } }
       (Invoke-MegaDeskDisposableMigrationRehearsal -FromSha ('a' * 40) -ToSha ('b' * 40) -Target $target).status | Should Be 'READY'
       $script:backupTarget | Should Be $target
       $script:migrationTarget | Should Be $target
+      Assert-MockCalled Set-MegaDeskOperationMainMigrationBackup -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'blocks disposable metadata for another disposable database before APPLY' {
+    InModuleScope $moduleName {
+      $target = New-MegaDeskDisposableMainMigrationTarget -DisposableOptIn -Container 'megadesk-updater-0031-rehearsal' -Database 'megadesk_test_updater_0031' -DatabaseUrl $global:MegaDeskDisposableUrl -BackupDirectory $global:MegaDeskDisposableBackupRoot
+      Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'PENDING'; pending = @([pscustomobject]@{ tag = '0031_fixture' }); journal = $null } }
+      Mock New-MegaDeskMainMigrationBackup { [pscustomobject]@{ id = 'wrong-target.sql'; createdAt = '2026-09-20T00:00:00Z'; database = 'megadesk_test_other'; sizeBytes = [int64]1; sha256 = ('a' * 64) } }
+      Mock Set-MegaDeskOperationMainMigrationBackup { throw 'setter must not run' }
+      Mock Invoke-MegaDeskCanonicalMainMigrationCommand { throw 'APPLY must not run' }
+
+      { Invoke-MegaDeskDisposableMigrationRehearsal -FromSha ('a' * 40) -ToSha ('b' * 40) -Target $target } | Should Throw 'invalida antes do setter'
+      Assert-MockCalled Set-MegaDeskOperationMainMigrationBackup -Times 0 -Exactly -Scope It
+      Assert-MockCalled Invoke-MegaDeskCanonicalMainMigrationCommand -Times 0 -Exactly -Scope It
+    }
+  }
+
+  It 'blocks disposable metadata that falsely identifies MAIN before APPLY' {
+    InModuleScope $moduleName {
+      $target = New-MegaDeskDisposableMainMigrationTarget -DisposableOptIn -Container 'megadesk-updater-0031-rehearsal' -Database 'megadesk_test_updater_0031' -DatabaseUrl $global:MegaDeskDisposableUrl -BackupDirectory $global:MegaDeskDisposableBackupRoot
+      Mock Get-MegaDeskPendingCanonicalMainMigrations { [pscustomobject]@{ status = 'PENDING'; pending = @([pscustomobject]@{ tag = '0031_fixture' }); journal = $null } }
+      Mock New-MegaDeskMainMigrationBackup { [pscustomobject]@{ id = 'false-main.sql'; createdAt = '2026-09-20T00:00:00Z'; database = 'megadesk_local'; sizeBytes = [int64]1; sha256 = ('a' * 64) } }
+      Mock Set-MegaDeskOperationMainMigrationBackup { throw 'setter must not run' }
+      Mock Invoke-MegaDeskCanonicalMainMigrationCommand { throw 'APPLY must not run' }
+
+      { Invoke-MegaDeskDisposableMigrationRehearsal -FromSha ('a' * 40) -ToSha ('b' * 40) -Target $target } | Should Throw 'invalida antes do setter'
+      Assert-MockCalled Set-MegaDeskOperationMainMigrationBackup -Times 0 -Exactly -Scope It
+      Assert-MockCalled Invoke-MegaDeskCanonicalMainMigrationCommand -Times 0 -Exactly -Scope It
     }
   }
 
