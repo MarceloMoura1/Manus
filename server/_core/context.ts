@@ -79,7 +79,7 @@ export async function createContext(
 
   // 3. Fallback: Create test user ONLY if explicitly requested via header
   // This prevents accidentally creating non-admin users when auth fails
-  if (!user && opts.req.headers?.['x-allow-test-user'] === 'true') {
+  if (!user && process.env.NODE_ENV === "test" && opts.req.headers?.['x-allow-test-user'] === 'true') {
     user = {
       id: 1,
       openId: 'test-user-dev',

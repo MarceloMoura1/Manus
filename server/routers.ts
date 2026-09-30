@@ -44,6 +44,8 @@ import { findConversationContactByPhone, searchLightweightContactsForAttendance 
 import { conversationAttachmentSendInput } from "./conversation-attachment-contract";
 import { ConversationReplyResolutionError, resolveConversationReplyReference } from "./conversation-reply-resolution";
 import { sanitizeMegaAdminUser } from "./megaadmin-response-sanitization";
+import { emitOperationalTenantEventAsync } from "./modules/whatsapp/socket/whatsapp.socket";
+import { classifyAssistantFailure } from "./assistant-error";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -111,6 +113,14 @@ type Conversation = {
   lastMessageFrom?: "customer" | "agent" | "bot";
   createdAt?: string;
 };
+
+export function findTenantConversationSnapshot<T extends { id: string; clientId: string }>(
+  snapshots: readonly T[],
+  tenantId: string,
+  conversationId: string,
+): T | undefined {
+  return snapshots.find(snapshot => snapshot.id === conversationId && snapshot.clientId === tenantId);
+}
 
 type TicketRecord = {
   id: string;
@@ -360,6 +370,22 @@ function assertClientUserPermission(client: MegaClient, permission: string, user
     throw new TRPCError({ code: "FORBIDDEN", message: `Usuário ${user.email} não possui a permissão ${permission}.` });
   }
   return user;
+}
+
+function sessionBoundAssistantUserId(requestedUserId: string, sessionUserEmail: string | undefined): string {
+  const expected = sessionUserEmail?.trim().toLowerCase();
+  if (!expected || requestedUserId.trim().toLowerCase() !== expected) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Identidade de usuário inválida." });
+  }
+  return expected;
+}
+
+async function emitConversationEventBestEffort(clientId: string, event: string, payload: unknown): Promise<void> {
+  try {
+    await emitOperationalTenantEventAsync(clientId, event, payload);
+  } catch {
+    console.error("[Conversation Realtime] Falha ao entregar evento.", { event });
+  }
 }
 
 export function sanitizeClient(client: MegaClient) {
@@ -1606,7 +1632,7 @@ export const appRouter = router({
             company: input.company,
           });
           
-          const conversation = conversations.find(c => c.id === input.customerId);
+          const conversation = findTenantConversationSnapshot(conversations, ctx.tenantId, input.customerId);
           if (conversation) {
             if (input.name) conversation.name = input.name;
             if (input.company) conversation.company = input.company;
@@ -1727,19 +1753,37 @@ export const appRouter = router({
         platform: z.enum(["megaadmin", "megadesk"]).optional(),
         url: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
+        const authenticatedPlatform = ctx.user?.role === "admin"
+          ? "megaadmin" as const
+          : ctx.tenantId && ctx.operationalUserId
+            ? "megadesk" as const
+            : null;
+        if (!authenticatedPlatform) {
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "Autenticação necessária para usar o assistente." });
+        }
+        if (input.platform && input.platform !== authenticatedPlatform) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Contexto do assistente inválido." });
+        }
         const { generateAIResponse, getSystemPromptForPlatform, detectPlatformFromContext } = await import("./_core/gemini");
         
-        const platform = input.platform || (input.url ? await detectPlatformFromContext(input.url) : "megadesk");
+        const platform = input.url
+          ? await detectPlatformFromContext(input.url)
+          : authenticatedPlatform;
+        if (platform !== authenticatedPlatform) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Contexto do assistente inválido." });
+        }
         const systemPrompt = getSystemPromptForPlatform(platform);
         
         try {
           const response = await generateAIResponse(input.messages, systemPrompt);
           return { ok: true, response, platform };
         } catch (error) {
+          const failure = classifyAssistantFailure(error);
+          console.error("[Assistant] Provider request failed.", { platform, errorClass: failure.errorClass });
           throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: `Erro ao gerar resposta IA: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
+            code: failure.code,
+            message: failure.message,
           });
         }
       }),
@@ -1751,20 +1795,22 @@ export const appRouter = router({
         userId: z.string().min(1),
         message: z.string().min(1).max(4000),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const { chatWithClientGemini, loadConversationHistory } = await import("./gemini-client");
-        const history = await loadConversationHistory(input.clientId, input.userId);
+        const userId = sessionBoundAssistantUserId(input.userId, ctx.userEmail);
+        const history = await loadConversationHistory(ctx.tenantId, userId);
         try {
           const result = await chatWithClientGemini(
-            input.clientId,
-            input.userId,
+            ctx.tenantId,
+            userId,
             input.message,
             history
           );
           return result;
         } catch (error) {
-          const msg = error instanceof Error ? error.message : "Erro desconhecido";
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: msg });
+          const failure = classifyAssistantFailure(error);
+          console.error("[Assistant] Tenant provider request failed.", { errorClass: failure.errorClass });
+          throw new TRPCError({ code: failure.code, message: failure.message });
         }
       }),
 
@@ -1774,9 +1820,10 @@ export const appRouter = router({
         clientId: z.string().min(1),
         userId: z.string().min(1),
       }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
         const { loadConversationHistory } = await import("./gemini-client");
-        const history = await loadConversationHistory(input.clientId, input.userId);
+        const userId = sessionBoundAssistantUserId(input.userId, ctx.userEmail);
+        const history = await loadConversationHistory(ctx.tenantId, userId);
         return { ok: true, history };
       }),
 
@@ -1786,11 +1833,12 @@ export const appRouter = router({
         clientId: z.string().min(1),
         userId: z.string().min(1),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
+        const userId = sessionBoundAssistantUserId(input.userId, ctx.userEmail);
         const pool = getPool();
         await pool.execute(
           "DELETE FROM megadesk_domain_ia_conversation_history WHERE client_id = ? AND user_id = ?",
-          [input.clientId, input.userId]
+          [ctx.tenantId, userId]
         );
         return { ok: true };
       }),
@@ -2008,11 +2056,7 @@ export const appRouter = router({
         // Também atualizar array em memória se existir
         const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === ctx.tenantId);
         if (conv) conv.status = "closed";
-        try {
-          const { getSocketIO } = require("../modules/whatsapp/socket/whatsapp.socket");
-          const io = getSocketIO();
-          if (io) io.to(`client:${ctx.tenantId}`).emit("conversation:closed", { conversationId: input.conversationId, clientId: ctx.tenantId });
-        } catch {}
+        await emitConversationEventBestEffort(ctx.tenantId, "conversation:closed", { conversationId: input.conversationId, clientId: ctx.tenantId });
         return { ok: true };
       }),
     assign: megadeskProcedure
@@ -2027,11 +2071,7 @@ export const appRouter = router({
         // Também atualizar array em memória se existir
         const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === ctx.tenantId);
         if (conv) { conv.assignedUserId = input.userId; conv.assignedUserName = input.userName; }
-        try {
-          const { getSocketIO } = require("../modules/whatsapp/socket/whatsapp.socket");
-          const io = getSocketIO();
-          if (io) io.to(`client:${ctx.tenantId}`).emit("conversation:assigned", { conversationId: input.conversationId, assignedUserId: input.userId, assignedUserName: input.userName, clientId: ctx.tenantId });
-        } catch {}
+        await emitConversationEventBestEffort(ctx.tenantId, "conversation:assigned", { conversationId: input.conversationId, assignedUserId: input.userId, assignedUserName: input.userName, clientId: ctx.tenantId });
         return { ok: true };
       }),
     reopen: megadeskProcedure
@@ -2042,19 +2082,16 @@ export const appRouter = router({
         // Também atualizar array em memória se existir
         const conv = conversations.find((c) => c.id === input.conversationId && c.clientId === ctx.tenantId);
         if (conv) conv.status = "open";
-        try {
-          const { getSocketIO } = require("../modules/whatsapp/socket/whatsapp.socket");
-          const io = getSocketIO();
-          if (io) io.to(`client:${ctx.tenantId}`).emit("conversation:reopened", { conversationId: input.conversationId, clientId: ctx.tenantId });
-        } catch {}
+        await emitConversationEventBestEffort(ctx.tenantId, "conversation:reopened", { conversationId: input.conversationId, clientId: ctx.tenantId });
         return { ok: true };
       }),
   }),
   users: router({
-    list: publicProcedure
+    list: megadeskProcedure
       .input(z.object({ clientId: z.string() }))
-      .query(({ input }) => {
-        const client = clients.find((c) => c.clientId === input.clientId);
+      .query(async ({ ctx }) => {
+        await hydrateSyncState();
+        const client = clients.find((c) => c.clientId === ctx.tenantId);
         if (!client) return [];
         return client.users.map((u) => ({
           id: u.id,

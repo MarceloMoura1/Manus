@@ -24,6 +24,8 @@ import { emitNewMessage, emitConversationUpdated } from "../socket/whatsapp.sock
 import { updateConversationLastMessage } from "../repositories/conversation.repo";
 import type { SendTextMessageInput, SendMediaMessageInput, SendTemplateMessageInput } from "../types";
 import { TRPCError } from "@trpc/server";
+import { logWhatsAppProviderFailure, whatsappProviderDiagnostic, whatsappProviderPersistedError,
+  whatsappProviderPublicMessage } from "../provider-error";
 
 // ─── Envio de Texto ────────────────────────────────────────────────────────────
 
@@ -68,8 +70,10 @@ export async function sendText(input: SendTextMessageInput) {
 
     return { success: true, messageId: message.id, waMessageId };
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : "Erro desconhecido";
-    await markMessageFailed(input.clientId, message.id, errMsg);
+    const diagnostic = whatsappProviderDiagnostic(err, "send_text", "provider_request");
+    logWhatsAppProviderFailure("[WA Message] Sanitized text send failure.", diagnostic);
+    const errMsg = whatsappProviderPublicMessage(diagnostic);
+    await markMessageFailed(input.clientId, message.id, whatsappProviderPersistedError(diagnostic));
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Falha ao enviar mensagem: ${errMsg}` });
   }
 }
@@ -127,8 +131,10 @@ export async function sendMedia(input: SendMediaMessageInput & { conversationId:
 
     return { success: true, messageId: message.id, waMessageId };
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : "Erro desconhecido";
-    await markMessageFailed(input.clientId, message.id, errMsg);
+    const diagnostic = whatsappProviderDiagnostic(err, "send_media", "provider_request");
+    logWhatsAppProviderFailure("[WA Message] Sanitized media send failure.", diagnostic);
+    const errMsg = whatsappProviderPublicMessage(diagnostic);
+    await markMessageFailed(input.clientId, message.id, whatsappProviderPersistedError(diagnostic));
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Falha ao enviar mídia: ${errMsg}` });
   }
 }
@@ -169,8 +175,10 @@ export async function sendTemplate(input: SendTemplateMessageInput & { conversat
 
     return { success: true, messageId: message.id, waMessageId };
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : "Erro desconhecido";
-    await markMessageFailed(input.clientId, message.id, errMsg);
+    const diagnostic = whatsappProviderDiagnostic(err, "send_template", "provider_request");
+    logWhatsAppProviderFailure("[WA Message] Sanitized template send failure.", diagnostic);
+    const errMsg = whatsappProviderPublicMessage(diagnostic);
+    await markMessageFailed(input.clientId, message.id, whatsappProviderPersistedError(diagnostic));
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Falha ao enviar template: ${errMsg}` });
   }
 }

@@ -4,7 +4,7 @@
  * Integrado ao router principal em server/routers.ts
  */
 import { z } from "zod";
-import { router, megadeskProcedure } from "../../_core/trpc";
+import { router, megadeskAdminProcedure, megadeskProcedure } from "../../_core/trpc";
 import {
   listConversationsSchema,
   getConversationSchema,
@@ -30,7 +30,7 @@ export const whatsappRouter = router({
    * Conectar uma nova conta WhatsApp Business.
    * Verifica o token com a Meta API antes de salvar.
    */
-  connectAccount: megadeskProcedure
+  connectAccount: megadeskAdminProcedure
     .input(createWaAccountSchema)
     .mutation(async ({ input }) => {
       return connectAccount(input);
@@ -39,7 +39,7 @@ export const whatsappRouter = router({
   /**
    * Listar todas as contas WhatsApp do tenant.
    */
-  listAccounts: megadeskProcedure
+  listAccounts: megadeskAdminProcedure
     .input(z.object({ clientId: z.string() }))
     .query(async ({ input }) => {
       return listAccounts(input.clientId);
@@ -48,7 +48,7 @@ export const whatsappRouter = router({
   /**
    * Obter detalhes de uma conta (sem expor o token completo).
    */
-  getAccount: megadeskProcedure
+  getAccount: megadeskAdminProcedure
     .input(z.object({ clientId: z.string(), accountId: z.string() }))
     .query(async ({ input }) => {
       return getAccount(input.clientId, input.accountId);
@@ -57,7 +57,7 @@ export const whatsappRouter = router({
   /**
    * Atualizar nome ou token de uma conta.
    */
-  updateAccount: megadeskProcedure
+  updateAccount: megadeskAdminProcedure
     .input(updateWaAccountSchema)
     .mutation(async ({ input }) => {
       return updateAccount(input.clientId, input.accountId, {
@@ -69,7 +69,7 @@ export const whatsappRouter = router({
   /**
    * Desconectar (inativar) uma conta sem remover do banco.
    */
-  disconnectAccount: megadeskProcedure
+  disconnectAccount: megadeskAdminProcedure
     .input(z.object({ clientId: z.string(), accountId: z.string() }))
     .mutation(async ({ input }) => {
       return disconnectAccount(input.clientId, input.accountId);
@@ -78,7 +78,7 @@ export const whatsappRouter = router({
   /**
    * Remover permanentemente uma conta.
    */
-  removeAccount: megadeskProcedure
+  removeAccount: megadeskAdminProcedure
     .input(deleteWaAccountSchema)
     .mutation(async ({ input }) => {
       return removeAccount(input.clientId, input.accountId);

@@ -70,16 +70,53 @@ describe("Company/WhatsApp operational lifecycle guard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     companyDb.getCompanySettings.mockResolvedValue({ clientId: "tenant-a" });
-    whatsappDb.getWhatsappConfig.mockResolvedValue({ clientId: "tenant-a", accessToken: "synthetic-token" });
+    whatsappDb.getWhatsappConfig.mockResolvedValue({
+      clientId: "tenant-a",
+      accessToken: "synthetic-token",
+      webhookVerifyToken: "synthetic-webhook-secret",
+    });
   });
 
   it("allows the active and released tenant admin in Company and WhatsApp", async () => {
     await expect(companyRouter.createCaller(context()).getSettings({ clientId: "tenant-a" }))
       .resolves.toMatchObject({ clientId: "tenant-a" });
-    await expect(whatsappRouter.createCaller(context()).getConfig({ clientId: "tenant-a" }))
-      .resolves.toMatchObject({ clientId: "tenant-a" });
+    const whatsapp = await whatsappRouter.createCaller(context()).getConfig({ clientId: "tenant-a" });
+    expect(whatsapp).toMatchObject({
+      clientId: "tenant-a",
+      accessTokenConfigured: true,
+      webhookVerifyTokenConfigured: true,
+    });
+    expect(whatsapp).not.toHaveProperty("accessToken");
+    expect(whatsapp).not.toHaveProperty("webhookVerifyToken");
+    expect(JSON.stringify(whatsapp)).not.toContain("synthetic-token");
+    expect(JSON.stringify(whatsapp)).not.toContain("synthetic-webhook-secret");
     expect(companyDb.getCompanySettings).toHaveBeenCalledWith("tenant-a");
     expect(whatsappDb.getWhatsappConfig).toHaveBeenCalledWith("tenant-a");
+  });
+
+  it("preserves stored WhatsApp secrets on metadata-only updates without returning them", async () => {
+    whatsappDb.saveWhatsappConfig.mockResolvedValue({
+      clientId: "tenant-a",
+      accessToken: "synthetic-token",
+      webhookVerifyToken: "synthetic-webhook-secret",
+      phoneNumberId: "phone-new",
+    });
+
+    const result = await whatsappRouter.createCaller(context()).saveConfig({
+      clientId: "tenant-a",
+      phoneNumberId: "phone-new",
+      businessAccountId: "business-a",
+      phoneNumber: "5511000000000",
+    });
+
+    expect(whatsappDb.saveWhatsappConfig).toHaveBeenCalledWith("tenant-a", expect.objectContaining({
+      accessToken: "synthetic-token",
+      webhookVerifyToken: "synthetic-webhook-secret",
+    }));
+    expect(result.config).not.toHaveProperty("accessToken");
+    expect(result.config).not.toHaveProperty("webhookVerifyToken");
+    expect(JSON.stringify(result)).not.toContain("synthetic-token");
+    expect(JSON.stringify(result)).not.toContain("synthetic-webhook-secret");
   });
 
   it.each([

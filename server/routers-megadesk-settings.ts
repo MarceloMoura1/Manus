@@ -52,8 +52,8 @@ export const megadeskSettingsRouter = router({
         userRole: z.string(),
       })
     )
-    .query(async ({ input }) => {
-      requireClientAdmin(input.userRole);
+    .query(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
       
       // Buscar dados sincronizados do cliente (sempre puxar dados mais recentes)
       const syncedData = await getSyncedClientData(input.clientId);
@@ -110,8 +110,8 @@ export const megadeskSettingsRouter = router({
         businessHours: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
-      requireClientAdmin(input.userRole);
+    .mutation(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
       const pool = getPool();
 
       // Verificar se já existe
@@ -175,8 +175,8 @@ export const megadeskSettingsRouter = router({
    */
   listTicketStatuses: megadeskProcedure
     .input(z.object({ clientId: z.string().min(1), userRole: z.string() }))
-    .query(async ({ input }) => {
-      requireClientAdmin(input.userRole);
+    .query(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
       const pool = getPool();
       const [rows] = await pool.execute(
         "SELECT * FROM megadesk_ticket_statuses WHERE client_id = ? ORDER BY `order` ASC",
@@ -205,8 +205,8 @@ export const megadeskSettingsRouter = router({
         order: z.number().int().optional().default(0),
       })
     )
-    .mutation(async ({ input }) => {
-      requireClientAdmin(input.userRole);
+    .mutation(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
       const pool = getPool();
       const statusId = randomUUID();
       await pool.execute(
@@ -230,8 +230,8 @@ export const megadeskSettingsRouter = router({
         order: z.number().int().optional(),
       })
     )
-    .mutation(async ({ input }) => {
-      requireClientAdmin(input.userRole);
+    .mutation(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
       const pool = getPool();
       const updates: string[] = [];
       const values: any[] = [];
@@ -258,8 +258,8 @@ export const megadeskSettingsRouter = router({
         statusId: z.string().min(1),
       })
     )
-    .mutation(async ({ input }) => {
-      requireClientAdmin(input.userRole);
+    .mutation(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
       const pool = getPool();
       await pool.execute(
         "DELETE FROM megadesk_ticket_statuses WHERE status_id = ? AND client_id = ?",
@@ -282,8 +282,8 @@ export const megadeskSettingsRouter = router({
         userRole: z.string(),
       })
     )
-    .query(async ({ input }) => {
-      requireClientAdmin(input.userRole);
+    .query(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
       const { getSyncedClientData, validateSyncIntegrity } = await import('./sync-megadesk');
       const integrity = await validateSyncIntegrity(input.clientId);
       if (!integrity.isSynced) {
@@ -308,8 +308,8 @@ export const megadeskSettingsRouter = router({
         permissions: z.array(z.string()).optional(),
       })
     )
-    .mutation(async ({ input }) => {
-      requireClientAdmin(input.userRole);
+    .mutation(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
       const pool = getPool();
 
       // Verificar limite de usuários do cliente
@@ -377,8 +377,8 @@ export const megadeskSettingsRouter = router({
         targetUserId: z.string().min(1),
       })
     )
-    .mutation(async ({ input }) => {
-      requireClientAdmin(input.userRole);
+    .mutation(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
       const pool = getPool();
 
       // Verificar que o usuário pertence ao cliente
@@ -413,8 +413,8 @@ export const megadeskSettingsRouter = router({
         status: z.enum(["active", "blocked"]).optional(),
       })
     )
-    .mutation(async ({ input }) => {
-      requireClientAdmin(input.userRole);
+    .mutation(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
       const pool = getPool();
 
       // Verificar que o usuário pertence ao cliente
@@ -454,8 +454,8 @@ export const megadeskSettingsRouter = router({
         newPassword: z.string().min(6),
       })
     )
-    .mutation(async ({ input }) => {
-      requireClientAdmin(input.userRole);
+    .mutation(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
       const pool = getPool();
 
       // Verificar que o usuário pertence ao cliente
@@ -481,8 +481,8 @@ export const megadeskSettingsRouter = router({
    */
   getClientInfo: megadeskProcedure
     .input(z.object({ clientId: z.string().min(1), userRole: z.string() }))
-    .query(async ({ input }) => {
-      requireClientAdmin(input.userRole);
+    .query(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
       const pool = getPool();
       const [rows] = await pool.execute(
         "SELECT company, max_users, plan FROM megadesk_domain_clients WHERE client_id = ?",
@@ -511,8 +511,8 @@ export const megadeskSettingsRouter = router({
         includeBotScripts: z.boolean().default(true),
       })
     )
-    .mutation(async ({ input }) => {
-      requireClientAdmin(input.userRole);
+    .mutation(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
       const pool = getPool();
       const exportData: Record<string, any> = {
         exportedAt: new Date().toISOString(),
@@ -560,8 +560,8 @@ export const megadeskSettingsRouter = router({
    */
   getDataStats: megadeskProcedure
     .input(z.object({ clientId: z.string().min(1), userRole: z.string() }))
-    .query(async ({ input }) => {
-      requireClientAdmin(input.userRole);
+    .query(async ({ input, ctx }) => {
+      requireClientAdmin(ctx.operationalUserRole);
       const pool = getPool();
 
       const queries = [

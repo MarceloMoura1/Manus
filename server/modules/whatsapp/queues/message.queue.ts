@@ -9,6 +9,8 @@
  * 3. Mover workers para arquivos separados
  */
 
+import { logWhatsAppProviderFailure, whatsappProviderDiagnostic } from "../provider-error";
+
 export type QueueJobType = "send_message" | "process_webhook" | "sync_status";
 
 export interface QueueJob<T = unknown> {
@@ -92,7 +94,8 @@ class InMemoryQueue {
       try {
         await handler(job);
       } catch (err) {
-        console.error(`[WA Queue] Job ${job.id} falhou (tentativa ${job.attempts}/${job.maxAttempts}):`, err);
+        logWhatsAppProviderFailure("[WA Queue] Sanitized job failure.",
+          whatsappProviderDiagnostic(err, job.type, "queue_handler"));
 
         if (job.attempts < job.maxAttempts) {
           // Retry com backoff exponencial

@@ -67,7 +67,7 @@ export function AdminSettingsPage({ clientId }: AdminSettingsPageProps) {
     phoneNumberId: whatsappConfig?.phoneNumberId ?? "",
     businessAccountId: whatsappConfig?.businessAccountId ?? "",
     accessToken: "",
-    webhookVerifyToken: whatsappConfig?.webhookVerifyToken ?? "",
+    webhookVerifyToken: "",
     phoneNumber: whatsappConfig?.phoneNumber ?? "",
     webhookUrl: (whatsappConfig as any)?.webhookUrl ?? "",
   });
@@ -79,7 +79,7 @@ export function AdminSettingsPage({ clientId }: AdminSettingsPageProps) {
         ...prev,
         phoneNumberId: whatsappConfig.phoneNumberId ?? "",
         businessAccountId: whatsappConfig.businessAccountId ?? "",
-        webhookVerifyToken: whatsappConfig.webhookVerifyToken ?? "",
+        webhookVerifyToken: "",
         phoneNumber: whatsappConfig.phoneNumber ?? "",
         webhookUrl: (whatsappConfig as any).webhookUrl ?? "",
       }));
@@ -121,8 +121,8 @@ export function AdminSettingsPage({ clientId }: AdminSettingsPageProps) {
         clientId,
         phoneNumberId: formData.phoneNumberId,
         businessAccountId: formData.businessAccountId,
-        accessToken: formData.accessToken || whatsappConfig?.accessToken || "",
-        webhookVerifyToken: formData.webhookVerifyToken,
+        accessToken: formData.accessToken || undefined,
+        webhookVerifyToken: formData.webhookVerifyToken || undefined,
         phoneNumber: formData.phoneNumber,
         webhookUrl: formData.webhookUrl,
       });
@@ -235,12 +235,12 @@ export function AdminSettingsPage({ clientId }: AdminSettingsPageProps) {
 
                       {/* Status de Credenciais */}
                       <div className={`p-4 rounded-lg border-2 transition ${
-                        whatsappConfig?.accessToken
+                        whatsappConfig?.accessTokenConfigured
                           ? 'bg-purple-50 border-purple-300'
                           : 'bg-gray-50 border-gray-300'
                       }`}>
                         <div className="flex items-center gap-2 mb-2">
-                          {whatsappConfig?.accessToken ? (
+                          {whatsappConfig?.accessTokenConfigured ? (
                             <>
                               <Check className="w-4 h-4 text-purple-600" />
                               <span className="font-semibold text-purple-900">Credenciais OK</span>
@@ -253,7 +253,7 @@ export function AdminSettingsPage({ clientId }: AdminSettingsPageProps) {
                           )}
                         </div>
                         <p className="text-xs text-slate-600">
-                          {whatsappConfig?.accessToken ? 'Token configurado' : 'Adicione um token'}
+                          {whatsappConfig?.accessTokenConfigured ? 'Token configurado' : 'Adicione um token'}
                         </p>
                       </div>
                     </div>

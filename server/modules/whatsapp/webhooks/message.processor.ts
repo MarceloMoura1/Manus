@@ -7,6 +7,7 @@ import { findOrCreateConversation, updateConversationLastMessage } from "../repo
 import { createMessage, updateMessageStatus, getMessageByWaId } from "../repositories/message.repo";
 import { getMediaUrl } from "../meta/graph-api";
 import { emitNewMessage, emitMessageStatus, emitNewConversation, emitConversationUpdated } from "../socket/whatsapp.socket";
+import { logWhatsAppProviderFailure, whatsappProviderDiagnostic } from "../provider-error";
 import type {
   MetaWebhookMessage,
   MetaWebhookContact,
@@ -26,7 +27,7 @@ export async function processIncomingMessage(
   // A conta e o tenant foram resolvidos autoritativamente pelo handler.
   const existing = await getMessageByWaId(account.clientId, message.id);
   if (existing) {
-    console.log(`[WA Webhook] Mensagem duplicada ignorada: ${message.id}`);
+    console.log("[WA Webhook] Duplicate message ignored.");
     return;
   }
 
@@ -60,7 +61,7 @@ export async function processIncomingMessage(
         try {
           mediaUrl = await getMediaUrl(mediaId, account.accessToken);
         } catch (e) {
-          console.error("[WA Webhook] Falha ao obter URL de mídia:", e);
+          logWhatsAppProviderFailure("[WA Webhook] Sanitized media URL failure.", whatsappProviderDiagnostic(e, "get_image_url", "webhook_media"));
         }
       }
       break;
@@ -71,7 +72,7 @@ export async function processIncomingMessage(
         try {
           mediaUrl = await getMediaUrl(mediaId, account.accessToken);
         } catch (e) {
-          console.error("[WA Webhook] Falha ao obter URL de mídia:", e);
+          logWhatsAppProviderFailure("[WA Webhook] Sanitized media URL failure.", whatsappProviderDiagnostic(e, "get_audio_url", "webhook_media"));
         }
       }
       break;
@@ -83,7 +84,7 @@ export async function processIncomingMessage(
         try {
           mediaUrl = await getMediaUrl(mediaId, account.accessToken);
         } catch (e) {
-          console.error("[WA Webhook] Falha ao obter URL de mídia:", e);
+          logWhatsAppProviderFailure("[WA Webhook] Sanitized media URL failure.", whatsappProviderDiagnostic(e, "get_video_url", "webhook_media"));
         }
       }
       break;
@@ -95,7 +96,7 @@ export async function processIncomingMessage(
         try {
           mediaUrl = await getMediaUrl(mediaId, account.accessToken);
         } catch (e) {
-          console.error("[WA Webhook] Falha ao obter URL de mídia:", e);
+          logWhatsAppProviderFailure("[WA Webhook] Sanitized media URL failure.", whatsappProviderDiagnostic(e, "get_document_url", "webhook_media"));
         }
       }
       break;

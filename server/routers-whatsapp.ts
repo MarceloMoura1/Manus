@@ -4,6 +4,7 @@
  */
 import { router, megadeskAdminProcedure } from "./_core/trpc";
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import {
   getWhatsappConfig,
   saveWhatsappConfig,
@@ -12,6 +13,15 @@ import {
   deleteWhatsappConfig,
 } from "./db-whatsapp";
 
+function sanitizeWhatsappConfig<T extends { accessToken?: string | null; webhookVerifyToken?: string | null }>(config: T) {
+  const { accessToken, webhookVerifyToken, ...safe } = config;
+  return {
+    ...safe,
+    accessTokenConfigured: Boolean(accessToken),
+    webhookVerifyTokenConfigured: Boolean(webhookVerifyToken),
+  };
+}
+
 export const whatsappRouter = router({
   /**
    * Buscar configuração WhatsApp do cliente (admin)
@@ -19,14 +29,7 @@ export const whatsappRouter = router({
   getConfig: megadeskAdminProcedure.input(z.object({ clientId: z.string() })).query(async ({ input }) => {
     const config = await getWhatsappConfig(input.clientId);
     
-    // Não retornar accessToken completo por segurança
-    if (config) {
-      return {
-        ...config,
-        accessToken: config.accessToken ? "***" + config.accessToken.slice(-10) : "",
-      };
-    }
-    return null;
+    return config ? sanitizeWhatsappConfig(config) : null;
   }),
 
   /**
@@ -38,26 +41,32 @@ export const whatsappRouter = router({
         clientId: z.string(),
         phoneNumberId: z.string(),
         businessAccountId: z.string(),
-        accessToken: z.string(),
-        webhookVerifyToken: z.string(),
+        accessToken: z.string().optional(),
+        webhookVerifyToken: z.string().optional(),
         phoneNumber: z.string(),
         webhookUrl: z.string().optional(),
       })
     )
     .mutation(async ({ input: data }) => {
       const input = data;
+      const current = await getWhatsappConfig(input.clientId);
+      const accessToken = input.accessToken?.trim() || current?.accessToken;
+      const webhookVerifyToken = input.webhookVerifyToken?.trim() || current?.webhookVerifyToken || "";
+      if (!accessToken) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Informe o token de acesso do WhatsApp." });
+      }
       const config = await saveWhatsappConfig(input.clientId, {
         phoneNumberId: input.phoneNumberId,
         businessAccountId: input.businessAccountId,
-        accessToken: input.accessToken,
-        webhookVerifyToken: input.webhookVerifyToken,
+        accessToken,
+        webhookVerifyToken,
         phoneNumber: input.phoneNumber,
         webhookUrl: input.webhookUrl,
       });
 
       return {
         success: true,
-        config: config ? { ...config, accessToken: "***" } : null,
+        config: config ? sanitizeWhatsappConfig(config) : null,
       };
     }),
 
@@ -103,11 +112,11 @@ export const whatsappRouter = router({
             message: "Falha ao conectar com WhatsApp. Verifique as credenciais.",
           };
         }
-      } catch (error) {
+      } catch {
         await updateWebhookStatus(input.clientId, "failed");
         return {
           success: false,
-          message: "Erro ao testar conexão: " + (error instanceof Error ? error.message : "Erro desconhecido"),
+          message: "Erro ao testar conexão com o WhatsApp.",
         };
       }
     }),
