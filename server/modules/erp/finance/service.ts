@@ -9,6 +9,7 @@ export type FinanceEventPublisher={publish(clientId:string,event:"erp:finance.en
 const publisher:FinanceEventPublisher={publish:(clientId,event,payload)=>emitOperationalTenantEventForRoles(clientId,event,payload,["admin","manager","viewer"])};
 export class FinanceService {
   constructor(private repository=new FinanceRepository(),private events:FinanceEventPublisher=publisher){}
+  async settlePartial(i:Identity,id:string,accountId:string,key:string,amountCents?:number){this.write(i);const r=await this.repository.settlePartial(i.clientId,i.userId,id,accountId,key,amountCents);if(!r.entry)throw new Error("Liquidacao nao persistida.");if(!r.replay){await runPostCommitBestEffort([()=>this.events.publish(i.clientId,"erp:finance.entry.changed",financeEvent(id,"settled")),()=>this.events.publish(i.clientId,"erp:finance.account.changed",financeEvent(accountId,"updated"))]);}return {...r.entry,replay:r.replay};}
   private read(i:Identity){if(!canReadFinance(i.role))throw new ErpDomainError("FORBIDDEN","Seu perfil não permite acessar o Financeiro.");}
   private write(i:Identity){this.read(i);if(!canWriteFinance(i.role))throw new ErpDomainError("FORBIDDEN","Seu perfil possui acesso somente leitura ao Financeiro.");}
   private publish(clientId:string,event:"erp:finance.entry.changed"|"erp:finance.account.changed",publicId:string,operation:FinanceOperation){return runPostCommitBestEffort([()=>this.events.publish(clientId,event,financeEvent(publicId,operation))]);}

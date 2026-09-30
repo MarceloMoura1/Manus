@@ -163,7 +163,7 @@ describe("ERP Fornecedores V2 — Suíte de Testes Estruturais e de Domínio", (
   // 13. Compras
   it("13. exibe histórico de compras e indicadores calculados factualmente", () => {
     expect(suppliersSource).toContain("TabPurchases");
-    expect(suppliersSource).toContain("trpc.erp.purchases.list.useQuery");
+    expect(suppliersSource).toContain("trpc.erp.purchases.supplierMetrics.useQuery");
     expect(suppliersSource).toContain("supplierPublicId: supplier.publicId");
     expect(suppliersSource).toContain("Total Comprado");
     expect(suppliersSource).toContain("Última Compra");

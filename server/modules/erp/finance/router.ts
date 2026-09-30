@@ -18,6 +18,6 @@ export const financeRouter=router({
   fromPurchase:megadeskProcedure.input(sourceEntryInput).mutation(({ctx,input})=>run(()=>service.createFromSource(identity(ctx),"purchase_order",input))),
   fromSale:megadeskProcedure.input(sourceEntryInput).mutation(({ctx,input})=>run(()=>service.createFromSource(identity(ctx),"sales_order",input))),
   update:megadeskProcedure.input(updateEntryInput).mutation(({ctx,input})=>run(()=>service.update(identity(ctx),input))),
-  settle:megadeskProcedure.input(settlementInput).mutation(({ctx,input})=>run(()=>service.settle(identity(ctx),input.publicId,input.financialAccountPublicId,input.idempotencyKey))),
+  settle:megadeskProcedure.input(settlementInput).mutation(({ctx,input})=>run(()=>service.settlePartial(identity(ctx),input.publicId,input.financialAccountPublicId,input.idempotencyKey,input.amountCents))),
   cancel:megadeskProcedure.input(cancelEntryInput).mutation(({ctx,input})=>run(()=>service.cancel(identity(ctx),input.publicId,input.reason))),
 });

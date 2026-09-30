@@ -113,7 +113,7 @@ physical("ERP purchases MySQL behavior matrix", () => {
       await count(
         "SELECT COUNT(*) total FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name LIKE 'erp_purchase_%'"
       )
-    ).toBe(6);
+    ).toBe(16);
   });
   it("02 creates draft with server totals and snapshots", async () => {
     const f = await fixture(),

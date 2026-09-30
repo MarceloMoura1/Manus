@@ -2203,6 +2203,7 @@ export const erpSupplierFiles = mysqlTable(
   },
   (table): MySqlTableExtraConfigValue[] => [
     uniqueIndex("uq_esf_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_esf_tenant_id").on(table.clientId, table.id),
     uniqueIndex("uq_esf_storage_key").on(table.storageKey),
     index("idx_esf_lookup").on(
       table.clientId,
@@ -2292,6 +2293,247 @@ export const erpPurchaseOrderSequences = mysqlTable(
   ]
 );
 
+export const erpPurchaseWorkflowSequences = mysqlTable(
+  "erp_purchase_workflow_sequences",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    entityType: mysqlEnum("entity_type", ["request", "quote"]).notNull(),
+    year: int().notNull(),
+    nextNumber: int("next_number").default(1).notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_purchase_workflow_sequence").on(
+      table.clientId,
+      table.entityType,
+      table.year
+    ),
+  ]
+);
+
+export const erpPurchaseRequests = mysqlTable(
+  "erp_purchase_requests",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    requestNumber: varchar("request_number", { length: 32 }).notNull(),
+    requesterUserId: varchar("requester_user_id", { length: 80 }).notNull(),
+    responsibleUserId: varchar("responsible_user_id", { length: 80 }),
+    department: varchar({ length: 120 }),
+    priority: mysqlEnum(["low", "normal", "high", "urgent"])
+      .default("normal")
+      .notNull(),
+    reason: text().notNull(),
+    status: mysqlEnum([
+      "draft",
+      "pending_approval",
+      "approved",
+      "rejected",
+      "cancelled",
+    ])
+      .default("draft")
+      .notNull(),
+    approvalRequestedBy: varchar("approval_requested_by", { length: 80 }),
+    approvalRequestedAt: timestamp("approval_requested_at", { mode: "string" }),
+    decidedBy: varchar("decided_by", { length: 80 }),
+    decidedAt: timestamp("decided_at", { mode: "string" }),
+    decisionReason: varchar("decision_reason", { length: 500 }),
+    cancelledBy: varchar("cancelled_by", { length: 80 }),
+    cancelledAt: timestamp("cancelled_at", { mode: "string" }),
+    cancellationReason: varchar("cancellation_reason", { length: 500 }),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    updatedBy: varchar("updated_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_purchase_requests_tenant_public").on(
+      table.clientId,
+      table.publicId
+    ),
+    uniqueIndex("uq_erp_purchase_requests_tenant_number").on(
+      table.clientId,
+      table.requestNumber
+    ),
+    uniqueIndex("uq_erp_purchase_requests_tenant_id").on(
+      table.clientId,
+      table.id
+    ),
+    index("idx_erp_purchase_requests_tenant_status_date").on(
+      table.clientId,
+      table.status,
+      table.createdAt
+    ),
+  ]
+);
+
+export const erpPurchaseRequestItems = mysqlTable(
+  "erp_purchase_request_items",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    purchaseRequestId: bigint("purchase_request_id", { mode: "number" }).notNull(),
+    productId: bigint("product_id", { mode: "number" }),
+    inventoryItemId: bigint("inventory_item_id", { mode: "number" }),
+    descriptionSnapshot: varchar("description_snapshot", { length: 180 }).notNull(),
+    skuSnapshot: varchar("sku_snapshot", { length: 80 }),
+    unitSnapshot: varchar("unit_snapshot", { length: 20 }),
+    quantity: decimal({ precision: 18, scale: 3 }).notNull(),
+    estimatedUnitCostCents: bigint("estimated_unit_cost_cents", {
+      mode: "number",
+    }).default(0).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_purchase_request_items_public").on(
+      table.purchaseRequestId,
+      table.publicId
+    ),
+    index("idx_erp_purchase_request_items_tenant_request").on(
+      table.clientId,
+      table.purchaseRequestId
+    ),
+    foreignKey({
+      name: "fk_erp_purchase_request_item_request",
+      columns: [table.clientId, table.purchaseRequestId],
+      foreignColumns: [erpPurchaseRequests.clientId, erpPurchaseRequests.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_purchase_request_item_product",
+      columns: [table.clientId, table.productId],
+      foreignColumns: [erpProducts.clientId, erpProducts.id],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const erpPurchaseQuotes = mysqlTable(
+  "erp_purchase_quotes",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    quoteNumber: varchar("quote_number", { length: 32 }).notNull(),
+    purchaseRequestId: bigint("purchase_request_id", { mode: "number" }).notNull(),
+    status: mysqlEnum(["draft", "collecting", "selected", "cancelled"])
+      .default("draft")
+      .notNull(),
+    selectedProposalId: bigint("selected_proposal_id", { mode: "number" }),
+    selectedBy: varchar("selected_by", { length: 80 }),
+    selectedAt: timestamp("selected_at", { mode: "string" }),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_purchase_quotes_tenant_public").on(
+      table.clientId,
+      table.publicId
+    ),
+    uniqueIndex("uq_erp_purchase_quotes_tenant_number").on(
+      table.clientId,
+      table.quoteNumber
+    ),
+    uniqueIndex("uq_erp_purchase_quotes_request").on(table.purchaseRequestId),
+    uniqueIndex("uq_erp_purchase_quotes_tenant_id").on(table.clientId, table.id),
+    foreignKey({
+      name: "fk_erp_purchase_quote_request",
+      columns: [table.clientId, table.purchaseRequestId],
+      foreignColumns: [erpPurchaseRequests.clientId, erpPurchaseRequests.id],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const erpPurchaseQuoteProposals = mysqlTable(
+  "erp_purchase_quote_proposals",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    quoteId: bigint("quote_id", { mode: "number" }).notNull(),
+    supplierId: bigint("supplier_id", { mode: "number" }).notNull(),
+    supplierNameSnapshot: varchar("supplier_name_snapshot", { length: 180 }).notNull(),
+    subtotalCents: bigint("subtotal_cents", { mode: "number" }).notNull(),
+    freightCents: bigint("freight_cents", { mode: "number" }).default(0).notNull(),
+    totalCents: bigint("total_cents", { mode: "number" }).notNull(),
+    leadTimeDays: int("lead_time_days"),
+    paymentTerms: varchar("payment_terms", { length: 500 }),
+    notes: text(),
+    supplierFileId: bigint("supplier_file_id", { mode: "number" }),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_purchase_quote_proposals_public").on(
+      table.clientId,
+      table.publicId
+    ),
+    uniqueIndex("uq_erp_purchase_quote_proposals_supplier").on(
+      table.quoteId,
+      table.supplierId
+    ),
+    foreignKey({
+      name: "fk_erp_purchase_quote_proposal_quote",
+      columns: [table.clientId, table.quoteId],
+      foreignColumns: [erpPurchaseQuotes.clientId, erpPurchaseQuotes.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_purchase_quote_proposal_supplier",
+      columns: [table.clientId, table.supplierId],
+      foreignColumns: [erpSuppliers.clientId, erpSuppliers.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_purchase_quote_proposal_file",
+      columns: [table.clientId, table.supplierFileId],
+      foreignColumns: [erpSupplierFiles.clientId, erpSupplierFiles.id],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const erpPurchaseQuoteProposalItems = mysqlTable(
+  "erp_purchase_quote_proposal_items",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    proposalId: bigint("proposal_id", { mode: "number" }).notNull(),
+    requestItemId: bigint("request_item_id", { mode: "number" }).notNull(),
+    unitCostCents: bigint("unit_cost_cents", { mode: "number" }).notNull(),
+    discountCents: bigint("discount_cents", { mode: "number" }).default(0).notNull(),
+    lineTotalCents: bigint("line_total_cents", { mode: "number" }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_purchase_quote_proposal_item").on(
+      table.proposalId,
+      table.requestItemId
+    ),
+    foreignKey({
+      name: "fk_erp_purchase_quote_proposal_item_proposal",
+      columns: [table.proposalId],
+      foreignColumns: [erpPurchaseQuoteProposals.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_purchase_quote_proposal_item_request_item",
+      columns: [table.requestItemId],
+      foreignColumns: [erpPurchaseRequestItems.id],
+    }).onDelete("restrict"),
+  ]
+);
+
 export const erpPurchaseOrders = mysqlTable(
   "erp_purchase_orders",
   {
@@ -2299,10 +2541,17 @@ export const erpPurchaseOrders = mysqlTable(
     publicId: varchar("public_id", { length: 36 }).notNull(),
     clientId: varchar("client_id", { length: 80 }).notNull(),
     orderNumber: varchar("order_number", { length: 32 }).notNull(),
+    creationIdempotencyKey: varchar("creation_idempotency_key", { length: 100 }),
     supplierId: bigint("supplier_id", { mode: "number" }).notNull(),
     supplierNameSnapshot: varchar("supplier_name_snapshot", {
       length: 180,
     }).notNull(),
+    sourceType: mysqlEnum("source_type", ["direct", "request", "quote"])
+      .default("direct")
+      .notNull(),
+    purchaseRequestId: bigint("purchase_request_id", { mode: "number" }),
+    purchaseQuoteId: bigint("purchase_quote_id", { mode: "number" }),
+    responsibleUserId: varchar("responsible_user_id", { length: 80 }),
     status: mysqlEnum(["draft", "approved", "received", "cancelled"])
       .default("draft")
       .notNull(),
@@ -2311,7 +2560,17 @@ export const erpPurchaseOrders = mysqlTable(
     subtotalCents: bigint("subtotal_cents", { mode: "number" })
       .default(0)
       .notNull(),
+    discountCents: bigint("discount_cents", { mode: "number" })
+      .default(0)
+      .notNull(),
+    freightCents: bigint("freight_cents", { mode: "number" })
+      .default(0)
+      .notNull(),
+    otherExpensesCents: bigint("other_expenses_cents", { mode: "number" })
+      .default(0)
+      .notNull(),
     totalCents: bigint("total_cents", { mode: "number" }).default(0).notNull(),
+    paymentTerms: varchar("payment_terms", { length: 500 }),
     approvedBy: varchar("approved_by", { length: 80 }),
     approvedAt: timestamp("approved_at", { mode: "string" }),
     receivedBy: varchar("received_by", { length: 80 }),
@@ -2337,6 +2596,14 @@ export const erpPurchaseOrders = mysqlTable(
       table.clientId,
       table.orderNumber
     ),
+    uniqueIndex("uq_erp_purchase_orders_tenant_id").on(
+      table.clientId,
+      table.id
+    ),
+    uniqueIndex("uq_erp_purchase_orders_tenant_creation_key").on(
+      table.clientId,
+      table.creationIdempotencyKey
+    ),
     index("idx_erp_purchase_orders_tenant_status_date").on(
       table.clientId,
       table.status,
@@ -2346,11 +2613,28 @@ export const erpPurchaseOrders = mysqlTable(
       table.clientId,
       table.supplierId
     ),
+    uniqueIndex("uq_erp_purchase_orders_request").on(table.purchaseRequestId),
+    uniqueIndex("uq_erp_purchase_orders_quote").on(table.purchaseQuoteId),
     foreignKey({
       name: "fk_erp_po_supplier",
       columns: [table.supplierId],
       foreignColumns: [erpSuppliers.id],
     }),
+    foreignKey({
+      name: "fk_erp_po_supplier_tenant",
+      columns: [table.clientId, table.supplierId],
+      foreignColumns: [erpSuppliers.clientId, erpSuppliers.id],
+    }),
+    foreignKey({
+      name: "fk_erp_po_request",
+      columns: [table.clientId, table.purchaseRequestId],
+      foreignColumns: [erpPurchaseRequests.clientId, erpPurchaseRequests.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_po_quote",
+      columns: [table.clientId, table.purchaseQuoteId],
+      foreignColumns: [erpPurchaseQuotes.clientId, erpPurchaseQuotes.id],
+    }).onDelete("restrict"),
   ]
 );
 
@@ -2372,6 +2656,9 @@ export const erpPurchaseOrderItems = mysqlTable(
     skuSnapshot: varchar("sku_snapshot", { length: 80 }).notNull(),
     quantity: decimal({ precision: 18, scale: 3 }).notNull(),
     unitCostCents: bigint("unit_cost_cents", { mode: "number" }).notNull(),
+    discountCents: bigint("discount_cents", { mode: "number" })
+      .default(0)
+      .notNull(),
     lineTotalCents: bigint("line_total_cents", { mode: "number" }).notNull(),
     createdAt: timestamp("created_at", { mode: "string" })
       .defaultNow()
@@ -2440,6 +2727,180 @@ export const erpPurchaseOrderHistory = mysqlTable(
   ]
 );
 
+export const erpPurchaseApprovals = mysqlTable(
+  "erp_purchase_approvals",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    purchaseRequestId: bigint("purchase_request_id", { mode: "number" }),
+    purchaseOrderId: bigint("purchase_order_id", { mode: "number" }),
+    status: mysqlEnum(["pending", "approved", "rejected"])
+      .default("pending")
+      .notNull(),
+    requestedBy: varchar("requested_by", { length: 80 }).notNull(),
+    requestedAt: timestamp("requested_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    decidedBy: varchar("decided_by", { length: 80 }),
+    decidedAt: timestamp("decided_at", { mode: "string" }),
+    justification: varchar({ length: 500 }),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_purchase_approvals_tenant_public").on(
+      table.clientId,
+      table.publicId
+    ),
+    index("idx_erp_purchase_approvals_request_date").on(
+      table.purchaseRequestId,
+      table.createdAt
+    ),
+    index("idx_erp_purchase_approvals_order_date").on(
+      table.purchaseOrderId,
+      table.createdAt
+    ),
+    check(
+      "ck_erp_purchase_approval_entity",
+      sql`(${table.purchaseRequestId} IS NOT NULL AND ${table.purchaseOrderId} IS NULL) OR (${table.purchaseRequestId} IS NULL AND ${table.purchaseOrderId} IS NOT NULL)`
+    ),
+    foreignKey({
+      name: "fk_erp_purchase_approval_request",
+      columns: [table.clientId, table.purchaseRequestId],
+      foreignColumns: [erpPurchaseRequests.clientId, erpPurchaseRequests.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_purchase_approval_order",
+      columns: [table.clientId, table.purchaseOrderId],
+      foreignColumns: [erpPurchaseOrders.clientId, erpPurchaseOrders.id],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const erpPurchaseEvents = mysqlTable(
+  "erp_purchase_events",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    purchaseRequestId: bigint("purchase_request_id", { mode: "number" }),
+    purchaseQuoteId: bigint("purchase_quote_id", { mode: "number" }),
+    purchaseOrderId: bigint("purchase_order_id", { mode: "number" }),
+    entityType: mysqlEnum("entity_type", [
+      "request",
+      "quote",
+      "order",
+      "receipt",
+      "financial",
+      "stock",
+      "document",
+    ]).notNull(),
+    entityPublicId: varchar("entity_public_id", { length: 36 }).notNull(),
+    action: varchar({ length: 80 }).notNull(),
+    actorType: mysqlEnum("actor_type", ["human", "system"]).notNull(),
+    actorUserId: varchar("actor_user_id", { length: 80 }),
+    actorNameSnapshot: varchar("actor_name_snapshot", { length: 180 }),
+    actorRole: varchar("actor_role", { length: 20 }),
+    summary: varchar({ length: 500 }).notNull(),
+    beforeJson: json("before_json"),
+    afterJson: json("after_json"),
+    metadataJson: json("metadata_json"),
+    correlationId: varchar("correlation_id", { length: 100 }),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_purchase_events_tenant_public").on(
+      table.clientId,
+      table.publicId
+    ),
+    index("idx_erp_purchase_events_request_date").on(
+      table.clientId,
+      table.purchaseRequestId,
+      table.createdAt
+    ),
+    index("idx_erp_purchase_events_order_date").on(
+      table.clientId,
+      table.purchaseOrderId,
+      table.createdAt
+    ),
+    foreignKey({
+      name: "fk_erp_purchase_event_request",
+      columns: [table.clientId, table.purchaseRequestId],
+      foreignColumns: [erpPurchaseRequests.clientId, erpPurchaseRequests.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_purchase_event_quote",
+      columns: [table.clientId, table.purchaseQuoteId],
+      foreignColumns: [erpPurchaseQuotes.clientId, erpPurchaseQuotes.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_purchase_event_order",
+      columns: [table.clientId, table.purchaseOrderId],
+      foreignColumns: [erpPurchaseOrders.clientId, erpPurchaseOrders.id],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const erpPurchaseDocumentLinks = mysqlTable(
+  "erp_purchase_document_links",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    purchaseRequestId: bigint("purchase_request_id", { mode: "number" }),
+    purchaseQuoteId: bigint("purchase_quote_id", { mode: "number" }),
+    purchaseOrderId: bigint("purchase_order_id", { mode: "number" }),
+    supplierFileId: bigint("supplier_file_id", { mode: "number" }).notNull(),
+    documentType: mysqlEnum("document_type", [
+      "proposal",
+      "budget",
+      "purchase_order",
+      "invoice",
+      "receipt",
+      "payment_proof",
+      "other",
+    ]).notNull(),
+    linkedBy: varchar("linked_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_purchase_documents_tenant_public").on(
+      table.clientId,
+      table.publicId
+    ),
+    uniqueIndex("uq_erp_purchase_documents_file_entity").on(
+      table.supplierFileId,
+      table.purchaseRequestId,
+      table.purchaseQuoteId,
+      table.purchaseOrderId
+    ),
+    check(
+      "ck_erp_purchase_document_entity",
+      sql`((${table.purchaseRequestId} IS NOT NULL) + (${table.purchaseQuoteId} IS NOT NULL) + (${table.purchaseOrderId} IS NOT NULL)) = 1`
+    ),
+    foreignKey({
+      name: "fk_erp_purchase_document_request",
+      columns: [table.clientId, table.purchaseRequestId],
+      foreignColumns: [erpPurchaseRequests.clientId, erpPurchaseRequests.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_purchase_document_quote",
+      columns: [table.clientId, table.purchaseQuoteId],
+      foreignColumns: [erpPurchaseQuotes.clientId, erpPurchaseQuotes.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_purchase_document_order",
+      columns: [table.clientId, table.purchaseOrderId],
+      foreignColumns: [erpPurchaseOrders.clientId, erpPurchaseOrders.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_purchase_document_file",
+      columns: [table.clientId, table.supplierFileId],
+      foreignColumns: [erpSupplierFiles.clientId, erpSupplierFiles.id],
+    }).onDelete("restrict"),
+  ]
+);
+
 export const erpPurchaseOrderReceipts = mysqlTable(
   "erp_purchase_order_receipts",
   {
@@ -2447,7 +2908,10 @@ export const erpPurchaseOrderReceipts = mysqlTable(
     publicId: varchar("public_id", { length: 36 }).notNull(),
     clientId: varchar("client_id", { length: 80 }).notNull(),
     purchaseOrderId: bigint("purchase_order_id", { mode: "number" }).notNull(),
+    receiptNumber: int("receipt_number").default(1).notNull(),
     idempotencyKey: varchar("idempotency_key", { length: 100 }).notNull(),
+    notes: text(),
+    documentNumber: varchar("document_number", { length: 120 }),
     receivedBy: varchar("received_by", { length: 80 }).notNull(),
     receivedAt: timestamp("received_at", { mode: "string" })
       .defaultNow()
@@ -2469,11 +2933,19 @@ export const erpPurchaseOrderReceipts = mysqlTable(
       table.clientId,
       table.idempotencyKey
     ),
-    uniqueIndex("uq_erp_purchase_receipts_order").on(table.purchaseOrderId),
+    uniqueIndex("uq_erp_purchase_receipts_order_number").on(
+      table.purchaseOrderId,
+      table.receiptNumber
+    ),
     foreignKey({
       name: "fk_erp_por_order",
       columns: [table.purchaseOrderId],
       foreignColumns: [erpPurchaseOrders.id],
+    }),
+    foreignKey({
+      name: "fk_erp_por_order_tenant",
+      columns: [table.clientId, table.purchaseOrderId],
+      foreignColumns: [erpPurchaseOrders.clientId, erpPurchaseOrders.id],
     }),
   ]
 );
@@ -2862,6 +3334,7 @@ export const erpFinancialEntries = mysqlTable(
       "sales_order",
     ]).notNull(),
     sourcePublicId: varchar("source_public_id", { length: 36 }),
+    sourceInstallment: int("source_installment").default(1).notNull(),
     partyNameSnapshot: varchar("party_name_snapshot", { length: 255 }),
     notes: text(),
     settledAt: timestamp("settled_at", { mode: "string" }),
@@ -2880,10 +3353,12 @@ export const erpFinancialEntries = mysqlTable(
   },
   t => [
     uniqueIndex("uq_erp_fin_entries_tenant_public").on(t.clientId, t.publicId),
-    uniqueIndex("uq_erp_fin_entries_tenant_source").on(
+    uniqueIndex("uq_erp_fin_entries_tenant_id").on(t.clientId, t.id),
+    uniqueIndex("uq_erp_fin_entries_tenant_source_installment").on(
       t.clientId,
       t.sourceType,
-      t.sourcePublicId
+      t.sourcePublicId,
+      t.sourceInstallment
     ),
     index("idx_erp_fin_entries_tenant_status_due").on(
       t.clientId,
@@ -2944,7 +3419,7 @@ export const erpFinancialSettlements = mysqlTable(
       t.clientId,
       t.publicId
     ),
-    uniqueIndex("uq_erp_fin_settlements_tenant_entry").on(
+    index("idx_erp_fin_settlements_tenant_entry").on(
       t.clientId,
       t.financialEntryId
     ),
@@ -3023,6 +3498,48 @@ export const erpFinancialLedger = mysqlTable(
       columns: [t.settlementId],
       foreignColumns: [erpFinancialSettlements.id],
     }),
+  ]
+);
+
+export const erpPurchaseOrderInstallments = mysqlTable(
+  "erp_purchase_order_installments",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    purchaseOrderId: bigint("purchase_order_id", { mode: "number" }).notNull(),
+    installmentNumber: int("installment_number").notNull(),
+    dueDate: date("due_date", { mode: "string" }).notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    financialEntryId: bigint("financial_entry_id", { mode: "number" }),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_purchase_installments_tenant_public").on(
+      table.clientId,
+      table.publicId
+    ),
+    uniqueIndex("uq_erp_purchase_installments_order_number").on(
+      table.purchaseOrderId,
+      table.installmentNumber
+    ),
+    uniqueIndex("uq_erp_purchase_installments_financial_entry").on(
+      table.financialEntryId
+    ),
+    foreignKey({
+      name: "fk_erp_purchase_installment_order",
+      columns: [table.clientId, table.purchaseOrderId],
+      foreignColumns: [erpPurchaseOrders.clientId, erpPurchaseOrders.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_purchase_installment_financial_entry",
+      columns: [table.clientId, table.financialEntryId],
+      foreignColumns: [erpFinancialEntries.clientId, erpFinancialEntries.id],
+    }).onDelete("restrict"),
   ]
 );
 

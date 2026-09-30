@@ -490,4 +490,65 @@ physical("finance MySQL executable conditional matrix", () => {
       expect(ledger.filter(x => x.type === "payable_settlement")).toHaveLength(1);
       expect(ledger[0]).toMatchObject({ resultingBalanceCents: 1000 });
     }));
+  it("14 serializes concurrent partial payments without overpaying", () =>
+    isolated(async ({ service }) => {
+      const f = await manual(service, "payable", 1000);
+      const attempts = await Promise.allSettled([
+        service.settlePartial(admin, f.entry!.publicId, f.accountPublicId, crypto.randomUUID(), 600),
+        service.settlePartial(manager, f.entry!.publicId, f.accountPublicId, crypto.randomUUID(), 600),
+      ]);
+      expect(attempts.filter(result => result.status === "fulfilled")).toHaveLength(1);
+      expect(attempts.filter(result => result.status === "rejected")).toHaveLength(1);
+      expect((await service.detail(admin, f.entry!.publicId))).toMatchObject({
+        status: "open",
+        paidCents: 600,
+        pendingCents: 400,
+        paymentStatus: "partially_paid",
+      });
+      expect(await counts()).toEqual({ settlements: 1, entryLedger: 1 });
+    }));
+  it("15 rejects overpayment atomically", () =>
+    isolated(async ({ service, events }) => {
+      const f = await manual(service, "payable", 1000);
+      const eventCount = events.length;
+      await expect(
+        service.settlePartial(admin, f.entry!.publicId, f.accountPublicId, crypto.randomUUID(), 1001)
+      ).rejects.toMatchObject({ code: "VALIDATION" });
+      expect(await counts()).toEqual({ settlements: 0, entryLedger: 0 });
+      expect(await service.detail(admin, f.entry!.publicId)).toMatchObject({ paidCents: 0, pendingCents: 1000 });
+      expect(events).toHaveLength(eventCount);
+    }));
+  it("16 blocks cancellation that races with a partial payment", () =>
+    isolated(async ({ service }) => {
+      const f = await manual(service, "payable", 1000);
+      await getPool().query("DROP TRIGGER IF EXISTS megadesk_test_delay_settlement");
+      await getPool().query(
+        "CREATE TRIGGER megadesk_test_delay_settlement BEFORE INSERT ON erp_financial_settlements FOR EACH ROW DO SLEEP(0.25)"
+      );
+      try {
+        const payment = service.settlePartial(
+          admin,
+          f.entry!.publicId,
+          f.accountPublicId,
+          crypto.randomUUID(),
+          600
+        );
+        await new Promise(resolve => setTimeout(resolve, 75));
+        const cancellation = service.cancel(admin, f.entry!.publicId, "Cancelamento concorrente");
+        const [paymentResult, cancellationResult] = await Promise.allSettled([payment, cancellation]);
+        expect(paymentResult.status).toBe("fulfilled");
+        expect(cancellationResult.status).toBe("rejected");
+        if (cancellationResult.status === "rejected") {
+          expect(cancellationResult.reason).toMatchObject({ code: "CONFLICT" });
+        }
+        expect(await service.detail(admin, f.entry!.publicId)).toMatchObject({
+          status: "open",
+          paidCents: 600,
+          pendingCents: 400,
+        });
+        expect(await counts()).toEqual({ settlements: 1, entryLedger: 1 });
+      } finally {
+        await getPool().query("DROP TRIGGER IF EXISTS megadesk_test_delay_settlement");
+      }
+    }));
 });

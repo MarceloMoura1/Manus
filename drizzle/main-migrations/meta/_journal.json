@@ -255,6 +255,13 @@
       "when": 1790743203490,
       "tag": "0035_furry_stranger",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "5",
+      "when": 1790786929102,
+      "tag": "0036_spicy_zeigeist",
+      "breakpoints": true
     }
   ]
 }

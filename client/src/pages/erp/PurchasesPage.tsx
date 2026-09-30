@@ -1,4 +1,5 @@
 import React from "react";
+import { PurchasesWorkspacePage } from "./PurchasesWorkspacePage";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,7 +33,7 @@ const money = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
 });
-export function PurchasesPage() {
+function LegacyPurchasesPage() {
   const utils = trpc.useUtils(),
     [search, setSearch] = React.useState(""),
     [status, setStatus] = React.useState<
@@ -236,15 +237,20 @@ export function PurchasesPage() {
                     )}
                   {canWrite && o.status === "approved" && (
                     <Button
-                      onClick={() =>
-                        confirm(
-                          "Receber integralmente e atualizar o estoque?"
-                        ) &&
+                      onClick={async () => {
+                        if (!confirm("Receber integralmente e atualizar o estoque?")) return;
+                        const order = await utils.erp.purchases.detail.fetch({ publicId: o.publicId });
                         receive.mutate({
                           publicId: o.publicId,
                           idempotencyKey: crypto.randomUUID(),
-                        })
-                      }
+                          items: order.items
+                            .filter(item => Number("pendingQuantity" in item ? item.pendingQuantity : item.quantity) > 0)
+                            .map(item => ({
+                              orderItemPublicId: item.publicId,
+                              quantity: String("pendingQuantity" in item ? item.pendingQuantity : item.quantity),
+                            })),
+                        });
+                      }}
                     >
                       Receber
                     </Button>
@@ -549,4 +555,8 @@ function label(s: string) {
       } as Record<string, string>
     )[s] ?? s
   );
+}
+
+export function PurchasesPage({ onNavigate }: { onNavigate?: (section: "finance" | "stock") => void }) {
+  return <PurchasesWorkspacePage onNavigate={onNavigate} />;
 }

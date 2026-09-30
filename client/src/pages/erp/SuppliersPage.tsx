@@ -1332,22 +1332,18 @@ function LinkProductDialog({
 // ─── Aba: Compras ─────────────────────────────────────────────────────────────
 
 function TabPurchases({ supplier, onNavigate }: { supplier: SupplierItem; onNavigate?: (section: any) => void }) {
-  const purchasesQuery = trpc.erp.purchases.list.useQuery({
+  const purchasesQuery = trpc.erp.purchases.supplierMetrics.useQuery({
     supplierPublicId: supplier.publicId,
-    pageSize: 50,
   });
 
-  const orders = purchasesQuery.data?.items ?? [];
+  const orders = purchasesQuery.data?.recentOrders ?? [];
 
   const metrics = useMemo(() => {
-    let totalCents = 0;
-    let count = orders.length;
+    let totalCents = purchasesQuery.data?.purchasedCents ?? 0;
+    let count = purchasesQuery.data?.orderCount ?? 0;
     let lastDate: string | null = null;
 
     for (const ord of orders) {
-      if (ord.status === "received" || ord.status === "approved") {
-        totalCents += ord.totalCents;
-      }
       if (!lastDate || new Date(ord.createdAt) > new Date(lastDate)) {
         lastDate = ord.createdAt;
       }
@@ -1360,8 +1356,11 @@ function TabPurchases({ supplier, onNavigate }: { supplier: SupplierItem; onNavi
       lastPurchaseDate: lastDate ? formatDate(lastDate) : "—",
       ordersCount: count,
       averageTicket: formatMoneyCents(ticketCents),
+      averageLead: `${purchasesQuery.data?.averageLeadDays ?? 0} dias`,
+      onTimeRate: purchasesQuery.data?.onTimeRate == null ? "Sem base" : `${purchasesQuery.data.onTimeRate}%`,
+      pending: formatMoneyCents(purchasesQuery.data?.pendingCents ?? 0),
     };
-  }, [orders]);
+  }, [orders, purchasesQuery.data?.orderCount, purchasesQuery.data?.purchasedCents]);
 
   const statusMap: Record<string, { label: string; style: string }> = {
     draft: { label: "Rascunho", style: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300" },
@@ -1373,7 +1372,7 @@ function TabPurchases({ supplier, onNavigate }: { supplier: SupplierItem; onNavi
   return (
     <div className="space-y-4">
       {/* Indicadores Factualmente Calculáveis */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         <div className="rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
           <p className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Total Comprado</p>
           <p className="mt-1 text-base font-bold text-slate-900 dark:text-slate-100">{metrics.totalPurchased}</p>
@@ -1389,6 +1388,14 @@ function TabPurchases({ supplier, onNavigate }: { supplier: SupplierItem; onNavi
         <div className="rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
           <p className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Ticket Médio</p>
           <p className="mt-1 text-base font-bold text-slate-900 dark:text-slate-100">{metrics.averageTicket}</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Prazo médio</p>
+          <p className="mt-1 text-base font-bold text-slate-900 dark:text-slate-100">{metrics.averageLead} · {metrics.onTimeRate}</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Saldo a pagar</p>
+          <p className="mt-1 text-base font-bold text-slate-900 dark:text-slate-100">{metrics.pending}</p>
         </div>
       </div>
 
@@ -1478,9 +1485,8 @@ function TabTimeline({ supplier }: { supplier: SupplierItem }) {
     pageSize: 50,
   });
 
-  const purchasesQuery = trpc.erp.purchases.list.useQuery({
+  const purchasesQuery = trpc.erp.purchases.supplierMetrics.useQuery({
     supplierPublicId: supplier.publicId,
-    pageSize: 50,
   });
 
   const filesQuery = trpc.erp.suppliers.files.list.useQuery({
@@ -1539,7 +1545,7 @@ function TabTimeline({ supplier }: { supplier: SupplierItem }) {
     }
 
     // Eventos de compras
-    for (const po of purchasesQuery.data?.items ?? []) {
+    for (const po of purchasesQuery.data?.recentOrders ?? []) {
       list.push({
         id: `po-${po.publicId}`,
         date: po.createdAt,

@@ -32,6 +32,20 @@ const ALLOWED_INDEX_REPLACEMENTS: Record<string, readonly AllowedIndexReplacemen
       replacement: "ALTER TABLE `erp_sale_order_items` ADD CONSTRAINT `uq_erp_sale_items_order_identity` UNIQUE(`sale_order_id`,`order_item_identity`)",
     },
   ],
+  "0036_spicy_zeigeist.sql": [
+    {
+      drop: "ALTER TABLE `erp_financial_entries` DROP INDEX `uq_erp_fin_entries_tenant_source`",
+      replacement: "ALTER TABLE `erp_financial_entries` ADD CONSTRAINT `uq_erp_fin_entries_tenant_source_installment` UNIQUE(`client_id`,`source_type`,`source_public_id`,`source_installment`)",
+    },
+    {
+      drop: "ALTER TABLE `erp_financial_settlements` DROP INDEX `uq_erp_fin_settlements_tenant_entry`",
+      replacement: "CREATE INDEX `idx_erp_fin_settlements_tenant_entry` ON `erp_financial_settlements` (`client_id`,`financial_entry_id`)",
+    },
+    {
+      drop: "ALTER TABLE `erp_purchase_order_receipts` DROP INDEX `uq_erp_purchase_receipts_order`",
+      replacement: "ALTER TABLE `erp_purchase_order_receipts` ADD CONSTRAINT `uq_erp_purchase_receipts_order_number` UNIQUE(`purchase_order_id`,`receipt_number`)",
+    },
+  ],
 };
 
 function normalizeSqlStatement(value: string): string {

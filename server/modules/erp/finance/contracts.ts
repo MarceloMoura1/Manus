@@ -21,7 +21,7 @@ export const manualEntryInput = z.object({
 });
 export const sourceEntryInput = z.object({ sourcePublicId: publicId, dueDate: date, categoryPublicId: publicId, financialAccountPublicId: publicId.optional().nullable(), notes: optionalText(4_000) });
 export const updateEntryInput = z.object({ publicId, description: z.string().trim().min(2).max(500), dueDate: date, categoryPublicId: publicId, financialAccountPublicId: publicId.optional().nullable(), notes: optionalText(4_000) });
-export const settlementInput = z.object({ publicId, financialAccountPublicId: publicId, idempotencyKey: publicId });
+export const settlementInput = z.object({ publicId, financialAccountPublicId: publicId, idempotencyKey: publicId, amountCents: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional() });
 export const cancelEntryInput = z.object({ publicId, reason: z.string().trim().min(3).max(500) });
 export const financeListInput = z.object({
   search: z.string().trim().max(180).default(""), direction: z.enum(financeDirections).optional(), status: z.enum(financeStatuses).optional(), overdue: z.boolean().optional(),

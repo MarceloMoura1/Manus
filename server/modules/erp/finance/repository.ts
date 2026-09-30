@@ -4,14 +4,114 @@ import { getPool } from "../../../db";
 import { ErpDomainError } from "../errors";
 import { isOverdue, signedSettlementAmount, type AccountInput, type CategoryInput, type FinanceDirection, type FinanceListInput, type ManualEntryInput, type SourceEntryInput, type UpdateEntryInput } from "./contracts";
 
-type EntryRow = RowDataPacket & { id:number; public_id:string; document_number:string; direction:FinanceDirection; status:"open"|"settled"|"cancelled"; description:string; amount_cents:number; due_date:string|Date; issue_date:string|Date; category_public_id:string; category_name:string; account_public_id:string|null; account_name:string|null; supplier_public_id:string|null; crm_client_id:string|null; source_type:"manual"|"purchase_order"|"sales_order"; source_public_id:string|null; party_name_snapshot:string|null; notes:string|null; settled_at:string|null; cancelled_at:string|null; cancellation_reason:string|null; created_at:string; updated_at:string };
+type EntryRow = RowDataPacket & { id:number; public_id:string; document_number:string; direction:FinanceDirection; status:"open"|"settled"|"cancelled"; description:string; amount_cents:number; paid_cents?:number; due_date:string|Date; issue_date:string|Date; category_public_id:string; category_name:string; account_public_id:string|null; account_name:string|null; supplier_public_id:string|null; crm_client_id:string|null; source_type:"manual"|"purchase_order"|"sales_order"; source_public_id:string|null; party_name_snapshot:string|null; notes:string|null; settled_at:string|null; cancelled_at:string|null; cancellation_reason:string|null; created_at:string; updated_at:string };
 const normalizeInt = (value:number,min:number,max:number) => Math.max(min,Math.min(max,Math.trunc(value)));
 const dateOnly = (value:string|Date) => value instanceof Date ? value.toISOString().slice(0,10) : String(value).slice(0,10);
-const publicEntry = (r:EntryRow) => ({ publicId:r.public_id,documentNumber:r.document_number,direction:r.direction,status:r.status,description:r.description,amountCents:Number(r.amount_cents),dueDate:dateOnly(r.due_date),issueDate:dateOnly(r.issue_date),category:{publicId:r.category_public_id,name:r.category_name},financialAccount:r.account_public_id?{publicId:r.account_public_id,name:r.account_name}:null,supplierPublicId:r.supplier_public_id,crmClientId:r.crm_client_id,sourceType:r.source_type,sourcePublicId:r.source_public_id,partyName:r.party_name_snapshot,notes:r.notes,settledAt:r.settled_at,cancelledAt:r.cancelled_at,cancellationReason:r.cancellation_reason,overdue:isOverdue(r.status,dateOnly(r.due_date)),createdAt:r.created_at,updatedAt:r.updated_at});
+const publicEntry = (r:EntryRow) => {
+  const amountCents=Number(r.amount_cents),paidCents=Number(r.paid_cents??0);
+  const pendingCents=r.status==="cancelled"?0:Math.max(0,amountCents-paidCents);
+  const paymentStatus=r.status==="cancelled"?"cancelled":paidCents>=amountCents?"paid":paidCents>0?"partially_paid":isOverdue(r.status,dateOnly(r.due_date))?"overdue":"open";
+  return {publicId:r.public_id,documentNumber:r.document_number,direction:r.direction,status:r.status,description:r.description,amountCents,paidCents,pendingCents,paymentStatus,dueDate:dateOnly(r.due_date),issueDate:dateOnly(r.issue_date),category:{publicId:r.category_public_id,name:r.category_name},financialAccount:r.account_public_id?{publicId:r.account_public_id,name:r.account_name}:null,supplierPublicId:r.supplier_public_id,crmClientId:r.crm_client_id,sourceType:r.source_type,sourcePublicId:r.source_public_id,partyName:r.party_name_snapshot,notes:r.notes,settledAt:r.settled_at,cancelledAt:r.cancelled_at,cancellationReason:r.cancellation_reason,overdue:isOverdue(r.status,dateOnly(r.due_date)),createdAt:r.created_at,updatedAt:r.updated_at};
+};
 
 export class FinanceRepository {
   constructor(private pool?:Pool) {}
   private db(){ return (this.pool ??= getPool()); }
+  private async paidCentsForUpdate(connection:PoolConnection,clientId:string,entryId:number){
+    const [rows]=await connection.execute<RowDataPacket[]>(
+      "SELECT amount_cents FROM erp_financial_settlements WHERE client_id=? AND financial_entry_id=? FOR UPDATE",
+      [clientId,entryId]
+    );
+    const total=rows.reduce((sum,row)=>sum+BigInt(String(row.amount_cents)),0n);
+    if(total>BigInt(Number.MAX_SAFE_INTEGER))throw new ErpDomainError("CONFLICT","Soma de pagamentos excede o limite monetario seguro.");
+    return Number(total);
+  }
+  async settlePartial(clientId:string,userId:string,publicId:string,accountPublicId:string,key:string,requestedAmountCents?:number){
+    const c=await this.db().getConnection();
+    try{
+      await c.beginTransaction();
+      const [old]=await c.execute<RowDataPacket[]>(
+        `SELECT e.public_id,a.public_id account_public_id,x.amount_cents
+         FROM erp_financial_settlements x
+         INNER JOIN erp_financial_entries e ON e.id=x.financial_entry_id AND e.client_id=x.client_id
+         INNER JOIN erp_financial_accounts a ON a.id=x.financial_account_id AND a.client_id=x.client_id
+         WHERE x.client_id=? AND x.idempotency_key=? LIMIT 1`,
+        [clientId,key]
+      );
+      if(old[0]){
+        if(String(old[0].public_id)!==publicId||String(old[0].account_public_id)!==accountPublicId||
+          (requestedAmountCents!==undefined&&Number(old[0].amount_cents)!==requestedAmountCents)){
+          throw new ErpDomainError("IDEMPOTENCY_CONFLICT","Chave idempotente ja usada com outro pagamento.");
+        }
+        await c.commit();
+        const entry=await this.detail(clientId,publicId);
+        return {entry,replay:true};
+      }
+      const [entries]=await c.execute<RowDataPacket[]>(
+        `SELECT e.id,e.public_id,e.direction,e.status,e.amount_cents,e.source_type,e.source_public_id
+         FROM erp_financial_entries e WHERE e.client_id=? AND e.public_id=? LIMIT 1 FOR UPDATE`,
+        [clientId,publicId]
+      );
+      const entryRow=entries[0];
+      if(!entryRow)throw new ErpDomainError("NOT_FOUND","Titulo nao encontrado.");
+      if(entryRow.status==="cancelled")throw new ErpDomainError("CONFLICT","Titulo cancelado nao pode receber pagamento.");
+      const total=Number(entryRow.amount_cents),paid=await this.paidCentsForUpdate(c,clientId,Number(entryRow.id)),remaining=total-paid;
+      if(remaining<=0)throw new ErpDomainError("CONFLICT","Titulo ja foi integralmente liquidado.");
+      const amount=requestedAmountCents??remaining;
+      if(!Number.isSafeInteger(amount)||amount<=0||amount>remaining){
+        throw new ErpDomainError("VALIDATION","Valor do pagamento deve ser positivo e nao pode exceder o saldo do titulo.");
+      }
+      const [accounts]=await c.execute<RowDataPacket[]>(
+        "SELECT id,current_balance_cents,allow_negative,active FROM erp_financial_accounts WHERE client_id=? AND public_id=? LIMIT 1 FOR UPDATE",
+        [clientId,accountPublicId]
+      );
+      if(!accounts[0])throw new ErpDomainError("NOT_FOUND","Conta financeira nao encontrada.");
+      if(!Number(accounts[0].active))throw new ErpDomainError("CONFLICT","Conta financeira inativa.");
+      const signed=signedSettlementAmount(entryRow.direction,amount);
+      const previous=Number(accounts[0].current_balance_cents),resulting=previous+signed;
+      if(resulting<0&&!Number(accounts[0].allow_negative)){
+        throw new ErpDomainError("CONFLICT","Saldo insuficiente; a conta nao permite saldo negativo.");
+      }
+      const settlementPublicId=randomUUID();
+      const [settlement]=await c.execute<ResultSetHeader>(
+        "INSERT INTO erp_financial_settlements(public_id,client_id,financial_entry_id,financial_account_id,idempotency_key,amount_cents,settled_by) VALUES(?,?,?,?,?,?,?)",
+        [settlementPublicId,clientId,entryRow.id,accounts[0].id,key,amount,userId]
+      );
+      await c.execute(
+        "INSERT INTO erp_financial_ledger(public_id,client_id,financial_account_id,financial_entry_id,settlement_id,type,amount_cents,previous_balance_cents,resulting_balance_cents,occurred_at,created_by,metadata) VALUES(?,?,?,?,?,?,?,?,?,NOW(),?,?)",
+        [randomUUID(),clientId,accounts[0].id,entryRow.id,settlement.insertId,entryRow.direction==="payable"?"payable_settlement":"receivable_settlement",signed,previous,resulting,userId,JSON.stringify({kind:"settlement",partial:paid+amount<total})]
+      );
+      await c.execute("UPDATE erp_financial_accounts SET current_balance_cents=? WHERE client_id=? AND id=?",[resulting,clientId,accounts[0].id]);
+      const completed=paid+amount===total;
+      await c.execute(
+        `UPDATE erp_financial_entries SET financial_account_id=?,status=?,
+         settled_at=CASE WHEN ? THEN NOW() ELSE NULL END,settled_by=CASE WHEN ? THEN ? ELSE NULL END
+         WHERE client_id=? AND id=?`,
+        [accounts[0].id,completed?"settled":"open",completed,completed,userId,clientId,entryRow.id]
+      );
+      if(entryRow.source_type==="purchase_order"&&entryRow.source_public_id){
+        const [orders]=await c.execute<RowDataPacket[]>(
+          "SELECT id,purchase_request_id,purchase_quote_id,order_number FROM erp_purchase_orders WHERE client_id=? AND public_id=? LIMIT 1",
+          [clientId,entryRow.source_public_id]
+        );
+        if(orders[0]){
+          const [users]=await c.execute<RowDataPacket[]>(
+            "SELECT COALESCE(name,email) display_name FROM megadesk_domain_client_users WHERE client_id=? AND user_id=? LIMIT 1",
+            [clientId,userId]
+          );
+          await c.execute(
+            `INSERT INTO erp_purchase_events
+             (public_id,client_id,purchase_request_id,purchase_quote_id,purchase_order_id,entity_type,entity_public_id,action,actor_type,actor_user_id,actor_name_snapshot,summary,after_json,correlation_id)
+             VALUES(?,?,?,?,?,'financial',?,'payment_registered','human',?,?,?, ?,?)`,
+            [randomUUID(),clientId,orders[0].purchase_request_id,orders[0].purchase_quote_id,orders[0].id,settlementPublicId,userId,String(users[0]?.display_name??"Usuario indisponivel"),`${completed?"Pagamento integral":"Pagamento parcial"} registrado para ${orders[0].order_number}.`,JSON.stringify({financialEntryPublicId:publicId,settlementPublicId,amountCents:amount,paidCents:paid+amount,pendingCents:total-paid-amount}),key]
+          );
+        }
+      }
+      await c.commit();
+      const entry=await this.detail(clientId,publicId);
+      return {entry:entry?{...entry,paidCents:paid+amount,pendingCents:total-paid-amount,paymentStatus:completed?"paid":"partially_paid"}:entry,replay:false};
+    }catch(e){await c.rollback();throw e;}finally{c.release();}
+  }
   async options(clientId:string){
     const [accounts]=await this.db().execute<RowDataPacket[]>("SELECT public_id publicId,name,type,current_balance_cents currentBalanceCents,allow_negative allowNegative,active FROM erp_financial_accounts WHERE client_id=? ORDER BY name",[clientId]);
     const [categories]=await this.db().execute<RowDataPacket[]>("SELECT public_id publicId,name,direction,active FROM erp_financial_categories WHERE client_id=? ORDER BY name",[clientId]);
@@ -63,14 +163,40 @@ export class FinanceRepository {
     if(o.overdue!==undefined)where.push(o.overdue?"e.status='open' AND e.due_date<CURRENT_DATE":"NOT (e.status='open' AND e.due_date<CURRENT_DATE)");
     const ids=[[o.categoryPublicId,"c.public_id"],[o.financialAccountPublicId,"a.public_id"],[o.supplierPublicId,"s.public_id"],[o.crmClientId,"e.crm_client_id"]] as const; for(const [v,col] of ids)if(v){where.push(`${col}=?`);values.push(v);}
     for(const [v,op,col] of [[o.issueFrom,">=","e.issue_date"],[o.issueTo,"<=","e.issue_date"],[o.dueFrom,">=","e.due_date"],[o.dueTo,"<=","e.due_date"]] as const)if(v){where.push(`${col}${op}?`);values.push(v);}
-    const joins=" INNER JOIN erp_financial_categories c ON c.id=e.category_id AND c.client_id=e.client_id LEFT JOIN erp_financial_accounts a ON a.id=e.financial_account_id AND a.client_id=e.client_id LEFT JOIN erp_suppliers s ON s.id=e.supplier_id AND s.client_id=e.client_id"; const sqlWhere=where.join(" AND "),sort={dueDate:"e.due_date",issueDate:"e.issue_date",amount:"e.amount_cents",documentNumber:"e.document_number"}[o.sort];
-    const [count]=await this.db().execute<RowDataPacket[]>(`SELECT COUNT(*) total FROM erp_financial_entries e${joins} WHERE ${sqlWhere}`,values); const [rows]=await this.db().execute<EntryRow[]>(`SELECT e.*,c.public_id category_public_id,c.name category_name,a.public_id account_public_id,a.name account_name,s.public_id supplier_public_id FROM erp_financial_entries e${joins} WHERE ${sqlWhere} ORDER BY ${sort} ${o.directionSort==="asc"?"ASC":"DESC"},e.id DESC LIMIT ${limit} OFFSET ${offset}`,values);
+    const joins=" INNER JOIN erp_financial_categories c ON c.id=e.category_id AND c.client_id=e.client_id LEFT JOIN erp_financial_accounts a ON a.id=e.financial_account_id AND a.client_id=e.client_id LEFT JOIN erp_suppliers s ON s.id=e.supplier_id AND s.client_id=e.client_id LEFT JOIN (SELECT client_id,financial_entry_id,SUM(amount_cents) paid_cents FROM erp_financial_settlements GROUP BY client_id,financial_entry_id) x ON x.client_id=e.client_id AND x.financial_entry_id=e.id"; const sqlWhere=where.join(" AND "),sort={dueDate:"e.due_date",issueDate:"e.issue_date",amount:"e.amount_cents",documentNumber:"e.document_number"}[o.sort];
+    const [count]=await this.db().execute<RowDataPacket[]>(`SELECT COUNT(*) total FROM erp_financial_entries e${joins} WHERE ${sqlWhere}`,values); const [rows]=await this.db().execute<EntryRow[]>(`SELECT e.*,COALESCE(x.paid_cents,0) paid_cents,c.public_id category_public_id,c.name category_name,a.public_id account_public_id,a.name account_name,s.public_id supplier_public_id FROM erp_financial_entries e${joins} WHERE ${sqlWhere} ORDER BY ${sort} ${o.directionSort==="asc"?"ASC":"DESC"},e.id DESC LIMIT ${limit} OFFSET ${offset}`,values);
     return {items:rows.map(publicEntry),total:Number(count[0]?.total??0)};
   }
-  async detail(clientId:string,publicId:string,db:Pool|PoolConnection=this.db(),lock=false){const [rows]=await db.execute<EntryRow[]>(`SELECT e.*,c.public_id category_public_id,c.name category_name,a.public_id account_public_id,a.name account_name,s.public_id supplier_public_id FROM erp_financial_entries e INNER JOIN erp_financial_categories c ON c.id=e.category_id AND c.client_id=e.client_id LEFT JOIN erp_financial_accounts a ON a.id=e.financial_account_id AND a.client_id=e.client_id LEFT JOIN erp_suppliers s ON s.id=e.supplier_id AND s.client_id=e.client_id WHERE e.client_id=? AND e.public_id=? LIMIT 1${lock?" FOR UPDATE":""}`,[clientId,publicId]);return rows[0]?publicEntry(rows[0]):null;}
-  async update(clientId:string,publicId:string,input:UpdateEntryInput){const c=await this.db().getConnection();try{await c.beginTransaction();const entry=await this.detail(clientId,publicId,c,true);if(!entry)throw new ErpDomainError("NOT_FOUND","Título não encontrado.");if(entry.status!=="open")throw new ErpDomainError("CONFLICT","Título liquidado ou cancelado é imutável.");const refs=await this.references(c,clientId,entry.direction,input.categoryPublicId,input.financialAccountPublicId);await c.execute("UPDATE erp_financial_entries SET description=?,due_date=?,category_id=?,financial_account_id=?,notes=? WHERE client_id=? AND public_id=?",[input.description,input.dueDate,refs.categoryId,refs.accountId,input.notes,clientId,publicId]);await c.commit();}catch(e){await c.rollback();throw e;}finally{c.release();}return this.detail(clientId,publicId);}
+  async detail(clientId:string,publicId:string,db:Pool|PoolConnection=this.db(),lock=false){const [rows]=await db.execute<EntryRow[]>(`SELECT e.*,COALESCE((SELECT SUM(x.amount_cents) FROM erp_financial_settlements x WHERE x.client_id=e.client_id AND x.financial_entry_id=e.id),0) paid_cents,c.public_id category_public_id,c.name category_name,a.public_id account_public_id,a.name account_name,s.public_id supplier_public_id FROM erp_financial_entries e INNER JOIN erp_financial_categories c ON c.id=e.category_id AND c.client_id=e.client_id LEFT JOIN erp_financial_accounts a ON a.id=e.financial_account_id AND a.client_id=e.client_id LEFT JOIN erp_suppliers s ON s.id=e.supplier_id AND s.client_id=e.client_id WHERE e.client_id=? AND e.public_id=? LIMIT 1${lock?" FOR UPDATE":""}`,[clientId,publicId]);return rows[0]?publicEntry(rows[0]):null;}
+  async update(clientId:string,publicId:string,input:UpdateEntryInput){const c=await this.db().getConnection();try{await c.beginTransaction();const entry=await this.detail(clientId,publicId,c,true);if(!entry)throw new ErpDomainError("NOT_FOUND","Título não encontrado.");if(entry.status!=="open")throw new ErpDomainError("CONFLICT","Título liquidado ou cancelado é imutável.");const [ids]=await c.execute<RowDataPacket[]>("SELECT id FROM erp_financial_entries WHERE client_id=? AND public_id=? LIMIT 1",[clientId,publicId]);if(await this.paidCentsForUpdate(c,clientId,Number(ids[0].id))>0)throw new ErpDomainError("CONFLICT","Título com pagamento parcial não pode ser reescrito; conclua ou estorne explicitamente.");const refs=await this.references(c,clientId,entry.direction,input.categoryPublicId,input.financialAccountPublicId);await c.execute("UPDATE erp_financial_entries SET description=?,due_date=?,category_id=?,financial_account_id=?,notes=? WHERE client_id=? AND public_id=?",[input.description,input.dueDate,refs.categoryId,refs.accountId,input.notes,clientId,publicId]);await c.commit();}catch(e){await c.rollback();throw e;}finally{c.release();}return this.detail(clientId,publicId);}
   async settle(clientId:string,userId:string,publicId:string,accountPublicId:string,key:string){const c=await this.db().getConnection();try{await c.beginTransaction();const [old]=await c.execute<RowDataPacket[]>("SELECT e.public_id FROM erp_financial_settlements x INNER JOIN erp_financial_entries e ON e.id=x.financial_entry_id AND e.client_id=x.client_id WHERE x.client_id=? AND x.idempotency_key=? LIMIT 1",[clientId,key]);if(old[0]){if(old[0].public_id!==publicId)throw new ErpDomainError("IDEMPOTENCY_CONFLICT","Chave idempotente já usada em outro título.");await c.commit();return {entry:await this.detail(clientId,publicId),replay:true};}const entry=await this.detail(clientId,publicId,c,true);if(!entry)throw new ErpDomainError("NOT_FOUND","Título não encontrado.");if(entry.status!=="open")throw new ErpDomainError("CONFLICT","Somente título aberto pode ser liquidado.");const [entryIds]=await c.execute<RowDataPacket[]>("SELECT id,amount_cents,direction FROM erp_financial_entries WHERE client_id=? AND public_id=?",[clientId,publicId]);const [accounts]=await c.execute<RowDataPacket[]>("SELECT id,current_balance_cents,allow_negative,active FROM erp_financial_accounts WHERE client_id=? AND public_id=? LIMIT 1 FOR UPDATE",[clientId,accountPublicId]);if(!accounts[0])throw new ErpDomainError("NOT_FOUND","Conta financeira não encontrada.");if(!Number(accounts[0].active))throw new ErpDomainError("CONFLICT","Conta financeira inativa.");const amount=Number(entryIds[0].amount_cents),signed=signedSettlementAmount(entry.direction,amount),previous=Number(accounts[0].current_balance_cents),resulting=previous+signed;if(resulting<0&&!Number(accounts[0].allow_negative))throw new ErpDomainError("CONFLICT","Saldo insuficiente; a conta não permite saldo negativo.");const settlementPublicId=randomUUID();const [settlement]=await c.execute<ResultSetHeader>("INSERT INTO erp_financial_settlements(public_id,client_id,financial_entry_id,financial_account_id,idempotency_key,amount_cents,settled_by) VALUES(?,?,?,?,?,?,?)",[settlementPublicId,clientId,entryIds[0].id,accounts[0].id,key,amount,userId]);await c.execute("INSERT INTO erp_financial_ledger(public_id,client_id,financial_account_id,financial_entry_id,settlement_id,type,amount_cents,previous_balance_cents,resulting_balance_cents,occurred_at,created_by,metadata) VALUES(?,?,?,?,?,?,?,?,?,NOW(),?,?)",[randomUUID(),clientId,accounts[0].id,entryIds[0].id,settlement.insertId,entry.direction==="payable"?"payable_settlement":"receivable_settlement",signed,previous,resulting,userId,JSON.stringify({kind:"settlement"})]);await c.execute("UPDATE erp_financial_accounts SET current_balance_cents=? WHERE client_id=? AND id=?",[resulting,clientId,accounts[0].id]);await c.execute("UPDATE erp_financial_entries SET status='settled',financial_account_id=?,settled_at=NOW(),settled_by=? WHERE client_id=? AND id=?",[accounts[0].id,userId,clientId,entryIds[0].id]);await c.commit();return {entry:await this.detail(clientId,publicId),replay:false};}catch(e){await c.rollback();throw e;}finally{c.release();}}
-  async cancel(clientId:string,userId:string,publicId:string,reason:string){const c=await this.db().getConnection();try{await c.beginTransaction();const e=await this.detail(clientId,publicId,c,true);if(!e)throw new ErpDomainError("NOT_FOUND","Título não encontrado.");if(e.status!=="open")throw new ErpDomainError("CONFLICT","Somente título aberto pode ser cancelado.");await c.execute("UPDATE erp_financial_entries SET status='cancelled',cancelled_at=NOW(),cancelled_by=?,cancellation_reason=? WHERE client_id=? AND public_id=?",[userId,reason,clientId,publicId]);await c.commit();}catch(e){await c.rollback();throw e;}finally{c.release();}return this.detail(clientId,publicId);}
+  async cancel(clientId:string,userId:string,publicId:string,reason:string){const c=await this.db().getConnection();try{await c.beginTransaction();const e=await this.detail(clientId,publicId,c,true);if(!e)throw new ErpDomainError("NOT_FOUND","Título não encontrado.");if(e.status!=="open")throw new ErpDomainError("CONFLICT","Somente título aberto pode ser cancelado.");const [ids]=await c.execute<RowDataPacket[]>("SELECT id FROM erp_financial_entries WHERE client_id=? AND public_id=? LIMIT 1",[clientId,publicId]);if(await this.paidCentsForUpdate(c,clientId,Number(ids[0].id))>0)throw new ErpDomainError("CONFLICT","Título com pagamento não pode ser cancelado sem estorno explícito.");await c.execute("UPDATE erp_financial_entries SET status='cancelled',cancelled_at=NOW(),cancelled_by=?,cancellation_reason=? WHERE client_id=? AND public_id=?",[userId,reason,clientId,publicId]);await c.commit();}catch(e){await c.rollback();throw e;}finally{c.release();}return this.detail(clientId,publicId);}
   async ledger(clientId:string,accountPublicId:string){const [rows]=await this.db().execute<RowDataPacket[]>("SELECT l.public_id publicId,l.type,l.amount_cents amountCents,l.previous_balance_cents previousBalanceCents,l.resulting_balance_cents resultingBalanceCents,l.occurred_at occurredAt FROM erp_financial_ledger l INNER JOIN erp_financial_accounts a ON a.id=l.financial_account_id AND a.client_id=l.client_id WHERE l.client_id=? AND a.public_id=? ORDER BY l.occurred_at DESC,l.id DESC LIMIT 500",[clientId,accountPublicId]);return rows;}
-  async summary(clientId:string,from?:string,to?:string){const period=[from??"1000-01-01",to??"9999-12-31"];const [totals]=await this.db().execute<RowDataPacket[]>("SELECT COALESCE(SUM(CASE WHEN direction='payable' AND status='open' THEN amount_cents ELSE 0 END),0) openPayable,COALESCE(SUM(CASE WHEN direction='receivable' AND status='open' THEN amount_cents ELSE 0 END),0) openReceivable,COALESCE(SUM(CASE WHEN direction='payable' AND status='open' AND due_date<CURRENT_DATE THEN amount_cents ELSE 0 END),0) overduePayable,COALESCE(SUM(CASE WHEN direction='receivable' AND status='open' AND due_date<CURRENT_DATE THEN amount_cents ELSE 0 END),0) overdueReceivable,COALESCE(SUM(CASE WHEN direction='payable' AND status='settled' AND DATE(settled_at) BETWEEN ? AND ? THEN amount_cents ELSE 0 END),0) settledPayable,COALESCE(SUM(CASE WHEN direction='receivable' AND status='settled' AND DATE(settled_at) BETWEEN ? AND ? THEN amount_cents ELSE 0 END),0) settledReceivable FROM erp_financial_entries WHERE client_id=?",[...period,...period,clientId]);const [accounts]=await this.db().execute<RowDataPacket[]>("SELECT public_id publicId,name,current_balance_cents currentBalanceCents,active FROM erp_financial_accounts WHERE client_id=? ORDER BY name",[clientId]);const t=totals[0]??{},number=(key:string)=>Number(t[key]??0);return {openPayable:number("openPayable"),openReceivable:number("openReceivable"),overduePayable:number("overduePayable"),overdueReceivable:number("overdueReceivable"),settledPayable:number("settledPayable"),settledReceivable:number("settledReceivable"),realizedNetCents:number("settledReceivable")-number("settledPayable"),accounts:accounts.map(a=>({...a,currentBalanceCents:Number(a.currentBalanceCents),active:Boolean(a.active)}))};}
+  async summary(clientId:string,from?:string,to?:string){
+    const period=[from??"1000-01-01",to??"9999-12-31"];
+    const [open]=await this.db().execute<RowDataPacket[]>(
+      `SELECT
+         COALESCE(SUM(CASE WHEN e.direction='payable' AND e.status='open' THEN GREATEST(e.amount_cents-COALESCE(x.paid_cents,0),0) ELSE 0 END),0) openPayable,
+         COALESCE(SUM(CASE WHEN e.direction='receivable' AND e.status='open' THEN GREATEST(e.amount_cents-COALESCE(x.paid_cents,0),0) ELSE 0 END),0) openReceivable,
+         COALESCE(SUM(CASE WHEN e.direction='payable' AND e.status='open' AND e.due_date<CURRENT_DATE THEN GREATEST(e.amount_cents-COALESCE(x.paid_cents,0),0) ELSE 0 END),0) overduePayable,
+         COALESCE(SUM(CASE WHEN e.direction='receivable' AND e.status='open' AND e.due_date<CURRENT_DATE THEN GREATEST(e.amount_cents-COALESCE(x.paid_cents,0),0) ELSE 0 END),0) overdueReceivable
+       FROM erp_financial_entries e
+       LEFT JOIN (SELECT client_id,financial_entry_id,SUM(amount_cents) paid_cents FROM erp_financial_settlements GROUP BY client_id,financial_entry_id) x
+         ON x.client_id=e.client_id AND x.financial_entry_id=e.id
+       WHERE e.client_id=?`,
+      [clientId]
+    );
+    const [realized]=await this.db().execute<RowDataPacket[]>(
+      `SELECT
+         COALESCE(SUM(CASE WHEN e.direction='payable' THEN s.amount_cents ELSE 0 END),0) settledPayable,
+         COALESCE(SUM(CASE WHEN e.direction='receivable' THEN s.amount_cents ELSE 0 END),0) settledReceivable
+       FROM erp_financial_settlements s
+       INNER JOIN erp_financial_entries e ON e.id=s.financial_entry_id AND e.client_id=s.client_id
+       WHERE s.client_id=? AND DATE(s.settled_at) BETWEEN ? AND ?`,
+      [clientId,...period]
+    );
+    const [accounts]=await this.db().execute<RowDataPacket[]>("SELECT public_id publicId,name,current_balance_cents currentBalanceCents,active FROM erp_financial_accounts WHERE client_id=? ORDER BY name",[clientId]);
+    const totals={...(open[0]??{}),...(realized[0]??{})},number=(key:string)=>Number(totals[key]??0);
+    return {openPayable:number("openPayable"),openReceivable:number("openReceivable"),overduePayable:number("overduePayable"),overdueReceivable:number("overdueReceivable"),settledPayable:number("settledPayable"),settledReceivable:number("settledReceivable"),realizedNetCents:number("settledReceivable")-number("settledPayable"),accounts:accounts.map(a=>({...a,currentBalanceCents:Number(a.currentBalanceCents),active:Boolean(a.active)}))};
+  }
 }
