@@ -50,6 +50,21 @@ export type ConversationMediaDiagnosticCode =
   | "INVALID_MEDIA_REFERENCE"
   | "BRIDGE_INTERNAL_FAILURE";
 
+export function parseConversationMediaRange(value: unknown, size: number): { start: number; end: number } | null {
+  if (typeof value !== "string" || !Number.isSafeInteger(size) || size <= 0) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
+  if (!match || (!match[1] && !match[2])) return null;
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) return null;
+    return { start: Math.max(0, size - suffix), end: size - 1 };
+  }
+  const start = Number(match[1]);
+  const requestedEnd = match[2] ? Number(match[2]) : size - 1;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(requestedEnd) || start < 0 || start >= size || requestedEnd < start) return null;
+  return { start, end: Math.min(requestedEnd, size - 1) };
+}
+
 type ConversationMediaLogger = Pick<Console, "warn">;
 
 function reportDiagnostic(
@@ -197,6 +212,22 @@ export function createConversationMediaHandler(
     res.setHeader("Content-Type", mimeType);
     res.setHeader("Content-Disposition", `${attachment ? "attachment" : "inline"}; filename=\"${safeName(fileName)}\"`);
     res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Accept-Ranges", "bytes");
+    const requestedRange = req.headers.range;
+    if (requestedRange !== undefined) {
+      const range = parseConversationMediaRange(requestedRange, bytes.length);
+      if (!range) {
+        res.setHeader("Content-Range", `bytes */${bytes.length}`);
+        res.status(416).end();
+        return;
+      }
+      const body = bytes.subarray(range.start, range.end + 1);
+      res.setHeader("Content-Range", `bytes ${range.start}-${range.end}/${bytes.length}`);
+      res.setHeader("Content-Length", String(body.length));
+      res.status(206).send(body);
+      return;
+    }
+    res.setHeader("Content-Length", String(bytes.length));
     res.status(200).send(bytes);
   } catch {
     reportDiagnostic(logger, "BRIDGE_INTERNAL_FAILURE", correlationId);

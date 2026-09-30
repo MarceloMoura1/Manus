@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { SupplierFileService } from "./files-service";
+import { decodeSupplierFileBase64, SupplierFileService } from "./files-service";
 import { SupplierFileRepository, type SupplierFileRow } from "./files-repository";
 import { resolveSupplierFilePath } from "./files-storage";
 import { ErpDomainError } from "../errors";
@@ -164,6 +164,78 @@ describe("Supplier Files — Domain Service & Atomicity", () => {
         }
       )
     ).rejects.toThrow("Não é possível anexar arquivos a um fornecedor inativo.");
+  });
+
+  it("rejects malformed base64 instead of silently decoding a valid prefix", async () => {
+    const repo = createMockRepo();
+    const service = new SupplierFileService(repo);
+    const validPdf = Buffer.from("%PDF-1.4\n%%EOF").toString("base64");
+
+    await expect(service.upload(
+      { clientId: tenantA, userId: "admin-1", role: "admin" },
+      {
+        supplierPublicId: supplierPublicIdA,
+        fileName: "contrato.pdf",
+        category: "contracts",
+        mimeType: "application/pdf",
+        base64: `${validPdf}!!!!`,
+      },
+    )).rejects.toMatchObject({ code: "VALIDATION" });
+    expect(repo.insertFile).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["empty", ""],
+    ["excessive padding", "QQ==="],
+    ["missing required padding", "QQ"],
+    ["invalid character", "QQ=!"],
+    ["whitespace", "Q Q="],
+    ["newline", "Q\nQ="],
+    ["tab", "Q\tQ="],
+    ["truncated", "Q"],
+    ["data URL prefix", "data:application/pdf;base64,QQ=="],
+  ])("rejects %s before accepting base64", (_case, value) => {
+    const decode = vi.fn((input: string, encoding: BufferEncoding) => Buffer.from(input, encoding));
+    expect(() => decodeSupplierFileBase64(value, { maxBytes: 3, decode })).toThrow(ErpDomainError);
+    expect(decode).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["one byte with == padding", "QQ==", "A"],
+    ["two bytes with = padding", "QUI=", "AB"],
+    ["three bytes without padding", "QUJD", "ABC"],
+  ])("accepts canonical %s", (_case, value, expected) => {
+    expect(decodeSupplierFileBase64(value, { maxBytes: 3 }).toString()).toBe(expected);
+  });
+
+  it("rejects an encoded payload beyond the mathematical bound before decode", () => {
+    const decode = vi.fn((input: string, encoding: BufferEncoding) => Buffer.from(input, encoding));
+    // maxBytes=3 => 4 * ceil(3/3) = 4 encoded characters.
+    expect(() => decodeSupplierFileBase64("QUJDRA==", { maxBytes: 3, decode }))
+      .toThrow("Arquivo excede o limite máximo de 20 MB.");
+    expect(decode).not.toHaveBeenCalled();
+  });
+
+  it("accepts the exact decoded limit and rejects the immediately larger payload before storage or DB insert", async () => {
+    // maxBytes=2 models the production remainder (20 MiB mod 3 = 2): both
+    // exact and +1 byte have the same encoded length, so the decoded-size guard
+    // remains necessary after the pre-allocation length guard.
+    expect(decodeSupplierFileBase64("QUI=", { maxBytes: 2 })).toEqual(Buffer.from("AB"));
+    expect(() => decodeSupplierFileBase64("QUJD", { maxBytes: 2 })).toThrow(ErpDomainError);
+
+    const repo = createMockRepo();
+    const service = new SupplierFileService(repo);
+    await expect(service.upload(
+      { clientId: tenantA, userId: "admin-1", role: "admin" },
+      {
+        supplierPublicId: supplierPublicIdA,
+        fileName: "contrato.pdf",
+        category: "contracts",
+        mimeType: "application/pdf",
+        base64: "A".repeat(4 * Math.ceil((20 * 1024 * 1024) / 3) + 4),
+      },
+    )).rejects.toMatchObject({ code: "VALIDATION" });
+    expect(repo.insertFile).not.toHaveBeenCalled();
   });
 
   // ─── 3. Authorization Role Guards ─────────────────────────────────────────

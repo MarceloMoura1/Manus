@@ -19,6 +19,7 @@ import { registerTicketAttachmentRoutes } from "../chamados-attachments";
 import { registerSupplierFileRoutes } from "../modules/erp/suppliers/files-router";
 import { registerClientFileRoutes } from "../modules/crm/client-files/files-router";
 import { startTicketAttachmentReconciler } from "../chamados-attachment-reconciler";
+import { createSupplierUploadIngressMiddleware } from "./media-ingress";
 
 // ─── Domínios permitidos (CORS) ───────────────────────────────────────────────
 const ALLOWED_ORIGINS = [
@@ -89,6 +90,7 @@ async function startServer() {
   const trustedProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? "0");
   if (Number.isInteger(trustedProxyHops) && trustedProxyHops > 0) app.set("trust proxy", trustedProxyHops);
 
+  app.use("/api/trpc", createSupplierUploadIngressMiddleware());
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 

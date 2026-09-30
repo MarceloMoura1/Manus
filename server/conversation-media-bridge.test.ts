@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createConversationMediaHandler } from "./conversation-media-bridge";
+import { createConversationMediaHandler, parseConversationMediaRange } from "./conversation-media-bridge";
 
 function response() {
   const res: any = { status: vi.fn(), end: vi.fn(), send: vi.fn(), setHeader: vi.fn() };
@@ -10,6 +10,14 @@ const identity = async () => ({ tenantId: "tenant-a", userId: "user-a", sessionI
 
 describe("conversation media bridge", () => {
   const diagnostics = () => ({ warn: vi.fn() });
+
+  it("parses only a single satisfiable byte range", () => {
+    expect(parseConversationMediaRange("bytes=2-4", 10)).toEqual({ start: 2, end: 4 });
+    expect(parseConversationMediaRange("bytes=7-", 10)).toEqual({ start: 7, end: 9 });
+    expect(parseConversationMediaRange("bytes=-3", 10)).toEqual({ start: 7, end: 9 });
+    expect(parseConversationMediaRange("bytes=10-11", 10)).toBeNull();
+    expect(parseConversationMediaRange("bytes=0-1,4-5", 10)).toBeNull();
+  });
 
   it("rejects an unauthenticated request without querying media", async () => {
     const execute = vi.fn(); const res = response(); const logger = diagnostics();
@@ -111,6 +119,42 @@ describe("conversation media bridge", () => {
     expect(res.setHeader).toHaveBeenCalledWith("Content-Disposition", 'inline; filename="audio.ogg"');
     expect(res.send).toHaveBeenCalledWith(bytes);
     expect(res.send.mock.calls[0][0]).toBe(bytes);
+  });
+
+  it("serves authenticated media ranges with an exact 206 contract", async () => {
+    const bytes = Buffer.from("0123456789");
+    const execute = vi.fn().mockResolvedValue([[{
+      mediaReference: JSON.stringify({ mediaData: `data:video/mp4;base64,${bytes.toString("base64")}`, fileName: "clip.mp4" }),
+      messageType: "video",
+    }]]);
+    const req = request();
+    req.headers.range = "bytes=2-5";
+    const res = response();
+
+    await createConversationMediaHandler({ execute } as any, identity)(req, res);
+
+    expect(res.setHeader).toHaveBeenCalledWith("Accept-Ranges", "bytes");
+    expect(res.setHeader).toHaveBeenCalledWith("Content-Range", "bytes 2-5/10");
+    expect(res.setHeader).toHaveBeenCalledWith("Content-Length", "4");
+    expect(res.status).toHaveBeenCalledWith(206);
+    expect(res.send).toHaveBeenCalledWith(Buffer.from("2345"));
+  });
+
+  it("rejects an unsatisfiable or multi-range request without returning bytes", async () => {
+    const bytes = Buffer.from("0123456789");
+    const execute = vi.fn().mockResolvedValue([[{
+      mediaReference: JSON.stringify({ mediaData: `data:video/mp4;base64,${bytes.toString("base64")}` }),
+      messageType: "video",
+    }]]);
+    const req = request();
+    req.headers.range = "bytes=20-30";
+    const res = response();
+
+    await createConversationMediaHandler({ execute } as any, identity)(req, res);
+
+    expect(res.setHeader).toHaveBeenCalledWith("Content-Range", "bytes */10");
+    expect(res.status).toHaveBeenCalledWith(416);
+    expect(res.send).not.toHaveBeenCalled();
   });
 
   it("returns a controlled 404 when a V2 object is missing", async () => {

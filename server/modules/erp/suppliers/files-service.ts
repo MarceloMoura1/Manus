@@ -8,6 +8,7 @@ import {
   type SupplierFileListInput,
   type SupplierFileUploadInput,
   type SupplierFileView,
+  SUPPLIER_FILE_MAX_BYTES,
   SUPPLIER_FILE_CATEGORY_LABELS,
 } from "./files-contracts";
 import { SupplierFileRepository, type SupplierFileRow } from "./files-repository";
@@ -25,6 +26,35 @@ type Identity = {
   userId: string;
   role: OperationalRole;
 };
+
+export const SUPPLIER_FILE_MAX_BASE64_LENGTH = 4 * Math.ceil(SUPPLIER_FILE_MAX_BYTES / 3);
+
+export function decodeSupplierFileBase64(
+  base64: string,
+  options: {
+    maxBytes?: number;
+    decode?: (value: string, encoding: BufferEncoding) => Buffer;
+  } = {},
+): Buffer {
+  const maxBytes = options.maxBytes ?? SUPPLIER_FILE_MAX_BYTES;
+  const maxEncodedLength = 4 * Math.ceil(maxBytes / 3);
+  // This check is intentionally before regex canonicalization and Buffer.from:
+  // no allocation proportional to an obviously oversized encoded payload.
+  if (base64.length > maxEncodedLength) {
+    throw new ErpDomainError("VALIDATION", "Arquivo excede o limite máximo de 20 MB.");
+  }
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64) || base64.length % 4 !== 0) {
+    throw new ErpDomainError("VALIDATION", "Conteúdo em formato base64 inválido.");
+  }
+  const bytes = (options.decode ?? ((value, encoding) => Buffer.from(value, encoding)))(base64, "base64");
+  if (bytes.length === 0 || bytes.length > maxBytes || bytes.toString("base64") !== base64) {
+    throw new ErpDomainError(
+      "VALIDATION",
+      bytes.length > maxBytes ? "Arquivo excede o limite máximo de 20 MB." : "Conteúdo em formato base64 inválido.",
+    );
+  }
+  return bytes;
+}
 
 function toFileView(row: SupplierFileRow, supplierPublicId: string): SupplierFileView {
   return {
@@ -85,12 +115,7 @@ export class SupplierFileService {
     }
 
     const safeName = sanitizeFileName(input.fileName);
-    let bytes: Buffer;
-    try {
-      bytes = Buffer.from(input.base64, "base64");
-    } catch {
-      throw new ErpDomainError("VALIDATION", "Conteúdo em formato base64 inválido.");
-    }
+    const bytes = decodeSupplierFileBase64(input.base64);
 
     const { mimeType, sha256 } = await validateAndInspectFile(bytes, input.mimeType);
     const filePublicId = randomUUID();
