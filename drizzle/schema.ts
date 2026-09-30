@@ -879,6 +879,47 @@ export const megadeskConversationMessages = mysqlTable(
   ]
 );
 
+export const megadeskConversationPendingReceipts = mysqlTable(
+  "megadesk_conversation_pending_receipts",
+  {
+    receiptId: char("receipt_id", { length: 36 }).primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    provider: varchar({ length: 40 }).notNull(),
+    integrationId: varchar("integration_id", { length: 120 }).notNull(),
+    externalMessageId: varchar("external_message_id", { length: 180 }).notNull(),
+    status: varchar({ length: 40 }).notNull(),
+    statusRank: int("status_rank").notNull(),
+    providerEventAt: timestamp("provider_event_at", { mode: "date" }),
+    receivedAt: timestamp("received_at", { mode: "date" }).defaultNow().notNull(),
+    expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
+    replayState: mysqlEnum("replay_state", ["pending", "replayed"])
+      .default("pending")
+      .notNull(),
+    messageId: varchar("message_id", { length: 100 }),
+    replayedAt: timestamp("replayed_at", { mode: "date" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mdpr_external_scope").on(
+      table.clientId,
+      table.provider,
+      table.integrationId,
+      table.externalMessageId
+    ),
+    index("idx_mdpr_expiry").on(table.expiresAt, table.replayState),
+    index("idx_mdpr_tenant_state").on(table.clientId, table.replayState, table.updatedAt),
+    foreignKey({
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId],
+      name: "fk_mdpr_client",
+    }).onDelete("restrict").onUpdate("restrict"),
+  ]
+);
+
 export const megadeskEvolutionSessions = mysqlTable(
   "megadesk_evolution_sessions",
   {

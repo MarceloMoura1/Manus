@@ -7,7 +7,12 @@ import type { Server as HttpServer } from "http";
 import { Server as SocketIOServer, type Socket } from "socket.io";
 import type { Request } from "express";
 import type { WaConversationRecord, WaMessageRecord, WaMessageStatus } from "../types";
-import { operationalAllowedOrigins, resolveOperationalSession } from "../../../_core/megadesk-session";
+import {
+  operationalAllowedOrigins,
+  resolveOperationalSession,
+  resolveOperationalSessionReadOnly,
+  type OperationalIdentity,
+} from "../../../_core/megadesk-session";
 
 let io: SocketIOServer | null = null;
 
@@ -78,18 +83,63 @@ export function emitOperationalTenantEvent(clientId: string, event: string, payl
 }
 
 export function emitOperationalTenantEventForRoles(clientId: string, event: string, payload: unknown, allowedRoles?: readonly string[]): void {
-  if (!io) return;
-  void (async () => {
-    const sockets = [...io!.sockets.sockets.values()].filter(socket => socket.rooms.has(`client:${clientId}`));
-    await Promise.all(sockets.map(async socket => {
-      const identity = await resolveOperationalSession(socket.request as Request).catch(() => null);
-      if (!identity || identity.tenantId !== clientId) return socket.disconnect(true);
-      if (allowedRoles && !allowedRoles.includes(identity.role)) return;
-      socket.emit(event, payload);
-    }));
-  })().catch(() => {
-    if (process.env.NODE_ENV === "development") console.error("[WA Socket] Falha ao validar destinatários de evento.");
+  void emitOperationalTenantEventAsync(clientId, event, payload, allowedRoles).catch(() => {
+    console.error("[WA Socket] Falha ao validar destinatários de evento.", { event });
   });
+}
+
+type OperationalSocketRecipient = Pick<Socket, "request" | "rooms" | "disconnect" | "emit">;
+type OperationalSessionResolver = (request: Pick<Request, "headers">) => Promise<OperationalIdentity | null>;
+
+export type OperationalEventDelivery = {
+  candidates: number;
+  emitted: number;
+  disconnected: number;
+  roleFiltered: number;
+};
+
+/** Revalida a sessão imediatamente antes de entregar cada evento. */
+export async function deliverOperationalTenantEvent(
+  sockets: readonly OperationalSocketRecipient[],
+  clientId: string,
+  event: string,
+  payload: unknown,
+  allowedRoles?: readonly string[],
+  resolveSession: OperationalSessionResolver = resolveOperationalSessionReadOnly,
+): Promise<OperationalEventDelivery> {
+  const delivery: OperationalEventDelivery = {
+    candidates: sockets.length,
+    emitted: 0,
+    disconnected: 0,
+    roleFiltered: 0,
+  };
+  await Promise.all(sockets.map(async socket => {
+    const identity = await resolveSession(socket.request as Request).catch(() => null);
+    if (!identity || identity.tenantId !== clientId) {
+      delivery.disconnected += 1;
+      socket.disconnect(true);
+      return;
+    }
+    if (allowedRoles && !allowedRoles.includes(identity.role)) {
+      delivery.roleFiltered += 1;
+      return;
+    }
+    socket.emit(event, payload);
+    delivery.emitted += 1;
+  }));
+  return delivery;
+}
+
+/** Variante aguardável para webhooks e mutations observarem a entrega. */
+export async function emitOperationalTenantEventAsync(
+  clientId: string,
+  event: string,
+  payload: unknown,
+  allowedRoles?: readonly string[],
+): Promise<OperationalEventDelivery> {
+  if (!io) return { candidates: 0, emitted: 0, disconnected: 0, roleFiltered: 0 };
+  const sockets = [...io.sockets.sockets.values()].filter(socket => socket.rooms.has(`client:${clientId}`));
+  return deliverOperationalTenantEvent(sockets, clientId, event, payload, allowedRoles);
 }
 
 // ─── Emissores de Eventos ──────────────────────────────────────────────────────

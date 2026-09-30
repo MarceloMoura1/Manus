@@ -102,6 +102,13 @@ export function safeOutboundProviderMessage(error: unknown): string {
     : 0;
   const name = error instanceof Error ? error.name : "";
   const message = error instanceof Error ? error.message : "";
+  if (name === "OutboundProviderOutcomeUncertainError"
+    || message === "OUTBOUND_SENT_RECONCILIATION_PENDING"
+    || message === "OUTBOUND_FAILED_RECONCILIATION_PENDING"
+    || (message === "OUTBOUND_ATTEMPT_ALREADY_RECORDED"
+      && (error as { status?: unknown }).status !== "failed")) {
+    return "O envio está aguardando confirmação. Não reenvie esta mensagem; atualize a conversa para acompanhar o status.";
+  }
   if (message === "A conversa não possui um destinatário de WhatsApp seguro.") return message;
   if (status === 400 || status === 422) return "A Evolution rejeitou o destinatário ou o conteúdo da mensagem.";
   if (status === 401 || status === 403) return "A Evolution recusou a autenticação configurada.";

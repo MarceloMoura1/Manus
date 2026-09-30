@@ -3,12 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { executeOutboundAttempt, OutboundAttemptAlreadyRecordedError, OutboundPendingPersistenceError, OutboundReconciliationError, sendOutboundConversationMediaFromPrivateStorage, writeOutboundConversationMedia } from "./conversation-outbound";
+import { executeOutboundAttempt, outboundAttemptFingerprint, OutboundAttemptAlreadyRecordedError, OutboundAttemptConflictError, OutboundPendingPersistenceError, OutboundPreProviderFailureError, OutboundProviderOutcomeUncertainError, OutboundReconciliationError, reconcileOutboundDelivery, sendOutboundConversationMediaFromPrivateStorage, writeOutboundConversationMedia } from "./conversation-outbound";
 import { decodeConversationMediaDataUrl, readConversationMedia, writeConversationMedia } from "./conversation-media-storage";
 
 const input = {
   messageId: "local-1", clientAttemptId: "attempt-1", conversationId: "conv-1", clientId: "tenant-a", provider: "evolution",
-  integrationId: "instance-a", messageType: "text", sender: "agent" as const, text: "hello",
+  integrationId: "instance-a", recipient: "5541999999999", messageType: "text", sender: "agent" as const, text: "hello",
   timestamp: new Date("2026-08-29T12:00:00Z"), legacyMessage: { from: "agent", text: "hello" },
 };
 
@@ -17,23 +17,50 @@ const providerReference = {
   message: { conversation: "hello" },
 };
 
-function pool(options: { insertError?: Error; reconciliationError?: Error; existing?: any } = {}) {
+function pool(options: { insertError?: Error; reconciliationError?: Error; reconciliationAffectedRows?: number;
+  reconciliationRowExists?: boolean; existing?: any; pendingReceipt?: { receiptId: string; status: string } } = {}) {
+  const existing = options.existing ? {
+    ...options.existing,
+    media_reference: options.existing.media_reference ?? JSON.stringify({
+      _megadeskOutboundAttempt: { version: 1, fingerprint: outboundAttemptFingerprint(input) },
+    }),
+  } : undefined;
   const connection = {
     beginTransaction: vi.fn().mockResolvedValue(undefined), commit: vi.fn().mockResolvedValue(undefined),
     rollback: vi.fn().mockResolvedValue(undefined), release: vi.fn(),
     execute: vi.fn(async (sql: string) => {
       if (sql.includes("GET_LOCK")) return [[{ acquired: 1 }]];
-      if (sql.includes("client_attempt_id") && sql.includes("SELECT message_id")) return [[options.existing].filter(Boolean)];
+      if (sql.includes("client_attempt_id") && sql.includes("SELECT message_id")) return [[existing].filter(Boolean)];
       if (sql.includes("INSERT INTO megadesk_domain_conversations_messages") && options.insertError) throw options.insertError;
       if (sql.includes("SELECT messages_json")) return [[{ messages_json: "[]" }]];
+      if (sql.startsWith("UPDATE megadesk_domain_conversations_messages")) {
+        if (options.reconciliationError) throw options.reconciliationError;
+        return [{ affectedRows: options.reconciliationAffectedRows ?? 1 }];
+      }
+      if (sql.startsWith("SELECT message_id FROM megadesk_domain_conversations_messages")) {
+        return [options.reconciliationRowExists ? [{ message_id: input.messageId }] : []];
+      }
+      if (sql.includes("FROM megadesk_conversation_pending_receipts")) {
+        return [[...(options.pendingReceipt ? [options.pendingReceipt] : [])]];
+      }
+      if (sql.includes("FROM megadesk_domain_conversations_messages") && sql.includes("external_message_id")) {
+        return [[{ messageId: input.messageId, status: options.pendingReceipt?.status ?? "sent" }]];
+      }
       return [{ affectedRows: 1 }];
     }),
   };
   const execute = vi.fn(async () => {
     if (options.reconciliationError) throw options.reconciliationError;
-    return [{ affectedRows: 1 }];
+    if (options.reconciliationAffectedRows === 0 && options.reconciliationRowExists) {
+      return [[{ message_id: input.messageId }]];
+    }
+    return [{ affectedRows: options.reconciliationAffectedRows ?? 1 }];
   });
   return { value: { getConnection: vi.fn(async () => connection), execute } as any, connection, execute };
+}
+
+function providerRejection(status: number, message = "provider rejected") {
+  return Object.assign(new Error(message), { status });
 }
 
 async function temporaryRoot() {
@@ -48,7 +75,19 @@ describe("outbound tracked workflow", () => {
       return providerReference;
     });
     await expect(executeOutboundAttempt(db.value, input, send)).resolves.toMatchObject({ status: "sent", externalMessageId: "provider-1" });
-    expect(db.execute.mock.calls[0][1]).toEqual(["sent", "provider-1", JSON.stringify(providerReference), "local-1", "conv-1", "tenant-a", "evolution", "instance-a"]);
+    const delivery = db.connection.execute.mock.calls.find(call => String(call[0]).startsWith("UPDATE megadesk_domain_conversations_messages"));
+    expect(delivery?.[1]).toEqual(["sent", "sent", "provider-1", JSON.stringify(providerReference), "local-1", "conv-1", "tenant-a", "evolution", "instance-a"]);
+    expect(String(delivery?.[0])).toContain("WHEN ? = 'sent' AND status = 'pending' THEN 'sent'");
+    expect(String(delivery?.[0])).toContain("WHEN ? = 'failed' AND status IN ('pending', 'sent') THEN 'failed'");
+  });
+
+  it("accepts an idempotent zero-change reattach when the fully scoped message still exists", async () => {
+    const db = pool({ reconciliationAffectedRows: 0, reconciliationRowExists: true });
+    await expect(reconcileOutboundDelivery(db.value, input, "sent", "provider-1", providerReference))
+      .resolves.toMatchObject({ reconciled: false });
+    expect(db.connection.commit).toHaveBeenCalledOnce();
+    expect(db.connection.execute.mock.calls.some(call => String(call[0])
+      .startsWith("SELECT message_id FROM megadesk_domain_conversations_messages"))).toBe(true);
   });
 
   it("never calls provider when initial persistence fails", async () => {
@@ -58,11 +97,31 @@ describe("outbound tracked workflow", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("keeps the local row and marks failure when provider fails", async () => {
+  it("marks failed only when the provider definitively rejects before acceptance", async () => {
     const db = pool();
-    await expect(executeOutboundAttempt(db.value, input, async () => { throw new Error("provider failed"); })).rejects.toThrow("provider failed");
+    const send = vi.fn(async () => { throw providerRejection(422); });
+    await expect(executeOutboundAttempt(db.value, input, send)).rejects.toThrow("provider rejected");
     expect(db.connection.commit).toHaveBeenCalledOnce();
     expect(db.execute.mock.calls[0][1][0]).toBe("failed");
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    Object.assign(new Error("request timed out"), { name: "TimeoutError" }),
+    new Error("ECONNRESET after request write"),
+    providerRejection(503, "provider unavailable after request"),
+  ])("keeps an uncertain provider outcome pending without a second send", async (providerError) => {
+    const db = pool();
+    const send = vi.fn(async () => { throw providerError; });
+    await expect(executeOutboundAttempt(db.value, input, send))
+      .rejects.toBeInstanceOf(OutboundProviderOutcomeUncertainError);
+    expect(send).toHaveBeenCalledOnce();
+    expect(db.execute).not.toHaveBeenCalled();
+
+    const retry = pool({ existing: { message_id: input.messageId, status: "pending", external_message_id: null } });
+    await expect(executeOutboundAttempt(retry.value, input, send))
+      .rejects.toBeInstanceOf(OutboundAttemptAlreadyRecordedError);
+    expect(send).toHaveBeenCalledOnce();
   });
 
   it("leaves a reconcilable pending row when post-provider update fails", async () => {
@@ -72,11 +131,60 @@ describe("outbound tracked workflow", () => {
     expect(db.connection.commit).toHaveBeenCalledOnce();
   });
 
-  it("returns an already-sent attempt without calling provider", async () => {
-    const db = pool({ existing: { message_id: "stored-1", status: "sent", external_message_id: "provider-1" } });
+  it("CAUSAL replays a pending receipt in the outbound reconciliation boundary and emits tenant-scoped realtime", async () => {
+    const db = pool({ pendingReceipt: { receiptId: "receipt-1", status: "read" } });
+    const emitReceipt = vi.fn().mockResolvedValue(undefined);
+    await expect(executeOutboundAttempt(db.value, input, async () => providerReference, { emitReceipt }))
+      .resolves.toMatchObject({ status: "sent", externalMessageId: "provider-1" });
+    expect(emitReceipt).toHaveBeenCalledWith("tenant-a", expect.objectContaining({ status: "read" }));
+    expect(db.connection.commit).toHaveBeenCalledTimes(2);
+    const replayMark = db.connection.execute.mock.calls.find(call => String(call[0]).startsWith("UPDATE megadesk_conversation_pending_receipts"));
+    expect(replayMark?.[1]).toEqual(expect.arrayContaining(["local-1", "receipt-1", "tenant-a", "evolution", "instance-a", "provider-1"]));
+  });
+
+  it("treats a zero-row sent reconciliation as uncertain instead of reporting success", async () => {
+    const db = pool({ reconciliationAffectedRows: 0 });
+    const send = vi.fn(async () => providerReference);
+    await expect(executeOutboundAttempt(db.value, input, send))
+      .rejects.toMatchObject({
+        name: "Error",
+        message: "OUTBOUND_SENT_RECONCILIATION_PENDING",
+        intendedStatus: "sent",
+      });
+    expect(send).toHaveBeenCalledOnce();
+
+    const retry = pool({ existing: { message_id: input.messageId, status: "pending", external_message_id: null } });
+    await expect(executeOutboundAttempt(retry.value, input, send))
+      .rejects.toBeInstanceOf(OutboundAttemptAlreadyRecordedError);
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it("surfaces a zero-row failed reconciliation instead of silently swallowing it", async () => {
+    const db = pool({ reconciliationAffectedRows: 0 });
+    await expect(executeOutboundAttempt(db.value, input, async () => { throw providerRejection(400); }))
+      .rejects.toMatchObject({
+        name: "Error",
+        message: "OUTBOUND_FAILED_RECONCILIATION_PENDING",
+        intendedStatus: "failed",
+      });
+  });
+
+  it.each(["sent", "delivered", "read", "played"])("returns an already-confirmed %s attempt without calling provider", async (status) => {
+    const db = pool({ existing: { message_id: "stored-1", status, external_message_id: "provider-1" } });
     const send = vi.fn();
     await expect(executeOutboundAttempt(db.value, input, send)).resolves.toEqual({ messageId: "stored-1", externalMessageId: "provider-1", status: "sent" });
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("keeps the same attempt identifier isolated between tenants", async () => {
+    const tenantB = { ...input, clientId: "tenant-b", conversationId: "conv-b", integrationId: "instance-b",
+      recipient: "5511888888888", messageId: "local-b" };
+    const db = pool();
+    const send = vi.fn(async () => providerReference);
+    await expect(executeOutboundAttempt(db.value, tenantB, send)).resolves.toMatchObject({ status: "sent" });
+    expect(send).toHaveBeenCalledOnce();
+    const lookup = db.connection.execute.mock.calls.find(call => String(call[0]).includes("client_attempt_id"));
+    expect(lookup?.[1]).toEqual(["tenant-b", "attempt-1"]);
   });
 
   it.each(["pending", "failed"])("does not blindly resend an existing %s attempt", async (status) => {
@@ -84,6 +192,98 @@ describe("outbound tracked workflow", () => {
     const send = vi.fn();
     await expect(executeOutboundAttempt(db.value, input, send)).rejects.toBeInstanceOf(OutboundAttemptAlreadyRecordedError);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["payload", { text: "different payload" }],
+    ["conversation", { conversationId: "conv-2" }],
+    ["recipient", { recipient: "5511999999999" }],
+  ])("fails closed when the same attempt ID is reused with a different %s", async (_field, change) => {
+    const db = pool({ existing: { message_id: "stored-1", status: "sent", external_message_id: "provider-1" } });
+    const send = vi.fn();
+    await expect(executeOutboundAttempt(db.value, { ...input, ...change }, send))
+      .rejects.toBeInstanceOf(OutboundAttemptConflictError);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("allows an explicit new logical attempt after a definitive failure without reusing the failed identity", async () => {
+    const first = pool();
+    const firstSend = vi.fn(async () => { throw providerRejection(400); });
+    await expect(executeOutboundAttempt(first.value, input, firstSend)).rejects.toThrow("provider rejected");
+
+    const second = pool();
+    const secondSend = vi.fn(async () => providerReference);
+    await expect(executeOutboundAttempt(second.value, {
+      ...input,
+      messageId: "local-2",
+      clientAttemptId: "attempt-2",
+    }, secondSend)).resolves.toMatchObject({ status: "sent" });
+    expect(firstSend).toHaveBeenCalledOnce();
+    expect(secondSend).toHaveBeenCalledOnce();
+  });
+
+  it("marks a proven pre-provider media failure as definitive without calling the provider", async () => {
+    const db = pool();
+    const provider = vi.fn();
+    const mediaReference = { version: 2 as const, storage: "local" as const,
+      storageKey: "tenants/tenant-a/conversation-media/22/22222222-2222-4222-8222-222222222222.bin",
+      mimeType: "application/pdf", fileName: "proposal.pdf", byteSize: 3, sha256: "a".repeat(64) };
+
+    await expect(executeOutboundAttempt(db.value, {
+      ...input,
+      messageType: "document",
+      mediaReference,
+    }, () => sendOutboundConversationMediaFromPrivateStorage({
+      clientId: "tenant-a",
+      mediaReference,
+      instanceName: "instance-a",
+      number: "5541999999999",
+      kind: "document",
+    }, {
+      read: vi.fn().mockRejectedValue(new Error("private object unavailable")),
+      send: provider,
+    }))).rejects.toBeInstanceOf(OutboundPreProviderFailureError);
+    expect(provider).not.toHaveBeenCalled();
+    expect(db.execute.mock.calls[0][1][0]).toBe("failed");
+  });
+
+  it("allows at most one provider send while a concurrent request uses the same attempt identity", async () => {
+    let pendingPersisted = false;
+    const connections = Array.from({ length: 3 }, () => ({
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+      execute: vi.fn(async (sql: string) => {
+        if (sql.includes("GET_LOCK")) return [[{ acquired: 1 }]];
+        if (sql.includes("SELECT message_id")) return [pendingPersisted
+          ? [{ message_id: input.messageId, status: "pending", external_message_id: null,
+            media_reference: JSON.stringify({ _megadeskOutboundAttempt: { version: 1, fingerprint: outboundAttemptFingerprint(input) } }) }]
+          : []];
+        if (sql.includes("INSERT INTO megadesk_domain_conversations_messages")) pendingPersisted = true;
+        if (sql.includes("SELECT messages_json")) return [[{ messages_json: "[]" }]];
+        if (sql.includes("FROM megadesk_conversation_pending_receipts")) return [[]];
+        return [{ affectedRows: 1 }];
+      }),
+    }));
+    const db = {
+      getConnection: vi.fn()
+        .mockResolvedValueOnce(connections[0])
+        .mockResolvedValueOnce(connections[1])
+        .mockResolvedValueOnce(connections[2]),
+      execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }]),
+    } as any;
+    let releaseProvider!: (value: typeof providerReference) => void;
+    const providerBlocked = new Promise<typeof providerReference>(resolve => { releaseProvider = resolve; });
+    const send = vi.fn(() => providerBlocked);
+
+    const firstRequest = executeOutboundAttempt(db, input, send);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
+    await expect(executeOutboundAttempt(db, input, send)).rejects.toBeInstanceOf(OutboundAttemptAlreadyRecordedError);
+    expect(send).toHaveBeenCalledOnce();
+    releaseProvider(providerReference);
+    await expect(firstRequest).resolves.toMatchObject({ status: "sent" });
+    expect(send).toHaveBeenCalledOnce();
   });
 
   it("persists the quote relation in the pending row before calling the provider", async () => {
@@ -101,7 +301,8 @@ describe("outbound tracked workflow", () => {
     await executeOutboundAttempt(db.value, { ...input, messageType: "document", mediaReference }, async () => providerReference);
     const insert = db.connection.execute.mock.calls.find(call => String(call[0]).includes("INSERT INTO megadesk_domain_conversations_messages"));
     const serialized = String(insert?.[1][13]);
-    expect(JSON.parse(serialized)).toEqual(mediaReference);
+    expect(JSON.parse(serialized)).toMatchObject(mediaReference);
+    expect(JSON.parse(serialized)._megadeskOutboundAttempt.fingerprint).toMatch(/^[a-f0-9]{64}$/);
     expect(serialized).not.toMatch(/mediaData|base64|dataUrl|data:.*;base64/i);
   });
 
@@ -133,7 +334,7 @@ describe("outbound tracked workflow", () => {
 
       const insert = db.connection.execute.mock.calls.find(call => String(call[0]).includes("INSERT INTO megadesk_domain_conversations_messages"));
       const persistedReference = String(insert?.[1][13]);
-      expect(JSON.parse(persistedReference)).toEqual(mediaReference);
+      expect(JSON.parse(persistedReference)).toMatchObject(mediaReference);
       expect(persistedReference).not.toMatch(/mediaData|base64|dataUrl|data:.*;base64/i);
       expect(mediaReference.storageKey).toMatch(/^tenants\/tenant-a\/conversation-media\//);
       expect(path.isAbsolute(mediaReference.storageKey)).toBe(false);
@@ -149,7 +350,7 @@ describe("outbound tracked workflow", () => {
       }, {
         read: request => readConversationMedia({ ...request, root }),
         send: async () => { throw new Error("provider unavailable"); },
-      }))).rejects.toThrow("provider unavailable");
+      }))).rejects.toBeInstanceOf(OutboundProviderOutcomeUncertainError);
       await expect(readConversationMedia({ clientId: "tenant-a", reference: mediaReference, root }))
         .resolves.toMatchObject({ bytes });
     } finally {

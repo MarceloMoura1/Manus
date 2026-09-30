@@ -44,6 +44,7 @@ import {
   type PreparedRecordedAudio,
 } from "@/lib/audioRecordingController";
 import { outboundAttachmentAccept, prepareOutboundAttachment, type PreparedOutboundAttachment } from "@/lib/outboundAttachment";
+import { isDefinitiveOutboundClientFailure, outboundAttemptLedger } from "@/lib/outbound-attempt-identity";
 import { operatorDisplayName } from "@/lib/conversation-operator-name";
 
 import { Button } from "@/components/ui/button";
@@ -1018,7 +1019,15 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
   sendRecordedAudioRef.current = async audio => {
     if (waConnected === false) throw new Error('WhatsApp disconnected');
     const replyTo = replyTargetRef.current;
-    const clientAttemptId = crypto.randomUUID();
+    const attempt = await outboundAttemptLedger.claim({
+      tenantId: clientId ?? audio.tenantId,
+      conversationId: audio.conversationId,
+      senderContext: audio.userEmail,
+      text: "",
+      attachment: { kind: "audio", mimeType: audio.mimeType, fileName: audio.fileName, dataUrl: audio.dataUrl },
+      replyToMessageId: replyTo?.messageId ?? null,
+    });
+    const clientAttemptId = attempt.clientAttemptId;
     const optimisticId = `pending-${clientAttemptId}`;
     setOptimisticMessages(previous => [...previous, {
       id: optimisticId,
@@ -1037,6 +1046,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
       pending: true,
     }]);
     try {
+      await outboundAttemptLedger.transition(attempt, "submitted");
       await sendAttachmentMutation.mutateAsync({
         conversationId: audio.conversationId,
         kind: 'audio',
@@ -1051,8 +1061,11 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
       await refetchMessages();
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
       setReplyTarget(null);
+      await outboundAttemptLedger.complete(attempt);
     } catch (error) {
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
+      if (isDefinitiveOutboundClientFailure(error)) await outboundAttemptLedger.release(attempt);
+      else await outboundAttemptLedger.transition(attempt, "uncertain");
       throw error;
     }
   };
@@ -1063,7 +1076,21 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
     const textToSend = messageInput.trim();
     const attachmentToSend = attachment;
     const replyTo = replyTarget;
-    const clientAttemptId = crypto.randomUUID();
+    let stableAttempt;
+    try {
+      stableAttempt = await outboundAttemptLedger.claim({
+        tenantId: clientId ?? "unknown-tenant",
+        conversationId: selectedConv.id,
+        senderContext: sessionData?.userEmail ?? "",
+        text: textToSend,
+        attachment: attachmentToSend,
+        replyToMessageId: replyTo?.messageId ?? null,
+      });
+    } catch {
+      showToast('Este envio possui resultado incerto e requer revisão antes de uma nova tentativa.', 'error');
+      return;
+    }
+    const clientAttemptId = stableAttempt.clientAttemptId;
     const optimisticId = `pending-${clientAttemptId}`;
     setOptimisticMessages(previous => [...previous, {
       id: optimisticId,
@@ -1085,6 +1112,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
     setAttachment(null);
     setIsSendingMessage(true);
     try {
+      await outboundAttemptLedger.transition(stableAttempt, "submitted");
       if (attachmentToSend) {
         await sendAttachmentMutation.mutateAsync({
           conversationId: selectedConv.id,
@@ -1110,10 +1138,13 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
       await refetchMessages();
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
       setReplyTarget(null);
+      await outboundAttemptLedger.complete(stableAttempt);
     } catch (error) {
       setOptimisticMessages(previous => previous.filter(message => message.id !== optimisticId));
       setMessageInput(textToSend);
       setAttachment(attachmentToSend);
+      if (isDefinitiveOutboundClientFailure(error)) await outboundAttemptLedger.release(stableAttempt);
+      else await outboundAttemptLedger.transition(stableAttempt, "uncertain");
       showToast(error instanceof Error ? error.message : (attachmentToSend ? 'Erro ao enviar anexo' : 'Erro ao enviar mensagem'), 'error');
     } finally {
       setIsSendingMessage(false);

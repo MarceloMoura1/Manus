@@ -9,6 +9,7 @@ const CONVERSATION_TIMESTAMP_UTC_REPAIR_CONTRACT = "conversation_timestamp_utc_v
 
 export const REQUIRED_RUNTIME_MAIN_TABLES = [
   "megadesk_ticket_statuses", "megadesk_crm_timeline", "megadesk_domain_conversations_messages",
+  "megadesk_conversation_pending_receipts",
   "megadesk_evolution_sessions", "megadesk_domain_ia_conversations",
   "megadesk_domain_ia_conversation_history", "megadesk_ia_token_usage",
   "megadesk_operational_sessions",
@@ -29,6 +30,7 @@ export const REQUIRED_RUNTIME_COLUMNS: Record<string, readonly string[]> = {
   megadesk_whatsapp_config: ["configId", "clientId", "phoneNumberId", "accessToken", "connectionStatus"],
   megadesk_domain_bot_scripts: ["script_id", "client_id", "description", "system_prompt"],
   megadesk_domain_conversations_messages: ["message_id", "conversation_id", "status"],
+  megadesk_conversation_pending_receipts: ["receipt_id", "client_id", "provider", "integration_id", "external_message_id", "status", "status_rank", "expires_at", "replay_state"],
   megadesk_evolution_sessions: ["client_id", "instance_name", "status"],
   megadesk_ia_token_usage: ["id", "client_id", "created_at"],
   megadesk_operational_sessions: ["id", "token_hash", "user_id", "client_id", "expires_at", "revoked_at"],

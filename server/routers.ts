@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createHash, randomUUID } from "node:crypto";
 import { withPublicCodeRetry } from "./conversation-public-code";
-import { executeOutboundAttempt, OutboundPendingPersistenceError, sendOutboundConversationMediaFromPrivateStorage, writeOutboundConversationMedia } from "./conversation-outbound";
+import { executeOutboundAttempt, isOutboundOutcomeUncertain, OutboundPendingPersistenceError, sendOutboundConversationMediaFromPrivateStorage, writeOutboundConversationMedia } from "./conversation-outbound";
 import { canonicalMessageMirror } from "./conversation-message-store";
 import { decodeConversationMediaDataUrl, removeConversationMedia } from "./conversation-media-storage";
 
@@ -947,13 +947,16 @@ export const appRouter = router({
         const [{ evoSendText }, { instanceNameFor }] = await Promise.all([
           import("./evolution/client"), import("./evolution/session-store"),
         ]);
+        // Resolve local/pre-provider validation before creating a pending row.
+        // A failure here proves no provider request was attempted.
+        const recipient = resolveOutboundRecipient(outboundConversation);
         const sent = await executeOutboundAttempt(getPool(), { messageId, clientAttemptId: input.clientAttemptId, conversationId: input.conversationId,
           clientId: ctx.tenantId, provider: "evolution", integrationId: outboundConversation.integrationId,
+          recipient,
           messageType: "text",
           sender: "agent", senderUserId: ctx.operationalUserId, senderNameSnapshot: operatorName,
           text: input.message, timestamp: sentAt, legacyMessage: outgoingMessage, replyToMessageId: input.replyToMessageId ?? null },
-          () => evoSendText(instanceNameFor(outboundConversation.clientId),
-            resolveOutboundRecipient(outboundConversation), input.message, replyReference));
+          () => evoSendText(instanceNameFor(outboundConversation.clientId), recipient, input.message, replyReference));
         if (conversation) {
           conversation.messages.push(canonicalMessageMirror({ messageId: sent.messageId, externalMessageId: sent.externalMessageId,
             clientAttemptId: input.clientAttemptId, conversationId: input.conversationId, clientId: ctx.tenantId,
@@ -964,7 +967,10 @@ export const appRouter = router({
           conversation.time = time;
         }
       } catch (error) {
-        throw new TRPCError({ code: "BAD_GATEWAY", message: safeOutboundProviderMessage(error) });
+        throw new TRPCError({
+          code: isOutboundOutcomeUncertain(error) ? "CONFLICT" : "BAD_GATEWAY",
+          message: safeOutboundProviderMessage(error),
+        });
       }
       audit("MegaDesk", "Mensagem enviada e sincronizada", outboundConversation.clientId);
       await recordMegaDeskMetric(outboundConversation.clientId, "message_sent", 1, { conversationId: input.conversationId });
@@ -1030,9 +1036,11 @@ export const appRouter = router({
         const [{ evoSendAttachment }, { instanceNameFor }] = await Promise.all([
           import("./evolution/client"), import("./evolution/session-store"),
         ]);
+        const recipient = resolveOutboundRecipient(outboundConversation);
         const sent = await executeOutboundAttempt(getPool(), { messageId, clientAttemptId: input.clientAttemptId,
           conversationId: input.conversationId, clientId: ctx.tenantId, provider: "evolution",
           integrationId: outboundConversation.integrationId,
+          recipient,
           messageType: input.kind, sender: "agent",
           senderUserId: ctx.operationalUserId, senderNameSnapshot: operatorName, text: summary,
           timestamp: sentAt, legacyMessage: outgoingMessage,
@@ -1040,7 +1048,7 @@ export const appRouter = router({
           mediaReference },
           () => sendOutboundConversationMediaFromPrivateStorage({
             clientId: ctx.tenantId, mediaReference, instanceName: instanceNameFor(ctx.tenantId),
-            number: resolveOutboundRecipient(outboundConversation), kind: input.kind,
+            number: recipient, kind: input.kind,
             mediaSource: input.mediaSource,
             ...(input.kind === "audio" && input.mediaSource === "recording"
               ? { recordingInput: { mimeType: media.mimeType, byteLength: media.bytes.length } }
@@ -1061,7 +1069,10 @@ export const appRouter = router({
         if (error instanceof OutboundPendingPersistenceError) {
           await removeConversationMedia({ clientId: ctx.tenantId, reference: mediaReference }).catch(() => undefined);
         }
-        throw new TRPCError({ code: "BAD_GATEWAY", message: safeOutboundProviderMessage(error) });
+        throw new TRPCError({
+          code: isOutboundOutcomeUncertain(error) ? "CONFLICT" : "BAD_GATEWAY",
+          message: safeOutboundProviderMessage(error),
+        });
       }
       return { ok: true, conversationId: input.conversationId, kind: input.kind };
     }),

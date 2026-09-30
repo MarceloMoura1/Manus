@@ -32,6 +32,7 @@ import {
 } from '@/lib/outboundAttachment';
 import type { CrmWhatsAppIntent } from '../../../shared/crm';
 import { formatContactPhone, hasHumanContactName } from '../../../shared/contact-phone';
+import { isDefinitiveOutboundClientFailure, outboundAttemptLedger, type StableOutboundAttempt } from '@/lib/outbound-attempt-identity';
 
 const ACTIVE_ATTENDANCE_PHONE_KEY = 'MEGADESK_ACTIVE_ATTENDANCE_PHONE';
 const SELECTED_CONVERSATION_KEY = 'MEGADESK_SELECTED_CONVERSATION_ID';
@@ -190,7 +191,17 @@ export function NewAttendanceFlow({ onNavigate, initialPhone, initialCrmCustomer
         return;
       }
 
+      let attempt: StableOutboundAttempt | null = null;
       try {
+        attempt = await outboundAttemptLedger.claim({
+          tenantId,
+          conversationId: conversation.conversationId,
+          senderContext: userEmail,
+          text,
+          attachment: attachmentToSend,
+          replyToMessageId: null,
+        });
+        await outboundAttemptLedger.transition(attempt, 'submitted');
         if (attachmentToSend) {
           await sendAttachment.mutateAsync({
             conversationId: conversation.conversationId,
@@ -203,17 +214,22 @@ export function NewAttendanceFlow({ onNavigate, initialPhone, initialCrmCustomer
               : undefined,
             caption: text || undefined,
             userEmail,
-            clientAttemptId: crypto.randomUUID(),
+            clientAttemptId: attempt.clientAttemptId,
           });
         } else {
           await sendMessage.mutateAsync({
             conversationId: conversation.conversationId,
             message: text,
             userEmail,
-            clientAttemptId: crypto.randomUUID(),
+            clientAttemptId: attempt.clientAttemptId,
           });
         }
+        await outboundAttemptLedger.complete(attempt);
       } catch (sendError) {
+        if (attempt) {
+          if (isDefinitiveOutboundClientFailure(sendError)) await outboundAttemptLedger.release(attempt);
+          else await outboundAttemptLedger.transition(attempt, 'uncertain');
+        }
           setActiveConversation({ id: conversation.conversationId, customerName: recipient.name || 'Contato sem nome', phone: recipient.phone });
         setError(errorMessage(sendError, 'O atendimento foi criado, mas a mensagem não pôde ser enviada.'));
         return;

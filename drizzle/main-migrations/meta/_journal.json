@@ -248,6 +248,13 @@
       "when": 1790308790520,
       "tag": "0034_cold_multiple_man",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "5",
+      "when": 1790743203490,
+      "tag": "0035_furry_stranger",
+      "breakpoints": true
     }
   ]
 }

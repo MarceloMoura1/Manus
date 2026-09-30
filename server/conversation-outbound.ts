@@ -5,14 +5,80 @@ import { normalizeProviderMessageReference, type ProviderMessageReference } from
 import { readConversationMedia, writeConversationMedia, type ConversationMediaReferenceV2 } from "./conversation-media-storage";
 import { capturePreEvolutionAudioDiagnostic } from "./audio-pre-evolution-diagnostic";
 import { normalizeOutboundAudio, OUTBOUND_AUDIO_MIME_TYPE } from "./outbound-audio-normalization";
+import {
+  reconcileConversationReceiptAfterOutbound,
+  type ConversationReceiptReplayResult,
+} from "./conversation-receipt-store";
 
 export type OutboundAttemptInput = Omit<CanonicalMessageWrite, "direction" | "status" | "externalMessageId" | "clientAttemptId"> & {
   clientAttemptId: string;
+  recipient: string;
 };
 
+const OUTBOUND_ATTEMPT_BINDING_KEY = "_megadeskOutboundAttempt";
+type OutboundAttemptBinding = { version: 1; fingerprint: string };
+
+/**
+ * Binds a browser-generated retry ID to the logical server-side operation.
+ * The hash is deliberately streamed from bounded canonical fields; it never
+ * serializes media bytes or transient provider/browser URLs.
+ */
+export function outboundAttemptFingerprint(input: OutboundAttemptInput): string {
+  const hash = createHash("sha256");
+  const field = (name: string, value: unknown) => hash.update(name).update("\0").update(String(value ?? "")).update("\0");
+  field("tenant", input.clientId);
+  field("conversation", input.conversationId);
+  field("recipient", input.recipient.trim().toLowerCase());
+  field("provider", input.provider);
+  field("integration", input.integrationId);
+  field("sender", input.sender);
+  field("senderUser", input.senderUserId);
+  field("type", input.messageType);
+  field("text", input.text);
+  field("reply", input.replyToMessageId);
+  const media = input.mediaReference as Partial<ConversationMediaReferenceV2> | null | undefined;
+  field("mediaSha256", media?.sha256);
+  field("mediaMime", media?.mimeType?.toLowerCase());
+  field("mediaName", media?.fileName);
+  field("mediaSize", media?.byteSize);
+  return hash.digest("hex");
+}
+
+function withOutboundAttemptBinding(
+  mediaReference: Record<string, unknown> | null | undefined,
+  fingerprint: string,
+): Record<string, unknown> {
+  return { ...(mediaReference ?? {}), [OUTBOUND_ATTEMPT_BINDING_KEY]: { version: 1, fingerprint } satisfies OutboundAttemptBinding };
+}
+
+function storedOutboundAttemptFingerprint(value: unknown): string | null {
+  if (typeof value === "string") {
+    try { return storedOutboundAttemptFingerprint(JSON.parse(value)); } catch { return null; }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const binding = (value as Record<string, unknown>)[OUTBOUND_ATTEMPT_BINDING_KEY];
+  if (!binding || typeof binding !== "object" || Array.isArray(binding)) return null;
+  const fingerprint = (binding as Record<string, unknown>).fingerprint;
+  return typeof fingerprint === "string" && /^[a-f0-9]{64}$/.test(fingerprint) ? fingerprint : null;
+}
+
 export class OutboundReconciliationError extends Error {
+  constructor(public readonly messageId: string, public readonly intendedStatus: "sent" | "failed", cause: unknown) {
+    super(intendedStatus === "sent" ? "OUTBOUND_SENT_RECONCILIATION_PENDING" : "OUTBOUND_FAILED_RECONCILIATION_PENDING", { cause });
+  }
+}
+
+export class OutboundProviderOutcomeUncertainError extends Error {
   constructor(public readonly messageId: string, cause: unknown) {
-    super("OUTBOUND_SENT_RECONCILIATION_PENDING", { cause });
+    super("OUTBOUND_PROVIDER_OUTCOME_UNCERTAIN", { cause });
+    this.name = "OutboundProviderOutcomeUncertainError";
+  }
+}
+
+export class OutboundPreProviderFailureError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : "OUTBOUND_PRE_PROVIDER_FAILURE", { cause });
+    this.name = "OutboundPreProviderFailureError";
   }
 }
 
@@ -20,11 +86,37 @@ export class OutboundAttemptAlreadyRecordedError extends Error {
   constructor(public readonly status: string) { super("OUTBOUND_ATTEMPT_ALREADY_RECORDED"); }
 }
 
+export class OutboundAttemptConflictError extends Error {
+  constructor() {
+    super("OUTBOUND_ATTEMPT_CONTEXT_CONFLICT");
+    this.name = "OutboundAttemptConflictError";
+  }
+}
+
 /** The pending row never committed, so a caller may safely compensate its new object. */
 export class OutboundPendingPersistenceError extends Error {
   constructor(cause: unknown) {
     super(cause instanceof Error ? cause.message : "OUTBOUND_PENDING_PERSISTENCE_FAILED", { cause });
   }
+}
+
+/**
+ * Only an explicit 4xx provider response proves that the provider rejected the
+ * request. Transport failures, 5xx responses and malformed success responses
+ * may happen after provider acceptance and must remain pending.
+ */
+export function isDefinitiveOutboundProviderFailure(error: unknown): boolean {
+  if (error instanceof OutboundPreProviderFailureError) return true;
+  if (typeof error !== "object" || error === null || !("status" in error)) return false;
+  const status = Number((error as { status?: unknown }).status);
+  return [400, 401, 403, 404, 405, 413, 415, 422].includes(status);
+}
+
+export function isOutboundOutcomeUncertain(error: unknown): boolean {
+  return error instanceof OutboundProviderOutcomeUncertainError
+    || error instanceof OutboundReconciliationError
+    || error instanceof OutboundAttemptConflictError
+    || (error instanceof OutboundAttemptAlreadyRecordedError && error.status !== "failed");
 }
 
 type ConversationAttachmentKind = "image" | "video" | "audio" | "document" | "sticker";
@@ -103,17 +195,21 @@ export async function sendOutboundConversationMediaFromPrivateStorage(
     captureAudioDiagnostic?: typeof capturePreEvolutionAudioDiagnostic;
   },
 ): Promise<ProviderMessageReference> {
-  // An absent discriminator used to enter the attachment compatibility path,
-  // which silently sent a broken MediaRecorder WebM to Evolution. All current
-  // first-party audio call sites send an explicit source; reject ambiguous
-  // audio again at this boundary even if a caller bypasses the router schema.
-  if (input.kind === "audio" && input.mediaSource === undefined) {
-    throw new OutboundAudioSourceRequiredError();
-  }
-  const stored = await (dependencies.read ?? readConversationMedia)({ clientId: input.clientId, reference: input.mediaReference });
-  const normalizationAttempted = input.kind === "audio" && input.mediaSource === "recording";
-  if (normalizationAttempted && stored.mimeType !== OUTBOUND_AUDIO_MIME_TYPE) {
-    throw new OutboundRecordedAudioCanonicalMediaError();
+  let stored: Awaited<ReturnType<typeof readConversationMedia>>;
+  let normalizationAttempted: boolean;
+  try {
+    // These checks and the private read happen before dependencies.send. Their
+    // failure therefore proves that no provider request was attempted.
+    if (input.kind === "audio" && input.mediaSource === undefined) {
+      throw new OutboundAudioSourceRequiredError();
+    }
+    stored = await (dependencies.read ?? readConversationMedia)({ clientId: input.clientId, reference: input.mediaReference });
+    normalizationAttempted = input.kind === "audio" && input.mediaSource === "recording";
+    if (normalizationAttempted && stored.mimeType !== OUTBOUND_AUDIO_MIME_TYPE) {
+      throw new OutboundRecordedAudioCanonicalMediaError();
+    }
+  } catch (error) {
+    throw new OutboundPreProviderFailureError(error);
   }
   const providerMedia = stored;
   if (input.kind === "audio") {
@@ -140,52 +236,88 @@ export async function sendOutboundConversationMediaFromPrivateStorage(
   });
 }
 
-async function updateDelivery(pool: Pool, input: OutboundAttemptInput, status: "sent" | "failed", externalMessageId?: string,
-  providerMessageReference?: ProviderMessageReference | null) {
+export async function reconcileOutboundDelivery(pool: Pool, input: OutboundAttemptInput, status: "sent" | "failed", externalMessageId?: string,
+  providerMessageReference?: ProviderMessageReference | null): Promise<ConversationReceiptReplayResult> {
   const reference = normalizeProviderMessageReference(providerMessageReference);
-  await pool.execute(
-    `UPDATE megadesk_domain_conversations_messages
-     SET status = ?, external_message_id = COALESCE(?, external_message_id),
-       provider_message_reference = COALESCE(?, provider_message_reference), updated_at = NOW()
-     WHERE message_id = ? AND conversation_id = ? AND client_id = ? AND provider = ? AND integration_id = ?`,
-     [status, externalMessageId ?? null, reference ? JSON.stringify(reference) : null,
-       input.messageId, input.conversationId, input.clientId, input.provider, input.integrationId],
-  );
+  const attach = async (executor: Pick<PoolConnection, "execute">) => {
+    const [result] = await executor.execute(
+      `UPDATE megadesk_domain_conversations_messages
+       SET status = CASE
+           WHEN ? = 'sent' AND status = 'pending' THEN 'sent'
+           WHEN ? = 'failed' AND status IN ('pending', 'sent') THEN 'failed'
+           ELSE status END,
+         external_message_id = COALESCE(?, external_message_id),
+         provider_message_reference = COALESCE(?, provider_message_reference), updated_at = NOW()
+       WHERE message_id = ? AND conversation_id = ? AND client_id = ? AND provider = ? AND integration_id = ?`,
+       [status, status, externalMessageId ?? null, reference ? JSON.stringify(reference) : null,
+         input.messageId, input.conversationId, input.clientId, input.provider, input.integrationId],
+    );
+    if (Number((result as { affectedRows?: unknown } | null)?.affectedRows ?? 0) === 0) {
+      const [rows] = await executor.execute(
+        `SELECT message_id FROM megadesk_domain_conversations_messages
+         WHERE message_id = ? AND conversation_id = ? AND client_id = ? AND provider = ? AND integration_id = ? LIMIT 1`,
+        [input.messageId, input.conversationId, input.clientId, input.provider, input.integrationId],
+      );
+      if (!Array.isArray(rows) || rows.length !== 1) throw new Error("OUTBOUND_DELIVERY_UPDATE_MISSING");
+    }
+  };
+  if (status === "sent" && externalMessageId) {
+    return reconcileConversationReceiptAfterOutbound(pool, {
+      clientId: input.clientId,
+      provider: input.provider,
+      integrationId: input.integrationId,
+      externalMessageId,
+    }, attach);
+  }
+  await attach(pool as unknown as PoolConnection);
+  return { reconciled: false, applied: false, messageId: null, storedStatus: null };
 }
+
+export type OutboundAttemptDependencies = {
+  emitReceipt?: (clientId: string, payload: { status: string; receivedAt: string }) => Promise<void>;
+};
 
 export async function executeOutboundAttempt(
   pool: Pool,
   input: OutboundAttemptInput,
   sendProvider: () => Promise<ProviderMessageReference>,
+  dependencies: OutboundAttemptDependencies = {},
 ): Promise<{ messageId: string; externalMessageId: string; status: "sent" }> {
   const connection = await pool.getConnection();
-  let existing: { message_id: string; status: string; external_message_id: string | null } | undefined;
+  let existing: { message_id: string; status: string; external_message_id: string | null; media_reference: unknown } | undefined;
+  const fingerprint = outboundAttemptFingerprint(input);
   const lockName = createHash("sha256").update(`outbound\0${input.clientId}\0${input.clientAttemptId}`).digest("hex");
   try {
     const [lockRows] = await connection.execute("SELECT GET_LOCK(?, 10) AS acquired", [lockName]) as any[];
     if (Number(lockRows?.[0]?.acquired) !== 1) throw new Error("OUTBOUND_ATTEMPT_LOCK_TIMEOUT");
     await connection.beginTransaction();
     const [rows] = await connection.execute(
-      `SELECT message_id, status, external_message_id FROM megadesk_domain_conversations_messages
+      `SELECT message_id, status, external_message_id, media_reference FROM megadesk_domain_conversations_messages
        WHERE client_id = ? AND client_attempt_id = ? LIMIT 1 FOR UPDATE`,
       [input.clientId, input.clientAttemptId],
     ) as any[];
     existing = rows[0];
+    if (existing && storedOutboundAttemptFingerprint(existing.media_reference) !== fingerprint) {
+      throw new OutboundAttemptConflictError();
+    }
     if (!existing) {
       await persistCanonicalMessage(connection as PoolConnection, {
-        ...input, direction: "outbound", status: "pending", externalMessageId: null,
+        ...input,
+        mediaReference: withOutboundAttemptBinding(input.mediaReference, fingerprint),
+        direction: "outbound", status: "pending", externalMessageId: null,
       });
     }
     await connection.commit();
   } catch (error) {
     await connection.rollback().catch(() => undefined);
+    if (error instanceof OutboundAttemptConflictError) throw error;
     throw new OutboundPendingPersistenceError(error);
   } finally {
     await connection.execute("SELECT RELEASE_LOCK(?)", [lockName]).catch(() => undefined);
     connection.release();
   }
 
-  if (existing?.status === "sent" && existing.external_message_id) {
+  if (existing?.external_message_id && ["sent", "delivered", "read", "played"].includes(existing.status)) {
     return { messageId: existing.message_id, externalMessageId: existing.external_message_id, status: "sent" };
   }
   if (existing) throw new OutboundAttemptAlreadyRecordedError(existing.status);
@@ -196,14 +328,36 @@ export async function executeOutboundAttempt(
     response = normalizeProviderMessageReference(response) as ProviderMessageReference;
     if (!response) throw new Error("PROVIDER_MESSAGE_REFERENCE_MISSING");
   } catch (error) {
-    await updateDelivery(pool, input, "failed").catch(() => undefined);
+    if (!isDefinitiveOutboundProviderFailure(error)) {
+      throw new OutboundProviderOutcomeUncertainError(input.messageId, error);
+    }
+    try {
+      await reconcileOutboundDelivery(pool, input, "failed");
+    } catch (reconciliationError) {
+      throw new OutboundReconciliationError(input.messageId, "failed", new AggregateError(
+        [error, reconciliationError],
+        "OUTBOUND_PROVIDER_AND_FAILURE_RECONCILIATION_FAILED",
+      ));
+    }
     throw error;
   }
 
   try {
-    await updateDelivery(pool, input, "sent", response.key.id, response);
+    const replay = await reconcileOutboundDelivery(pool, input, "sent", response.key.id, response);
+    if (replay.reconciled && replay.storedStatus) {
+      const emitReceipt = dependencies.emitReceipt ?? (async (clientId, payload) => {
+        const { emitOperationalTenantEventAsync } = await import("./modules/whatsapp/socket/whatsapp.socket");
+        await emitOperationalTenantEventAsync(clientId, "conversation:receipt", { clientId, ...payload });
+      });
+      await emitReceipt(input.clientId, {
+        status: replay.storedStatus,
+        receivedAt: new Date().toISOString(),
+      }).catch(() => {
+        console.warn("[Evolution Receipt] reconciled receipt realtime delivery failed");
+      });
+    }
   } catch (error) {
-    throw new OutboundReconciliationError(input.messageId, error);
+    throw new OutboundReconciliationError(input.messageId, "sent", error);
   }
   return { messageId: input.messageId, externalMessageId: response.key.id, status: "sent" };
 }

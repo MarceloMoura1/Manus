@@ -38,6 +38,7 @@ import {
 import { useUserPersonalization } from "@/hooks/useUserPersonalization";
 import type { ConversaSocketItem } from "@/hooks/useConversasSocket";
 import { validations } from "@/lib/validations";
+import { isDefinitiveOutboundClientFailure, outboundAttemptLedger, type StableOutboundAttempt } from "@/lib/outbound-attempt-identity";
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const MEGADESK_SESSION_KEY = "megadesk_session_v1";
@@ -999,17 +1000,25 @@ export function ConversasPage() {
             <form
               data-testid="conversation-composer"
               className="flex gap-2 border-t p-3"
-              onSubmit={event => {
+              onSubmit={async event => {
                 event.preventDefault();
                 const message = draftMessage.trim();
                 if (!message || sendMutation.isPending || !session?.userEmail)
                   return;
-                sendMutation.mutate({
-                  conversationId: selectedConversation,
-                  message,
-                  userEmail: session.userEmail,
-                  clientAttemptId: crypto.randomUUID(),
-                });
+                let attempt: StableOutboundAttempt | null = null;
+                try {
+                  attempt = await outboundAttemptLedger.claim({ tenantId: clientId!, conversationId: selectedConversation,
+                    senderContext: session.userEmail, text: message, attachment: null, replyToMessageId: null });
+                  await outboundAttemptLedger.transition(attempt, "submitted");
+                  await sendMutation.mutateAsync({ conversationId: selectedConversation, message,
+                    userEmail: session.userEmail, clientAttemptId: attempt.clientAttemptId });
+                  await outboundAttemptLedger.complete(attempt);
+                } catch (error) {
+                  if (attempt) {
+                    if (isDefinitiveOutboundClientFailure(error)) await outboundAttemptLedger.release(attempt);
+                    else await outboundAttemptLedger.transition(attempt, "uncertain");
+                  }
+                }
               }}
             >
               <Input

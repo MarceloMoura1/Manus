@@ -21,15 +21,52 @@ import {
 } from "../conversation-media-storage";
 import { getEvolutionWebhookSecret } from "./config";
 import { evoGetMediaBase64, normalizeEvolutionRecipient } from "./client";
+import {
+  cleanupExpiredConversationReceipts,
+  persistConversationReceipt,
+  persistOrApplyConversationReceipt,
+  type ConversationReceiptPersistenceResult,
+} from "../conversation-receipt-store";
 
 // Socket.IO — importado dinamicamente para evitar dependência circular
-async function emitToClient(clientId: string, event: string, data: unknown) {
+export type EvolutionRealtimeDeliveryResult = {
+  attempted: boolean;
+  succeeded: boolean;
+  recipientCount: number;
+  candidateCount: number;
+  outcome: "delivered" | "partial" | "no_recipients" | "no_eligible_recipients" | "failed";
+  failureClass: "SOCKET_DELIVERY_FAILED" | "NO_ELIGIBLE_RECIPIENTS" | null;
+};
+
+type OperationalDelivery = { candidates: number; emitted: number; disconnected: number; roleFiltered: number };
+type RealtimeAdapterLoader = () => Promise<{
+  emitOperationalTenantEventAsync: (clientId: string, event: string, data: unknown) => Promise<OperationalDelivery>;
+}>;
+
+export async function emitToClient(
+  clientId: string,
+  event: string,
+  data: unknown,
+  loadAdapter: RealtimeAdapterLoader = () => import("../modules/whatsapp/socket/whatsapp.socket"),
+): Promise<EvolutionRealtimeDeliveryResult> {
   try {
-    const { getSocketIO } = await import("../modules/whatsapp/socket/whatsapp.socket");
-    const io = getSocketIO();
-    if (io) io.to(`client:${clientId}`).emit(event, data);
+    const { emitOperationalTenantEventAsync } = await loadAdapter();
+    const delivery = await emitOperationalTenantEventAsync(clientId, event, data);
+    if (delivery.candidates === 0) {
+      return { attempted: false, succeeded: false, recipientCount: 0, candidateCount: 0,
+        outcome: "no_recipients", failureClass: null };
+    }
+    if (delivery.emitted === 0) {
+      return { attempted: true, succeeded: false, recipientCount: 0, candidateCount: delivery.candidates,
+        outcome: "no_eligible_recipients", failureClass: "NO_ELIGIBLE_RECIPIENTS" };
+    }
+    const partial = delivery.emitted < delivery.candidates;
+    return { attempted: true, succeeded: true, recipientCount: delivery.emitted, candidateCount: delivery.candidates,
+      outcome: partial ? "partial" : "delivered", failureClass: null };
   } catch {
-    // socket não disponível
+    console.error("[Evolution Realtime] Falha ao entregar evento.", { event });
+    return { attempted: true, succeeded: false, recipientCount: 0, candidateCount: 0,
+      outcome: "failed", failureClass: "SOCKET_DELIVERY_FAILED" };
   }
 }
 
@@ -75,8 +112,31 @@ export function canonicalEvolutionReceiptStatus(value: unknown): "pending" | "se
   return EVOLUTION_RECEIPT_STATUS[value.trim().toUpperCase()] ?? null;
 }
 
+export function canonicalEvolutionEventTimestamp(value: unknown): string | null {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  let milliseconds: number;
+  if (/^\d{10}$/.test(raw)) {
+    milliseconds = Number(raw) * 1_000;
+  } else if (/^\d{13}$/.test(raw)) {
+    milliseconds = Number(raw);
+  } else if (typeof value === "string") {
+    milliseconds = Date.parse(raw);
+  } else {
+    return null;
+  }
+
+  const minimum = Date.UTC(2000, 0, 1);
+  // MySQL TIMESTAMP tops out in January 2038; reject unpersistable provider values.
+  const maximum = Date.UTC(2038, 0, 19);
+  if (!Number.isFinite(milliseconds) || milliseconds < minimum || milliseconds >= maximum) return null;
+  return new Date(milliseconds).toISOString();
+}
+
 /** Supports Evolution's webhook (`keyId` + `status`) and native (`key.id` + `update.status`) update shapes. */
-export function parseEvolutionMessageStatusUpdates(data: Record<string, any> | Record<string, any>[]): Array<{ externalMessageId: string; status: "pending" | "sent" | "delivered" | "read" | "played" | "failed" }> {
+export function parseEvolutionMessageStatusUpdates(data: Record<string, any> | Record<string, any>[]): Array<{ externalMessageId: string; status: "pending" | "sent" | "delivered" | "read" | "played" | "failed"; providerEventAt: string | null }> {
   const candidates = Array.isArray(data)
     ? data
     : Array.isArray(data?.updates)
@@ -86,9 +146,13 @@ export function parseEvolutionMessageStatusUpdates(data: Record<string, any> | R
         : [data];
   return candidates.flatMap((item: Record<string, any>) => {
     const externalMessageId = [item?.keyId, item?.messageId, item?.key?.id, item?.id]
-      .find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim();
+      .find((value): value is string => typeof value === "string"
+        && value.trim().length > 0 && value.trim().length <= 180)?.trim();
     const status = canonicalEvolutionReceiptStatus(item?.status ?? item?.update?.status);
-    return externalMessageId && status ? [{ externalMessageId, status }] : [];
+    const providerEventAt = canonicalEvolutionEventTimestamp(
+      item?.timestamp ?? item?.messageTimestamp ?? item?.update?.timestamp ?? item?.update?.messageTimestamp,
+    );
+    return externalMessageId && status ? [{ externalMessageId, status, providerEventAt }] : [];
   });
 }
 
@@ -183,13 +247,29 @@ export type EvolutionReceiptTelemetry = {
   integrationId: string;
   externalMessageIdHash: string;
   receivedAt: string;
+  providerEventAt: string | null;
+  providerToWebhookMs: number | null;
+  persistenceCompletedAt: string;
+  webhookToPersistenceMs: number;
+  realtimeEmittedAt: string | null;
+  persistenceToRealtimeMs: number | null;
+  realtimeAttempted: boolean | null;
+  realtimeEmitSucceeded: boolean | null;
+  realtimeRecipientCount: number | null;
+  realtimeOutcome: EvolutionRealtimeDeliveryResult["outcome"] | null;
+  realtimeFailureClass: EvolutionRealtimeDeliveryResult["failureClass"];
   affectedRows: number;
+  matchedRows: number;
+  applied: boolean;
   zeroMatch: boolean;
+  deferred: boolean;
+  persistenceOutcome: "APPLIED" | "STALE_OR_DUPLICATE" | "RECEIPT_DEFERRED";
+  storedStatus: string | null;
 };
 
 type ReceiptUpdateDependencies = {
   execute?: (sql: string, values: unknown[]) => Promise<[unknown, unknown?]>;
-  emit?: (clientId: string, event: string, data: unknown) => Promise<void>;
+  emit?: (clientId: string, event: string, data: unknown) => Promise<EvolutionRealtimeDeliveryResult>;
   recordTelemetry?: (telemetry: EvolutionReceiptTelemetry) => void;
   now?: () => Date;
 };
@@ -208,27 +288,63 @@ export async function handleMessagesUpdate(
     console.info("[Evolution Receipt]", telemetry);
   });
   const now = dependencies.now ?? (() => new Date());
+  const webhookReceivedDate = now();
+  const receivedAt = webhookReceivedDate.toISOString();
 
   for (const update of parseEvolutionMessageStatusUpdates(data)) {
-    const [result] = await execute(
-      `UPDATE megadesk_domain_conversations_messages
-       SET status = CASE
-         WHEN status = 'failed' THEN status
-         WHEN status = 'played' THEN status
-         WHEN status = 'read' AND ? <> 'played' THEN status
-         WHEN status IN ('delivered', 'read', 'played') AND ? = 'failed' THEN status
-         WHEN status = 'delivered' AND ? IN ('pending', 'sent') THEN status
-         WHEN status = 'sent' AND ? = 'pending' THEN status
-         ELSE ?
-       END,
-       updated_at = NOW()
-       WHERE client_id = ? AND provider = 'evolution' AND integration_id = ?
-         AND external_message_id = ? AND direction = 'outbound'`,
-      [update.status, update.status, update.status, update.status, update.status,
-        clientId, integrationId, update.externalMessageId],
-    );
-    const affectedRows = Number((result as { affectedRows?: unknown } | null)?.affectedRows ?? 0);
-    const receivedAt = now().toISOString();
+    const receiptInput = {
+      clientId,
+      provider: "evolution",
+      integrationId,
+      externalMessageId: update.externalMessageId,
+      status: update.status,
+      providerEventAt: update.providerEventAt,
+      receivedAt: webhookReceivedDate,
+    } as const;
+    let persistence: ConversationReceiptPersistenceResult;
+    if (dependencies.execute) {
+      persistence = await persistOrApplyConversationReceipt({ execute }, receiptInput);
+    } else {
+      persistence = await persistConversationReceipt(getPool(), receiptInput);
+      if (persistence.deferred) {
+        await cleanupExpiredConversationReceipts(getPool()).catch(() => {
+          console.warn("[Evolution Receipt] bounded expiry cleanup failed");
+        });
+      }
+    }
+    const { affectedRows, matchedRows, applied, deferred, zeroMatch, storedStatus } = persistence;
+    const persistenceCompletedDate = now();
+    let realtimeEmittedAt: string | null = null;
+    let realtimeAttempted: boolean | null = null;
+    let realtimeEmitSucceeded: boolean | null = null;
+    let realtimeRecipientCount: number | null = null;
+    let realtimeOutcome: EvolutionRealtimeDeliveryResult["outcome"] | null = null;
+    let realtimeFailureClass: EvolutionRealtimeDeliveryResult["failureClass"] = null;
+
+    if (applied) {
+      try {
+        const delivery = await emit(clientId, "conversation:receipt", {
+          clientId,
+          status: update.status,
+          receivedAt,
+        });
+        realtimeAttempted = delivery.attempted;
+        realtimeEmitSucceeded = delivery.succeeded;
+        realtimeRecipientCount = delivery.recipientCount;
+        realtimeOutcome = delivery.outcome;
+        realtimeFailureClass = delivery.failureClass;
+      } catch {
+        realtimeAttempted = true;
+        realtimeEmitSucceeded = false;
+        realtimeRecipientCount = 0;
+        realtimeOutcome = "failed";
+        realtimeFailureClass = "SOCKET_DELIVERY_FAILED";
+      }
+      realtimeEmittedAt = now().toISOString();
+    }
+
+    const providerEventTime = update.providerEventAt === null ? null : Date.parse(update.providerEventAt);
+    const realtimeEmittedTime = realtimeEmittedAt === null ? null : Date.parse(realtimeEmittedAt);
     const telemetry: EvolutionReceiptTelemetry = {
       event: "evolution_receipt_update",
       status: update.status,
@@ -236,18 +352,26 @@ export async function handleMessagesUpdate(
       integrationId,
       externalMessageIdHash: createHash("sha256").update(update.externalMessageId).digest("hex"),
       receivedAt,
+      providerEventAt: update.providerEventAt,
+      providerToWebhookMs: providerEventTime === null ? null : webhookReceivedDate.getTime() - providerEventTime,
+      persistenceCompletedAt: persistenceCompletedDate.toISOString(),
+      webhookToPersistenceMs: persistenceCompletedDate.getTime() - webhookReceivedDate.getTime(),
+      realtimeEmittedAt,
+      persistenceToRealtimeMs: realtimeEmittedTime === null ? null : realtimeEmittedTime - persistenceCompletedDate.getTime(),
+      realtimeAttempted,
+      realtimeEmitSucceeded,
+      realtimeRecipientCount,
+      realtimeOutcome,
+      realtimeFailureClass,
       affectedRows,
-      zeroMatch: affectedRows === 0,
+      matchedRows,
+      applied,
+      zeroMatch,
+      deferred,
+      persistenceOutcome: deferred ? "RECEIPT_DEFERRED" : applied ? "APPLIED" : "STALE_OR_DUPLICATE",
+      storedStatus,
     };
     recordTelemetry(telemetry);
-
-    if (affectedRows > 0) {
-      await emit(clientId, "conversation:receipt", {
-        clientId,
-        status: update.status,
-        receivedAt,
-      });
-    }
   }
 }
 

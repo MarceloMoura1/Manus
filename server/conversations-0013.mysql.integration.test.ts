@@ -275,6 +275,7 @@ physical.sequential("Conversations 0013 physical lifecycle", () => {
     const attempt = (suffix: string, clientId = tenantA, conversationId = outboundId) => ({
       messageId: `audit-out-${suffix}-${clientId}`, clientAttemptId: `audit-attempt-${suffix}`,
       conversationId, clientId, provider: "evolution", integrationId: clientId === tenantA ? integrationA : integrationB,
+      recipient: clientId === tenantA ? outboundPhone : "5511988887777",
       messageType: "text", sender: "agent" as const, senderUserId: clientId === tenantA ? "audit-agent-a" : "audit-admin-b",
       senderNameSnapshot: "Synthetic Operator", text: "Synthetic outbound", timestamp: new Date(),
       legacyMessage: { from: "agent", text: "Synthetic outbound" },

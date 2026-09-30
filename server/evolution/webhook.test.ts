@@ -1,12 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const webhookMocks = vi.hoisted(() => ({ poolExecute: vi.fn(), getConnection: vi.fn(), upsertSession: vi.fn(), socketTo: vi.fn(), socketEmit: vi.fn() }));
+const webhookMocks = vi.hoisted(() => ({ poolExecute: vi.fn(), getConnection: vi.fn(), upsertSession: vi.fn(), socketEmit: vi.fn() }));
 vi.mock("../db", () => ({ getPool: () => ({ execute: webhookMocks.poolExecute, getConnection: webhookMocks.getConnection }) }));
 vi.mock("./config", () => ({ getEvolutionWebhookSecret: () => "webhook-secret" }));
 vi.mock("./session-store", () => ({ upsertSession: webhookMocks.upsertSession, instanceNameFor: (clientId: string) => `megadesk-${clientId}` }));
-vi.mock("../modules/whatsapp/socket/whatsapp.socket", () => ({ getSocketIO: () => ({ to: webhookMocks.socketTo }) }));
+vi.mock("../modules/whatsapp/socket/whatsapp.socket", () => ({ emitOperationalTenantEventAsync: webhookMocks.socketEmit }));
 
-import { canonicalEvolutionReceiptStatus, evolutionMediaDownloadEnvelope, evolutionPhoneCandidates, extractEvolutionProviderName, extractEvolutionQuotedExternalMessageId, handleEvolutionWebhook, handleMessagesUpdate, normalizeEvolutionEvent, normalizeMessagesUpsertPayload, parseEvolutionIncomingMessage, parseEvolutionMessageStatusUpdates, prepareInboundConversationMedia, saveIncomingMessage, selectInboundContactName } from "./webhook";
+import { canonicalEvolutionEventTimestamp, canonicalEvolutionReceiptStatus, emitToClient, evolutionMediaDownloadEnvelope, evolutionPhoneCandidates, extractEvolutionProviderName, extractEvolutionQuotedExternalMessageId, handleEvolutionWebhook, handleMessagesUpdate, normalizeEvolutionEvent, normalizeMessagesUpsertPayload, parseEvolutionIncomingMessage, parseEvolutionMessageStatusUpdates, prepareInboundConversationMedia, saveIncomingMessage, selectInboundContactName, type EvolutionRealtimeDeliveryResult } from "./webhook";
+
+const deliveredRealtime: EvolutionRealtimeDeliveryResult = {
+  attempted: true,
+  succeeded: true,
+  recipientCount: 1,
+  candidateCount: 1,
+  outcome: "delivered",
+  failureClass: null,
+};
 
 function responseDouble() {
   const response: any = { statusCode: 200, body: undefined };
@@ -42,16 +51,22 @@ describe("Evolution webhook normalization", () => {
     expect(canonicalEvolutionReceiptStatus("ERROR")).toBe("failed");
     expect(canonicalEvolutionReceiptStatus("UNKNOWN")).toBeNull();
     expect(parseEvolutionMessageStatusUpdates([
-      { keyId: "provider-delivered", status: "DELIVERY_ACK" },
-      { key: { id: "provider-read" }, update: { status: "READ" } },
+      { keyId: "provider-delivered", status: "DELIVERY_ACK", timestamp: 1_780_231_195 },
+      { key: { id: "provider-read" }, update: { status: "READ", timestamp: "2026-05-31T12:39:56.000Z" } },
       { messageId: "provider-played", update: { status: "PLAYED" } },
       { id: "provider-failed", status: "ERROR" },
     ])).toEqual([
-      { externalMessageId: "provider-delivered", status: "delivered" },
-      { externalMessageId: "provider-read", status: "read" },
-      { externalMessageId: "provider-played", status: "played" },
-      { externalMessageId: "provider-failed", status: "failed" },
+      { externalMessageId: "provider-delivered", status: "delivered", providerEventAt: "2026-05-31T12:39:55.000Z" },
+      { externalMessageId: "provider-read", status: "read", providerEventAt: "2026-05-31T12:39:56.000Z" },
+      { externalMessageId: "provider-played", status: "played", providerEventAt: null },
+      { externalMessageId: "provider-failed", status: "failed", providerEventAt: null },
     ]);
+    expect(canonicalEvolutionEventTimestamp(1_780_231_195_000)).toBe("2026-05-31T12:39:55.000Z");
+    expect(canonicalEvolutionEventTimestamp("not-a-timestamp")).toBeNull();
+    expect(canonicalEvolutionEventTimestamp("2099-01-01T00:00:00.000Z")).toBeNull();
+    expect(canonicalEvolutionEventTimestamp({ low: 123 })).toBeNull();
+    expect(parseEvolutionMessageStatusUpdates({ keyId: "x".repeat(181), status: "READ" })).toEqual([]);
+    expect(parseEvolutionMessageStatusUpdates({ keyId: "valid", status: "UNSUPPORTED" })).toEqual([]);
   });
 
   it("associa número brasileiro canônico e legado sem 55", () => {
@@ -201,7 +216,20 @@ describe("Evolution inbound media persistence", () => {
 });
 
 describe("Evolution webhook HTTP contract", () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => {
+    vi.resetAllMocks();
+    webhookMocks.getConnection.mockResolvedValue({
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+      execute: vi.fn(async (sql: string, values?: unknown[]) => {
+        if (sql.includes("GET_LOCK")) return [[{ acquired: 1 }]];
+        if (sql.includes("RELEASE_LOCK")) return [[{ released: 1 }]];
+        return webhookMocks.poolExecute(sql, values);
+      }),
+    });
+  });
 
   it("returns 400 for an invalid payload and 404 for an unknown instance", async () => {
     let res = responseDouble();
@@ -250,7 +278,6 @@ describe("Evolution webhook HTTP contract", () => {
     webhookMocks.poolExecute
       .mockResolvedValueOnce([[{ clientId: "tenant-a" }]])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
-    webhookMocks.socketTo.mockReturnValue({ emit: webhookMocks.socketEmit });
     const res = responseDouble();
     await handleEvolutionWebhook({ headers: { "x-megadesk-webhook-secret": "webhook-secret" }, body: {
       event: "messages.update", instance: "megadesk-tenant-a", data: { keyId: "provider-read", status: "READ" },
@@ -258,14 +285,35 @@ describe("Evolution webhook HTTP contract", () => {
     expect(res.statusCode).toBe(200);
     const [sql, values] = webhookMocks.poolExecute.mock.calls[1];
     expect(String(sql)).toContain("external_message_id = ? AND direction = 'outbound'");
-    expect(String(sql)).toContain("WHEN status = 'read' AND ? <> 'played' THEN status");
-    expect(String(sql)).toContain("WHEN status = 'delivered' AND ? IN ('pending', 'sent') THEN status");
-    expect(values).toEqual(["read", "read", "read", "read", "read", "tenant-a", "megadesk-tenant-a", "provider-read"]);
-    expect(webhookMocks.socketTo).toHaveBeenCalledWith("client:tenant-a");
-    expect(webhookMocks.socketEmit).toHaveBeenCalledWith("conversation:receipt", expect.objectContaining({
+    expect(String(sql)).toContain("status <> 'failed'");
+    expect(String(sql)).toContain("? = 'failed' AND status IN ('pending', 'sent')");
+    expect(String(sql)).toContain("FIELD(?, 'pending', 'sent', 'delivered', 'read', 'played')");
+    expect(values).toEqual([
+      "read", "tenant-a", "evolution", "megadesk-tenant-a", "provider-read", "read", "read", "read",
+    ]);
+    expect(webhookMocks.socketEmit).toHaveBeenCalledWith("tenant-a", "conversation:receipt", expect.objectContaining({
       clientId: "tenant-a",
       status: "read",
     }));
+  });
+
+  it("CAUSAL acknowledges a zero-match receipt only after durable pending persistence commits", async () => {
+    webhookMocks.poolExecute
+      .mockResolvedValueOnce([[{ clientId: "tenant-a" }]])
+      .mockResolvedValueOnce([{ affectedRows: 0 }])
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([[{ status: "read" }]])
+      .mockResolvedValueOnce([{ affectedRows: 0 }]);
+    const res = responseDouble();
+    await handleEvolutionWebhook({ headers: { "x-megadesk-webhook-secret": "webhook-secret" }, body: {
+      event: "messages.update", instance: "megadesk-tenant-a", data: { keyId: "provider-before-send-result", status: "READ" },
+    } } as any, res);
+    const connection = await webhookMocks.getConnection.mock.results[0].value;
+    expect(connection.commit).toHaveBeenCalledOnce();
+    expect(res.statusCode).toBe(200);
+    expect(webhookMocks.socketEmit).not.toHaveBeenCalled();
+    expect(webhookMocks.poolExecute.mock.calls.some(call => String(call[0]).includes("INSERT INTO megadesk_conversation_pending_receipts"))).toBe(true);
   });
 
   it.each([
@@ -275,12 +323,13 @@ describe("Evolution webhook HTTP contract", () => {
     ["PLAYED", "played"],
   ] as const)("records and emits the tenant-scoped %s receipt", async (providerStatus, canonicalStatus) => {
     const execute = vi.fn().mockResolvedValue([{ affectedRows: 1 }]);
-    const emit = vi.fn().mockResolvedValue(undefined);
+    const emit = vi.fn().mockResolvedValue(deliveredRealtime);
     const recordTelemetry = vi.fn();
 
     await handleMessagesUpdate("tenant-a", "instance-a", {
       keyId: `private-provider-${canonicalStatus}`,
       status: providerStatus,
+      timestamp: "2026-09-29T19:59:58.750Z",
     }, {
       execute,
       emit,
@@ -289,8 +338,8 @@ describe("Evolution webhook HTTP contract", () => {
     });
 
     expect(execute.mock.calls[0][1]).toEqual([
-      canonicalStatus, canonicalStatus, canonicalStatus, canonicalStatus, canonicalStatus,
-      "tenant-a", "instance-a", `private-provider-${canonicalStatus}`,
+      canonicalStatus, "tenant-a", "evolution", "instance-a", `private-provider-${canonicalStatus}`,
+      canonicalStatus, canonicalStatus, canonicalStatus,
     ]);
     expect(emit).toHaveBeenCalledWith("tenant-a", "conversation:receipt", {
       clientId: "tenant-a",
@@ -304,20 +353,106 @@ describe("Evolution webhook HTTP contract", () => {
       clientId: "tenant-a",
       integrationId: "instance-a",
       affectedRows: 1,
+      matchedRows: 1,
+      applied: true,
       zeroMatch: false,
+      storedStatus: canonicalStatus,
+      receivedAt: "2026-09-29T20:00:00.000Z",
+      providerEventAt: "2026-09-29T19:59:58.750Z",
+      providerToWebhookMs: 1250,
+      persistenceCompletedAt: "2026-09-29T20:00:00.000Z",
+      webhookToPersistenceMs: 0,
+      realtimeEmittedAt: "2026-09-29T20:00:00.000Z",
+      persistenceToRealtimeMs: 0,
+      realtimeAttempted: true,
+      realtimeEmitSucceeded: true,
+      realtimeRecipientCount: 1,
+      realtimeOutcome: "delivered",
+      realtimeFailureClass: null,
     });
     expect(telemetry.externalMessageIdHash).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.stringify(telemetry)).not.toContain(`private-provider-${canonicalStatus}`);
   });
 
+  it("maps the production realtime adapter delivery and rejection outcomes without exposing payload data", async () => {
+    const delivered = await emitToClient("tenant-a", "conversation:receipt", { private: "message" }, async () => ({
+      emitOperationalTenantEventAsync: vi.fn().mockResolvedValue({ candidates: 2, emitted: 1, disconnected: 1, roleFiltered: 0 }),
+    }));
+    expect(delivered).toEqual({ attempted: true, succeeded: true, recipientCount: 1, candidateCount: 2,
+      outcome: "partial", failureClass: null });
+
+    const noRecipients = await emitToClient("tenant-a", "conversation:receipt", {}, async () => ({
+      emitOperationalTenantEventAsync: vi.fn().mockResolvedValue({ candidates: 0, emitted: 0, disconnected: 0, roleFiltered: 0 }),
+    }));
+    expect(noRecipients).toEqual({ attempted: false, succeeded: false, recipientCount: 0, candidateCount: 0,
+      outcome: "no_recipients", failureClass: null });
+
+    const noEligible = await emitToClient("tenant-a", "conversation:receipt", {}, async () => ({
+      emitOperationalTenantEventAsync: vi.fn().mockResolvedValue({ candidates: 2, emitted: 0, disconnected: 1, roleFiltered: 1 }),
+    }));
+    expect(noEligible).toEqual({ attempted: true, succeeded: false, recipientCount: 0, candidateCount: 2,
+      outcome: "no_eligible_recipients", failureClass: "NO_ELIGIBLE_RECIPIENTS" });
+
+    const failed = await emitToClient("tenant-a", "conversation:receipt", { private: "message" }, async () => ({
+      emitOperationalTenantEventAsync: vi.fn().mockRejectedValue(new Error("socket failed with private payload")),
+    }));
+    expect(failed).toEqual({ attempted: true, succeeded: false, recipientCount: 0, candidateCount: 0,
+      outcome: "failed", failureClass: "SOCKET_DELIVERY_FAILED" });
+  });
+
+  it("keeps a persisted receipt successful when realtime rejects and records the failure truthfully", async () => {
+    const recordTelemetry = vi.fn();
+    await expect(handleMessagesUpdate("tenant-a", "instance-a", {
+      keyId: "private-provider-read",
+      status: "READ",
+    }, {
+      execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }]),
+      emit: vi.fn().mockRejectedValue(new Error("socket unavailable")),
+      recordTelemetry,
+      now: () => new Date("2026-09-29T20:00:00.000Z"),
+    })).resolves.toBeUndefined();
+
+    expect(recordTelemetry).toHaveBeenCalledWith(expect.objectContaining({
+      applied: true,
+      realtimeAttempted: true,
+      realtimeEmitSucceeded: false,
+      realtimeRecipientCount: 0,
+      realtimeOutcome: "failed",
+      realtimeFailureClass: "SOCKET_DELIVERY_FAILED",
+    }));
+  });
+
+  it("keeps webhook persistence successful but never reports realtime success when there are no recipients", async () => {
+    const recordTelemetry = vi.fn();
+    await expect(handleMessagesUpdate("tenant-a", "instance-a", {
+      keyId: "private-provider-read", status: "READ",
+    }, {
+      execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }]),
+      emit: vi.fn().mockResolvedValue({ attempted: false, succeeded: false, recipientCount: 0,
+        candidateCount: 0, outcome: "no_recipients", failureClass: null }),
+      recordTelemetry,
+      now: () => new Date("2026-09-29T20:00:00.000Z"),
+    })).resolves.toBeUndefined();
+    expect(recordTelemetry).toHaveBeenCalledWith(expect.objectContaining({
+      applied: true,
+      realtimeAttempted: false,
+      realtimeEmitSucceeded: false,
+      realtimeOutcome: "no_recipients",
+    }));
+  });
+
   it("records an explicit zero-match without emitting a realtime update", async () => {
-    const emit = vi.fn().mockResolvedValue(undefined);
+    const emit = vi.fn().mockResolvedValue(deliveredRealtime);
     const recordTelemetry = vi.fn();
     await handleMessagesUpdate("tenant-a", "instance-a", {
       keyId: "provider-missing",
       status: "READ",
     }, {
-      execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }]),
+      execute: vi.fn()
+        .mockResolvedValueOnce([{ affectedRows: 0 }])
+        .mockResolvedValueOnce([[]])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([[{ status: "read" }]]),
       emit,
       recordTelemetry,
       now: () => new Date("2026-09-29T20:00:00.000Z"),
@@ -327,16 +462,67 @@ describe("Evolution webhook HTTP contract", () => {
       clientId: "tenant-a",
       status: "read",
       affectedRows: 0,
+      matchedRows: 0,
+      applied: false,
       zeroMatch: true,
+      deferred: true,
+      persistenceOutcome: "RECEIPT_DEFERRED",
+      storedStatus: "read",
+    }));
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes a stale or duplicate receipt from a true zero-match", async () => {
+    const emit = vi.fn().mockResolvedValue(deliveredRealtime);
+    const recordTelemetry = vi.fn();
+    const execute = vi.fn()
+      .mockResolvedValueOnce([{ affectedRows: 0 }])
+      .mockResolvedValueOnce([[{ status: "read" }]]);
+
+    await handleMessagesUpdate("tenant-a", "instance-a", {
+      keyId: "provider-already-read",
+      status: "DELIVERY_ACK",
+    }, { execute, emit, recordTelemetry });
+
+    expect(recordTelemetry).toHaveBeenCalledWith(expect.objectContaining({
+      status: "delivered",
+      affectedRows: 0,
+      matchedRows: 1,
+      applied: false,
+      zeroMatch: false,
+      storedStatus: "read",
+    }));
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("does not replace a delivered/read/played or failed terminal state with a late failure", async () => {
+    const emit = vi.fn().mockResolvedValue(deliveredRealtime);
+    const recordTelemetry = vi.fn();
+    const execute = vi.fn()
+      .mockResolvedValueOnce([{ affectedRows: 0 }])
+      .mockResolvedValueOnce([[{ status: "read" }]]);
+
+    await handleMessagesUpdate("tenant-a", "instance-a", {
+      keyId: "provider-already-read",
+      status: "FAILED",
+    }, { execute, emit, recordTelemetry });
+
+    expect(String(execute.mock.calls[0][0])).toContain("status <> 'failed'");
+    expect(recordTelemetry).toHaveBeenCalledWith(expect.objectContaining({
+      status: "failed",
+      matchedRows: 1,
+      applied: false,
+      zeroMatch: false,
+      storedStatus: "read",
     }));
     expect(emit).not.toHaveBeenCalled();
   });
 
   it("cannot update or emit across tenants when the receipt belongs to another tenant", async () => {
-    const emit = vi.fn().mockResolvedValue(undefined);
-    const execute = vi.fn(async (_sql: string, values: unknown[]) => [{
-      affectedRows: values[5] === "tenant-owner" ? 1 : 0,
-    }]);
+    const emit = vi.fn().mockResolvedValue(deliveredRealtime);
+    const execute = vi.fn(async (sql: string, values: unknown[]) => String(sql).includes("UPDATE")
+      ? [{ affectedRows: values[1] === "tenant-owner" ? 1 : 0 }]
+      : [[]]);
 
     await handleMessagesUpdate("tenant-other", "instance-a", {
       keyId: "provider-owned-by-tenant-owner",
@@ -383,7 +569,6 @@ describe("Evolution webhook HTTP contract", () => {
     };
     webhookMocks.poolExecute.mockResolvedValueOnce([[{ clientId: "tenant-a" }]]);
     webhookMocks.getConnection.mockResolvedValueOnce(connection);
-    webhookMocks.socketTo.mockReturnValue({ emit: webhookMocks.socketEmit });
     const res = responseDouble();
     await handleEvolutionWebhook({ headers: { "x-megadesk-webhook-secret": "webhook-secret" }, body: {
       event: "messages.upsert", instance: "megadesk-tenant-a", data: {
@@ -396,8 +581,7 @@ describe("Evolution webhook HTTP contract", () => {
     expect(connection.commit).toHaveBeenCalledOnce();
     const persisted = connection.execute.mock.calls.find(call => String(call[0]).includes("INSERT INTO megadesk_domain_conversations_messages"));
     expect(persisted?.[1]).toContain("tenant-a");
-    expect(webhookMocks.socketTo).toHaveBeenCalledWith("client:tenant-a");
-    expect(webhookMocks.socketEmit).toHaveBeenCalledWith("conversation:message", expect.objectContaining({ clientId: "tenant-a", conversationId: "conv-a" }));
+    expect(webhookMocks.socketEmit).toHaveBeenCalledWith("tenant-a", "conversation:message", expect.objectContaining({ clientId: "tenant-a", conversationId: "conv-a" }));
   });
 
   it("returns 200 after a supported event is persisted", async () => {

@@ -1,7 +1,7 @@
 import type { PoolConnection } from "mysql2/promise";
 import { isDuplicateConstraint } from "./conversation-public-code";
 import { normalizeProviderMessageReference, type ProviderMessageReference } from "./conversation-provider-reference";
-import { containsConversationMediaBinary } from "./conversation-media-storage";
+import { containsConversationMediaBinary, isConversationMediaReferenceV2 } from "./conversation-media-storage";
 
 export type CanonicalMessageWrite = {
   messageId: string;
@@ -59,7 +59,7 @@ export function sanitizeConversationMessagesForPersistence(messages: unknown): u
 
 export function lightweightLegacyMessage(input: CanonicalMessageWrite): Record<string, unknown> {
   const metadata = stripTransientConversationMedia(input.legacyMessage) as Record<string, unknown>;
-  if (input.mediaReference == null) return metadata;
+  if (!isConversationMediaReferenceV2(input.mediaReference)) return metadata;
   return {
     ...metadata,
     mediaReference: { storage: "private", messageId: input.messageId },
