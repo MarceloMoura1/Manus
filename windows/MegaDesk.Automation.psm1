@@ -849,6 +849,8 @@ function New-MegaDeskOperationRecord {
     [AllowNull()][string]$BaselineSha = $null,
     [Parameter(Mandatory = $true)][bool]$SwitchAttempted,
     [AllowNull()]$MainMigrationBackup = $null,
+    [ValidatePattern('^[0-9a-f]{32}$')][string]$OperationId = ([guid]::NewGuid().ToString('N')),
+    [ValidateSet('PREPARING', 'READY', 'PRE_SWITCH_FAILED', 'ACTIVE_RUNTIME_CLASSIFIED', 'OLD_RUNTIME_STOPPED', 'CANDIDATE_STARTED', 'CANDIDATE_HEALTH_PASSED', 'ROLLBACK_STARTED', 'RECOVERY_STARTED', 'RECOVERY_COMPLETED', 'ACTIVE_COMMITTED')][string]$Phase = 'PREPARING',
     [string]$Message = ''
   )
   return [pscustomobject]@{
@@ -858,6 +860,8 @@ function New-MegaDeskOperationRecord {
     baselineSha = $BaselineSha
     switchAttempted = $SwitchAttempted
     mainMigrationBackup = $MainMigrationBackup
+    operationId = $OperationId
+    phase = $Phase
     updatedAt = (Get-Date).ToUniversalTime().ToString('o')
     message = $Message
   }
@@ -870,6 +874,7 @@ function Set-MegaDeskOperationState {
     [ValidateSet('UPDATE', 'BOOTSTRAP_ZERO')][string]$Kind = '',
     [AllowNull()][string]$BaselineSha = $null,
     [AllowNull()]$MainMigrationBackup = $null,
+    [ValidateSet('', 'PREPARING', 'READY', 'PRE_SWITCH_FAILED', 'ACTIVE_RUNTIME_CLASSIFIED', 'OLD_RUNTIME_STOPPED', 'CANDIDATE_STARTED', 'CANDIDATE_HEALTH_PASSED', 'ROLLBACK_STARTED', 'RECOVERY_STARTED', 'RECOVERY_COMPLETED', 'ACTIVE_COMMITTED')][string]$Phase = '',
     [string]$Message = ''
   )
   $baselineWasBound = $PSBoundParameters.ContainsKey('BaselineSha')
@@ -916,7 +921,56 @@ function Set-MegaDeskOperationState {
       }
       $resolvedBaselineSha = if ($baselineWasBound) { $BaselineSha } elseif ($Kind -eq 'UPDATE') { $null } elseif ($null -ne $state.operation -and $state.operation.PSObject.Properties.Name -contains 'baselineSha') { $state.operation.baselineSha } else { $null }
       $resolvedMainMigrationBackup = if ($mainMigrationBackupWasBound) { $MainMigrationBackup } elseif ($null -ne $state.operation -and $state.operation.PSObject.Properties.Name -contains 'mainMigrationBackup') { $state.operation.mainMigrationBackup } else { $null }
-      $state.operation = New-MegaDeskOperationRecord -Status $Status -Kind $resolvedKind -CandidateSha $CandidateSha -BaselineSha $resolvedBaselineSha -SwitchAttempted $switchAttempted -MainMigrationBackup $resolvedMainMigrationBackup -Message $Message
+      $operationId = if ($Status -eq 'PREPARING') { [guid]::NewGuid().ToString('N') } elseif ($null -ne $state.operation -and $state.operation.PSObject.Properties.Name -contains 'operationId' -and [string]$state.operation.operationId -match '^[0-9a-f]{32}$') { [string]$state.operation.operationId } else { [guid]::NewGuid().ToString('N') }
+      $resolvedPhase = if (-not [string]::IsNullOrWhiteSpace($Phase)) {
+        $Phase
+      } else {
+        switch ($Status) {
+          'PREPARING' { 'PREPARING'; break }
+          'READY' { 'READY'; break }
+          'SWITCHING' { 'ACTIVE_RUNTIME_CLASSIFIED'; break }
+          'ROLLING_BACK' { 'ROLLBACK_STARTED'; break }
+          'ACTIVE' { 'ACTIVE_COMMITTED'; break }
+          'FAILED' {
+            if ($previousSwitchAttempted -eq $false) { 'PRE_SWITCH_FAILED' }
+            elseif ($null -ne $state.operation -and $state.operation.PSObject.Properties.Name -contains 'phase' -and -not [string]::IsNullOrWhiteSpace([string]$state.operation.phase)) { [string]$state.operation.phase }
+            else { 'ACTIVE_RUNTIME_CLASSIFIED' }
+            break
+          }
+        }
+      }
+      $state.operation = New-MegaDeskOperationRecord -Status $Status -Kind $resolvedKind -CandidateSha $CandidateSha -BaselineSha $resolvedBaselineSha -SwitchAttempted $switchAttempted -MainMigrationBackup $resolvedMainMigrationBackup -OperationId $operationId -Phase $resolvedPhase -Message $Message
+    }
+  }
+}
+
+function Set-MegaDeskOperationPhase {
+  param(
+    [Parameter(Mandatory = $true)][ValidateSet('OLD_RUNTIME_STOPPED', 'CANDIDATE_STARTED', 'CANDIDATE_HEALTH_PASSED', 'RECOVERY_STARTED')][string]$Phase,
+    [Parameter(Mandatory = $true)][string]$CandidateSha,
+    [string]$Message = ''
+  )
+  return Invoke-WithMegaDeskLifecycleLock {
+    Update-MegaDeskState -AllowedFields operation -Mutation {
+      param($state)
+      if ($null -eq $state.operation -or [string]$state.operation.status -notin @('SWITCHING', 'FAILED') -or [string]$state.operation.candidateSha -cne $CandidateSha) {
+        throw 'Phase recusada: operation divergiu do lifecycle esperado.'
+      }
+      if ((Get-MegaDeskOperationSwitchAttempted -Operation $state.operation) -ne $true) { throw 'Phase recusada: switchAttempted=true nao comprovado.' }
+      $currentPhase = if ($state.operation.PSObject.Properties.Name -contains 'phase') { [string]$state.operation.phase } else { 'ACTIVE_RUNTIME_CLASSIFIED' }
+      $allowed = @{
+        ACTIVE_RUNTIME_CLASSIFIED = @('OLD_RUNTIME_STOPPED')
+        OLD_RUNTIME_STOPPED = @('CANDIDATE_STARTED', 'RECOVERY_STARTED')
+        CANDIDATE_STARTED = @('CANDIDATE_HEALTH_PASSED', 'RECOVERY_STARTED')
+        CANDIDATE_HEALTH_PASSED = @('RECOVERY_STARTED')
+      }
+      if (-not $allowed.ContainsKey($currentPhase) -or $allowed[$currentPhase] -notcontains $Phase) { throw ("Transicao de phase invalida: {0} -> {1}." -f $currentPhase, $Phase) }
+      if ($state.operation.PSObject.Properties.Name -contains 'phase') { $state.operation.phase = $Phase } else { Add-Member -InputObject $state.operation -NotePropertyName phase -NotePropertyValue $Phase }
+      $updatedAt = (Get-Date).ToUniversalTime().ToString('o')
+      if ($state.operation.PSObject.Properties.Name -contains 'updatedAt') { $state.operation.updatedAt = $updatedAt } else { Add-Member -InputObject $state.operation -NotePropertyName updatedAt -NotePropertyValue $updatedAt }
+      if (-not [string]::IsNullOrWhiteSpace($Message)) {
+        if ($state.operation.PSObject.Properties.Name -contains 'message') { $state.operation.message = $Message } else { Add-Member -InputObject $state.operation -NotePropertyName message -NotePropertyValue $Message }
+      }
     }
   }
 }
@@ -941,6 +995,96 @@ function Assert-MegaDeskStartupState {
     throw 'Inicio recusado: UPDATE FAILED pode ter interrompido runtime ou tentado iniciar candidate.'
   }
   return Assert-MegaDeskActiveRelease -State $State
+}
+
+function Resolve-MegaDeskActiveRuntimeRecovery {
+  return Invoke-WithMegaDeskLifecycleLock {
+    $state = Get-MegaDeskState
+    $activeRelease = Assert-MegaDeskActiveRelease -State $state
+    if ($null -eq $state.operation) { throw 'Recovery recusado: operation ausente.' }
+    if ([string]$state.operation.status -ceq 'ACTIVE') {
+      return [pscustomobject]@{ status = 'NO_ACTION_ACTIVE'; activeRelease = $activeRelease; nodeAction = 'NONE'; tunnelAction = 'NONE' }
+    }
+    if ([string]$state.operation.kind -cne 'UPDATE' -or [string]$state.operation.status -notin @('FAILED', 'SWITCHING', 'ROLLING_BACK')) {
+      throw ('Recovery recusado: lifecycle {0}/{1} nao e recuperavel automaticamente.' -f [string]$state.operation.kind, [string]$state.operation.status)
+    }
+
+    try { Write-MegaDeskLog ("event=SUPERVISOR_RECOVERY_STARTED status={0} active_sha={1}." -f [string]$state.operation.status, [string]$activeRelease.sha) } catch { }
+    $nodeStatus = Get-MegaDeskManagedProcessStatus -Record $state.node -Kind node
+    $nodeAction = 'NONE'
+    if ($nodeStatus -eq 'VALID') {
+      if ([string]$state.node.releaseSha -ceq [string]$activeRelease.sha) {
+        $nodeAction = 'PRESERVE_ACTIVE'
+      } elseif ((Test-MegaDeskFullSha ([string]$state.operation.candidateSha)) -and [string]$state.node.releaseSha -ceq [string]$state.operation.candidateSha) {
+        Stop-MegaDeskManagedProcess -Kind node -StopReason RECOVERY_ABORT_CANDIDATE
+        $nodeAction = 'STOP_PROVEN_CANDIDATE'
+        $state = Get-MegaDeskState
+      } else {
+        try { Write-MegaDeskLog 'event=SUPERVISOR_RECOVERY_BLOCKED reason=VALID_NODE_RELEASE_NOT_AUTHORIZED.' } catch { }
+        throw 'Recovery recusado: Node valido nao pertence a activeRelease nem a candidate registrada.'
+      }
+    } elseif ($nodeStatus -in @('UNKNOWN', 'AMBIGUOUS')) {
+      try { Write-MegaDeskLog 'event=SUPERVISOR_RECOVERY_BLOCKED reason=NODE_IDENTITY_UNKNOWN.' } catch { }
+      throw 'Recovery recusado: identidade do Node ficou UNKNOWN.'
+    } elseif ($null -ne $state.node) {
+      $ownership = Get-MegaDeskPortOwnership -Port $script:RuntimePort
+      if ($ownership.status -ne 'FREE') {
+        try { Write-MegaDeskLog ("event=SUPERVISOR_RECOVERY_BLOCKED reason=PORT_OWNER_MISMATCH classification={0}." -f $ownership.status) } catch { }
+        throw ('Recovery recusado: record Node {0}, mas ownership da porta e {1}.' -f $nodeStatus, $ownership.status)
+      }
+      $staleNodeRecord = $state.node
+      Update-MegaDeskState -AllowedFields node -Precondition {
+        param($current)
+        $null -ne $current.node -and (Test-MegaDeskStateValueEqual -Left $current.node -Right $staleNodeRecord)
+      } -Mutation { param($current) $current.node = $null } | Out-Null
+      $nodeAction = if ($nodeStatus -eq 'ABSENT') { 'CLEAR_STALE_ABSENT' } else { 'CLEAR_IDENTITY_MISMATCH_WITH_FREE_PORT' }
+      $state = Get-MegaDeskState
+    } else {
+      $ownership = Get-MegaDeskPortOwnership -Port $script:RuntimePort
+      if ($ownership.status -ne 'FREE') {
+        try { Write-MegaDeskLog ("event=SUPERVISOR_RECOVERY_BLOCKED reason=PORT_OWNER_MISMATCH classification={0}." -f $ownership.status) } catch { }
+        throw ('Recovery recusado: nenhum Node registrado e ownership da porta e {0}.' -f $ownership.status)
+      }
+      $nodeAction = 'ACTIVE_START_REQUIRED'
+    }
+
+    $tunnelStatus = Get-MegaDeskManagedProcessStatus -Record $state.cloudflared -Kind cloudflared
+    $tunnelAction = 'NONE'
+    if ($tunnelStatus -eq 'VALID') {
+      $tunnelAction = 'PRESERVE_VALID'
+    } elseif ($tunnelStatus -in @('UNKNOWN', 'AMBIGUOUS')) {
+      try { Write-MegaDeskLog 'event=SUPERVISOR_RECOVERY_BLOCKED reason=TUNNEL_IDENTITY_UNKNOWN.' } catch { }
+      throw 'Recovery recusado: identidade do Cloudflared ficou UNKNOWN.'
+    } elseif ($tunnelStatus -eq 'IDENTITY_MISMATCH') {
+      try { Write-MegaDeskLog 'event=SUPERVISOR_RECOVERY_BLOCKED reason=TUNNEL_IDENTITY_MISMATCH_PID_PRESENT.' } catch { }
+      throw 'Recovery recusado: record Cloudflared divergiu de um PID existente.'
+    } elseif ($null -ne $state.cloudflared) {
+      $presence = Get-MegaDeskGlobalCloudflaredPresence
+      if ($presence.status -ne 'ABSENT') {
+        try { Write-MegaDeskLog 'event=SUPERVISOR_RECOVERY_BLOCKED reason=TUNNEL_IDENTITY_MISMATCH.' } catch { }
+        throw 'Recovery recusado: record Cloudflared stale/divergente, mas ausencia global nao foi provada.'
+      }
+      $staleTunnelRecord = $state.cloudflared
+      Update-MegaDeskState -AllowedFields cloudflared -Precondition {
+        param($current)
+        $null -ne $current.cloudflared -and (Test-MegaDeskStateValueEqual -Left $current.cloudflared -Right $staleTunnelRecord)
+      } -Mutation { param($current) $current.cloudflared = $null } | Out-Null
+      $tunnelAction = 'CLEAR_STALE_ABSENT'
+    }
+
+    $state = Get-MegaDeskState
+    $priorOperation = $state.operation
+    Update-MegaDeskState -AllowedFields operation -Precondition {
+      param($current)
+      $null -ne $current.operation -and (Test-MegaDeskStateValueEqual -Left $current.operation -Right $priorOperation) -and $null -ne $current.activeRelease -and [string]$current.activeRelease.sha -ceq [string]$activeRelease.sha
+    } -Mutation {
+      param($current)
+      $operationId = if ($current.operation.PSObject.Properties.Name -contains 'operationId' -and [string]$current.operation.operationId -match '^[0-9a-f]{32}$') { [string]$current.operation.operationId } else { [guid]::NewGuid().ToString('N') }
+      $current.operation = New-MegaDeskOperationRecord -Status ACTIVE -Kind UPDATE -CandidateSha ([string]$activeRelease.sha) -BaselineSha $null -SwitchAttempted $true -OperationId $operationId -Phase RECOVERY_COMPLETED -Message 'Lifecycle reconciliado para a activeRelease sem promover candidate.'
+    } | Out-Null
+    try { Write-MegaDeskLog ("event=SUPERVISOR_RECOVERY_COMPLETED active_sha={0} node_action={1} tunnel_action={2}." -f [string]$activeRelease.sha, $nodeAction, $tunnelAction) } catch { }
+    return [pscustomobject]@{ status = 'RECOVERED_ACTIVE_AUTHORITY'; activeRelease = $activeRelease; nodeAction = $nodeAction; tunnelAction = $tunnelAction }
+  }
 }
 
 function Assert-MegaDeskRecoverableState {
@@ -2234,11 +2378,13 @@ function Test-MegaDeskNodeCommandLine {
       return $false
     }
     $arguments = @(ConvertFrom-MegaDeskWindowsCommandLine -CommandLine ([string]$Process.CommandLine))
-    if ($arguments.Count -ne 3) { return $false }
+    $hasRuntimeInstanceId = $Record.PSObject.Properties.Name -contains 'runtimeInstanceId' -and [string]$Record.runtimeInstanceId -match '^[0-9a-f]{32}$'
+    if (($hasRuntimeInstanceId -and $arguments.Count -ne 4) -or (-not $hasRuntimeInstanceId -and $arguments.Count -ne 3)) { return $false }
     if (-not (Test-MegaDeskSamePath -Left $arguments[0] -Right ([string]$Record.executablePath))) { return $false }
     if ($arguments[1].Length -le '--env-file='.Length -or -not $arguments[1].StartsWith('--env-file=', [StringComparison]::Ordinal)) { return $false }
     if (-not (Test-MegaDeskSamePath -Left $arguments[1].Substring('--env-file='.Length) -Right ([string]$Record.environmentPath))) { return $false }
     if (-not (Test-MegaDeskSamePath -Left $arguments[2] -Right ([string]$Record.scriptPath))) { return $false }
+    if ($hasRuntimeInstanceId -and $arguments[3] -cne ('--megadesk-runtime-id={0}' -f [string]$Record.runtimeInstanceId)) { return $false }
     return $true
   } catch {
     return $false
@@ -2433,6 +2579,49 @@ function Assert-DockerAndMySql {
   throw 'Timeout aguardando health do megadesk-local-mysql.'
 }
 
+function Wait-MegaDeskDockerAndMySql {
+  param(
+    [ValidateRange(0, 3600)][int]$TimeoutSeconds = 900,
+    [ValidateRange(1, 60)][int]$InitialBackoffSeconds = 2,
+    [ValidateRange(1, 60)][int]$MaxBackoffSeconds = 30
+  )
+
+  if ($InitialBackoffSeconds -gt $MaxBackoffSeconds) {
+    throw 'Backoff inicial de dependencias nao pode exceder o maximo.'
+  }
+
+  $startedAt = Get-Date
+  $deadline = $startedAt.AddSeconds($TimeoutSeconds)
+  $attempt = 0
+  $backoffSeconds = $InitialBackoffSeconds
+  $lastFailure = ''
+
+  do {
+    $attempt++
+    try {
+      Assert-DockerAndMySql
+      $elapsedSeconds = [Math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
+      Write-MegaDeskLog ("Dependencias Docker/MySQL confirmadas em {0} tentativa(s), apos {1} segundo(s)." -f $attempt, $elapsedSeconds)
+      return [pscustomobject]@{ status = 'READY'; attempts = $attempt; elapsedSeconds = $elapsedSeconds }
+    } catch {
+      $lastFailure = ([string]$_.Exception.Message) -replace '[\r\n]+', ' '
+      $now = Get-Date
+      if ($TimeoutSeconds -eq 0 -or $now -ge $deadline) {
+        throw ("Dependencias Docker/MySQL nao convergiram em {0} segundo(s), apos {1} tentativa(s). lastFailure={2}" -f $TimeoutSeconds, $attempt, $lastFailure)
+      }
+
+      $remainingSeconds = [Math]::Max(0, [Math]::Floor(($deadline - $now).TotalSeconds))
+      $sleepSeconds = [Math]::Min($backoffSeconds, $remainingSeconds)
+      if ($sleepSeconds -lt 1) {
+        throw ("Dependencias Docker/MySQL nao convergiram em {0} segundo(s), apos {1} tentativa(s). lastFailure={2}" -f $TimeoutSeconds, $attempt, $lastFailure)
+      }
+      Write-MegaDeskLog ("Dependencias Docker/MySQL ainda indisponiveis; tentativa={0}; retryEmSegundos={1}; lastFailure={2}" -f $attempt, $sleepSeconds, $lastFailure)
+      Start-Sleep -Seconds $sleepSeconds
+      $backoffSeconds = [Math]::Min($MaxBackoffSeconds, $backoffSeconds * 2)
+    }
+  } while ($true)
+}
+
 function Assert-CloudflaredConfig {
   Assert-MegaDeskExecutionContext -Operation 'leitura de configuracao Cloudflared' -Paths @($script:CloudflaredConfig)
   if (-not (Test-Path -LiteralPath $script:CloudflaredConfig -PathType Leaf)) { throw 'config.yml do cloudflared nao encontrado.' }
@@ -2457,7 +2646,8 @@ function New-MegaDeskNodeLaunchSpec {
   param(
     [Parameter(Mandatory = $true)][string]$ExecutablePath,
     [Parameter(Mandatory = $true)][string]$EnvironmentPath,
-    [Parameter(Mandatory = $true)][string]$ScriptPath
+    [Parameter(Mandatory = $true)][string]$ScriptPath,
+    [ValidatePattern('^$|^[0-9a-f]{32}$')][string]$RuntimeInstanceId = ''
   )
   $canonicalExecutable = ConvertTo-MegaDeskCanonicalPath -Path $ExecutablePath
   $canonicalEnvironment = ConvertTo-MegaDeskCanonicalPath -Path $EnvironmentPath
@@ -2466,7 +2656,8 @@ function New-MegaDeskNodeLaunchSpec {
     executablePath = $canonicalExecutable
     environmentPath = $canonicalEnvironment
     scriptPath = $canonicalScript
-    arguments = '--env-file="{0}" "{1}"' -f $canonicalEnvironment, $canonicalScript
+    runtimeInstanceId = $RuntimeInstanceId
+    arguments = if ([string]::IsNullOrWhiteSpace($RuntimeInstanceId)) { '--env-file="{0}" "{1}"' -f $canonicalEnvironment, $canonicalScript } else { '--env-file="{0}" "{1}" --megadesk-runtime-id={2}' -f $canonicalEnvironment, $canonicalScript, $RuntimeInstanceId }
   }
 }
 
@@ -2476,15 +2667,16 @@ function Get-MegaDeskManagedProcessStatus {
     [Parameter(Mandatory = $true)][ValidateSet('node', 'cloudflared')][string]$Kind
   )
   if ($null -eq $Record) { return 'ABSENT' }
-  if (-not ($Record.PSObject.Properties.Name -contains 'pid') -or -not $Record.pid) { return 'AMBIGUOUS' }
+  if (-not ($Record.PSObject.Properties.Name -contains 'pid') -or -not $Record.pid) { return 'UNKNOWN' }
   if (Test-ManagedProcess -Record $Record -Kind $Kind) { return 'VALID' }
   try {
     $snapshot = Get-ProcessSnapshotStrict -ProcessId ([int]$Record.pid)
   } catch {
-    return 'AMBIGUOUS'
+    return 'UNKNOWN'
   }
   if ($null -eq $snapshot) { return 'ABSENT' }
-  return 'AMBIGUOUS'
+  if (-not ($snapshot.PSObject.Properties.Name -contains 'ProcessId') -or [int]$snapshot.ProcessId -ne [int]$Record.pid -or [string]::IsNullOrWhiteSpace([string]$snapshot.ExecutablePath) -or [string]::IsNullOrWhiteSpace([string]$snapshot.CommandLine) -or $null -eq $snapshot.CreationDate) { return 'UNKNOWN' }
+  return 'IDENTITY_MISMATCH'
 }
 
 function New-MegaDeskNodeDiagnosticPaths {
@@ -2502,6 +2694,7 @@ function New-MegaDeskNodeDiagnosticPaths {
   $stderrPath = Assert-MegaDeskPathInside -Path (Join-Path $script:NodeDiagnosticsRoot ($prefix + '.stderr.log')) -Root $script:NodeDiagnosticsRoot -Label 'Log stderr do Node'
   $exitTelemetryPath = Assert-MegaDeskPathInside -Path (Join-Path $script:NodeDiagnosticsRoot ($prefix + '.exit.json')) -Root $script:NodeDiagnosticsRoot -Label 'Telemetria de termino do Node'
   $observerRequestPath = Assert-MegaDeskPathInside -Path (Join-Path $script:NodeDiagnosticsRoot ($prefix + '.exit-observer.json')) -Root $script:NodeDiagnosticsRoot -Label 'Solicitacao de observador do Node'
+  $stopIntentPath = Assert-MegaDeskPathInside -Path (Join-Path $script:NodeDiagnosticsRoot ($prefix + '.stop-intent.json')) -Root $script:NodeDiagnosticsRoot -Label 'Intencao de parada do Node'
   try {
     New-Item -ItemType File -Path $stdoutPath -ErrorAction Stop | Out-Null
     New-Item -ItemType File -Path $stderrPath -ErrorAction Stop | Out-Null
@@ -2509,7 +2702,7 @@ function New-MegaDeskNodeDiagnosticPaths {
     if (Test-Path -LiteralPath $stdoutPath -PathType Leaf) { Remove-Item -LiteralPath $stdoutPath -Force -ErrorAction SilentlyContinue }
     throw 'Nao foi possivel reservar arquivos exclusivos de diagnostico do Node.'
   }
-  return [pscustomobject]@{ invocationId = $invocationId; stdoutPath = $stdoutPath; stderrPath = $stderrPath; exitTelemetryPath = $exitTelemetryPath; observerRequestPath = $observerRequestPath }
+  return [pscustomobject]@{ invocationId = $invocationId; stdoutPath = $stdoutPath; stderrPath = $stderrPath; exitTelemetryPath = $exitTelemetryPath; observerRequestPath = $observerRequestPath; stopIntentPath = $stopIntentPath }
 }
 
 function Write-MegaDeskNodeDiagnosticJson {
@@ -2532,6 +2725,102 @@ function Write-MegaDeskNodeDiagnosticJson {
   }
 }
 
+function Write-MegaDeskNodeStopIntent {
+  param(
+    [Parameter(Mandatory = $true)]$Record,
+    [Parameter(Mandatory = $true)][ValidateSet('PUBLISH_SWITCH', 'ROLLBACK_CLEANUP', 'RECOVERY_ABORT_CANDIDATE', 'STARTUP_COMPENSATION', 'MANUAL_STOP')][string]$Reason
+  )
+  foreach ($property in @('pid', 'releaseSha', 'operationId', 'runtimeInstanceId', 'stopIntentPath')) {
+    if (-not ($Record.PSObject.Properties.Name -contains $property) -or [string]::IsNullOrWhiteSpace([string]$Record.$property)) { return $false }
+  }
+  $payload = [ordered]@{
+    schemaVersion = 1
+    event = 'NODE_OFFICIAL_STOP_INTENT'
+    pid = [int]$Record.pid
+    releaseSha = [string]$Record.releaseSha
+    operationId = [string]$Record.operationId
+    runtimeInstanceId = [string]$Record.runtimeInstanceId
+    reason = $Reason
+    requestedAt = (Get-Date).ToUniversalTime().ToString('o')
+  }
+  Write-MegaDeskNodeDiagnosticJson -Path ([string]$Record.stopIntentPath) -Payload $payload
+  return $true
+}
+
+function Write-MegaDeskNodeStopConfirmation {
+  param(
+    [Parameter(Mandatory = $true)]$Record,
+    [Parameter(Mandatory = $true)][ValidateSet('PUBLISH_SWITCH', 'ROLLBACK_CLEANUP', 'RECOVERY_ABORT_CANDIDATE', 'STARTUP_COMPENSATION', 'MANUAL_STOP')][string]$Reason
+  )
+  foreach ($property in @('pid', 'releaseSha', 'operationId', 'runtimeInstanceId', 'stopIntentPath')) {
+    if (-not ($Record.PSObject.Properties.Name -contains $property) -or [string]::IsNullOrWhiteSpace([string]$Record.$property)) { return $false }
+  }
+  $confirmationPath = '{0}.confirmed.json' -f [string]$Record.stopIntentPath
+  $payload = [ordered]@{
+    schemaVersion = 1
+    event = 'NODE_OFFICIAL_STOP_CONFIRMED'
+    pid = [int]$Record.pid
+    releaseSha = [string]$Record.releaseSha
+    operationId = [string]$Record.operationId
+    runtimeInstanceId = [string]$Record.runtimeInstanceId
+    reason = $Reason
+    confirmedAt = (Get-Date).ToUniversalTime().ToString('o')
+  }
+  Write-MegaDeskNodeDiagnosticJson -Path $confirmationPath -Payload $payload
+  return $true
+}
+
+function Test-MegaDeskNodeStopEvidence {
+  param(
+    [Parameter(Mandatory = $true)]$Request,
+    [Parameter(Mandatory = $true)][string]$DiagnosticsRoot,
+    [ValidateRange(0, 60000)][int]$ConfirmationWaitMilliseconds = 5000
+  )
+
+  $result = [pscustomobject]@{ expected = $false; reason = 'UNEXPECTED_EXIT' }
+  try {
+    $canonicalDiagnosticsRoot = [System.IO.Path]::GetFullPath($DiagnosticsRoot).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $stopIntentPath = [System.IO.Path]::GetFullPath([string]$Request.stopIntentPath)
+    if (-not $stopIntentPath.StartsWith($canonicalDiagnosticsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { return $result }
+    if (-not (Test-Path -LiteralPath $stopIntentPath -PathType Leaf)) { return $result }
+
+    $intent = Get-Content -LiteralPath $stopIntentPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $allowedReasons = @('PUBLISH_SWITCH', 'ROLLBACK_CLEANUP', 'RECOVERY_ABORT_CANDIDATE', 'STARTUP_COMPENSATION', 'MANUAL_STOP')
+    $intentMatches = [int]$intent.schemaVersion -eq 1 -and
+      [string]$intent.event -ceq 'NODE_OFFICIAL_STOP_INTENT' -and
+      [int]$intent.pid -eq [int]$Request.pid -and
+      [string]$intent.releaseSha -ceq [string]$Request.releaseSha -and
+      [string]$intent.operationId -ceq [string]$Request.operationId -and
+      [string]$intent.runtimeInstanceId -ceq [string]$Request.runtimeInstanceId -and
+      [string]$intent.reason -in $allowedReasons
+    if (-not $intentMatches) { return $result }
+
+    $confirmationPath = [System.IO.Path]::GetFullPath($stopIntentPath + '.confirmed.json')
+    if (-not $confirmationPath.StartsWith($canonicalDiagnosticsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { return $result }
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($ConfirmationWaitMilliseconds)
+    do {
+      if (Test-Path -LiteralPath $confirmationPath -PathType Leaf) {
+        $confirmation = Get-Content -LiteralPath $confirmationPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        $confirmationMatches = [int]$confirmation.schemaVersion -eq 1 -and
+          [string]$confirmation.event -ceq 'NODE_OFFICIAL_STOP_CONFIRMED' -and
+          [int]$confirmation.pid -eq [int]$Request.pid -and
+          [string]$confirmation.releaseSha -ceq [string]$Request.releaseSha -and
+          [string]$confirmation.operationId -ceq [string]$Request.operationId -and
+          [string]$confirmation.runtimeInstanceId -ceq [string]$Request.runtimeInstanceId -and
+          [string]$confirmation.reason -ceq [string]$intent.reason
+        if ($confirmationMatches) {
+          [void][DateTime]::Parse([string]$confirmation.confirmedAt)
+          return [pscustomobject]@{ expected = $true; reason = [string]$intent.reason }
+        }
+        return $result
+      }
+      if ($ConfirmationWaitMilliseconds -eq 0) { break }
+      Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+  } catch { }
+  return $result
+}
+
 function Write-MegaDeskNodeExitTelemetry {
   param(
     [Parameter(Mandatory = $true)][string]$Path,
@@ -2542,7 +2831,11 @@ function Write-MegaDeskNodeExitTelemetry {
     [Parameter(Mandatory = $true)][string]$ObservedExitTime,
     [AllowNull()][Nullable[int]]$ExitCode = $null,
     [Parameter(Mandatory = $true)][bool]$ExitCodeAvailable,
-    [Parameter(Mandatory = $true)][ValidateSet('EXITED_WITH_CODE', 'PROCESS_DISAPPEARED', 'IDENTITY_LOST', 'UNKNOWN')][string]$Classification
+    [Parameter(Mandatory = $true)][ValidateSet('EXITED_WITH_CODE', 'PROCESS_DISAPPEARED', 'IDENTITY_LOST', 'UNKNOWN')][string]$Classification,
+    [ValidatePattern('^$|^[0-9a-f]{32}$')][string]$OperationId = '',
+    [ValidatePattern('^$|^[0-9a-f]{32}$')][string]$RuntimeInstanceId = '',
+    [bool]$Expected = $false,
+    [ValidateSet('UNEXPECTED_EXIT', 'PUBLISH_SWITCH', 'ROLLBACK_CLEANUP', 'RECOVERY_ABORT_CANDIDATE', 'STARTUP_COMPENSATION', 'MANUAL_STOP')][string]$Reason = 'UNEXPECTED_EXIT'
   )
 
   [void](ConvertTo-MegaDeskProcessStartUtc -Value $CreationTime)
@@ -2551,15 +2844,21 @@ function Write-MegaDeskNodeExitTelemetry {
   if (-not $ExitCodeAvailable -and $null -ne $ExitCode) { throw 'Telemetria sem exitCode disponivel nao pode inventar um exitCode.' }
   if ($Classification -eq 'EXITED_WITH_CODE' -and -not $ExitCodeAvailable) { throw 'EXITED_WITH_CODE exige exitCode disponivel.' }
   $payload = [ordered]@{
-    schemaVersion = 1
+    schemaVersion = 2
+    event = if ($Expected) { 'NODE_KILLED_BY_OFFICIAL_STOP' } else { 'NODE_EXITED' }
     pid = $Pid
     invocationId = $InvocationId
     releaseSha = $ReleaseSha
+    operationId = $OperationId
+    runtimeInstanceId = $RuntimeInstanceId
     creationTime = $CreationTime
     observedExitTime = $ObservedExitTime
     exitCode = if ($ExitCodeAvailable) { [int]$ExitCode } else { $null }
     exitCodeAvailable = $ExitCodeAvailable
     classification = $Classification
+    expected = $Expected
+    reason = $Reason
+    uptimeSeconds = [Math]::Max(0, [Math]::Round(((ConvertTo-MegaDeskProcessStartUtc -Value $ObservedExitTime) - (ConvertTo-MegaDeskProcessStartUtc -Value $CreationTime)).TotalSeconds, 3))
   }
   Write-MegaDeskNodeDiagnosticJson -Path $Path -Payload $payload
 }
@@ -2571,18 +2870,21 @@ function New-MegaDeskNodeExitObserverRequest {
     [Parameter(Mandatory = $true)][string]$RequestPath
   )
 
-  foreach ($property in @('pid', 'diagnosticInvocationId', 'releaseSha', 'startedAtUtc', 'executablePath', 'scriptPath', 'environmentPath')) {
+  foreach ($property in @('pid', 'diagnosticInvocationId', 'releaseSha', 'startedAtUtc', 'executablePath', 'scriptPath', 'environmentPath', 'operationId', 'runtimeInstanceId', 'stopIntentPath')) {
     if (-not ($Record.PSObject.Properties.Name -contains $property) -or [string]::IsNullOrWhiteSpace([string]$Record.$property)) { throw "Record do Node sem $property para exit telemetry." }
   }
   $payload = [ordered]@{
-    schemaVersion = 1
+    schemaVersion = 2
     pid = [int]$Record.pid
     invocationId = [string]$Record.diagnosticInvocationId
     releaseSha = [string]$Record.releaseSha
+    operationId = [string]$Record.operationId
+    runtimeInstanceId = [string]$Record.runtimeInstanceId
     creationTime = [string]$Record.startedAtUtc
     executablePath = [string]$Record.executablePath
     scriptPath = [string]$Record.scriptPath
     environmentPath = [string]$Record.environmentPath
+    stopIntentPath = Assert-MegaDeskPathInside -Path ([string]$Record.stopIntentPath) -Root $script:NodeDiagnosticsRoot -Label 'Intencao de parada do Node'
     exitTelemetryPath = Assert-MegaDeskPathInside -Path $ExitTelemetryPath -Root $script:NodeDiagnosticsRoot -Label 'Destino de exit telemetry do Node'
   }
   Write-MegaDeskNodeDiagnosticJson -Path $RequestPath -Payload $payload
@@ -2631,7 +2933,7 @@ function Start-MegaDeskProcess {
 }
 
 function New-ManagedProcessRecord {
-  param($Process, [string]$ExecutablePath, [ValidateSet('node', 'cloudflared')][string]$Kind, [string]$ConfigPath = '', [string]$ScriptPath = '', [string]$EnvironmentPath = '', [string]$ReleaseSha = '', [Nullable[int]]$Port = $null, [string]$StdoutPath = '', [string]$StderrPath = '', [string]$DiagnosticInvocationId = '', [string]$ExitTelemetryPath = '', [string]$ProjectRoot = '')
+  param($Process, [string]$ExecutablePath, [ValidateSet('node', 'cloudflared')][string]$Kind, [string]$ConfigPath = '', [string]$ScriptPath = '', [string]$EnvironmentPath = '', [string]$ReleaseSha = '', [Nullable[int]]$Port = $null, [string]$StdoutPath = '', [string]$StderrPath = '', [string]$DiagnosticInvocationId = '', [string]$ExitTelemetryPath = '', [string]$StopIntentPath = '', [string]$OperationId = '', [string]$RuntimeInstanceId = '', [string]$ProjectRoot = '')
   if ($Kind -eq 'node' -and ($null -eq $Port -or $Port -lt 1 -or $Port -gt 65535)) { throw 'Node exige porta valida no record de identidade.' }
   if ($Kind -eq 'cloudflared' -and $null -ne $Port) { throw 'Cloudflared nao pode registrar ownership da porta do Node.' }
   $snapshot = $null
@@ -2656,6 +2958,9 @@ function New-ManagedProcessRecord {
     stderrPath = if ([string]::IsNullOrWhiteSpace($StderrPath)) { '' } else { ConvertTo-MegaDeskCanonicalPath -Path $StderrPath }
     diagnosticInvocationId = $DiagnosticInvocationId
     exitTelemetryPath = if ([string]::IsNullOrWhiteSpace($ExitTelemetryPath)) { '' } else { ConvertTo-MegaDeskCanonicalPath -Path $ExitTelemetryPath }
+    stopIntentPath = if ([string]::IsNullOrWhiteSpace($StopIntentPath)) { '' } else { ConvertTo-MegaDeskCanonicalPath -Path $StopIntentPath }
+    operationId = $OperationId
+    runtimeInstanceId = $RuntimeInstanceId
   }
 }
 
@@ -2716,8 +3021,16 @@ function Start-MegaDeskNode {
     Write-MegaDeskLog 'Processo Node controlado ja esta ativo; nenhuma duplicata foi criada.'
     return $null
   }
-  if ($nodeStatus -eq 'AMBIGUOUS') { throw 'Identidade do processo Node registrada e ambigua; inicio recusado.' }
+  if ($nodeStatus -in @('UNKNOWN', 'AMBIGUOUS')) {
+    try { Write-MegaDeskLog 'event=NODE_IDENTITY_MISMATCH classification=UNKNOWN action=FAIL_CLOSED.' } catch { }
+    throw 'Identidade do processo Node registrada ficou UNKNOWN; inicio recusado em fail-closed.'
+  }
   if ($null -ne $state.node) {
+    try { Assert-MegaDeskPortFree -Port $Port -Operation 'reconciliacao de record Node stale/divergente' | Out-Null } catch {
+      try { Write-MegaDeskLog ("event=PORT_OWNER_MISMATCH port={0} classification=UNKNOWN_OR_UNMANAGED action=FAIL_CLOSED." -f $Port) } catch { }
+      throw
+    }
+    try { Write-MegaDeskLog ("event=NODE_IDENTITY_MISMATCH classification={0} port=FREE action=CLEAR_STALE_RECORD." -f $nodeStatus) } catch { }
     $staleNodeRecord = $state.node
     Update-MegaDeskState -AllowedFields node -Precondition {
       param($current)
@@ -2735,7 +3048,9 @@ function Start-MegaDeskNode {
   $runtimeConfigRoot = Resolve-MegaDeskRuntimeConfigRoot -RequireEnvFile
   $environmentFile = Join-Path $runtimeConfigRoot '.env.local'
   if (-not (Test-Path -LiteralPath $environmentFile -PathType Leaf)) { throw '.env.local obrigatorio ausente fora da release.' }
-  $launch = New-MegaDeskNodeLaunchSpec -ExecutablePath $node.Source -EnvironmentPath $environmentFile -ScriptPath $scriptPath
+  $runtimeInstanceId = [guid]::NewGuid().ToString('N')
+  $operationId = if ($null -ne $state.operation -and $state.operation.PSObject.Properties.Name -contains 'operationId' -and [string]$state.operation.operationId -match '^[0-9a-f]{32}$') { [string]$state.operation.operationId } else { [guid]::NewGuid().ToString('N') }
+  $launch = New-MegaDeskNodeLaunchSpec -ExecutablePath $node.Source -EnvironmentPath $environmentFile -ScriptPath $scriptPath -RuntimeInstanceId $runtimeInstanceId
   $environmentOverrides = @{
     NODE_ENV = 'production'
     HOST = '127.0.0.1'
@@ -2746,10 +3061,11 @@ function Start-MegaDeskNode {
   $environmentOverrides['MEGADESK_RELEASE_SHA'] = $ReleaseSha
   if ([string]$script:MegaDeskExecutionContext.mode -eq 'TEST') { $environmentOverrides['MEGADESK_TEST_TOKEN'] = [string]$script:MegaDeskExecutionContext.token }
   $diagnostics = New-MegaDeskNodeDiagnosticPaths -ReleaseSha $ReleaseSha
+  $stopIntentPath = if ($diagnostics.PSObject.Properties.Name -contains 'stopIntentPath' -and -not [string]::IsNullOrWhiteSpace([string]$diagnostics.stopIntentPath)) { [string]$diagnostics.stopIntentPath } else { ([string]$diagnostics.exitTelemetryPath -replace '\.exit\.json$', '.stop-intent.json') }
   Assert-MegaDeskNodeStartAuthorization -AuthorizationMode $AuthorizationMode -ReleaseSha $ReleaseSha -RequireNodeAbsent | Out-Null
   $process = Start-MegaDeskNativeNodeProcess -Launch $launch -WorkingDirectory $workingDirectory -EnvironmentOverrides $environmentOverrides -StdoutPath $diagnostics.stdoutPath -StderrPath $diagnostics.stderrPath
   try {
-    $record = New-ManagedProcessRecord -Process $process -ExecutablePath $launch.executablePath -Kind node -ScriptPath $launch.scriptPath -EnvironmentPath $launch.environmentPath -ReleaseSha $ReleaseSha -Port $Port -StdoutPath $diagnostics.stdoutPath -StderrPath $diagnostics.stderrPath -DiagnosticInvocationId $diagnostics.invocationId -ExitTelemetryPath $diagnostics.exitTelemetryPath -ProjectRoot $runtimeConfigRoot
+    $record = New-ManagedProcessRecord -Process $process -ExecutablePath $launch.executablePath -Kind node -ScriptPath $launch.scriptPath -EnvironmentPath $launch.environmentPath -ReleaseSha $ReleaseSha -Port $Port -StdoutPath $diagnostics.stdoutPath -StderrPath $diagnostics.stderrPath -DiagnosticInvocationId $diagnostics.invocationId -ExitTelemetryPath $diagnostics.exitTelemetryPath -StopIntentPath $stopIntentPath -OperationId $operationId -RuntimeInstanceId $runtimeInstanceId -ProjectRoot $runtimeConfigRoot
     Register-MegaDeskTestProcessOwnership -Process $process -ExecutablePath $launch.executablePath -CommandIdentity $launch.scriptPath -Port $Port
   } catch {
     throw ("CRITICO: identidade do Node iniciado nao pode ser comprovada: {0}. Nenhum encerramento por PID foi tentado; intervencao manual e necessaria." -f $_.Exception.Message)
@@ -2762,7 +3078,7 @@ function Start-MegaDeskNode {
   } catch {
     $stateFailure = $_.Exception.Message
     try {
-      Stop-MegaDeskExactManagedProcess -Record $record -Kind node -AllowStaticIdentity
+      Stop-MegaDeskExactManagedProcess -Record $record -Kind node -AllowStaticIdentity -StopReason STARTUP_COMPENSATION
     } catch {
       throw ("CRITICO: state do Node iniciado nao pode ser persistido: {0}. Compensacao automatica nao pode ser provada: {1}. Intervencao manual e necessaria." -f $stateFailure, $_.Exception.Message)
     }
@@ -2773,7 +3089,7 @@ function Start-MegaDeskNode {
   } catch {
     $telemetryFailure = $_.Exception.Message
     try {
-      Stop-MegaDeskExactManagedProcess -Record $record -Kind node -AllowStaticIdentity
+      Stop-MegaDeskExactManagedProcess -Record $record -Kind node -AllowStaticIdentity -StopReason STARTUP_COMPENSATION
       Update-MegaDeskState -AllowedFields node -Precondition {
         param($current)
         $null -ne $current.node -and (Test-MegaDeskStateValueEqual -Left $current.node -Right $record)
@@ -2784,7 +3100,7 @@ function Start-MegaDeskNode {
     throw ("Exit telemetry do Node nao iniciou; candidate compensada localmente: {0}." -f $telemetryFailure)
   }
   Add-Member -InputObject $record -NotePropertyName processHandle -NotePropertyValue $process -Force
-  try { Write-MegaDeskLog ("MegaDesk Node iniciado e controlado (PID {0}); invocation={1}; stdout_path={2}; stderr_path={3}; exit_telemetry_path={4}." -f $process.Id, $diagnostics.invocationId, $diagnostics.stdoutPath, $diagnostics.stderrPath, $diagnostics.exitTelemetryPath) } catch { }
+  try { Write-MegaDeskLog ("event=NODE_STARTED pid={0} release_sha={1} operation_id={2} runtime_instance_id={3} invocation={4}." -f $process.Id, $ReleaseSha, $operationId, $runtimeInstanceId, $diagnostics.invocationId) } catch { }
   return $record
   }
 }
@@ -2866,7 +3182,10 @@ function Start-MegaDeskTunnel {
     try { Write-MegaDeskLog 'Cloudflare Tunnel controlado ja esta ativo; nenhuma duplicata foi criada.' } catch { }
     return $null
   }
-  if ($tunnelStatus -eq 'AMBIGUOUS') { throw 'Identidade do processo Cloudflared registrada e ambigua; inicio recusado.' }
+  if ($tunnelStatus -in @('UNKNOWN', 'AMBIGUOUS')) { throw 'Identidade do processo Cloudflared registrada e ambigua/UNKNOWN; inicio recusado em fail-closed.' }
+  if ($tunnelStatus -eq 'IDENTITY_MISMATCH') {
+    throw 'Record Cloudflared divergiu de um PID existente; inicio duplicado recusado em fail-closed.'
+  }
   Assert-MegaDeskGlobalCloudflaredAbsent | Out-Null
   $staleTunnelRecord = $state.cloudflared
 
@@ -3558,11 +3877,14 @@ function Stop-MegaDeskExactManagedProcess {
   param(
     [Parameter(Mandatory = $true)]$Record,
     [Parameter(Mandatory = $true)][ValidateSet('node', 'cloudflared')][string]$Kind,
-    [switch]$AllowStaticIdentity
+    [switch]$AllowStaticIdentity,
+    [ValidateSet('PUBLISH_SWITCH', 'ROLLBACK_CLEANUP', 'RECOVERY_ABORT_CANDIDATE', 'STARTUP_COMPENSATION', 'MANUAL_STOP')][string]$StopReason = 'MANUAL_STOP'
   )
   $target = Get-MegaDeskDestructiveProcessTarget -Record $Record -Kind $Kind -AllowStaticIdentity:$AllowStaticIdentity
   if ($target.status -eq 'ABSENT') { return }
+  if ($Kind -eq 'node') { [void](Write-MegaDeskNodeStopIntent -Record $Record -Reason $StopReason) }
   Stop-MegaDeskValidatedProcessHandle -ProcessHandle $target.processHandle -Kind $Kind
+  if ($Kind -eq 'node') { [void](Write-MegaDeskNodeStopConfirmation -Record $Record -Reason $StopReason) }
 }
 
 function Undo-MegaDeskInvocation {
@@ -3586,7 +3908,11 @@ function Undo-MegaDeskInvocation {
       }
       $target = Get-MegaDeskDestructiveProcessTarget -Record $current -Kind $entry.Kind -AllowStaticIdentity:($entry.Kind -eq 'node')
       $processWasAlreadyAbsent = $target.status -eq 'ABSENT'
-      if ($target.status -eq 'PRESENT') { Stop-MegaDeskValidatedProcessHandle -ProcessHandle $target.processHandle -Kind $entry.Kind }
+      if ($target.status -eq 'PRESENT') {
+        if ($entry.Kind -eq 'node') { [void](Write-MegaDeskNodeStopIntent -Record $current -Reason 'ROLLBACK_CLEANUP') }
+        Stop-MegaDeskValidatedProcessHandle -ProcessHandle $target.processHandle -Kind $entry.Kind
+        if ($entry.Kind -eq 'node') { [void](Write-MegaDeskNodeStopConfirmation -Record $current -Reason 'ROLLBACK_CLEANUP') }
+      }
       $ownedRecord = $entry.Record
       $ownedKind = [string]$entry.Kind
       Update-MegaDeskState -AllowedFields $ownedKind -Precondition {
@@ -3609,7 +3935,10 @@ function Undo-MegaDeskInvocation {
 }
 
 function Stop-MegaDeskManagedProcess {
-  param([Parameter(Mandatory = $true)][ValidateSet('node', 'cloudflared')][string]$Kind)
+  param(
+    [Parameter(Mandatory = $true)][ValidateSet('node', 'cloudflared')][string]$Kind,
+    [ValidateSet('PUBLISH_SWITCH', 'ROLLBACK_CLEANUP', 'RECOVERY_ABORT_CANDIDATE', 'STARTUP_COMPENSATION', 'MANUAL_STOP')][string]$StopReason = 'MANUAL_STOP'
+  )
   return Invoke-WithMegaDeskLifecycleLock {
   Assert-MegaDeskExecutionContext -Operation 'encerramento de processo gerenciado' -Paths @($script:RuntimeRoot, $script:StatePath)
   $state = Get-MegaDeskState
@@ -3620,7 +3949,9 @@ function Stop-MegaDeskManagedProcess {
   }
   $target = Get-MegaDeskDestructiveProcessTarget -Record $record -Kind $Kind
   if ($target.status -ne 'PRESENT') { throw ("Processo {0} registrado esta ausente; encerramento nao alterou o state." -f $Kind) }
+  if ($Kind -eq 'node') { [void](Write-MegaDeskNodeStopIntent -Record $record -Reason $StopReason) }
   Stop-MegaDeskValidatedProcessHandle -ProcessHandle $target.processHandle -Kind $Kind
+  if ($Kind -eq 'node') { [void](Write-MegaDeskNodeStopConfirmation -Record $record -Reason $StopReason) }
   Update-MegaDeskState -AllowedFields $Kind -Precondition {
     param($latest)
     $null -ne $latest.$Kind -and (Test-SameManagedProcessRecord -Left $latest.$Kind -Right $record)
@@ -3685,6 +4016,7 @@ function Invoke-MegaDeskReleaseRollback {
     }
     $activeShaBeforeRollback = [string]$stateBeforeRollback.activeRelease.sha
     Set-MegaDeskOperationState -Status 'ROLLING_BACK' -CandidateSha ([string]$PreviousRelease.sha) -Message 'Rollback de codigo iniciado.' | Out-Null
+    try { Write-MegaDeskLog ("event=ROLLBACK_STARTED target_sha={0}." -f [string]$PreviousRelease.sha) } catch { }
     if ($null -ne $StartedCandidateRecord) { Undo-MegaDeskInvocation -StartedNodeRecord $StartedCandidateRecord }
     $rollbackState = Get-MegaDeskState
     Assert-MegaDeskDangerousLifecycleState -State $rollbackState -Kind UPDATE -Status ROLLING_BACK -CandidateSha ([string]$PreviousRelease.sha) -ActiveReleaseMode MATCH -ActiveReleaseSha $activeShaBeforeRollback -NodeMode ABSENT | Out-Null
@@ -3698,9 +4030,11 @@ function Invoke-MegaDeskReleaseRollback {
       $null -ne $current.operation -and [string]$current.operation.kind -ceq 'UPDATE' -and [string]$current.operation.status -ceq 'ROLLING_BACK' -and [string]$current.operation.candidateSha -ceq [string]$PreviousRelease.sha -and (Get-MegaDeskOperationSwitchAttempted -Operation $current.operation) -eq $true
     } -Mutation {
       param($current)
+      $operationId = if ($current.operation.PSObject.Properties.Name -contains 'operationId' -and [string]$current.operation.operationId -match '^[0-9a-f]{32}$') { [string]$current.operation.operationId } else { [guid]::NewGuid().ToString('N') }
       $current.activeRelease = [pscustomobject]@{ sha = $PreviousRelease.sha; path = $PreviousRelease.path; activatedAt = (Get-Date).ToUniversalTime().ToString('o') }
-      $current.operation = New-MegaDeskOperationRecord -Status 'ACTIVE' -Kind 'UPDATE' -CandidateSha $PreviousRelease.sha -BaselineSha $null -SwitchAttempted $true -Message 'Rollback de codigo confirmado por health local e publico.'
+      $current.operation = New-MegaDeskOperationRecord -Status 'ACTIVE' -Kind 'UPDATE' -CandidateSha $PreviousRelease.sha -BaselineSha $null -SwitchAttempted $true -OperationId $operationId -Phase ACTIVE_COMMITTED -Message 'Rollback de codigo confirmado por health local e publico.'
     } | Out-Null
+    try { Write-MegaDeskLog ("event=ROLLBACK_COMPLETED active_sha={0}." -f [string]$PreviousRelease.sha) } catch { }
     Write-MegaDeskLog ("Rollback confirmou a release anterior {0}." -f $PreviousRelease.sha)
   } catch {
     try { Set-MegaDeskOperationState -Status 'FAILED' -CandidateSha ([string]$PreviousRelease.sha) -Message 'Rollback nao confirmado.' | Out-Null } catch { }
@@ -3723,8 +4057,9 @@ function Resolve-MegaDeskReleaseSwitchNodeStatus {
 
   $status = Get-MegaDeskManagedProcessStatus -Record $record -Kind node
   if ($status -eq 'VALID') { return [pscustomobject]@{ status = 'VALID'; recordCleared = $false } }
-  if ($status -ne 'ABSENT') {
-    throw ('Switch recusado: identidade do Node registrado e ambigua ({0}).' -f $status)
+  if ($status -in @('UNKNOWN', 'AMBIGUOUS')) {
+    try { Write-MegaDeskLog 'event=NODE_IDENTITY_MISMATCH classification=UNKNOWN action=PUBLISH_SWITCH_ABORTED.' } catch { }
+    throw 'Switch recusado: identidade do Node registrado ficou UNKNOWN.'
   }
 
   $ownership = Get-MegaDeskPortOwnership -Port $script:RuntimePort
@@ -3732,15 +4067,16 @@ function Resolve-MegaDeskReleaseSwitchNodeStatus {
     throw ('Switch recusado: Node registrado ausente, mas porta {0} nao esta comprovadamente livre ({1}).' -f $script:RuntimePort, $ownership.status)
   }
 
-  # A record is cleared only after the exact registered PID is proved absent
-  # and the managed port is proved free. No process is stopped in this path.
+  # ABSENT and IDENTITY_MISMATCH are safe to clear only when the managed port
+  # is proved free. A PID-reused process is deliberately never stopped here.
   $staleRecord = $record
   Update-MegaDeskState -AllowedFields node -Precondition {
     param($current)
     $null -ne $current.node -and (Test-MegaDeskStateValueEqual -Left $current.node -Right $staleRecord)
   } -Mutation { param($current) $current.node = $null } | Out-Null
   $State.node = $null
-  return [pscustomobject]@{ status = 'ABSENT'; recordCleared = $true }
+  try { Write-MegaDeskLog ("event=NODE_IDENTITY_MISMATCH classification={0} port=FREE action=CLEAR_STALE_RECORD." -f $status) } catch { }
+  return [pscustomobject]@{ status = 'ABSENT'; recordCleared = $true; priorStatus = $status }
 }
 
 function Invoke-MegaDeskReleaseSwitch {
@@ -3756,36 +4092,42 @@ function Invoke-MegaDeskReleaseSwitch {
   if ($TestMode) { Assert-MegaDeskTestChecks -Checks $PublicChecks }
   $startedCandidateRecord = $null
   $oldProcessStopped = $false
+  $switchStatePersisted = $false
   try {
     Assert-MegaDeskCandidateLaunchReadiness -CandidateRelease $CandidateRelease -ActiveRelease $PreviousRelease -Port $script:RuntimePort | Out-Null
-    Set-MegaDeskOperationState -Status 'SWITCHING' -CandidateSha ([string]$CandidateRelease.sha) -Message 'Switch de codigo iniciado.' | Out-Null
     $state = Get-MegaDeskState
     $runtime = Resolve-MegaDeskReleaseSwitchNodeStatus -State $state
     $expectedActiveNodeRecord = if ($runtime.status -eq 'VALID') { $state.node } else { $null }
+    if ($runtime.status -eq 'VALID' -and [string]$state.node.releaseSha -cne [string]$PreviousRelease.sha) {
+      throw 'Node ativo nao corresponde a release ativa registrada; switch recusado antes do marcador destrutivo.'
+    }
+    Set-MegaDeskOperationState -Status 'SWITCHING' -CandidateSha ([string]$CandidateRelease.sha) -Phase ACTIVE_RUNTIME_CLASSIFIED -Message 'Runtime ACTIVE classificada; switch de codigo iniciado.' | Out-Null
+    $switchStatePersisted = $true
     $state = Get-MegaDeskState
     if ($runtime.status -eq 'VALID') {
-      if ([string]$state.node.releaseSha -ne [string]$PreviousRelease.sha) {
-        throw 'Node ativo nao corresponde a release ativa registrada; switch recusado.'
-      }
       Assert-MegaDeskDangerousLifecycleState -State $state -Kind UPDATE -Status SWITCHING -CandidateSha ([string]$CandidateRelease.sha) -ActiveReleaseMode MATCH -ActiveReleaseSha ([string]$PreviousRelease.sha) -NodeMode MATCH -ExpectedNodeRecord $expectedActiveNodeRecord | Out-Null
-      Stop-MegaDeskManagedProcess -Kind node
+      Stop-MegaDeskManagedProcess -Kind node -StopReason PUBLISH_SWITCH
       $oldProcessStopped = $true
     }
+    Set-MegaDeskOperationPhase -Phase OLD_RUNTIME_STOPPED -CandidateSha ([string]$CandidateRelease.sha) -Message 'Runtime ACTIVE anterior ausente e porta liberada.' | Out-Null
     $stateBeforeCandidate = Get-MegaDeskState
     Assert-MegaDeskDangerousLifecycleState -State $stateBeforeCandidate -Kind UPDATE -Status SWITCHING -CandidateSha ([string]$CandidateRelease.sha) -ActiveReleaseMode MATCH -ActiveReleaseSha ([string]$PreviousRelease.sha) -NodeMode ABSENT | Out-Null
     Assert-MegaDeskPortFree -Port $script:RuntimePort -Operation 'switch apos parada do runtime gerenciado' | Out-Null
     $startedCandidateRecord = Start-MegaDeskNode -AuthorizationMode UPDATE_CANDIDATE -ReleaseSha ([string]$CandidateRelease.sha) -Port $script:RuntimePort
+    Set-MegaDeskOperationPhase -Phase CANDIDATE_STARTED -CandidateSha ([string]$CandidateRelease.sha) -Message 'Candidate iniciada com identidade composta persistida.' | Out-Null
     Wait-MegaDeskLocal -ExpectedReleaseSha ([string]$CandidateRelease.sha) -Port $script:RuntimePort -TimeoutSeconds $LocalTimeoutSeconds -NodeRecord $startedCandidateRecord
     if (-not $TestMode) { Start-MegaDeskTunnel -AuthorizationMode UPDATE_CANDIDATE -ReleaseSha ([string]$CandidateRelease.sha) | Out-Null }
     Wait-MegaDeskPublicEndpoints -ExpectedReleaseSha ([string]$CandidateRelease.sha) -Checks $PublicChecks -TestMode:$TestMode -TimeoutSeconds $PublicTimeoutSeconds
+    Set-MegaDeskOperationPhase -Phase CANDIDATE_HEALTH_PASSED -CandidateSha ([string]$CandidateRelease.sha) -Message 'Candidate confirmou health local e publico.' | Out-Null
     Update-MegaDeskState -AllowedFields @('previousRelease', 'activeRelease', 'operation') -Precondition {
       param($current)
       $null -ne $current.operation -and [string]$current.operation.kind -ceq 'UPDATE' -and [string]$current.operation.status -ceq 'SWITCHING' -and [string]$current.operation.candidateSha -ceq [string]$CandidateRelease.sha -and (Get-MegaDeskOperationSwitchAttempted -Operation $current.operation) -eq $true
     } -Mutation {
       param($current)
+      $operationId = if ($current.operation.PSObject.Properties.Name -contains 'operationId' -and [string]$current.operation.operationId -match '^[0-9a-f]{32}$') { [string]$current.operation.operationId } else { [guid]::NewGuid().ToString('N') }
       $current.previousRelease = [pscustomobject]@{ sha = $PreviousRelease.sha; path = $PreviousRelease.path; activatedAt = $current.activeRelease.activatedAt }
       $current.activeRelease = [pscustomobject]@{ sha = $CandidateRelease.sha; path = $CandidateRelease.path; activatedAt = (Get-Date).ToUniversalTime().ToString('o') }
-      $current.operation = New-MegaDeskOperationRecord -Status 'ACTIVE' -Kind 'UPDATE' -CandidateSha $CandidateRelease.sha -BaselineSha $null -SwitchAttempted $true -Message 'Release candidata confirmada por health local e publico.'
+      $current.operation = New-MegaDeskOperationRecord -Status 'ACTIVE' -Kind 'UPDATE' -CandidateSha $CandidateRelease.sha -BaselineSha $null -SwitchAttempted $true -OperationId $operationId -Phase ACTIVE_COMMITTED -Message 'Release candidata confirmada por health local e publico.'
     } | Out-Null
     Write-MegaDeskLog ("Release {0} marcada como ativa." -f $CandidateRelease.sha)
   } catch {
@@ -3793,6 +4135,7 @@ function Invoke-MegaDeskReleaseSwitch {
     if ($oldProcessStopped -or $null -ne $startedCandidateRecord) {
       Invoke-MegaDeskReleaseRollback -PreviousRelease $PreviousRelease -StartedCandidateRecord $startedCandidateRecord -PublicChecks $PublicChecks -TestMode:$TestMode -LocalTimeoutSeconds $LocalTimeoutSeconds -PublicTimeoutSeconds $PublicTimeoutSeconds
     } else {
+      try { Write-MegaDeskLog ("event=PUBLISH_SWITCH_ABORTED switch_state_persisted={0} old_runtime_stopped=NO." -f $switchStatePersisted) } catch { }
       Set-MegaDeskOperationState -Status 'FAILED' -CandidateSha ([string]$CandidateRelease.sha) -Message 'Switch recusado antes de interromper a release ativa.' | Out-Null
     }
     throw $switchError
@@ -4040,7 +4383,7 @@ function Complete-MegaDeskBootstrapZeroActivation {
     param($current)
     $current.activeRelease = [pscustomobject]@{ sha = $CandidateRelease.sha; path = $CandidateRelease.path; activatedAt = (Get-Date).ToUniversalTime().ToString('o') }
     $current.previousRelease = $null
-    $current.operation = New-MegaDeskOperationRecord -Status 'ACTIVE' -Kind 'BOOTSTRAP_ZERO' -CandidateSha $CandidateRelease.sha -BaselineSha $MigrationBaselineSha -SwitchAttempted $true -Message 'Bootstrap Zero confirmado por health local e publico.'
+    $current.operation = New-MegaDeskOperationRecord -Status 'ACTIVE' -Kind 'BOOTSTRAP_ZERO' -CandidateSha $CandidateRelease.sha -BaselineSha $MigrationBaselineSha -SwitchAttempted $true -Phase ACTIVE_COMMITTED -Message 'Bootstrap Zero confirmado por health local e publico.'
   } | Out-Null
   try { Write-MegaDeskLog ("Bootstrap Zero marcou a release {0} como ativa." -f $CandidateRelease.sha) } catch { }
   }
@@ -4334,9 +4677,9 @@ function Restore-MegaDeskDist {
 
 Export-ModuleMember -Function @(
   'Enable-MegaDeskOperationalContext', 'Enable-MegaDeskTestContext',
-  'Write-MegaDeskLog', 'Get-MegaDeskState', 'Invoke-WithMegaDeskLifecycleLock', 'Test-ManagedProcess', 'Test-MegaDeskStaticProcessIdentity', 'Get-PortOwner', 'Assert-MegaDeskToolchain', 'Assert-MegaDeskActiveRelease', 'Assert-MegaDeskStartupState',
+  'Write-MegaDeskLog', 'Get-MegaDeskState', 'Invoke-WithMegaDeskLifecycleLock', 'Test-ManagedProcess', 'Test-MegaDeskStaticProcessIdentity', 'Get-PortOwner', 'Assert-MegaDeskToolchain', 'Assert-MegaDeskActiveRelease', 'Assert-MegaDeskStartupState', 'Resolve-MegaDeskActiveRuntimeRecovery',
   'Assert-MegaDeskArtifacts', 'Assert-DockerAndMySql', 'Assert-CloudflaredConfig',
-  'Start-MegaDeskNode', 'Start-MegaDeskTunnel', 'Wait-MegaDeskLocal', 'Write-MegaDeskNodeExitTelemetry',
+  'Start-MegaDeskNode', 'Start-MegaDeskTunnel', 'Wait-MegaDeskDockerAndMySql', 'Wait-MegaDeskLocal', 'Write-MegaDeskNodeExitTelemetry',
   'Wait-MegaDeskPublicEndpoints', 'Undo-MegaDeskInvocation', 'Stop-MegaDeskManagedProcess',
   'Backup-MegaDeskDist', 'Restore-MegaDeskDist', 'Invoke-MegaDeskUpdaterV2', 'Invoke-MegaDeskPreparedReleasePublish', 'Invoke-MegaDeskBootstrapZero', 'New-MegaDeskDisposableMainMigrationTarget', 'Invoke-MegaDeskDisposableMigrationRehearsal',
   'Invoke-MegaDeskBootstrapFailedRecovery',

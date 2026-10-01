@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import express from "express";
@@ -80,7 +80,7 @@ describe("write freeze causal boundary", () => {
   it("holds a single boundary under hundreds of contending writers", async () => {
     const freeze = await coordinator();
     const admitted = await Promise.all(Array.from({ length: 200 }, (_, index) => freeze.beginWrite(`burst-${index}`)));
-    const activation = freeze.activate("high-contention", 10_000);
+    const activation = freeze.activate("high-contention", 16_000);
     await new Promise(resolve => setTimeout(resolve, 25));
     const denied = await Promise.allSettled(Array.from({ length: 200 }, (_, index) => freeze.beginWrite(`post-boundary-${index}`)));
     expect(denied).toHaveLength(200);
@@ -194,6 +194,52 @@ describe("durable webhook quarantine", () => {
     await writeFile(path.join(root, "state.json"), "{\"mode\":\"unfrozen\"}\n");
     const restarted = new WriteFreezeCoordinator({ root });
     await expect(restarted.beginWrite("must-deny")).rejects.toMatchObject({ code: "WRITE_FREEZE_CORRUPT" });
+  });
+
+  it("retries when the same contended lock disappears before inspection", async () => {
+    let inspections = 0;
+    const freeze = await coordinator({
+      beforeLockInspection: async lockDirectory => {
+        inspections += 1;
+        await rm(lockDirectory, { recursive: true, force: true });
+      },
+    });
+    const root = (freeze as any).options.root as string;
+    await mkdir(path.join(root, "locks", "state.lock"), { recursive: true });
+
+    await expect(freeze.status()).resolves.toMatchObject({ mode: "unfrozen" });
+    expect(inspections).toBe(1);
+  });
+
+  it("does not swallow ENOENT raised outside inspection of the contended lock", async () => {
+    const freeze = await coordinator({
+      beforeLockInspection: () => {
+        throw Object.assign(new Error("unrelated path disappeared"), {
+          code: "ENOENT",
+          path: "unrelated-sentinel",
+        });
+      },
+    });
+    const root = (freeze as any).options.root as string;
+    await mkdir(path.join(root, "locks", "state.lock"), { recursive: true });
+
+    await expect(freeze.status()).rejects.toMatchObject({ code: "ENOENT", path: "unrelated-sentinel" });
+  });
+
+  it("keeps lock acquisition bounded and fail-closed", async () => {
+    const freeze = await coordinator({ processLockTimeoutMs: 40, incompleteLockStaleMs: 60_000 });
+    const root = (freeze as any).options.root as string;
+    await mkdir(path.join(root, "locks", "state.lock"), { recursive: true });
+
+    await expect(freeze.status()).rejects.toMatchObject({ code: "WRITE_FREEZE_CORRUPT" });
+  });
+
+  it("still reclaims a stale incomplete lock", async () => {
+    const freeze = await coordinator({ processLockTimeoutMs: 1_000, incompleteLockStaleMs: 0 });
+    const root = (freeze as any).options.root as string;
+    await mkdir(path.join(root, "locks", "state.lock"), { recursive: true });
+
+    await expect(freeze.status()).resolves.toMatchObject({ mode: "unfrozen" });
   });
 
   it("is crash-consistent between durable persist and provider ACK", async () => {

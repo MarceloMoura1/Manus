@@ -207,7 +207,7 @@ Describe 'MegaDesk ACTIVE runtime reconciliation' {
     }
   }
 
-  It 'blocks PID reuse or an ambiguous recorded process before a replacement start' {
+  It 'clears a PID-reused record only with a free port and never kills that process' {
     $candidate = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     $global:MegaDeskDailyCandidate = $candidate
     InModuleScope $moduleName {
@@ -217,14 +217,17 @@ Describe 'MegaDesk ACTIVE runtime reconciliation' {
       Mock Get-MegaDeskRelease { [pscustomobject]@{ sha = $candidate; path = 'C:\isolated\active-release' } }
       Mock Get-MegaDeskState { $script:testState }
       Mock Test-ManagedProcess { $false }
-      Mock Get-ProcessSnapshotStrict { [pscustomobject]@{ ProcessId = 4242 } }
-      Mock Save-MegaDeskState { throw 'state must remain unchanged' }
+      Mock Get-ProcessSnapshotStrict { [pscustomobject]@{ ProcessId = 4242; ExecutablePath = 'C:\Windows\System32\conhost.exe'; CommandLine = 'conhost.exe 0x4'; CreationDate = ([DateTime]::UtcNow).ToString('o') } }
+      Mock Save-MegaDeskState { param($State) $script:testState = $State }
+      Mock Assert-MegaDeskPortFree { }
       Mock Start-MegaDeskNativeNodeProcess { throw 'replacement must not start' }
+      Mock Stop-MegaDeskValidatedProcessHandle { throw 'PID-reused process must not be killed' }
 
       { Start-MegaDeskNode -AuthorizationMode ACTIVE_START -ReleaseSha $candidate -Port $script:RuntimePort } | Should Throw
-      $script:testState.node | Should Be $stale
-      Assert-MockCalled Save-MegaDeskState -Times 0 -Exactly -Scope It
+      $script:testState.node | Should Be $null
+      Assert-MockCalled Save-MegaDeskState -Times 1 -Exactly -Scope It
       Assert-MockCalled Start-MegaDeskNativeNodeProcess -Times 0 -Exactly -Scope It
+      Assert-MockCalled Stop-MegaDeskValidatedProcessHandle -Times 0 -Exactly -Scope It
     }
   }
 
@@ -249,7 +252,7 @@ Describe 'MegaDesk ACTIVE runtime reconciliation' {
       Mock Assert-MegaDeskPortFree { }
       Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\node.exe' } }
       Mock Test-Path { $true }
-      Mock New-MegaDeskNodeDiagnosticPaths { [pscustomobject]@{ invocationId = '00000000000000000000000000000000'; stdoutPath = 'C:\isolated\node.stdout.log'; stderrPath = 'C:\isolated\node.stderr.log'; exitTelemetryPath = 'C:\isolated\node.exit.json'; observerRequestPath = 'C:\isolated\node.exit-observer.json' } }
+      Mock New-MegaDeskNodeDiagnosticPaths { [pscustomobject]@{ invocationId = '00000000000000000000000000000000'; stdoutPath = 'C:\isolated\node.stdout.log'; stderrPath = 'C:\isolated\node.stderr.log'; exitTelemetryPath = 'C:\isolated\node.exit.json'; observerRequestPath = 'C:\isolated\node.exit-observer.json'; stopIntentPath = 'C:\isolated\node.stop-intent.json' } }
       Mock Start-MegaDeskNativeNodeProcess {
         param($Launch, $WorkingDirectory, $EnvironmentOverrides, $StdoutPath, $StderrPath)
         $script:nodeLaunch = $Launch
@@ -1359,7 +1362,7 @@ Describe 'MegaDesk Bootstrap Zero readiness and stale process safety' {
       Mock Test-ManagedProcess { $false }
       Mock Save-MegaDeskState { param($State) $global:MegaDeskBootstrapStalePresentState = $State }
       Mock Get-Command { [pscustomobject]@{ Source = 'C:\runtime\cloudflared.exe' } }
-      Mock Get-CimInstance { param($ClassName, $Filter) [pscustomobject]@{ ProcessId = 5252 } }
+      Mock Get-CimInstance { param($ClassName, $Filter) [pscustomobject]@{ ProcessId = 5252; ExecutablePath = 'C:\Windows\System32\conhost.exe'; CommandLine = 'conhost.exe 0x4'; CreationDate = ([DateTime]::UtcNow).ToString('o') } }
       Mock Assert-MegaDeskTunnelStartAuthorization { }
       Mock Start-MegaDeskProcess { throw 'a second tunnel must not start' }
       Mock Stop-Process { throw 'an invalid process must not be terminated' }
@@ -1367,7 +1370,7 @@ Describe 'MegaDesk Bootstrap Zero readiness and stale process safety' {
       $failure = $null
       try { Start-MegaDeskTunnel -AuthorizationMode BOOTSTRAP_ZERO_CANDIDATE -ReleaseSha ('a' * 40) } catch { $failure = $_.Exception.Message }
 
-      $failure | Should Match 'identidade do processo Cloudflared registrada e ambigua'
+      $failure | Should Match 'Record Cloudflared divergiu de um PID existente.*fail-closed'
       $global:MegaDeskBootstrapStalePresentState.cloudflared.pid | Should Be 5252
       Assert-MockCalled Save-MegaDeskState -Times 0 -Exactly -Scope It
       Assert-MockCalled Start-MegaDeskProcess -Times 0 -Exactly -Scope It
@@ -3783,8 +3786,8 @@ Describe 'MegaDesk Node health diagnostics' {
         return [pscustomobject]@{ Id = 4242 }
       }
       Mock New-ManagedProcessRecord {
-        param($Process, $ExecutablePath, $Kind, $ConfigPath, $ScriptPath, $EnvironmentPath, $ReleaseSha, $Port, $StdoutPath, $StderrPath, $DiagnosticInvocationId, $ExitTelemetryPath)
-        [pscustomobject]@{ pid = 4242; executablePath = 'C:\\runtime\\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); releaseSha = $global:MegaDeskDiagnosticCandidate; port = $script:RuntimePort; stdoutPath = $StdoutPath; stderrPath = $StderrPath; diagnosticInvocationId = $DiagnosticInvocationId; exitTelemetryPath = $ExitTelemetryPath }
+        param($Process, $ExecutablePath, $Kind, $ConfigPath, $ScriptPath, $EnvironmentPath, $ReleaseSha, $Port, $StdoutPath, $StderrPath, $DiagnosticInvocationId, $ExitTelemetryPath, $StopIntentPath, $OperationId, $RuntimeInstanceId, $ProjectRoot)
+        [pscustomobject]@{ pid = 4242; executablePath = 'C:\\runtime\\node.exe'; startedAtUtc = ([DateTime]::UtcNow).ToString('o'); releaseSha = $global:MegaDeskDiagnosticCandidate; port = $script:RuntimePort; stdoutPath = $StdoutPath; stderrPath = $StderrPath; diagnosticInvocationId = $DiagnosticInvocationId; exitTelemetryPath = $ExitTelemetryPath; stopIntentPath = $StopIntentPath; operationId = $OperationId; runtimeInstanceId = $RuntimeInstanceId }
       }
       Mock Start-MegaDeskNodeExitObserver { }
       Mock Write-MegaDeskLog { }
@@ -3828,7 +3831,10 @@ Describe 'MegaDesk Node health diagnostics' {
       Write-MegaDeskNodeExitTelemetry -Path $paths.exitTelemetryPath -Pid 4242 -InvocationId $paths.invocationId -ReleaseSha $global:MegaDeskExitTelemetryCandidate -CreationTime $creation -ObservedExitTime $observed -ExitCode 23 -ExitCodeAvailable $true -Classification 'EXITED_WITH_CODE'
       $withCode = Get-Content -LiteralPath $paths.exitTelemetryPath -Raw | ConvertFrom-Json
 
-      $withCode.schemaVersion | Should Be 1
+      $withCode.schemaVersion | Should Be 2
+      $withCode.event | Should Be 'NODE_EXITED'
+      $withCode.expected | Should Be $false
+      $withCode.reason | Should Be 'UNEXPECTED_EXIT'
       $withCode.pid | Should Be 4242
       $withCode.invocationId | Should Be $paths.invocationId
       $withCode.releaseSha | Should Be $global:MegaDeskExitTelemetryCandidate
@@ -4340,7 +4346,7 @@ Describe 'MegaDesk durable switchAttempted lifecycle' {
     }
   }
 
-  It 'fails before runtime inspection when persisting SWITCHING fails' {
+  It 'classifies runtime before SWITCHING and still performs no stop when persistence fails' {
     $global:MegaDeskDurableOld = [pscustomobject]@{ sha = '8888888888888888888888888888888888888888'; path = 'C:\old' }
     $global:MegaDeskDurableCandidate = [pscustomobject]@{ sha = '9999999999999999999999999999999999999999'; path = 'C:\candidate' }
     InModuleScope $moduleName {
@@ -4349,13 +4355,14 @@ Describe 'MegaDesk durable switchAttempted lifecycle' {
       $script:stableStateJson = ([pscustomobject]@{ schemaVersion = 2; node = [pscustomobject]@{ pid = 4242; releaseSha = $old.sha }; cloudflared = $null; activeRelease = [pscustomobject]@{ sha = $old.sha; path = $old.path }; previousRelease = $null; operation = [pscustomobject]@{ kind = 'UPDATE'; status = 'READY'; candidateSha = $candidate.sha; switchAttempted = $false } } | ConvertTo-Json -Depth 8)
       Mock Get-MegaDeskState { $script:stableStateJson | ConvertFrom-Json }
       Mock Save-MegaDeskState { throw 'durable write failed' }
+      Mock Assert-MegaDeskCandidateLaunchReadiness { }
       Mock Resolve-MegaDeskReleaseSwitchNodeStatus { [pscustomobject]@{ status = 'VALID' } }
       Mock Stop-MegaDeskManagedProcess { }
       Mock Start-MegaDeskNode { }
 
       { Invoke-MegaDeskReleaseSwitch -CandidateRelease $candidate -PreviousRelease $old -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'isolated' }) -TestMode } | Should Throw
 
-      Assert-MockCalled Resolve-MegaDeskReleaseSwitchNodeStatus -Times 0 -Exactly -Scope It
+      Assert-MockCalled Resolve-MegaDeskReleaseSwitchNodeStatus -Times 1 -Exactly -Scope It
       Assert-MockCalled Stop-MegaDeskManagedProcess -Times 0 -Exactly -Scope It
       Assert-MockCalled Start-MegaDeskNode -Times 0 -Exactly -Scope It
     }
@@ -4379,7 +4386,7 @@ Describe 'MegaDesk durable switchAttempted lifecycle' {
       $stopIndex = $switchSource.IndexOf('Stop-MegaDeskManagedProcess -Kind node')
       $startIndex = $switchSource.IndexOf('Start-MegaDeskNode -AuthorizationMode UPDATE_CANDIDATE -ReleaseSha')
       ($persistIndex -ge 0) | Should Be $true
-      ($persistIndex -lt $resolveIndex) | Should Be $true
+      ($resolveIndex -lt $persistIndex) | Should Be $true
       ($persistIndex -lt $stopIndex) | Should Be $true
       ($persistIndex -lt $startIndex) | Should Be $true
     }
@@ -4404,7 +4411,8 @@ Describe 'MegaDesk durable switchAttempted lifecycle' {
 
       { Invoke-MegaDeskReleaseSwitch -CandidateRelease $candidate -PreviousRelease $old -PublicChecks @(@{ Url = 'http://127.0.0.1:32120/healthz'; Expected = 200; Label = 'isolated' }) -TestMode } | Should Throw
 
-      $script:durableSequence[0] | Should Be 'save-SWITCHING-True'
+      $script:durableSequence[0] | Should Be 'resolve-ABSENT'
+      $script:durableSequence[1] | Should Be 'save-SWITCHING-True'
       ($script:durableSequence -contains 'candidate-attempt') | Should Be $true
       $script:durableState.operation.status | Should Be 'FAILED'
       $script:durableState.operation.switchAttempted | Should Be $true
@@ -4460,16 +4468,16 @@ Describe 'MegaDesk durable switchAttempted lifecycle' {
     $global:MegaDeskDurableMockScope = $null
   }
 
-  It 'preserves ABSENT reconciliation and AMBIGUOUS fail-closed identity handling' {
+  It 'preserves safe stale reconciliation and UNKNOWN fail-closed identity handling' {
     InModuleScope $moduleName {
       $source = Get-Content -LiteralPath (Get-Module 'MegaDesk.Automation').Path -Raw
       $resolveSource = [regex]::Match($source, 'function Resolve-MegaDeskReleaseSwitchNodeStatus \{.*?(?=function Invoke-MegaDeskReleaseSwitch)', [System.Text.RegularExpressions.RegexOptions]::Singleline).Value
       $resolveSource | Should Match 'if \(\$status -eq ''VALID''\)'
-      $resolveSource | Should Match 'if \(\$status -ne ''ABSENT''\)'
-      $resolveSource | Should Match "identidade do Node registrado e ambigua"
+      $resolveSource | Should Match 'if \(\$status -in @\(''UNKNOWN'', ''AMBIGUOUS''\)\)'
+      $resolveSource | Should Match 'identidade do Node registrado ficou UNKNOWN'
       $resolveSource | Should Match 'Update-MegaDeskState -AllowedFields node'
       $resolveSource | Should Match 'Test-MegaDeskStateValueEqual'
-      ($resolveSource.IndexOf("if (`$status -ne 'ABSENT')") -lt $resolveSource.IndexOf('Update-MegaDeskState -AllowedFields node')) | Should Be $true
+      ($resolveSource.IndexOf("if (`$status -in @('UNKNOWN', 'AMBIGUOUS'))") -lt $resolveSource.IndexOf('Update-MegaDeskState -AllowedFields node')) | Should Be $true
     }
   }
 }

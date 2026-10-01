@@ -5,10 +5,30 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-type Worker = { child: ChildProcess; command(type: string, options?: { timeoutMs?: number; providerEventId?: string; tenantId?: string; integrationId?: string }): Promise<any> };
+type WorkerCommandOptions = {
+  timeoutMs?: number;
+  commandTimeoutMs?: number;
+  providerEventId?: string;
+  tenantId?: string;
+  integrationId?: string;
+};
+type Worker = { child: ChildProcess; command(type: string, options?: WorkerCommandOptions): Promise<any> };
 const roots: string[] = [];
 const children: ChildProcess[] = [];
 let commandId = 0;
+const WORKER_READY_TIMEOUT_MS = 5_000;
+const ACTIVATION_TIMEOUT_MS = 5_000;
+const INCOMPLETE_LOCK_STALE_MS = 10_000;
+const SCHEDULER_FILESYSTEM_MARGIN_MS = 4_000;
+const DRAINING_POLL_INTERVAL_MS = 20;
+const DRAINING_OBSERVATION_BUDGET_MS = ACTIVATION_TIMEOUT_MS + SCHEDULER_FILESYSTEM_MARGIN_MS;
+const DRAINING_CRASH_TEST_TIMEOUT_MS = (3 * WORKER_READY_TIMEOUT_MS)
+  + (2 * ACTIVATION_TIMEOUT_MS)
+  + INCOMPLETE_LOCK_STALE_MS
+  + DRAINING_OBSERVATION_BUDGET_MS
+  + SCHEDULER_FILESYSTEM_MARGIN_MS;
+const LOCK_RECOVERY_COMMAND_TIMEOUT_MS = INCOMPLETE_LOCK_STALE_MS + SCHEDULER_FILESYSTEM_MARGIN_MS;
+const CHILD_EXIT_TIMEOUT_MS = 5_000;
 
 async function spawnWorker(root: string): Promise<Worker> {
   const child = fork(fileURLToPath(new URL("./write-freeze-multiprocess-worker.ts", import.meta.url)), [root], {
@@ -17,7 +37,7 @@ async function spawnWorker(root: string): Promise<Worker> {
   });
   children.push(child);
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("worker start timeout")), 5_000);
+    const timer = setTimeout(() => reject(new Error("worker start timeout")), WORKER_READY_TIMEOUT_MS);
     child.once("message", message => {
       clearTimeout(timer);
       if ((message as any)?.ready) resolve(); else reject(new Error("worker did not become ready"));
@@ -26,7 +46,7 @@ async function spawnWorker(root: string): Promise<Worker> {
   });
   return {
     child,
-    command(type: string, options: { timeoutMs?: number; providerEventId?: string; tenantId?: string; integrationId?: string } = {}) {
+    command(type: string, options: WorkerCommandOptions = {}) {
       const id = ++commandId;
       return new Promise((resolve, reject) => {
         const cleanup = () => {
@@ -34,7 +54,10 @@ async function spawnWorker(root: string): Promise<Worker> {
           child.off("message", listener);
           child.off("exit", exitListener);
         };
-        const timer = setTimeout(() => { cleanup(); reject(new Error(`worker command timeout: ${type}`)); }, 10_000);
+        const timer = setTimeout(
+          () => { cleanup(); reject(new Error(`worker command timeout: ${type}`)); },
+          options.commandTimeoutMs ?? 10_000,
+        );
         const listener = (message: any) => {
           if (message?.id !== id) return;
           cleanup();
@@ -49,10 +72,28 @@ async function spawnWorker(root: string): Promise<Worker> {
   };
 }
 
+async function terminateAndReap(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.off("exit", onExit);
+    };
+    const onExit = () => { cleanup(); resolve(); };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`worker cleanup timeout: ${child.pid ?? "unknown"}`));
+    }, CHILD_EXIT_TIMEOUT_MS);
+    child.once("exit", onExit);
+    if (!child.kill("SIGKILL") && (child.exitCode !== null || child.signalCode !== null)) {
+      cleanup();
+      resolve();
+    }
+  });
+}
+
 afterEach(async () => {
-  for (const child of children.splice(0)) {
-    if (child.exitCode === null) child.kill("SIGKILL");
-  }
+  await Promise.all(children.splice(0).map(terminateAndReap));
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
@@ -95,20 +136,28 @@ describe("write freeze physical multi-process coordination", () => {
     const freezer = await spawnWorker(root);
     const observer = await spawnWorker(root);
     await writer.command("begin");
-    const activation = freezer.command("activate", { timeoutMs: 5_000 }).catch(() => undefined);
-    for (let attempt = 0; attempt < 50; attempt++) {
-      if ((await observer.command("status")).mode === "draining") break;
-      await new Promise(resolve => setTimeout(resolve, 20));
+    const activation = freezer.command("activate", { timeoutMs: ACTIVATION_TIMEOUT_MS }).catch(() => undefined);
+    const observationDeadline = Date.now() + DRAINING_OBSERVATION_BUDGET_MS;
+    let drainingObserved = false;
+    while (Date.now() < observationDeadline) {
+      if ((await observer.command("status")).mode === "draining") {
+        drainingObserved = true;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, DRAINING_POLL_INTERVAL_MS));
     }
+    expect(drainingObserved).toBe(true);
     expect(await observer.command("status")).toMatchObject({ mode: "draining", activeWriters: 1 });
     freezer.child.kill("SIGKILL");
     await new Promise(resolve => freezer.child.once("exit", resolve));
     await activation;
-    await expect(observer.command("begin")).rejects.toThrow("write freeze ativo");
+    await expect(observer.command("begin", { commandTimeoutMs: LOCK_RECOVERY_COMMAND_TIMEOUT_MS })).rejects.toThrow("write freeze ativo");
     await writer.command("release");
-    await observer.command("activate", { timeoutMs: 5_000 });
+    await observer.command("activate", { timeoutMs: ACTIVATION_TIMEOUT_MS });
     expect(await observer.command("status")).toMatchObject({ mode: "active", activeWriters: 0 });
-  });
+  // Three sequential readiness windows + two activation windows + the 10 s
+  // incomplete-lock stale bound + polling + 4 s of scheduler/filesystem margin.
+  }, DRAINING_CRASH_TEST_TIMEOUT_MS);
 
   it("reclaims only a proven-dead writer lease while activating", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "megadesk-freeze-writer-crash-"));

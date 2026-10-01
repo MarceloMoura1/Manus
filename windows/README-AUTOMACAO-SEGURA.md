@@ -1,8 +1,85 @@
 # Automacao local segura do MegaDesk
 
 Esta automacao substitui, para o fluxo atual, os arquivos `.bat` legados. Ela nao
-configura inicializacao automatica, nao instala servicos e nao controla Evolution,
-n8n, MySQL fora do container existente ou qualquer volume Docker.
+usa os instaladores `.bat` legados, nao controla Evolution, n8n, MySQL fora do
+container existente ou qualquer volume Docker.
+
+## Autostart seguro e separado do deploy
+
+O supervisor `MegaDesk.Autostart.ps1` restaura somente a `activeRelease` registrada.
+Ele pode solicitar o start do Docker Desktop pela CLI oficial, aguarda Docker e o
+MySQL existente com retry limitado, e entao chama `Iniciar-MegaDesk.ps1 -NoBrowser`.
+O supervisor nunca executa updater, publish, migration, DNS ou selecao de candidate.
+
+A instalacao e explicita e exige PowerShell elevado porque usa `BootTrigger`:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\windows\Instalar-Autostart-Seguro-MegaDesk.ps1
+```
+
+A tarefa usa a conta instaladora com logon S4U, `StartWhenAvailable`, restart
+limitado pelo Task Scheduler e `IgnoreNew` para impedir supervisores duplicados.
+O supervisor tambem usa mutex global e o bootstrap preserva seu lifecycle mutex.
+
+Para remover somente a tarefa, sem encerrar runtime ou alterar state:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\windows\Desinstalar-Autostart-Seguro-MegaDesk.ps1 -Confirm
+```
+
+A validacao final exige reboot controlado. Em especial, Docker Desktop com backend
+WSL2 precisa ser comprovado no contexto S4U deste host; a presenca do script ou da
+tarefa, isoladamente, nao prova operacao 24x7 sem sessao interativa.
+
+## Identidade composta, switch e recovery
+
+PID isolado nunca identifica uma runtime. O record do Node combina PID, creation
+time, executavel, command line canonica, caminho imutavel da release, SHA, porta,
+`operationId` e `runtimeInstanceId`. Antes de qualquer stop, o modulo repete a
+prova sobre snapshot e handle; PID reutilizado ou owner desconhecido bloqueiam em
+fail-closed e nenhum processo e encerrado.
+
+O lifecycle V2 preserva os estados `PREPARING`, `READY`, `SWITCHING`, `ACTIVE`,
+`ROLLING_BACK` e `FAILED`, com uma fase causal adicional. A ordem do publish e:
+
+```text
+READY
+  -> ACTIVE_RUNTIME_CLASSIFIED
+  -> OLD_RUNTIME_STOPPED
+  -> CANDIDATE_STARTED
+  -> CANDIDATE_HEALTH_PASSED
+  -> ACTIVE_COMMITTED
+```
+
+A classificacao ocorre antes do marcador destrutivo `SWITCHING`. Assim, uma falha
+de identidade pre-stop permanece `PRE_SWITCH_FAILED`. Se houver crash posterior,
+`Resolve-MegaDeskActiveRuntimeRecovery` reconcilia a autoridade da release ACTIVE:
+preserva a ACTIVE valida, limpa record stale somente com porta comprovadamente
+livre e interrompe uma candidate apenas quando sua identidade composta e a tupla
+da operation forem inequivocas. O recovery nunca promove candidate, executa
+migration ou publica implicitamente.
+
+O supervisor usa as mesmas provas compostas do modulo e o mesmo lifecycle mutex.
+As combinacoes Node/tunnel sao tratadas separadamente: tunnel vivo nao prova Node
+vivo, e Node vivo nao prova tunnel vivo.
+
+Cada Node possui stdout/stderr exclusivos, observer de exit, stop-intent atomico e
+confirmacao imutavel gravada somente depois do encerramento validado. A telemetria
+V2 distingue `NODE_EXITED` de `NODE_KILLED_BY_OFFICIAL_STOP` apenas quando intent e
+confirmacao correspondem ao mesmo PID, SHA, operation/runtime id e motivo. Ela
+registra exit code quando disponivel e uptime aproximado, sem persistir environment
+ou secrets.
+
+O rehearsal adversarial nao produtivo e executado por:
+
+```powershell
+powershell.exe -NoProfile -File .\windows\tests\Invoke-MegaDesk.PublishIdentityRehearsal.ps1
+```
+
+Ele cria somente um Node sintetico sob `%TEMP%`, escolhe porta entre 33120 e 33220,
+prova stale PID, PID reuse, owner desconhecido, health vinculado ao SHA e listener
+unico, e remove apenas os recursos que criou. Porta 3000 e `.env.local` real nunca
+sao usados.
 
 ## Instalar atalhos
 

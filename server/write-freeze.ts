@@ -51,6 +51,8 @@ export type WriteFreezeOptions = {
   incompleteLockStaleMs?: number;
   beforeSpoolCommit?: () => void | Promise<void>;
   afterSpoolPersist?: (record: WebhookSpoolRecord) => void | Promise<void>;
+  /** Deterministic interleaving hook for lock-race tests; omitted in production. */
+  beforeLockInspection?: (lockDirectory: string) => void | Promise<void>;
 };
 
 export class WriteFreezeError extends Error {
@@ -258,7 +260,18 @@ export class WriteFreezeCoordinator {
         break;
       } catch (error: any) {
         if (error?.code !== "EEXIST") throw error;
-        if (await this.lockCanBeRecovered(lockDirectory)) {
+        await this.options.beforeLockInspection?.(lockDirectory);
+        let recoverable = false;
+        try {
+          recoverable = await this.lockCanBeRecovered(lockDirectory);
+        } catch (inspectionError: any) {
+          if (inspectionError?.code !== "ENOENT") throw inspectionError;
+          if (Date.now() >= deadline) {
+            throw new WriteFreezeError(`Timeout no lock interprocesso ${name}.`, "WRITE_FREEZE_CORRUPT");
+          }
+          continue;
+        }
+        if (recoverable) {
           const staleDirectory = `${lockDirectory}.stale-${randomUUID()}`;
           try {
             await rename(lockDirectory, staleDirectory);

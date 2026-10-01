@@ -20,12 +20,12 @@ if (-not $canonicalRequestPath.StartsWith($canonicalDiagnosticsRoot + [IO.Path]:
 }
 
 $request = Get-Content -LiteralPath $canonicalRequestPath -Raw | ConvertFrom-Json
-foreach ($property in @('schemaVersion', 'pid', 'invocationId', 'releaseSha', 'creationTime', 'executablePath', 'scriptPath', 'environmentPath', 'exitTelemetryPath')) {
+foreach ($property in @('schemaVersion', 'pid', 'invocationId', 'releaseSha', 'creationTime', 'executablePath', 'scriptPath', 'environmentPath', 'exitTelemetryPath', 'operationId', 'runtimeInstanceId', 'stopIntentPath')) {
   if (-not ($request.PSObject.Properties.Name -contains $property) -or [string]::IsNullOrWhiteSpace([string]$request.$property)) {
     throw "Solicitacao de exit telemetry sem $property."
   }
 }
-if ([int]$request.schemaVersion -ne 1) { throw 'schemaVersion de solicitacao de exit telemetry incompativel.' }
+if ([int]$request.schemaVersion -ne 2) { throw 'schemaVersion de solicitacao de exit telemetry incompativel.' }
 
 $record = [pscustomobject]@{
   pid = [int]$request.pid
@@ -34,6 +34,8 @@ $record = [pscustomobject]@{
   releaseSha = [string]$request.releaseSha
   scriptPath = [string]$request.scriptPath
   environmentPath = [string]$request.environmentPath
+  operationId = [string]$request.operationId
+  runtimeInstanceId = [string]$request.runtimeInstanceId
 }
 
 $classification = 'UNKNOWN'
@@ -99,4 +101,11 @@ while ($true) {
 }
 
 $observedExitTime = (Get-Date).ToUniversalTime().ToString('o')
-Write-MegaDeskNodeExitTelemetry -Path ([string]$request.exitTelemetryPath) -Pid ([int]$request.pid) -InvocationId ([string]$request.invocationId) -ReleaseSha ([string]$request.releaseSha) -CreationTime ([string]$request.creationTime) -ObservedExitTime $observedExitTime -ExitCode $exitCode -ExitCodeAvailable $exitCodeAvailable -Classification $classification
+$expected = $false
+$reason = 'UNEXPECTED_EXIT'
+try {
+  $stopEvidence = & $automationModule { param($Request, $DiagnosticsRoot) Test-MegaDeskNodeStopEvidence -Request $Request -DiagnosticsRoot $DiagnosticsRoot } $request $canonicalDiagnosticsRoot
+  $expected = [bool]$stopEvidence.expected
+  $reason = [string]$stopEvidence.reason
+} catch { }
+Write-MegaDeskNodeExitTelemetry -Path ([string]$request.exitTelemetryPath) -Pid ([int]$request.pid) -InvocationId ([string]$request.invocationId) -ReleaseSha ([string]$request.releaseSha) -CreationTime ([string]$request.creationTime) -ObservedExitTime $observedExitTime -ExitCode $exitCode -ExitCodeAvailable $exitCodeAvailable -Classification $classification -OperationId ([string]$request.operationId) -RuntimeInstanceId ([string]$request.runtimeInstanceId) -Expected $expected -Reason $reason

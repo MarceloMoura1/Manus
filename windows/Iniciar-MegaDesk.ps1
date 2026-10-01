@@ -1,5 +1,9 @@
 [CmdletBinding()]
-param([switch]$NoBrowser)
+param(
+  [switch]$NoBrowser,
+  [ValidateRange(0, 3600)][int]$DependencyTimeoutSeconds = 900,
+  [ValidateRange(1, 60)][int]$DependencyMaxBackoffSeconds = 30
+)
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
@@ -12,10 +16,11 @@ try {
     $startedTunnelRecord = $null
     try {
       Write-MegaDeskLog 'Inicio seguro do MegaDesk solicitado.'
+      Resolve-MegaDeskActiveRuntimeRecovery | Out-Null
       $state = Get-MegaDeskState
       $activeRelease = Assert-MegaDeskStartupState -State $state
       Assert-MegaDeskToolchain
-      Assert-DockerAndMySql
+      Wait-MegaDeskDockerAndMySql -TimeoutSeconds $DependencyTimeoutSeconds -MaxBackoffSeconds $DependencyMaxBackoffSeconds | Out-Null
       Assert-CloudflaredConfig
       $startedNodeRecord = Start-MegaDeskNode -AuthorizationMode ACTIVE_START -ReleaseSha ([string]$activeRelease.sha)
       $current = Get-MegaDeskState
