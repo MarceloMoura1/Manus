@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "name": "megadesk-oracle-windows-pre-cutover",
+  "defaultPolicy": "BLOCK_FAIL_CLOSED",
+  "principles": {
+    "canonicalBase": "ORACLE_BASE",
+    "deltaSource": "WINDOWS_DELTA",
+    "failClosed": true,
+    "copyCredentials": false,
+    "productionWritesAllowed": false
+  },
+  "forbiddenColumns": [
+    "password", "password_hash", "token", "token_hash", "api_token",
+    "access_token", "refresh_token", "secret", "cookie", "session_data",
+    "credentials_json", "authorization", "api_key", "client_secret", "private_key"
+  ],
+  "entities": {
+    "megadesk_domain_clients": { "authority": "MERGE", "identity": "explicit_mapping_from_unique_admin_and_business_fingerprint", "collisionPolicy": "require_explicit_mapping", "updatePolicy": "preserve_oracle_master", "auditPolicy": "record_mapping_only" },
+    "megadesk_domain_client_users": { "authority": "MERGE", "identity": "explicit_normalized_email_hash_with_tenant_mapping", "collisionPolicy": "require_unique_candidate_and_equal_role", "updatePolicy": "preserve_oracle_credentials_and_user_master", "auditPolicy": "record_mapping_without_credentials" },
+    "erp_suppliers": { "authority": "MERGE", "identity": "tenant_plus_tax_id_or_public_id", "collisionPolicy": "same_identity_equal_payload_is_replay_otherwise_conflict", "updatePolicy": "insert_windows_only", "auditPolicy": "full_non_secret_payload_hash" },
+    "megadesk_conversation_contacts": { "authority": "MERGE", "identity": "tenant_channel_provider_external_identity", "collisionPolicy": "unique_identity_maps_to_oracle_master", "updatePolicy": "insert_windows_only_preserve_oracle_on_identity_match", "auditPolicy": "before_after_non_secret_hash" },
+    "megadesk_domain_conversations": { "authority": "MERGE", "identity": "tenant_plus_conversation_id_or_active_key", "collisionPolicy": "never_merge_by_phone_or_text", "updatePolicy": "insert_windows_only_and_remap_user_contact", "auditPolicy": "full_non_secret_payload_hash" },
+    "megadesk_domain_conversations_messages": { "authority": "MERGE", "identity": "tenant_provider_integration_external_message_id_then_tenant_client_attempt_id_then_message_id", "collisionPolicy": "equal_payload_replay_incompatible_payload_conflict", "updatePolicy": "insert_windows_only_and_remap_conversation_user_reply", "auditPolicy": "payload_hash_without_message_text_in_report" },
+    "megadesk_conversation_events": { "authority": "MERGE", "identity": "event_id", "collisionPolicy": "equal_payload_replay_otherwise_conflict", "updatePolicy": "insert_windows_only_and_remap_conversation_user_message", "auditPolicy": "full_non_secret_payload_hash" },
+    "megadesk_domain_audit_logs": { "authority": "MERGE", "identity": "audit_id", "collisionPolicy": "equal_payload_replay_otherwise_conflict", "updatePolicy": "insert_windows_only_and_remap_operator", "auditPolicy": "preserve_source_audit_event" },
+    "megadesk_domain_metrics": { "authority": "MERGE", "identity": "source_metric_id", "collisionPolicy": "allocate_target_pk_and_remember_mapping", "updatePolicy": "insert_windows_only", "auditPolicy": "full_non_secret_payload_hash" },
+    "megadesk_user_settings": { "authority": "WINDOWS_DELTA", "identity": "canonical_tenant_plus_canonical_user", "collisionPolicy": "replace_non_secret_preferences_only", "updatePolicy": "update_current_user_preferences", "auditPolicy": "before_after_non_secret_hash" },
+    "megadesk_conversation_pending_receipts": { "authority": "WINDOWS_DELTA", "identity": "tenant_provider_integration_external_message_id", "collisionPolicy": "monotonic_status_equal_payload_replay_otherwise_conflict", "updatePolicy": "insert_after_0035_only", "auditPolicy": "status_rank_and_payload_hash" },
+    "erp_products": { "authority": "ORACLE_BASE", "identity": "tenant_plus_public_id", "collisionPolicy": "preserve", "updatePolicy": "none", "auditPolicy": "count_and_hash" },
+    "erp_inventory_items": { "authority": "ORACLE_BASE", "identity": "tenant_plus_public_id", "collisionPolicy": "preserve", "updatePolicy": "none", "auditPolicy": "count_and_hash" },
+    "erp_inventory_item_balances": { "authority": "ORACLE_BASE", "identity": "tenant_plus_inventory_item", "collisionPolicy": "preserve_snapshot", "updatePolicy": "none", "auditPolicy": "quantity_invariant" },
+    "erp_stock_balances": { "authority": "ORACLE_BASE", "identity": "tenant_plus_product", "collisionPolicy": "preserve_snapshot", "updatePolicy": "none", "auditPolicy": "quantity_invariant" },
+    "erp_stock_movements": { "authority": "ORACLE_BASE", "identity": "tenant_plus_public_id_and_idempotency_key", "collisionPolicy": "preserve_ledger", "updatePolicy": "none", "auditPolicy": "ledger_hash" },
+    "megadesk_crm_clients": { "authority": "ORACLE_BASE", "identity": "tenant_plus_crm_client_id", "collisionPolicy": "preserve", "updatePolicy": "none", "auditPolicy": "count_and_hash" },
+    "megadesk_domain_chamados": { "authority": "ORACLE_BASE", "identity": "tenant_plus_chamado_id", "collisionPolicy": "preserve", "updatePolicy": "none", "auditPolicy": "dependency_graph" },
+    "megadesk_domain_chamado_activities": { "authority": "ORACLE_BASE", "identity": "activity_id", "collisionPolicy": "preserve", "updatePolicy": "none", "auditPolicy": "dependency_graph" },
+    "megadesk_domain_chamado_attachments": { "authority": "ORACLE_BASE", "identity": "attachment_id", "collisionPolicy": "preserve", "updatePolicy": "none", "auditPolicy": "storage_reference" },
+    "erp_product_media": { "authority": "ORACLE_BASE", "identity": "tenant_plus_media_id", "collisionPolicy": "preserve", "updatePolicy": "none", "auditPolicy": "storage_reference" },
+    "erp_supplier_files": { "authority": "ORACLE_BASE", "identity": "tenant_plus_public_id", "collisionPolicy": "preserve", "updatePolicy": "none", "auditPolicy": "storage_reference" },
+    "megadesk_crm_client_files": { "authority": "ORACLE_BASE", "identity": "tenant_plus_public_id", "collisionPolicy": "preserve", "updatePolicy": "none", "auditPolicy": "storage_reference" },
+    "megadesk_operational_sessions": { "authority": "DO_NOT_COPY", "identity": "session_token_hash", "collisionPolicy": "block", "updatePolicy": "none", "auditPolicy": "count_only" },
+    "megaadmin_credentials": { "authority": "DO_NOT_COPY", "identity": "credential_owner", "collisionPolicy": "block", "updatePolicy": "none", "auditPolicy": "count_only" },
+    "admin_credentials": { "authority": "DO_NOT_COPY", "identity": "credential_owner", "collisionPolicy": "block", "updatePolicy": "none", "auditPolicy": "count_only" },
+    "megadesk_evolution_sessions": { "authority": "DO_NOT_COPY", "identity": "tenant", "collisionPolicy": "human_authority_decision", "updatePolicy": "none", "auditPolicy": "sanitized_forensics_only" },
+    "megadesk_tenant_provisioning_requests": { "authority": "DO_NOT_COPY", "identity": "idempotency_key", "collisionPolicy": "block", "updatePolicy": "none", "auditPolicy": "count_only" }
+  },
+  "importOrder": [
+    "erp_suppliers", "megadesk_conversation_contacts",
+    "megadesk_domain_conversations", "megadesk_domain_conversations_messages",
+    "megadesk_conversation_events", "megadesk_domain_audit_logs",
+    "megadesk_domain_metrics", "megadesk_user_settings",
+    "megadesk_conversation_pending_receipts"
+  ],
+  "transactionGroups": [
+    ["erp_suppliers"],
+    ["megadesk_conversation_contacts", "megadesk_domain_conversations", "megadesk_domain_conversations_messages", "megadesk_conversation_events"],
+    ["megadesk_domain_audit_logs"],
+    ["megadesk_domain_metrics"],
+    ["megadesk_user_settings"],
+    ["megadesk_conversation_pending_receipts"]
+  ],
+  "blockedTables": [
+    "megaadmin_credentials", "admin_credentials", "megadesk_operational_sessions",
+    "megadesk_evolution_sessions", "megadesk_tenant_provisioning_requests"
+  ]
+}
