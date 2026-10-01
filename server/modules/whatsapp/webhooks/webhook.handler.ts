@@ -8,9 +8,54 @@ import { validateWebhookSignature, validateVerifyToken } from "../meta/webhook-v
 import { getWaAccountByPhoneNumberId } from "../repositories/whatsapp.repo";
 import { processIncomingMessage, processMessageStatus } from "./message.processor";
 import { metaWebhookEnvelopeSchema, metaWebhookPayloadSchema, webhookVerifySchema } from "../validators";
+import { WriteFreezeError, type PreparedWebhook } from "../../../write-freeze";
 
 // App Secret da Meta — deve ser configurado via variável de ambiente
 export interface WebhookRequest extends Request { rawBody?: Buffer }
+
+function validateMetaRequest(req: WebhookRequest) {
+  const appSecret = process.env.META_APP_SECRET;
+  if (!appSecret) throw new WriteFreezeError("Meta webhook indisponível.", "INVALID_WEBHOOK");
+  const signatureHeader = req.headers["x-hub-signature-256"];
+  const signature = typeof signatureHeader === "string" ? signatureHeader : "";
+  const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body));
+  if (!validateWebhookSignature(rawBody, signature, appSecret)) {
+    throw new WriteFreezeError("Assinatura Meta inválida.", "INVALID_WEBHOOK");
+  }
+  const envelope = metaWebhookEnvelopeSchema.safeParse(req.body);
+  if (!envelope.success || envelope.data.object !== "whatsapp_business_account") {
+    throw new WriteFreezeError("Envelope Meta inválido.", "INVALID_WEBHOOK");
+  }
+  const parsed = metaWebhookPayloadSchema.safeParse(req.body);
+  if (!parsed.success) throw new WriteFreezeError("Payload Meta inválido.", "INVALID_WEBHOOK");
+  return parsed.data;
+}
+
+export async function prepareMetaWebhookSpool(req: Request): Promise<PreparedWebhook> {
+  const payload = validateMetaRequest(req as WebhookRequest);
+  const bindings: Array<{ tenantId: string; integrationId: string }> = [];
+  const eventIds: string[] = [];
+  for (const entry of payload.entry ?? []) {
+    for (const change of entry.changes ?? []) {
+      if (change.field !== "messages") continue;
+      const phoneNumberId = change.value.metadata?.phone_number_id;
+      if (!phoneNumberId) throw new WriteFreezeError("Binding Meta ausente.", "INVALID_WEBHOOK");
+      const account = await getWaAccountByPhoneNumberId(phoneNumberId);
+      if (!account) throw new WriteFreezeError("Conta Meta desconhecida.", "INVALID_WEBHOOK");
+      bindings.push({ tenantId: account.clientId, integrationId: String(account.id ?? phoneNumberId) });
+      for (const item of [...(change.value.messages ?? []), ...(change.value.statuses ?? [])]) {
+        if (typeof item.id === "string" && item.id.trim()) eventIds.push(item.id.trim());
+      }
+    }
+  }
+  if (bindings.length === 0) throw new WriteFreezeError("Webhook Meta sem evento vinculável.", "INVALID_WEBHOOK");
+  return {
+    provider: "meta",
+    event: "MESSAGES",
+    providerEventId: eventIds.length ? [...new Set(eventIds)].sort().join(",") : null,
+    bindings,
+  };
+}
 
 /**
  * GET /api/webhooks/meta
@@ -77,7 +122,7 @@ export async function handleWebhookEvent(req: WebhookRequest, res: Response): Pr
     return;
   }
   const payload = parsedPayload.data;
-  res.status(200).json({ status: "accepted" });
+  const operations: Promise<unknown>[] = [];
 
   for (const entry of payload.entry ?? []) {
     for (const change of entry.changes ?? []) {
@@ -92,28 +137,33 @@ export async function handleWebhookEvent(req: WebhookRequest, res: Response): Pr
         account = await getWaAccountByPhoneNumberId(phoneNumberId);
       } catch {
         console.warn("[WA Webhook] Conta não pôde ser resolvida com segurança.");
-        continue;
+        res.status(503).json({ error: "Account lookup failed" });
+        return;
       }
       if (!account) {
         console.warn("[WA Webhook] Conta não pôde ser resolvida com segurança.");
-        continue;
+        res.status(404).json({ error: "Unknown account" });
+        return;
       }
 
       // Processar mensagens recebidas
       for (const message of value.messages ?? []) {
         const contact = value.contacts?.find((c) => c.wa_id === message.from);
-        processIncomingMessage(account, message, contact).catch(() => {
-          console.error("[WA Webhook] Erro ao processar mensagem.");
-        });
+        operations.push(processIncomingMessage(account, message, contact));
       }
 
       // Processar atualizações de status
       for (const status of value.statuses ?? []) {
-        processMessageStatus(account.clientId, status).catch(() => {
-          console.error("[WA Webhook] Erro ao processar status.");
-        });
+        operations.push(processMessageStatus(account.clientId, status));
       }
     }
+  }
+  try {
+    await Promise.all(operations);
+    res.status(200).json({ status: "accepted" });
+  } catch {
+    console.error("[WA Webhook] Erro ao processar evento.");
+    res.status(503).json({ error: "Webhook processing failed" });
   }
 }
 

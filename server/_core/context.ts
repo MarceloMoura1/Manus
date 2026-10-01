@@ -2,7 +2,8 @@ import type { CreateExpressContextOptions } from "@trpc/server/adapters/express"
 import type { User } from "./types";
 import { sdk } from "./sdk";
 import { jwtVerify } from "jose";
-import { resolveOperationalSession, type OperationalIdentity } from "./megadesk-session";
+import { resolveOperationalSessionReadOnly, type OperationalIdentity } from "./megadesk-session";
+import { getWriteFreezeCoordinator } from "../write-freeze";
 
 export const MEGAADMIN_COOKIE = "megaadmin_session";
 
@@ -63,11 +64,14 @@ export async function createContext(
   opts: CreateExpressContextOptions
 ): Promise<TrpcContext> {
   let user: User | null = null;
-  let operationalSession: Awaited<ReturnType<typeof resolveOperationalSession>> = null;
+  let operationalSession: Awaited<ReturnType<typeof resolveOperationalSessionReadOnly>> = null;
 
   // 1. Try Manus OAuth session
   try {
-    user = await sdk.authenticateRequest(opts.req);
+    user = await getWriteFreezeCoordinator().withWriteLease(
+      "auth:manus-session-touch",
+      () => sdk.authenticateRequest(opts.req),
+    );
   } catch {
     user = null;
   }
@@ -95,7 +99,7 @@ export async function createContext(
 
   // 4. MegaDesk operational identity comes only from its opaque server session.
   try {
-    operationalSession = await resolveOperationalSession(opts.req);
+    operationalSession = await resolveOperationalSessionReadOnly(opts.req);
   } catch {
     operationalSession = null;
   }

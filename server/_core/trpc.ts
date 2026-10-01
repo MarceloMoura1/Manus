@@ -3,15 +3,31 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
 import { assertOperationalCsrf } from "./megadesk-session";
+import { getWriteFreezeCoordinator, WriteFreezeError } from "../write-freeze";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
 });
 
 export const router = t.router;
-export const publicProcedure = t.procedure;
-export const isolatedProcedure = t.procedure;
 export const createCallerFactory = t.createCallerFactory;
+
+const enforceWriteFreeze = t.middleware(async opts => {
+  if (opts.type !== "mutation") return opts.next();
+  const tenantId = typeof opts.ctx.tenantId === "string" ? opts.ctx.tenantId : null;
+  try {
+    return await getWriteFreezeCoordinator().withWriteLease(`trpc:${opts.path}`, () => opts.next(), tenantId);
+  } catch (error) {
+    if (error instanceof WriteFreezeError) {
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: error.code });
+    }
+    throw error;
+  }
+});
+
+const writeGuardedProcedure = t.procedure.use(enforceWriteFreeze);
+export const publicProcedure = writeGuardedProcedure;
+export const isolatedProcedure = writeGuardedProcedure;
 
 const requireUser = t.middleware(async opts => {
   const { ctx, next } = opts;
@@ -28,7 +44,7 @@ const requireUser = t.middleware(async opts => {
   });
 });
 
-export const protectedProcedure = t.procedure.use(requireUser);
+export const protectedProcedure = writeGuardedProcedure.use(requireUser);
 
 // MegaDesk procedures require an opaque server-side session.
 const requireTenant = t.middleware(async opts => {
@@ -78,7 +94,7 @@ const requireTenant = t.middleware(async opts => {
   }
   return next({ ctx: { ...ctx, tenantId, userEmail: ctx.userEmail, operationalUserId: ctx.operationalUserId, operationalUserRole: ctx.operationalUserRole } });
 });
-export const megadeskProcedure = t.procedure.use(requireTenant);
+export const megadeskProcedure = writeGuardedProcedure.use(requireTenant);
 
 export const megadeskAdminProcedure = megadeskProcedure.use(
   t.middleware(async opts => {
@@ -89,7 +105,7 @@ export const megadeskAdminProcedure = megadeskProcedure.use(
   }),
 );
 
-export const adminProcedure = t.procedure.use(
+export const adminProcedure = writeGuardedProcedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 

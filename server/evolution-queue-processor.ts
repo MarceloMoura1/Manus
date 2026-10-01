@@ -15,6 +15,7 @@ import {
   type EvolutionFailedMessage,
 } from "./db-evolution-queue";
 import { getEvolutionAdapter } from "./evolution-manager";
+import { getWriteFreezeCoordinator, WriteFreezeError } from "./write-freeze";
 
 interface ProcessorConfig {
   enabled: boolean;
@@ -57,6 +58,7 @@ export function initializeQueueProcessor() {
       isProcessing = true;
       await processQueue();
     } catch (error) {
+      if (error instanceof WriteFreezeError) return;
       console.error("[Evolution Queue] Erro ao processar fila:", error);
     } finally {
       isProcessing = false;
@@ -104,6 +106,10 @@ async function processQueue() {
  * Processar fila de um cliente específico
  */
 async function processClientQueue(clientId: string) {
+  return getWriteFreezeCoordinator().withWriteLease(`background:evolution-queue:${clientId}`, () => processClientQueueUnfrozen(clientId), clientId);
+}
+
+async function processClientQueueUnfrozen(clientId: string) {
   const pendingMessages = await getPendingFailedMessages(clientId);
 
   if (pendingMessages.length === 0) {
@@ -124,7 +130,7 @@ async function processClientQueue(clientId: string) {
 
   for (const chunk of chunks) {
     await Promise.all(
-      chunk.map((message) => retryMessage(clientId, message))
+      chunk.map((message) => retryMessageUnfrozen(clientId, message))
     );
   }
 
@@ -142,6 +148,17 @@ async function processClientQueue(clientId: string) {
  * Tentar reenviar uma mensagem
  */
 export async function retryMessage(
+  clientId: string,
+  message: EvolutionFailedMessage
+) {
+  return getWriteFreezeCoordinator().withWriteLease(
+    `background:evolution-retry:${clientId}`,
+    () => retryMessageUnfrozen(clientId, message),
+    clientId,
+  );
+}
+
+async function retryMessageUnfrozen(
   clientId: string,
   message: EvolutionFailedMessage
 ) {
@@ -316,15 +333,19 @@ export async function scheduleFailedMessage(
   error?: string,
   errorCode?: string
 ) {
-  const failedMessageId = await addFailedMessage(
+  const failedMessageId = await getWriteFreezeCoordinator().withWriteLease(
+    `background:evolution-schedule:${clientId}`,
+    () => addFailedMessage(
+      clientId,
+      conversationId,
+      phoneNumber,
+      messageText,
+      agentName,
+      messageId,
+      error,
+      errorCode
+    ),
     clientId,
-    conversationId,
-    phoneNumber,
-    messageText,
-    agentName,
-    messageId,
-    error,
-    errorCode
   );
 
   console.log(

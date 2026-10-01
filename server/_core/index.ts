@@ -10,7 +10,9 @@ import { registerIntegrationApi } from "../integrationApi";
 import { createContext } from "./context";
 import { serveStatic } from "./static";
 import { initWhatsAppSocket, handleWebhookVerify, handleWebhookEvent } from "../modules/whatsapp";
+import { prepareMetaWebhookSpool } from "../modules/whatsapp/webhooks/webhook.handler";
 import { handleEvolutionWebhook, ensureSessionTable } from "../evolution";
+import { prepareEvolutionWebhookSpool } from "../evolution/webhook";
 import { operationalAllowedOrigins } from "./megadesk-session";
 import { registerConversationMediaBridge } from "../conversation-media-bridge";
 import { registerProductMediaRoutes } from "../product-media";
@@ -20,6 +22,12 @@ import { registerSupplierFileRoutes } from "../modules/erp/suppliers/files-route
 import { registerClientFileRoutes } from "../modules/crm/client-files/files-router";
 import { startTicketAttachmentReconciler } from "../chamados-attachment-reconciler";
 import { createSupplierUploadIngressMiddleware } from "./media-ingress";
+import {
+  createFreezeAwareWebhookHandler,
+  createWriteFreezeHttpMiddleware,
+  getWriteFreezeCoordinator,
+  registerWriteFreezeControlRoutes,
+} from "../write-freeze";
 
 // ─── Domínios permitidos (CORS) ───────────────────────────────────────────────
 const ALLOWED_ORIGINS = [
@@ -91,11 +99,22 @@ async function startServer() {
   if (Number.isInteger(trustedProxyHops) && trustedProxyHops > 0) app.set("trust proxy", trustedProxyHops);
 
   app.use("/api/trpc", createSupplierUploadIngressMiddleware());
-  app.use(express.json({ limit: "50mb" }));
+  app.use(express.json({
+    limit: "50mb",
+    verify: (req, _res, buffer) => {
+      if (req.url?.startsWith("/api/webhooks/meta")) {
+        (req as typeof req & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+      }
+    },
+  }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
   // ─── CORS ─────────────────────────────────────────────────────────────────
   registerMegaDeskCors(app);
+
+  const writeFreeze = getWriteFreezeCoordinator();
+  registerWriteFreezeControlRoutes(app, writeFreeze);
+  app.use(createWriteFreezeHttpMiddleware(writeFreeze));
 
   registerOAuthRoutes(app);
   registerMetricWebhook(app);
@@ -110,16 +129,16 @@ async function startServer() {
   // ─── Webhooks ─────────────────────────────────────────────────────────────
   // Meta WhatsApp Business API
   app.get("/api/webhooks/meta", handleWebhookVerify);
-  app.post("/api/webhooks/meta", handleWebhookEvent);
+  app.post("/api/webhooks/meta", createFreezeAwareWebhookHandler(prepareMetaWebhookSpool, handleWebhookEvent, writeFreeze));
 
   // Evolution API (QR Code / Baileys)
-  app.post("/webhook/evolution", handleEvolutionWebhook);
+  app.post("/webhook/evolution", createFreezeAwareWebhookHandler(prepareEvolutionWebhookSpool, handleEvolutionWebhook, writeFreeze));
   // Evolution com webhookByEvents=true envia para sub-paths
-  app.post("/webhook/evolution/:event", (req, res) => {
+  app.post("/webhook/evolution/:event", (req, res, next) => {
     const eventSlug = req.params.event.toUpperCase().replace(/-/g, "_");
     req.body = { ...req.body, event: req.body.event ?? eventSlug };
-    return handleEvolutionWebhook(req, res);
-  });
+    next();
+  }, createFreezeAwareWebhookHandler(prepareEvolutionWebhookSpool, handleEvolutionWebhook, writeFreeze));
 
   // Endpoint diagnóstico de erros frontend
   app.post("/api/client-error", (req, res) => {

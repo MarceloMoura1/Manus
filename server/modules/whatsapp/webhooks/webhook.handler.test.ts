@@ -89,11 +89,11 @@ describe("Meta webhook handler", () => {
     expect(result.statusCode).toBe(503);
   });
 
-  it("does not process an ambiguous account resolution", async () => {
+  it("returns a retryable failure for ambiguous account resolution", async () => {
     mocks.resolveAccount.mockRejectedValue(new Error("WA_ACCOUNT_RESOLUTION_AMBIGUOUS"));
     const { res, result } = response();
     await handleWebhookEvent(request(validBody), res as never);
-    expect(result.statusCode).toBe(200);
+    expect(result.statusCode).toBe(503);
     expect(mocks.processIncoming).not.toHaveBeenCalled();
     expect(mocks.processStatus).not.toHaveBeenCalled();
   });

@@ -9,7 +9,6 @@ import type { Request } from "express";
 import type { WaConversationRecord, WaMessageRecord, WaMessageStatus } from "../types";
 import {
   operationalAllowedOrigins,
-  resolveOperationalSession,
   resolveOperationalSessionReadOnly,
   type OperationalIdentity,
 } from "../../../_core/megadesk-session";
@@ -35,7 +34,7 @@ export function initWhatsAppSocket(httpServer: HttpServer): SocketIOServer {
 
   io.use(async (socket, next) => {
     try {
-      const identity = await resolveOperationalSession(socket.request as Request);
+      const identity = await resolveOperationalSessionReadOnly(socket.request as Request);
       if (!identity) return next(new Error("UNAUTHORIZED"));
       const declaredTenant = socket.handshake.auth?.clientId ?? socket.handshake.query?.clientId ?? socket.handshake.headers["x-tenant-id"];
       if (typeof declaredTenant === "string" && declaredTenant !== identity.tenantId) return next(new Error("FORBIDDEN"));
@@ -45,19 +44,19 @@ export function initWhatsAppSocket(httpServer: HttpServer): SocketIOServer {
   });
 
   io.on("connection", (socket: Socket) => {
-    const identity = socket.data.operationalIdentity as Awaited<ReturnType<typeof resolveOperationalSession>>;
+    const identity = socket.data.operationalIdentity as Awaited<ReturnType<typeof resolveOperationalSessionReadOnly>>;
     if (!identity) return socket.disconnect(true);
     socket.join(`client:${identity.tenantId}`);
 
     // Cliente entra na sala do seu tenant
     socket.on("wa:join_client", async (clientId: string) => {
-      const current = await resolveOperationalSession(socket.request as Request).catch(() => null);
+      const current = await resolveOperationalSessionReadOnly(socket.request as Request).catch(() => null);
       if (!current || current.tenantId !== identity.tenantId || clientId !== identity.tenantId) socket.disconnect(true);
     });
 
     // Cliente sai da sala
     socket.on("wa:leave_client", async (clientId: string) => {
-      const current = await resolveOperationalSession(socket.request as Request).catch(() => null);
+      const current = await resolveOperationalSessionReadOnly(socket.request as Request).catch(() => null);
       if (!current || current.tenantId !== identity.tenantId || clientId !== identity.tenantId) return socket.disconnect(true);
       socket.leave(`client:${identity.tenantId}`);
     });

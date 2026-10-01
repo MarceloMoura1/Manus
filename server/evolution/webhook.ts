@@ -8,7 +8,7 @@
 
 import type { Request, Response } from "express";
 import { upsertSession, instanceNameFor } from "./session-store";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { getPool } from "../db";
 import { generateConversationPublicCode, withPublicCodeRetry } from "../conversation-public-code";
 import { persistCanonicalMessage } from "../conversation-message-store";
@@ -20,6 +20,7 @@ import {
   writeConversationMedia,
 } from "../conversation-media-storage";
 import { getEvolutionWebhookSecret } from "./config";
+import { WriteFreezeError, type PreparedWebhook } from "../write-freeze";
 import { evoGetMediaBase64, normalizeEvolutionRecipient } from "./client";
 import {
   cleanupExpiredConversationReceipts,
@@ -71,7 +72,7 @@ export async function emitToClient(
 }
 
 /** Resolve clientId a partir do instanceName (ex: "megadesk-cliente-001" → "cliente-001") */
-async function clientIdFromInstance(instanceName: string): Promise<string | null> {
+export async function clientIdFromInstance(instanceName: string): Promise<string | null> {
   const [rows] = await getPool().execute(
     `SELECT s.client_id AS clientId
        FROM megadesk_evolution_sessions s
@@ -89,6 +90,47 @@ interface EvolutionWebhookPayload {
   event: string;
   instance: string;         // instanceName
   data: Record<string, any>;
+}
+
+function secureSecretMatch(received: unknown, expected: string): boolean {
+  if (typeof received !== "string") return false;
+  const left = Buffer.from(received);
+  const right = Buffer.from(expected);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+function evolutionProviderEventId(data: unknown): string | null {
+  const candidates = Array.isArray(data) ? data : [data];
+  const ids = candidates.flatMap(item => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, any>;
+    return [record.id, record.keyId, record.messageId, record.key?.id]
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 180)
+      .map(value => value.trim());
+  });
+  return ids.length ? [...new Set(ids)].sort().join(",") : null;
+}
+
+export async function prepareEvolutionWebhookSpool(req: Request): Promise<PreparedWebhook> {
+  let expected: string;
+  try { expected = getEvolutionWebhookSecret(); }
+  catch { throw new WriteFreezeError("Evolution webhook indisponível.", "INVALID_WEBHOOK"); }
+  if (!secureSecretMatch(req.headers["x-megadesk-webhook-secret"], expected)) {
+    throw new WriteFreezeError("Evolution webhook não autenticado.", "INVALID_WEBHOOK");
+  }
+  const payload = req.body as Partial<EvolutionWebhookPayload>;
+  if (typeof payload?.event !== "string" || typeof payload?.instance !== "string"
+    || !payload.event.trim() || !payload.instance.trim() || payload.data === null || typeof payload.data !== "object") {
+    throw new WriteFreezeError("Payload Evolution inválido.", "INVALID_WEBHOOK");
+  }
+  const clientId = await clientIdFromInstance(payload.instance);
+  if (!clientId) throw new WriteFreezeError("Instância Evolution desconhecida.", "INVALID_WEBHOOK");
+  return {
+    provider: "evolution",
+    event: normalizeEvolutionEvent(payload.event),
+    providerEventId: evolutionProviderEventId(payload.data),
+    bindings: [{ tenantId: clientId, integrationId: payload.instance }],
+  };
 }
 
 export function normalizeEvolutionEvent(event: string): string {
@@ -184,8 +226,8 @@ export async function handleEvolutionWebhook(req: Request, res: Response): Promi
     res.status(503).json({ error: "Evolution webhook is not configured" });
     return;
   }
-  const receivedKey = req.headers["x-megadesk-webhook-secret"] as string;
-  if (!receivedKey || receivedKey !== expectedKey) {
+  const receivedKey = req.headers["x-megadesk-webhook-secret"];
+  if (!secureSecretMatch(receivedKey, expectedKey)) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

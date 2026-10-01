@@ -21,6 +21,8 @@ const flushMicrotasks = async () => {
   await Promise.resolve();
 };
 
+const unfrozenLease = async (_label: string, operation: () => Promise<{ markedPendingDelete: number }>) => operation();
+
 describe("ticket attachment reconciler scheduler", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -31,7 +33,7 @@ describe("ticket attachment reconciler scheduler", () => {
   it("starts reconciliation immediately and repeats it at the configured interval", async () => {
     vi.useFakeTimers();
     mocks.reconcile.mockResolvedValue({ markedPendingDelete: 0 });
-    const scheduler = startTicketAttachmentReconciler({ intervalMs: 1_000, logger: { info: vi.fn(), error: vi.fn() } });
+    const scheduler = startTicketAttachmentReconciler({ intervalMs: 1_000, logger: { info: vi.fn(), error: vi.fn() }, writeLease: unfrozenLease });
 
     await flushMicrotasks();
     expect(mocks.reconcile).toHaveBeenCalledTimes(1);
@@ -51,7 +53,7 @@ describe("ticket attachment reconciler scheduler", () => {
     let finish!: (value: { markedPendingDelete: number }) => void;
     mocks.reconcile.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
     mocks.reconcile.mockResolvedValue({ markedPendingDelete: 0 });
-    const scheduler = startTicketAttachmentReconciler({ intervalMs: 1_000, logger: { info: vi.fn(), error: vi.fn() } });
+    const scheduler = startTicketAttachmentReconciler({ intervalMs: 1_000, logger: { info: vi.fn(), error: vi.fn() }, writeLease: unfrozenLease });
 
     await flushMicrotasks();
     await vi.advanceTimersByTimeAsync(3_000);
@@ -70,7 +72,7 @@ describe("ticket attachment reconciler scheduler", () => {
     mocks.reconcile
       .mockRejectedValueOnce(new Error("synthetic reconcile failure"))
       .mockResolvedValue({ markedPendingDelete: 0 });
-    const scheduler = startTicketAttachmentReconciler({ intervalMs: 1_000, logger });
+    const scheduler = startTicketAttachmentReconciler({ intervalMs: 1_000, logger, writeLease: unfrozenLease });
 
     await flushMicrotasks();
     expect(logger.error).toHaveBeenCalledWith("[Ticket Attachments] Reconciliation failed", expect.any(Error));
