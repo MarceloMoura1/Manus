@@ -53,12 +53,17 @@ export function assertStagingDatabaseName(name) {
   return name;
 }
 
-export function assertStagingDatabaseUrl(urlString) {
+export function assertStagingDatabaseUrl(urlString, options = {}) {
   const parsed = new URL(urlString);
   if (parsed.protocol !== "mysql:") {
     throw new ReconciliationError("NON_MYSQL_STAGING_URL", "Staging URL must use mysql://.");
   }
-  if (!LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase())) {
+  const isolatedLinuxRunnerRoute = options.isolatedLinuxRunner === true
+    && process.platform === "linux"
+    && process.env.MEGADESK_PROMOTION_ISOLATED_REHEARSAL === "YES"
+    && parsed.hostname.toLowerCase() === "host.docker.internal"
+    && parsed.port === "33330";
+  if (!LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase()) && !isolatedLinuxRunnerRoute) {
     throw new ReconciliationError("NON_LOCAL_STAGING_HOST", "Staging database must be reached through a loopback host.", { hostHash: sha256(parsed.hostname.toLowerCase()) });
   }
   return { parsed, database: assertStagingDatabaseName(decodeURIComponent(parsed.pathname.replace(/^\//, ""))) };
