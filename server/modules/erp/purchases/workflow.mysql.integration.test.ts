@@ -46,6 +46,7 @@ async function cleanup() {
     "DELETE FROM erp_purchase_order_sequences WHERE client_id IN (?,?)",
     "DELETE FROM erp_stock_movements WHERE client_id IN (?,?)",
     "DELETE FROM erp_stock_balances WHERE client_id IN (?,?)",
+    "DELETE FROM erp_product_suppliers WHERE client_id IN (?,?)",
     "DELETE FROM erp_product_audit_logs WHERE client_id IN (?,?)",
     "DELETE b FROM erp_inventory_item_balances b INNER JOIN erp_inventory_items i ON i.client_id=b.client_id AND i.id=b.inventory_item_id WHERE i.client_id IN (?,?)",
     "DELETE FROM erp_inventory_items WHERE client_id IN (?,?)",
@@ -221,6 +222,118 @@ physical("ERP purchase workflow integration", () => {
         items: [{ ...command.items[0], unitCostCents: 101 }],
       })
     ).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+  });
+
+  it("keeps a newly-created supplier draft in canonical history and opens draft and confirmed details", async () => {
+    const suppliers = new SupplierService(new SupplierRepository(), purchaseEvents);
+    const products = new ErpService(new ErpRepository());
+    const supplier = await suppliers.create(adminA, {
+      legalName: "Fornecedor Historico Draft",
+      tradeName: "Historico Draft",
+      personType: "legal",
+      taxId: "42345678000195",
+      stateRegistration: null,
+      email: "historico@example.invalid",
+      phone: null,
+      contactName: null,
+      postalCode: null,
+      street: null,
+      addressNumber: null,
+      addressComplement: null,
+      district: null,
+      city: null,
+      state: null,
+      notes: null,
+    });
+    const product = await products.createProduct(adminA, {
+      name: "Produto Historico Draft",
+      sku: "WF-HISTORY-DRAFT",
+      barcode: null,
+      description: null,
+      category: "Workflow",
+      unit: "unit",
+      costPriceCents: 7300,
+      salePriceCents: 0,
+      minimumStock: "0",
+    });
+    const purchases = new PurchaseService(
+      new PurchaseWorkflowRepository(),
+      purchaseEvents
+    );
+    const order = await purchases.create(adminA, {
+      supplierPublicId: supplier.publicId,
+      idempotencyKey: randomUUID(),
+      responsibleUserId: null,
+      notes: null,
+      expectedDate: null,
+      discountCents: 0,
+      freightCents: 0,
+      otherExpensesCents: 0,
+      paymentTerms: null,
+      installments: [{ dueDate: "2030-10-10", amountCents: 7300 }],
+      items: [
+        {
+          productPublicId: product.publicId,
+          inventoryItemPublicId: null,
+          quantity: "1.000",
+          unitCostCents: 7300,
+          discountCents: 0,
+        },
+      ],
+    });
+
+    const history = await purchases.list(adminA, {
+      search: "",
+      supplierPublicId: supplier.publicId,
+      sort: "createdAt",
+      direction: "desc",
+      page: 1,
+      pageSize: 20,
+    });
+    expect(history.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ publicId: order.publicId, status: "draft" }),
+      ])
+    );
+    expect(
+      await purchases.list(adminB, {
+        search: "",
+        supplierPublicId: supplier.publicId,
+        sort: "createdAt",
+        direction: "desc",
+        page: 1,
+        pageSize: 20,
+      })
+    ).toMatchObject({ items: [], total: 0 });
+
+    const draftDetail = (await purchases.detail(adminA, order.publicId)) as any;
+    expect(draftDetail).toMatchObject({
+      status: "draft",
+      expectedDate: null,
+      receiptStatus: "awaiting",
+      financialStatus: "not_launched",
+    });
+    expect(draftDetail.items[0]).toMatchObject({
+      productPublicId: product.publicId,
+      unit: "unit",
+      pendingQuantity: "1.000",
+    });
+    expect(draftDetail.receipts).toEqual([]);
+    expect(draftDetail.payments).toEqual([]);
+    expect(draftDetail.installments).toEqual([
+      { installmentNumber: 1, dueDate: "2030-10-10", amountCents: 7300 },
+    ]);
+    await expect(purchases.detail(adminB, order.publicId)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(purchases.detail(adminA, randomUUID())).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+
+    const confirmed = (await purchases.approve(adminA, order.publicId)) as any;
+    expect(confirmed).toMatchObject({ status: "approved" });
+    expect(confirmed.items).toHaveLength(1);
+    expect(confirmed.receipts).toEqual([]);
   });
 
   it("serializes concurrent approvals without duplicating the decision or audit", async () => {

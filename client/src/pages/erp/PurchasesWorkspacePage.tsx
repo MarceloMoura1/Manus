@@ -9,6 +9,7 @@ import {
   Clock3,
   FileText,
   PackageCheck,
+  Pencil,
   Plus,
   Search,
   ShoppingCart,
@@ -30,6 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { ErpEmptyState } from "@/components/erp/ErpEmptyState";
 import { Pagination } from "@/components/erp/Pagination";
+import { consumePurchaseOpenIntent } from "./purchase-navigation";
 
 type PurchaseWorkspacePageProps = {
   onNavigate?: (section: "finance" | "stock") => void;
@@ -44,12 +46,30 @@ const shortDate = new Intl.DateTimeFormat("pt-BR", {
   month: "short",
   year: "numeric",
 });
-const safeDate = (value?: string | null) =>
-  value
-    ? shortDate.format(new Date(`${value.slice(0, 10)}T12:00:00`))
-    : "Sem prazo";
+export const safeDate = (value?: string | Date | null) => {
+  if (!value) return "Sem prazo";
+  const date =
+    value instanceof Date
+      ? value
+      : new Date(
+          /^\d{4}-\d{2}-\d{2}$/.test(value.slice(0, 10))
+            ? `${value.slice(0, 10)}T12:00:00`
+            : value
+        );
+  return Number.isNaN(date.getTime())
+    ? "Data indisponível"
+    : shortDate.format(date);
+};
 const formatMoney = (cents: number | null | undefined) =>
   cents == null ? "—" : money.format(cents / 100);
+const moneyInput = (value: number | null | undefined) =>
+  ((value ?? 0) / 100).toFixed(2);
+const dateInput = (value: string | Date | null | undefined) =>
+  value instanceof Date
+    ? value.toISOString().slice(0, 10)
+    : value
+      ? String(value).slice(0, 10)
+      : "";
 const cents = (value: string) =>
   Math.max(0, Math.round(Number(value.replace(",", ".")) * 100) || 0);
 const previewLineCents = (quantity: string, unitCostCents: number) => {
@@ -62,7 +82,7 @@ const emptyRequestItems = () => [
   { productPublicId: "", description: "", quantity: "1.000", cost: "0" },
 ];
 const emptyOrderItems = () => [
-  { productPublicId: "", quantity: "1.000", cost: "0" },
+  { productPublicId: "", quantity: "1.000", cost: "0", discountCents: 0 },
 ];
 const errorText = (error: unknown) =>
   error instanceof Error
@@ -216,10 +236,15 @@ export function PurchasesWorkspacePage({
   >("all");
   const [page, setPage] = React.useState(1);
   const [requestPage, setRequestPage] = React.useState(1);
-  const [orderId, setOrderId] = React.useState<string | null>(null);
+  const [orderId, setOrderId] = React.useState<string | null>(() =>
+    typeof window === "undefined"
+      ? null
+      : consumePurchaseOpenIntent(window.sessionStorage)
+  );
   const [requestId, setRequestId] = React.useState<string | null>(null);
   const [requestForm, setRequestForm] = React.useState(false);
   const [orderForm, setOrderForm] = React.useState(false);
+  const [editingOrder, setEditingOrder] = React.useState<any | null>(null);
   const [notice, setNotice] = React.useState<{
     tone: "success" | "error";
     text: string;
@@ -600,12 +625,22 @@ export function PurchasesWorkspacePage({
         fail={text => setNotice({ tone: "error", text })}
       />
       <DirectOrderForm
-        open={orderForm}
-        close={() => setOrderForm(false)}
-        done={async () => {
+        open={orderForm || Boolean(editingOrder)}
+        order={editingOrder}
+        close={() => {
           setOrderForm(false);
+          setEditingOrder(null);
+        }}
+        done={async () => {
+          const wasEditing = Boolean(editingOrder);
+          setOrderForm(false);
+          setEditingOrder(null);
           setSection("orders");
-          await refresh("Pedido criado como rascunho.");
+          await refresh(
+            wasEditing
+              ? "Pedido atualizado com sucesso."
+              : "Pedido criado como rascunho."
+          );
         }}
         fail={text => setNotice({ tone: "error", text })}
       />
@@ -615,6 +650,10 @@ export function PurchasesWorkspacePage({
         done={refresh}
         fail={text => setNotice({ tone: "error", text })}
         onNavigate={onNavigate}
+        edit={order => {
+          setOrderId(null);
+          setEditingOrder(order);
+        }}
       />
       <RequestDetail
         publicId={requestId}
@@ -637,17 +676,27 @@ function RequestForm({
   done: () => void;
   fail: (text: string) => void;
 }) {
-  const products = trpc.erp.products.list.useQuery(
+  const suppliers = trpc.erp.suppliers.list.useQuery(
     {
       search: "",
       active: true,
-      stock: "all",
-      sort: "name",
+      sort: "legalName",
       direction: "asc",
       page: 1,
       pageSize: 100,
     },
     { enabled: open }
+  );
+  const [supplier, setSupplier] = React.useState("");
+  const products = trpc.erp.productSuppliers.list.useQuery(
+    {
+      supplierPublicId: supplier || undefined,
+      active: true,
+      search: "",
+      page: 1,
+      pageSize: 100,
+    },
+    { enabled: open && Boolean(supplier) }
   );
   const [reason, setReason] = React.useState("");
   const [department, setDepartment] = React.useState("");
@@ -660,6 +709,7 @@ function RequestForm({
     setReason("");
     setDepartment("");
     setPriority("normal");
+    setSupplier("");
     setItems(emptyRequestItems());
   }, [open]);
   const create = trpc.erp.purchases.requests.create.useMutation({
@@ -710,6 +760,27 @@ function RequestForm({
               </select>
             </Field>
           </div>
+          <Field label="Fornecedor do catálogo">
+            <select
+              value={supplier}
+              onChange={event => {
+                setSupplier(event.target.value);
+                setItems(emptyRequestItems());
+              }}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="">Selecione para limitar os produtos</option>
+              {suppliers.data?.items.map(item => (
+                <option key={item.publicId} value={item.publicId}>
+                  {item.legalName}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-slate-500">
+              O fornecedor limita o catálogo desta solicitação; a cotação
+              continua podendo avaliar outros fornecedores.
+            </p>
+          </Field>
           <Field label="Motivo da compra">
             <Textarea
               required
@@ -750,7 +821,10 @@ function RequestForm({
                 <select
                   aria-label={`Produto ${index + 1}`}
                   value={item.productPublicId}
-                  onChange={event =>
+                  onChange={event => {
+                    const association = products.data?.items.find(
+                      product => product.productPublicId === event.target.value
+                    );
                     setItems(current =>
                       current.map((row, rowIndex) =>
                         rowIndex === index
@@ -758,17 +832,24 @@ function RequestForm({
                               ...row,
                               productPublicId: event.target.value,
                               description: "",
+                              cost:
+                                association?.costPriceCents != null
+                                  ? moneyInput(association.costPriceCents)
+                                  : row.cost,
                             }
                           : row
                       )
-                    )
-                  }
+                    );
+                  }}
                   className="h-10 rounded-md border border-input bg-background px-3 text-sm"
                 >
                   <option value="">Item não catalogado</option>
                   {products.data?.items.map(product => (
-                    <option key={product.publicId} value={product.publicId}>
-                      {product.name} · {product.sku}
+                    <option
+                      key={product.publicId}
+                      value={product.productPublicId}
+                    >
+                      {product.productName} · {product.productSku}
                     </option>
                   ))}
                 </select>
@@ -836,6 +917,11 @@ function RequestForm({
                 </Button>
               </div>
             ))}
+            {supplier && !products.isLoading && products.data?.items.length === 0 && (
+              <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                Nenhum produto cadastrado para este fornecedor.
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={close}>
@@ -853,11 +939,13 @@ function RequestForm({
 
 function DirectOrderForm({
   open,
+  order,
   close,
   done,
   fail,
 }: {
   open: boolean;
+  order?: any | null;
   close: () => void;
   done: () => void;
   fail: (text: string) => void;
@@ -873,19 +961,17 @@ function DirectOrderForm({
     },
     { enabled: open }
   );
-  const products = trpc.erp.products.list.useQuery(
+  const [supplier, setSupplier] = React.useState("");
+  const products = trpc.erp.productSuppliers.list.useQuery(
     {
+      supplierPublicId: supplier || undefined,
       search: "",
       active: true,
-      stock: "all",
-      sort: "name",
-      direction: "asc",
       page: 1,
       pageSize: 100,
     },
-    { enabled: open }
+    { enabled: open && Boolean(supplier) }
   );
-  const [supplier, setSupplier] = React.useState("");
   const [expectedDate, setExpectedDate] = React.useState("");
   const [notes, setNotes] = React.useState("");
   const [freight, setFreight] = React.useState("0");
@@ -893,48 +979,75 @@ function DirectOrderForm({
   const [idempotencyKey, setIdempotencyKey] = React.useState(() => crypto.randomUUID());
   React.useEffect(() => {
     if (!open) return;
-    setSupplier("");
-    setExpectedDate("");
-    setNotes("");
-    setFreight("0");
-    setItems(emptyOrderItems());
+    setSupplier(order?.supplierPublicId ?? "");
+    setExpectedDate(dateInput(order?.expectedDate));
+    setNotes(order?.notes ?? "");
+    setFreight(moneyInput(order?.freightCents));
+    setItems(
+      order?.items?.length
+        ? order.items.map((item: any) => ({
+            productPublicId: item.productPublicId,
+            quantity: item.quantity,
+            cost: moneyInput(item.unitCostCents),
+            discountCents: item.discountCents ?? 0,
+          }))
+        : emptyOrderItems()
+    );
     setIdempotencyKey(crypto.randomUUID());
-  }, [open]);
+  }, [open, order]);
   const create = trpc.erp.purchases.create.useMutation({
+    onSuccess: done,
+    onError: error => fail(errorText(error)),
+  });
+  const update = trpc.erp.purchases.update.useMutation({
     onSuccess: done,
     onError: error => fail(errorText(error)),
   });
   const total =
     items.reduce(
-      (sum, item) => sum + previewLineCents(item.quantity, cents(item.cost)),
+      (sum, item) =>
+        sum +
+        Math.max(
+          0,
+          previewLineCents(item.quantity, cents(item.cost)) -
+            item.discountCents
+        ),
       0
-    ) + cents(freight);
+    ) +
+    cents(freight) +
+    (order?.otherExpensesCents ?? 0) -
+    (order?.discountCents ?? 0);
   return (
     <Dialog open={open} onOpenChange={value => !value && close()}>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Novo pedido direto</DialogTitle>
+          <DialogTitle>{order ? "Editar pedido" : "Novo pedido direto"}</DialogTitle>
         </DialogHeader>
         <form
           onSubmit={event => {
             event.preventDefault();
-            create.mutate({
+            const payload = {
               supplierPublicId: supplier,
               expectedDate: expectedDate || null,
               notes: notes || null,
+              responsibleUserId: order?.responsibleUserId ?? null,
               freightCents: cents(freight),
-              discountCents: 0,
-              otherExpensesCents: 0,
-              paymentTerms: null,
-              installments: [],
-               idempotencyKey,
+              discountCents: order?.discountCents ?? 0,
+              otherExpensesCents: order?.otherExpensesCents ?? 0,
+              paymentTerms: order?.paymentTerms ?? null,
+              installments: order?.installments ?? [],
               items: items.map(item => ({
                 productPublicId: item.productPublicId,
                 quantity: item.quantity,
                 unitCostCents: cents(item.cost),
-                discountCents: 0,
+                discountCents: item.discountCents,
               })),
-            });
+            };
+            if (order) {
+              update.mutate({ publicId: order.publicId, ...payload });
+            } else {
+              create.mutate({ ...payload, idempotencyKey });
+            }
           }}
           className="space-y-5"
         >
@@ -943,7 +1056,10 @@ function DirectOrderForm({
               <select
                 required
                 value={supplier}
-                onChange={event => setSupplier(event.target.value)}
+                onChange={event => {
+                  setSupplier(event.target.value);
+                  setItems(emptyOrderItems());
+                }}
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               >
                 <option value="">Selecione</option>
@@ -969,10 +1085,18 @@ function DirectOrderForm({
                 type="button"
                 size="sm"
                 variant="outline"
+                disabled={
+                  !supplier || products.isLoading || !products.data?.items.length
+                }
                 onClick={() =>
                   setItems(current => [
                     ...current,
-                    { productPublicId: "", quantity: "1.000", cost: "0" },
+                    {
+                      productPublicId: "",
+                      quantity: "1.000",
+                      cost: "0",
+                      discountCents: 0,
+                    },
                   ])
                 }
               >
@@ -988,21 +1112,35 @@ function DirectOrderForm({
                 <select
                   required
                   value={item.productPublicId}
-                  onChange={event =>
+                  disabled={!supplier || products.isLoading}
+                  onChange={event => {
+                    const association = products.data?.items.find(
+                      product => product.productPublicId === event.target.value
+                    );
                     setItems(current =>
                       current.map((row, rowIndex) =>
                         rowIndex === index
-                          ? { ...row, productPublicId: event.target.value }
+                          ? {
+                              ...row,
+                              productPublicId: event.target.value,
+                              cost:
+                                association?.costPriceCents == null
+                                  ? row.cost
+                                  : moneyInput(association.costPriceCents),
+                            }
                           : row
                       )
-                    )
-                  }
+                    );
+                  }}
                   className="h-10 rounded-md border border-input bg-background px-3 text-sm"
                 >
                   <option value="">Selecione o produto</option>
                   {products.data?.items.map(product => (
-                    <option key={product.publicId} value={product.publicId}>
-                      {product.name} · {product.sku}
+                    <option
+                      key={product.publicId}
+                      value={product.productPublicId}
+                    >
+                      {product.productName} · {product.productSku}
                     </option>
                   ))}
                 </select>
@@ -1052,6 +1190,11 @@ function DirectOrderForm({
                 </Button>
               </div>
             ))}
+            {supplier && !products.isLoading && products.data?.items.length === 0 && (
+              <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                Nenhum produto cadastrado para este fornecedor.
+              </p>
+            )}
           </div>
           <div className="grid gap-4 sm:grid-cols-[1fr_10rem]">
             <Field label="Observações">
@@ -1078,8 +1221,12 @@ function DirectOrderForm({
             <Button type="button" variant="outline" onClick={close}>
               Cancelar
             </Button>
-            <Button disabled={create.isPending}>
-              {create.isPending ? "Criando…" : "Criar pedido"}
+            <Button disabled={create.isPending || update.isPending}>
+              {create.isPending || update.isPending
+                ? "Salvando…"
+                : order
+                  ? "Salvar alterações"
+                  : "Criar pedido"}
             </Button>
           </DialogFooter>
         </form>
@@ -1094,12 +1241,14 @@ function OrderDetail({
   done,
   fail,
   onNavigate,
+  edit,
 }: {
   publicId: string | null;
   close: () => void;
   done: (message?: string) => Promise<void>;
   fail: (text: string) => void;
   onNavigate?: (section: "finance" | "stock") => void;
+  edit: (order: any) => void;
 }) {
   const query = trpc.erp.purchases.detail.useQuery(
     { publicId: publicId! },
@@ -1170,13 +1319,18 @@ function OrderDetail({
             <div className="max-h-[65vh] overflow-y-auto p-5">
               <TabsContent value="overview" className="mt-0 space-y-5">
                 <div className="grid gap-4 sm:grid-cols-3">
+                  <Info label="Criado em" value={safeDate(order.createdAt)} />
+                  <Info
+                    label="Criado por"
+                    value={order.createdByName || "Usuário indisponível"}
+                  />
+                  <Info label="Previsão" value={safeDate(order.expectedDate)} />
                   {order.capabilities?.canViewValues && (
                     <Info
                       label="Valor total"
                       value={formatMoney(order.totalCents)}
                     />
                   )}
-                  <Info label="Previsão" value={safeDate(order.expectedDate)} />
                   <Info
                     label="Responsável"
                     value={
@@ -1185,7 +1339,33 @@ function OrderDetail({
                       "Não atribuído"
                     }
                   />
+                  <Info
+                    label="Financeiro"
+                    value={
+                      order.financialStatus === "paid"
+                        ? "Pago"
+                        : order.financialStatus === "partially_paid"
+                          ? "Pago parcialmente"
+                          : order.financialStatus === "overdue"
+                            ? "Vencido"
+                            : order.financialStatus === "not_launched"
+                              ? "Não lançado"
+                              : "Em aberto"
+                    }
+                  />
                 </div>
+                {order.capabilities?.canViewValues && (
+                  <div className="grid gap-3 rounded-xl bg-slate-50 p-4 text-sm dark:bg-slate-900 sm:grid-cols-5">
+                    <Info label="Subtotal" value={formatMoney(order.subtotalCents)} />
+                    <Info label="Desconto" value={formatMoney(order.discountCents)} />
+                    <Info label="Frete" value={formatMoney(order.freightCents)} />
+                    <Info
+                      label="Outras despesas"
+                      value={formatMoney(order.otherExpensesCents)}
+                    />
+                    <Info label="Total" value={formatMoney(order.totalCents)} />
+                  </div>
+                )}
                 <div>
                   <div className="mb-2 flex justify-between text-sm">
                     <span>Recebimento</span>
@@ -1202,14 +1382,16 @@ function OrderDetail({
                 )}
               </TabsContent>
               <TabsContent value="items" className="mt-0 space-y-2">
-                {order.items.map((item: any) => (
+                {(order.items ?? []).map((item: any) => (
                   <div
                     key={item.publicId}
-                    className="grid gap-2 rounded-xl border border-slate-200 p-3 dark:border-slate-800 sm:grid-cols-[1fr_auto_auto]"
+                    className="grid gap-2 rounded-xl border border-slate-200 p-3 dark:border-slate-800 sm:grid-cols-[1fr_auto_auto_auto]"
                   >
                     <div>
                       <strong>{item.productName}</strong>
-                      <p className="text-xs text-slate-500">SKU {item.sku}</p>
+                      <p className="text-xs text-slate-500">
+                        SKU {item.sku} · {item.quantity} {item.unit || "un."}
+                      </p>
                     </div>
                     <div className="text-sm tabular-nums">
                       <span className="text-slate-500">Recebido</span>
@@ -1217,6 +1399,11 @@ function OrderDetail({
                         {item.receivedQuantity} / {item.quantity}
                       </strong>
                     </div>
+                    {order.capabilities?.canViewValues && (
+                      <span className="text-right text-sm tabular-nums text-slate-600 dark:text-slate-300">
+                        {formatMoney(item.unitCostCents)} / {item.unit || "un."}
+                      </span>
+                    )}
                     {order.capabilities?.canViewValues && (
                       <strong className="text-right tabular-nums">
                         {formatMoney(item.lineTotalCents)}
@@ -1226,7 +1413,7 @@ function OrderDetail({
                 ))}
               </TabsContent>
               <TabsContent value="receipts" className="mt-0">
-                {order.receipts.length ? (
+                {order.receipts?.length ? (
                   <div className="space-y-3">
                     {order.receipts.map((receipt: any) => (
                       <div
@@ -1267,7 +1454,7 @@ function OrderDetail({
               </TabsContent>
               {order.capabilities?.canViewValues && (
               <TabsContent value="payments" className="mt-0">
-                {order.payments.length ? (
+                {order.payments?.length ? (
                   <div className="space-y-2">
                     {order.payments.map((payment: any) => (
                       <div
@@ -1307,6 +1494,27 @@ function OrderDetail({
                       </Button>
                     )}
                   </div>
+                ) : order.installments?.length ? (
+                  <div className="space-y-2">
+                    {order.installments.map((installment: any) => (
+                      <div
+                        key={installment.installmentNumber}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-4 dark:border-slate-800"
+                      >
+                        <div>
+                          <strong>
+                            Parcela planejada {installment.installmentNumber}
+                          </strong>
+                          <p className="text-xs text-slate-500">
+                            Vence em {safeDate(installment.dueDate)}
+                          </p>
+                        </div>
+                        <strong className="tabular-nums">
+                          {formatMoney(installment.amountCents)}
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
                 ) : (
                   <ErpEmptyState
                     title="Ainda sem lançamento financeiro"
@@ -1317,7 +1525,7 @@ function OrderDetail({
               )}
               <TabsContent value="history" className="mt-0">
                 <ol className="relative ml-2 space-y-5 border-l border-slate-200 pl-5 dark:border-slate-800">
-                  {order.timeline.map((event: any) => (
+                  {(order.timeline ?? []).map((event: any) => (
                     <li key={event.publicId}>
                       <span
                         className={`absolute -left-1.5 mt-1 h-3 w-3 rounded-full ring-4 ring-white dark:ring-slate-950 ${event.actorType === "system" ? "bg-violet-500" : "bg-blue-600"}`}
@@ -1338,7 +1546,7 @@ function OrderDetail({
                 </ol>
               </TabsContent>
               <TabsContent value="documents" className="mt-0">
-                {order.documents.length ? (
+                {order.documents?.length ? (
                   <div className="space-y-2">
                     {order.documents.map((document: any) => (
                       <div
@@ -1368,6 +1576,12 @@ function OrderDetail({
           </Tabs>
         )}
         <DialogFooter className="border-t border-slate-200 px-5 py-4 dark:border-slate-800">
+          {order?.status === "draft" && order.capabilities?.canEditOrder && (
+            <Button variant="outline" onClick={() => edit(order)}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Editar pedido
+            </Button>
+          )}
           {order?.status === "draft" && order.capabilities?.canApprove && (
             <Button
               onClick={() => approve.mutate({ publicId })}

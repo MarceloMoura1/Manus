@@ -56,6 +56,10 @@ export class ProductSupplierRepository {
     if (options.active !== undefined) {
       conditions.push("ps.active = ?");
       parameters.push(options.active ? 1 : 0);
+      if (options.active) {
+        conditions.push("p.active = 1");
+        conditions.push("s.active = 1");
+      }
     }
     if (options.search) {
       conditions.push(

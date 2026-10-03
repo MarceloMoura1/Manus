@@ -45,6 +45,13 @@ export type PurchaseOperation =
 const publicId = z.string().uuid();
 const optionalText = (max: number) =>
   z.string().trim().max(max).optional().nullable().transform(value => value || null);
+const optionalUserId = z
+  .string()
+  .trim()
+  .max(80)
+  .optional()
+  .nullable()
+  .transform(value => value || null);
 const money = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const quantity = z
   .string()
@@ -103,7 +110,7 @@ function uniqueCatalogItems(
 const purchaseDraftShape = {
     supplierPublicId: publicId,
     idempotencyKey: publicId.optional(),
-    responsibleUserId: z.string().trim().max(80).optional().nullable(),
+    responsibleUserId: optionalUserId,
     notes: optionalText(4_000),
     expectedDate: z.string().date().optional().nullable().transform(value => value || null),
     discountCents: money.default(0),
@@ -122,7 +129,7 @@ export const purchaseRequestDraftInput = z.object({
   department: optionalText(120),
   priority: z.enum(purchasePriorities).default("normal"),
   reason: z.string().trim().min(3).max(4_000),
-  responsibleUserId: z.string().trim().max(80).optional().nullable(),
+  responsibleUserId: optionalUserId,
   items: z.array(requestItem).min(1).max(100),
 });
 export const purchaseRequestListInput = z.object({
@@ -215,7 +222,7 @@ export const requestToOrderInput = z.object(purchaseDraftShape).omit({ items: tr
 }).superRefine((value, context) => uniqueCatalogItems(value.items, context));
 export const quoteToOrderInput = z.object({
   quotePublicId: publicId,
-  responsibleUserId: z.string().trim().max(80).optional().nullable(),
+  responsibleUserId: optionalUserId,
   notes: optionalText(4_000),
   expectedDate: z.string().date().optional().nullable().transform(value => value || null),
   discountCents: money.default(0),
