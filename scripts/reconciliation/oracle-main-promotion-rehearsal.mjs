@@ -54,6 +54,11 @@ const PROMOTION_UID = 65534;
 const PROMOTION_GID = 65534;
 const ATTACKER_UID = 65533;
 const ATTACKER_GID = 65533;
+// The wrapper accepts only the compiled trust roots. This legacy rehearsal can
+// generate its own disposable key, but that key can no longer authorize a run.
+// Do not start Docker until an independently provisioned, root-signed fixture
+// source is implemented and reviewed.
+const TRUSTED_REHEARSAL_ARTIFACT_SOURCE = null;
 
 const sha256 = value => createHash("sha256").update(value).digest("hex");
 const canonical = value => JSON.stringify(stableValue(value));
@@ -1116,6 +1121,15 @@ async function storageBindingPlatformFailClosed() {
 }
 
 async function main() {
+  if (!TRUSTED_REHEARSAL_ARTIFACT_SOURCE) {
+    process.stdout.write(`${JSON.stringify({
+      result: "BLOCKED_ENVIRONMENT",
+      error: "No independently provisioned root-signed authorization and freeze-evidence fixture source is available.",
+      resourcesTouched: "NO",
+    })}\n`);
+    process.exitCode = 2;
+    return;
+  }
   const protectedBefore = inspectProtected();
   let mainError = null;
   try {
