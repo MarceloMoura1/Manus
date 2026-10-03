@@ -833,4 +833,62 @@ describe("ProductSupplierService Domain Rules", () => {
     expect(updatedViaUpdate.isPreferred).toBe(true);
     expect(updatedViaUpdate.active).toBe(true);
   });
+
+  it("35. lists only products linked to the selected supplier and isolates tenants", async () => {
+    const rows = [
+      mockProductSupplierRow({
+        public_id: "ps-a",
+        product_public_id: "product-a",
+        product_name: "Produto A",
+        supplier_public_id: "supplier-a",
+      }),
+      mockProductSupplierRow({
+        public_id: "ps-b",
+        product_public_id: "product-b",
+        product_name: "Produto B",
+        supplier_public_id: "supplier-b",
+      }),
+    ];
+    repo.list.mockImplementation(
+      async (clientId: string, options: { supplierPublicId?: string }) => {
+        if (clientId !== "tenant-a") return { items: [], total: 0 };
+        const items = rows.filter(
+          row => row.supplier_public_id === options.supplierPublicId
+        );
+        return { items, total: items.length };
+      }
+    );
+    const options = {
+      active: true,
+      search: "",
+      page: 1,
+      pageSize: 100,
+    };
+
+    const supplierA = await service.list(adminA, {
+      ...options,
+      supplierPublicId: "supplier-a",
+    });
+    const supplierB = await service.list(adminA, {
+      ...options,
+      supplierPublicId: "supplier-b",
+    });
+    const empty = await service.list(adminA, {
+      ...options,
+      supplierPublicId: "supplier-empty",
+    });
+    const crossTenant = await service.list(adminB, {
+      ...options,
+      supplierPublicId: "supplier-a",
+    });
+
+    expect(supplierA.items.map(item => item.productPublicId)).toEqual(["product-a"]);
+    expect(supplierB.items.map(item => item.productPublicId)).toEqual(["product-b"]);
+    expect(empty.items).toEqual([]);
+    expect(crossTenant.items).toEqual([]);
+    expect(repo.list).toHaveBeenCalledWith(
+      "tenant-b",
+      expect.objectContaining({ supplierPublicId: "supplier-a" })
+    );
+  });
 });

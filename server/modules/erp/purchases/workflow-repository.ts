@@ -1306,13 +1306,13 @@ export class PurchaseWorkflowRepository {
     const row = await this.orderRow(executor, clientId, publicId, lock);
     if (!row) return null;
     const [items] = await executor.execute<RowDataPacket[]>(
-      `SELECT i.*,p.public_id product_public_id,ii.public_id inventory_item_public_id,COALESCE(SUM(ri.quantity),0) received_quantity
+      `SELECT i.*,p.public_id product_public_id,p.unit product_unit,ii.public_id inventory_item_public_id,COALESCE(SUM(ri.quantity),0) received_quantity
        FROM erp_purchase_order_items i
        INNER JOIN erp_products p ON p.id=i.product_id AND p.client_id=?
        LEFT JOIN erp_inventory_items ii ON ii.id=i.inventory_item_id AND ii.client_id=?
        LEFT JOIN erp_purchase_order_receipt_items ri ON ri.purchase_order_item_id=i.id
        WHERE i.purchase_order_id=?
-       GROUP BY i.id,p.public_id,ii.public_id ORDER BY i.id`,
+       GROUP BY i.id,p.public_id,p.unit,ii.public_id ORDER BY i.id`,
       [clientId, clientId, row.id]
     );
     const [receipts] = await executor.execute<RowDataPacket[]>(
@@ -1370,6 +1370,13 @@ export class PurchaseWorkflowRepository {
        GROUP BY e.id ORDER BY e.source_installment,e.id`,
       [clientId, publicId]
     );
+    const [installments] = await executor.execute<RowDataPacket[]>(
+      `SELECT installment_number,due_date,amount_cents
+       FROM erp_purchase_order_installments
+       WHERE client_id=? AND purchase_order_id=?
+       ORDER BY installment_number`,
+      [clientId, row.id]
+    );
     const timeline = await this.timeline(executor, clientId, { orderId: Number(row.id) });
     const documents = await this.documents(executor, clientId, { orderId: Number(row.id) });
     return {
@@ -1385,6 +1392,7 @@ export class PurchaseWorkflowRepository {
           inventoryItemPublicId: item.inventory_item_public_id ? String(item.inventory_item_public_id) : null,
           productName: String(item.product_name_snapshot),
           sku: String(item.sku_snapshot),
+          unit: item.product_unit ? String(item.product_unit) : null,
           quantity: millisQuantity(ordered),
           receivedQuantity: millisQuantity(received),
           pendingQuantity: millisQuantity(ordered - received),
@@ -1394,6 +1402,11 @@ export class PurchaseWorkflowRepository {
         };
       }),
       receipts: receiptViews,
+      installments: installments.map(installment => ({
+        installmentNumber: Number(installment.installment_number),
+        dueDate: dateOnly(installment.due_date),
+        amountCents: Number(installment.amount_cents),
+      })),
       payments: payments.map(payment => {
         const amount = Number(payment.amount_cents);
         const paid = Number(payment.paid_cents);
@@ -2174,7 +2187,7 @@ export class PurchaseWorkflowRepository {
 
   async supplierMetrics(clientId: string, supplierPublicId: string) {
     const [suppliers] = await this.db().execute<RowDataPacket[]>(
-      "SELECT id,public_id,name FROM erp_suppliers WHERE client_id=? AND public_id=? LIMIT 1",
+      "SELECT id,public_id,legal_name,trade_name FROM erp_suppliers WHERE client_id=? AND public_id=? LIMIT 1",
       [clientId, supplierPublicId]
     );
     const supplier = suppliers[0];
@@ -2210,7 +2223,7 @@ export class PurchaseWorkflowRepository {
     const measured = Number(metric.measured_count ?? 0);
     return {
       supplierPublicId: String(supplier.public_id),
-      supplierName: String(supplier.name),
+      supplierName: String(supplier.trade_name || supplier.legal_name),
       orderCount: Number(metric.order_count ?? 0),
       purchasedCents: Number(metric.purchased_cents ?? 0),
       averageLeadDays: Number(Number(metric.average_lead_days ?? 0).toFixed(1)),

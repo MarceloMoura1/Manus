@@ -65,6 +65,24 @@ describe("purchase workflow contracts", () => {
     });
     expect(parsed.items).toHaveLength(2);
     expect(parsed.items[1].productPublicId).toBeUndefined();
+    expect(parsed.responsibleUserId).toBeNull();
+  });
+
+  it("normalizes omitted optional user ids before they reach SQL bindings", () => {
+    const request = purchaseRequestDraftInput.parse({
+      reason: "Reposicao operacional",
+      items: [{ description: "Material avulso", quantity: "1" }],
+    });
+    const order = purchaseDraftInput.parse({
+      supplierPublicId: uuid(1),
+      items: [{ productPublicId: uuid(2), quantity: "1", unitCostCents: 100 }],
+    });
+
+    expect(request.responsibleUserId).toBeNull();
+    expect(request.department).toBeNull();
+    expect(order.responsibleUserId).toBeNull();
+    expect(order.expectedDate).toBeNull();
+    expect(order.notes).toBeNull();
   });
 
   it("requires an explicit, non-duplicated item set for partial receipt", () => {
