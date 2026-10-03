@@ -39,6 +39,8 @@ import { isValidCpf, isValidCnpj } from "../../../../shared/br-documents";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Pagination } from "@/components/erp/Pagination";
+import { queuePurchaseOpenIntent } from "./purchase-navigation";
 
 function cn(...classes: Array<string | false | undefined | null>) {
   return classes.filter(Boolean).join(" ");
@@ -1332,22 +1334,36 @@ function LinkProductDialog({
 // ─── Aba: Compras ─────────────────────────────────────────────────────────────
 
 function TabPurchases({ supplier, onNavigate }: { supplier: SupplierItem; onNavigate?: (section: any) => void }) {
-  const purchasesQuery = trpc.erp.purchases.supplierMetrics.useQuery({
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
+  React.useEffect(() => setPage(1), [supplier.publicId]);
+  const metricsQuery = trpc.erp.purchases.supplierMetrics.useQuery({
     supplierPublicId: supplier.publicId,
   });
+  const purchasesQuery = trpc.erp.purchases.list.useQuery({
+    search: "",
+    supplierPublicId: supplier.publicId,
+    sort: "createdAt",
+    direction: "desc",
+    page,
+    pageSize,
+  });
 
-  const orders = purchasesQuery.data?.recentOrders ?? [];
+  const orders = (purchasesQuery.data?.items ?? []) as Array<{
+    publicId: string;
+    orderNumber: string;
+    status: string;
+    totalCents: number | null;
+    createdAt: string | Date;
+    receivedAt?: string | Date | null;
+    receiptStatus: string;
+    financialStatus: string;
+  }>;
 
   const metrics = useMemo(() => {
-    let totalCents = purchasesQuery.data?.purchasedCents ?? 0;
-    let count = purchasesQuery.data?.orderCount ?? 0;
-    let lastDate: string | null = null;
-
-    for (const ord of orders) {
-      if (!lastDate || new Date(ord.createdAt) > new Date(lastDate)) {
-        lastDate = ord.createdAt;
-      }
-    }
+    let totalCents = metricsQuery.data?.purchasedCents ?? 0;
+    let count = metricsQuery.data?.orderCount ?? 0;
+    const lastDate = metricsQuery.data?.recentOrders?.[0]?.createdAt ?? null;
 
     const ticketCents = count > 0 ? Math.round(totalCents / count) : 0;
 
@@ -1356,17 +1372,29 @@ function TabPurchases({ supplier, onNavigate }: { supplier: SupplierItem; onNavi
       lastPurchaseDate: lastDate ? formatDate(lastDate) : "—",
       ordersCount: count,
       averageTicket: formatMoneyCents(ticketCents),
-      averageLead: `${purchasesQuery.data?.averageLeadDays ?? 0} dias`,
-      onTimeRate: purchasesQuery.data?.onTimeRate == null ? "Sem base" : `${purchasesQuery.data.onTimeRate}%`,
-      pending: formatMoneyCents(purchasesQuery.data?.pendingCents ?? 0),
+      averageLead: `${metricsQuery.data?.averageLeadDays ?? 0} dias`,
+      onTimeRate: metricsQuery.data?.onTimeRate == null ? "Sem base" : `${metricsQuery.data.onTimeRate}%`,
+      pending: formatMoneyCents(metricsQuery.data?.pendingCents ?? 0),
     };
-  }, [orders, purchasesQuery.data?.orderCount, purchasesQuery.data?.purchasedCents]);
+  }, [metricsQuery.data]);
 
   const statusMap: Record<string, { label: string; style: string }> = {
     draft: { label: "Rascunho", style: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300" },
     approved: { label: "Aprovado", style: "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300" },
     received: { label: "Recebido", style: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300" },
     cancelled: { label: "Cancelado", style: "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300" },
+  };
+  const receiptLabels: Record<string, string> = {
+    awaiting: "Aguardando recebimento",
+    partial: "Recebimento parcial",
+    received: "Recebido",
+  };
+  const financialLabels: Record<string, string> = {
+    not_launched: "Não lançado",
+    open: "Em aberto",
+    partially_paid: "Pago parcialmente",
+    paid: "Pago",
+    overdue: "Vencido",
   };
 
   return (
@@ -1400,14 +1428,16 @@ function TabPurchases({ supplier, onNavigate }: { supplier: SupplierItem; onNavi
       </div>
 
       {/* Lista de Ordens de Compra */}
-      {purchasesQuery.isLoading ? (
+      {purchasesQuery.isLoading || metricsQuery.isLoading ? (
         <div className="flex h-32 items-center justify-center">
           <RefreshCw className="h-6 w-6 animate-spin text-blue-500" />
         </div>
-      ) : purchasesQuery.isError ? (
+      ) : purchasesQuery.isError || metricsQuery.isError ? (
         <div className="rounded-2xl border border-slate-200/80 bg-white p-6 text-center dark:border-slate-800 dark:bg-slate-900">
           <AlertTriangle className="mx-auto mb-2 h-6 w-6 text-amber-500" />
-          <p className="text-xs text-slate-600 dark:text-slate-300">{purchasesQuery.error.message}</p>
+          <p className="text-xs text-slate-600 dark:text-slate-300">
+            {purchasesQuery.error?.message || metricsQuery.error?.message}
+          </p>
         </div>
       ) : orders.length === 0 ? (
         <div className="rounded-2xl border border-slate-200/80 bg-white p-8 text-center shadow-xs dark:border-slate-800 dark:bg-slate-900">
@@ -1418,14 +1448,15 @@ function TabPurchases({ supplier, onNavigate }: { supplier: SupplierItem; onNavi
           </p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {orders.map((order) => {
-            const st = statusMap[order.status] || { label: order.status, style: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300" };
-            return (
-              <div
-                key={order.publicId}
-                className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-white p-3 shadow-xs transition-colors hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700"
-              >
+        <div className="space-y-3">
+          <div className="space-y-2">
+            {orders.map((order) => {
+              const st = statusMap[order.status] || { label: order.status, style: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300" };
+              return (
+                <div
+                  key={order.publicId}
+                  className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-white p-3 shadow-xs transition-colors hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700"
+                >
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-xs font-bold text-slate-900 dark:text-slate-100">{order.orderNumber}</span>
@@ -1436,6 +1467,10 @@ function TabPurchases({ supplier, onNavigate }: { supplier: SupplierItem; onNavi
                   <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
                     Emitido em: {formatDate(order.createdAt)}
                     {order.receivedAt && ` • Recebido em: ${formatDate(order.receivedAt)}`}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    {receiptLabels[order.receiptStatus] || order.receiptStatus} •{" "}
+                    {financialLabels[order.financialStatus] || order.financialStatus}
                   </p>
                 </div>
 
@@ -1450,7 +1485,10 @@ function TabPurchases({ supplier, onNavigate }: { supplier: SupplierItem; onNavi
                   {onNavigate && (
                     <button
                       type="button"
-                      onClick={() => onNavigate("purchases")}
+                      onClick={() => {
+                        queuePurchaseOpenIntent(sessionStorage, order.publicId);
+                        onNavigate("purchases");
+                      }}
                       className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                       title="Abrir no módulo Compras"
                     >
@@ -1458,9 +1496,15 @@ function TabPurchases({ supplier, onNavigate }: { supplier: SupplierItem; onNavi
                     </button>
                   )}
                 </div>
-              </div>
-            );
-          })}
+                </div>
+              );
+            })}
+          </div>
+          <Pagination
+            page={page}
+            totalPages={Math.max(1, Math.ceil((purchasesQuery.data?.total ?? 0) / pageSize))}
+            onPage={setPage}
+          />
         </div>
       )}
     </div>

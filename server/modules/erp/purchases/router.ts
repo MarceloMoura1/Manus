@@ -58,15 +58,44 @@ const purchaseProcedure = megadeskProcedure.use(async ({ ctx, next, path, type }
   else console.warn("[ERP Purchase] operation failed", diagnostic);
   return result;
 });
-async function run<T>(fn: () => Promise<T>) {
+export const PURCHASE_PUBLIC_ERROR_MESSAGE =
+  "Não foi possível concluir a operação de compras.";
+
+export function purchaseFailureDiagnostic(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return { name: typeof error, code: null, errno: null, sqlState: null };
+  }
+  const candidate = error as Record<string, unknown>;
+  return {
+    name:
+      typeof candidate.name === "string"
+        ? candidate.name
+        : error.constructor?.name ?? "UnknownError",
+    code: typeof candidate.code === "string" ? candidate.code : null,
+    errno: typeof candidate.errno === "number" ? candidate.errno : null,
+    sqlState:
+      typeof candidate.sqlState === "string" ? candidate.sqlState : null,
+  };
+}
+
+export async function runPurchaseOperation<T>(fn: () => Promise<T>) {
   try {
     return await fn();
   } catch (e) {
     if (e instanceof ErpDomainError)
       throw new TRPCError({ code: erpTrpcCode(e), message: e.message });
-    throw e;
+    if (e instanceof TRPCError) throw e;
+    console.error(
+      "[ERP Purchase] unexpected operation failure",
+      purchaseFailureDiagnostic(e)
+    );
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: PURCHASE_PUBLIC_ERROR_MESSAGE,
+    });
   }
 }
+const run = runPurchaseOperation;
 const id = z.object({ publicId: z.string().uuid() });
 export const purchasesRouter = router({
   capabilities: purchaseProcedure.query(({ ctx }) => service.capabilities(identity(ctx))),

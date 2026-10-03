@@ -164,12 +164,18 @@ describe("ERP Fornecedores V2 — Suíte de Testes Estruturais e de Domínio", (
   it("13. exibe histórico de compras e indicadores calculados factualmente", () => {
     expect(suppliersSource).toContain("TabPurchases");
     expect(suppliersSource).toContain("trpc.erp.purchases.supplierMetrics.useQuery");
+    expect(suppliersSource).toContain("trpc.erp.purchases.list.useQuery");
     expect(suppliersSource).toContain("supplierPublicId: supplier.publicId");
     expect(suppliersSource).toContain("Total Comprado");
     expect(suppliersSource).toContain("Última Compra");
     expect(suppliersSource).toContain("Ticket Médio");
     expect(purchasesContractsSource).toContain("supplierPublicId: z.string().uuid().optional()");
     expect(purchasesRepoSource).toContain("s.public_id=?");
+    expect(suppliersSource).toContain("queuePurchaseOpenIntent(sessionStorage, order.publicId)");
+    expect(suppliersSource).toContain("receiptLabels[order.receiptStatus]");
+    expect(suppliersSource).toContain("financialLabels[order.financialStatus]");
+    expect(suppliersSource).toContain("<Pagination");
+    expect(suppliersSource).toContain("purchasesQuery.data?.total");
   });
 
   // 14. Timeline com resolução de responsável (Item 5)
