@@ -24,7 +24,16 @@ import { stableValue } from "./reconciler.mjs";
 
 const PLAN_URL = new URL("./reconciliation-plan.json", import.meta.url);
 const AUTH_KIND = "megadesk-oracle-main-promotion-authorization";
-const AUTH_VERSION = 1;
+const AUTH_VERSION = 2;
+const FREEZE_EVIDENCE_KIND = "megadesk-oracle-write-freeze-evidence";
+const FREEZE_EVIDENCE_VERSION = 1;
+const MAX_FREEZE_EVIDENCE_TTL_MS = 15 * 60 * 1000;
+const GIT_COMMIT_RE = /^[a-f0-9]{40}$/;
+const REPOSITORY_ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const PROMOTION_TRUST_ROOT_PATH = fileURLToPath(new URL("./trust/oracle-promotion-authority.v1.pem", import.meta.url));
+const FREEZE_TRUST_ROOT_PATH = fileURLToPath(new URL("./trust/oracle-write-freeze-authority.v1.pem", import.meta.url));
+const PROMOTION_TRUST_ROOT_SHA256 = "7c28dba348bac78a1e97b209c6e89c585924c05c8a4acfdfa24111b133ffc53f";
+const FREEZE_TRUST_ROOT_SHA256 = "5ed809d46c8bd59e3bef90e45df1372bbf23cf50cd49f2c4ded0bacd45ed40c6";
 const JOURNAL_KIND = "megadesk-oracle-main-promotion-journal";
 const JOURNAL_VERSION = 1;
 const LOCK_KIND = "megadesk-oracle-main-promotion-lock";
@@ -904,18 +913,85 @@ function signedPayloadBytes(authorization) {
   return Buffer.from(canonical(authorization.payload), "utf8");
 }
 
-async function loadAuthorization(environment = process.env) {
+function assertGitCommit(value, label) {
+  if (!GIT_COMMIT_RE.test(String(value))) fail("RELEASE_IDENTITY_INVALID", `${label} must be a full lowercase Git commit SHA.`);
+  return String(value);
+}
+
+export function assertReleaseBinding(authorizedCommit, candidateCommit) {
+  const authorized = assertGitCommit(authorizedCommit, "authorized release");
+  const candidate = assertGitCommit(candidateCommit, "candidate release");
+  if (!equalSecret(authorized, candidate)) {
+    fail("RELEASE_IDENTITY_MISMATCH", "The authorized release does not match the candidate Git commit.");
+  }
+  return authorized;
+}
+
+export function assertAuthorizationPayload(payload, now) {
+  if (!payload || typeof payload !== "object") fail("CORRUPT_AUTHORIZATION", "Authorization payload is invalid.");
+  assertUuid(payload.operationId, "operation ID");
+  assertUuid(payload.authorizationId, "authorization ID");
+  assertHex(payload.humanAuthorizationSha256, "human authorization hash");
+  if (!Number.isFinite(Date.parse(payload.issuedAt)) || !Number.isFinite(Date.parse(payload.expiresAt))
+      || now < Date.parse(payload.issuedAt) || now >= Date.parse(payload.expiresAt)) {
+    fail("AUTHORIZATION_EXPIRED", "Authorization is not currently valid.");
+  }
+  if (!payload.release || typeof payload.release !== "object") {
+    fail("RELEASE_IDENTITY_REQUIRED", "Authorization must bind an exact Git release commit.");
+  }
+  assertGitCommit(payload.release.gitCommit, "authorized release");
+  if (!payload.freeze || typeof payload.freeze !== "object") {
+    fail("FREEZE_EVIDENCE_REQUIRED", "Authorization must bind a signed freeze-evidence artifact.");
+  }
+  assertUuid(payload.freeze.requestId, "freeze request identity");
+  assertUuid(payload.freeze.freezeId, "freeze identity");
+  assertHex(payload.freeze.evidenceSha256, "freeze evidence hash");
+  if (!payload.candidate?.database || !payload.candidate?.storage) {
+    fail("CORRUPT_AUTHORIZATION", "Authorization candidate identity is incomplete.");
+  }
+  if (!payload.candidate.release || typeof payload.candidate.release !== "object") {
+    fail("RELEASE_IDENTITY_REQUIRED", "Authorization must bind the candidate artifact to an exact Git release commit.");
+  }
+  assertReleaseBinding(payload.release.gitCommit, payload.candidate.release.gitCommit);
+  if (payload.candidate.database.fingerprint !== APPROVED_DATABASE_FINGERPRINT
+      || payload.candidate.storage.fingerprint !== APPROVED_STORAGE_MANIFEST) {
+    fail("APPROVED_CANDIDATE_MISMATCH", "Signed candidate differs from the independently approved fingerprints.");
+  }
+  if (!Array.isArray(payload.allowedActions) || !payload.singleUse) {
+    fail("AUTHORIZATION_POLICY_INVALID", "Authorization must be explicit and single-use.");
+  }
+  return payload;
+}
+
+export async function loadPinnedTrustRoot(path, expectedSha256, label) {
+  try {
+    await assertNoSymlinkPath(path);
+    const info = await lstat(path);
+    if (!info.isFile() || info.isSymbolicLink()) fail("TRUST_ROOT_UNSAFE", `${label} must be a regular, non-symlink file.`);
+    if (process.platform === "linux" && (info.mode & 0o022) !== 0) {
+      fail("TRUST_ROOT_UNSAFE", `${label} must not be group or world writable.`);
+    }
+    const key = await readFile(path);
+    if (!equalSecret(sha256(key), expectedSha256)) fail("TRUST_ROOT_PIN_MISMATCH", `${label} differs from the compiled trust root.`);
+    return key;
+  } catch (error) {
+    if (error instanceof OracleMainPromotionError) throw error;
+    fail("TRUST_ROOT_UNAVAILABLE", `${label} is unavailable: ${error?.code ?? "UNEXPECTED"}.`);
+  }
+}
+
+export async function loadAuthorization(environment = process.env, { now = Date.now() } = {}) {
   const authPath = environment.MEGADESK_PROMOTION_AUTHORIZATION_FILE;
-  const keyPath = environment.MEGADESK_PROMOTION_PUBLIC_KEY_FILE;
-  if (!authPath || !keyPath) fail("AUTHORIZATION_REQUIRED", "Authorization and pinned public key files are required.");
-  const raw = await readFile(authPath);
-  const key = await readFile(keyPath);
-  if (!equalSecret(sha256(raw), assertHex(environment.MEGADESK_PROMOTION_AUTHORIZATION_SHA256, "authorization artifact pin"))) {
-    fail("AUTHORIZATION_PIN_MISMATCH", "Authorization artifact differs from the external trust anchor.");
+  if (!authPath) fail("AUTHORIZATION_REQUIRED", "A signed authorization artifact is required.");
+  let raw;
+  try {
+    await assertNoSymlinkPath(authPath);
+    raw = await readFile(authPath);
+  } catch (error) {
+    if (error instanceof OracleMainPromotionError) throw error;
+    fail("AUTHORIZATION_UNAVAILABLE", `Authorization artifact is unavailable: ${error?.code ?? "UNEXPECTED"}.`);
   }
-  if (!equalSecret(sha256(key), assertHex(environment.MEGADESK_PROMOTION_PUBLIC_KEY_SHA256, "public key pin"))) {
-    fail("PUBLIC_KEY_PIN_MISMATCH", "Public key differs from the external trust anchor.");
-  }
+  const key = await loadPinnedTrustRoot(PROMOTION_TRUST_ROOT_PATH, PROMOTION_TRUST_ROOT_SHA256, "promotion trust root");
   let authorization;
   try { authorization = JSON.parse(raw.toString("utf8")); } catch { fail("CORRUPT_AUTHORIZATION", "Authorization artifact is not valid JSON."); }
   if (authorization.kind !== AUTH_KIND || authorization.version !== AUTH_VERSION || typeof authorization.payload !== "object") {
@@ -924,25 +1000,88 @@ async function loadAuthorization(environment = process.env) {
   let signature;
   try { signature = Buffer.from(authorization.signature, "base64"); } catch { fail("CORRUPT_AUTHORIZATION", "Authorization signature is invalid."); }
   if (!verifySignature(null, signedPayloadBytes(authorization), key, signature)) fail("AUTHORIZATION_SIGNATURE_INVALID", "Authorization signature verification failed.");
-  const payload = authorization.payload;
+  const payload = assertAuthorizationPayload(authorization.payload, now);
   if (payload.operationId !== environment.MEGADESK_PROMOTION_OPERATION_ID || payload.authorizationId !== environment.MEGADESK_PROMOTION_AUTHORIZATION_ID) {
     fail("AUTHORIZATION_CONTEXT_MISMATCH", "Operation or authorization ID differs from the external invocation context.");
   }
   if (sha256(environment.MEGADESK_PROMOTION_HUMAN_AUTHORIZATION ?? "") !== payload.humanAuthorizationSha256) {
     fail("HUMAN_AUTHORIZATION_REQUIRED", "Human authorization proof does not match the signed authorization.");
   }
-  const now = Date.now();
-  if (!Number.isFinite(Date.parse(payload.issuedAt)) || !Number.isFinite(Date.parse(payload.expiresAt))
-      || now < Date.parse(payload.issuedAt) || now >= Date.parse(payload.expiresAt)) {
-    fail("AUTHORIZATION_EXPIRED", "Authorization is not currently valid.");
-  }
-  if (payload.freezeBoundaryId !== EXPECTED_FREEZE_BOUNDARY) fail("FREEZE_BOUNDARY_MISMATCH", "Freeze boundary differs from the approved source.");
-  if (payload.candidate.database.fingerprint !== APPROVED_DATABASE_FINGERPRINT
-      || payload.candidate.storage.fingerprint !== APPROVED_STORAGE_MANIFEST) {
-    fail("APPROVED_CANDIDATE_MISMATCH", "Signed candidate differs from the independently approved fingerprints.");
-  }
-  if (!Array.isArray(payload.allowedActions) || !payload.singleUse) fail("AUTHORIZATION_POLICY_INVALID", "Authorization must be explicit and single-use.");
   return { authorization, raw, key, path: resolve(authPath) };
+}
+
+function gitOutput(args, failureCode, message) {
+  const result = spawnSync("git", ["-C", REPOSITORY_ROOT, ...args], { encoding: "utf8", windowsHide: true });
+  if (result.error || result.status !== 0) fail(failureCode, `${message}: ${result.error?.code ?? result.stderr?.trim() ?? "UNEXPECTED"}.`);
+  return String(result.stdout ?? "").trim();
+}
+
+export function candidateGitCommit() {
+  const commit = gitOutput(["rev-parse", "--verify", "HEAD^{commit}"], "CANDIDATE_RELEASE_UNAVAILABLE", "Candidate Git HEAD is unavailable");
+  assertGitCommit(commit, "candidate Git HEAD");
+  const clean = spawnSync("git", ["-C", REPOSITORY_ROOT, "diff-index", "--quiet", "HEAD", "--"], { encoding: "utf8", windowsHide: true });
+  if (clean.error) fail("CANDIDATE_RELEASE_UNAVAILABLE", `Candidate Git cleanliness cannot be checked: ${clean.error.code ?? "UNEXPECTED"}.`);
+  if (clean.status === 1) fail("CANDIDATE_RELEASE_DIRTY", "Candidate Git checkout has tracked changes.");
+  if (clean.status !== 0) fail("CANDIDATE_RELEASE_UNAVAILABLE", `Candidate Git cleanliness cannot be checked: ${clean.stderr?.trim() ?? "UNEXPECTED"}.`);
+  return commit;
+}
+
+export function assertFreezeEvidencePayload(payload, auth, candidateCommit, now = Date.now()) {
+  if (!payload || typeof payload !== "object") fail("FREEZE_EVIDENCE_CORRUPT", "Freeze evidence payload is invalid.");
+  if (payload.active !== true) fail("FREEZE_NOT_ACTIVE", "Freeze evidence does not attest an active freeze.");
+  if (payload.writersDrained !== true || payload.activeWriters !== 0 || payload.inFlightWrites !== 0) {
+    fail("WRITERS_NOT_DRAINED", "Freeze evidence does not attest that all writers are drained.");
+  }
+  assertUuid(payload.freezeId, "freeze evidence identity");
+  assertUuid(payload.requestId, "freeze evidence request identity");
+  if (payload.requestId !== auth.freeze.requestId) fail("FREEZE_REQUEST_MISMATCH", "Freeze evidence request differs from authorization.");
+  if (payload.freezeId !== auth.freeze.freezeId) fail("FREEZE_IDENTITY_MISMATCH", "Freeze evidence identity differs from authorization.");
+  if (payload.operationId !== auth.operationId) fail("FREEZE_OPERATION_MISMATCH", "Freeze evidence operation differs from authorization.");
+  const authorizedRelease = assertReleaseBinding(auth.release?.gitCommit, candidateCommit);
+  if (payload.release?.gitCommit !== authorizedRelease) fail("FREEZE_RELEASE_MISMATCH", "Freeze evidence release differs from the authorized candidate.");
+  if (payload.target?.hostname !== auth.target?.host?.hostname || payload.target?.database !== auth.target?.mysql?.database) {
+    fail("FREEZE_TARGET_MISMATCH", "Freeze evidence target differs from authorization.");
+  }
+  const issuedAt = Date.parse(payload.issuedAt);
+  const expiresAt = Date.parse(payload.expiresAt);
+  if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) || issuedAt > now || now >= expiresAt
+      || expiresAt - issuedAt > MAX_FREEZE_EVIDENCE_TTL_MS) {
+    fail("FREEZE_EVIDENCE_STALE", "Freeze evidence is not current within the maximum trusted TTL.");
+  }
+  return payload;
+}
+
+export async function loadTrustedFreezeEvidence(ctx, candidateCommit, { now = Date.now() } = {}) {
+  const path = ctx.environment.MEGADESK_PROMOTION_FREEZE_EVIDENCE_FILE;
+  if (!path) fail("FREEZE_EVIDENCE_REQUIRED", "A signed freeze-evidence artifact is required before destructive promotion.");
+  let raw;
+  try {
+    await assertNoSymlinkPath(path);
+    raw = await readFile(path);
+  } catch (error) {
+    if (error instanceof OracleMainPromotionError) throw error;
+    fail("FREEZE_EVIDENCE_UNAVAILABLE", `Freeze evidence is unavailable: ${error?.code ?? "UNEXPECTED"}.`);
+  }
+  if (!equalSecret(sha256(raw), authFreezeEvidenceSha256(ctx.auth))) {
+    fail("FREEZE_EVIDENCE_SUBSTITUTION", "Freeze evidence differs from the artifact signed in authorization.");
+  }
+  let evidence;
+  try { evidence = JSON.parse(raw.toString("utf8")); } catch { fail("FREEZE_EVIDENCE_CORRUPT", "Freeze evidence is not valid JSON."); }
+  if (evidence.kind !== FREEZE_EVIDENCE_KIND || evidence.version !== FREEZE_EVIDENCE_VERSION || typeof evidence.payload !== "object") {
+    fail("FREEZE_EVIDENCE_CORRUPT", "Freeze evidence kind/version is invalid.");
+  }
+  let signature;
+  try { signature = Buffer.from(evidence.signature, "base64"); } catch { fail("FREEZE_EVIDENCE_CORRUPT", "Freeze evidence signature is invalid."); }
+  const key = await loadPinnedTrustRoot(FREEZE_TRUST_ROOT_PATH, FREEZE_TRUST_ROOT_SHA256, "freeze-evidence trust root");
+  if (!verifySignature(null, Buffer.from(canonical(evidence.payload), "utf8"), key, signature)) {
+    fail("FREEZE_EVIDENCE_SIGNATURE_INVALID", "Freeze evidence signature verification failed.");
+  }
+  return { evidence, raw, path: resolve(path), payload: assertFreezeEvidencePayload(evidence.payload, ctx.auth, candidateCommit, now) };
+}
+
+function authFreezeEvidenceSha256(auth) {
+  if (!auth?.freeze || typeof auth.freeze !== "object") fail("FREEZE_EVIDENCE_REQUIRED", "Authorization does not bind freeze evidence.");
+  return assertHex(auth.freeze.evidenceSha256, "freeze evidence hash");
 }
 
 export function assertTargetPolicy(auth, environment) {
@@ -1003,6 +1142,12 @@ export function assertTargetPolicy(auth, environment) {
     if (targetUrl.hostname !== "127.0.0.1" || targetUrl.port !== "33329") {
       fail("DISPOSABLE_DATABASE_ROUTE_MISMATCH", "Disposable rehearsal must use exact loopback port 33329.");
     }
+  }
+}
+
+export function assertDestructivePlatform(action, platform = process.platform) {
+  if (["promote", "recover", "rollback"].includes(action) && platform !== "linux") {
+    fail("STORAGE_TARGET_BINDING_UNSUPPORTED", "Promotion and rollback require Linux storage target binding; this platform fails closed before mutation.");
   }
 }
 
@@ -1191,6 +1336,61 @@ async function revalidateRollbackBoundary(ctx, boundary, expectation) {
   } catch (error) {
     fail("HUMAN_RECOVERY_REQUIRED", `Rollback target identity is ambiguous at ${boundary}: ${error.code ?? "UNEXPECTED"}.`);
   }
+}
+
+export function assertBackupEvidence(ctx) {
+  const backup = ctx.backup;
+  if (!backup?.database || !backup?.storage) fail("BACKUP_EVIDENCE_REQUIRED", "A fully verified backup is required before destructive promotion.");
+  if (resolve(backup.database.path ?? "") !== resolve(ctx.auth.backup.database.path)
+      || !Number.isSafeInteger(backup.database.bytes) || backup.database.bytes <= 0) {
+    fail("BACKUP_EVIDENCE_INVALID", "Database backup evidence is incomplete or substituted.");
+  }
+  assertHex(backup.database.sha256, "database backup hash");
+  if (!sameStorageSnapshot(backup.storage, ctx.auth.preState.storage)) {
+    fail("BACKUP_EVIDENCE_INVALID", "Storage backup evidence differs from the authorized pre-state.");
+  }
+  if (backup.restoredDb !== ctx.auth.preState.database.fingerprint || backup.restoredStorage !== ctx.auth.preState.storage.fingerprint) {
+    fail("BACKUP_EVIDENCE_INVALID", "Backup restore verification does not match the authorized pre-state.");
+  }
+  return backup;
+}
+
+async function assertAuthorizationStillTrusted(ctx) {
+  const reloaded = await loadAuthorization(ctx.environment);
+  if (!equalSecret(sha256(reloaded.raw), ctx.authorizationSha256)
+      || canonical(reloaded.authorization.payload) !== canonical(ctx.auth)) {
+    fail("AUTHORIZATION_CHANGED", "Authorization changed after initial verification.");
+  }
+  assertTargetPolicy(ctx.auth, ctx.environment);
+}
+
+export async function assertPromotionDestructiveBoundary(ctx, expectation) {
+  assertBackupEvidence(ctx);
+  await revalidateDestructiveBoundary(ctx, "DB_PROMOTION", expectation);
+  await assertAuthorizationStillTrusted(ctx);
+  const candidateCommit = candidateGitCommit();
+  assertReleaseBinding(ctx.auth.release?.gitCommit, candidateCommit);
+  assertReleaseBinding(ctx.auth.candidate?.release?.gitCommit, candidateCommit);
+  const freeze = await loadTrustedFreezeEvidence(ctx, candidateCommit);
+  await assertCandidateStillBound(ctx);
+  const finalTarget = await observeTarget(ctx, expectation);
+  return { candidateCommit, freeze, target: finalTarget };
+}
+
+export async function runDestructivePromotion(ctx, expectation, { boundary = assertPromotionDestructiveBoundary, write = promoteDatabase } = {}) {
+  await boundary(ctx, expectation);
+  return write(ctx);
+}
+
+async function assertRollbackDestructiveBoundary(ctx, boundary, expectation) {
+  assertBackupEvidence(ctx);
+  await revalidateRollbackBoundary(ctx, boundary, expectation);
+  await assertAuthorizationStillTrusted(ctx);
+  const candidateCommit = candidateGitCommit();
+  assertReleaseBinding(ctx.auth.release?.gitCommit, candidateCommit);
+  assertReleaseBinding(ctx.auth.candidate?.release?.gitCommit, candidateCommit);
+  await loadTrustedFreezeEvidence(ctx, candidateCommit);
+  return observeTarget(ctx, expectation);
 }
 
 function checksummed(body) {
@@ -1490,6 +1690,7 @@ async function rollbackBoth(ctx) {
   await writeJournal(ctx, "ROLLBACK_STARTED", { from: ctx.journal?.phase ?? null });
   const verified = ctx.backup ?? journalEvidence(ctx, "BACKUP_VERIFIED");
   if (!verified?.database || !verified?.storage) fail("ROLLBACK_EVIDENCE_MISSING", "Verified backup evidence is absent from the durable journal.");
+  ctx.backup = verified;
   const backupPath = verified.database.path;
   if (resolve(backupPath) !== resolve(ctx.auth.backup.database.path)) fail("ROLLBACK_BACKUP_SUBSTITUTION", "Database rollback path differs from authorization.");
   if (!await exists(backupPath)) fail("ROLLBACK_BACKUP_MISSING", "Database rollback backup is missing.");
@@ -1507,10 +1708,10 @@ async function rollbackBoth(ctx) {
     fail("ROLLBACK_BACKUP_MISMATCH", "Captured rollback storage differs from the verified pre-state.");
   }
   const expectedBeforeRollback = rollbackExpectedTarget(ctx);
-  await revalidateRollbackBoundary(ctx, "ROLLBACK_DB", expectedBeforeRollback);
+  await assertRollbackDestructiveBoundary(ctx, "ROLLBACK_DB", expectedBeforeRollback);
   ctx.mutationStarted = true;
   await restoreDatabase(ctx, ctx.auth.target.mysql.database, backupPath);
-  await revalidateRollbackBoundary(ctx, "ROLLBACK_STORAGE", { database: ctx.auth.preState.database, storage: expectedBeforeRollback.storage });
+  await assertRollbackDestructiveBoundary(ctx, "ROLLBACK_STORAGE", { database: ctx.auth.preState.database, storage: expectedBeforeRollback.storage });
   const restoredStorage = await restoreBoundStorage(ctx, capturedBackupStorage, ctx.auth.preState.storage.fingerprint);
   const expectedDb = ctx.auth.preState.database;
   const restoredDb = await assertDatabase(ctx.auth.target.mysql.url, ctx.password, expectedDb, "rolled-back target");
@@ -1519,7 +1720,7 @@ async function rollbackBoth(ctx) {
 }
 
 async function loadContext(action, environment = process.env) {
-  const { authorization } = await loadAuthorization(environment);
+  const { authorization, raw } = await loadAuthorization(environment);
   const auth = authorization.payload;
   if (!auth.allowedActions.includes(action)) fail("ACTION_NOT_AUTHORIZED", "Requested action is not in the signed authorization.");
   assertTargetPolicy(auth, environment);
@@ -1532,9 +1733,7 @@ async function loadContext(action, environment = process.env) {
       || environment.MEGADESK_PROMOTION_TEST_HOOK_ROOT)) {
     fail("TEST_CONTROL_FORBIDDEN", "Failure injection and test timing controls are forbidden for Oracle MAIN.");
   }
-  if (["promote", "recover", "rollback"].includes(action) && process.platform !== "linux") {
-    fail("STORAGE_TARGET_BINDING_UNSUPPORTED", "Promotion and rollback require Linux storage target binding; this platform fails closed before mutation.");
-  }
+  assertDestructivePlatform(action);
   if (!environment.MEGADESK_PROMOTION_DATABASE_PASSWORD) fail("DATABASE_PASSWORD_REQUIRED", "Database password must be supplied only in process memory.");
   const allowedRoot = resolve(auth.paths.allowedRoot);
   const expectedLock = auth.target.class === "oracle-main"
@@ -1576,6 +1775,7 @@ async function loadContext(action, environment = process.env) {
     lockOwner: null,
     backup: null,
     candidate: null,
+    authorizationSha256: sha256(raw),
     mutationStarted: false,
   };
   await mkdir(ctx.paths.stateRoot, { recursive: true });
@@ -1621,9 +1821,12 @@ export async function run(action, environment = process.env) {
       await verifyCandidate(ctx);
       await writeJournal(ctx, "CANDIDATE_VERIFIED", { database: APPROVED_DATABASE_FINGERPRINT, storage: APPROVED_STORAGE_MANIFEST });
       maybeInject(ctx, "after_backup_before_promotion");
-      await revalidateDestructiveBoundary(ctx, "DB_PROMOTION", { database: ctx.auth.preState.database, storage: ctx.auth.preState.storage });
-      await writeJournal(ctx, "PROMOTION_STARTED");
-      await promoteDatabase(ctx);
+      await runDestructivePromotion(ctx, { database: ctx.auth.preState.database, storage: ctx.auth.preState.storage }, {
+        write: async current => {
+          await writeJournal(current, "PROMOTION_STARTED");
+          return promoteDatabase(current);
+        },
+      });
       if (ctx.environment.MEGADESK_PROMOTION_INJECT_FAILURE === "process_crash") maybeInject(ctx, "process_crash");
       maybeInject(ctx, "after_db_before_storage");
       const promotedDatabase = { ...ctx.auth.preState.database, ...ctx.auth.candidate.database.identity, fingerprint: APPROVED_DATABASE_FINGERPRINT };
@@ -1688,6 +1891,13 @@ export const constants = Object.freeze({
   EXPECTED_FREEZE_BOUNDARY,
   AUTH_KIND,
   AUTH_VERSION,
+  FREEZE_EVIDENCE_KIND,
+  FREEZE_EVIDENCE_VERSION,
+  MAX_FREEZE_EVIDENCE_TTL_MS,
+  PROMOTION_TRUST_ROOT_PATH,
+  FREEZE_TRUST_ROOT_PATH,
+  PROMOTION_TRUST_ROOT_SHA256,
+  FREEZE_TRUST_ROOT_SHA256,
   REHEARSAL_ROOT_SUFFIX,
   PRODUCTION_HOSTNAME,
   PRODUCTION_DATABASE,
