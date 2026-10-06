@@ -126,23 +126,23 @@ physical("ERP Supplier Files — Disposable Physical MySQL Integration Rehearsal
     );
     supplierIdB = resB.insertId;
 
-    // 3. Now apply 0032 onto baseline
-    const entry32 = fullJournal.entries.find((e: any) => e.idx === 32);
-    if (entry32) {
-      const sqlFile = `${entry32.tag}.sql`;
+    // 3. Apply the complete canonical tail from 0032 through the journal head.
+    // The current repository lifecycle depends on 0033, so copying only 0032
+    // would create a schema that no longer matches the code under test.
+    for (const entry of fullJournal.entries.filter((item: any) => item.idx >= 32)) {
+      const sqlFile = `${entry.tag}.sql`;
       await copyFile(join(MAIN_MIGRATIONS_DIR, sqlFile), join(migrationFolder, sqlFile));
-      const snapshotFile = `${entry32.tag.slice(0, 4)}_snapshot.json`;
+      const snapshotFile = `${entry.tag.slice(0, 4)}_snapshot.json`;
       if (existsSync(join(MAIN_MIGRATIONS_DIR, "meta", snapshotFile))) {
         await copyFile(join(MAIN_MIGRATIONS_DIR, "meta", snapshotFile), join(migrationFolder, "meta", snapshotFile));
       }
-      await writeFile(
-        join(migrationFolder, "meta", "_journal.json"),
-        JSON.stringify(fullJournal, null, 2)
-      );
-
-      // Execute 0032 migration
-      await migrate(drizzle(pool), { migrationsFolder: migrationFolder });
     }
+    await writeFile(
+      join(migrationFolder, "meta", "_journal.json"),
+      JSON.stringify(fullJournal, null, 2)
+    );
+
+    await migrate(drizzle(pool), { migrationsFolder: migrationFolder });
   }, 120_000);
 
   afterAll(async () => {
@@ -150,7 +150,7 @@ physical("ERP Supplier Files — Disposable Physical MySQL Integration Rehearsal
     if (migrationFolder) await rm(migrationFolder, { recursive: true, force: true });
   });
 
-  it("proves 0032 created erp_supplier_files table with exact schema & constraints", async () => {
+  it("proves the 0032 supplier-files schema survives the current canonical migration tail", async () => {
     const [tables] = await pool.execute<RowDataPacket[]>(
       "SHOW TABLES LIKE 'erp_supplier_files'"
     );
@@ -209,16 +209,26 @@ physical("ERP Supplier Files — Disposable Physical MySQL Integration Rehearsal
     const listA = await repo.list(tenantA, supplierIdA);
     expect(listA.find(f => f.public_id === filePublicIdA)).toBeDefined();
 
-    // Soft delete
-    const deleteOk = await repo.softDelete(tenantA, supplierIdA, filePublicIdA, userA);
-    expect(deleteOk).toBe(true);
+    // The current two-phase lifecycle must hide the file before physical cleanup.
+    const pendingDelete = await repo.transitionToPendingDelete(
+      tenantA,
+      supplierIdA,
+      filePublicIdA,
+      userA
+    );
+    expect(pendingDelete).toMatchObject({
+      state: "pending_delete",
+      deleted_by: userA,
+      deleted_at: null,
+    });
+    expect(pendingDelete?.pending_delete_at).toBeTruthy();
 
     const afterDeleteActive = await repo.list(tenantA, supplierIdA, { includeDeleted: false });
     expect(afterDeleteActive.find(f => f.public_id === filePublicIdA)).toBeUndefined();
 
     const afterDeleteAll = await repo.list(tenantA, supplierIdA, { includeDeleted: true });
     const deletedFile = afterDeleteAll.find(f => f.public_id === filePublicIdA);
-    expect(deletedFile?.state).toBe("deleted");
+    expect(deletedFile?.state).toBe("pending_delete");
     expect(deletedFile?.deleted_by_name).toBe("Alice Gestora Alpha");
   });
 
