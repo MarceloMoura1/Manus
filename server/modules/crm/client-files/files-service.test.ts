@@ -67,6 +67,7 @@ function createRepository() {
     findByPublicId: vi.fn(async (clientId: string, crmClientId: string, filePublicId: string) =>
       files.find(file => file.client_id === clientId && file.crm_client_id === crmClientId && file.public_id === filePublicId) ?? null
     ),
+    hasActiveSaleDocumentLink: vi.fn(async () => false),
     transitionToPendingDelete: vi.fn(async (clientId: string, crmClientId: string, filePublicId: string, userId: string) => {
       const file = files.find(item => item.client_id === clientId && item.crm_client_id === crmClientId && item.public_id === filePublicId);
       if (!file || file.state === "deleted") return null;
@@ -180,6 +181,22 @@ describe("Client Files — tenant scoped persistence", () => {
     await expect(access(physicalPath)).rejects.toMatchObject({ code: "ENOENT" });
     expect((repository as any).transitionToPendingDelete).toHaveBeenCalledTimes(2);
     expect((repository as any).finalizePendingDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("prevents a sale document from being physically deleted through the generic client file action", async () => {
+    const { repository } = createRepository();
+    const service = new ClientFileService(repository);
+    const adminA = { clientId: tenantA, userId: "admin-a", role: "admin" as const };
+    const uploaded = await service.upload(adminA, uploadInput(clientA1));
+    vi.mocked(repository.hasActiveSaleDocumentLink).mockResolvedValueOnce(true);
+
+    await expect(
+      service.delete(adminA, { crmClientId: clientA1, filePublicId: uploaded.publicId })
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "Este documento está vinculado a uma venda e deve ser removido pelo pedido correspondente.",
+    });
+    expect(repository.transitionToPendingDelete).not.toHaveBeenCalled();
   });
 
   it("uses the existing safe filename, path and content policies in a distinct CRM namespace", async () => {

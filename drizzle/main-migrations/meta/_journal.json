@@ -262,6 +262,20 @@
       "when": 1790786929102,
       "tag": "0036_spicy_zeigeist",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "5",
+      "when": 1791258271434,
+      "tag": "0037_spicy_wilson_fisk",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "5",
+      "when": 1791263011437,
+      "tag": "0038_quick_lenny_balinger",
+      "breakpoints": true
     }
   ]
 }

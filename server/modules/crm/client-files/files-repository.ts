@@ -14,7 +14,7 @@ export type ClientFileRow = RowDataPacket & {
   size_bytes: number;
   sha256: string;
   storage_key: string;
-  state: "active" | "pending_delete" | "deleted";
+  state: "pending_upload" | "active" | "pending_delete" | "deleted";
   created_by: string;
   created_at: string;
   deleted_by: string | null;
@@ -128,6 +128,26 @@ export class ClientFileRepository {
     return this.findByPublicId(clientId, crmClientId, filePublicId);
   }
 
+  async hasActiveSaleDocumentLink(
+    clientId: string,
+    crmClientId: string,
+    filePublicId: string
+  ): Promise<boolean> {
+    const [rows] = await this.db().execute<RowDataPacket[]>(
+      `SELECT 1
+       FROM erp_sale_documents d
+       INNER JOIN megadesk_crm_client_files f
+         ON f.client_id=d.client_id AND f.id=d.client_file_id
+       INNER JOIN erp_sale_orders o
+         ON o.client_id=d.client_id AND o.id=d.sale_order_id
+       WHERE d.client_id=? AND o.crm_client_id=? AND f.public_id=?
+         AND d.state <> 'deleted'
+       LIMIT 1`,
+      [clientId, crmClientId, filePublicId]
+    );
+    return Boolean(rows[0]);
+  }
+
   async finalizePendingDelete(clientId: string, crmClientId: string, filePublicId: string): Promise<ClientFileRow | null> {
     const [result] = await this.db().execute<ResultSetHeader>(
       `UPDATE megadesk_crm_client_files
@@ -143,9 +163,13 @@ export class ClientFileRepository {
   async listEligiblePhysicalCleanup(clientId: string, limit = 100): Promise<ClientFileRow[]> {
     const boundedLimit = Math.max(1, Math.min(1_000, limit));
     const [rows] = await this.db().execute<ClientFileRow[]>(
-      `SELECT * FROM megadesk_crm_client_files
-       WHERE client_id = ? AND state = 'pending_delete' AND pending_delete_at IS NOT NULL
-       ORDER BY pending_delete_at ASC, id ASC
+      `SELECT f.* FROM megadesk_crm_client_files f
+       WHERE f.client_id = ? AND f.state = 'pending_delete' AND f.pending_delete_at IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM erp_sale_documents d
+           WHERE d.client_id=f.client_id AND d.client_file_id=f.id AND d.state <> 'deleted'
+         )
+       ORDER BY f.pending_delete_at ASC, f.id ASC
        LIMIT ${boundedLimit}`,
       [clientId]
     );

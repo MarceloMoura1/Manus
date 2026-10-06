@@ -6,7 +6,7 @@ import type { CustomerType, CrmWhatsAppIntent } from "../../../shared/crm";
 import { customerTypeToCsv } from "../../../shared/crm";
 import { isValidCpf, isValidCnpj, suggestCustomerType } from "../../../shared/br-documents";
 import { normalizeContactPhone, sameContactPhone } from "../../../shared/contact-phone";
-import { Building2, Phone, Mail, MapPin, Search, Plus, User, Tag, FileText, MessageCircle, Ticket, DollarSign, Package, Paperclip, Clock, Edit3, X, ChevronLeft, ChevronRight, MoreHorizontal, Archive, RotateCcw, Trash2, Briefcase, Hash, Globe, Instagram, Facebook, Smartphone, CheckCircle, XCircle, AlertCircle, MinusCircle, TrendingDown, UploadCloud, Download, RefreshCw, AlertTriangle, CheckCircle2, MessageSquare, PlusCircle } from "lucide-react";
+import { Building2, Phone, Mail, MapPin, Search, Plus, User, Tag, FileText, MessageCircle, Ticket, DollarSign, Package, Paperclip, Clock, Edit3, X, ChevronLeft, ChevronRight, MoreHorizontal, Archive, RotateCcw, Trash2, Briefcase, Hash, Globe, Instagram, Facebook, Smartphone, CheckCircle, XCircle, AlertCircle, MinusCircle, TrendingDown, UploadCloud, Download, RefreshCw, AlertTriangle, CheckCircle2, MessageSquare, PlusCircle, ShoppingCart } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -51,7 +51,7 @@ export type CrmClient = {
   lifecycleVersion: number;
 };
 
-type ClientTab = "geral" | "chamados" | "conversas" | "timeline" | "financeiro" | "rastreamento" | "arquivos";
+type ClientTab = "geral" | "chamados" | "conversas" | "timeline" | "financeiro" | "vendas" | "rastreamento" | "arquivos";
 type AdditionalContact = {
   phone: string;
   whatsapp: string;
@@ -898,12 +898,61 @@ function ClientFilesTab({ client }: { client: CrmClient }) {
   );
 }
 
-function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappConnected, canStartConversation, canPermanentlyDelete, onLifecycleChanged, onDeleted }: { client: CrmClient; onEdit: () => void; onClose: () => void; onSendMessage?: (intent: CrmWhatsAppIntent) => void; whatsappConnected: boolean; canStartConversation: boolean; canPermanentlyDelete: boolean; onLifecycleChanged: () => Promise<void>; onDeleted: () => Promise<void> }) {
+const clientSaleStageLabels: Record<string, string> = {
+  created: "Criada",
+  confirmed: "Confirmada",
+  separation: "Separação",
+  shipped: "Enviado",
+  received: "Recebido",
+  completed: "Concluído",
+};
+
+const clientSalePaymentLabels: Record<string, string> = {
+  pending: "Pendente",
+  partial: "Pagamento parcial",
+  paid: "Pago",
+};
+
+function ClientSalesTab({ client, onSaleNavigate }: { client: CrmClient; onSaleNavigate?: (salePublicId: string) => void }) {
+  const query = trpc.erp.sales.customerSales.useQuery(
+    { crmClientId: client.crmClientId },
+    { refetchOnWindowFocus: true }
+  );
+  const sales = query.data?.sales ?? [];
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Vendas do cliente</h3>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Pedidos, produtos, pagamento, etapa e documentos vinculados com dados reais do ERP.</p>
+      </div>
+      {query.isLoading ? <div className="flex h-36 items-center justify-center"><RefreshCw className="h-5 w-5 animate-spin text-blue-500" /></div> : query.isError ? <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">Não foi possível carregar as vendas deste cliente. <button type="button" className="font-semibold underline" onClick={() => void query.refetch()}>Tentar novamente</button></div> : sales.length === 0 ? <div className="flex min-h-48 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 text-center dark:border-slate-700"><ShoppingCart className="mb-3 h-10 w-10 text-slate-300 dark:text-slate-600" /><p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Nenhuma venda vinculada</p><p className="mt-1 text-xs text-slate-500">As vendas associadas a este cliente aparecerão aqui.</p></div> : (
+        <div className="space-y-3">
+          {sales.map(sale => (
+            <article key={sale.publicId} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div><strong className="text-sm text-slate-900 dark:text-slate-100">{sale.orderNumber}</strong><p className="mt-1 text-xs text-slate-500">{formatDate(sale.createdAt)}</p></div>
+                <div className="flex flex-wrap gap-1.5"><span className={cn("rounded-full px-2 py-1 text-[10px] font-bold", sale.paymentStatus === "paid" ? "bg-emerald-100 text-emerald-800" : sale.paymentStatus === "partial" ? "bg-amber-100 text-amber-900" : "bg-rose-100 text-rose-800")}>{clientSalePaymentLabels[sale.paymentStatus] ?? sale.paymentStatus}</span><span className="rounded-full bg-blue-100 px-2 py-1 text-[10px] font-bold text-blue-800">{clientSaleStageLabels[sale.currentStage] ?? sale.currentStage}</span>{sale.status === "cancelled" && <span className="rounded-full bg-slate-200 px-2 py-1 text-[10px] font-bold text-slate-700">Cancelada</span>}</div>
+              </div>
+              <div className="mt-3 flex items-end justify-between gap-3 border-t border-slate-100 pt-3 dark:border-slate-800"><div><span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Total</span><strong className="block text-base text-slate-900 dark:text-slate-100">{new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(sale.totalCents / 100)}</strong></div>{onSaleNavigate && <button type="button" className="text-xs font-semibold text-blue-700 hover:underline dark:text-blue-300" onClick={() => onSaleNavigate(sale.publicId)}>Ver venda <ChevronRight className="inline h-3.5 w-3.5" /></button>}</div>
+              <div className="mt-3"><span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Produtos</span><ul className="mt-1 space-y-1">{sale.items.map((item, index) => <li key={`${item.sku}-${index}`} className="flex justify-between gap-3 text-xs text-slate-600 dark:text-slate-300"><span className="min-w-0 truncate">{item.productName} · {item.sku}</span><span className="shrink-0 tabular-nums">{Number(item.quantity).toLocaleString("pt-BR", { maximumFractionDigits: 3 })}</span></li>)}</ul></div>
+              <div className="mt-3"><span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Documentos</span>{sale.documents.length ? <ul className="mt-1 space-y-1">{sale.documents.map(document => <li key={document.publicId} className="flex items-center justify-between gap-2 text-xs"><span className="min-w-0 truncate text-slate-600 dark:text-slate-300"><FileText className="mr-1 inline h-3.5 w-3.5 text-blue-600" />{document.fileName}</span><a href={`${document.downloadUrl}?preview=1`} target="_blank" rel="noreferrer" className="shrink-0 font-semibold text-blue-700 hover:underline dark:text-blue-300">Visualizar</a></li>)}</ul> : <p className="mt-1 text-xs text-slate-500">Nenhum documento vinculado.</p>}</div>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, onSaleNavigate, canAccessSales, whatsappConnected, canStartConversation, canPermanentlyDelete, onLifecycleChanged, onDeleted }: { client: CrmClient; onEdit: () => void; onClose: () => void; onSendMessage?: (intent: CrmWhatsAppIntent) => void; onSaleNavigate?: (salePublicId: string) => void; canAccessSales: boolean; whatsappConnected: boolean; canStartConversation: boolean; canPermanentlyDelete: boolean; onLifecycleChanged: () => Promise<void>; onDeleted: () => Promise<void> }) {
   const [activeTab, setActiveTab] = useState<ClientTab>("geral");
   const [newTimelineNote, setNewTimelineNote] = useState("");
   const [riskAction, setRiskAction] = useState<"deactivate" | "reactivate" | "archive" | "restore" | "delete" | null>(null);
   const [deletePhrase, setDeletePhrase] = useState("");
   const [riskError, setRiskError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!canAccessSales && activeTab === "vendas") setActiveTab("geral");
+  }, [activeTab, canAccessSales]);
   const lifecycleMutation = trpc.crm.changeLifecycle.useMutation();
   const deleteMutation = trpc.crm.deletePermanently.useMutation();
   const riskPending = lifecycleMutation.isPending || deleteMutation.isPending;
@@ -949,7 +998,7 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
     }
   };
 
-  const tabs: { id: ClientTab; label: string; icon: React.ReactNode }[] = [
+  const allTabs: { id: ClientTab; label: string; icon: React.ReactNode }[] = [
     { id: "geral", label: "Geral", icon: <User className="w-4 h-4" /> },
     { id: "chamados", label: "Chamados", icon: <Ticket className="w-4 h-4" /> },
     {
@@ -964,6 +1013,11 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
       icon: <DollarSign className="w-4 h-4" />,
     },
     {
+      id: "vendas",
+      label: "Vendas",
+      icon: <ShoppingCart className="w-4 h-4" />,
+    },
+    {
       id: "rastreamento",
       label: "Rastreamento",
       icon: <Package className="w-4 h-4" />,
@@ -974,6 +1028,7 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
       icon: <Paperclip className="w-4 h-4" />,
     },
   ];
+  const tabs = allTabs.filter(tab => canAccessSales || tab.id !== "vendas");
 
   // Queries das abas
   const chamadosQuery = trpc.crm.getChamados.useQuery({ crmClientId: client.crmClientId }, { enabled: activeTab === "chamados", refetchOnWindowFocus: false });
@@ -1374,6 +1429,10 @@ function ClientDetailPanel({ client, onEdit, onClose, onSendMessage, whatsappCon
           </div>
         )}
 
+        {activeTab === "vendas" && canAccessSales && (
+          <ClientSalesTab client={client} onSaleNavigate={onSaleNavigate} />
+        )}
+
         {activeTab === "rastreamento" && (
           <div className="flex flex-col items-center justify-center h-48 text-center">
             <Package className="w-12 h-12 text-slate-200 mb-3" />
@@ -1443,12 +1502,16 @@ export function ClientesPage({
   whatsappConnected = false,
   canStartConversation = false,
   canPermanentlyDelete = false,
+  canAccessSales = false,
+  onSaleNavigate,
 }: {
   initialSelectedId?: string;
   onNavigate?: (intent: CrmWhatsAppIntent) => void;
   whatsappConnected?: boolean;
   canStartConversation?: boolean;
   canPermanentlyDelete?: boolean;
+  canAccessSales?: boolean;
+  onSaleNavigate?: (salePublicId: string) => void;
 } = {}) {
   const handleSendMessage = useCallback(
     (intent: CrmWhatsAppIntent) => {
@@ -1719,6 +1782,8 @@ export function ClientesPage({
             }}
             onClose={() => setSelectedClientId(null)}
             onSendMessage={handleSendMessage}
+            onSaleNavigate={onSaleNavigate}
+            canAccessSales={canAccessSales}
             whatsappConnected={whatsappConnected}
             canStartConversation={canStartConversation}
             canPermanentlyDelete={canPermanentlyDelete}

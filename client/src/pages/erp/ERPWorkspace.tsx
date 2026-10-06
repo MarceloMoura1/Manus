@@ -32,12 +32,14 @@ const planned = ["Integrações"];
 
 export function getErpTopbarItems({
   canAccessClients,
+  canAccessSales,
   canAccessFinance,
   canAccessFiscal,
   canAccessReports,
   onNavigate,
 }: {
   canAccessClients: boolean;
+  canAccessSales: boolean;
   canAccessFinance: boolean;
   canAccessFiscal: boolean;
   canAccessReports: boolean;
@@ -50,7 +52,7 @@ export function getErpTopbarItems({
     {id:"stock" as const,label:"Estoque"},
     {id:"suppliers" as const,label:"Fornecedores"},
     {id:"purchases" as const,label:"Compras"},
-    {id:"sales" as const,label:"Vendas"},
+    {id:"sales" as const,label:"Vendas",hidden:!canAccessSales},
     {id:"finance" as const,label:"Financeiro",hidden:!canAccessFinance},
     {id:"fiscal" as const,label:"Fiscal",hidden:!canAccessFiscal},
     {id:"reports" as const,label:"Relatórios",hidden:!canAccessReports},
@@ -70,7 +72,13 @@ function useErpRealtime() {
   React.useEffect(() => {
     const socket = io(window.location.origin, { path: "/api/ws/whatsapp", withCredentials: true });
     let refreshTimer: number | undefined;
-    const refresh = () => { window.clearTimeout(refreshTimer); refreshTimer = window.setTimeout(() => void utils.erp.reports.invalidate(), 250); };
+    const refresh = () => {
+      window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => void utils.erp.invalidate(), 250);
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
     const refreshSuppliers = () => { refresh(); };
     socket.on("connect", refresh);
     socket.on("erp:product.changed", refresh);
@@ -82,6 +90,10 @@ function useErpRealtime() {
     socket.on("erp:finance.account.changed", refresh);
     socket.on("erp:fiscal.document.changed", refresh);
     socket.on("erp:fiscal.settings.changed", refresh);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("pageshow", refresh);
+    window.addEventListener("online", refresh);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       window.clearTimeout(refreshTimer);
       socket.off("connect", refresh);
@@ -94,6 +106,10 @@ function useErpRealtime() {
       socket.off("erp:finance.account.changed", refresh);
       socket.off("erp:fiscal.document.changed", refresh);
       socket.off("erp:fiscal.settings.changed", refresh);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("pageshow", refresh);
+      window.removeEventListener("online", refresh);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
       socket.disconnect();
     };
   }, [utils]);
@@ -103,10 +119,10 @@ function StateMessage({ title, retry }: { title: string; retry?: () => void }) {
   return <ErpEmptyState title={title} action={retry ? { label: "Tentar novamente", onClick: retry } : undefined} />;
 }
 
-export function ERPWorkspace({ section, onNavigate, canAccessClients, canAccessFinance, canAccessFiscal, canAccessReports, canPermanentlyDeleteClients, initialCrmClientId, onClientNavigate, whatsappConnected, canStartConversation }: { section: ErpSection; onNavigate: (section: ErpSection) => void; canAccessClients: boolean; canAccessFinance: boolean; canAccessFiscal: boolean; canAccessReports: boolean; canPermanentlyDeleteClients: boolean; initialCrmClientId?: string; onClientNavigate: (intent: CrmWhatsAppIntent) => void; whatsappConnected: boolean; canStartConversation: boolean }) {
+export function ERPWorkspace({ section, onNavigate, canAccessClients, canAccessSales, canAccessFinance, canAccessFiscal, canAccessReports, canPermanentlyDeleteClients, initialCrmClientId, initialSalePublicId, onClientNavigate, onNavigateToClient, onNavigateToSale, whatsappConnected, canStartConversation }: { section: ErpSection; onNavigate: (section: ErpSection) => void; canAccessClients: boolean; canAccessSales: boolean; canAccessFinance: boolean; canAccessFiscal: boolean; canAccessReports: boolean; canPermanentlyDeleteClients: boolean; initialCrmClientId?: string; initialSalePublicId?: string; onClientNavigate: (intent: CrmWhatsAppIntent) => void; onNavigateToClient: (crmClientId: string) => void; onNavigateToSale: (salePublicId: string) => void; whatsappConnected: boolean; canStartConversation: boolean }) {
   useErpRealtime();
   const denied = <div role="alert" className="rounded-2xl border border-slate-200 bg-white p-8 text-center"><h1 className="text-xl font-bold text-slate-900">Acesso indisponível</h1><p className="mt-2 text-sm text-slate-600">Este módulo não está disponível para o seu perfil.</p></div>;
-  const content = section === "summary" ? <Summary onNavigate={onNavigate}/> : section === "clients" ? canAccessClients ? <ClientesPage initialSelectedId={initialCrmClientId} onNavigate={onClientNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDelete={canPermanentlyDeleteClients}/> : denied : section === "products" ? <Products/> : section === "suppliers" ? <SuppliersPage onNavigate={onNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} onClientNavigate={onClientNavigate}/> : section === "purchases" ? <PurchasesPage onNavigate={onNavigate}/> : section === "sales" ? <SalesPage/> : section === "finance" ? canAccessFinance ? <FinancePage/> : denied : section === "fiscal" ? canAccessFiscal ? <FiscalPage/> : denied : section === "reports" ? canAccessReports ? <ReportsPage/> : denied : <StockPage/>;
+  const content = section === "summary" ? <Summary onNavigate={onNavigate}/> : section === "clients" ? canAccessClients ? <ClientesPage initialSelectedId={initialCrmClientId} onNavigate={onClientNavigate} onSaleNavigate={onNavigateToSale} canAccessSales={canAccessSales} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDelete={canPermanentlyDeleteClients}/> : denied : section === "products" ? <Products/> : section === "suppliers" ? <SuppliersPage onNavigate={onNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} onClientNavigate={onClientNavigate}/> : section === "purchases" ? <PurchasesPage onNavigate={onNavigate}/> : section === "sales" ? canAccessSales ? <SalesPage initialSelectedId={initialSalePublicId} onClientNavigate={canAccessClients ? onNavigateToClient : undefined}/> : denied : section === "finance" ? canAccessFinance ? <FinancePage/> : denied : section === "fiscal" ? canAccessFiscal ? <FiscalPage/> : denied : section === "reports" ? canAccessReports ? <ReportsPage/> : denied : <StockPage/>;
   return <div className="min-w-0 max-w-full" data-testid="erp-workspace">{content}</div>;
 }
 

@@ -4094,6 +4094,7 @@ function Shell() {
   const mainContentRef = React.useRef<HTMLElement>(null);
   const [indicadores, setIndicadores] = useState<any>(null);
   const [activeCrmClientId, setActiveCrmClientId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("crmClientId"));
+  const [activeSalePublicId, setActiveSalePublicId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("salePublicId"));
   const [attendanceIntent, setAttendanceIntent] = useState(() => {
     const restoreLegacyAttendance = localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY) === "active-attendance";
     return createAttendanceLaunchIntent(
@@ -4105,7 +4106,7 @@ function Shell() {
     setSidebarOpen(false);
     if (restoreFocus) window.setTimeout(() => sidebarTriggerRef.current?.focus(), 0);
   }, []);
-  const navigateToRoute = React.useCallback((route: RouteId, options?: { replace?: boolean; crmClientId?: string }) => {
+  const navigateToRoute = React.useCallback((route: RouteId, options?: { replace?: boolean; crmClientId?: string; salePublicId?: string }) => {
     const isLegacyAttendanceRoute = route === "active-attendance";
     const targetRoute: RouteId = isLegacyAttendanceRoute ? "conversations" : route;
     if (isLegacyAttendanceRoute) setAttendanceIntent(current => queueAttendanceLaunchIntent(current));
@@ -4118,7 +4119,7 @@ function Shell() {
           : targetRoute === "erp-suppliers"
               ? "/erp/fornecedores"
             : targetRoute === "erp-sales"
-              ? "/erp/vendas"
+              ? `/erp/vendas${options?.salePublicId ? `?salePublicId=${encodeURIComponent(options.salePublicId)}` : ""}`
             : targetRoute === "erp-finance"
               ? "/erp/financeiro"
             : targetRoute === "erp-fiscal"
@@ -4132,6 +4133,7 @@ function Shell() {
               : "/";
     window.history[options?.replace ? "replaceState" : "pushState"](null, "", path);
     setActiveCrmClientId(targetRoute === "erp-clients" ? options?.crmClientId ?? null : null);
+    setActiveSalePublicId(targetRoute === "erp-sales" ? options?.salePublicId ?? null : null);
     setActive(targetRoute);
     if (window.innerWidth < 1024) {
       setSidebarOpen(false);
@@ -4187,6 +4189,7 @@ function Shell() {
         path = "/erp/clientes";
       }
       setActiveCrmClientId(path === "/erp/clientes" ? new URLSearchParams(window.location.search).get("crmClientId") : null);
+      setActiveSalePublicId(path === "/erp/vendas" ? new URLSearchParams(window.location.search).get("salePublicId") : null);
         setActive(path === "/erp/clientes" ? "erp-clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp/compras" ? "erp-purchases" : path === "/erp/vendas" ? "erp-sales" : path === "/erp/financeiro" ? "erp-finance" : path === "/erp/fiscal" ? "erp-fiscal" : path === "/erp/relatorios" ? "erp-reports" : path === "/erp" ? "erp-summary" : event.state?.megadeskRoute === "conversations" ? "conversations" : "home");
       window.setTimeout(() => mainContentRef.current?.focus(), 0);
     };
@@ -4274,10 +4277,12 @@ function Shell() {
   const mainNavItems = filteredNavItems.filter(item => !["settings", "admin-settings", "bot-config", "ai-assistant", "help", "notifications"].includes(item.id));
   const settingsNavItems = filteredNavItems.filter(item => ["settings", "admin-settings", "bot-config", "ai-assistant", "help", "notifications", "whatsapp-config"].includes(item.id));
   const canAccessClients = canAccessErpClients(session);
+  const canAccessSales = session.permissions.includes("erp");
   const erpSection = (active === "erp-clients" ? "clients" : active === "erp-products" ? "products" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : active === "erp-purchases" ? "purchases" : active === "erp-sales" ? "sales" : active === "erp-finance" ? "finance" : active === "erp-fiscal" ? "fiscal" : active === "erp-reports" ? "reports" : "summary") as ErpSection;
   const navigateToErpSection = (section: ErpSection) => navigateToRoute(section === "clients" ? "erp-clients" : section === "products" ? "erp-products" : section === "stock" ? "erp-stock" : section === "suppliers" ? "erp-suppliers" : section === "purchases" ? "erp-purchases" : section === "sales" ? "erp-sales" : section === "finance" ? "erp-finance" : section === "fiscal" ? "erp-fiscal" : section === "reports" ? "erp-reports" : "erp-summary");
   const erpTopbarItems = getErpTopbarItems({
     canAccessClients,
+    canAccessSales,
     canAccessFinance: session.userRole !== "agent",
     canAccessFiscal: session.userRole !== "agent",
     canAccessReports: session.userRole !== "agent",
@@ -4485,7 +4490,7 @@ function Shell() {
           />}
           {active === "tickets" && <TicketsPage onOpenMobileMenu={() => setSidebarOpen(true)} />}
           {active === "tracking" && <TrackingPage />}
-           {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} onClientNavigate={handleClientNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
+           {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessSales={canAccessSales} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("erp-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("erp-sales", { salePublicId })} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
            {active === "settings" && <SettingsPageComponent layout={shellLayout.settingsPageLayout} />}
           {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
           {active === "bot-config" && <BotConfigPage />}

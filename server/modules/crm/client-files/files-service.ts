@@ -119,6 +119,18 @@ export class ClientFileService {
     this.assertManage(identity);
     const owner = await this.repository.findClient(identity.clientId, input.crmClientId);
     if (!owner) throw new ErpDomainError("NOT_FOUND", "Cliente não encontrado.");
+    if (
+      await this.repository.hasActiveSaleDocumentLink(
+        identity.clientId,
+        owner.crmClientId,
+        input.filePublicId
+      )
+    ) {
+      throw new ErpDomainError(
+        "CONFLICT",
+        "Este documento está vinculado a uma venda e deve ser removido pelo pedido correspondente."
+      );
+    }
     const file = await this.repository.transitionToPendingDelete(
       identity.clientId,
       owner.crmClientId,

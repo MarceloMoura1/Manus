@@ -31,6 +31,13 @@ describe("Clientes profile regression guards", () => {
     expect(clients).toContain("Excluir cliente definitivamente");
   });
 
+  it("hides customer sales when the session lacks ERP permission", () => {
+    expect(home).toContain('const canAccessSales = session.permissions.includes("erp")');
+    expect(home).toContain("canAccessSales={canAccessSales}");
+    expect(clients).toContain('allTabs.filter(tab => canAccessSales || tab.id !== "vendas")');
+    expect(clients).toContain('activeTab === "vendas" && canAccessSales');
+  });
+
   it("keeps dependency failures in the open modal and closes, clears and refetches after success", () => {
     expect(clients).toContain("setRiskError(message)");
     expect(clients).toContain('{riskError && (');

@@ -1306,7 +1306,7 @@ export const megadeskCrmClientFiles = mysqlTable(
     sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
     sha256: varchar({ length: 64 }).notNull(),
     storageKey: varchar("storage_key", { length: 255 }).notNull(),
-    state: mysqlEnum("state", ["active", "pending_delete", "deleted"]).default("active").notNull(),
+    state: mysqlEnum("state", ["active", "pending_delete", "deleted", "pending_upload"]).default("active").notNull(),
     createdBy: varchar("created_by", { length: 80 }).notNull(),
     createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
     deletedBy: varchar("deleted_by", { length: 80 }),
@@ -1315,6 +1315,7 @@ export const megadeskCrmClientFiles = mysqlTable(
   },
   (table): MySqlTableExtraConfigValue[] => [
     uniqueIndex("uq_mccf_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_mccf_tenant_id").on(table.clientId, table.id),
     uniqueIndex("uq_mccf_storage_key").on(table.storageKey),
     index("idx_mccf_lookup").on(table.clientId, table.crmClientId, table.state, table.createdAt),
     index("idx_mccf_pending_delete").on(table.state, table.pendingDeleteAt),
@@ -3030,6 +3031,30 @@ export const erpSaleOrders = mysqlTable(
     status: mysqlEnum(["draft", "confirmed", "fulfilled", "cancelled"])
       .default("draft")
       .notNull(),
+    currentStage: mysqlEnum("current_stage", [
+      "created",
+      "confirmed",
+      "separation",
+      "shipped",
+      "received",
+      "completed",
+    ]),
+    sellerNameSnapshot: varchar("seller_name_snapshot", { length: 180 }),
+    shippingAddressSnapshot: text("shipping_address_snapshot"),
+    billingAddressSnapshot: text("billing_address_snapshot"),
+    discountCents: bigint("discount_cents", { mode: "number" })
+      .default(0)
+      .notNull(),
+    freightCents: bigint("freight_cents", { mode: "number" })
+      .default(0)
+      .notNull(),
+    paymentMethodSnapshot: varchar("payment_method_snapshot", { length: 80 }),
+    confirmationIdempotencyKey: varchar("confirmation_idempotency_key", {
+      length: 100,
+    }),
+    confirmationPayloadHash: varchar("confirmation_payload_hash", {
+      length: 64,
+    }),
     notes: text(),
     expectedDate: date("expected_date", { mode: "string" }),
     subtotalCents: bigint("subtotal_cents", { mode: "number" })
@@ -3061,6 +3086,11 @@ export const erpSaleOrders = mysqlTable(
       table.clientId,
       table.orderNumber
     ),
+    uniqueIndex("uq_erp_sale_orders_tenant_id").on(table.clientId, table.id),
+    uniqueIndex("uq_erp_sale_orders_tenant_confirmation_key").on(
+      table.clientId,
+      table.confirmationIdempotencyKey
+    ),
     index("idx_erp_sale_orders_tenant_status_date").on(
       table.clientId,
       table.status,
@@ -3069,6 +3099,11 @@ export const erpSaleOrders = mysqlTable(
     index("idx_erp_sale_orders_tenant_customer").on(
       table.clientId,
       table.crmClientId
+    ),
+    index("idx_erp_sale_orders_tenant_stage_date").on(
+      table.clientId,
+      table.currentStage,
+      table.createdAt
     ),
     foreignKey({
       name: "fk_erp_so_customer",
@@ -3096,6 +3131,9 @@ export const erpSaleOrderItems = mysqlTable(
     skuSnapshot: varchar("sku_snapshot", { length: 80 }).notNull(),
     quantity: decimal({ precision: 18, scale: 3 }).notNull(),
     unitPriceCents: bigint("unit_price_cents", { mode: "number" }).notNull(),
+    discountCents: bigint("discount_cents", { mode: "number" })
+      .default(0)
+      .notNull(),
     lineTotalCents: bigint("line_total_cents", { mode: "number" }).notNull(),
     createdAt: timestamp("created_at", { mode: "string" })
       .defaultNow()
@@ -3161,6 +3199,135 @@ export const erpSaleOrderHistory = mysqlTable(
       columns: [table.saleOrderId],
       foreignColumns: [erpSaleOrders.id],
     }),
+  ]
+);
+
+export const erpSaleOrderEvents = mysqlTable(
+  "erp_sale_order_events",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    saleOrderId: bigint("sale_order_id", { mode: "number" }).notNull(),
+    eventType: mysqlEnum("event_type", [
+      "created",
+      "updated",
+      "confirmed",
+      "stage_transition",
+      "cancelled",
+      "address_corrected",
+      "payment_registered",
+      "document_added",
+      "document_removed",
+    ]).notNull(),
+    fromStage: mysqlEnum("from_stage", [
+      "created",
+      "confirmed",
+      "separation",
+      "shipped",
+      "received",
+      "completed",
+    ]),
+    toStage: mysqlEnum("to_stage", [
+      "created",
+      "confirmed",
+      "separation",
+      "shipped",
+      "received",
+      "completed",
+    ]),
+    reason: varchar({ length: 500 }),
+    beforeJson: text("before_json"),
+    afterJson: text("after_json"),
+    idempotencyKey: varchar("idempotency_key", { length: 100 }),
+    payloadHash: varchar("payload_hash", { length: 64 }),
+    changedBy: varchar("changed_by", { length: 80 }).notNull(),
+    changedByNameSnapshot: varchar("changed_by_name_snapshot", { length: 180 }),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_sale_events_tenant_public").on(
+      table.clientId,
+      table.publicId
+    ),
+    uniqueIndex("uq_erp_sale_events_tenant_key").on(
+      table.clientId,
+      table.idempotencyKey
+    ),
+    index("idx_erp_sale_events_order_date").on(
+      table.clientId,
+      table.saleOrderId,
+      table.createdAt
+    ),
+    foreignKey({
+      name: "fk_erp_sale_events_order",
+      columns: [table.clientId, table.saleOrderId],
+      foreignColumns: [erpSaleOrders.clientId, erpSaleOrders.id],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const erpSaleDocuments = mysqlTable(
+  "erp_sale_documents",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    saleOrderId: bigint("sale_order_id", { mode: "number" }).notNull(),
+    clientFileId: bigint("client_file_id", { mode: "number" }).notNull(),
+    documentType: mysqlEnum("document_type", [
+      "invoice",
+      "content_declaration",
+      "other",
+    ]).notNull(),
+    uploadIdempotencyKey: varchar("upload_idempotency_key", { length: 36 }).notNull(),
+    uploadPayloadHash: varchar("upload_payload_hash", { length: 64 }).notNull(),
+    state: mysqlEnum("state", ["active", "pending_delete", "deleted", "pending_upload"])
+      .default("active")
+      .notNull(),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    deletedBy: varchar("deleted_by", { length: 80 }),
+    pendingDeleteAt: timestamp("pending_delete_at", { mode: "string" }),
+    deletedAt: timestamp("deleted_at", { mode: "string" }),
+  },
+  table => [
+    uniqueIndex("uq_erp_sale_documents_tenant_public").on(
+      table.clientId,
+      table.publicId
+    ),
+    uniqueIndex("uq_erp_sale_documents_file").on(table.clientFileId),
+    uniqueIndex("uq_erp_sale_documents_tenant_upload_key").on(
+      table.clientId,
+      table.uploadIdempotencyKey
+    ),
+    index("idx_erp_sale_documents_order_state_date").on(
+      table.clientId,
+      table.saleOrderId,
+      table.state,
+      table.createdAt
+    ),
+    index("idx_erp_sale_documents_pending_delete").on(
+      table.state,
+      table.pendingDeleteAt
+    ),
+    foreignKey({
+      name: "fk_erp_sale_document_order",
+      columns: [table.clientId, table.saleOrderId],
+      foreignColumns: [erpSaleOrders.clientId, erpSaleOrders.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_sale_document_client_file",
+      columns: [table.clientId, table.clientFileId],
+      foreignColumns: [
+        megadeskCrmClientFiles.clientId,
+        megadeskCrmClientFiles.id,
+      ],
+    }).onDelete("restrict"),
   ]
 );
 
