@@ -136,14 +136,15 @@ async function confirmSale(
 async function prepareShipment(
   service: SaleService,
   identity: typeof adminA,
-  publicId: string
+  publicId: string,
+  idempotencyKey = crypto.randomUUID()
 ) {
   return service.transition(
     identity,
     saleTransitionInput.parse({
       publicId,
       toStage: "separation",
-      idempotencyKey: crypto.randomUUID(),
+      idempotencyKey,
     })
   );
 }
@@ -650,6 +651,9 @@ physical("ERP sales MySQL behavior matrix", () => {
     const outcomes = await Promise.allSettled([s.fulfill(adminA,a.publicId,crypto.randomUUID()),s.fulfill(adminA,b.publicId,crypto.randomUUID())]);
     expect(outcomes.filter(x => x.status === "fulfilled")).toHaveLength(1);
     expect(outcomes.filter(x => x.status === "rejected")).toHaveLength(1);
+    expect(outcomes.find(x => x.status === "rejected")).toMatchObject({
+      reason: { code: "INSUFFICIENT_STOCK" },
+    });
     expect(await count("SELECT COUNT(*) total FROM erp_stock_movements WHERE client_id=? AND type='sale_out'", [adminA.clientId])).toBe(1);
   });
   it("22 isolates detail and mutations and exercises customer, period and ordering filters", async () => {
@@ -732,5 +736,64 @@ physical("ERP sales MySQL behavior matrix", () => {
       );
     }
     expect((await s.detail(adminA, order.publicId)).items[0].productPublicId).toBe(a.product.publicId);
+  });
+  it("25 completes concurrent transitions for different orders and idempotency keys", async () => {
+    const f = await fixture(), s = new SaleService(new SaleRepository(), silent);
+    const [a,b] = await Promise.all([
+      s.create(adminA, draft(f.customer.crmClientId, f.product.publicId)),
+      s.create(adminA, draft(f.customer.crmClientId, f.product.publicId)),
+    ]);
+    await confirmSale(s, adminA, a, f.categoryPublicId);
+    await confirmSale(s, adminA, b, f.categoryPublicId);
+    const keys = [crypto.randomUUID(), crypto.randomUUID()];
+    const transitioned = await Promise.all([
+      prepareShipment(s, adminA, a.publicId, keys[0]),
+      prepareShipment(s, adminA, b.publicId, keys[1]),
+    ]);
+    expect(transitioned.map(order => order.currentStage)).toEqual(["separation", "separation"]);
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_sale_order_events WHERE client_id=? AND idempotency_key IN (?,?)",
+      [adminA.clientId, ...keys]
+    )).toBe(2);
+  });
+  it("26 replays concurrent transitions for one order and idempotency key exactly once", async () => {
+    const f = await fixture(), s = new SaleService(new SaleRepository(), silent);
+    const order = await s.create(adminA, draft(f.customer.crmClientId, f.product.publicId));
+    await confirmSale(s, adminA, order, f.categoryPublicId);
+    const key = crypto.randomUUID();
+    const results = await Promise.all([
+      prepareShipment(s, adminA, order.publicId, key),
+      prepareShipment(s, adminA, order.publicId, key),
+    ]);
+    expect(results.map(result => result.replay).sort()).toEqual([false, true]);
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_sale_order_events WHERE client_id=? AND idempotency_key=?",
+      [adminA.clientId, key]
+    )).toBe(1);
+  });
+  it("27 rejects concurrent cross-order key reuse without duplicate effects", async () => {
+    const f = await fixture(), s = new SaleService(new SaleRepository(), silent);
+    const [a,b] = await Promise.all([
+      s.create(adminA, draft(f.customer.crmClientId, f.product.publicId)),
+      s.create(adminA, draft(f.customer.crmClientId, f.product.publicId)),
+    ]);
+    await confirmSale(s, adminA, a, f.categoryPublicId);
+    await confirmSale(s, adminA, b, f.categoryPublicId);
+    const key = crypto.randomUUID();
+    const outcomes = await Promise.allSettled([
+      prepareShipment(s, adminA, a.publicId, key),
+      prepareShipment(s, adminA, b.publicId, key),
+    ]);
+    expect(outcomes.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    const rejection = outcomes.find(result => result.status === "rejected");
+    expect(rejection).toMatchObject({ reason: { code: "IDEMPOTENCY_CONFLICT" } });
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_sale_order_events WHERE client_id=? AND idempotency_key=?",
+      [adminA.clientId, key]
+    )).toBe(1);
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_sale_orders WHERE client_id=? AND current_stage='separation' AND public_id IN (?,?)",
+      [adminA.clientId, a.publicId, b.publicId]
+    )).toBe(1);
   });
 });

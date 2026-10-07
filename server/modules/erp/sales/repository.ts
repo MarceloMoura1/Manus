@@ -117,6 +117,12 @@ const parseJson = <T>(value: string | null): T | null => {
 };
 const dateOnly = (value: string | Date) =>
   value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
+const isTransitionIdempotencyDuplicate = (error: unknown) => {
+  if (typeof error !== "object" || error === null) return false;
+  const record = error as { code?: unknown; message?: unknown; sqlMessage?: unknown };
+  const message = String(record.sqlMessage ?? record.message ?? "");
+  return record.code === "ER_DUP_ENTRY" && message.includes("uq_erp_sale_events_tenant_key");
+};
 
 export class SaleRepository {
   constructor(private pool?: Pool) {}
@@ -172,6 +178,21 @@ export class SaleRepository {
         input.actor.name,
       ]
     );
+  }
+
+  private async transitionEventByIdempotencyKey(
+    connection: Executor,
+    clientId: string,
+    idempotencyKey: string
+  ) {
+    const [rows] = await connection.execute<RowDataPacket[]>(
+      `SELECT o.public_id,e.payload_hash
+       FROM erp_sale_order_events e
+       INNER JOIN erp_sale_orders o ON o.client_id=e.client_id AND o.id=e.sale_order_id
+       WHERE e.client_id=? AND e.idempotency_key=? LIMIT 1`,
+      [clientId, idempotencyKey]
+    );
+    return rows[0] ?? null;
   }
 
   async options(clientId: string) {
@@ -980,7 +1001,7 @@ export class SaleRepository {
   ) {
     const [existing] = await connection.execute<RowDataPacket[]>(
       `SELECT id,idempotency_key FROM erp_sale_order_fulfillments
-       WHERE client_id=? AND sale_order_id=? LIMIT 1 FOR UPDATE`,
+       WHERE client_id=? AND sale_order_id=? LIMIT 1`,
       [clientId, order.id]
     );
     if (existing[0]) {
@@ -1112,17 +1133,15 @@ export class SaleRepository {
       await connection.beginTransaction();
       const order = await this.detail(clientId, input.publicId, connection, true);
       if (!order) throw new ErpDomainError("NOT_FOUND", "Venda não encontrada.");
-      const [oldEvents] = await connection.execute<RowDataPacket[]>(
-        `SELECT o.public_id,e.payload_hash
-         FROM erp_sale_order_events e
-         INNER JOIN erp_sale_orders o ON o.client_id=e.client_id AND o.id=e.sale_order_id
-         WHERE e.client_id=? AND e.idempotency_key=? LIMIT 1 FOR UPDATE`,
-        [clientId, input.idempotencyKey]
+      const oldEvent = await this.transitionEventByIdempotencyKey(
+        connection,
+        clientId,
+        input.idempotencyKey
       );
-      if (oldEvents[0]) {
+      if (oldEvent) {
         if (
-          String(oldEvents[0].public_id) !== input.publicId ||
-          String(oldEvents[0].payload_hash) !== payloadHash
+          String(oldEvent.public_id) !== input.publicId ||
+          String(oldEvent.payload_hash) !== payloadHash
         ) {
           throw new ErpDomainError("IDEMPOTENCY_CONFLICT", "Chave idempotente já usada em outra transição.");
         }
@@ -1184,6 +1203,27 @@ export class SaleRepository {
       await connection.commit();
     } catch (error) {
       await connection.rollback();
+      if (isTransitionIdempotencyDuplicate(error)) {
+        const winner = await this.transitionEventByIdempotencyKey(
+          connection,
+          clientId,
+          input.idempotencyKey
+        );
+        if (!winner) throw error;
+        if (
+          String(winner.public_id) !== input.publicId ||
+          String(winner.payload_hash) !== payloadHash
+        ) {
+          throw new ErpDomainError("IDEMPOTENCY_CONFLICT", "Chave idempotente já usada em outra transição.");
+        }
+        replay = true;
+        stockChanged = false;
+        return {
+          order: await this.detail(clientId, input.publicId, connection),
+          replay,
+          stockChanged,
+        };
+      }
       throw error;
     } finally {
       connection.release();

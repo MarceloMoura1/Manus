@@ -69,7 +69,15 @@ describe("sales B+C architecture", () => {
     );
     expect(transition).toContain("isStockExitTransition");
     expect(transition).toContain("await connection.rollback()");
-    expect(transition).toContain("idempotency_key=?");
+    expect(repository).toContain("transitionEventByIdempotencyKey");
+    expect(repository).toContain("uq_erp_sale_events_tenant_key");
+    expect(repository).toContain("isTransitionIdempotencyDuplicate");
+    expect(repository).not.toMatch(
+      /WHERE e\.client_id=\? AND e\.idempotency_key=\? LIMIT 1 FOR UPDATE/
+    );
+    expect(repository).not.toMatch(
+      /WHERE client_id=\? AND sale_order_id=\? LIMIT 1 FOR UPDATE/
+    );
   });
 
   it("does not move stock on completion or on audited logistical corrections", () => {
