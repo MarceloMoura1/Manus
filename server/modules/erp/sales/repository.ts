@@ -370,6 +370,10 @@ export class SaleRepository {
       const like = `%${options.search}%`;
       values.push(like, like, like, like);
     }
+    if (options.crmClientId) {
+      where.push("o.crm_client_id=?");
+      values.push(options.crmClientId);
+    }
     if (options.status) {
       where.push("o.status=?");
       values.push(options.status);

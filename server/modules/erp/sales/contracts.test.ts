@@ -12,10 +12,20 @@ import {
   saleConfirmationInput,
   saleDraftInput,
   saleEvent,
+  saleListInput,
   saleTransitionKind,
 } from "./contracts";
 
 describe("sale contracts", () => {
+  it("accepts an explicit customer filter without broadening the search", () => {
+    expect(saleListInput.parse({ crmClientId: "crm-customer-42" })).toMatchObject({
+      crmClientId: "crm-customer-42",
+      search: "",
+      page: 1,
+      pageSize: 20,
+    });
+  });
+
   it("rounds quantities half-up without floating-point arithmetic", () => {
     expect(lineTotalCents("1.005", 101)).toBe(102);
     expect(lineTotalCents("0.001", 499)).toBe(0);

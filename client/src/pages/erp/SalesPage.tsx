@@ -15,6 +15,7 @@ import {
   Download,
   Edit3,
   Eye,
+  Filter,
   MapPin,
   PackageCheck,
   PackageOpen,
@@ -23,6 +24,7 @@ import {
   ReceiptText,
   RotateCcw,
   Search,
+  SlidersHorizontal,
   ShoppingCart,
   Trash2,
   Truck,
@@ -38,6 +40,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { ErpPageHeader } from "@/components/erp/ErpPageHeader";
+import { MoneyInput } from "@/components/erp/MoneyInput";
+import { useDebounce } from "@/hooks/useDebounce";
 import {
   Dialog,
   DialogContent,
@@ -56,6 +60,14 @@ import {
   type SalesAddress,
   type SalesForm,
 } from "./sales-form";
+import {
+  SALES_LOOKUP_MIN_LENGTH,
+  activeSalesFilterCount,
+  canRunSalesLookup,
+  salesAddressesMatch,
+  salesConfirmationRequirements,
+  salesDraftProgress,
+} from "./sales-ux";
 
 const money = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -79,6 +91,8 @@ type RouterOutputs = inferRouterOutputs<AppRouter>;
 type SaleDetail = RouterOutputs["erp"]["sales"]["detail"];
 type CustomerResults = RouterOutputs["erp"]["sales"]["customers"];
 type CatalogResults = RouterOutputs["erp"]["sales"]["catalog"];
+type CustomerOption = CustomerResults["items"][number];
+type CatalogOption = CatalogResults["items"][number];
 type DetailQueryState = {
   data?: SaleDetail;
   isFetched: boolean;
@@ -130,6 +144,9 @@ export function SalesPage({
   >("all");
   const [paymentMethod, setPaymentMethod] = React.useState("all");
   const [sellerUserId, setSellerUserId] = React.useState("all");
+  const [filterCustomer, setFilterCustomer] = React.useState<CustomerOption | null>(null);
+  const [filterCustomerSearch, setFilterCustomerSearch] = React.useState("");
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = React.useState(false);
   const [from, setFrom] = React.useState(month.from);
   const [to, setTo] = React.useState(month.to);
   const [page, setPage] = React.useState(1);
@@ -142,6 +159,8 @@ export function SalesPage({
   const [catalogSearch, setCatalogSearch] = React.useState("");
   const [customerPage, setCustomerPage] = React.useState(1);
   const [catalogPage, setCatalogPage] = React.useState(1);
+  const [separateBillingAddress, setSeparateBillingAddress] = React.useState(false);
+  const [expandedCatalogProductId, setExpandedCatalogProductId] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState("");
   const [confirmation, setConfirmation] = React.useState<ConfirmationState | null>(null);
   const [cancellation, setCancellation] = React.useState<ReasonState | null>(null);
@@ -149,8 +168,17 @@ export function SalesPage({
   const [addressCorrection, setAddressCorrection] = React.useState<AddressCorrectionState | null>(null);
 
   const metrics = trpc.erp.sales.metrics.useQuery({ from, to });
+  const debouncedListSearch = useDebounce(search.trim(), 300);
+  const debouncedCustomerSearch = useDebounce(customerSearch.trim(), 300);
+  const debouncedCatalogSearch = useDebounce(catalogSearch.trim(), 300);
+  const debouncedFilterCustomerSearch = useDebounce(filterCustomerSearch.trim(), 300);
+  const customerLookupEnabled = Boolean(form) && canRunSalesLookup(debouncedCustomerSearch);
+  const catalogLookupEnabled = Boolean(form) && canRunSalesLookup(debouncedCatalogSearch);
+  const filterCustomerLookupEnabled = canRunSalesLookup(debouncedFilterCustomerSearch);
+
   const list = trpc.erp.sales.list.useQuery({
-    search,
+    search: debouncedListSearch,
+    crmClientId: filterCustomer?.crmClientId,
     stage: stage === "all" ? undefined : stage,
     paymentStatus: paymentStatus === "all" ? undefined : paymentStatus,
     paymentMethod: paymentMethod === "all" ? undefined : paymentMethod,
@@ -168,12 +196,16 @@ export function SalesPage({
     { enabled: Boolean(selectedId) }
   );
   const customers = trpc.erp.sales.customers.useQuery(
-    { search: customerSearch, page: customerPage, pageSize: 12 },
-    { enabled: Boolean(form) }
+    { search: debouncedCustomerSearch, page: customerPage, pageSize: 12 },
+    { enabled: customerLookupEnabled }
   );
   const catalog = trpc.erp.sales.catalog.useQuery(
-    { search: catalogSearch, page: catalogPage, pageSize: 12 },
-    { enabled: Boolean(form) }
+    { search: debouncedCatalogSearch, page: catalogPage, pageSize: 12 },
+    { enabled: catalogLookupEnabled }
+  );
+  const filterCustomers = trpc.erp.sales.customers.useQuery(
+    { search: debouncedFilterCustomerSearch, page: 1, pageSize: 8 },
+    { enabled: filterCustomerLookupEnabled }
   );
 
   React.useEffect(() => {
@@ -234,6 +266,18 @@ export function SalesPage({
   const correctAddress = trpc.erp.sales.correctAddress.useMutation({
     onSuccess: result => void done("Endereço corrigido com registro de auditoria.", result.publicId),
   });
+  const createFinancialCategory = trpc.erp.finance.categories.create.useMutation({
+    onSuccess: async result => {
+      setConfirmation(current => current ? { ...current, categoryPublicId: result.publicId } : current);
+      await utils.erp.sales.options.invalidate();
+    },
+  });
+  const createFinancialAccount = trpc.erp.finance.accounts.create.useMutation({
+    onSuccess: async result => {
+      setConfirmation(current => current ? { ...current, financialAccountPublicId: result.publicId } : current);
+      await utils.erp.sales.options.invalidate();
+    },
+  });
 
   const canWrite = list.data?.canWrite === true;
   const pendingError =
@@ -263,10 +307,40 @@ export function SalesPage({
   const edit = async (publicId: string) => {
     const selected = await utils.erp.sales.detail.fetch({ publicId });
     setForm(salesFormFromDetail(selected));
-    setCustomerSearch(selected.customerName);
+    setCustomerSearch("");
+    setCatalogSearch("");
+    setSeparateBillingAddress(
+      !salesAddressesMatch(selected.shippingAddress, selected.billingAddress)
+    );
+    setExpandedCatalogProductId(null);
     setCustomerPage(1);
     setCatalogPage(1);
   };
+
+  const clearFilters = () => {
+    setSearch("");
+    setStage("all");
+    setPaymentStatus("all");
+    setPaymentMethod("all");
+    setSellerUserId("all");
+    setFilterCustomer(null);
+    setFilterCustomerSearch("");
+    setFrom(month.from);
+    setTo(month.to);
+    setPage(1);
+  };
+  const activeFilterCount = activeSalesFilterCount({
+    search,
+    stage,
+    paymentStatus,
+    paymentMethod,
+    sellerUserId,
+    customerId: filterCustomer?.crmClientId,
+    from,
+    to,
+    defaultFrom: month.from,
+    defaultTo: month.to,
+  });
 
   return (
     <div
@@ -286,6 +360,8 @@ export function SalesPage({
                 setCatalogSearch("");
                 setCustomerPage(1);
                 setCatalogPage(1);
+                setSeparateBillingAddress(false);
+                setExpandedCatalogProductId(null);
               }}
             >
               <Plus className="mr-2 h-4 w-4" /> Nova venda
@@ -313,102 +389,107 @@ export function SalesPage({
 
       <SalesMetrics data={metrics.data} loading={metrics.isLoading} />
 
-      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="min-w-0 space-y-5">
         <section className="min-w-0 space-y-3" aria-label="Lista de vendas">
-          <div className="grid gap-2 rounded-xl bg-slate-100/80 p-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-[minmax(220px,1fr)_145px_150px_150px_150px_210px]">
-            <label className="relative min-w-0">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-              <Input
-                aria-label="Buscar por venda, cliente, produto ou SKU"
-                className="bg-white pl-9"
-                placeholder="Venda, cliente, produto ou SKU"
-                value={search}
-                onChange={event => {
-                  setSearch(event.target.value);
-                  setPage(1);
-                }}
-              />
-            </label>
-            <label>
-              <span className="sr-only">Etapa</span>
-              <select
-                className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                value={stage}
-                onChange={event => {
-                  setStage(event.target.value as typeof stage);
-                  setPage(1);
-                }}
-              >
-                <option value="all">Todas as etapas</option>
-                {stageOrder.map(value => (
-                  <option key={value} value={value}>{stageLabels[value]}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span className="sr-only">Forma de pagamento</span>
-              <select
-                className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                value={paymentMethod}
-                onChange={event => {
-                  setPaymentMethod(event.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="all">Todas as formas</option>
-                {options.data?.paymentMethods.map(value => <option key={value} value={value}>{value}</option>)}
-              </select>
-            </label>
-            <label>
-              <span className="sr-only">Vendedor</span>
-              <select
-                className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                value={sellerUserId}
-                onChange={event => {
-                  setSellerUserId(event.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="all">Todos os vendedores</option>
-                {options.data?.sellers.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}
-              </select>
-            </label>
-            <label>
-              <span className="sr-only">Pagamento</span>
-              <select
-                className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                value={paymentStatus}
-                onChange={event => {
-                  setPaymentStatus(event.target.value as typeof paymentStatus);
-                  setPage(1);
-                }}
-              >
-                <option value="all">Todos os pagamentos</option>
-                <option value="pending">Pendente</option>
-                <option value="partial">Pagamento parcial</option>
-                <option value="paid">Pago</option>
-              </select>
-            </label>
-            <label className="grid grid-cols-2 gap-1" aria-label="Período das vendas">
-              <Input
-                type="date"
-                aria-label="Data inicial"
-                value={from}
-                onChange={event => {
-                  setFrom(event.target.value);
-                  setPage(1);
-                }}
-              />
-              <Input
-                type="date"
-                aria-label="Data final"
-                value={to}
-                onChange={event => {
-                  setTo(event.target.value);
-                  setPage(1);
-                }}
-              />
-            </label>
+          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-[0_8px_24px_-22px_rgba(15,23,42,0.45)]" data-testid="sales-filters">
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_170px_300px_minmax(190px,0.7fr)_auto_auto]">
+              <label className="relative min-w-0">
+                <span className="sr-only">Busca</span>
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                <Input
+                  aria-label="Buscar por venda, cliente, produto ou SKU"
+                  className="bg-white pl-9"
+                  placeholder="Buscar venda, cliente, produto ou SKU"
+                  value={search}
+                  onChange={event => {
+                    setSearch(event.target.value);
+                    setPage(1);
+                  }}
+                />
+              </label>
+              <label>
+                <span className="sr-only">Etapa</span>
+                <select
+                  className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  value={stage}
+                  onChange={event => {
+                    setStage(event.target.value as typeof stage);
+                    setPage(1);
+                  }}
+                >
+                  <option value="all">Todas as etapas</option>
+                  {stageOrder.map(value => (
+                    <option key={value} value={value}>{stageLabels[value]}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid grid-cols-2 gap-1" aria-label="Período das vendas">
+                <Input type="date" aria-label="Data inicial" value={from} onChange={event => { setFrom(event.target.value); setPage(1); }} />
+                <Input type="date" aria-label="Data final" value={to} onChange={event => { setTo(event.target.value); setPage(1); }} />
+              </label>
+              <div className="relative min-w-0">
+                {filterCustomer ? (
+                  <div className="flex h-10 items-center justify-between gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 text-sm text-blue-950">
+                    <span className="truncate font-medium">{filterCustomer.customerName}</span>
+                    <button type="button" aria-label="Remover filtro de cliente" className="rounded p-1 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => { setFilterCustomer(null); setPage(1); }}><XCircle className="h-4 w-4" /></button>
+                  </div>
+                ) : (
+                  <>
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                    <Input aria-label="Filtrar por cliente" className="pl-9" placeholder="Filtrar por cliente" value={filterCustomerSearch} onChange={event => setFilterCustomerSearch(event.target.value)} />
+                    {filterCustomerLookupEnabled && (
+                      <div className="absolute left-0 right-0 top-11 z-30 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl [scrollbar-width:thin]">
+                        {filterCustomers.isLoading ? <p className="p-3 text-sm text-slate-500">Buscando clientes…</p> : filterCustomers.isError ? <p className="p-3 text-sm text-rose-700">Não foi possível buscar clientes.</p> : filterCustomers.data?.items.length ? filterCustomers.data.items.map(customer => (
+                          <button type="button" key={customer.crmClientId} className="block w-full rounded-md px-3 py-2 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => { setFilterCustomer(customer); setFilterCustomerSearch(""); setPage(1); }}>
+                            <strong className="block truncate text-sm text-slate-900">{customer.customerName}</strong>
+                            <span className="block truncate text-xs text-slate-500">{customer.document || customer.responsibleName || customer.crmClientId}</span>
+                          </button>
+                        )) : <p className="p-3 text-sm text-slate-500">Nenhum cliente encontrado.</p>}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+              <Button type="button" variant="outline" className="justify-between" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
+                <SlidersHorizontal className="mr-2 h-4 w-4" /> Mais filtros
+                {activeFilterCount > 0 && <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">{activeFilterCount}</span>}
+              </Button>
+              <Button type="button" variant="ghost" className="text-slate-600" disabled={activeFilterCount === 0} onClick={clearFilters}>Limpar</Button>
+            </div>
+
+            {advancedFiltersOpen && (
+              <div className="mt-3 grid gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Filtros avançados">
+                <label className="text-xs font-semibold text-slate-600">Pagamento
+                  <select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-slate-800" value={paymentStatus} onChange={event => { setPaymentStatus(event.target.value as typeof paymentStatus); setPage(1); }}>
+                    <option value="all">Todos os pagamentos</option><option value="pending">Pendente</option><option value="partial">Pagamento parcial</option><option value="paid">Pago</option>
+                  </select>
+                </label>
+                <label className="text-xs font-semibold text-slate-600">Forma de pagamento
+                  <select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-slate-800" value={paymentMethod} onChange={event => { setPaymentMethod(event.target.value); setPage(1); }}>
+                    <option value="all">Todas as formas</option>{options.data?.paymentMethods.map(value => <option key={value} value={value}>{value}</option>)}
+                  </select>
+                </label>
+                <label className="text-xs font-semibold text-slate-600">Vendedor
+                  <select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-slate-800" value={sellerUserId} onChange={event => { setSellerUserId(event.target.value); setPage(1); }}>
+                    <option value="all">Todos os vendedores</option>{options.data?.sellers.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}
+                  </select>
+                </label>
+              </div>
+            )}
+
+            {activeFilterCount > 0 && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 text-xs" aria-label="Filtros ativos">
+                <Filter className="h-3.5 w-3.5 text-slate-500" /><span className="font-semibold text-slate-600">Filtros ativos:</span>
+                {search.trim() && <span className="rounded-full bg-slate-100 px-2.5 py-1">Busca: {search.trim()}</span>}
+                {stage !== "all" && <span className="rounded-full bg-blue-50 px-2.5 py-1 text-blue-800">Etapa: {stageLabels[stage]}</span>}
+                {filterCustomer && <span className="rounded-full bg-blue-50 px-2.5 py-1 text-blue-800">Cliente: {filterCustomer.customerName}</span>}
+                {paymentStatus !== "all" && <span className="rounded-full bg-slate-100 px-2.5 py-1">Pagamento: {paymentLabels[paymentStatus]}</span>}
+                {paymentMethod !== "all" && <span className="rounded-full bg-slate-100 px-2.5 py-1">Forma: {paymentMethod}</span>}
+                {sellerUserId !== "all" && <span className="rounded-full bg-slate-100 px-2.5 py-1">Vendedor selecionado</span>}
+                {(from !== month.from || to !== month.to) && <span className="rounded-full bg-slate-100 px-2.5 py-1">Período personalizado</span>}
+                <button type="button" className="font-semibold text-blue-700 hover:underline" onClick={clearFilters}>Limpar filtros</button>
+              </div>
+            )}
           </div>
 
           {list.isLoading ? (
@@ -450,7 +531,7 @@ export function SalesPage({
                       active && "bg-blue-50/55"
                     )}
                   >
-                    <div className="grid items-center gap-3 px-4 py-3 lg:grid-cols-[34px_110px_minmax(140px,1fr)_minmax(145px,1.2fr)_110px_130px_120px]">
+                    <div className="grid grid-cols-[34px_minmax(0,1fr)] items-center gap-3 px-4 py-3 lg:grid-cols-[34px_110px_minmax(140px,1fr)_minmax(145px,1.2fr)_110px_130px_120px]">
                       <button
                         type="button"
                         aria-label={expanded ? "Recolher itens" : "Expandir itens"}
@@ -465,7 +546,7 @@ export function SalesPage({
                       </button>
                       <button
                         type="button"
-                        className="min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                        className="col-start-2 min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:col-auto"
                         onClick={() => setSelectedId(order.publicId)}
                       >
                         <strong className="block text-sm text-slate-950">{order.orderNumber}</strong>
@@ -473,12 +554,12 @@ export function SalesPage({
                       </button>
                       <button
                         type="button"
-                        className="truncate text-left text-sm font-semibold text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                        className="col-start-2 truncate text-left text-sm font-semibold text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:col-auto"
                         onClick={() => setSelectedId(order.publicId)}
                       >
                         {order.customerName}
                       </button>
-                      <div className="min-w-0">
+                      <div className="col-start-2 min-w-0 lg:col-auto">
                         <p className="truncate text-sm text-slate-800">
                           {order.firstProductName ?? "Itens históricos indisponíveis"}
                           {order.itemCount > 1 ? ` · +${order.itemCount - 1}` : ""}
@@ -487,11 +568,11 @@ export function SalesPage({
                           {order.itemCount} {order.itemCount === 1 ? "item" : "itens"} · {formatQuantity(order.totalQuantity)} un.
                         </p>
                       </div>
-                      <strong className="text-left text-sm tabular-nums text-slate-950 lg:text-right">
+                      <strong className="col-start-2 text-left text-sm tabular-nums text-slate-950 lg:col-auto lg:text-right">
                         {money.format(order.totalCents / 100)}
                       </strong>
-                      <PaymentBadge value={order.paymentStatus} />
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="col-start-2 lg:col-auto"><PaymentBadge value={order.paymentStatus} /></div>
+                      <div className="col-start-2 flex items-center justify-between gap-2 lg:col-auto">
                         <StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} />
                         {order.cancelled && <XCircle className="h-4 w-4 text-rose-600" aria-label="Cancelada" />}
                       </div>
@@ -539,9 +620,12 @@ export function SalesPage({
               totalCents: order.totalCents,
               paymentMethod: options.data?.paymentMethods[0] ?? "PIX",
               categoryPublicId: options.data?.categories[0]?.publicId ?? "",
-              financialAccountPublicId: "",
+              financialAccountPublicId: options.data?.accounts[0]?.publicId ?? "",
               installmentCount: 1,
               firstDueDate: new Date().toISOString().slice(0, 10),
+              hasCustomer: Boolean(order.crmClientId),
+              hasProducts: order.items.length > 0,
+              hasAddress: Boolean(order.shippingAddress?.street && order.shippingAddress?.city),
             })
           }
           onTransition={(order, toStage, correction) =>
@@ -586,6 +670,12 @@ export function SalesPage({
         setCatalogPage={setCatalogPage}
         customers={customers}
         catalog={catalog}
+        customerLookupEnabled={customerLookupEnabled}
+        catalogLookupEnabled={catalogLookupEnabled}
+        separateBillingAddress={separateBillingAddress}
+        setSeparateBillingAddress={setSeparateBillingAddress}
+        expandedCatalogProductId={expandedCatalogProductId}
+        setExpandedCatalogProductId={setExpandedCatalogProductId}
         busy={create.isPending || update.isPending}
         onSubmit={save}
       />
@@ -596,7 +686,15 @@ export function SalesPage({
         categories={options.data?.categories ?? []}
         accounts={options.data?.accounts ?? []}
         paymentMethods={options.data?.paymentMethods ?? []}
+        optionsLoading={options.isLoading}
+        optionsError={options.error?.message}
+        onRetryOptions={() => void options.refetch()}
         busy={confirmSale.isPending}
+        categoryCreationBusy={createFinancialCategory.isPending}
+        accountCreationBusy={createFinancialAccount.isPending}
+        financialSetupError={createFinancialCategory.error?.message ?? createFinancialAccount.error?.message}
+        onCreateCategory={name => createFinancialCategory.mutate({ name, direction: "receivable" })}
+        onCreateAccount={(name, type) => createFinancialAccount.mutate({ name, type, initialBalanceCents: 0, allowNegative: false })}
         onConfirm={state => {
           const installments = splitInstallments(
             state.totalCents,
@@ -825,7 +923,7 @@ function SaleDetailPanel({
   const canCorrectAddress = ["confirmed", "separation"].includes(order.currentStage);
   const progress = order.totalCents > 0 ? Math.min(100, Math.round((order.paidCents / order.totalCents) * 100)) : 0;
   return (
-    <aside className="self-start overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_14px_30px_-26px_rgba(15,23,42,0.65)] xl:sticky xl:top-3" aria-label="Detalhes da venda selecionada">
+    <aside className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_14px_30px_-26px_rgba(15,23,42,0.65)]" aria-label="Detalhes da venda selecionada">
       <header className="border-b border-slate-200 px-5 py-4">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -845,8 +943,8 @@ function SaleDetailPanel({
         )}
       </header>
 
-      <div className="max-h-[calc(100vh-190px)] space-y-5 overflow-y-auto px-5 py-5 [scrollbar-color:#94a3b8_transparent] [scrollbar-width:thin]">
-        <section className="grid gap-4 text-sm">
+      <div className="grid gap-5 px-5 py-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+        <section className="grid gap-4 rounded-xl border border-slate-200 p-4 text-sm xl:col-start-1 xl:row-start-1">
           <div>
             <InfoRow icon={UserRound} label="Cliente" value={order.customerName} detail={order.crmClientId} />
             {onClientNavigate && (
@@ -863,7 +961,7 @@ function SaleDetailPanel({
           <InfoRow icon={CalendarDays} label="Previsão de entrega" value={order.expectedDate ? date.format(new Date(`${order.expectedDate}T12:00:00`)) : "Não informada"} />
         </section>
 
-        <section>
+        <section className="rounded-xl border border-slate-200 p-4 xl:col-span-2 xl:row-start-2">
           <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900"><Edit3 className="h-4 w-4 text-slate-500" />Etapa da venda</h3>
           <SaleTimeline stage={order.currentStage as Stage} cancelled={order.cancelled} />
           <p className="mt-3 text-xs leading-5 text-slate-600">
@@ -871,7 +969,7 @@ function SaleDetailPanel({
           </p>
         </section>
 
-        <section className="rounded-xl bg-slate-50 p-4">
+        <section className="rounded-xl bg-slate-50 p-4 xl:col-start-2 xl:row-start-1">
           <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900"><WalletCards className="h-4 w-4 text-slate-500" />Pagamento</h3>
           <Progress value={progress} className="mt-3 h-2" />
           <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
@@ -890,7 +988,7 @@ function SaleDetailPanel({
           </div>
         </section>
 
-        <section className="rounded-xl bg-blue-50 p-4 text-blue-950">
+        <section className="rounded-xl bg-blue-50 p-4 text-blue-950 xl:col-start-2 xl:row-start-3">
           <h3 className="flex items-center gap-2 text-sm font-bold"><Box className="h-4 w-4" />Estoque</h3>
           {stageOrder.indexOf(order.currentStage as Stage) >= stageOrder.indexOf("shipped") ? (
             <p className="mt-2 text-sm">Saída registrada no envio. Concluir a venda não gera nova movimentação.</p>
@@ -899,7 +997,7 @@ function SaleDetailPanel({
           )}
         </section>
 
-        <section>
+        <section className="rounded-xl border border-slate-200 p-4 xl:col-start-1 xl:row-start-3">
           <div className="flex items-center justify-between gap-3">
             <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900"><MapPin className="h-4 w-4 text-slate-500" />Endereço de entrega</h3>
             {canWrite && canCorrectAddress && !order.cancelled && (
@@ -909,12 +1007,14 @@ function SaleDetailPanel({
           <AddressSummary address={order.shippingAddress} />
         </section>
 
-        <SaleDocuments
-          salePublicId={order.publicId}
-          canWrite={canWrite && !order.cancelled}
-        />
+        <div className="min-w-0 xl:col-start-1 xl:row-start-4">
+          <SaleDocuments
+            salePublicId={order.publicId}
+            canWrite={canWrite && !order.cancelled}
+          />
+        </div>
 
-        <section>
+        <section className="min-w-0 rounded-xl border border-slate-200 p-4 xl:col-start-2 xl:row-start-4">
           <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900"><Clock3 className="h-4 w-4 text-slate-500" />Histórico</h3>
           {!order.historyComplete && (
             <p className="mt-2 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">
@@ -972,8 +1072,8 @@ function SaleDetailPanel({
 function SaleTimeline({ stage, cancelled }: { stage: Stage; cancelled: boolean }) {
   const current = stageOrder.indexOf(stage);
   return (
-    <div className="mt-4 min-w-0 pb-1">
-      <ol className="grid w-full min-w-0 grid-cols-6" aria-label="Timeline das etapas da venda">
+    <div className="mt-4 min-w-0 overflow-x-auto pb-2 [scrollbar-width:thin]">
+      <ol className="grid w-full min-w-[640px] grid-cols-6 sm:min-w-0" aria-label="Timeline das etapas da venda">
         {stageOrder.map((value, index) => {
           const completed = index < current;
           const active = index === current;
@@ -987,7 +1087,7 @@ function SaleTimeline({ stage, cancelled }: { stage: Stage; cancelled: boolean }
               )}>
                 {completed && <Check className="h-3 w-3" />}
               </span>
-              <span className={cn("mt-2 block text-[9px] font-semibold leading-3", active ? "text-blue-700" : "text-slate-500")}>{stageLabels[value]}</span>
+              <span className={cn("mt-2 block text-[11px] font-semibold leading-4", active ? "text-blue-700" : "text-slate-500")}>{stageLabels[value]}</span>
             </li>
           );
         })}
@@ -1009,6 +1109,12 @@ function SaleFormDialog({
   setCatalogPage,
   customers,
   catalog,
+  customerLookupEnabled,
+  catalogLookupEnabled,
+  separateBillingAddress,
+  setSeparateBillingAddress,
+  expandedCatalogProductId,
+  setExpandedCatalogProductId,
   busy,
   onSubmit,
 }: {
@@ -1022,147 +1128,133 @@ function SaleFormDialog({
   setCatalogSearch: (value: string) => void;
   catalogPage: number;
   setCatalogPage: React.Dispatch<React.SetStateAction<number>>;
-  customers: { data?: CustomerResults; isLoading: boolean };
-  catalog: { data?: CatalogResults; isLoading: boolean };
+  customers: { data?: CustomerResults; isLoading: boolean; isError: boolean };
+  catalog: { data?: CatalogResults; isLoading: boolean; isError: boolean };
+  customerLookupEnabled: boolean;
+  catalogLookupEnabled: boolean;
+  separateBillingAddress: boolean;
+  setSeparateBillingAddress: React.Dispatch<React.SetStateAction<boolean>>;
+  expandedCatalogProductId: string | null;
+  setExpandedCatalogProductId: React.Dispatch<React.SetStateAction<string | null>>;
   busy: boolean;
   onSubmit: (event: React.FormEvent) => void;
 }) {
   if (!form) return null;
   const totals = calculateSalesFormTotals(form);
+  const progress = salesDraftProgress(form);
+  const completeSteps = progress.filter(item => item.complete).length;
   const patchItem = (index: number, patch: Record<string, unknown>) =>
     setForm(current =>
       current
         ? { ...current, items: current.items.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item) }
         : current
     );
+  const addCatalogItem = (product: CatalogOption) => {
+    if (form.items.some(item => item.inventoryItemPublicId === product.inventoryItemPublicId)) return;
+    setForm(current => current ? { ...current, items: [...current.items, {
+      productPublicId: product.productPublicId,
+      inventoryItemPublicId: product.inventoryItemPublicId,
+      productName: product.name,
+      variantName: product.variantAttributes || product.variantName,
+      sku: product.sku,
+      unit: product.unit,
+      imagePath: product.canonicalImage?.thumbnailPath,
+      availableQuantity: product.availableQuantity,
+      quantity: "1.000",
+      unitPriceCents: product.salePriceCents,
+      discountCents: 0,
+    }] } : current);
+    setCatalogSearch("");
+    setExpandedCatalogProductId(null);
+  };
+  const groups = (catalog.data?.items ?? []).reduce<Array<{ productPublicId: string; name: string; imagePath?: string | null; options: CatalogOption[] }>>((result, item) => {
+    const current = result.find(group => group.productPublicId === item.productPublicId);
+    if (current) current.options.push(item);
+    else result.push({ productPublicId: item.productPublicId, name: item.name, imagePath: item.canonicalImage?.thumbnailPath, options: [item] });
+    return result;
+  }, []);
+
   return (
     <Dialog open onOpenChange={open => !open && setForm(null)}>
-      <DialogContent className="max-h-[94vh] max-w-5xl overflow-y-auto bg-white p-0">
-        <DialogHeader className="border-b border-slate-200 px-6 py-5">
-          <DialogTitle>{form.publicId ? "Editar venda" : "Nova venda"}</DialogTitle>
-          <p className="text-sm text-slate-600">Defina cliente, variações, valores e os endereços históricos desta venda.</p>
+      <DialogContent className="flex h-[min(94vh,920px)] flex-col gap-0 overflow-hidden bg-slate-50 p-0 sm:max-w-[min(96vw,1440px)]">
+        <DialogHeader className="border-b border-slate-200 bg-white px-5 py-4 sm:px-7">
+          <div className="pr-10">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Operação de vendas</p>
+            <DialogTitle className="mt-1 text-xl">{form.publicId ? "Editar venda" : "Nova venda"}</DialogTitle>
+            <p className="mt-1 text-sm text-slate-600">Complete a operação por etapas. A venda será salva primeiro como rascunho.</p>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2" aria-label="Progresso da nova venda">
+            {progress.map((item, index) => <span key={item.key} className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold", item.complete ? "bg-emerald-50 text-emerald-800" : "bg-slate-100 text-slate-600")}><span className={cn("flex h-4 w-4 items-center justify-center rounded-full text-[10px]", item.complete ? "bg-emerald-600 text-white" : "bg-slate-300 text-slate-700")}>{item.complete ? <Check className="h-3 w-3" /> : index + 1}</span>{item.label}</span>)}
+          </div>
         </DialogHeader>
-        <form onSubmit={onSubmit} className="space-y-6 px-6 pb-6">
-          <section className="pt-5">
-            <h3 className="text-sm font-bold text-slate-900">Cliente</h3>
-            <label className="relative mt-2 block">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-              <Input className="pl-9" placeholder="Buscar por nome, documento ou código" value={customerSearch} onChange={event => setCustomerSearch(event.target.value)} />
-            </label>
-            {form.crmClientId && <p className="mt-2 text-sm font-semibold text-blue-800">Selecionado: {form.customerName ?? form.crmClientId}</p>}
-            <div className="mt-2 grid max-h-36 gap-1 overflow-y-auto rounded-lg border border-slate-200 p-1 [scrollbar-width:thin] sm:grid-cols-2">
-              {customers.isLoading ? <p className="p-3 text-sm text-slate-500">Buscando clientes…</p> : customers.data?.items.map(customer => (
-                <button
-                  type="button"
-                  key={customer.crmClientId}
-                  className={cn("rounded-md px-3 py-2 text-left text-sm hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500", form.crmClientId === customer.crmClientId && "bg-blue-50 text-blue-900")}
-                  onClick={() => {
-                    const address: SalesAddress = {
-                      recipientName: customer.responsibleName || customer.customerName,
-                      postalCode: customer.postalCode || "",
-                      street: customer.address || "",
-                      number: "",
-                      complement: "",
-                      district: "",
-                      city: customer.city || "",
-                      state: customer.state || "",
-                    };
-                    setForm(current => current ? { ...current, crmClientId: customer.crmClientId, customerName: customer.customerName, shippingAddress: address, billingAddress: { ...address } } : current);
-                  }}
-                >
-                  <strong className="block truncate">{customer.customerName}</strong>
-                  <span className="text-xs text-slate-500">{customer.document || customer.crmClientId}</span>
-                </button>
-              ))}
-            </div>
-            <SearchPager
-              page={customerPage}
-              total={customers.data?.total ?? 0}
-              pageSize={customers.data?.pageSize ?? 12}
-              onPage={setCustomerPage}
-            />
-          </section>
 
-          <section>
-            <div className="flex items-end justify-between gap-3">
-              <div><h3 className="text-sm font-bold text-slate-900">Produtos e variações</h3><p className="mt-1 text-xs text-slate-500">O saldo exibido é informativo; a confirmação não reserva estoque.</p></div>
-            </div>
-            <label className="relative mt-2 block">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-              <Input className="pl-9" placeholder="Buscar produto, variação, SKU ou código" value={catalogSearch} onChange={event => setCatalogSearch(event.target.value)} />
-            </label>
-            <div className="mt-2 grid max-h-48 gap-2 overflow-y-auto rounded-lg border border-slate-200 p-2 [scrollbar-width:thin] sm:grid-cols-2">
-              {catalog.isLoading ? <p className="p-3 text-sm text-slate-500">Buscando produtos…</p> : catalog.data?.items.map(product => {
-                const used = form.items.some(item => item.inventoryItemPublicId === product.inventoryItemPublicId);
-                return (
-                  <button
-                    type="button"
-                    key={product.inventoryItemPublicId}
-                    disabled={used}
-                    className="flex items-center gap-3 rounded-lg border border-slate-100 p-2 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-45"
-                    onClick={() => setForm(current => current ? { ...current, items: [...current.items, {
-                      productPublicId: product.productPublicId,
-                      inventoryItemPublicId: product.inventoryItemPublicId,
-                      productName: product.name,
-                      variantName: product.variantAttributes || product.variantName,
-                      sku: product.sku,
-                      unit: product.unit,
-                      imagePath: product.canonicalImage?.thumbnailPath,
-                      availableQuantity: product.availableQuantity,
-                      quantity: "1.000",
-                      unitPriceCents: product.salePriceCents,
-                      discountCents: 0,
-                    }] } : current)}
-                  >
-                    <ProductThumb imagePath={product.canonicalImage?.thumbnailPath} name={product.name} />
-                    <span className="min-w-0 flex-1"><strong className="block truncate text-sm text-slate-900">{product.name}</strong><span className="block truncate text-xs text-slate-500">{product.variantAttributes || product.variantName || product.sku} · disponível {formatQuantity(product.availableQuantity)}</span></span>
-                    <Plus className="h-4 w-4 text-blue-700" />
-                  </button>
-                );
-              })}
-            </div>
-            <SearchPager
-              page={catalogPage}
-              total={catalog.data?.total ?? 0}
-              pageSize={catalog.data?.pageSize ?? 12}
-              onPage={setCatalogPage}
-            />
-            <div className="mt-3 space-y-2">
-              {form.items.length ? form.items.map((item, index) => (
-                <div key={`${item.inventoryItemPublicId}-${index}`} className="grid items-end gap-2 rounded-lg bg-slate-50 p-3 sm:grid-cols-[minmax(190px,1fr)_100px_130px_120px_36px]">
-                  <div className="flex min-w-0 items-center gap-3 self-center">
-                    <ProductThumb imagePath={item.imagePath} name={item.productName ?? "Produto"} />
-                    <div className="min-w-0"><strong className="block truncate text-sm text-slate-900">{item.productName ?? item.productPublicId}</strong><span className="block truncate text-xs text-slate-500">{item.variantName || item.sku} · disponível {item.availableQuantity ? formatQuantity(item.availableQuantity) : "—"}</span></div>
+        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 [scrollbar-width:thin]">
+            <div className="mx-auto grid max-w-[1320px] gap-5 xl:grid-cols-[minmax(0,1fr)_310px]">
+              <div className="space-y-5">
+                <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5" aria-labelledby="sale-customer-heading">
+                  <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-blue-700">1. Identificação</p><h3 id="sale-customer-heading" className="mt-1 font-bold text-slate-950">Cliente</h3><p className="mt-1 text-sm text-slate-500">Pesquise por nome, documento ou código. Nenhum cadastro é carregado antes da busca.</p></div>{form.crmClientId && <Button type="button" size="sm" variant="ghost" onClick={() => { setForm(current => current ? { ...current, crmClientId: "", customerName: "", shippingAddress: blankSalesAddress(), billingAddress: blankSalesAddress() } : current); setCustomerSearch(""); }}>Trocar cliente</Button>}</div>
+                  {form.crmClientId ? (
+                    <div className="mt-4 flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3"><span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-white"><UserRound className="h-5 w-5" /></span><div className="min-w-0"><strong className="block truncate text-slate-950">{form.customerName}</strong><span className="text-xs text-slate-600">Cliente selecionado para esta venda</span></div><Check className="ml-auto h-5 w-5 text-emerald-600" /></div>
+                  ) : (
+                    <div className="relative mt-4">
+                      <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-500" />
+                      <Input autoComplete="off" className="pl-9" aria-label="Buscar cliente para a venda" placeholder="Digite ao menos 2 caracteres" value={customerSearch} onChange={event => setCustomerSearch(event.target.value)} />
+                      <div className="mt-2 rounded-lg border border-slate-200 bg-white">
+                        {!customerLookupEnabled ? <p className="p-4 text-sm text-slate-500">Comece a digitar para localizar um cliente.</p> : customers.isLoading ? <p role="status" className="p-4 text-sm text-slate-500">Buscando clientes…</p> : customers.isError ? <p role="alert" className="p-4 text-sm text-rose-700">Não foi possível buscar clientes.</p> : customers.data?.items.length ? <div className="max-h-56 divide-y divide-slate-100 overflow-y-auto [scrollbar-width:thin]">{customers.data.items.map(customer => (
+                          <button type="button" key={customer.crmClientId} className="flex w-full items-start gap-3 px-3 py-3 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500" onClick={() => { const address: SalesAddress = { recipientName: customer.responsibleName || customer.customerName, postalCode: customer.postalCode || "", street: customer.address || "", number: "", complement: "", district: "", city: customer.city || "", state: customer.state || "" }; setForm(current => current ? { ...current, crmClientId: customer.crmClientId, customerName: customer.customerName, shippingAddress: address, billingAddress: { ...address } } : current); setCustomerSearch(""); setSeparateBillingAddress(false); }}><UserRound className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" /><span className="min-w-0"><strong className="block truncate text-sm text-slate-900">{customer.customerName}</strong><span className="block truncate text-xs text-slate-500">{[customer.document, customer.responsibleName, [customer.city, customer.state].filter(Boolean).join("/")].filter(Boolean).join(" · ") || customer.crmClientId}</span></span></button>
+                        ))}</div> : <p className="p-4 text-sm text-slate-500">Nenhum cliente encontrado para “{customerSearch.trim()}”.</p>}
+                      </div>
+                      {customerLookupEnabled && <SearchPager page={customerPage} total={customers.data?.total ?? 0} pageSize={customers.data?.pageSize ?? 12} onPage={setCustomerPage} />}
+                    </div>
+                  )}
+                </section>
+
+                <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5" aria-labelledby="sale-products-heading">
+                  <div><p className="text-xs font-semibold text-blue-700">2. Itens</p><h3 id="sale-products-heading" className="mt-1 font-bold text-slate-950">Produtos e variações</h3><p className="mt-1 text-sm text-slate-500">Pesquise o produto; as variações aparecem somente quando você abrir o resultado.</p></div>
+                  <label className="relative mt-4 block"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" /><Input autoComplete="off" className="pl-9" aria-label="Buscar produto para a venda" placeholder="Nome, SKU, código ou variação" value={catalogSearch} onChange={event => { setCatalogSearch(event.target.value); setExpandedCatalogProductId(null); }} /></label>
+                  <div className="mt-2 rounded-lg border border-slate-200">
+                    {!catalogLookupEnabled ? <p className="p-4 text-sm text-slate-500">Digite ao menos {SALES_LOOKUP_MIN_LENGTH} caracteres para pesquisar o catálogo.</p> : catalog.isLoading ? <p role="status" className="p-4 text-sm text-slate-500">Buscando produtos…</p> : catalog.isError ? <p role="alert" className="p-4 text-sm text-rose-700">Não foi possível buscar produtos.</p> : groups.length ? <div className="max-h-72 divide-y divide-slate-100 overflow-y-auto [scrollbar-width:thin]">{groups.map(group => {
+                      const expanded = expandedCatalogProductId === group.productPublicId;
+                      return <div key={group.productPublicId} className="p-2"><button type="button" className="flex w-full items-center gap-3 rounded-md p-2 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" aria-expanded={expanded} onClick={() => group.options.length === 1 ? addCatalogItem(group.options[0]) : setExpandedCatalogProductId(expanded ? null : group.productPublicId)}><ProductThumb imagePath={group.imagePath} name={group.name} /><span className="min-w-0 flex-1"><strong className="block truncate text-sm text-slate-900">{group.name}</strong><span className="block text-xs text-slate-500">{group.options.length === 1 ? `${group.options[0].sku} · adicionar item` : `${group.options.length} variações encontradas`}</span></span>{group.options.length === 1 ? <Plus className="h-4 w-4 text-blue-700" /> : expanded ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronRight className="h-4 w-4 text-slate-500" />}</button>{expanded && <div className="ml-12 mt-1 space-y-1 border-l border-slate-200 pl-3">{group.options.map(option => { const used = form.items.some(item => item.inventoryItemPublicId === option.inventoryItemPublicId); return <button type="button" key={option.inventoryItemPublicId} disabled={used} className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-45" onClick={() => addCatalogItem(option)}><span className="min-w-0"><strong className="block truncate text-slate-900">{option.variantAttributes || option.variantName || "Produto padrão"}</strong><span className="block truncate text-xs text-slate-500">{option.sku} · disponível {formatQuantity(option.availableQuantity)}</span></span><span className="shrink-0 font-semibold tabular-nums">{money.format(option.salePriceCents / 100)}</span></button>; })}</div>}</div>;
+                    })}</div> : <p className="p-4 text-sm text-slate-500">Nenhum produto encontrado para “{catalogSearch.trim()}”.</p>}
                   </div>
-                  <MoneyOrQuantity label="Quantidade" value={item.quantity} onChange={value => patchItem(index, { quantity: value })} />
-                  <MoneyOrQuantity money label="Preço unit." value={item.unitPriceCents} onChange={value => patchItem(index, { unitPriceCents: value })} />
-                  <MoneyOrQuantity money label="Desconto" value={item.discountCents ?? 0} onChange={value => patchItem(index, { discountCents: value })} />
-                  <Button type="button" size="icon" variant="ghost" aria-label={`Remover ${item.productName ?? "produto"}`} className="text-rose-700" onClick={() => setForm(current => current ? { ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) } : current)}><Trash2 className="h-4 w-4" /></Button>
-                </div>
-              )) : <p className="rounded-lg bg-amber-50 p-4 text-sm text-amber-900">Nenhum produto adicionado.</p>}
+                  {catalogLookupEnabled && <SearchPager page={catalogPage} total={catalog.data?.total ?? 0} pageSize={catalog.data?.pageSize ?? 12} onPage={setCatalogPage} />}
+
+                  <div className="mt-4 space-y-2">
+                    {form.items.length ? form.items.map((item, index) => (
+                      <div key={`${item.inventoryItemPublicId}-${index}`} className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-[minmax(210px,1fr)_100px_145px_135px_110px_36px] md:items-end">
+                        <div className="flex min-w-0 items-center gap-3 self-center"><ProductThumb imagePath={item.imagePath} name={item.productName ?? "Produto"} /><div className="min-w-0"><strong className="block truncate text-sm text-slate-900">{item.productName ?? item.productPublicId}</strong><span className="block truncate text-xs text-slate-500">{item.variantName || item.sku} · disponível {item.availableQuantity ? formatQuantity(item.availableQuantity) : "—"}</span></div></div>
+                        <MoneyOrQuantity label="Quantidade" value={item.quantity} onChange={value => patchItem(index, { quantity: value })} />
+                        <MoneyOrQuantity money label="Preço unit." value={item.unitPriceCents} onChange={value => patchItem(index, { unitPriceCents: value })} />
+                        <MoneyOrQuantity money label="Desconto" value={item.discountCents ?? 0} onChange={value => patchItem(index, { discountCents: value })} />
+                        <div className="text-right"><span className="text-xs font-semibold text-slate-600">Subtotal</span><strong className="mt-2 block text-sm tabular-nums text-slate-950">{money.format(Math.max(0, Math.round(Number(item.quantity || 0) * item.unitPriceCents) - (item.discountCents ?? 0)) / 100)}</strong></div>
+                        <Button type="button" size="icon" variant="ghost" aria-label={`Remover ${item.productName ?? "produto"}`} className="text-rose-700" onClick={() => setForm(current => current ? { ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) } : current)}><Trash2 className="h-4 w-4" /></Button>
+                      </div>
+                    )) : <div className="rounded-lg border border-dashed border-slate-300 p-5 text-center text-sm text-slate-500">Pesquise e adicione o primeiro produto da venda.</div>}
+                  </div>
+                </section>
+
+                <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5" aria-labelledby="sale-address-heading">
+                  <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold text-blue-700">3. Entrega</p><h3 id="sale-address-heading" className="mt-1 font-bold text-slate-950">Endereço do cliente</h3><p className="mt-1 text-sm text-slate-500">Este endereço ficará preservado no histórico da venda.</p></div><Button type="button" size="sm" variant="outline" onClick={() => { setSeparateBillingAddress(value => !value); if (separateBillingAddress) setForm(current => current ? { ...current, billingAddress: { ...(current.shippingAddress ?? blankSalesAddress()) } } : current); }}>{separateBillingAddress ? "Usar um único endereço" : "Usar outro endereço de cobrança"}</Button></div>
+                  <div className={cn("mt-4 grid gap-4", separateBillingAddress && "lg:grid-cols-2")}><AddressFields title={separateBillingAddress ? "Entrega" : undefined} address={form.shippingAddress ?? blankSalesAddress()} onChange={shippingAddress => setForm(current => current ? { ...current, shippingAddress, billingAddress: separateBillingAddress ? current.billingAddress : { ...shippingAddress } } : current)} />{separateBillingAddress && <AddressFields title="Cobrança" address={form.billingAddress ?? blankSalesAddress()} onChange={billingAddress => setForm(current => current ? { ...current, billingAddress } : current)} />}</div>
+                </section>
+
+                <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5" aria-labelledby="sale-values-heading">
+                  <div><p className="text-xs font-semibold text-blue-700">4. Valores e prazo</p><h3 id="sale-values-heading" className="mt-1 font-bold text-slate-950">Condições comerciais</h3></div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><label className="text-xs font-semibold text-slate-700">Previsão de entrega<Input className="mt-1" type="date" value={form.expectedDate} onChange={event => setForm(current => current ? { ...current, expectedDate: event.target.value } : current)} /></label><MoneyOrQuantity money label="Desconto da venda" value={form.orderDiscountCents ?? 0} onChange={value => setForm(current => current ? { ...current, orderDiscountCents: value } : current)} /><MoneyOrQuantity money label="Frete" value={form.freightCents ?? 0} onChange={value => setForm(current => current ? { ...current, freightCents: value } : current)} /></div>
+                  <label className="mt-4 block text-xs font-semibold text-slate-700">Observações<textarea className="mt-1 min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={form.notes} onChange={event => setForm(current => current ? { ...current, notes: event.target.value } : current)} /></label>
+                </section>
+              </div>
+
+              <aside className="self-start rounded-xl border border-slate-200 bg-white p-5 xl:sticky xl:top-0" aria-label="Resumo da venda em edição">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Resumo</p><h3 className="mt-1 text-lg font-bold text-slate-950">{completeSteps}/{progress.length} etapas preenchidas</h3>
+                <div className="mt-4 space-y-2 text-sm"><div className="flex justify-between gap-3 text-slate-600"><span>Produtos</span><strong className="text-slate-950">{form.items.length}</strong></div><div className="flex justify-between gap-3 text-slate-600"><span>Subtotal</span><strong className="tabular-nums text-slate-950">{money.format(totals.subtotalCents / 100)}</strong></div><div className="flex justify-between gap-3 text-slate-600"><span>Descontos</span><strong className="tabular-nums text-slate-950">− {money.format(totals.discountCents / 100)}</strong></div><div className="flex justify-between gap-3 text-slate-600"><span>Frete</span><strong className="tabular-nums text-slate-950">{money.format((form.freightCents ?? 0) / 100)}</strong></div><div className="flex justify-between gap-3 border-t border-slate-200 pt-3 text-base"><strong>Total</strong><strong className="tabular-nums text-blue-700">{money.format(totals.totalCents / 100)}</strong></div></div>
+                <div className="mt-5 rounded-lg bg-blue-50 p-3 text-xs leading-5 text-blue-900"><strong className="block">Próximo passo</strong>Salve o rascunho. A forma de pagamento, categoria, conta prevista e parcelas serão revisadas antes da confirmação.</div>
+              </aside>
             </div>
-          </section>
-
-          <section className="grid gap-4 lg:grid-cols-2">
-            <AddressFields title="Endereço de entrega" address={form.shippingAddress ?? blankSalesAddress()} onChange={shippingAddress => setForm(current => current ? { ...current, shippingAddress } : current)} />
-            <div>
-              <div className="mb-2 flex items-center justify-between gap-3"><h3 className="text-sm font-bold text-slate-900">Endereço de cobrança</h3><button type="button" className="text-xs font-semibold text-blue-700 underline-offset-4 hover:underline" onClick={() => setForm(current => current ? { ...current, billingAddress: { ...(current.shippingAddress ?? blankSalesAddress()) } } : current)}>Usar o de entrega</button></div>
-              <AddressFields address={form.billingAddress ?? blankSalesAddress()} onChange={billingAddress => setForm(current => current ? { ...current, billingAddress } : current)} />
-            </div>
-          </section>
-
-          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <label className="text-xs font-semibold text-slate-700">Previsão de entrega<Input className="mt-1" type="date" value={form.expectedDate} onChange={event => setForm(current => current ? { ...current, expectedDate: event.target.value } : current)} /></label>
-            <MoneyOrQuantity money label="Desconto da venda" value={form.orderDiscountCents ?? 0} onChange={value => setForm(current => current ? { ...current, orderDiscountCents: value } : current)} />
-            <MoneyOrQuantity money label="Frete" value={form.freightCents ?? 0} onChange={value => setForm(current => current ? { ...current, freightCents: value } : current)} />
-            <div className="rounded-lg bg-slate-950 p-3 text-white"><span className="text-xs text-slate-300">Total</span><strong className="mt-1 block text-lg tabular-nums">{money.format(totals.totalCents / 100)}</strong></div>
-          </section>
-          <label className="block text-xs font-semibold text-slate-700">Observações<textarea className="mt-1 min-h-20 w-full rounded-md border border-input bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={form.notes} onChange={event => setForm(current => current ? { ...current, notes: event.target.value } : current)} /></label>
-
-          <DialogFooter className="sticky bottom-0 -mx-6 -mb-6 border-t border-slate-200 bg-white px-6 py-4">
-            <Button type="button" variant="outline" onClick={() => setForm(null)}>Cancelar</Button>
-            <Button type="submit" disabled={busy || !form.crmClientId || !form.items.length || totals.totalCents <= 0}>{busy ? "Salvando…" : "Salvar rascunho"}</Button>
-          </DialogFooter>
+          </div>
+          <DialogFooter className="border-t border-slate-200 bg-white px-5 py-3 sm:px-7"><Button type="button" variant="outline" onClick={() => setForm(null)}>Cancelar</Button><Button type="submit" disabled={busy || !form.crmClientId || !form.items.length || totals.totalCents <= 0 || (form.freightCents ?? 0) < 0}>{busy ? "Salvando…" : "Salvar rascunho"}</Button></DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
@@ -1178,35 +1270,68 @@ type ConfirmationState = {
   financialAccountPublicId: string;
   installmentCount: number;
   firstDueDate: string;
+  hasCustomer: boolean;
+  hasProducts: boolean;
+  hasAddress: boolean;
 };
 
-function ConfirmationDialog({ state, setState, categories, accounts, paymentMethods, busy, onConfirm }: {
+function ConfirmationDialog({ state, setState, categories, accounts, paymentMethods, optionsLoading, optionsError, busy, categoryCreationBusy, accountCreationBusy, financialSetupError, onRetryOptions, onCreateCategory, onCreateAccount, onConfirm }: {
   state: ConfirmationState | null;
   setState: React.Dispatch<React.SetStateAction<ConfirmationState | null>>;
   categories: Array<{ publicId: string; name: string }>;
   accounts: Array<{ publicId: string; name: string }>;
   paymentMethods: string[];
+  optionsLoading: boolean;
+  optionsError?: string;
   busy: boolean;
+  categoryCreationBusy: boolean;
+  accountCreationBusy: boolean;
+  financialSetupError?: string;
+  onRetryOptions: () => void;
+  onCreateCategory: (name: string) => void;
+  onCreateAccount: (name: string, type: "cash" | "bank") => void;
   onConfirm: (state: ConfirmationState) => void;
 }) {
+  const [categoryName, setCategoryName] = React.useState("");
+  const [accountName, setAccountName] = React.useState("");
+  const [accountType, setAccountType] = React.useState<"cash" | "bank">("bank");
+  const [setup, setSetup] = React.useState<"category" | "account" | null>(null);
   if (!state) return null;
   const installments = splitInstallments(state.totalCents, state.installmentCount, state.firstDueDate);
+  const requirements = salesConfirmationRequirements(state);
+  const ready =
+    requirements.every(requirement => requirement.complete) &&
+    installments.length > 0 &&
+    !optionsLoading &&
+    !optionsError;
+  const focus = (key: string) => document.getElementById(`sales-confirm-${key}`)?.focus();
   return (
     <Dialog open onOpenChange={open => !open && setState(null)}>
-      <DialogContent className="max-w-xl bg-white">
-        <DialogHeader><DialogTitle>Confirmar venda e criar títulos</DialogTitle><p className="text-sm text-slate-600">A confirmação e os títulos serão gravados na mesma transação. Esta etapa não reserva estoque.</p></DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="text-xs font-semibold text-slate-700">Forma de pagamento<select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={state.paymentMethod} onChange={event => setState({ ...state, paymentMethod: event.target.value })}>{paymentMethods.map(value => <option key={value}>{value}</option>)}</select></label>
-          <label className="text-xs font-semibold text-slate-700">Categoria financeira<select required className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={state.categoryPublicId} onChange={event => setState({ ...state, categoryPublicId: event.target.value })}><option value="">Selecione</option>{categories.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}</select></label>
-          <label className="text-xs font-semibold text-slate-700">Conta prevista<select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={state.financialAccountPublicId} onChange={event => setState({ ...state, financialAccountPublicId: event.target.value })}><option value="">Sem conta definida</option>{accounts.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}</select></label>
-          <label className="text-xs font-semibold text-slate-700">Número de parcelas<Input className="mt-1" type="number" min={1} max={120} value={state.installmentCount} onChange={event => setState({ ...state, installmentCount: Math.max(1, Number(event.target.value)) })} /></label>
-          <label className="text-xs font-semibold text-slate-700 sm:col-span-2">Primeiro vencimento<Input className="mt-1" type="date" value={state.firstDueDate} onChange={event => setState({ ...state, firstDueDate: event.target.value })} /></label>
+      <DialogContent className="max-h-[92vh] overflow-y-auto bg-slate-50 p-0 [scrollbar-width:thin] sm:max-w-4xl">
+        <DialogHeader className="border-b border-slate-200 bg-white px-6 py-5"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">Conferência final</p><DialogTitle className="mt-1">Confirmar venda</DialogTitle><p className="mt-1 text-sm text-slate-600">A venda e seus títulos serão confirmados na mesma transação. A confirmação não reserva estoque.</p></DialogHeader>
+        <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="space-y-4">
+            <section className="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="confirmation-requirements-heading"><h3 id="confirmation-requirements-heading" className="font-bold text-slate-950">Esta venda pode ser confirmada?</h3><div className="mt-3 space-y-2">{requirements.map(requirement => <div key={requirement.key} className={cn("flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm", requirement.complete ? "bg-emerald-50 text-emerald-900" : "bg-amber-50 text-amber-950")}><span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-full", requirement.complete ? "bg-emerald-600 text-white" : "border border-amber-400 bg-white text-amber-700")}>{requirement.complete ? <Check className="h-3.5 w-3.5" /> : "!"}</span><strong className="flex-1">{requirement.label}</strong>{!requirement.complete && requirement.actionLabel && <button type="button" className="font-semibold text-blue-700 hover:underline" onClick={() => focus(requirement.key === "payment" ? "payment" : requirement.key === "installments" ? "installments" : requirement.key)}>{requirement.actionLabel}</button>}</div>)}</div></section>
+
+            <section className="rounded-xl border border-slate-200 bg-white p-4"><h3 className="font-bold text-slate-950">Condições financeiras</h3>
+            {optionsLoading && <p role="status" className="mt-3 rounded-lg bg-blue-50 p-3 text-sm text-blue-900">Carregando categorias, contas e formas de pagamento…</p>}
+            {optionsError && <div role="alert" className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-rose-50 p-3 text-sm text-rose-900"><span>Não foi possível carregar os cadastros financeiros. Nenhuma confirmação será enviada enquanto este gate estiver incompleto.</span><Button type="button" size="sm" variant="outline" onClick={onRetryOptions}>Tentar novamente</Button></div>}
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="text-xs font-semibold text-slate-700">Forma de pagamento<select id="sales-confirm-payment" className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={state.paymentMethod} onChange={event => setState({ ...state, paymentMethod: event.target.value })}><option value="">Selecione</option>{paymentMethods.map(value => <option key={value}>{value}</option>)}</select></label>
+              <label className="text-xs font-semibold text-slate-700">Categoria financeira<select id="sales-confirm-category" required className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={state.categoryPublicId} onChange={event => setState({ ...state, categoryPublicId: event.target.value })}><option value="">Selecione</option>{categories.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}</select></label>
+              <label className="text-xs font-semibold text-slate-700">Conta prevista<select id="sales-confirm-account" required className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={state.financialAccountPublicId} onChange={event => setState({ ...state, financialAccountPublicId: event.target.value })}><option value="">Selecione</option>{accounts.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}</select></label>
+              <div id="sales-confirm-installments" className="grid grid-cols-2 gap-2"><label className="text-xs font-semibold text-slate-700">Parcelas<Input className="mt-1" type="number" min={1} max={120} value={state.installmentCount} onChange={event => setState({ ...state, installmentCount: Math.max(1, Number(event.target.value)) })} /></label><label className="text-xs font-semibold text-slate-700">1º vencimento<Input className="mt-1" type="date" value={state.firstDueDate} onChange={event => setState({ ...state, firstDueDate: event.target.value })} /></label></div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setSetup(setup === "category" ? null : "category")}><Plus className="mr-1.5 h-3.5 w-3.5" />Nova categoria a receber</Button><Button type="button" size="sm" variant="outline" onClick={() => setSetup(setup === "account" ? null : "account")}><Plus className="mr-1.5 h-3.5 w-3.5" />Nova conta</Button></div>
+            {setup === "category" && <div className="mt-3 flex flex-col gap-2 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-end"><label className="flex-1 text-xs font-semibold text-slate-700">Nome da categoria<Input autoFocus className="mt-1" value={categoryName} onChange={event => setCategoryName(event.target.value)} placeholder="Ex.: Receita de vendas" /></label><Button type="button" disabled={categoryCreationBusy || categoryName.trim().length < 2} onClick={() => onCreateCategory(categoryName.trim())}>{categoryCreationBusy ? "Criando…" : "Criar e selecionar"}</Button></div>}
+            {setup === "account" && <div className="mt-3 grid gap-2 rounded-lg bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_140px_auto] sm:items-end"><label className="text-xs font-semibold text-slate-700">Nome da conta<Input autoFocus className="mt-1" value={accountName} onChange={event => setAccountName(event.target.value)} placeholder="Ex.: Banco principal" /></label><label className="text-xs font-semibold text-slate-700">Tipo<select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={accountType} onChange={event => setAccountType(event.target.value as "cash" | "bank")}><option value="bank">Banco</option><option value="cash">Caixa</option></select></label><Button type="button" disabled={accountCreationBusy || accountName.trim().length < 2} onClick={() => onCreateAccount(accountName.trim(), accountType)}>{accountCreationBusy ? "Criando…" : "Criar e selecionar"}</Button></div>}
+            {financialSetupError && <p role="alert" className="mt-3 rounded-lg bg-rose-50 p-3 text-sm text-rose-900">{financialSetupError}</p>}
+            </section>
+          </div>
+
+          <aside className="self-start rounded-xl bg-slate-950 p-5 text-white lg:sticky lg:top-0"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Resumo financeiro</p><strong className="mt-2 block text-2xl tabular-nums">{money.format(state.totalCents / 100)}</strong><div className="mt-4 max-h-64 space-y-2 overflow-y-auto border-t border-slate-700 pt-4 [scrollbar-width:thin]">{installments.length ? installments.map((entry, index) => <div key={`${entry.dueDate}-${index}`} className="flex justify-between gap-3 text-sm"><span className="text-slate-300">{index + 1}/{installments.length} · {date.format(new Date(`${entry.dueDate}T12:00:00`))}</span><strong className="tabular-nums">{money.format(entry.amountCents / 100)}</strong></div>) : <p className="text-sm text-amber-200">Defina parcelas e vencimento.</p>}</div><div className={cn("mt-5 rounded-lg p-3 text-sm", ready ? "bg-emerald-500/15 text-emerald-100" : "bg-amber-500/15 text-amber-100")}><strong className="block">{ready ? "Pronta para confirmar" : "Confirmação bloqueada"}</strong>{ready ? "Todos os requisitos foram atendidos." : `${requirements.filter(item => !item.complete).length} requisito(s) ainda precisam de atenção.`}</div></aside>
         </div>
-        <div className="max-h-44 space-y-2 overflow-y-auto rounded-lg bg-slate-50 p-3 [scrollbar-width:thin]">
-          {installments.map((entry, index) => <div key={entry.dueDate} className="flex justify-between gap-3 text-sm"><span>{index + 1}/{installments.length} · {date.format(new Date(`${entry.dueDate}T12:00:00`))}</span><strong className="tabular-nums">{money.format(entry.amountCents / 100)}</strong></div>)}
-          <div className="flex justify-between border-t border-slate-200 pt-2 text-sm"><strong>Total exato</strong><strong className="tabular-nums">{money.format(installments.reduce((sum, item) => sum + item.amountCents, 0) / 100)}</strong></div>
-        </div>
-        <DialogFooter><Button variant="outline" onClick={() => setState(null)}>Voltar</Button><Button disabled={busy || !state.categoryPublicId || !state.paymentMethod || !installments.length} onClick={() => onConfirm(state)}>{busy ? "Confirmando…" : "Confirmar e criar títulos"}</Button></DialogFooter>
+        <DialogFooter className="sticky bottom-0 border-t border-slate-200 bg-white px-6 py-4"><Button variant="outline" onClick={() => setState(null)}>Voltar</Button><Button disabled={busy || !ready} onClick={() => onConfirm(state)}>{busy ? "Confirmando…" : "Confirmar venda e criar títulos"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -1257,7 +1382,7 @@ function AddressCorrectionDialog({ state, setState, busy, onConfirm }: {
 }) {
   if (!state) return null;
   return (
-    <Dialog open onOpenChange={open => !open && setState(null)}><DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto bg-white"><DialogHeader><DialogTitle>Corrigir endereço histórico</DialogTitle><p className="text-sm text-slate-600">Permitido até Separação. Os valores anterior e novo serão mantidos na auditoria.</p></DialogHeader><div className="grid gap-4 sm:grid-cols-2"><AddressFields title="Entrega" address={state.shippingAddress} onChange={shippingAddress => setState({ ...state, shippingAddress })} /><AddressFields title="Cobrança" address={state.billingAddress} onChange={billingAddress => setState({ ...state, billingAddress })} /></div><label className="text-sm font-semibold text-slate-700">Motivo da correção<textarea className="mt-1 min-h-20 w-full rounded-md border border-input px-3 py-2 text-sm" value={state.reason} onChange={event => setState({ ...state, reason: event.target.value })} /></label><DialogFooter><Button variant="outline" onClick={() => setState(null)}>Voltar</Button><Button disabled={busy || state.reason.trim().length < 3} onClick={() => onConfirm(state)}>{busy ? "Salvando…" : "Salvar correção"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open onOpenChange={open => !open && setState(null)}><DialogContent className="max-h-[92vh] overflow-y-auto bg-white sm:max-w-3xl"><DialogHeader><DialogTitle>Corrigir endereço histórico</DialogTitle><p className="text-sm text-slate-600">Permitido até Separação. Os valores anterior e novo serão mantidos na auditoria.</p></DialogHeader><div className="grid gap-4 sm:grid-cols-2"><AddressFields title="Entrega" address={state.shippingAddress} onChange={shippingAddress => setState({ ...state, shippingAddress })} /><AddressFields title="Cobrança" address={state.billingAddress} onChange={billingAddress => setState({ ...state, billingAddress })} /></div><label className="text-sm font-semibold text-slate-700">Motivo da correção<textarea className="mt-1 min-h-20 w-full rounded-md border border-input px-3 py-2 text-sm" value={state.reason} onChange={event => setState({ ...state, reason: event.target.value })} /></label><DialogFooter><Button variant="outline" onClick={() => setState(null)}>Voltar</Button><Button disabled={busy || state.reason.trim().length < 3} onClick={() => onConfirm(state)}>{busy ? "Salvando…" : "Salvar correção"}</Button></DialogFooter></DialogContent></Dialog>
   );
 }
 
@@ -1279,8 +1404,18 @@ function AddressFields({ title, address, onChange }: { title?: string; address: 
 }
 
 function MoneyOrQuantity({ label, value, onChange, money: monetary }: { label: string; value: string | number; onChange: (value: never) => void; money?: boolean }) {
+  if (monetary) {
+    return (
+      <label className="text-xs font-semibold text-slate-700">{label}
+        <div className="relative mt-1">
+          <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-sm font-medium text-slate-500">R$</span>
+          <MoneyInput className="pl-10 tabular-nums" label={label} valueCents={Number(value)} onChangeCents={cents => onChange(cents as never)} />
+        </div>
+      </label>
+    );
+  }
   return (
-    <label className="text-xs font-semibold text-slate-700">{label}<Input className="mt-1 tabular-nums" type="number" min={0} step={monetary ? "0.01" : "0.001"} value={monetary ? (Number(value) / 100).toFixed(2) : value} onChange={event => onChange((monetary ? Math.round(Number(event.target.value) * 100) : event.target.value) as never)} /></label>
+    <label className="text-xs font-semibold text-slate-700">{label}<Input className="mt-1 tabular-nums" type="text" inputMode="decimal" value={value} onChange={event => onChange(event.target.value as never)} /></label>
   );
 }
 

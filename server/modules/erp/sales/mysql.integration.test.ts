@@ -660,7 +660,10 @@ physical("ERP sales MySQL behavior matrix", () => {
       confirmSale(s, adminB, first, b.categoryPublicId)
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     await s.create(adminA, draft(a.customer.crmClientId, a.product.publicId, { items: [{ productPublicId: a.product.publicId, quantity: "2", unitPriceCents: 200 }] }));
-    const day = new Date().toISOString().slice(0,10);
+    const [databaseDates] = await getPool().execute<RowDataPacket[]>(
+      "SELECT DATE_FORMAT(CURRENT_DATE, '%Y-%m-%d') day"
+    );
+    const day = String(databaseDates[0].day);
     for (const sort of ["orderNumber","createdAt","total"] as const) {
       const result = await s.list(adminA,{ search:a.customer.companyName,status:"draft",from:day,to:day,sort,direction:"desc",page:1,pageSize:1 });
       expect(result.total).toBe(2); expect(result.items).toHaveLength(1); expect(result.totalPages).toBe(2);
