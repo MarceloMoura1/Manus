@@ -2,6 +2,36 @@ import type { SalesAddress, SalesForm } from "./sales-form";
 
 export const SALES_LOOKUP_MIN_LENGTH = 2;
 
+export type SalesPaginationItem = number | "ellipsis-left" | "ellipsis-right";
+
+export function salesPaginationItems(
+  currentPage: number,
+  totalPages: number
+): SalesPaginationItem[] {
+  if (totalPages <= 0) return [];
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const pages = new Set([1, totalPages, currentPage - 1, currentPage, currentPage + 1]);
+  if (currentPage <= 4) [2, 3, 4, 5].forEach(page => pages.add(page));
+  if (currentPage >= totalPages - 3) {
+    [totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1].forEach(page => pages.add(page));
+  }
+  const ordered = [...pages]
+    .filter(page => page >= 1 && page <= totalPages)
+    .sort((left, right) => left - right);
+  const result: SalesPaginationItem[] = [];
+  ordered.forEach((page, index) => {
+    const previous = ordered[index - 1];
+    if (previous && page - previous > 1) {
+      result.push(previous === 1 ? "ellipsis-left" : "ellipsis-right");
+    }
+    result.push(page);
+  });
+  return result;
+}
+
 export function canRunSalesLookup(value: string) {
   return value.trim().length >= SALES_LOOKUP_MIN_LENGTH;
 }

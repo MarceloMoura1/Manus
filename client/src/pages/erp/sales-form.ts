@@ -81,6 +81,33 @@ export function hasDuplicateSalesItemIdentity(items: SalesFormItem[]) {
   return new Set(identities).size !== identities.length;
 }
 
+const quantityMillis = (value: string) => {
+  const normalized = value.trim().replace(",", ".");
+  if (!/^\d{1,15}(?:\.\d{1,3})?$/.test(normalized)) return null;
+  const [whole, fraction = ""] = normalized.split(".");
+  return BigInt(whole) * 1_000n + BigInt(fraction.padEnd(3, "0"));
+};
+
+export function salesStockIssue(item: SalesFormItem) {
+  if (item.availableQuantity === null || item.availableQuantity === undefined) return null;
+  const requested = quantityMillis(item.quantity);
+  const available = quantityMillis(item.availableQuantity);
+  if (requested === null || requested <= 0n || available === null || requested <= available) return null;
+  return {
+    productName: item.productName || item.sku || "Produto",
+    availableQuantity: item.availableQuantity,
+    requestedQuantity: item.quantity,
+  };
+}
+
+export function firstSalesStockIssue(items: SalesFormItem[]) {
+  for (const item of items) {
+    const issue = salesStockIssue(item);
+    if (issue) return issue;
+  }
+  return null;
+}
+
 export function salesFormFromDetail(detail: SaleDetailForForm): SalesForm {
   return {
     publicId: detail.publicId,

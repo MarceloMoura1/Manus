@@ -3,6 +3,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../../server/routers";
 import {
   AlertCircle,
+  ArrowLeft,
   ArrowRight,
   Box,
   CalendarDays,
@@ -53,6 +54,7 @@ import {
   blankSalesAddress,
   blankSalesForm,
   calculateSalesFormTotals,
+  firstSalesStockIssue,
   hasDuplicateSalesItemIdentity,
   salesDraftFromForm,
   salesFormFromDetail,
@@ -67,6 +69,7 @@ import {
   salesAddressesMatch,
   salesConfirmationRequirements,
   salesDraftProgress,
+  salesPaginationItems,
 } from "./sales-ux";
 
 const money = new Intl.NumberFormat("pt-BR", {
@@ -131,9 +134,11 @@ const month = currentMonth();
 
 export function SalesPage({
   initialSelectedId,
+  onSaleNavigate,
   onClientNavigate,
 }: {
   initialSelectedId?: string;
+  onSaleNavigate?: (salePublicId?: string) => void;
   onClientNavigate?: (crmClientId: string) => void;
 } = {}) {
   const utils = trpc.useUtils();
@@ -150,10 +155,10 @@ export function SalesPage({
   const [from, setFrom] = React.useState(month.from);
   const [to, setTo] = React.useState(month.to);
   const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(10);
   const [selectedId, setSelectedId] = React.useState<string | null>(
     initialSelectedId ?? null
   );
-  const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [form, setForm] = React.useState<SalesForm | null>(null);
   const [customerSearch, setCustomerSearch] = React.useState("");
   const [catalogSearch, setCatalogSearch] = React.useState("");
@@ -188,7 +193,7 @@ export function SalesPage({
     sort: "createdAt",
     direction: "desc",
     page,
-    pageSize: 12,
+    pageSize,
   });
   const options = trpc.erp.sales.options.useQuery();
   const detail = trpc.erp.sales.detail.useQuery(
@@ -209,13 +214,24 @@ export function SalesPage({
   );
 
   React.useEffect(() => {
-    const first = list.data?.items[0]?.publicId;
-    if (!selectedId && first) setSelectedId(first);
-  }, [list.data?.items, selectedId]);
+    setSelectedId(initialSelectedId ?? null);
+  }, [initialSelectedId]);
 
   React.useEffect(() => {
-    if (initialSelectedId) setSelectedId(initialSelectedId);
-  }, [initialSelectedId]);
+    if (!list.data) return;
+    const lastPage = Math.max(1, list.data.totalPages);
+    if (page > lastPage) setPage(lastPage);
+  }, [list.data, page]);
+
+  const openSale = React.useCallback((publicId: string) => {
+    setSelectedId(publicId);
+    onSaleNavigate?.(publicId);
+  }, [onSaleNavigate]);
+
+  const closeSale = React.useCallback(() => {
+    setSelectedId(null);
+    onSaleNavigate?.();
+  }, [onSaleNavigate]);
 
   const refresh = React.useCallback(async () => {
     await utils.erp.invalidate();
@@ -228,10 +244,10 @@ export function SalesPage({
       setTransition(null);
       setAddressCorrection(null);
       setMessage(text);
-      if (id) setSelectedId(id);
+      if (id) openSale(id);
       await refresh();
     },
-    [refresh]
+    [openSale, refresh]
   );
 
   const create = trpc.erp.sales.create.useMutation({
@@ -299,6 +315,13 @@ export function SalesPage({
       setMessage("A mesma variação não pode aparecer duas vezes na venda.");
       return;
     }
+    const stockIssue = firstSalesStockIssue(form.items);
+    if (stockIssue) {
+      setMessage(
+        `Estoque insuficiente para ${stockIssue.productName}. Disponível: ${formatQuantity(stockIssue.availableQuantity)}. Solicitado: ${formatQuantity(stockIssue.requestedQuantity)}.`
+      );
+      return;
+    }
     const command = salesDraftFromForm(form);
     if (form.publicId) update.mutate({ ...command, publicId: form.publicId });
     else create.mutate(command);
@@ -347,6 +370,7 @@ export function SalesPage({
       className="min-w-0 space-y-5 selection:bg-blue-100 selection:text-blue-950"
       data-testid="erp-sales-page"
     >
+      <div className={selectedId ? "hidden" : "contents"} aria-hidden={selectedId ? true : undefined}>
       <ErpPageHeader
         title="Vendas"
         description="Pedidos, produtos e recebimentos em uma única visão."
@@ -392,7 +416,7 @@ export function SalesPage({
       <div className="min-w-0 space-y-5">
         <section className="min-w-0 space-y-3" aria-label="Lista de vendas">
           <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-[0_8px_24px_-22px_rgba(15,23,42,0.45)]" data-testid="sales-filters">
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_170px_300px_minmax(190px,0.7fr)_auto_auto]">
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_170px_300px_auto_auto]">
               <label className="relative min-w-0">
                 <span className="sr-only">Busca</span>
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
@@ -427,29 +451,6 @@ export function SalesPage({
                 <Input type="date" aria-label="Data inicial" value={from} onChange={event => { setFrom(event.target.value); setPage(1); }} />
                 <Input type="date" aria-label="Data final" value={to} onChange={event => { setTo(event.target.value); setPage(1); }} />
               </label>
-              <div className="relative min-w-0">
-                {filterCustomer ? (
-                  <div className="flex h-10 items-center justify-between gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 text-sm text-blue-950">
-                    <span className="truncate font-medium">{filterCustomer.customerName}</span>
-                    <button type="button" aria-label="Remover filtro de cliente" className="rounded p-1 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => { setFilterCustomer(null); setPage(1); }}><XCircle className="h-4 w-4" /></button>
-                  </div>
-                ) : (
-                  <>
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                    <Input aria-label="Filtrar por cliente" className="pl-9" placeholder="Filtrar por cliente" value={filterCustomerSearch} onChange={event => setFilterCustomerSearch(event.target.value)} />
-                    {filterCustomerLookupEnabled && (
-                      <div className="absolute left-0 right-0 top-11 z-30 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl [scrollbar-width:thin]">
-                        {filterCustomers.isLoading ? <p className="p-3 text-sm text-slate-500">Buscando clientes…</p> : filterCustomers.isError ? <p className="p-3 text-sm text-rose-700">Não foi possível buscar clientes.</p> : filterCustomers.data?.items.length ? filterCustomers.data.items.map(customer => (
-                          <button type="button" key={customer.crmClientId} className="block w-full rounded-md px-3 py-2 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => { setFilterCustomer(customer); setFilterCustomerSearch(""); setPage(1); }}>
-                            <strong className="block truncate text-sm text-slate-900">{customer.customerName}</strong>
-                            <span className="block truncate text-xs text-slate-500">{customer.document || customer.responsibleName || customer.crmClientId}</span>
-                          </button>
-                        )) : <p className="p-3 text-sm text-slate-500">Nenhum cliente encontrado.</p>}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
               <Button type="button" variant="outline" className="justify-between" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
                 <SlidersHorizontal className="mr-2 h-4 w-4" /> Mais filtros
                 {activeFilterCount > 0 && <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">{activeFilterCount}</span>}
@@ -458,7 +459,31 @@ export function SalesPage({
             </div>
 
             {advancedFiltersOpen && (
-              <div className="mt-3 grid gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Filtros avançados">
+              <div className="mt-3 grid gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Filtros avançados">
+                <div className="relative min-w-0">
+                  <span className="text-xs font-semibold text-slate-600">Cliente</span>
+                  {filterCustomer ? (
+                    <div className="mt-1 flex h-10 items-center justify-between gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 text-sm text-blue-950">
+                      <span className="truncate font-medium">{filterCustomer.customerName}</span>
+                      <button type="button" aria-label="Remover filtro de cliente" className="rounded p-1 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => { setFilterCustomer(null); setPage(1); }}><XCircle className="h-4 w-4" /></button>
+                    </div>
+                  ) : (
+                    <>
+                      <Search className="pointer-events-none absolute bottom-3 left-3 h-4 w-4 text-slate-500" />
+                      <Input aria-label="Filtrar por cliente" className="mt-1 pl-9" placeholder="Buscar cliente" value={filterCustomerSearch} onChange={event => setFilterCustomerSearch(event.target.value)} />
+                      {filterCustomerLookupEnabled && (
+                        <div className="absolute left-0 right-0 top-[4.5rem] z-30 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl [scrollbar-width:thin]">
+                          {filterCustomers.isLoading ? <p className="p-3 text-sm text-slate-500">Buscando clientes…</p> : filterCustomers.isError ? <p className="p-3 text-sm text-rose-700">Não foi possível buscar clientes.</p> : filterCustomers.data?.items.length ? filterCustomers.data.items.map(customer => (
+                            <button type="button" key={customer.crmClientId} className="block w-full rounded-md px-3 py-2 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => { setFilterCustomer(customer); setFilterCustomerSearch(""); setPage(1); }}>
+                              <strong className="block truncate text-sm text-slate-900">{customer.customerName}</strong>
+                              <span className="block truncate text-xs text-slate-500">{customer.document || customer.responsibleName || customer.crmClientId}</span>
+                            </button>
+                          )) : <p className="p-3 text-sm text-slate-500">Nenhum cliente encontrado.</p>}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
                 <label className="text-xs font-semibold text-slate-600">Pagamento
                   <select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-slate-800" value={paymentStatus} onChange={event => { setPaymentStatus(event.target.value as typeof paymentStatus); setPage(1); }}>
                     <option value="all">Todos os pagamentos</option><option value="pending">Pendente</option><option value="partial">Pagamento parcial</option><option value="paid">Pago</option>
@@ -510,115 +535,99 @@ export function SalesPage({
               description="Ajuste os filtros ou crie uma nova venda."
             />
           ) : (
-            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_8px_24px_-20px_rgba(15,23,42,0.55)]">
-              <div className="hidden grid-cols-[34px_110px_minmax(140px,1fr)_minmax(145px,1.2fr)_110px_130px_120px] gap-3 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-600 lg:grid">
-                <span aria-hidden="true" />
-                <span>Pedido</span>
-                <span>Cliente</span>
-                <span>Produtos</span>
-                <span className="text-right">Total</span>
-                <span>Pagamento</span>
-                <span>Etapa</span>
+            <div className="overflow-visible rounded-xl border border-slate-200 bg-white shadow-[0_8px_24px_-20px_rgba(15,23,42,0.55)]">
+              <div className="hidden grid-cols-[64px_minmax(190px,1.5fr)_minmax(140px,1fr)_120px_135px_120px_44px] items-center gap-3 rounded-t-xl bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-600 lg:grid">
+                <span>Produto</span><span>Venda</span><span>Cliente</span><span className="text-right">Total</span><span>Pagamento</span><span>Etapa</span><span className="sr-only">Ações</span>
               </div>
-              {list.data.items.map(order => {
-                const expanded = expandedId === order.publicId;
-                const active = selectedId === order.publicId;
-                return (
-                  <article
-                    key={order.publicId}
-                    className={cn(
-                      "border-t border-slate-100 first:border-t-0",
-                      active && "bg-blue-50/55"
-                    )}
-                  >
-                    <div className="grid grid-cols-[34px_minmax(0,1fr)] items-center gap-3 px-4 py-3 lg:grid-cols-[34px_110px_minmax(140px,1fr)_minmax(145px,1.2fr)_110px_130px_120px]">
-                      <button
-                        type="button"
-                        aria-label={expanded ? "Recolher itens" : "Expandir itens"}
-                        aria-expanded={expanded}
-                        className="flex h-8 w-8 items-center justify-center rounded-md text-slate-600 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                        onClick={() => {
-                          setExpandedId(expanded ? null : order.publicId);
-                          setSelectedId(order.publicId);
-                        }}
-                      >
-                        {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                      </button>
-                      <button
-                        type="button"
-                        className="col-start-2 min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:col-auto"
-                        onClick={() => setSelectedId(order.publicId)}
-                      >
-                        <strong className="block text-sm text-slate-950">{order.orderNumber}</strong>
-                        <span className="text-xs text-slate-500">{date.format(new Date(order.createdAt))}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="col-start-2 truncate text-left text-sm font-semibold text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 lg:col-auto"
-                        onClick={() => setSelectedId(order.publicId)}
-                      >
-                        {order.customerName}
-                      </button>
-                      <div className="col-start-2 min-w-0 lg:col-auto">
-                        <p className="truncate text-sm text-slate-800">
-                          {order.firstProductName ?? "Itens históricos indisponíveis"}
-                          {order.itemCount > 1 ? ` · +${order.itemCount - 1}` : ""}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          {order.itemCount} {order.itemCount === 1 ? "item" : "itens"} · {formatQuantity(order.totalQuantity)} un.
-                        </p>
+              <div className="divide-y divide-slate-100">
+                {list.data.items.map(order => (
+                  <article key={order.publicId} className="group relative p-3 transition-colors hover:bg-slate-50/80 sm:p-4 lg:grid lg:grid-cols-[64px_minmax(190px,1.5fr)_minmax(140px,1fr)_120px_135px_120px_44px] lg:items-center lg:gap-3" data-testid={`sale-row-${order.publicId}`}>
+                    <button type="button" className="absolute inset-0 z-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500" aria-label={`Abrir venda ${order.orderNumber}`} onClick={() => openSale(order.publicId)} />
+                    <div className="pointer-events-none relative z-10 grid grid-cols-[48px_minmax(0,1fr)] items-start gap-x-3 lg:contents">
+                      <ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} />
+                      <div className="min-w-0 lg:block">
+                        <strong className="block text-sm text-blue-800">{order.orderNumber}</strong>
+                        <span className="mt-0.5 block truncate text-sm font-semibold text-slate-900">{order.firstProductName ?? "Itens históricos indisponíveis"}{order.itemCount > 1 ? ` · +${order.itemCount - 1}` : ""}</span>
+                        <span className="mt-0.5 block text-xs text-slate-500">{date.format(new Date(order.createdAt))} · {order.itemCount} {order.itemCount === 1 ? "item" : "itens"}</span>
                       </div>
-                      <strong className="col-start-2 text-left text-sm tabular-nums text-slate-950 lg:col-auto lg:text-right">
-                        {money.format(order.totalCents / 100)}
-                      </strong>
-                      <div className="col-start-2 lg:col-auto"><PaymentBadge value={order.paymentStatus} /></div>
-                      <div className="col-start-2 flex items-center justify-between gap-2 lg:col-auto">
-                        <StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} />
-                        {order.cancelled && <XCircle className="h-4 w-4 text-rose-600" aria-label="Cancelada" />}
-                      </div>
+                      <div className="col-start-2 mt-3 min-w-0 lg:col-auto lg:mt-0"><span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 lg:hidden">Cliente</span><p className="truncate text-sm font-semibold text-slate-800">{order.customerName}</p></div>
+                      <div className="col-start-2 mt-3 lg:col-auto lg:mt-0 lg:text-right"><span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 lg:hidden">Total</span><strong className="block text-sm tabular-nums text-slate-950">{money.format(order.totalCents / 100)}</strong></div>
+                      <div className="col-start-2 mt-3 lg:col-auto lg:mt-0"><span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500 lg:hidden">Pagamento</span><PaymentBadge value={order.paymentStatus} /></div>
+                      <div className="col-start-2 mt-3 lg:col-auto lg:mt-0"><span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500 lg:hidden">Etapa</span><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} /></div>
                     </div>
-                    {expanded && (
-                      <ExpandedProducts
-                        orderId={order.publicId}
-                        detail={selectedId === order.publicId ? detail : null}
-                        onEdit={canWrite && order.currentStage === "created" && !order.cancelled ? () => void edit(order.publicId) : undefined}
-                      />
-                    )}
+                    <details className="absolute right-3 top-3 z-20 justify-self-end sm:right-4 sm:top-4 lg:relative lg:right-auto lg:top-auto lg:mt-0">
+                      <summary className="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" aria-label={`Ações da venda ${order.orderNumber}`}><span aria-hidden="true" className="text-xl leading-none">⋯</span></summary>
+                      <div className="absolute right-0 top-10 z-30 w-44 rounded-lg border border-slate-200 bg-white p-1 shadow-xl">
+                        <button type="button" className="w-full rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => openSale(order.publicId)}>Ver detalhes</button>
+                        {canWrite && order.currentStage === "created" && !order.cancelled && <button type="button" className="w-full rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => void edit(order.publicId)}>Editar rascunho</button>}
+                      </div>
+                    </details>
                   </article>
-                );
-              })}
+                ))}
+              </div>
             </div>
           )}
 
           {list.data && (
-            <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
-              <span>{list.data.total} {list.data.total === 1 ? "venda" : "vendas"}</span>
-              {list.data.totalPages > 1 && (
-                <nav aria-label="Paginação das vendas" className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(value => value - 1)}>
-                    Anterior
-                  </Button>
-                  <span className="tabular-nums">{page} / {list.data.totalPages}</span>
-                  <Button variant="outline" size="sm" disabled={page >= list.data.totalPages} onClick={() => setPage(value => value + 1)}>
-                    Próxima
-                  </Button>
-                </nav>
-              )}
+            <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-600 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4">
+              <span className="tabular-nums">
+                {list.data.total === 0
+                  ? "Nenhuma venda"
+                  : `Mostrando ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, list.data.total)} de ${list.data.total} vendas`}
+              </span>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                  Itens por página
+                  <select
+                    aria-label="Itens por página"
+                    className="h-9 rounded-md border border-input bg-white px-2 text-sm"
+                    value={pageSize}
+                    onChange={event => {
+                      setPageSize(Number(event.target.value));
+                      setPage(1);
+                    }}
+                  >
+                    {[10, 20, 50, 100].map(value => <option key={value} value={value}>{value}</option>)}
+                  </select>
+                </label>
+                {list.data.totalPages > 1 && (
+                  <nav aria-label="Paginação das vendas" className="flex items-center gap-1">
+                    <Button variant="outline" size="sm" aria-label="Página anterior" disabled={page <= 1} onClick={() => setPage(value => value - 1)}>‹</Button>
+                    {salesPaginationItems(page, list.data.totalPages).map(item =>
+                      typeof item === "number" ? (
+                        <Button key={item} variant={item === page ? "default" : "outline"} size="sm" aria-current={item === page ? "page" : undefined} aria-label={`Página ${item}`} onClick={() => setPage(item)}>{item}</Button>
+                      ) : (
+                        <span key={item} className="px-1 text-slate-400" aria-hidden="true">…</span>
+                      )
+                    )}
+                    <Button variant="outline" size="sm" aria-label="Próxima página" disabled={page >= list.data.totalPages} onClick={() => setPage(value => value + 1)}>›</Button>
+                  </nav>
+                )}
+              </div>
             </div>
           )}
         </section>
+      </div>
+      </div>
 
-        <SaleDetailPanel
+      {selectedId && (
+        <section className="min-w-0 space-y-4" aria-label="Detalhe da venda" data-testid="sales-detail-screen">
+          <Button type="button" variant="ghost" className="-ml-2 text-slate-700" onClick={closeSale}>
+            <ArrowLeft className="mr-2 h-4 w-4" /> Voltar para vendas
+          </Button>
+          <SaleDetailPanel
           query={detail}
-          canWrite={canWrite}
+          canWrite={detail.data?.canWrite === true}
           onRetry={() => void detail.refetch()}
           onEdit={id => void edit(id)}
           onConfirm={order =>
             setConfirmation({
               publicId: order.publicId,
               idempotencyKey: crypto.randomUUID(),
-              totalCents: order.totalCents,
-              paymentMethod: options.data?.paymentMethods[0] ?? "PIX",
+               totalCents: order.totalCents,
+               paymentStatus: "pending",
+               receivedCents: 0,
+               paymentMethod: options.data?.paymentMethods[0] ?? "PIX",
               categoryPublicId: options.data?.categories[0]?.publicId ?? "",
               financialAccountPublicId: options.data?.accounts[0]?.publicId ?? "",
               installmentCount: 1,
@@ -648,8 +657,9 @@ export function SalesPage({
             })
           }
           onClientNavigate={onClientNavigate}
-        />
-      </div>
+          />
+        </section>
+      )}
 
       <SaleFormDialog
         form={form}
@@ -706,8 +716,9 @@ export function SalesPage({
             idempotencyKey: state.idempotencyKey,
             paymentMethod: state.paymentMethod,
             categoryPublicId: state.categoryPublicId,
-            financialAccountPublicId: state.financialAccountPublicId || undefined,
-            installments,
+             financialAccountPublicId: state.financialAccountPublicId || undefined,
+             receivedCents: state.receivedCents,
+             installments,
           });
         }}
       />
@@ -1141,6 +1152,7 @@ function SaleFormDialog({
 }) {
   if (!form) return null;
   const totals = calculateSalesFormTotals(form);
+  const stockIssue = firstSalesStockIssue(form.items);
   const progress = salesDraftProgress(form);
   const completeSteps = progress.filter(item => item.complete).length;
   const patchItem = (index: number, patch: Record<string, unknown>) =>
@@ -1150,6 +1162,7 @@ function SaleFormDialog({
         : current
     );
   const addCatalogItem = (product: CatalogOption) => {
+    if (Number(product.availableQuantity) <= 0) return;
     if (form.items.some(item => item.inventoryItemPublicId === product.inventoryItemPublicId)) return;
     setForm(current => current ? { ...current, items: [...current.items, {
       productPublicId: product.productPublicId,
@@ -1216,7 +1229,9 @@ function SaleFormDialog({
                   <div className="mt-2 rounded-lg border border-slate-200">
                     {!catalogLookupEnabled ? <p className="p-4 text-sm text-slate-500">Digite ao menos {SALES_LOOKUP_MIN_LENGTH} caracteres para pesquisar o catálogo.</p> : catalog.isLoading ? <p role="status" className="p-4 text-sm text-slate-500">Buscando produtos…</p> : catalog.isError ? <p role="alert" className="p-4 text-sm text-rose-700">Não foi possível buscar produtos.</p> : groups.length ? <div className="max-h-72 divide-y divide-slate-100 overflow-y-auto [scrollbar-width:thin]">{groups.map(group => {
                       const expanded = expandedCatalogProductId === group.productPublicId;
-                      return <div key={group.productPublicId} className="p-2"><button type="button" className="flex w-full items-center gap-3 rounded-md p-2 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" aria-expanded={expanded} onClick={() => group.options.length === 1 ? addCatalogItem(group.options[0]) : setExpandedCatalogProductId(expanded ? null : group.productPublicId)}><ProductThumb imagePath={group.imagePath} name={group.name} /><span className="min-w-0 flex-1"><strong className="block truncate text-sm text-slate-900">{group.name}</strong><span className="block text-xs text-slate-500">{group.options.length === 1 ? `${group.options[0].sku} · adicionar item` : `${group.options.length} variações encontradas`}</span></span>{group.options.length === 1 ? <Plus className="h-4 w-4 text-blue-700" /> : expanded ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronRight className="h-4 w-4 text-slate-500" />}</button>{expanded && <div className="ml-12 mt-1 space-y-1 border-l border-slate-200 pl-3">{group.options.map(option => { const used = form.items.some(item => item.inventoryItemPublicId === option.inventoryItemPublicId); return <button type="button" key={option.inventoryItemPublicId} disabled={used} className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-45" onClick={() => addCatalogItem(option)}><span className="min-w-0"><strong className="block truncate text-slate-900">{option.variantAttributes || option.variantName || "Produto padrão"}</strong><span className="block truncate text-xs text-slate-500">{option.sku} · disponível {formatQuantity(option.availableQuantity)}</span></span><span className="shrink-0 font-semibold tabular-nums">{money.format(option.salePriceCents / 100)}</span></button>; })}</div>}</div>;
+                      const singleOption = group.options.length === 1 ? group.options[0] : null;
+                      const singleUnavailable = Boolean(singleOption && Number(singleOption.availableQuantity) <= 0);
+                      return <div key={group.productPublicId} className="p-2"><button type="button" disabled={singleUnavailable} className="flex w-full items-center gap-3 rounded-md p-2 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50" aria-expanded={group.options.length > 1 ? expanded : undefined} onClick={() => singleOption ? addCatalogItem(singleOption) : setExpandedCatalogProductId(expanded ? null : group.productPublicId)}><ProductThumb imagePath={group.imagePath} name={group.name} /><span className="min-w-0 flex-1"><strong className="block truncate text-sm text-slate-900">{group.name}</strong><span className="block text-xs text-slate-500">{singleOption ? `${singleOption.sku} · ${singleUnavailable ? "sem estoque" : `disponível ${formatQuantity(singleOption.availableQuantity)}`}` : `${group.options.length} variações encontradas`}</span></span>{singleOption ? <Plus className="h-4 w-4 text-blue-700" /> : expanded ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronRight className="h-4 w-4 text-slate-500" />}</button>{expanded && <div className="ml-12 mt-1 space-y-1 border-l border-slate-200 pl-3">{group.options.map(option => { const used = form.items.some(item => item.inventoryItemPublicId === option.inventoryItemPublicId); const unavailable = Number(option.availableQuantity) <= 0; return <button type="button" key={option.inventoryItemPublicId} disabled={used || unavailable} className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-45" onClick={() => addCatalogItem(option)}><span className="min-w-0"><strong className="block truncate text-slate-900">{option.variantAttributes || option.variantName || "Produto padrão"}</strong><span className="block truncate text-xs text-slate-500">{option.sku} · {unavailable ? "sem estoque" : `disponível ${formatQuantity(option.availableQuantity)}`}</span></span><span className="shrink-0 font-semibold tabular-nums">{money.format(option.salePriceCents / 100)}</span></button>; })}</div>}</div>;
                     })}</div> : <p className="p-4 text-sm text-slate-500">Nenhum produto encontrado para “{catalogSearch.trim()}”.</p>}
                   </div>
                   {catalogLookupEnabled && <SearchPager page={catalogPage} total={catalog.data?.total ?? 0} pageSize={catalog.data?.pageSize ?? 12} onPage={setCatalogPage} />}
@@ -1233,6 +1248,11 @@ function SaleFormDialog({
                       </div>
                     )) : <div className="rounded-lg border border-dashed border-slate-300 p-5 text-center text-sm text-slate-500">Pesquise e adicione o primeiro produto da venda.</div>}
                   </div>
+                  {stockIssue && (
+                    <p role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
+                      Estoque insuficiente para {stockIssue.productName}. Disponível: {formatQuantity(stockIssue.availableQuantity)}. Solicitado: {formatQuantity(stockIssue.requestedQuantity)}.
+                    </p>
+                  )}
                 </section>
 
                 <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5" aria-labelledby="sale-address-heading">
@@ -1254,7 +1274,7 @@ function SaleFormDialog({
               </aside>
             </div>
           </div>
-          <DialogFooter className="border-t border-slate-200 bg-white px-5 py-3 sm:px-7"><Button type="button" variant="outline" onClick={() => setForm(null)}>Cancelar</Button><Button type="submit" disabled={busy || !form.crmClientId || !form.items.length || totals.totalCents <= 0 || (form.freightCents ?? 0) < 0}>{busy ? "Salvando…" : "Salvar rascunho"}</Button></DialogFooter>
+          <DialogFooter className="border-t border-slate-200 bg-white px-5 py-3 sm:px-7"><Button type="button" variant="outline" onClick={() => setForm(null)}>Cancelar</Button><Button type="submit" disabled={busy || Boolean(stockIssue) || !form.crmClientId || !form.items.length || totals.totalCents <= 0 || (form.freightCents ?? 0) < 0}>{busy ? "Salvando…" : "Salvar rascunho"}</Button></DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
@@ -1265,6 +1285,8 @@ type ConfirmationState = {
   publicId: string;
   idempotencyKey: string;
   totalCents: number;
+  paymentStatus: "pending" | "partial" | "paid";
+  receivedCents: number;
   paymentMethod: string;
   categoryPublicId: string;
   financialAccountPublicId: string;
@@ -1299,8 +1321,13 @@ function ConfirmationDialog({ state, setState, categories, accounts, paymentMeth
   if (!state) return null;
   const installments = splitInstallments(state.totalCents, state.installmentCount, state.firstDueDate);
   const requirements = salesConfirmationRequirements(state);
+  const paymentReady =
+    (state.paymentStatus === "pending" && state.receivedCents === 0) ||
+    (state.paymentStatus === "partial" && state.receivedCents > 0 && state.receivedCents < state.totalCents) ||
+    (state.paymentStatus === "paid" && state.receivedCents === state.totalCents);
   const ready =
     requirements.every(requirement => requirement.complete) &&
+    paymentReady &&
     installments.length > 0 &&
     !optionsLoading &&
     !optionsError;
@@ -1316,6 +1343,35 @@ function ConfirmationDialog({ state, setState, categories, accounts, paymentMeth
             <section className="rounded-xl border border-slate-200 bg-white p-4"><h3 className="font-bold text-slate-950">Condições financeiras</h3>
             {optionsLoading && <p role="status" className="mt-3 rounded-lg bg-blue-50 p-3 text-sm text-blue-900">Carregando categorias, contas e formas de pagamento…</p>}
             {optionsError && <div role="alert" className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-rose-50 p-3 text-sm text-rose-900"><span>Não foi possível carregar os cadastros financeiros. Nenhuma confirmação será enviada enquanto este gate estiver incompleto.</span><Button type="button" size="sm" variant="outline" onClick={onRetryOptions}>Tentar novamente</Button></div>}
+            <fieldset className="mt-3">
+              <legend className="text-xs font-semibold text-slate-700">Situação no momento da confirmação</legend>
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                {(["pending", "partial", "paid"] as const).map(status => (
+                  <button
+                    key={status}
+                    type="button"
+                    className={cn("rounded-lg border px-3 py-2 text-left text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500", state.paymentStatus === status ? "border-blue-500 bg-blue-50 text-blue-900" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50")}
+                    aria-pressed={state.paymentStatus === status}
+                    disabled={status === "partial" && state.totalCents <= 1}
+                    onClick={() => setState({
+                      ...state,
+                      paymentStatus: status,
+                      receivedCents: status === "pending" ? 0 : status === "paid" ? state.totalCents : Math.max(1, Math.min(state.totalCents - 1, Math.floor(state.totalCents / 2))),
+                    })}
+                  >
+                    {status === "pending" ? "Pendente" : status === "partial" ? "Pagamento parcial" : "Pago"}
+                  </button>
+                ))}
+              </div>
+              {state.paymentStatus === "partial" && (
+                <label className="mt-3 block text-xs font-semibold text-slate-700">
+                  Valor já recebido
+                  <MoneyInput className="mt-1 tabular-nums" label="Valor já recebido" valueCents={state.receivedCents} onChangeCents={receivedCents => setState({ ...state, receivedCents })} />
+                </label>
+              )}
+              {!paymentReady && <p role="alert" className="mt-2 text-sm text-rose-700">O valor recebido deve ser maior que zero e menor que o total para um pagamento parcial.</p>}
+              <p className="mt-2 text-xs leading-5 text-slate-500">Isenção não está disponível porque o domínio financeiro atual não possui um lançamento isento auditável. Nenhum status fictício será gravado.</p>
+            </fieldset>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <label className="text-xs font-semibold text-slate-700">Forma de pagamento<select id="sales-confirm-payment" className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={state.paymentMethod} onChange={event => setState({ ...state, paymentMethod: event.target.value })}><option value="">Selecione</option>{paymentMethods.map(value => <option key={value}>{value}</option>)}</select></label>
               <label className="text-xs font-semibold text-slate-700">Categoria financeira<select id="sales-confirm-category" required className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={state.categoryPublicId} onChange={event => setState({ ...state, categoryPublicId: event.target.value })}><option value="">Selecione</option>{categories.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}</select></label>
@@ -1329,7 +1385,7 @@ function ConfirmationDialog({ state, setState, categories, accounts, paymentMeth
             </section>
           </div>
 
-          <aside className="self-start rounded-xl bg-slate-950 p-5 text-white lg:sticky lg:top-0"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Resumo financeiro</p><strong className="mt-2 block text-2xl tabular-nums">{money.format(state.totalCents / 100)}</strong><div className="mt-4 max-h-64 space-y-2 overflow-y-auto border-t border-slate-700 pt-4 [scrollbar-width:thin]">{installments.length ? installments.map((entry, index) => <div key={`${entry.dueDate}-${index}`} className="flex justify-between gap-3 text-sm"><span className="text-slate-300">{index + 1}/{installments.length} · {date.format(new Date(`${entry.dueDate}T12:00:00`))}</span><strong className="tabular-nums">{money.format(entry.amountCents / 100)}</strong></div>) : <p className="text-sm text-amber-200">Defina parcelas e vencimento.</p>}</div><div className={cn("mt-5 rounded-lg p-3 text-sm", ready ? "bg-emerald-500/15 text-emerald-100" : "bg-amber-500/15 text-amber-100")}><strong className="block">{ready ? "Pronta para confirmar" : "Confirmação bloqueada"}</strong>{ready ? "Todos os requisitos foram atendidos." : `${requirements.filter(item => !item.complete).length} requisito(s) ainda precisam de atenção.`}</div></aside>
+          <aside className="self-start rounded-xl bg-slate-950 p-5 text-white lg:sticky lg:top-0"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Resumo financeiro</p><strong className="mt-2 block text-2xl tabular-nums">{money.format(state.totalCents / 100)}</strong><div className="mt-3 space-y-1 border-t border-slate-700 pt-3 text-sm"><div className="flex justify-between gap-3"><span className="text-slate-300">Recebido</span><strong className="tabular-nums text-emerald-300">{money.format(state.receivedCents / 100)}</strong></div><div className="flex justify-between gap-3"><span className="text-slate-300">Restante</span><strong className="tabular-nums">{money.format(Math.max(0, state.totalCents - state.receivedCents) / 100)}</strong></div></div><div className="mt-4 max-h-64 space-y-2 overflow-y-auto border-t border-slate-700 pt-4 [scrollbar-width:thin]">{installments.length ? installments.map((entry, index) => <div key={`${entry.dueDate}-${index}`} className="flex justify-between gap-3 text-sm"><span className="text-slate-300">{index + 1}/{installments.length} · {date.format(new Date(`${entry.dueDate}T12:00:00`))}</span><strong className="tabular-nums">{money.format(entry.amountCents / 100)}</strong></div>) : <p className="text-sm text-amber-200">Defina parcelas e vencimento.</p>}</div><div className={cn("mt-5 rounded-lg p-3 text-sm", ready ? "bg-emerald-500/15 text-emerald-100" : "bg-amber-500/15 text-amber-100")}><strong className="block">{ready ? "Pronta para confirmar" : "Confirmação bloqueada"}</strong>{ready ? "Todos os requisitos foram atendidos." : `${requirements.filter(item => !item.complete).length + (paymentReady ? 0 : 1)} requisito(s) ainda precisam de atenção.`}</div></aside>
         </div>
         <DialogFooter className="sticky bottom-0 border-t border-slate-200 bg-white px-6 py-4"><Button variant="outline" onClick={() => setState(null)}>Voltar</Button><Button disabled={busy || !ready} onClick={() => onConfirm(state)}>{busy ? "Confirmando…" : "Confirmar venda e criar títulos"}</Button></DialogFooter>
       </DialogContent>

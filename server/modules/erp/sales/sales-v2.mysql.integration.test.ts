@@ -510,7 +510,7 @@ physical.sequential("ERP sales v2 MySQL physical matrix", () => {
 
   it("rolls back the shipment when one inventory item lacks stock", async () => {
     const first = await fixture(adminA, "10.000");
-    const second = await fixture(adminA, "0.000");
+    const second = await fixture(adminA, "1.000");
     const service = new SaleService(new SaleRepository(), silent);
     const input = saleDraftInput.parse({
       crmClientId: first.customer.crmClientId,
@@ -534,6 +534,14 @@ physical.sequential("ERP sales v2 MySQL physical matrix", () => {
     const order = await service.create(adminA, input);
     await confirm(service, adminA, order, first.categoryPublicId);
     await transition(service, order.publicId, "separation");
+    await new ErpService(new ErpRepository()).moveStock(adminA, {
+      productPublicId: second.product.publicId,
+      inventoryItemPublicId: second.inventoryItemPublicId,
+      type: "manual_out",
+      quantity: "1.000",
+      reason: "Consumo concorrente sintético antes do envio",
+      idempotencyKey: crypto.randomUUID(),
+    });
     await expect(
       transition(service, order.publicId, "shipped")
     ).rejects.toMatchObject({ code: "INSUFFICIENT_STOCK" });

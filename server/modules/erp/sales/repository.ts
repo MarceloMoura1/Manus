@@ -67,6 +67,8 @@ type OrderRow = RowDataPacket & {
   item_count?: number;
   total_quantity?: string;
   first_product_name?: string | null;
+  first_product_public_id?: string | null;
+  first_product_media_id?: string | null;
 };
 
 type ItemRow = RowDataPacket & {
@@ -442,9 +444,17 @@ export class SaleRepository {
       ) fin ON fin.client_id=o.client_id AND fin.source_public_id=o.public_id
       LEFT JOIN (
         SELECT sale_order_id,COUNT(*) item_count,SUM(quantity) total_quantity,
-               SUBSTRING_INDEX(GROUP_CONCAT(product_name_snapshot ORDER BY id SEPARATOR '\\n'),'\\n',1) first_product_name
+               SUBSTRING_INDEX(GROUP_CONCAT(product_name_snapshot ORDER BY id SEPARATOR '\\n'),'\\n',1) first_product_name,
+               SUBSTRING_INDEX(GROUP_CONCAT(product_id ORDER BY id SEPARATOR ','),',',1) first_product_id
         FROM erp_sale_order_items GROUP BY sale_order_id
-      ) summary ON summary.sale_order_id=o.id`;
+      ) summary ON summary.sale_order_id=o.id
+      LEFT JOIN erp_products first_product
+        ON first_product.client_id=o.client_id AND first_product.id=summary.first_product_id
+      LEFT JOIN erp_product_media first_media
+        ON first_media.client_id=first_product.client_id
+       AND first_media.product_id=first_product.id
+       AND first_media.id=first_product.primary_media_id
+       AND first_media.state='active'`;
     const sqlWhere = where.join(" AND ");
     const sort = {
       orderNumber: "o.order_number",
@@ -458,7 +468,8 @@ export class SaleRepository {
     const [rows] = await this.db().execute<OrderRow[]>(
       `SELECT o.*,COALESCE(fin.paid_cents,0) paid_cents,COALESCE(fin.title_count,0) title_count,
               COALESCE(summary.item_count,0) item_count,COALESCE(summary.total_quantity,'0.000') total_quantity,
-              summary.first_product_name
+              summary.first_product_name,first_product.public_id first_product_public_id,
+              first_media.media_id first_product_media_id
        FROM erp_sale_orders o ${joins}
        WHERE ${sqlWhere}
        ORDER BY ${sort} ${options.direction === "asc" ? "ASC" : "DESC"},o.id DESC
@@ -658,6 +669,17 @@ export class SaleRepository {
         userId,
         productMinimumStock: String(rows[0].minimum_stock ?? "0.000"),
       });
+      const availableQuantity = await this.inventory().lockBalance(
+        connection,
+        clientId,
+        inventoryItem.id
+      );
+      if (quantityMillis(requested.quantity) > quantityMillis(availableQuantity)) {
+        throw new ErpDomainError(
+          "INSUFFICIENT_STOCK",
+          `Estoque insuficiente para ${String(rows[0].name)}. Disponível: ${availableQuantity}. Solicitado: ${requested.quantity}.`
+        );
+      }
       const [variant] = await connection.execute<RowDataPacket[]>(
         `SELECT v.sku,v.name,
                 GROUP_CONCAT(CONCAT(t.name, ': ',av.name) ORDER BY t.name SEPARATOR ' · ') attributes
@@ -685,6 +707,41 @@ export class SaleRepository {
       throw new ErpDomainError("CONFLICT", "Item de estoque duplicado no pedido.");
     }
     return { customer: customers[0], products };
+  }
+
+  private async assertOrderStockAvailable(
+    connection: PoolConnection,
+    clientId: string,
+    orderId: number
+  ) {
+    const [items] = await connection.execute<RowDataPacket[]>(
+      `SELECT i.inventory_item_id,i.quantity,i.product_name_snapshot,
+              ii.id resolved_inventory_item_id,ii.active inventory_item_active
+       FROM erp_sale_order_items i
+       LEFT JOIN erp_inventory_items ii
+         ON ii.id=i.inventory_item_id AND ii.client_id=?
+       WHERE i.sale_order_id=? ORDER BY i.inventory_item_id`,
+      [clientId, orderId]
+    );
+    for (const item of items) {
+      if (!item.resolved_inventory_item_id || !Number(item.inventory_item_active)) {
+        throw new ErpDomainError(
+          "CONFLICT",
+          `O item de estoque de ${String(item.product_name_snapshot)} não está disponível para confirmação.`
+        );
+      }
+      const available = await this.inventory().lockBalance(
+        connection,
+        clientId,
+        Number(item.inventory_item_id)
+      );
+      if (quantityMillis(String(item.quantity)) > quantityMillis(available)) {
+        throw new ErpDomainError(
+          "INSUFFICIENT_STOCK",
+          `Estoque insuficiente para ${String(item.product_name_snapshot)}. Disponível: ${available}. Solicitado: ${String(item.quantity)}.`
+        );
+      }
+    }
   }
 
   async save(
@@ -833,6 +890,7 @@ export class SaleRepository {
       paymentMethod: input.paymentMethod,
       categoryPublicId: input.categoryPublicId,
       financialAccountPublicId: input.financialAccountPublicId ?? null,
+      receivedCents: input.receivedCents,
       installments: input.installments,
     });
     let replay = false;
@@ -879,9 +937,21 @@ export class SaleRepository {
           "A soma das parcelas deve ser exatamente igual ao total da venda."
         );
       }
+      if (input.receivedCents > order.totalCents) {
+        throw new ErpDomainError(
+          "VALIDATION",
+          "O valor recebido não pode exceder o total da venda."
+        );
+      }
+      if (input.receivedCents > 0 && !input.financialAccountPublicId) {
+        throw new ErpDomainError(
+          "VALIDATION",
+          "Selecione a conta que recebeu o pagamento."
+        );
+      }
       const [references] = await connection.execute<RowDataPacket[]>(
         `SELECT c.id category_id,c.active category_active,c.direction,
-                a.id account_id,a.active account_active
+                a.id account_id,a.active account_active,a.current_balance_cents
          FROM erp_financial_categories c
          LEFT JOIN erp_financial_accounts a
            ON a.client_id=c.client_id AND a.public_id=?
@@ -929,14 +999,18 @@ export class SaleRepository {
           "Cliente e produtos devem permanecer ativos para a confirmação."
         );
       }
+      await this.assertOrderStockAvailable(connection, clientId, order.id);
+      let receiptRemaining = input.receivedCents;
+      let accountBalance = Number(references[0].current_balance_cents ?? 0);
       for (const [index, installment] of input.installments.entries()) {
         const number = index + 1;
-        await connection.execute(
+        const entryPublicId = randomUUID();
+        const [entryResult] = await connection.execute<ResultSetHeader>(
           `INSERT INTO erp_financial_entries
            (public_id,client_id,document_number,direction,status,description,amount_cents,due_date,issue_date,category_id,financial_account_id,crm_client_id,source_type,source_public_id,source_installment,party_name_snapshot,created_by)
            VALUES(?,?,?,'receivable','open',?,?,?,CURRENT_DATE,?,?,?,'sales_order',?,?,?,?)`,
           [
-            randomUUID(),
+            entryPublicId,
             clientId,
             `${order.orderNumber}-${String(number).padStart(2, "0")}/${String(input.installments.length).padStart(2, "0")}`,
             `Venda ${order.orderNumber} · parcela ${number}/${input.installments.length}`,
@@ -950,6 +1024,59 @@ export class SaleRepository {
             order.customerName,
             actor.userId,
           ]
+        );
+        const receiptForInstallment = Math.min(receiptRemaining, installment.amountCents);
+        if (receiptForInstallment > 0) {
+          const resultingBalance = accountBalance + receiptForInstallment;
+          const settlementPublicId = randomUUID();
+          const [settlementResult] = await connection.execute<ResultSetHeader>(
+            `INSERT INTO erp_financial_settlements
+             (public_id,client_id,financial_entry_id,financial_account_id,idempotency_key,amount_cents,settled_by)
+             VALUES(?,?,?,?,?,?,?)`,
+            [
+              settlementPublicId,
+              clientId,
+              entryResult.insertId,
+              references[0].account_id,
+              `${input.idempotencyKey}:initial:${number}`,
+              receiptForInstallment,
+              actor.userId,
+            ]
+          );
+          await connection.execute(
+            `INSERT INTO erp_financial_ledger
+             (public_id,client_id,financial_account_id,financial_entry_id,settlement_id,type,amount_cents,previous_balance_cents,resulting_balance_cents,occurred_at,created_by,metadata)
+             VALUES(?,?,?,?,?,'receivable_settlement',?,?,?,NOW(),?,?)`,
+            [
+              randomUUID(),
+              clientId,
+              references[0].account_id,
+              entryResult.insertId,
+              settlementResult.insertId,
+              receiptForInstallment,
+              accountBalance,
+              resultingBalance,
+              actor.userId,
+              json({ kind: "sale_confirmation", partial: receiptForInstallment < installment.amountCents }),
+            ]
+          );
+          const settled = receiptForInstallment === installment.amountCents;
+          await connection.execute(
+            `UPDATE erp_financial_entries
+             SET status=?,settled_at=CASE WHEN ? THEN NOW() ELSE NULL END,
+                 settled_by=CASE WHEN ? THEN ? ELSE NULL END
+             WHERE client_id=? AND id=?`,
+            [settled ? "settled" : "open", settled, settled, actor.userId, clientId, entryResult.insertId]
+          );
+          accountBalance = resultingBalance;
+          receiptRemaining -= receiptForInstallment;
+        }
+      }
+      if (input.receivedCents > 0) {
+        await connection.execute(
+          `UPDATE erp_financial_accounts SET current_balance_cents=?
+           WHERE client_id=? AND id=?`,
+          [accountBalance, clientId, references[0].account_id]
         );
       }
       await connection.execute(
@@ -978,10 +1105,29 @@ export class SaleRepository {
         after: {
           paymentMethod: input.paymentMethod,
           installmentCount: input.installments.length,
-          totalCents: order.totalCents,
-          stockReserved: false,
-        },
-      });
+           totalCents: order.totalCents,
+           receivedCents: input.receivedCents,
+           stockReserved: false,
+         },
+       });
+      if (input.receivedCents > 0) {
+        const paymentEvent = {
+          amountCents: input.receivedCents,
+          paidCents: input.receivedCents,
+          pendingCents: order.totalCents - input.receivedCents,
+        };
+        await this.insertEvent(connection, {
+          clientId,
+          orderId: order.id,
+          eventType: "payment_registered",
+          actor,
+          fromStage: "confirmed",
+          toStage: "confirmed",
+          idempotencyKey: `${input.idempotencyKey}:initial-payment`,
+          payloadHash: hash(paymentEvent),
+          after: paymentEvent,
+        });
+      }
       await connection.commit();
     } catch (error) {
       await connection.rollback();
@@ -1385,6 +1531,13 @@ function publicOrder(row: OrderRow) {
     itemCount: Number(row.item_count ?? 0),
     totalQuantity: String(row.total_quantity ?? "0.000"),
     firstProductName: row.first_product_name ?? null,
+    firstProductImage: row.first_product_public_id && row.first_product_media_id
+      ? {
+          productPublicId: row.first_product_public_id,
+          path: `/api/products/${row.first_product_public_id}/image`,
+          thumbnailPath: `/api/products/${row.first_product_public_id}/image?variant=thumbnail`,
+        }
+      : null,
     confirmationIdempotencyKey: row.confirmation_idempotency_key,
     confirmationPayloadHash: row.confirmation_payload_hash,
     confirmedAt: row.confirmed_at,

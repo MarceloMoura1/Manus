@@ -21,6 +21,8 @@ export type VariantRow = RowDataPacket & {
   updated_by: string | null;
   created_at: string;
   updated_at: string;
+  inventory_item_public_id?: string | null;
+  quantity?: string;
 };
 
 export type VariantAttributeValueRow = RowDataPacket & {
@@ -78,9 +80,16 @@ export class VariantRepository {
       `SELECT v.*,
               p.public_id AS product_public_id,
               p.name AS product_name,
-              p.sale_price_cents AS product_sale_price_cents
+              p.sale_price_cents AS product_sale_price_cents,
+              ii.public_id AS inventory_item_public_id,
+              COALESCE(ib.quantity,'0.000') AS quantity
        FROM erp_product_variants v
        INNER JOIN erp_products p ON p.client_id = v.client_id AND p.id = v.product_id
+       LEFT JOIN erp_inventory_items ii
+         ON ii.client_id=v.client_id AND ii.product_id=v.product_id
+        AND ii.variant_id=v.id AND ii.kind='variant'
+       LEFT JOIN erp_inventory_item_balances ib
+         ON ib.client_id=ii.client_id AND ib.inventory_item_id=ii.id
        WHERE ${where}
        ORDER BY v.created_at DESC
        LIMIT ${limit} OFFSET ${offset}`,
@@ -107,9 +116,16 @@ export class VariantRepository {
       `SELECT v.*,
               p.public_id AS product_public_id,
               p.name AS product_name,
-              p.sale_price_cents AS product_sale_price_cents
+              p.sale_price_cents AS product_sale_price_cents,
+              ii.public_id AS inventory_item_public_id,
+              COALESCE(ib.quantity,'0.000') AS quantity
        FROM erp_product_variants v
        INNER JOIN erp_products p ON p.client_id = v.client_id AND p.id = v.product_id
+       LEFT JOIN erp_inventory_items ii
+         ON ii.client_id=v.client_id AND ii.product_id=v.product_id
+        AND ii.variant_id=v.id AND ii.kind='variant'
+       LEFT JOIN erp_inventory_item_balances ib
+         ON ib.client_id=ii.client_id AND ib.inventory_item_id=ii.id
        WHERE v.client_id = ? AND v.public_id = ?
        LIMIT 1${lock ? " FOR UPDATE" : ""}`,
       [clientId, publicId]
@@ -133,9 +149,16 @@ export class VariantRepository {
       `SELECT v.*,
               p.public_id AS product_public_id,
               p.name AS product_name,
-              p.sale_price_cents AS product_sale_price_cents
+              p.sale_price_cents AS product_sale_price_cents,
+              ii.public_id AS inventory_item_public_id,
+              COALESCE(ib.quantity,'0.000') AS quantity
        FROM erp_product_variants v
        INNER JOIN erp_products p ON p.client_id = v.client_id AND p.id = v.product_id
+       LEFT JOIN erp_inventory_items ii
+         ON ii.client_id=v.client_id AND ii.product_id=v.product_id
+        AND ii.variant_id=v.id AND ii.kind='variant'
+       LEFT JOIN erp_inventory_item_balances ib
+         ON ib.client_id=ii.client_id AND ib.inventory_item_id=ii.id
        WHERE ${conditions.join(" AND ")}
        LIMIT 1`,
       parameters
@@ -159,9 +182,16 @@ export class VariantRepository {
       `SELECT v.*,
               p.public_id AS product_public_id,
               p.name AS product_name,
-              p.sale_price_cents AS product_sale_price_cents
+              p.sale_price_cents AS product_sale_price_cents,
+              ii.public_id AS inventory_item_public_id,
+              COALESCE(ib.quantity,'0.000') AS quantity
        FROM erp_product_variants v
        INNER JOIN erp_products p ON p.client_id = v.client_id AND p.id = v.product_id
+       LEFT JOIN erp_inventory_items ii
+         ON ii.client_id=v.client_id AND ii.product_id=v.product_id
+        AND ii.variant_id=v.id AND ii.kind='variant'
+       LEFT JOIN erp_inventory_item_balances ib
+         ON ib.client_id=ii.client_id AND ib.inventory_item_id=ii.id
        WHERE ${conditions.join(" AND ")}
        LIMIT 1`,
       parameters
@@ -190,9 +220,16 @@ export class VariantRepository {
       `SELECT v.*,
               p.public_id AS product_public_id,
               p.name AS product_name,
-              p.sale_price_cents AS product_sale_price_cents
+              p.sale_price_cents AS product_sale_price_cents,
+              ii.public_id AS inventory_item_public_id,
+              COALESCE(ib.quantity,'0.000') AS quantity
        FROM erp_product_variants v
        INNER JOIN erp_products p ON p.client_id = v.client_id AND p.id = v.product_id
+       LEFT JOIN erp_inventory_items ii
+         ON ii.client_id=v.client_id AND ii.product_id=v.product_id
+        AND ii.variant_id=v.id AND ii.kind='variant'
+       LEFT JOIN erp_inventory_item_balances ib
+         ON ib.client_id=ii.client_id AND ib.inventory_item_id=ii.id
        WHERE ${conditions.join(" AND ")}
        LIMIT 1`,
       parameters
@@ -209,9 +246,16 @@ export class VariantRepository {
       `SELECT v.*,
               p.public_id AS product_public_id,
               p.name AS product_name,
-              p.sale_price_cents AS product_sale_price_cents
+              p.sale_price_cents AS product_sale_price_cents,
+              ii.public_id AS inventory_item_public_id,
+              COALESCE(ib.quantity,'0.000') AS quantity
        FROM erp_product_variants v
        INNER JOIN erp_products p ON p.client_id = v.client_id AND p.id = v.product_id
+       LEFT JOIN erp_inventory_items ii
+         ON ii.client_id=v.client_id AND ii.product_id=v.product_id
+        AND ii.variant_id=v.id AND ii.kind='variant'
+       LEFT JOIN erp_inventory_item_balances ib
+         ON ib.client_id=ii.client_id AND ib.inventory_item_id=ii.id
        WHERE v.client_id = ? AND v.product_id = ?
        ORDER BY v.sku ASC, v.id ASC`,
       [clientId, productId]

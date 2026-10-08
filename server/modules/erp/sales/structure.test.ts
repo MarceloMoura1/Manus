@@ -35,11 +35,33 @@ describe("sales B+C architecture", () => {
     expect(confirm).toContain("installmentTotal !== BigInt(order.totalCents)");
     expect(confirm).toContain("confirmation_idempotency_key");
     expect(confirm).toContain("confirmation_payload_hash");
+    expect(confirm).toContain("erp_financial_settlements");
+    expect(confirm).toContain("erp_financial_ledger");
+    expect(confirm).toContain("sale_confirmation");
+    expect(confirm).toContain("receivedCents: input.receivedCents");
     expect(confirm).toContain("await connection.commit()");
     expect(confirm).toContain("await connection.rollback()");
     expect(confirm.indexOf("erp_financial_entries")).toBeLessThan(
       confirm.lastIndexOf("await connection.commit()")
     );
+  });
+
+  it("checks exact item balances before draft save and confirmation", () => {
+    expect(repository).toContain("private async assertOrderStockAvailable");
+    expect(repository).toContain("inventory_item_active");
+    expect(repository.match(/Estoque insuficiente para/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(repository).toContain("await this.assertOrderStockAvailable(connection, clientId, order.id)");
+  });
+
+  it("loads the primary product thumbnail in the paginated query without N+1 calls", () => {
+    const list = repository.slice(
+      repository.indexOf("async list("),
+      repository.indexOf("async detail(")
+    );
+    expect(list).toContain("first_product_id");
+    expect(list).toContain("LEFT JOIN erp_product_media first_media");
+    expect(list).toContain("first_media.media_id first_product_media_id");
+    expect(repository).toContain("firstProductImage:");
   });
 
   it("makes confirmation replay-safe and rejects divergent retries", () => {

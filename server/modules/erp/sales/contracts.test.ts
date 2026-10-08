@@ -107,6 +107,20 @@ describe("sale contracts", () => {
     ).toThrow();
   });
 
+  it("accepts an explicit real receipt and defaults legacy confirmation calls to pending", () => {
+    const base = {
+      publicId: crypto.randomUUID(),
+      idempotencyKey: crypto.randomUUID(),
+      paymentMethod: "PIX",
+      categoryPublicId: crypto.randomUUID(),
+      financialAccountPublicId: crypto.randomUUID(),
+      installments: [{ dueDate: "2026-10-10", amountCents: 1_000 }],
+    };
+    expect(saleConfirmationInput.parse(base).receivedCents).toBe(0);
+    expect(saleConfirmationInput.parse({ ...base, receivedCents: 400 }).receivedCents).toBe(400);
+    expect(() => saleConfirmationInput.parse({ ...base, receivedCents: -1 })).toThrow();
+  });
+
   it("allows only adjacent forward stages and explicit safe corrections", () => {
     expect(saleTransitionKind("confirmed", "separation")).toBe("forward");
     expect(saleTransitionKind("separation", "shipped")).toBe("forward");

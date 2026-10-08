@@ -12,6 +12,7 @@ import { SettingsPage as SettingsPageComponent } from "./SettingsPage";
 import { AdminSettingsPage } from "./AdminSettingsPage";
 import { BotConfigPage } from "./BotConfigPage";
 import { ERPWorkspace, getErpTopbarItems, type ErpSection } from "./erp/ERPWorkspace";
+import { buildSalesPath, readSalesRoute } from "./erp/sales-navigation";
 import { NotificationsModernPage } from "./NotificationsModernPage";
 import type { CrmWhatsAppIntent } from "../../../shared/crm";
 import { normalizeContactPhone } from "../../../shared/contact-phone";
@@ -4078,7 +4079,7 @@ function Shell() {
     if (window.location.pathname === "/erp/estoque") return "erp-stock";
     if (window.location.pathname === "/erp/fornecedores") return "erp-suppliers";
     if (window.location.pathname === "/erp/compras") return "erp-purchases";
-    if (window.location.pathname === "/erp/vendas") return "erp-sales";
+    if (readSalesRoute(window.location.pathname).matches) return "erp-sales";
     if (window.location.pathname === "/erp/financeiro") return "erp-finance";
     if (window.location.pathname === "/erp/fiscal") return "erp-fiscal";
     if (window.location.pathname === "/erp/relatorios") return "erp-reports";
@@ -4094,7 +4095,10 @@ function Shell() {
   const mainContentRef = React.useRef<HTMLElement>(null);
   const [indicadores, setIndicadores] = useState<any>(null);
   const [activeCrmClientId, setActiveCrmClientId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("crmClientId"));
-  const [activeSalePublicId, setActiveSalePublicId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("salePublicId"));
+  const [activeSalePublicId, setActiveSalePublicId] = useState<string | null>(() => {
+    const route = readSalesRoute(window.location.pathname);
+    return route.salePublicId ?? new URLSearchParams(window.location.search).get("salePublicId");
+  });
   const [attendanceIntent, setAttendanceIntent] = useState(() => {
     const restoreLegacyAttendance = localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY) === "active-attendance";
     return createAttendanceLaunchIntent(
@@ -4119,7 +4123,10 @@ function Shell() {
           : targetRoute === "erp-suppliers"
               ? "/erp/fornecedores"
             : targetRoute === "erp-sales"
-              ? `/erp/vendas${options?.salePublicId ? `?salePublicId=${encodeURIComponent(options.salePublicId)}` : ""}`
+              ? buildSalesPath(
+                  options?.salePublicId,
+                  readSalesRoute(window.location.pathname).matches ? window.location.search : ""
+                )
             : targetRoute === "erp-finance"
               ? "/erp/financeiro"
             : targetRoute === "erp-fiscal"
@@ -4189,8 +4196,9 @@ function Shell() {
         path = "/erp/clientes";
       }
       setActiveCrmClientId(path === "/erp/clientes" ? new URLSearchParams(window.location.search).get("crmClientId") : null);
-      setActiveSalePublicId(path === "/erp/vendas" ? new URLSearchParams(window.location.search).get("salePublicId") : null);
-        setActive(path === "/erp/clientes" ? "erp-clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp/compras" ? "erp-purchases" : path === "/erp/vendas" ? "erp-sales" : path === "/erp/financeiro" ? "erp-finance" : path === "/erp/fiscal" ? "erp-fiscal" : path === "/erp/relatorios" ? "erp-reports" : path === "/erp" ? "erp-summary" : event.state?.megadeskRoute === "conversations" ? "conversations" : "home");
+      const salesRoute = readSalesRoute(path);
+      setActiveSalePublicId(salesRoute.matches ? salesRoute.salePublicId : null);
+        setActive(path === "/erp/clientes" ? "erp-clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp/compras" ? "erp-purchases" : salesRoute.matches ? "erp-sales" : path === "/erp/financeiro" ? "erp-finance" : path === "/erp/fiscal" ? "erp-fiscal" : path === "/erp/relatorios" ? "erp-reports" : path === "/erp" ? "erp-summary" : event.state?.megadeskRoute === "conversations" ? "conversations" : "home");
       window.setTimeout(() => mainContentRef.current?.focus(), 0);
     };
     window.addEventListener("popstate", restoreFromHistory);

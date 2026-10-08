@@ -134,6 +134,7 @@ export const saleConfirmationInput = z.object({
   paymentMethod: z.string().trim().min(2).max(80),
   categoryPublicId: z.string().uuid(),
   financialAccountPublicId: z.string().uuid().nullish(),
+  receivedCents: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),
   installments: z
     .array(
       z.object({

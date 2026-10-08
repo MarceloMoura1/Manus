@@ -3,6 +3,14 @@ import { trpc } from "@/lib/trpc";
 import { productMediaUrl } from "@/lib/trpc-url";
 import { formatDateTime } from "@/lib/conversationDateTime";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ErpDetailLayout } from "@/components/erp/ErpDetailLayout";
 import { ErpStatusBadge } from "@/components/erp/ErpStatusBadge";
@@ -52,6 +60,25 @@ export function formatQuantityString(value: string | null | undefined): string {
   const num = Number(value);
   if (!Number.isFinite(num)) return "0,000";
   return num.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+}
+
+export function variantStockAdjustment(currentValue: string, targetValue: string) {
+  const parse = (value: string) => {
+    const normalized = value.trim().replace(",", ".");
+    if (!/^\d{1,15}(?:\.\d{1,3})?$/.test(normalized)) return null;
+    const [whole, fraction = ""] = normalized.split(".");
+    return BigInt(whole) * 1_000n + BigInt(fraction.padEnd(3, "0"));
+  };
+  const current = parse(currentValue);
+  const target = parse(targetValue);
+  if (current === null || target === null) return null;
+  const delta = target - current;
+  const absolute = delta < 0n ? -delta : delta;
+  return {
+    type: delta < 0n ? ("adjustment_out" as const) : ("adjustment_in" as const),
+    quantity: `${absolute / 1_000n}.${String(absolute % 1_000n).padStart(3, "0")}`,
+    unchanged: delta === 0n,
+  };
 }
 
 export const unitLabels: Record<string, string> = {
@@ -183,6 +210,7 @@ export type ProductDetailViewProps = {
   onRetry?: () => void;
   onAddVariant?: () => void;
   onEditVariant?: (variant: NonNullable<ProductDetail>["variants"][number]) => void;
+  onAdjustVariantStock?: (variant: NonNullable<ProductDetail>["variants"][number]) => void;
   onToggleVariantActive?: (variant: NonNullable<ProductDetail>["variants"][number]) => void;
   onDeleteVariant?: (variant: NonNullable<ProductDetail>["variants"][number]) => void;
   variantActionPending?: boolean;
@@ -205,6 +233,7 @@ export function ProductDetailView({
   onRetry,
   onAddVariant,
   onEditVariant,
+  onAdjustVariantStock,
   onToggleVariantActive,
   onDeleteVariant,
   variantActionPending,
@@ -560,8 +589,9 @@ export function ProductDetailView({
                       <th className="p-3.5">Código de Barras</th>
                       <th className="p-3.5 text-right">Preço Efetivo</th>
                       <th className="p-3.5 text-right">Custo Próprio</th>
+                      <th className="p-3.5 text-right">Estoque</th>
                       <th className="p-3.5 text-center">Status</th>
-                      {canWrite && (onEditVariant || onToggleVariantActive || onDeleteVariant) && (
+                      {canWrite && (onEditVariant || onAdjustVariantStock || onToggleVariantActive || onDeleteVariant) && (
                         <th className="p-3.5 text-right">Ações</th>
                       )}
                     </tr>
@@ -590,13 +620,16 @@ export function ProductDetailView({
                           <td className="p-3.5 text-right text-slate-700">
                             {formatMoneyCents(v.costPriceCents)}
                           </td>
+                          <td className="p-3.5 text-right font-semibold tabular-nums text-slate-900" data-testid={`variant-stock-${v.publicId}`}>
+                            {formatQuantityString(v.quantity)}
+                          </td>
                           <td className="p-3.5 text-center">
                             <ErpStatusBadge
                               variant={v.active ? "active" : "inactive"}
                               label={v.active ? "Ativo" : "Inativo"}
                             />
                           </td>
-                          {canWrite && (onEditVariant || onToggleVariantActive || onDeleteVariant) && (
+                          {canWrite && (onEditVariant || onAdjustVariantStock || onToggleVariantActive || onDeleteVariant) && (
                             <td className="p-3.5 text-right whitespace-nowrap">
                               <div className="flex items-center justify-end gap-1.5">
                                 {onEditVariant && (
@@ -609,6 +642,18 @@ export function ProductDetailView({
                                     disabled={variantActionPending}
                                   >
                                     Editar
+                                  </Button>
+                                )}
+                                {onAdjustVariantStock && v.inventoryItemPublicId && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 px-2.5 text-xs"
+                                    data-testid={`adjust-variant-stock-btn-${v.publicId}`}
+                                    onClick={() => onAdjustVariantStock(v)}
+                                    disabled={variantActionPending}
+                                  >
+                                    Ajustar estoque
                                   </Button>
                                 )}
                                 {onToggleVariantActive && (
@@ -1403,6 +1448,11 @@ export function ProductDetailPanel({
   const [currentTab, setCurrentTab] = React.useState<"general" | "variants" | "suppliers" | "history">("general");
   const [variantModalOpen, setVariantModalOpen] = React.useState(false);
   const [selectedVariant, setSelectedVariant] = React.useState<ProductVariantItem | null>(null);
+  const [stockAdjustment, setStockAdjustment] = React.useState<{
+    variant: NonNullable<ProductDetail>["variants"][number];
+    target: string;
+    reason: string;
+  } | null>(null);
   const [variantActionMessage, setVariantActionMessage] = React.useState<string | null>(null);
   const [variantActionError, setVariantActionError] = React.useState<string | null>(null);
 
@@ -1422,9 +1472,10 @@ export function ProductDetailPanel({
 
   const setActiveMutation = trpc.erp.variants.setActive.useMutation();
   const deleteMutation = trpc.erp.variants.delete.useMutation();
+  const stockMutation = trpc.erp.stock.move.useMutation();
 
   const actionRunningRef = React.useRef(false);
-  const variantActionPending = setActiveMutation.isPending || deleteMutation.isPending;
+  const variantActionPending = setActiveMutation.isPending || deleteMutation.isPending || stockMutation.isPending;
 
   const handleAddVariant = () => {
     setSelectedVariant(null);
@@ -1438,6 +1489,56 @@ export function ProductDetailPanel({
     setVariantActionMessage(null);
     setVariantActionError(null);
     setVariantModalOpen(true);
+  };
+
+  const handleAdjustVariantStock = (variant: NonNullable<ProductDetail>["variants"][number]) => {
+    setVariantActionMessage(null);
+    setVariantActionError(null);
+    setStockAdjustment({
+      variant,
+      target: String(variant.quantity ?? "0.000").replace(".", ","),
+      reason: "Ajuste manual no cadastro do produto",
+    });
+  };
+
+  const submitStockAdjustment = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!stockAdjustment?.variant.inventoryItemPublicId || stockMutation.isPending) return;
+    const adjustment = variantStockAdjustment(
+      String(stockAdjustment.variant.quantity ?? "0.000"),
+      stockAdjustment.target
+    );
+    if (!adjustment) {
+      setVariantActionError("Informe um saldo válido, com até três casas decimais.");
+      return;
+    }
+    if (adjustment.unchanged) {
+      setStockAdjustment(null);
+      setVariantActionMessage(`O saldo da variante ${stockAdjustment.variant.sku} já está atualizado.`);
+      return;
+    }
+    if (stockAdjustment.reason.trim().length < 3) {
+      setVariantActionError("Informe o motivo do ajuste de estoque.");
+      return;
+    }
+    try {
+      setVariantActionError(null);
+      await stockMutation.mutateAsync({
+        productPublicId,
+        inventoryItemPublicId: stockAdjustment.variant.inventoryItemPublicId,
+        type: adjustment.type,
+        quantity: adjustment.quantity,
+        reason: stockAdjustment.reason.trim(),
+        idempotencyKey: crypto.randomUUID(),
+      });
+      await utils.erp.invalidate();
+      setVariantActionMessage(
+        `Estoque da variante ${stockAdjustment.variant.sku} ajustado para ${formatQuantityString(stockAdjustment.target)}.`
+      );
+      setStockAdjustment(null);
+    } catch (error) {
+      setVariantActionError(error instanceof Error ? error.message : "Não foi possível ajustar o estoque da variante.");
+    }
   };
 
   const handleToggleVariantActive = async (v: NonNullable<ProductDetail>["variants"][number]) => {
@@ -1502,6 +1603,7 @@ export function ProductDetailPanel({
         onRetry={() => void productQuery.refetch()}
         onAddVariant={handleAddVariant}
         onEditVariant={handleEditVariant}
+        onAdjustVariantStock={handleAdjustVariantStock}
         onToggleVariantActive={handleToggleVariantActive}
         onDeleteVariant={handleDeleteVariant}
         variantActionPending={variantActionPending}
@@ -1527,6 +1629,47 @@ export function ProductDetailPanel({
           );
         }}
       />
+
+      <Dialog open={Boolean(stockAdjustment)} onOpenChange={open => !open && setStockAdjustment(null)}>
+        <DialogContent className="sm:max-w-md">
+          <form onSubmit={submitStockAdjustment}>
+            <DialogHeader>
+              <DialogTitle>Ajustar estoque da variante</DialogTitle>
+              <p className="text-sm text-slate-600">
+                {stockAdjustment?.variant.name || stockAdjustment?.variant.sku} · saldo atual {formatQuantityString(stockAdjustment?.variant.quantity)}
+              </p>
+            </DialogHeader>
+            <div className="mt-5 space-y-4">
+              <label className="block text-sm font-semibold text-slate-700">
+                Novo saldo
+                <Input
+                  autoFocus
+                  inputMode="decimal"
+                  className="mt-1"
+                  value={stockAdjustment?.target ?? ""}
+                  onChange={event => setStockAdjustment(current => current ? { ...current, target: event.target.value } : current)}
+                  aria-describedby="variant-stock-help"
+                />
+              </label>
+              <p id="variant-stock-help" className="text-xs leading-5 text-slate-500">
+                O ajuste cria uma movimentação somente para esta variante; os saldos das demais variantes não são alterados.
+              </p>
+              <label className="block text-sm font-semibold text-slate-700">
+                Motivo
+                <Input
+                  className="mt-1"
+                  value={stockAdjustment?.reason ?? ""}
+                  onChange={event => setStockAdjustment(current => current ? { ...current, reason: event.target.value } : current)}
+                />
+              </label>
+            </div>
+            <DialogFooter className="mt-6">
+              <Button type="button" variant="outline" onClick={() => setStockAdjustment(null)}>Cancelar</Button>
+              <Button type="submit" disabled={stockMutation.isPending}>{stockMutation.isPending ? "Salvando…" : "Salvar saldo"}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

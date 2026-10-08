@@ -5,6 +5,7 @@ import {
   salesAddressesMatch,
   salesConfirmationRequirements,
   salesDraftProgress,
+  salesPaginationItems,
 } from "./sales-ux";
 
 const address = {
@@ -81,5 +82,12 @@ describe("sales UX state", () => {
         defaultTo: "2026-10-31",
       })
     ).toBe(4);
+  });
+
+  it("builds compact server-side pagination windows", () => {
+    expect(salesPaginationItems(1, 3)).toEqual([1, 2, 3]);
+    expect(salesPaginationItems(1, 13)).toEqual([1, 2, 3, 4, 5, "ellipsis-right", 13]);
+    expect(salesPaginationItems(7, 13)).toEqual([1, "ellipsis-left", 6, 7, 8, "ellipsis-right", 13]);
+    expect(salesPaginationItems(13, 13)).toEqual([1, "ellipsis-left", 9, 10, 11, 12, 13]);
   });
 });

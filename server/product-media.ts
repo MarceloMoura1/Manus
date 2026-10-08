@@ -123,17 +123,18 @@ export class ProductMediaService {
     if (!UUID.test(attemptId)) throw new ProductMediaError("BAD_IMAGE","Requisição de mídia inválida.");
     if (!['admin','manager'].includes(identity.role)) throw new ProductMediaError("FORBIDDEN","Seu perfil não permite alterar produtos.");
     const image=await processProductImage(bytes); const mediaId=randomUUID(); const shard=mediaId.slice(0,2); const storageKey=`objects/${shard}/${mediaId}.webp`; const thumbnailStorageKey=`thumbnails/${shard}/${mediaId}.webp`;
-    const c=await this.pool.getConnection(); let media:MediaRow;
+    const c=await this.pool.getConnection(); let media:MediaRow; let replayIsPrimary=false;
     try { await c.beginTransaction(); const product=await this.product(c,identity.tenantId,productPublicId,true); if(!product) throw new ProductMediaError("NOT_FOUND","Produto não encontrado.");
       const [existing]=await c.execute<MediaRow[]>("SELECT * FROM erp_product_media WHERE client_id=? AND client_attempt_id=? LIMIT 1 FOR UPDATE",[identity.tenantId,attemptId]);
       if(existing[0]) { if(existing[0].product_id!==product.id||existing[0].sha256!==image.sha256) throw new ProductMediaError("CONFLICT","Esta tentativa já foi usada com outro arquivo."); media=existing[0]; }
       else { await c.execute("INSERT INTO erp_product_media(media_id,client_id,product_id,storage_key,thumbnail_storage_key,mime_type,byte_size,sha256,width,height,state,client_attempt_id,created_by,display_order) VALUES(?,?,?,?,?,'image/webp',?,?,?,?, 'staged',?,?,0) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)",[mediaId,identity.tenantId,product.id,storageKey,thumbnailStorageKey,image.main.length,image.sha256,image.width,image.height,attemptId,identity.userId]); const [created]=await c.execute<MediaRow[]>("SELECT * FROM erp_product_media WHERE client_id=? AND client_attempt_id=? FOR UPDATE",[identity.tenantId,attemptId]); media=created[0]; if(media.product_id!==product.id||media.sha256!==image.sha256) throw new ProductMediaError("CONFLICT","Esta tentativa já foi usada com outro arquivo."); }
+      replayIsPrimary=Number(product.primary_media_id)===Number(media.id);
       await c.commit();
     } catch(error){await c.rollback();throw error;} finally{c.release();}
-    if(media.state==="active") return {mediaId:media.media_id};
+    if(media.state==="active") return {mediaId:media.media_id,isPrimary:replayIsPrimary};
     const a=await this.pool.getConnection();
     try { await a.beginTransaction(); const product=await this.product(a,identity.tenantId,productPublicId,true); if(!product) throw new ProductMediaError("NOT_FOUND","Produto não encontrado."); const [current]=await a.execute<MediaRow[]>("SELECT * FROM erp_product_media WHERE id=? AND client_id=? FOR UPDATE",[media.id,identity.tenantId]); if(!current[0]) throw new ProductMediaError("NOT_FOUND","Mídia não encontrada.");
-      if(current[0].state==="active"){await a.commit();return{mediaId:current[0].media_id};}
+      if(current[0].state==="active"){const isPrimary=Number(product.primary_media_id)===Number(current[0].id);await a.commit();return{mediaId:current[0].media_id,isPrimary};}
       if(current[0].state!=="staged")throw new ProductMediaError("CONFLICT","A mídia não pode mais ser ativada.");
       try { await atomicWrite(resolveMediaPath(this.root,current[0].storage_key),image.main); await atomicWrite(resolveMediaPath(this.root,current[0].thumbnail_storage_key),image.thumbnail); }
       catch { throw new ProductMediaError("STORAGE","Não foi possível armazenar a imagem com segurança."); }

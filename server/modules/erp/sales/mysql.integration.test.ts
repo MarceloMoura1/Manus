@@ -616,9 +616,16 @@ physical("ERP sales MySQL behavior matrix", () => {
   });
   it("19 rolls back before the ledger when stock validation fails", async () => {
     const f = await fixture(), s = new SaleService(new SaleRepository(), silent), events: string[] = [], observed = new SaleService(new SaleRepository(), { publish: (_c, e) => events.push(e) });
-    const order = await s.create(adminA, draft(f.customer.crmClientId, f.product.publicId, { items: [{ productPublicId: f.product.publicId, quantity: "11", unitPriceCents: 1 }] }));
+    const order = await s.create(adminA, draft(f.customer.crmClientId, f.product.publicId, { items: [{ productPublicId: f.product.publicId, quantity: "10", unitPriceCents: 1 }] }));
     await confirmSale(s, adminA, order, f.categoryPublicId);
     await prepareShipment(s, adminA, order.publicId);
+    await new ErpService(new ErpRepository()).moveStock(adminA, {
+      productPublicId: f.product.publicId,
+      type: "manual_out",
+      quantity: "1.000",
+      reason: "Consumo concorrente sintético antes do envio",
+      idempotencyKey: crypto.randomUUID(),
+    });
     const before = events.length;
     await expect(observed.fulfill(adminA, order.publicId, crypto.randomUUID())).rejects.toMatchObject({ code: "INSUFFICIENT_STOCK" });
     expect(events).toHaveLength(before);

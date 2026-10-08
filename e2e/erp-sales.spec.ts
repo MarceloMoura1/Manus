@@ -84,8 +84,9 @@ const session = {
     items: [
       { inventoryItemPublicId: "55555555-5555-4555-8555-555555555555", productPublicId: "44444444-4444-4444-8444-444444444444", name: "Monitor 24 IPS", sku: "MON-024-PRETO", unit: "unit", availableQuantity: "18.000", kind: "variant", variantPublicId: "66666666-6666-4666-8666-666666666661", variantName: "Preto", variantAttributes: "Cor: Preto", salePriceCents: 120000, canonicalImage: null },
       { inventoryItemPublicId: "55555555-5555-4555-8555-555555555556", productPublicId: "44444444-4444-4444-8444-444444444444", name: "Monitor 24 IPS", sku: "MON-024-PRATA", unit: "unit", availableQuantity: "7.000", kind: "variant", variantPublicId: "66666666-6666-4666-8666-666666666662", variantName: "Prata", variantAttributes: "Cor: Prata", salePriceCents: 122000, canonicalImage: null },
+      { inventoryItemPublicId: "55555555-5555-4555-8555-555555555557", productPublicId: "44444444-4444-4444-8444-444444444444", name: "Monitor 24 IPS", sku: "MON-024-BRANCO", unit: "unit", availableQuantity: "0.000", kind: "variant", variantPublicId: "66666666-6666-4666-8666-666666666663", variantName: "Branco", variantAttributes: "Cor: Branco", salePriceCents: 121000, canonicalImage: null },
     ],
-    total: 2,
+    total: 3,
     page: 1,
     pageSize: 12,
   },
@@ -132,7 +133,7 @@ async function prepare(
         if (n.includes("evolution.getStatus")) return { status: "disconnected" };
         if (n.includes("erp.sales.metrics")) return { salesCents: 8475000, receivableCents: 1842000, openOrders: 24, grossMarginPercent: null, grossMarginAvailable: false, grossMarginReason: "Custos históricos indisponíveis", period: { from: "2026-10-01", to: "2026-10-31", criterion: "data de criação da venda" } };
         if (n.includes("erp.sales.documents.list")) return [];
-        if (n.includes("erp.sales.list")) return { items: empty ? [] : [activeOrder], total: empty ? 0 : 1, page: 1, pageSize: 12, totalPages: 1, canWrite: !readOnly };
+        if (n.includes("erp.sales.list")) return { items: empty ? [] : [activeOrder], total: empty ? 0 : 1, page: 1, pageSize: 10, totalPages: 1, canWrite: !readOnly };
         if (n.includes("erp.sales.detail")) return {
           ...activeOrder,
           items: [saleItem],
@@ -196,9 +197,25 @@ test("sales route exposes compact overview and wide detail", async ({ page }) =>
   await expect(page).toHaveURL(/\/erp\/vendas$/);
   await expect(page.getByTestId("erp-sales-page")).toBeVisible();
   await expect(page.getByText("VD-00128").first()).toBeVisible();
+  await expect(page.getByLabel("Timeline das etapas da venda")).toHaveCount(0);
+  await page.getByRole("button", { name: "Abrir venda VD-00128" }).click();
+  await expect(page).toHaveURL(new RegExp(`/erp/vendas/${order.publicId}$`));
+  const detail = page.getByTestId("sales-detail-screen");
+  await expect(detail.getByLabel("Timeline das etapas da venda")).toBeVisible();
+  await expect(detail.getByText("Pagamento parcial").first()).toBeVisible();
+  await expect(detail.getByText("Documentos", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Voltar para vendas" }).click();
+  await expect(page).toHaveURL(/\/erp\/vendas$/);
+  await expect(page.getByText("VD-00128").first()).toBeVisible();
+
+  await page.goto(`/erp/vendas/${order.publicId}`);
   await expect(page.getByLabel("Timeline das etapas da venda")).toBeVisible();
-  await expect(page.getByText("Pagamento parcial").first()).toBeVisible();
-  await expect(page.getByText("Documentos", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Timeline das etapas da venda")).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/erp\/vendas$/);
+  await page.goForward();
+  await expect(page).toHaveURL(new RegExp(`/erp/vendas/${order.publicId}$`));
   await capture(page, "sales-overview-desktop");
 });
 test("sales searches incrementally and reveals variants only on demand", async ({ page }) => {
@@ -225,9 +242,15 @@ test("sales searches incrementally and reveals variants only on demand", async (
   await capture(page, "sales-product-search");
   await dialog.getByRole("button", { name: /Monitor 24 IPS/ }).first().click();
   await expect(dialog.getByRole("button", { name: /Cor: Preto/ })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Cor: Branco/ })).toBeDisabled();
   await capture(page, "sales-variant-selection");
   await dialog.getByRole("button", { name: /Cor: Preto/ }).click();
   await expect(dialog.getByRole("button", { name: "Remover Monitor 24 IPS" })).toBeVisible();
+  await dialog.getByLabel("Quantidade").fill("19");
+  await expect(dialog.getByRole("alert")).toContainText("Estoque insuficiente");
+  await expect(dialog.getByRole("button", { name: "Salvar rascunho" })).toBeDisabled();
+  await dialog.getByLabel("Quantidade").fill("2");
+  await expect(dialog.getByText("Estoque insuficiente")).toHaveCount(0);
   await dialog.getByLabel("Frete").fill("125,90");
   await dialog.getByLabel("Frete").blur();
   await expect(dialog.getByLabel("Frete")).toHaveValue("125,90");
@@ -239,17 +262,27 @@ test("sales searches incrementally and reveals variants only on demand", async (
 test("sales confirms through the guided financial checklist", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 900 });
   await prepare(page, { stage: "created" });
+  await page.getByRole("button", { name: "Abrir venda VD-00128" }).click();
   await page.getByRole("button", { name: "Confirmar" }).click();
   const dialog = page.getByRole("dialog", { name: "Confirmar venda" });
   await expect(dialog.getByText("Esta venda pode ser confirmada?")).toBeVisible();
   await expect(dialog.getByLabel("Categoria financeira")).toHaveValue("b1111111-1111-4111-8111-111111111111");
   await expect(dialog.getByLabel("Conta prevista")).toHaveValue("c1111111-1111-4111-8111-111111111111");
+  await expect(dialog.getByText("Isenção não está disponível")).toBeVisible();
+  await dialog.getByRole("button", { name: "Pagamento parcial" }).click();
+  await dialog.getByLabel("Valor já recebido").fill("950,00");
+  await dialog.getByLabel("Valor já recebido").blur();
+  await expect(dialog.getByText("R$ 950,00")).toBeVisible();
+  await dialog.getByRole("button", { name: "Pago" }).click();
+  await expect(dialog.getByText("R$ 0,00")).toBeVisible();
+  await dialog.getByRole("button", { name: "Pendente" }).click();
   await expect(dialog.getByRole("button", { name: "Confirmar venda e criar títulos" })).toBeEnabled();
   await capture(page, "sales-confirmation-1366");
 });
 test("sales explains a blocked financial confirmation", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 900 });
   await prepare(page, { stage: "created", missingFinance: true });
+  await page.getByRole("button", { name: "Abrir venda VD-00128" }).click();
   await page.getByRole("button", { name: "Confirmar" }).click();
   const dialog = page.getByRole("dialog", { name: "Confirmar venda" });
   await expect(dialog.getByText("Confirmação bloqueada")).toBeVisible();
@@ -263,6 +296,7 @@ test("sales read-only omits writes", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Nova venda" })).toHaveCount(
     0
   );
+  await page.getByRole("button", { name: "Abrir venda VD-00128" }).click();
   await expect(page.getByRole("button", { name: "Confirmar" })).toHaveCount(0);
 });
 test("sales exposes empty state", async ({ page }) => {
@@ -291,6 +325,7 @@ for (const viewport of [
   { width: 390, height: 844 },
   { width: 768, height: 1024 },
   { width: 1024, height: 768 },
+  { width: 1366, height: 900 },
   { width: 1440, height: 900 },
 ])
   test(`sales usable at ${viewport.width}x${viewport.height}`, async ({

@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateSalesFormTotals,
+  firstSalesStockIssue,
   hasDuplicateSalesItemIdentity,
   isSalesProductOptionDisabled,
   salesDraftFromForm,
   salesFormFromDetail,
   selectSalesItemProduct,
   splitInstallments,
+  salesStockIssue,
   type SalesFormItem,
 } from "./sales-form";
 
@@ -103,6 +105,43 @@ describe("sales form inventory identity", () => {
     ];
 
     expect(isSalesProductOptionDisabled(items, 0, productPublicId)).toBe(false);
+  });
+
+  it("validates the selected variation against its own available balance", () => {
+    const size39: SalesFormItem = {
+      productPublicId,
+      inventoryItemPublicId,
+      productName: "Tênis X / 39",
+      availableQuantity: "5.000",
+      quantity: "6.000",
+      unitPriceCents: 10_000,
+    };
+    const size40: SalesFormItem = {
+      ...size39,
+      inventoryItemPublicId: "20000000-0000-4000-8000-000000000040",
+      productName: "Tênis X / 40",
+      availableQuantity: "8.000",
+      quantity: "8.000",
+    };
+
+    expect(salesStockIssue(size39)).toEqual({
+      productName: "Tênis X / 39",
+      availableQuantity: "5.000",
+      requestedQuantity: "6.000",
+    });
+    expect(salesStockIssue(size40)).toBeNull();
+    expect(firstSalesStockIssue([size40, size39])?.productName).toBe("Tênis X / 39");
+  });
+
+  it("does not invent a stock block for historical items without a current balance", () => {
+    expect(
+      salesStockIssue({
+        productPublicId,
+        quantity: "1.000",
+        unitPriceCents: 100,
+        availableQuantity: null,
+      })
+    ).toBeNull();
   });
 
   it("calculates discounts and freight from real form values", () => {

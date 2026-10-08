@@ -36,10 +36,12 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).not.toContain("Reserva registrada");
   });
 
-  it("renders real list, expanded product, wide detail and historical states", () => {
+  it("renders a compact list and a dedicated detail screen with historical states", () => {
     expect(source).toContain("Lista de vendas");
-    expect(source).toContain("ExpandedProducts");
     expect(source).toContain("SaleDetailPanel");
+    expect(source).toContain("sales-detail-screen");
+    expect(source).toContain("Voltar para vendas");
+    expect(source).toContain("onSaleNavigate?.(publicId)");
     expect(source).toContain("Endereço histórico não registrado");
     expect(source).toContain("Parte do histórico é anterior à timeline auditada");
     expect(source).toContain("productMediaUrl");
@@ -76,5 +78,32 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain("Esta venda pode ser confirmada?");
     expect(source).toContain("Nova categoria a receber");
     expect(source).toContain("Nova conta");
+  });
+
+  it("does not auto-select the newest sale and keeps seller out of the compact row", () => {
+    expect(source).toContain("setSelectedId(initialSelectedId ?? null)");
+    expect(source).not.toContain("setSelectedId(list.data.items[0].publicId)");
+    const compactRow = source.slice(
+      source.indexOf('data-testid={`sale-row-${order.publicId}`}'),
+      source.indexOf("{list.data && (")
+    );
+    expect(compactRow).not.toContain("sellerName");
+    expect(compactRow).toContain("firstProductImage");
+    expect(compactRow).toContain("Ver detalhes");
+  });
+
+  it("offers one primary filter bar and server-side page sizes", () => {
+    expect(source).toContain("Buscar venda, cliente, produto ou SKU");
+    expect(source).toContain("Mais filtros");
+    expect(source).toContain("Itens por página");
+    expect(source).toContain("[10, 20, 50, 100]");
+    expect(source).toContain("salesPaginationItems(page, list.data.totalPages)");
+  });
+
+  it("records pending, partial or paid state through real received amounts", () => {
+    expect(source).toContain('paymentStatus: "pending"');
+    expect(source).toContain('paymentStatus === "partial"');
+    expect(source).toContain("receivedCents: state.receivedCents");
+    expect(source).toContain("Isenção não está disponível");
   });
 });
