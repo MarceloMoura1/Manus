@@ -502,9 +502,21 @@ physical.sequential("ERP sales v2 MySQL physical matrix", () => {
         [adminA.clientId, order.publicId]
       )
     ).toBe(1);
-    expect(await service.detail(adminA, order.publicId)).toMatchObject({
+    const shippedDetail = await service.detail(adminA, order.publicId);
+    expect(shippedDetail).toMatchObject({
       status: "fulfilled",
       currentStage: "completed",
+    });
+    const [inventoryBalance] = await getPool().execute<RowDataPacket[]>(
+      `SELECT b.quantity FROM erp_inventory_item_balances b
+       INNER JOIN erp_inventory_items i ON i.client_id=b.client_id AND i.id=b.inventory_item_id
+       WHERE i.client_id=? AND i.public_id=?`,
+      [adminA.clientId, f.inventoryItemPublicId]
+    );
+    expect(shippedDetail.items[0]).toMatchObject({
+      currentAvailable: inventoryBalance[0].quantity,
+      stockExitRecorded: true,
+      quantity: "1.005",
     });
   });
 
@@ -541,6 +553,15 @@ physical.sequential("ERP sales v2 MySQL physical matrix", () => {
       quantity: "1.000",
       reason: "Consumo concorrente sintético antes do envio",
       idempotencyKey: crypto.randomUUID(),
+    });
+    const beforeShip = await service.detail(adminA, order.publicId);
+    expect(beforeShip.items.find(item => item.inventoryItemPublicId === first.inventoryItemPublicId)).toMatchObject({
+      currentAvailable: "10.000",
+      stockExitRecorded: false,
+    });
+    expect(beforeShip.items.find(item => item.inventoryItemPublicId === second.inventoryItemPublicId)).toMatchObject({
+      currentAvailable: "0.000",
+      stockExitRecorded: false,
     });
     await expect(
       transition(service, order.publicId, "shipped")
@@ -684,6 +705,19 @@ physical.sequential("ERP sales v2 MySQL physical matrix", () => {
       55
     );
     expect(await sales.detail(adminA, order.publicId)).toMatchObject({
+      paymentStatus: "paid",
+      paidCents: 105,
+      balanceCents: 0,
+    });
+    const [financialState] = await getPool().execute<RowDataPacket[]>(
+      `SELECT a.current_balance_cents balance,
+              (SELECT COUNT(*) FROM erp_financial_settlements s WHERE s.client_id=a.client_id AND s.financial_account_id=a.id) settlements,
+              (SELECT COUNT(*) FROM erp_financial_ledger l WHERE l.client_id=a.client_id AND l.financial_account_id=a.id AND l.type='receivable_settlement') ledgerEntries
+       FROM erp_financial_accounts a WHERE a.client_id=? AND a.public_id=?`,
+      [adminA.clientId, f.accountPublicId]
+    );
+    expect(financialState[0]).toMatchObject({ balance: 105, settlements: 2, ledgerEntries: 2 });
+    expect(await new SaleService(new SaleRepository(), silent).detail(adminA, order.publicId)).toMatchObject({
       paymentStatus: "paid",
       paidCents: 105,
       balanceCents: 0,

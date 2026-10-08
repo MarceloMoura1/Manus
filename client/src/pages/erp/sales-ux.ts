@@ -2,6 +2,68 @@ import type { SalesAddress, SalesForm } from "./sales-form";
 
 export const SALES_LOOKUP_MIN_LENGTH = 2;
 
+// MySQL DATE's supported range lets the existing bounded metrics query represent
+// an unbounded UI filter without changing its aggregation or SQL contract.
+const earliestSalesDate = "1000-01-01";
+const latestSalesDate = "9999-12-31";
+
+export function salesMetricPeriod(from: string, to: string, defaultFrom: string, defaultTo: string) {
+  const label = from === defaultFrom && to === defaultTo
+    ? "Vendas no mês"
+    : from && to
+      ? `Vendas de ${formatSalesDate(from)} a ${formatSalesDate(to)}`
+      : from
+        ? `Vendas desde ${formatSalesDate(from)}`
+        : to
+          ? `Vendas até ${formatSalesDate(to)}`
+          : "Vendas em todo o período";
+  return { from: from || earliestSalesDate, to: to || latestSalesDate, label };
+}
+
+function formatSalesDate(value: string) {
+  const [year, month, day] = value.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+export function salesCsvCell(value: string | number) {
+  const raw = String(value);
+  // Spreadsheet-facing CSV mitigation, not a universal guarantee: Excel may
+  // discard an apostrophe when saving/reopening CSV, while other applications
+  // may interpret a tab differently. Use a format with explicit text-typed cells
+  // (for example XLSX) when the spreadsheet/round-trip behavior must be assured.
+  // Normalize only for detection; preserve the original exported value after
+  // the safety prefix, including its accents, controls and Unicode characters.
+  const leading = raw.match(/^[\p{White_Space}\p{Cc}\p{Cf}]*/u)?.[0] ?? "";
+  const firstMeaningful = raw.slice(leading.length).normalize("NFKC");
+  const formulaLike = /^[=+\-@\u2212]/u.test(firstMeaningful);
+  const startsWithControl = /[\p{Cc}\p{Cf}]/u.test(leading);
+  const safe = formulaLike || startsWithControl ? `\t'${raw}` : raw;
+  return `"${safe.replaceAll('"', '""')}"`;
+}
+
+export function salesCsv(rows: Array<Array<string | number>>) {
+  return `\uFEFF${rows.map(row => row.map(salesCsvCell).join(";")).join("\r\n")}`;
+}
+
+export function saleStockPresentation(input: {
+  currentAvailable: string | number | null;
+  stockExitRecorded: boolean;
+  currentStage: string;
+}) {
+  const quantity = input.currentAvailable === null ? null : Number(input.currentAvailable);
+  const availability = quantity === null || !Number.isFinite(quantity) || quantity < 0
+    ? "Saldo atual não verificável"
+    : quantity === 0
+      ? "Sem saldo disponível"
+      : `Saldo disponível: ${quantity.toLocaleString("pt-BR", { maximumFractionDigits: 3 })}`;
+  const movement = input.stockExitRecorded
+    ? "Baixa de estoque registrada"
+    : ["shipped", "received", "completed"].includes(input.currentStage)
+      ? "Movimento histórico de baixa não encontrado"
+      : "Baixa de estoque ainda não realizada";
+  return { availability, movement };
+}
+
 export type SalesPaginationItem = number | "ellipsis-left" | "ellipsis-right";
 
 export function salesPaginationItems(

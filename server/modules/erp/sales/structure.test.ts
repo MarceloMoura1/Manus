@@ -64,6 +64,19 @@ describe("sales B+C architecture", () => {
     expect(repository).toContain("firstProductImage:");
   });
 
+  it("reads the current variation balance and verifies a recorded stock exit", () => {
+    const detail = repository.slice(
+      repository.indexOf("async detail("),
+      repository.indexOf("async transition(")
+    );
+    expect(detail).toContain("erp_inventory_item_balances ib");
+    expect(detail).toContain("CASE WHEN ii.id IS NULL THEN NULL");
+    expect(detail).toContain("erp_sale_order_fulfillment_items fi");
+    expect(detail).toContain("f.client_id=?");
+    expect(detail).toContain("f.sale_order_id=i.sale_order_id");
+    expect(detail).toContain("stockExitRecorded: Boolean(entry.stock_exited)");
+  });
+
   it("makes confirmation replay-safe and rejects divergent retries", () => {
     expect(repository).toContain("order.confirmationIdempotencyKey === input.idempotencyKey");
     expect(repository).toContain("order.confirmationPayloadHash === payloadHash");

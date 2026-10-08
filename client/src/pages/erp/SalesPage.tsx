@@ -25,6 +25,7 @@ import {
   ReceiptText,
   RotateCcw,
   Search,
+  Share2,
   SlidersHorizontal,
   ShoppingCart,
   Trash2,
@@ -35,9 +36,10 @@ import {
   XCircle,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
-import { productMediaUrl } from "@/lib/trpc-url";
+import { productMediaUrl, saleDocumentUrl } from "@/lib/trpc-url";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { ErpPageHeader } from "@/components/erp/ErpPageHeader";
@@ -70,6 +72,9 @@ import {
   salesConfirmationRequirements,
   salesDraftProgress,
   salesPaginationItems,
+  salesCsv,
+  salesMetricPeriod,
+  saleStockPresentation,
 } from "./sales-ux";
 
 const money = new Intl.NumberFormat("pt-BR", {
@@ -143,6 +148,7 @@ export function SalesPage({
 } = {}) {
   const utils = trpc.useUtils();
   const [search, setSearch] = React.useState("");
+  const [kind, setKind] = React.useState<"all" | "quotes" | "orders">("all");
   const [stage, setStage] = React.useState<"all" | Stage>("all");
   const [paymentStatus, setPaymentStatus] = React.useState<
     "all" | "pending" | "partial" | "paid"
@@ -155,7 +161,8 @@ export function SalesPage({
   const [from, setFrom] = React.useState(month.from);
   const [to, setTo] = React.useState(month.to);
   const [page, setPage] = React.useState(1);
-  const [pageSize, setPageSize] = React.useState(10);
+  const [pageSize, setPageSize] = React.useState(6);
+  const [selectedSaleIds, setSelectedSaleIds] = React.useState<string[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(
     initialSelectedId ?? null
   );
@@ -172,7 +179,8 @@ export function SalesPage({
   const [transition, setTransition] = React.useState<TransitionState | null>(null);
   const [addressCorrection, setAddressCorrection] = React.useState<AddressCorrectionState | null>(null);
 
-  const metrics = trpc.erp.sales.metrics.useQuery({ from, to });
+  const metricPeriod = salesMetricPeriod(from, to, month.from, month.to);
+  const metrics = trpc.erp.sales.metrics.useQuery({ from: metricPeriod.from, to: metricPeriod.to });
   const debouncedListSearch = useDebounce(search.trim(), 300);
   const debouncedCustomerSearch = useDebounce(customerSearch.trim(), 300);
   const debouncedCatalogSearch = useDebounce(catalogSearch.trim(), 300);
@@ -183,13 +191,14 @@ export function SalesPage({
 
   const list = trpc.erp.sales.list.useQuery({
     search: debouncedListSearch,
+    kind,
     crmClientId: filterCustomer?.crmClientId,
     stage: stage === "all" ? undefined : stage,
     paymentStatus: paymentStatus === "all" ? undefined : paymentStatus,
     paymentMethod: paymentMethod === "all" ? undefined : paymentMethod,
     sellerUserId: sellerUserId === "all" ? undefined : sellerUserId,
-    from,
-    to,
+    from: from || undefined,
+    to: to || undefined,
     sort: "createdAt",
     direction: "desc",
     page,
@@ -352,6 +361,26 @@ export function SalesPage({
     setTo(month.to);
     setPage(1);
   };
+  const exportCurrentPage = () => {
+    if (!list.data?.items.length) return;
+    const columns = ["Venda", "Cliente", "Data", "Vendedor", "Total (BRL)", "Pagamento", "Etapa"];
+    const selectedOnPage = list.data.items.filter(order => selectedSaleIds.includes(order.publicId));
+    const exportItems = selectedOnPage.length ? selectedOnPage : list.data.items;
+    if (!exportItems.length) return;
+    const rows = exportItems.map(order => [
+      order.orderNumber, order.customerName, date.format(new Date(order.createdAt)),
+      order.sellerName ?? "", (order.totalCents / 100).toFixed(2).replace(".", ","),
+      paymentLabels[order.paymentStatus as keyof typeof paymentLabels] ?? order.paymentStatus,
+      order.cancelled ? "Cancelada" : stageLabels[order.currentStage as Stage],
+    ]);
+    const csv = salesCsv([columns, ...rows]);
+    const href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = `vendas-pagina-${page}.csv`;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(href), 0);
+  };
   const activeFilterCount = activeSalesFilterCount({
     search,
     stage,
@@ -373,11 +402,13 @@ export function SalesPage({
       <div className={selectedId ? "hidden" : "contents"} aria-hidden={selectedId ? true : undefined}>
       <ErpPageHeader
         title="Vendas"
-        description="Pedidos, produtos e recebimentos em uma única visão."
+        description="Gerencie pedidos e acompanhe suas vendas."
         actions={
-          canWrite ? (
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" className="min-h-9 border-blue-500 text-blue-700" disabled={!list.data?.items.length} onClick={exportCurrentPage} title="Exportar a página atual ou as vendas selecionadas em CSV"><Share2 className="mr-2 h-4 w-4" />Exportar</Button>
+          {canWrite && (
             <Button
-              className="min-h-10 bg-blue-600 px-5 text-white shadow-sm hover:bg-blue-700"
+              className="min-h-9 bg-blue-600 px-5 text-white shadow-sm hover:bg-blue-700"
               onClick={() => {
                 setForm(blankSalesForm());
                 setCustomerSearch("");
@@ -390,7 +421,8 @@ export function SalesPage({
             >
               <Plus className="mr-2 h-4 w-4" /> Nova venda
             </Button>
-          ) : undefined
+          )}
+          </div>
         }
       />
 
@@ -411,19 +443,24 @@ export function SalesPage({
         </div>
       )}
 
-      <SalesMetrics data={metrics.data} loading={metrics.isLoading} />
+      <SalesMetrics data={metrics.data} loading={metrics.isLoading} periodLabel={metricPeriod.label} />
 
-      <div className="min-w-0 space-y-5">
-        <section className="min-w-0 space-y-3" aria-label="Lista de vendas">
-          <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-[0_8px_24px_-22px_rgba(15,23,42,0.45)]" data-testid="sales-filters">
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_170px_300px_auto_auto]">
+      <div className="min-w-0">
+        <section className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_8px_24px_-22px_rgba(15,23,42,0.45)]" aria-label="Lista de vendas">
+          <nav className="flex gap-4 border-b border-slate-200 px-3 sm:gap-6 sm:px-5" aria-label="Tipos de venda">
+            {([ ["all", "Todas as vendas"], ["quotes", "Orçamentos"], ["orders", "Pedidos"] ] as const).map(([value, label]) => (
+              <button key={value} type="button" aria-current={kind === value ? "page" : undefined} className={cn("border-b-2 px-2 py-3 text-xs font-semibold sm:text-sm", kind === value ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-800")} onClick={() => { setKind(value); setPage(1); }}>{label}</button>
+            ))}
+          </nav>
+          <div className="border-b border-slate-100 px-3 py-3 sm:px-5" data-testid="sales-filters">
+            <div className="grid gap-2 min-[900px]:grid-cols-[minmax(220px,1fr)_130px_120px_130px_100px]">
               <label className="relative min-w-0">
                 <span className="sr-only">Busca</span>
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                 <Input
                   aria-label="Buscar por venda, cliente, produto ou SKU"
                   className="bg-white pl-9"
-                  placeholder="Buscar venda, cliente, produto ou SKU"
+                  placeholder="Buscar por número ou cliente..."
                   value={search}
                   onChange={event => {
                     setSearch(event.target.value);
@@ -431,31 +468,45 @@ export function SalesPage({
                   }}
                 />
               </label>
-              <label>
-                <span className="sr-only">Etapa</span>
+              <label className="relative">
+                <span className="sr-only">Período</span>
+                <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
                 <select
-                  className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  className="h-10 w-full rounded-md border border-input bg-white pl-9 pr-2 text-xs text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  value={from === month.from && to === month.to ? "month" : !from && !to ? "all" : "custom"}
+                  onChange={event => { if (event.target.value === "month") { setFrom(month.from); setTo(month.to); } else if (event.target.value === "all") { setFrom(""); setTo(""); } else { setAdvancedFiltersOpen(true); } setPage(1); }}
+                >
+                  <option value="month">Este mês</option><option value="all">Todo o período</option><option value="custom">Personalizado</option>
+                </select>
+              </label>
+              <label className="relative">
+                <span className="sr-only">Status</span>
+                <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
+                <select
+                  className="h-10 w-full rounded-md border border-input bg-white pl-9 pr-2 text-xs text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                   value={stage}
                   onChange={event => {
                     setStage(event.target.value as typeof stage);
                     setPage(1);
                   }}
                 >
-                  <option value="all">Todas as etapas</option>
+                  <option value="all">Status</option>
                   {stageOrder.map(value => (
                     <option key={value} value={value}>{stageLabels[value]}</option>
                   ))}
                 </select>
               </label>
-              <label className="grid grid-cols-2 gap-1" aria-label="Período das vendas">
-                <Input type="date" aria-label="Data inicial" value={from} onChange={event => { setFrom(event.target.value); setPage(1); }} />
-                <Input type="date" aria-label="Data final" value={to} onChange={event => { setTo(event.target.value); setPage(1); }} />
+              <label className="relative">
+                <span className="sr-only">Vendedor</span>
+                <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
+                <select className="h-10 w-full rounded-md border border-input bg-white pl-9 pr-2 text-xs text-slate-800" value={sellerUserId} onChange={event => { setSellerUserId(event.target.value); setPage(1); }}>
+                  <option value="all">Vendedor</option>{options.data?.sellers.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}
+                </select>
               </label>
-              <Button type="button" variant="outline" className="justify-between" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
-                <SlidersHorizontal className="mr-2 h-4 w-4" /> Mais filtros
+              <Button type="button" variant="outline" className="justify-between px-3 text-xs" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
+                <SlidersHorizontal className="mr-1 h-4 w-4" /> Filtros
                 {activeFilterCount > 0 && <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">{activeFilterCount}</span>}
               </Button>
-              <Button type="button" variant="ghost" className="text-slate-600" disabled={activeFilterCount === 0} onClick={clearFilters}>Limpar</Button>
             </div>
 
             {advancedFiltersOpen && (
@@ -494,10 +545,8 @@ export function SalesPage({
                     <option value="all">Todas as formas</option>{options.data?.paymentMethods.map(value => <option key={value} value={value}>{value}</option>)}
                   </select>
                 </label>
-                <label className="text-xs font-semibold text-slate-600">Vendedor
-                  <select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-slate-800" value={sellerUserId} onChange={event => { setSellerUserId(event.target.value); setPage(1); }}>
-                    <option value="all">Todos os vendedores</option>{options.data?.sellers.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}
-                  </select>
+                <label className="text-xs font-semibold text-slate-600">Período personalizado
+                  <span className="mt-1 grid grid-cols-2 gap-1"><Input type="date" aria-label="Data inicial" value={from} onChange={event => { setFrom(event.target.value); setPage(1); }} /><Input type="date" aria-label="Data final" value={to} onChange={event => { setTo(event.target.value); setPage(1); }} /></span>
                 </label>
               </div>
             )}
@@ -535,41 +584,43 @@ export function SalesPage({
               description="Ajuste os filtros ou crie uma nova venda."
             />
           ) : (
-            <div className="overflow-visible rounded-xl border border-slate-200 bg-white shadow-[0_8px_24px_-20px_rgba(15,23,42,0.55)]">
-              <div className="hidden grid-cols-[64px_minmax(190px,1.5fr)_minmax(140px,1fr)_120px_135px_120px_44px] items-center gap-3 rounded-t-xl bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-600 lg:grid">
-                <span>Produto</span><span>Venda</span><span>Cliente</span><span className="text-right">Total</span><span>Pagamento</span><span>Etapa</span><span className="sr-only">Ações</span>
+            <div className="min-w-0">
+              <div className="hidden overflow-x-auto md:block">
+                <table className="w-full min-w-[790px] table-fixed text-left text-xs" aria-label="Vendas">
+                  <colgroup><col className="w-9" /><col className="w-[18%]" /><col className="w-[16%]" /><col className="w-[11%]" /><col className="w-[10%]" /><col className="w-[12%]" /><col className="w-[10%]" /><col className="w-[13%]" /><col className="w-11" /></colgroup>
+                  <thead className="bg-slate-50 text-[11px] font-semibold text-slate-700"><tr>
+                    <th className="px-2 py-2"><input type="checkbox" aria-label="Selecionar vendas desta página" checked={list.data.items.every(order => selectedSaleIds.includes(order.publicId))} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...new Set([...current, ...list.data!.items.map(order => order.publicId)])] : current.filter(id => !list.data!.items.some(order => order.publicId === id)))} /></th>
+                    <th className="px-2 py-2">Venda</th><th className="px-2 py-2">Cliente</th><th className="px-2 py-2">Data</th><th className="px-2 py-2">Vendedor</th><th className="px-2 py-2 text-right">Total</th><th className="px-2 py-2">Pagamento</th><th className="px-2 py-2">Status</th><th className="px-2 py-2 text-center">Ações</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {list.data.items.map(order => (
+                      <tr key={order.publicId} className="hover:bg-blue-50/40" data-testid={`sale-row-${order.publicId}`}>
+                        <td className="px-2 py-2"><input type="checkbox" aria-label={`Selecionar venda ${order.orderNumber}`} checked={selectedSaleIds.includes(order.publicId)} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...current, order.publicId] : current.filter(id => id !== order.publicId))} /></td>
+                        <td className="px-2 py-1.5"><div className="flex min-w-0 items-center gap-2"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} compact /><div className="min-w-0"><button type="button" className="block truncate font-semibold text-blue-700 hover:underline" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><span className="block truncate text-[10px] text-slate-500">{order.firstProductName ?? "Produto histórico"}{order.itemCount > 1 ? ` · +${order.itemCount - 1}` : ""}</span></div></div></td>
+                        <td className="truncate px-2 py-2 font-medium text-slate-800" title={order.customerName}>{order.customerName}</td>
+                        <td className="px-2 py-2 tabular-nums text-slate-700">{date.format(new Date(order.createdAt))}</td>
+                        <td className="truncate px-2 py-2 text-slate-700" title={order.sellerName ?? ""}>{order.sellerName ?? "—"}</td>
+                        <td className="px-2 py-2 text-right font-semibold tabular-nums text-slate-900">{money.format(order.totalCents / 100)}</td>
+                        <td className="px-2 py-2"><PaymentBadge value={order.paymentStatus} compact /></td>
+                        <td className="px-2 py-2"><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></td>
+                        <td className="px-2 py-2 text-center"><DropdownMenu><DropdownMenuTrigger asChild><button type="button" className="rounded px-2 py-1 text-lg leading-none text-slate-600 hover:bg-slate-100" aria-label={`Ações da venda ${order.orderNumber}`}>⋯</button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => openSale(order.publicId)}>Ver detalhes</DropdownMenuItem>{canWrite && order.currentStage === "created" && !order.cancelled && <DropdownMenuItem onSelect={() => void edit(order.publicId)}>Editar rascunho</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div className="divide-y divide-slate-100">
-                {list.data.items.map(order => (
-                  <article key={order.publicId} className="group relative p-3 transition-colors hover:bg-slate-50/80 sm:p-4 lg:grid lg:grid-cols-[64px_minmax(190px,1.5fr)_minmax(140px,1fr)_120px_135px_120px_44px] lg:items-center lg:gap-3" data-testid={`sale-row-${order.publicId}`}>
-                    <button type="button" className="absolute inset-0 z-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500" aria-label={`Abrir venda ${order.orderNumber}`} onClick={() => openSale(order.publicId)} />
-                    <div className="pointer-events-none relative z-10 grid grid-cols-[48px_minmax(0,1fr)] items-start gap-x-3 lg:contents">
-                      <ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} />
-                      <div className="min-w-0 lg:block">
-                        <strong className="block text-sm text-blue-800">{order.orderNumber}</strong>
-                        <span className="mt-0.5 block truncate text-sm font-semibold text-slate-900">{order.firstProductName ?? "Itens históricos indisponíveis"}{order.itemCount > 1 ? ` · +${order.itemCount - 1}` : ""}</span>
-                        <span className="mt-0.5 block text-xs text-slate-500">{date.format(new Date(order.createdAt))} · {order.itemCount} {order.itemCount === 1 ? "item" : "itens"}</span>
-                      </div>
-                      <div className="col-start-2 mt-3 min-w-0 lg:col-auto lg:mt-0"><span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 lg:hidden">Cliente</span><p className="truncate text-sm font-semibold text-slate-800">{order.customerName}</p></div>
-                      <div className="col-start-2 mt-3 lg:col-auto lg:mt-0 lg:text-right"><span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 lg:hidden">Total</span><strong className="block text-sm tabular-nums text-slate-950">{money.format(order.totalCents / 100)}</strong></div>
-                      <div className="col-start-2 mt-3 lg:col-auto lg:mt-0"><span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500 lg:hidden">Pagamento</span><PaymentBadge value={order.paymentStatus} /></div>
-                      <div className="col-start-2 mt-3 lg:col-auto lg:mt-0"><span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500 lg:hidden">Etapa</span><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} /></div>
-                    </div>
-                    <details className="absolute right-3 top-3 z-20 justify-self-end sm:right-4 sm:top-4 lg:relative lg:right-auto lg:top-auto lg:mt-0">
-                      <summary className="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" aria-label={`Ações da venda ${order.orderNumber}`}><span aria-hidden="true" className="text-xl leading-none">⋯</span></summary>
-                      <div className="absolute right-0 top-10 z-30 w-44 rounded-lg border border-slate-200 bg-white p-1 shadow-xl">
-                        <button type="button" className="w-full rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => openSale(order.publicId)}>Ver detalhes</button>
-                        {canWrite && order.currentStage === "created" && !order.cancelled && <button type="button" className="w-full rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => void edit(order.publicId)}>Editar rascunho</button>}
-                      </div>
-                    </details>
-                  </article>
-                ))}
+              <div className="divide-y divide-slate-100 md:hidden">
+                {list.data.items.map(order => <article key={order.publicId} className="p-3">
+                  <div className="flex items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} /><div className="min-w-0 flex-1"><button type="button" className="font-semibold text-blue-700" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><p className="truncate text-xs text-slate-600">{order.firstProductName ?? "Produto histórico"}</p><p className="mt-1 truncate text-xs font-medium text-slate-800">{order.customerName}</p></div><strong className="shrink-0 text-xs tabular-nums">{money.format(order.totalCents / 100)}</strong></div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 pl-[52px]"><span className="text-xs text-slate-500">{date.format(new Date(order.createdAt))} · {order.sellerName ?? "—"}</span><div className="flex gap-1"><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></div></div>
+                  <div className="mt-2 flex gap-3 pl-[52px]"><button type="button" className="text-xs font-semibold text-blue-700" onClick={() => openSale(order.publicId)}>Ver detalhes</button>{canWrite && order.currentStage === "created" && !order.cancelled && <button type="button" className="text-xs font-semibold text-blue-700" onClick={() => void edit(order.publicId)}>Editar rascunho</button>}</div>
+                </article>)}
               </div>
             </div>
           )}
 
           {list.data && (
-            <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-600 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4">
+            <div className="flex flex-col gap-3 border-t border-slate-200 px-3 py-3 text-xs text-slate-600 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4">
               <span className="tabular-nums">
                 {list.data.total === 0
                   ? "Nenhuma venda"
@@ -587,7 +638,7 @@ export function SalesPage({
                       setPage(1);
                     }}
                   >
-                    {[10, 20, 50, 100].map(value => <option key={value} value={value}>{value}</option>)}
+                    {[6, 10, 20, 50, 100].map(value => <option key={value} value={value}>{value}</option>)}
                   </select>
                 </label>
                 {list.data.totalPages > 1 && (
@@ -761,23 +812,39 @@ export function SalesPage({
 function SalesMetrics({
   data,
   loading,
+  periodLabel,
 }: {
   data?: {
     salesCents: number;
     receivableCents: number;
+    orderCount: number;
+    averageTicketCents: number;
     openOrders: number;
     grossMarginAvailable: boolean;
     grossMarginReason: string;
     period: { from: string; to: string; criterion: string };
   };
   loading: boolean;
+  periodLabel: string;
 }) {
   const metrics = [
     {
-      label: "Vendas do período",
+      label: periodLabel,
       value: data ? money.format(data.salesCents / 100) : "—",
       icon: ShoppingCart,
       detail: data?.period.criterion ?? "data de criação da venda",
+    },
+    {
+      label: "Pedidos",
+      value: data ? String(data.orderCount) : "—",
+      icon: ReceiptText,
+      detail: "vendas confirmadas no período",
+    },
+    {
+      label: "Ticket médio",
+      value: data ? money.format(data.averageTicketCents / 100) : "—",
+      icon: CircleDollarSign,
+      detail: "total vendido dividido pelos pedidos",
     },
     {
       label: "A receber",
@@ -785,32 +852,20 @@ function SalesMetrics({
       icon: CreditCard,
       detail: "total da venda menos recebimentos reais",
     },
-    {
-      label: "Pedidos em aberto",
-      value: data ? String(data.openOrders) : "—",
-      icon: ReceiptText,
-      detail: "não cancelados e não concluídos",
-    },
-    {
-      label: "Margem bruta",
-      value: data?.grossMarginAvailable ? "Disponível" : "Indisponível",
-      icon: CircleDollarSign,
-      detail: data?.grossMarginReason ?? "aguardando dados históricos",
-    },
   ];
   return (
-    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicadores de vendas">
+    <section className="grid gap-2 min-[900px]:grid-cols-4" aria-label="Indicadores de vendas">
       {metrics.map(metric => (
-        <div key={metric.label} className="flex min-h-28 items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-[0_8px_20px_-20px_rgba(15,23,42,0.6)]">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+        <div key={metric.label} className="flex min-h-20 items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-[0_8px_20px_-20px_rgba(15,23,42,0.6)]">
+          <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-full", metric.label === "Ticket médio" ? "bg-emerald-50 text-emerald-600" : metric.label === "A receber" ? "bg-orange-50 text-orange-600" : "bg-blue-50 text-blue-600")}>
             <metric.icon className="h-5 w-5" />
           </span>
           <div className="min-w-0">
-            <p className="text-sm font-medium text-slate-600">{metric.label}</p>
-            <p className="mt-1 truncate text-xl font-bold tracking-[-0.02em] text-slate-950 tabular-nums">
+            <p className="text-xs font-medium text-slate-600">{metric.label}</p>
+            <p className="mt-0.5 truncate text-lg font-bold tracking-[-0.02em] text-slate-950 tabular-nums">
               {loading ? "Carregando…" : metric.value}
             </p>
-            <p className="mt-1 line-clamp-2 text-xs leading-4 text-slate-500">{metric.detail}</p>
+            <p className="sr-only">{metric.detail}</p>
           </div>
         </div>
       ))}
@@ -833,6 +888,7 @@ function ExpandedProducts({
   if (detail.error || !detail.data) {
     return <div role="alert" className="border-t border-rose-100 bg-rose-50 px-5 py-4 text-sm text-rose-900">Não foi possível carregar os itens desta venda.</div>;
   }
+  const currentStage = detail.data.currentStage;
   return (
     <div className="border-t border-blue-100 bg-white p-4" data-order-id={orderId}>
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -849,7 +905,7 @@ function ExpandedProducts({
               <th className="px-3 py-2 text-right font-semibold">Preço unit.</th>
               <th className="px-3 py-2 text-right font-semibold">Desconto</th>
               <th className="px-3 py-2 text-right font-semibold">Total</th>
-              <th className="px-3 py-2 text-right font-semibold">Disponível agora</th>
+              <th className="px-3 py-2 text-right font-semibold">Saldo atual</th>
             </tr>
           </thead>
           <tbody>
@@ -869,7 +925,7 @@ function ExpandedProducts({
                 <td className="px-3 py-2.5 text-right tabular-nums">{money.format(item.unitPriceCents / 100)}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{money.format(item.discountCents / 100)}</td>
                 <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{money.format(item.lineTotalCents / 100)}</td>
-                <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{item.currentAvailable === null ? "Não disponível" : formatQuantity(item.currentAvailable)}</td>
+                <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{saleStockPresentation({ currentAvailable: item.currentAvailable, stockExitRecorded: item.stockExitRecorded, currentStage }).availability}</td>
               </tr>
             ))}
           </tbody>
@@ -991,21 +1047,33 @@ function SaleDetailPanel({
             {order.installments.length ? order.installments.map(entry => (
               <div key={entry.publicId} className="flex items-center justify-between gap-3 text-xs">
                 <span className="text-slate-600">{entry.installment}/{order.installments.length} · {date.format(new Date(`${entry.dueDate}T12:00:00`))}</span>
-                <span className="font-semibold text-slate-900 tabular-nums">{money.format(entry.amountCents / 100)}</span>
+                <span className="text-right font-semibold text-slate-900 tabular-nums">{money.format(entry.amountCents / 100)}<small className="block font-normal text-slate-500">Recebido: {money.format(entry.paidCents / 100)}</small></span>
               </div>
             )) : (
               <p className="text-xs leading-5 text-amber-800">Venda legada sem títulos vinculados. Nenhuma cobrança retroativa foi criada.</p>
             )}
           </div>
+          <SalePaymentEditor key={order.publicId} order={order} canWrite={canWrite} />
         </section>
 
         <section className="rounded-xl bg-blue-50 p-4 text-blue-950 xl:col-start-2 xl:row-start-3">
           <h3 className="flex items-center gap-2 text-sm font-bold"><Box className="h-4 w-4" />Estoque</h3>
-          {stageOrder.indexOf(order.currentStage as Stage) >= stageOrder.indexOf("shipped") ? (
-            <p className="mt-2 text-sm">Saída registrada no envio. Concluir a venda não gera nova movimentação.</p>
-          ) : (
-            <p className="mt-2 text-sm">Sem reserva. O saldo permanece disponível até o envio.</p>
-          )}
+          <p className="mt-2 text-xs leading-5 text-blue-900">Saldo atual por variação, consultado no mesmo estoque de Produtos. Quantidade vendida e baixa são informações separadas.</p>
+          <ul className="mt-3 divide-y divide-blue-100 rounded-lg bg-white/75 px-3">
+            {order.items.map(item => {
+              const stock = saleStockPresentation({ currentAvailable: item.currentAvailable, stockExitRecorded: item.stockExitRecorded, currentStage: order.currentStage });
+              return <li key={item.publicId} className="py-2 text-xs">
+                <strong className="block truncate">{item.productName}</strong>
+                <span className="block truncate text-blue-800">{item.variantName || item.sku}</span>
+                <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                  <span>Quantidade vendida: {formatQuantity(item.quantity)}</span>
+                  <strong className="tabular-nums">{stock.availability}</strong>
+                </div>
+                <span className="block text-blue-800">{stock.movement}</span>
+              </li>;
+            })}
+          </ul>
+          <p className="mt-2 text-xs text-blue-800">{order.items.some(item => item.stockExitRecorded) ? "A saída registrada ocorreu no envio; concluir não repete a baixa." : stageOrder.indexOf(order.currentStage as Stage) >= stageOrder.indexOf("shipped") ? "Esta venda não possui movimentação de saída verificável no histórico atual." : "A disponibilidade será revalidada no envio; a confirmação não altera o saldo."}</p>
         </section>
 
         <section className="rounded-xl border border-slate-200 p-4 xl:col-start-1 xl:row-start-3">
@@ -1077,6 +1145,72 @@ function SaleDetailPanel({
         </footer>
       )}
     </aside>
+  );
+}
+
+function SalePaymentEditor({ order, canWrite }: { order: SaleDetail; canWrite: boolean }) {
+  const utils = trpc.useUtils();
+  const [selectedTitleId, setSelectedTitleId] = React.useState<string | null>(null);
+  const [accountId, setAccountId] = React.useState("");
+  const [amountCents, setAmountCents] = React.useState(0);
+  const [feedback, setFeedback] = React.useState("");
+  const attempt = React.useRef<string | null>(null);
+  const accounts = trpc.erp.sales.options.useQuery(undefined, { enabled: canWrite && !order.cancelled && order.balanceCents > 0 });
+  const settle = trpc.erp.finance.settle.useMutation();
+  const title = order.installments.find(entry => entry.publicId === selectedTitleId);
+  const remaining = title ? title.amountCents - title.paidCents : 0;
+  const canRecord = canWrite && !order.cancelled && title?.status === "open" && remaining > 0;
+
+  async function recordPayment(event: React.FormEvent) {
+    event.preventDefault();
+    if (!title || !canRecord || !accountId || !Number.isSafeInteger(amountCents) || amountCents <= 0 || amountCents > remaining) return;
+    const idempotencyKey = attempt.current ?? crypto.randomUUID();
+    attempt.current = idempotencyKey;
+    setFeedback("");
+    try {
+      await settle.mutateAsync({ publicId: title.publicId, financialAccountPublicId: accountId, amountCents, idempotencyKey });
+      attempt.current = null;
+      setSelectedTitleId(null);
+      setAmountCents(0);
+      setFeedback("Recebimento registrado no Financeiro. Saldo, ledger e status foram atualizados.");
+      await utils.erp.invalidate();
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Não foi possível registrar o recebimento.");
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-slate-200 pt-3 text-xs">
+      {canWrite && !order.cancelled && order.installments.some(entry => entry.status === "open" && entry.paidCents < entry.amountCents) && (
+        <div className="flex flex-wrap gap-2">
+          {order.installments.filter(entry => entry.status === "open" && entry.paidCents < entry.amountCents).map(entry => (
+            <Button key={entry.publicId} type="button" size="sm" variant="outline" onClick={() => { setSelectedTitleId(entry.publicId); setAmountCents(entry.amountCents - entry.paidCents); setFeedback(""); attempt.current = null; }}>
+              Registrar recebimento · parcela {entry.installment}
+            </Button>
+          ))}
+        </div>
+      )}
+      {canRecord && (
+        <form className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-white p-3" onSubmit={event => void recordPayment(event)}>
+          <p className="font-semibold text-slate-900">Recebimento da parcela {title.installment}</p>
+          <label className="block font-medium text-slate-700">Conta de recebimento
+            <select className="mt-1 h-9 w-full rounded-md border border-input bg-white px-2" value={accountId} onChange={event => { setAccountId(event.target.value); attempt.current = null; }} required>
+              <option value="">Selecione a conta</option>
+              {accounts.data?.accounts.map(account => <option key={account.publicId} value={account.publicId}>{account.name}</option>)}
+            </select>
+          </label>
+          {accounts.isError && <p role="alert" className="text-rose-700">Não foi possível carregar as contas financeiras.</p>}
+          <label className="block font-medium text-slate-700">Valor recebido (R$)
+            <MoneyInput className="mt-1" valueCents={amountCents} onChangeCents={value => { setAmountCents(value); attempt.current = null; }} />
+          </label>
+          <p className="text-slate-500">Saldo desta parcela: {money.format(remaining / 100)}. O lançamento atualizará o título, a conta e o ledger na mesma transação.</p>
+          {amountCents > remaining && <p role="alert" className="text-rose-700">O valor não pode superar o saldo da parcela.</p>}
+          <div className="flex justify-end gap-2"><Button type="button" size="sm" variant="ghost" onClick={() => { setSelectedTitleId(null); attempt.current = null; }}>Cancelar</Button><Button type="submit" size="sm" disabled={settle.isPending || accounts.isLoading || !accountId || amountCents <= 0 || amountCents > remaining}>{settle.isPending ? "Registrando…" : "Confirmar recebimento"}</Button></div>
+        </form>
+      )}
+      {feedback && <p role="status" className="mt-2 text-slate-700">{feedback}</p>}
+      {order.paidCents > 0 && canWrite && <p className="mt-2 text-slate-500">Reverter um recebimento exige estorno financeiro, ainda indisponível nesta tela.</p>}
+    </div>
   );
 }
 
@@ -1475,11 +1609,11 @@ function MoneyOrQuantity({ label, value, onChange, money: monetary }: { label: s
   );
 }
 
-function ProductThumb({ imagePath, name }: { imagePath?: string | null; name: string }) {
+function ProductThumb({ imagePath, name, compact = false }: { imagePath?: string | null; name: string; compact?: boolean }) {
   return imagePath ? (
-    <img src={productMediaUrl(imagePath)} alt="" className="h-10 w-10 shrink-0 rounded-md bg-slate-100 object-cover" />
+    <img src={productMediaUrl(imagePath)} crossOrigin="use-credentials" alt="" className={cn("shrink-0 rounded-md bg-slate-100 object-cover", compact ? "h-7 w-7" : "h-10 w-10")} />
   ) : (
-    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500" aria-label={`Sem imagem para ${name}`}><PackageOpen className="h-5 w-5" /></span>
+    <span className={cn("flex shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500", compact ? "h-7 w-7" : "h-10 w-10")} aria-label={`Sem imagem para ${name}`}><PackageOpen className="h-5 w-5" /></span>
   );
 }
 
@@ -1505,13 +1639,14 @@ function SearchPager({
   );
 }
 
-function PaymentBadge({ value }: { value: string }) {
+function PaymentBadge({ value, compact = false }: { value: string; compact?: boolean }) {
   const classes = value === "paid" ? "bg-emerald-100 text-emerald-800" : value === "partial" ? "bg-amber-100 text-amber-900" : "bg-rose-100 text-rose-800";
-  return <span className={cn("inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold", classes)}>{paymentLabels[value as keyof typeof paymentLabels] ?? value}</span>;
+  return <span className={cn("inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold", classes)}>{compact && value === "partial" ? "Parcial" : paymentLabels[value as keyof typeof paymentLabels] ?? value}</span>;
 }
 
-function StageBadge({ stage, cancelled }: { stage: Stage; cancelled?: boolean }) {
-  return <span className={cn("inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold", cancelled ? "bg-slate-100 text-slate-700" : stage === "completed" ? "bg-emerald-100 text-emerald-800" : "bg-blue-100 text-blue-800")}>{stageLabels[stage]}</span>;
+function StageBadge({ stage, cancelled, compact = false }: { stage: Stage; cancelled?: boolean; compact?: boolean }) {
+  const label = cancelled ? "Cancelada" : compact ? stage === "created" ? "Orçamento" : stage === "completed" ? "Concluída" : "Em andamento" : stageLabels[stage];
+  return <span className={cn("inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold", cancelled ? "bg-rose-100 text-rose-800" : stage === "completed" ? "bg-emerald-100 text-emerald-800" : stage === "created" ? "bg-slate-100 text-slate-700" : "bg-blue-100 text-blue-800")}>{label}</span>;
 }
 
 function InfoRow({ icon: Icon, label, value, detail }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; detail?: string }) {
@@ -1616,8 +1751,8 @@ function SaleDocuments({ salePublicId, canWrite }: { salePublicId: string; canWr
                   <strong className="block truncate text-xs text-slate-900">{document.fileName}</strong>
                   <span className="mt-0.5 block text-[11px] text-slate-500">{document.documentTypeLabel} · {fileSize(document.sizeBytes)}</span>
                 </div>
-                <a href={`${document.downloadUrl}?preview=1`} target="_blank" rel="noreferrer" aria-label={`Visualizar ${document.fileName}`} className="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-blue-700"><Eye className="h-3.5 w-3.5" /></a>
-                <a href={document.downloadUrl} aria-label={`Baixar ${document.fileName}`} className="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-blue-700"><Download className="h-3.5 w-3.5" /></a>
+                <a href={`${saleDocumentUrl(document.downloadUrl)}?preview=1`} target="_blank" rel="noreferrer" aria-label={`Visualizar ${document.fileName}`} className="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-blue-700"><Eye className="h-3.5 w-3.5" /></a>
+                <a href={saleDocumentUrl(document.downloadUrl)} aria-label={`Baixar ${document.fileName}`} className="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-blue-700"><Download className="h-3.5 w-3.5" /></a>
                 {canWrite && <button type="button" disabled={remove.isPending} aria-label={`Remover ${document.fileName}`} className="rounded p-1.5 text-slate-500 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50" onClick={() => window.confirm(`Remover “${document.fileName}” deste pedido?`) && remove.mutate({ salePublicId, documentPublicId: document.publicId })}><Trash2 className="h-3.5 w-3.5" /></button>}
               </div>
             </article>

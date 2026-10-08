@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isUserPersonalizationBackgroundPath,
   productMediaUrl,
+  saleDocumentUrl,
   resolveUserPersonalizationBackgroundUrl,
   ticketAttachmentUrl,
   trpcBaseUrl,
@@ -24,6 +25,8 @@ describe("tRPC transport URL", () => {
         .toBe("https://api.megadesk.online/api/products/prod-123/images");
       expect(productMediaUrl("api/products/prod-123/image?variant=thumbnail", hostname))
         .toBe("https://api.megadesk.online/api/products/prod-123/image?variant=thumbnail");
+      expect(saleDocumentUrl("/api/erp/sales/11111111-1111-4111-8111-111111111111/documents/22222222-2222-4222-8222-222222222222", hostname))
+        .toBe("https://api.megadesk.online/api/erp/sales/11111111-1111-4111-8111-111111111111/documents/22222222-2222-4222-8222-222222222222");
     },
   );
 
@@ -37,6 +40,13 @@ describe("tRPC transport URL", () => {
       .toBe("/api/products/prod-123/images");
     expect(productMediaUrl("api/products/prod-123/image?variant=thumbnail", hostname))
       .toBe("/api/products/prod-123/image?variant=thumbnail");
+    expect(saleDocumentUrl("/api/erp/sales/11111111-1111-4111-8111-111111111111/documents/22222222-2222-4222-8222-222222222222", hostname))
+      .toBe("/api/erp/sales/11111111-1111-4111-8111-111111111111/documents/22222222-2222-4222-8222-222222222222");
+  });
+
+  it("rejeita caminho arbitrário para não expor outro host ou endpoint", () => {
+    expect(() => saleDocumentUrl("https://example.invalid/arquivo", "app.megadesk.online")).toThrow();
+    expect(() => saleDocumentUrl("/api/erp/sales/../outro", "app.megadesk.online")).toThrow();
   });
 
   it("keeps an opaque custom-image revision on the authenticated API origin", () => {

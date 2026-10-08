@@ -20,10 +20,17 @@ describe("sale contracts", () => {
   it("accepts an explicit customer filter without broadening the search", () => {
     expect(saleListInput.parse({ crmClientId: "crm-customer-42" })).toMatchObject({
       crmClientId: "crm-customer-42",
+      kind: "all",
       search: "",
       page: 1,
       pageSize: 20,
     });
+  });
+
+  it("accepts only the supported order and quote tabs", () => {
+    expect(saleListInput.parse({ kind: "quotes" }).kind).toBe("quotes");
+    expect(saleListInput.parse({ kind: "orders" }).kind).toBe("orders");
+    expect(() => saleListInput.parse({ kind: "archived" })).toThrow();
   });
 
   it("rounds quantities half-up without floating-point arithmetic", () => {
