@@ -1,5 +1,7 @@
 import { readdir, rm } from "node:fs/promises";
+import type { AddressInfo } from "node:net";
 import path from "node:path";
+import express from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { RowDataPacket } from "mysql2/promise";
 import {
@@ -17,10 +19,12 @@ import { ClientFileService } from "../../crm/client-files/files-service";
 import {
   deleteCrmClientFilePhysical,
   readCrmClientFile,
+  resolveCrmClientFilePath,
   writeCrmClientFileAtomic,
 } from "../../crm/client-files/files-storage";
 import { SaleDocumentRepository } from "./documents-repository";
 import { SaleDocumentService } from "./documents-service";
+import { createSaleDocumentDownloadHandler } from "./documents-http";
 
 const physical = describe.runIf(isTestDatabaseEnabled());
 const adminA = {
@@ -192,6 +196,50 @@ physical.sequential("ERP sale documents MySQL + filesystem matrix", () => {
     await expect(
       service.getForDownload(adminB, f.salePublicId, created.publicId)
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("serves the stored file over a loopback HTTP route and enforces ERP/tenant access", async () => {
+    const f = await fixture();
+    const service = new SaleDocumentService();
+    const created = await service.upload(adminA, upload(f.salePublicId));
+    const app = express();
+    app.get(
+      "/api/erp/sales/:salePublicId/documents/:documentPublicId",
+      createSaleDocumentDownloadHandler(service, (async request => {
+        const role = request.header("X-Test-Session");
+        if (!role) return null;
+        return {
+          tenantId: role === "other-tenant" ? adminB.clientId : adminA.clientId,
+          userId: viewerA.userId,
+          role: "viewer",
+          permissions: role === "no-erp" ? ["clients"] : ["erp"],
+        };
+      }) as any)
+    );
+    const server = app.listen(0, "127.0.0.1");
+    try {
+      await new Promise<void>(resolve => server.once("listening", resolve));
+      const port = (server.address() as AddressInfo).port;
+      const url = `http://127.0.0.1:${port}${created.downloadUrl}`;
+      const allowed = await fetch(url, { headers: { "X-Test-Session": "viewer" } });
+      expect(allowed.status).toBe(200);
+      expect(allowed.headers.get("cache-control")).toBe("private, no-store");
+      expect(Buffer.from(await allowed.arrayBuffer())).toEqual(textBytes);
+      expect((await fetch(url)).status).toBe(401);
+      expect((await fetch(url, { headers: { "X-Test-Session": "no-erp" } })).status).toBe(403);
+      expect((await fetch(url, { headers: { "X-Test-Session": "other-tenant" } })).status).toBe(404);
+      expect((await fetch(url.replace(created.publicId, crypto.randomUUID()), { headers: { "X-Test-Session": "viewer" } })).status).toBe(404);
+      const [physical] = await getPool().execute<RowDataPacket[]>(
+        `SELECT f.storage_key FROM erp_sale_documents d
+         INNER JOIN megadesk_crm_client_files f ON f.client_id=d.client_id AND f.id=d.client_file_id
+         WHERE d.client_id=? AND d.public_id=?`,
+        [adminA.clientId, created.publicId]
+      );
+      await rm(resolveCrmClientFilePath(adminA.clientId, String(physical[0].storage_key), mediaRoot));
+      expect((await fetch(url, { headers: { "X-Test-Session": "viewer" } })).status).toBe(404);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
   });
 
   it("recovers pending_upload after physical write without a duplicate object", async () => {

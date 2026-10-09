@@ -29,9 +29,14 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain("currentStage");
   });
 
-  it("states the approved no-reservation stock behavior", () => {
+  it("shows real variant availability separately from the no-reservation policy", () => {
     expect(source).toContain("A confirmação não reserva estoque");
-    expect(source).toContain("Sem reserva. O saldo permanece disponível até o envio.");
+    expect(source).toContain("item.currentAvailable");
+    expect(source).toContain("item.stockExitRecorded");
+    expect(source).toContain("Saldo atual por variação");
+    expect(source).toContain("saleStockPresentation({ currentAvailable: item.currentAvailable");
+    expect(source).toContain("Quantidade vendida e baixa são informações separadas.");
+    expect(source).not.toContain("Reserva desta venda: não aplicada.");
     expect(source).not.toContain("Reserva ativa");
     expect(source).not.toContain("Reserva registrada");
   });
@@ -80,24 +85,30 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain("Nova conta");
   });
 
-  it("does not auto-select the newest sale and keeps seller out of the compact row", () => {
+  it("does not auto-select a sale and keeps seller, product image and actions in the compact list", () => {
     expect(source).toContain("setSelectedId(initialSelectedId ?? null)");
     expect(source).not.toContain("setSelectedId(list.data.items[0].publicId)");
     const compactRow = source.slice(
       source.indexOf('data-testid={`sale-row-${order.publicId}`}'),
       source.indexOf("{list.data && (")
     );
-    expect(compactRow).not.toContain("sellerName");
+    expect(compactRow).toContain("sellerName");
     expect(compactRow).toContain("firstProductImage");
     expect(compactRow).toContain("Ver detalhes");
   });
 
   it("offers one primary filter bar and server-side page sizes", () => {
-    expect(source).toContain("Buscar venda, cliente, produto ou SKU");
-    expect(source).toContain("Mais filtros");
+    expect(source).toContain("Buscar por número ou cliente...");
+    expect(source).toContain("Tipos de venda");
+    expect(source).toContain("Filtros avançados");
     expect(source).toContain("Itens por página");
-    expect(source).toContain("[10, 20, 50, 100]");
+    expect(source).toContain("[6, 10, 20, 50, 100]");
     expect(source).toContain("salesPaginationItems(page, list.data.totalPages)");
+  });
+
+  it("routes private sale document links to the authenticated API host", () => {
+    expect(source).toContain("saleDocumentUrl(document.downloadUrl)");
+    expect(source).toContain("?preview=1");
   });
 
   it("records pending, partial or paid state through real received amounts", () => {
@@ -105,5 +116,14 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain('paymentStatus === "partial"');
     expect(source).toContain("receivedCents: state.receivedCents");
     expect(source).toContain("Isenção não está disponível");
+  });
+
+  it("edits payment only through the Finance settlement contract", () => {
+    expect(source).toContain("trpc.erp.finance.settle.useMutation()");
+    expect(source).toContain("financialAccountPublicId: accountId");
+    expect(source).toContain("amountCents, idempotencyKey");
+    expect(source).toContain("await utils.erp.invalidate()");
+    expect(source).toContain("Reverter um recebimento exige estorno financeiro");
+    expect(source).not.toContain("setPaymentStatus(order.publicId");
   });
 });

@@ -44,3 +44,13 @@ export function productMediaUrl(
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${apiOrigin}${normalizedPath}`;
 }
+
+export function saleDocumentUrl(
+  path: string,
+  hostname = typeof window === "undefined" ? "localhost" : window.location.hostname || "localhost",
+): string {
+  if (!/^\/api\/erp\/sales\/[0-9a-f-]+\/documents\/[0-9a-f-]+$/i.test(path)) {
+    throw new Error("Caminho de documento da venda inválido.");
+  }
+  return `${trpcBaseUrl(hostname).replace(/\/api\/trpc$/, "")}${path}`;
+}

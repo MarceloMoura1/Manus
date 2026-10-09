@@ -43,6 +43,7 @@ const session = {
     itemCount: 3,
     totalQuantity: "6.000",
     firstProductName: "Monitor 24 IPS",
+    firstProductImage: { mediaId: "99999999-9999-4999-8999-999999999999", path: "/api/products/44444444-4444-4444-8444-444444444444/image", thumbnailPath: "/api/products/44444444-4444-4444-8444-444444444444/image?variant=thumbnail" },
     confirmedAt: "2026-10-05T14:10:00.000Z",
     fulfilledAt: null,
     cancelledAt: null,
@@ -63,6 +64,7 @@ const session = {
     discountCents: 0,
     lineTotalCents: 240000,
     currentAvailable: "18.000",
+    stockExitRecorded: false,
     canonicalImage: null,
   },
   customerResult = {
@@ -98,9 +100,15 @@ async function prepare(
     empty?: boolean;
     error?: boolean;
     missingFinance?: boolean;
-    stage?: "created" | "separation";
+    stage?: "created" | "separation" | "shipped";
+    stockAvailable?: string | null;
+    stockExitRecorded?: boolean;
     counters?: { customers: number; catalog: number };
     onSaleListRequest?: () => void;
+    visualRows?: boolean;
+    paymentFlow?: boolean;
+    exportNames?: Array<{ customerName: string; sellerName: string }>;
+    metricRequests?: string[];
   } = {}
 ) {
   const {
@@ -110,13 +118,46 @@ async function prepare(
     missingFinance = false,
     counters,
     onSaleListRequest,
+    visualRows = false,
+    paymentFlow = false,
+    exportNames,
+    metricRequests,
     stage = "separation",
+    stockAvailable = "18.000",
+    stockExitRecorded = false,
   } = options;
+  let extraPaidCents = 0;
   const activeOrder = {
     ...order,
     status: stage === "created" ? "draft" : "confirmed",
     currentStage: stage,
   };
+  const visualOrders = [
+    ["VD-00128", "Alfa Comércio", "paid", "completed", 125000],
+    ["VD-00127", "Studio Oliveira", "partial", "separation", 98000],
+    ["VD-00126", "NovaTech", "pending", "created", 243000],
+    ["VD-00125", "Casa Martins", "paid", "completed", 312000],
+    ["VD-00124", "Mercado Central", "pending", "created", 89000],
+    ["VD-00123", "Lima Serviços", "partial", "confirmed", 178000],
+  ].map(([orderNumber, customerName, paymentStatus, currentStage, totalCents], index) => ({
+    ...activeOrder,
+    publicId: `77777777-7777-4777-8777-${String(index + 1).padStart(12, "0")}`,
+    orderNumber,
+    customerName,
+    paymentStatus,
+    currentStage,
+    status: currentStage === "created" ? "draft" : currentStage === "completed" ? "fulfilled" : "confirmed",
+    cancelled: orderNumber === "VD-00124",
+    totalCents,
+    createdAt: `2026-10-0${5 - Math.floor(index / 2)}T12:24:00.000Z`,
+    sellerName: index % 2 ? "Ana" : "Marcelo",
+  }));
+  const exportOrders = exportNames?.map((names, index) => ({
+    ...activeOrder,
+    publicId: `77777777-7777-4777-8777-${String(index + 1).padStart(12, "0")}`,
+    orderNumber: `VD-${String(index + 1).padStart(5, "0")}`,
+    ...names,
+  }));
   await page.addInitScript(
     v => {
       localStorage.setItem("megadesk_session_v1", JSON.stringify(v));
@@ -124,6 +165,11 @@ async function prepare(
     },
     readOnly ? { ...session, userRole: "viewer" } : session
   );
+  await page.route("**/api/products/**/image*", route => route.fulfill({
+    status: 200,
+    contentType: "image/svg+xml",
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#dbeafe"/><rect x="12" y="18" width="56" height="40" rx="3" fill="#1d4ed8"/><rect x="17" y="23" width="46" height="30" fill="#60a5fa"/><path d="M34 62h12M40 58v4" stroke="#1e293b" stroke-width="3"/></svg>',
+  }));
   await page.route("**/api/trpc/**", async route => {
     const names = decodeURIComponent(new URL(route.request().url()).pathname)
         .replace(/^.*\/api\/trpc\//, "")
@@ -131,15 +177,27 @@ async function prepare(
       response = (n: string): unknown => {
         if (n.includes("refreshSession")) return { ok: true, session: readOnly ? { ...session, userRole: "viewer" } : session };
         if (n.includes("evolution.getStatus")) return { status: "disconnected" };
-        if (n.includes("erp.sales.metrics")) return { salesCents: 8475000, receivableCents: 1842000, openOrders: 24, grossMarginPercent: null, grossMarginAvailable: false, grossMarginReason: "Custos históricos indisponíveis", period: { from: "2026-10-01", to: "2026-10-31", criterion: "data de criação da venda" } };
+        if (n.includes("erp.sales.metrics")) {
+          metricRequests?.push(decodeURIComponent(route.request().url()));
+          return { salesCents: 8475000, receivableCents: 1842000, orderCount: 128, averageTicketCents: 66211, openOrders: 24, grossMarginPercent: null, grossMarginAvailable: false, grossMarginReason: "Custos históricos indisponíveis", period: { from: "2026-10-01", to: "2026-10-31", criterion: "data de criação da venda" } };
+        }
         if (n.includes("erp.sales.documents.list")) return [];
-        if (n.includes("erp.sales.list")) return { items: empty ? [] : [activeOrder], total: empty ? 0 : 1, page: 1, pageSize: 10, totalPages: 1, canWrite: !readOnly };
+        if (n.includes("erp.sales.list")) {
+          const items = empty ? [] : exportOrders ?? (visualRows ? visualOrders : [activeOrder]);
+          return { items, total: items.length, page: 1, pageSize: 6, totalPages: 1, canWrite: !readOnly };
+        }
+        if (n.includes("erp.finance.settle") && paymentFlow) {
+          extraPaidCents = 50_000;
+          return { publicId: "a2222222-2222-4222-8222-222222222222", paidCents: extraPaidCents, replay: false };
+        }
         if (n.includes("erp.sales.detail")) return {
           ...activeOrder,
-          items: [saleItem],
+          paidCents: activeOrder.paidCents + extraPaidCents,
+          balanceCents: activeOrder.balanceCents - extraPaidCents,
+          items: [{ ...saleItem, currentAvailable: stockAvailable, stockExitRecorded }],
           installments: [
             { publicId: "a1111111-1111-4111-8111-111111111111", installment: 1, dueDate: "2026-10-05", amountCents: 95000, paidCents: 95000, status: "settled", paymentStatus: "paid" },
-            { publicId: "a2222222-2222-4222-8222-222222222222", installment: 2, dueDate: "2026-11-05", amountCents: 95000, paidCents: 0, status: "open", paymentStatus: "pending" },
+            { publicId: "a2222222-2222-4222-8222-222222222222", installment: 2, dueDate: "2026-11-05", amountCents: 95000, paidCents: extraPaidCents, status: "open", paymentStatus: extraPaidCents ? "partial" : "pending" },
           ],
           financialHistoryAvailable: true,
           historyComplete: true,
@@ -197,12 +255,16 @@ test("sales route exposes compact overview and wide detail", async ({ page }) =>
   await expect(page).toHaveURL(/\/erp\/vendas$/);
   await expect(page.getByTestId("erp-sales-page")).toBeVisible();
   await expect(page.getByText("VD-00128").first()).toBeVisible();
+  await expect(page.locator('tr[data-testid^="sale-row-"] img')).toBeVisible();
+  await capture(page, "sales-list-desktop");
   await expect(page.getByLabel("Timeline das etapas da venda")).toHaveCount(0);
-  await page.getByRole("button", { name: "Abrir venda VD-00128" }).click();
+  await page.getByRole("button", { name: "VD-00128", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/erp/vendas/${order.publicId}$`));
   const detail = page.getByTestId("sales-detail-screen");
   await expect(detail.getByLabel("Timeline das etapas da venda")).toBeVisible();
   await expect(detail.getByText("Pagamento parcial").first()).toBeVisible();
+  await expect(detail.getByText("Saldo disponível: 18")).toBeVisible();
+  await expect(detail.getByText("Baixa de estoque ainda não realizada")).toBeVisible();
   await expect(detail.getByText("Documentos", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Voltar para vendas" }).click();
   await expect(page).toHaveURL(/\/erp\/vendas$/);
@@ -217,6 +279,147 @@ test("sales route exposes compact overview and wide detail", async ({ page }) =>
   await page.goForward();
   await expect(page).toHaveURL(new RegExp(`/erp/vendas/${order.publicId}$`));
   await capture(page, "sales-overview-desktop");
+});
+
+test("sales payment editor uses the Finance settlement and refreshes after reload", async ({ page }) => {
+  await prepare(page, { paymentFlow: true });
+  await page.getByRole("button", { name: "VD-00128", exact: true }).click();
+  await page.getByRole("button", { name: /Registrar recebimento · parcela 2/ }).click();
+  await page.getByLabel("Conta de recebimento").selectOption("c1111111-1111-4111-8111-111111111111");
+  await page.getByLabel("Valor recebido (R$)").fill("500,00");
+  await page.getByRole("button", { name: "Confirmar recebimento" }).click();
+  await expect(page.getByText("Recebimento registrado no Financeiro.", { exact: false })).toBeVisible();
+  await expect(page.getByText("R$ 1.450,00", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("R$ 1.450,00", { exact: true })).toBeVisible();
+});
+
+test("sales detail distinguishes zero stock from missing reservation", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await prepare(page, { stockAvailable: "0.000" });
+  await page.getByRole("button", { name: "VD-00128", exact: true }).click();
+  const detail = page.getByTestId("sales-detail-screen");
+  await expect(detail.getByText("Sem saldo disponível")).toBeVisible();
+  await expect(detail.getByText("Quantidade vendida: 2")).toBeVisible();
+  await expect(detail.getByText("Baixa de estoque ainda não realizada")).toBeVisible();
+  await expect(detail.getByText("Sem reserva", { exact: false })).toHaveCount(0);
+  await detail.getByText("Sem saldo disponível").scrollIntoViewIfNeeded();
+  await capture(page, "sales-stock-zero");
+});
+
+test("sales detail distinguishes recorded stock exit from current balance", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await prepare(page, { stockAvailable: "8.000", stockExitRecorded: true, stage: "shipped" });
+  await page.getByRole("button", { name: "VD-00128", exact: true }).click();
+  const detail = page.getByTestId("sales-detail-screen");
+  await expect(detail.getByText("Saldo disponível: 8")).toBeVisible();
+  await expect(detail.getByText("Quantidade vendida: 2")).toBeVisible();
+  await expect(detail.getByText("Baixa de estoque registrada")).toBeVisible();
+  await expect(detail.getByText("A saída registrada ocorreu no envio; concluir não repete a baixa.")).toBeVisible();
+  await detail.getByText("Baixa de estoque registrada").scrollIntoViewIfNeeded();
+  await capture(page, "sales-stock-exit");
+});
+
+test("sales export downloads formula-safe CSV with normal text, accents, quotes and line breaks", async ({ page }) => {
+  await prepare(page, { exportNames: [
+    { customerName: '=HYPERLINK("https://example.invalid","abrir")', sellerName: "+COMANDO" },
+    { customerName: " \t@SOMA(1,2)", sellerName: "\r\n-COMANDO" },
+    { customerName: 'Árvore, "Ltda"\nFilial', sellerName: 'Ana, "Silva"' },
+    { customerName: "Cliente normal", sellerName: "Marcelo" },
+    { customerName: "\u0000=FÓRMULA", sellerName: "\uFEFF+FÓRMULA" },
+    { customerName: "   =1+1", sellerName: "@IMPORTDATA" },
+  ] });
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Exportar" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("vendas-pagina-1.csv");
+  const stream = await download.createReadStream();
+  let csv = "";
+  for await (const chunk of stream) csv += chunk.toString("utf8");
+  expect(csv).toMatch(/^\uFEFF"Venda";"Cliente";"Data";"Vendedor"/);
+  expect(csv).toContain('"\t\'=HYPERLINK(""https://example.invalid"",""abrir"")";"');
+  expect(csv).toContain('"\t\'+COMANDO"');
+  expect(csv).toContain('"\t\' \t@SOMA(1,2)"');
+  expect(csv).toContain('"\t\'\r\n-COMANDO"');
+  expect(csv).toContain('"Árvore, ""Ltda""\nFilial"');
+  expect(csv).toContain('"Ana, ""Silva"""');
+  expect(csv).toContain('"Cliente normal"');
+  expect(csv).toContain('"\t\'\u0000=FÓRMULA"');
+  expect(csv).toContain('"\t\'\uFEFF+FÓRMULA"');
+  expect(csv).toContain('"\t\'   =1+1"');
+  expect(csv).toContain('"\t\'@IMPORTDATA"');
+  expect(csv).toContain('\r\n"VD-00002"');
+});
+
+test("sales download protects Unicode formula variants in customer and seller fields", async ({ page }) => {
+  await prepare(page, { exportNames: [
+    { customerName: "＝1+1", sellerName: "＋IMPORTDATA" },
+    { customerName: "－1+1", sellerName: "＠SOMA(1,2)" },
+    { customerName: " \u200B﹦1+1", sellerName: "\u00A0﹢1+1" },
+    { customerName: "﹣1+1", sellerName: "\u2060⁺1+1" },
+    { customerName: "−1+1", sellerName: "\u0000＝1+1" },
+    { customerName: "Cliente normal", sellerName: 'Árvore, "Silva"\r\nFilial' },
+  ] });
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Exportar" }).click();
+  const stream = await (await downloadPromise).createReadStream();
+  let csv = "";
+  for await (const chunk of stream) csv += chunk.toString("utf8");
+  expect(csv).toMatch(/^\uFEFF"Venda";"Cliente";"Data";"Vendedor"/);
+  expect(csv).toContain('"\t\'＝1+1";');
+  expect(csv).toContain('"\t\'＋IMPORTDATA"');
+  expect(csv).toContain('"\t\'－1+1";');
+  expect(csv).toContain('"\t\'＠SOMA(1,2)"');
+  expect(csv).toContain('"\t\' \u200B﹦1+1";');
+  expect(csv).toContain('"\t\'\u00A0﹢1+1"');
+  expect(csv).toContain('"\t\'﹣1+1";');
+  expect(csv).toContain('"\t\'\u2060⁺1+1"');
+  expect(csv).toContain('"\t\'−1+1";');
+  expect(csv).toContain('"\t\'\u0000＝1+1"');
+  expect(csv).toContain('"Cliente normal";');
+  expect(csv).toContain('"Árvore, ""Silva""\r\nFilial"');
+});
+
+test("sales metric label follows the actual monthly, complete, custom and partial query bounds", async ({ page }) => {
+  const metricRequests: string[] = [];
+  await prepare(page, { metricRequests });
+  await expect(page.getByText("Vendas no mês", { exact: true })).toBeVisible();
+  await expect.poll(() => metricRequests.length).toBeGreaterThan(0);
+  const period = page.getByRole("combobox", { name: "Período" });
+  await period.selectOption("all");
+  await expect(page.getByText("Vendas em todo o período", { exact: true })).toBeVisible();
+  await expect.poll(() => metricRequests.some(url => url.includes("1000-01-01") && url.includes("9999-12-31"))).toBe(true);
+
+  await period.selectOption("custom");
+  await page.getByLabel("Data inicial").fill("2026-09-02");
+  await page.getByLabel("Data final").fill("2026-09-28");
+  await expect(page.getByText("Vendas de 02/09/2026 a 28/09/2026", { exact: true })).toBeVisible();
+  await expect.poll(() => metricRequests.some(url => url.includes("2026-09-02") && url.includes("2026-09-28"))).toBe(true);
+
+  await page.getByLabel("Data final").fill("");
+  await expect(page.getByText("Vendas desde 02/09/2026", { exact: true })).toBeVisible();
+  await expect.poll(() => metricRequests.some(url => url.includes("2026-09-02") && url.includes("9999-12-31"))).toBe(true);
+
+  await page.getByLabel("Data inicial").fill("");
+  await page.getByLabel("Data final").fill("2026-09-28");
+  await expect(page.getByText("Vendas até 28/09/2026", { exact: true })).toBeVisible();
+  await expect.poll(() => metricRequests.some(url => url.includes("1000-01-01") && url.includes("2026-09-28"))).toBe(true);
+
+  await period.selectOption("month");
+  await expect(page.getByText("Vendas no mês", { exact: true })).toBeVisible();
+});
+
+test("sales list keeps the approved dense desktop composition and product images", async ({ page }) => {
+  await page.setViewportSize({ width: 950, height: 700 });
+  await prepare(page, { visualRows: true });
+  await expect(page.getByRole("table", { name: "Vendas" }).locator("tbody tr")).toHaveCount(6);
+  await expect(page.getByText("Mostrando 1–6 de 6 vendas")).toBeVisible();
+  await expect(page.getByRole("table", { name: "Vendas" }).locator("tbody img")).toHaveCount(6);
+  expect(await page.getByRole("table", { name: "Vendas" }).locator("tbody img").first().evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+  await expect(page.getByRole("table", { name: "Vendas" }).getByText("Em andamento").first()).toBeVisible();
+  await capture(page, "sales-list-reference-width");
+  await page.getByRole("button", { name: "Ações da venda VD-00126" }).click();
+  await expect(page.getByRole("menuitem", { name: "Editar rascunho" })).toBeVisible();
 });
 test("sales searches incrementally and reveals variants only on demand", async ({ page }) => {
   const counters = { customers: 0, catalog: 0 };
@@ -262,7 +465,7 @@ test("sales searches incrementally and reveals variants only on demand", async (
 test("sales confirms through the guided financial checklist", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 900 });
   await prepare(page, { stage: "created" });
-  await page.getByRole("button", { name: "Abrir venda VD-00128" }).click();
+  await page.getByRole("button", { name: "VD-00128", exact: true }).click();
   await page.getByRole("button", { name: "Confirmar" }).click();
   const dialog = page.getByRole("dialog", { name: "Confirmar venda" });
   await expect(dialog.getByText("Esta venda pode ser confirmada?")).toBeVisible();
@@ -282,7 +485,7 @@ test("sales confirms through the guided financial checklist", async ({ page }) =
 test("sales explains a blocked financial confirmation", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 900 });
   await prepare(page, { stage: "created", missingFinance: true });
-  await page.getByRole("button", { name: "Abrir venda VD-00128" }).click();
+  await page.getByRole("button", { name: "VD-00128", exact: true }).click();
   await page.getByRole("button", { name: "Confirmar" }).click();
   const dialog = page.getByRole("dialog", { name: "Confirmar venda" });
   await expect(dialog.getByText("Confirmação bloqueada")).toBeVisible();
@@ -296,7 +499,7 @@ test("sales read-only omits writes", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Nova venda" })).toHaveCount(
     0
   );
-  await page.getByRole("button", { name: "Abrir venda VD-00128" }).click();
+  await page.getByRole("button", { name: "VD-00128", exact: true }).click();
   await expect(page.getByRole("button", { name: "Confirmar" })).toHaveCount(0);
 });
 test("sales exposes empty state", async ({ page }) => {
@@ -308,7 +511,7 @@ test("sales exposes empty state", async ({ page }) => {
 test("sales keeps secondary filters behind an explicit control", async ({ page }) => {
   await prepare(page);
   await expect(page.getByLabel("Filtros avançados")).toHaveCount(0);
-  await page.getByRole("button", { name: /Mais filtros/ }).click();
+  await page.getByRole("button", { name: /Filtros/ }).click();
   await expect(page.getByLabel("Filtros avançados")).toBeVisible();
   await expect(page.getByLabel("Forma de pagamento")).toBeVisible();
   await capture(page, "sales-filters-open");

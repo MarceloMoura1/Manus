@@ -241,6 +241,23 @@ physical.sequential("ERP sales UX v3 physical flow", () => {
         },
       ])
     );
+    const productStock = await erp.getProduct(identity, product.publicId);
+    expect(productStock.variants.map(item => ({ sku: item.sku, quantity: item.quantity }))).toEqual(
+      expect.arrayContaining([
+        { sku: "MON-UX-V3-PRETO", quantity: "10.000" },
+        { sku: "MON-UX-V3-PRATA", quantity: "8.000" },
+      ])
+    );
+    await erp.moveStock(identity, {
+      productPublicId: product.publicId,
+      inventoryItemPublicId: secondInventoryItemPublicId,
+      type: "manual_out",
+      quantity: "8.000",
+      reason: "Zerar somente a variante prata no teste descartável",
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect((await erp.getProduct(identity, product.publicId)).variants.find(item => item.sku === "MON-UX-V3-PRATA")?.quantity).toBe("0.000");
+    expect((await new SaleService(new SaleRepository(), silent).catalog(identity, { search: "MON-UX-V3-PRATA", page: 1, pageSize: 12 })).items[0].availableQuantity).toBe("0.000");
 
     const saleAddress = {
       recipientName: "Patrícia",

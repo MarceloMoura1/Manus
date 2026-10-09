@@ -108,6 +108,7 @@ export const saleDraftInput = z
 
 export const saleListInput = z.object({
   search: z.string().trim().max(180).default(""),
+  kind: z.enum(["all", "quotes", "orders"]).default("all"),
   crmClientId: z.string().trim().min(1).max(80).optional(),
   status: z.enum(saleStatuses).optional(),
   stage: z.enum(saleStages).optional(),

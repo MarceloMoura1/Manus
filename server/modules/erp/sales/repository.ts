@@ -86,6 +86,7 @@ type ItemRow = RowDataPacket & {
   line_total_cents: number;
   unit?: string;
   current_available?: string | null;
+  stock_exited?: number;
   media_id?: string | null;
   variant_name?: string | null;
   variant_attributes?: string | null;
@@ -353,6 +354,7 @@ export class SaleRepository {
       `SELECT
          COALESCE(SUM(CASE WHEN o.status NOT IN ('draft','cancelled') THEN o.total_cents ELSE 0 END),0) salesCents,
          COALESCE(SUM(CASE WHEN o.status NOT IN ('draft','cancelled') THEN GREATEST(o.total_cents-COALESCE(fin.paid_cents,0),0) ELSE 0 END),0) receivableCents,
+         SUM(CASE WHEN o.status NOT IN ('draft','cancelled') THEN 1 ELSE 0 END) orderCount,
          SUM(CASE WHEN o.status NOT IN ('cancelled','fulfilled') AND ${STAGE_SQL}<>'completed' THEN 1 ELSE 0 END) openOrders
        FROM erp_sale_orders o
        LEFT JOIN (
@@ -369,10 +371,14 @@ export class SaleRepository {
       [clientId, start, end]
     );
     const value = rows[0] ?? {};
+    const orderCount = Number(value.orderCount ?? 0);
+    const salesCents = Number(value.salesCents ?? 0);
     return {
       period: { from: start, to: end, criterion: "data de criação da venda" },
-      salesCents: Number(value.salesCents ?? 0),
+      salesCents,
       receivableCents: Number(value.receivableCents ?? 0),
+      orderCount,
+      averageTicketCents: orderCount ? Math.round(salesCents / orderCount) : 0,
       openOrders: Number(value.openOrders ?? 0),
       grossMarginPercent: null,
       grossMarginAvailable: false,
@@ -385,6 +391,8 @@ export class SaleRepository {
     const offset = (integer(options.page, 1, Number.MAX_SAFE_INTEGER) - 1) * limit;
     const where = ["o.client_id=?"];
     const values: Array<string | number> = [clientId];
+    if (options.kind === "quotes") where.push("o.status='draft'");
+    if (options.kind === "orders") where.push("o.status<>'draft'");
     if (options.search) {
       where.push(`(o.order_number LIKE ? OR o.customer_name_snapshot LIKE ? OR EXISTS(
         SELECT 1 FROM erp_sale_order_items si
@@ -501,7 +509,15 @@ export class SaleRepository {
     );
     const [items] = await connection.execute<ItemRow[]>(
       `SELECT i.*,p.public_id product_public_id,p.unit,
-              ii.public_id inventory_item_public_id,COALESCE(ib.quantity,'0.000') current_available,
+              ii.public_id inventory_item_public_id,
+              CASE WHEN ii.id IS NULL THEN NULL ELSE COALESCE(ib.quantity,'0.000') END current_available,
+              EXISTS(
+                SELECT 1 FROM erp_sale_order_fulfillment_items fi
+                INNER JOIN erp_sale_order_fulfillments f
+                  ON f.id=fi.fulfillment_id AND f.client_id=?
+                 AND f.sale_order_id=i.sale_order_id
+                WHERE fi.sale_order_item_id=i.id
+              ) stock_exited,
               pm.media_id,v.name variant_name,
               GROUP_CONCAT(CONCAT(t.name, ': ',av.name) ORDER BY t.name SEPARATOR ' · ') variant_attributes
        FROM erp_sale_order_items i
@@ -522,7 +538,7 @@ export class SaleRepository {
        WHERE i.sale_order_id=? AND item_order.public_id=?
        GROUP BY i.id,p.id,ii.id,ib.quantity,v.id,pm.media_id
        ORDER BY i.id`,
-      [clientId, order.id, publicId]
+      [clientId, clientId, order.id, publicId]
     );
     if (items.length !== Number(expectedItems[0]?.total ?? 0)) {
       throw new ErpDomainError("CONFLICT", "Pedido contém itens inconsistentes.");
@@ -587,6 +603,7 @@ export class SaleRepository {
         discountCents: Number(entry.discount_cents),
         lineTotalCents: Number(entry.line_total_cents),
         currentAvailable: entry.current_available ?? null,
+        stockExitRecorded: Boolean(entry.stock_exited),
         canonicalImage: entry.media_id
           ? {
               mediaId: entry.media_id,
