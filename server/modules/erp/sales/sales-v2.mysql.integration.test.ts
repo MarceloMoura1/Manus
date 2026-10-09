@@ -20,6 +20,7 @@ import {
 } from "./contracts";
 import { SaleRepository } from "./repository";
 import { SaleService, type SaleEventPublisher } from "./service";
+import { createBootstrapCleanupGate } from "./bootstrap-cleanup-gate";
 
 const physical = describe.runIf(isTestDatabaseEnabled());
 const adminA = {
@@ -223,11 +224,13 @@ async function transition(
 }
 
 physical.sequential("ERP sales v2 MySQL physical matrix", () => {
-  beforeAll(() =>
-    applyCanonicalMigrations(getTestDatabaseUrl(), MAIN_MIGRATIONS_DIR)
+  const bootstrap = createBootstrapCleanupGate(clean);
+  beforeAll(
+    () => bootstrap.run(() => applyCanonicalMigrations(getTestDatabaseUrl(), MAIN_MIGRATIONS_DIR)),
+    45_000
   );
-  beforeEach(clean);
-  afterAll(clean);
+  beforeEach(bootstrap.clean);
+  afterAll(bootstrap.clean);
 
   it("persists tenant-safe draft snapshots, exact money and role gates", async () => {
     expect(
