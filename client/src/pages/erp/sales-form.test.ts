@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  blankSalesForm,
   calculateSalesFormTotals,
   firstSalesStockIssue,
   hasDuplicateSalesItemIdentity,
   isSalesProductOptionDisabled,
   salesDraftFromForm,
+  salesCommercialDate,
   salesFormFromDetail,
   selectSalesItemProduct,
   splitInstallments,
@@ -18,6 +20,7 @@ const inventoryItemPublicId = "20000000-0000-4000-8000-000000000001";
 describe("sales form inventory identity", () => {
   it("includes inventoryItemPublicId in a new sale command", () => {
     const command = salesDraftFromForm({
+      ...blankSalesForm(),
       crmClientId: "customer-1",
       notes: "",
       expectedDate: "",
@@ -56,6 +59,35 @@ describe("sales form inventory identity", () => {
     expect(salesDraftFromForm(form).items[0].inventoryItemPublicId).toBe(
       inventoryItemPublicId
     );
+  });
+
+  it("omits an absent legacy seller while preserving an explicit reassignment", () => {
+    const form = salesFormFromDetail({
+      publicId: "30000000-0000-4000-8000-000000000001",
+      documentType: "sale",
+      crmClientId: "customer-1",
+      sellerUserId: null,
+      notes: null,
+      expectedDate: null,
+      items: [{ productPublicId, quantity: "1.000", unitPriceCents: 1_000 }],
+    });
+
+    expect(salesDraftFromForm(form).sellerUserId).toBeUndefined();
+    expect(
+      salesDraftFromForm({ ...form, sellerUserId: "seller-explicit" }).sellerUserId
+    ).toBe("seller-explicit");
+  });
+
+  it("keeps an ISO commercial date on the same calendar day in a negative timezone", () => {
+    const commercialDate = salesCommercialDate("2026-10-05");
+    const brazilianDate = new Intl.DateTimeFormat("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(commercialDate);
+
+    expect(brazilianDate).toBe("05/10/2026");
   });
 
   it("accepts distinct variations of one product and rejects duplicate identities", () => {
@@ -147,11 +179,13 @@ describe("sales form inventory identity", () => {
   it("calculates discounts and freight from real form values", () => {
     expect(
       calculateSalesFormTotals({
+        ...blankSalesForm(),
         crmClientId: "customer-1",
         notes: "",
         expectedDate: "",
         orderDiscountCents: 200,
         freightCents: 80,
+        chargesCents: 40,
         items: [
           {
             productPublicId,
@@ -166,7 +200,8 @@ describe("sales form inventory identity", () => {
       subtotalCents: 2_400,
       itemDiscountCents: 100,
       discountCents: 300,
-      totalCents: 2_180,
+      chargesCents: 40,
+      totalCents: 2_220,
     });
   });
 

@@ -25,27 +25,39 @@ export type SalesFormItem = {
 
 export type SalesForm = {
   publicId?: string;
+  documentType: "quote" | "sale";
   crmClientId: string;
   customerName?: string;
+  sellerUserId: string;
+  commercialDate: string;
   notes: string;
+  paymentTerms: string;
+  paymentMethod: string;
   expectedDate: string;
   shippingAddress?: SalesAddress | null;
   billingAddress?: SalesAddress | null;
   orderDiscountCents?: number;
   freightCents?: number;
+  chargesCents?: number;
   items: SalesFormItem[];
 };
 
 type SaleDetailForForm = {
   publicId: string;
+  documentType: "quote" | "sale";
   crmClientId: string;
   customerName?: string;
+  sellerUserId?: string | null;
+  commercialDate?: string | null;
   notes: string | null;
+  paymentTerms?: string | null;
+  paymentMethod?: string | null;
   expectedDate: string | null;
   shippingAddress?: SalesAddress | null;
   billingAddress?: SalesAddress | null;
   discountCents?: number;
   freightCents?: number;
+  chargesCents?: number;
   items: SalesFormItem[];
 };
 
@@ -60,16 +72,26 @@ export const blankSalesAddress = (): SalesAddress => ({
   state: "",
 });
 
-export const blankSalesForm = (): SalesForm => ({
+export const blankSalesForm = (documentType: "quote" | "sale" = "sale"): SalesForm => ({
+  documentType,
   crmClientId: "",
+  sellerUserId: "",
+  commercialDate: new Date().toISOString().slice(0, 10),
   notes: "",
+  paymentTerms: "",
+  paymentMethod: "",
   expectedDate: "",
   shippingAddress: blankSalesAddress(),
   billingAddress: blankSalesAddress(),
   orderDiscountCents: 0,
   freightCents: 0,
+  chargesCents: 0,
   items: [],
 });
+
+export function salesCommercialDate(value: string): Date {
+  return new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T12:00:00` : value);
+}
 
 export const salesItemIdentity = (item: SalesFormItem) =>
   `${item.productPublicId}:${item.inventoryItemPublicId ?? "product-only"}`;
@@ -111,9 +133,14 @@ export function firstSalesStockIssue(items: SalesFormItem[]) {
 export function salesFormFromDetail(detail: SaleDetailForForm): SalesForm {
   return {
     publicId: detail.publicId,
+    documentType: detail.documentType,
     crmClientId: detail.crmClientId,
     customerName: detail.customerName,
+    sellerUserId: detail.sellerUserId ?? "",
+    commercialDate: detail.commercialDate ?? new Date().toISOString().slice(0, 10),
     notes: detail.notes ?? "",
+    paymentTerms: detail.paymentTerms ?? "",
+    paymentMethod: detail.paymentMethod ?? "",
     expectedDate: detail.expectedDate ?? "",
     shippingAddress: detail.shippingAddress ?? blankSalesAddress(),
     billingAddress: detail.billingAddress ?? blankSalesAddress(),
@@ -123,6 +150,7 @@ export function salesFormFromDetail(detail: SaleDetailForForm): SalesForm {
         detail.items.reduce((sum, item) => sum + (item.discountCents ?? 0), 0)
     ),
     freightCents: detail.freightCents ?? 0,
+    chargesCents: detail.chargesCents ?? 0,
     items: detail.items.map(item => ({
       ...item,
       inventoryItemPublicId: item.inventoryItemPublicId ?? null,
@@ -133,13 +161,19 @@ export function salesFormFromDetail(detail: SaleDetailForForm): SalesForm {
 
 export function salesDraftFromForm(form: SalesForm) {
   return {
+    documentType: form.documentType,
     crmClientId: form.crmClientId,
+    sellerUserId: form.sellerUserId || undefined,
+    commercialDate: form.commercialDate || undefined,
     notes: form.notes || undefined,
+    paymentTerms: form.paymentTerms || undefined,
+    paymentMethod: form.paymentMethod || undefined,
     expectedDate: form.expectedDate || undefined,
     shippingAddress: form.shippingAddress ?? undefined,
     billingAddress: form.billingAddress ?? undefined,
     orderDiscountCents: form.orderDiscountCents ?? 0,
     freightCents: form.freightCents ?? 0,
+    chargesCents: form.chargesCents ?? 0,
     items: form.items.map(item => ({
       productPublicId: item.productPublicId,
       inventoryItemPublicId: item.inventoryItemPublicId,
@@ -190,7 +224,14 @@ export function calculateSalesFormTotals(form: SalesForm) {
   );
   const discountCents = itemDiscountCents + (form.orderDiscountCents ?? 0);
   const totalCents = subtotalCents - discountCents + (form.freightCents ?? 0);
-  return { subtotalCents, itemDiscountCents, discountCents, totalCents };
+  const totalWithChargesCents = totalCents + (form.chargesCents ?? 0);
+  return {
+    subtotalCents,
+    itemDiscountCents,
+    discountCents,
+    chargesCents: form.chargesCents ?? 0,
+    totalCents: totalWithChargesCents,
+  };
 }
 
 export function splitInstallments(totalCents: number, count: number, firstDueDate: string) {

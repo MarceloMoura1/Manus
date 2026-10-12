@@ -3,6 +3,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../../server/routers";
 import {
   AlertCircle,
+  Archive,
   ArrowLeft,
   ArrowRight,
   Box,
@@ -13,11 +14,14 @@ import {
   CircleDollarSign,
   Clock3,
   CreditCard,
+  Copy,
   Download,
   Edit3,
   Eye,
+  FileClock,
   Filter,
   MapPin,
+  MoreHorizontal,
   PackageCheck,
   PackageOpen,
   Plus,
@@ -40,6 +44,7 @@ import { productMediaUrl, saleDocumentUrl } from "@/lib/trpc-url";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { ErpPageHeader } from "@/components/erp/ErpPageHeader";
@@ -60,6 +65,7 @@ import {
   hasDuplicateSalesItemIdentity,
   salesDraftFromForm,
   salesFormFromDetail,
+  salesCommercialDate,
   splitInstallments,
   type SalesAddress,
   type SalesForm,
@@ -101,6 +107,7 @@ type CustomerResults = RouterOutputs["erp"]["sales"]["customers"];
 type CatalogResults = RouterOutputs["erp"]["sales"]["catalog"];
 type CustomerOption = CustomerResults["items"][number];
 type CatalogOption = CatalogResults["items"][number];
+type SaleListItem = RouterOutputs["erp"]["sales"]["list"]["items"][number];
 type DetailQueryState = {
   data?: SaleDetail;
   isFetched: boolean;
@@ -120,6 +127,16 @@ const paymentLabels = {
   pending: "Pendente",
   partial: "Pagamento parcial",
   paid: "Pago",
+} as const;
+const commercialStatusLabels = {
+  draft: "Rascunho",
+  negotiation: "Em negociação",
+  approved: "Aprovado",
+  converted: "Convertido",
+  active: "Venda ativa",
+  completed: "Concluída",
+  lost: "Perdido",
+  cancelled: "Cancelado",
 } as const;
 
 function currentMonth() {
@@ -148,13 +165,15 @@ export function SalesPage({
 } = {}) {
   const utils = trpc.useUtils();
   const [search, setSearch] = React.useState("");
-  const [kind, setKind] = React.useState<"all" | "quotes" | "orders">("all");
+  const [kind, setKind] = React.useState<"all" | "quotes" | "orders">("orders");
   const [stage, setStage] = React.useState<"all" | Stage>("all");
+  const [commercialStatus, setCommercialStatus] = React.useState<"all" | "draft" | "negotiation" | "approved" | "converted" | "lost">("all");
   const [paymentStatus, setPaymentStatus] = React.useState<
     "all" | "pending" | "partial" | "paid"
   >("all");
   const [paymentMethod, setPaymentMethod] = React.useState("all");
   const [sellerUserId, setSellerUserId] = React.useState("all");
+  const [includeArchived, setIncludeArchived] = React.useState(false);
   const [filterCustomer, setFilterCustomer] = React.useState<CustomerOption | null>(null);
   const [filterCustomerSearch, setFilterCustomerSearch] = React.useState("");
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = React.useState(false);
@@ -174,8 +193,12 @@ export function SalesPage({
   const [separateBillingAddress, setSeparateBillingAddress] = React.useState(false);
   const [expandedCatalogProductId, setExpandedCatalogProductId] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState("");
+  const [localError, setLocalError] = React.useState("");
   const [confirmation, setConfirmation] = React.useState<ConfirmationState | null>(null);
   const [cancellation, setCancellation] = React.useState<ReasonState | null>(null);
+  const [archiveRequest, setArchiveRequest] = React.useState<ReasonState | null>(null);
+  const [commercialChange, setCommercialChange] = React.useState<CommercialChangeState | null>(null);
+  const [conversion, setConversion] = React.useState<SaleDetail | null>(null);
   const [transition, setTransition] = React.useState<TransitionState | null>(null);
   const [addressCorrection, setAddressCorrection] = React.useState<AddressCorrectionState | null>(null);
 
@@ -193,10 +216,12 @@ export function SalesPage({
     search: debouncedListSearch,
     kind,
     crmClientId: filterCustomer?.crmClientId,
-    stage: stage === "all" ? undefined : stage,
+    stage: kind === "quotes" || stage === "all" ? undefined : stage,
+    commercialStatus: kind === "quotes" && commercialStatus !== "all" ? commercialStatus : undefined,
     paymentStatus: paymentStatus === "all" ? undefined : paymentStatus,
     paymentMethod: paymentMethod === "all" ? undefined : paymentMethod,
     sellerUserId: sellerUserId === "all" ? undefined : sellerUserId,
+    includeArchived,
     from: from || undefined,
     to: to || undefined,
     sort: "createdAt",
@@ -241,6 +266,10 @@ export function SalesPage({
     setSelectedId(null);
     onSaleNavigate?.();
   }, [onSaleNavigate]);
+  const printDocument = React.useCallback((publicId: string) => {
+    openSale(publicId);
+    window.setTimeout(() => window.print(), 150);
+  }, [openSale]);
 
   const refresh = React.useCallback(async () => {
     await utils.erp.invalidate();
@@ -250,9 +279,13 @@ export function SalesPage({
       setForm(null);
       setConfirmation(null);
       setCancellation(null);
+      setArchiveRequest(null);
+      setCommercialChange(null);
+      setConversion(null);
       setTransition(null);
       setAddressCorrection(null);
       setMessage(text);
+      setLocalError("");
       if (id) openSale(id);
       await refresh();
     },
@@ -260,10 +293,16 @@ export function SalesPage({
   );
 
   const create = trpc.erp.sales.create.useMutation({
-    onSuccess: result => void done("Venda criada como rascunho.", result.publicId),
+    onSuccess: result => void done("Documento comercial criado como rascunho.", result.publicId),
   });
   const update = trpc.erp.sales.update.useMutation({
-    onSuccess: result => void done("Rascunho atualizado.", result.publicId),
+    onSuccess: result =>
+      void done(
+        result.financialAdjustment
+          ? "Venda atualizada; recebimentos preservados e saldo dos títulos conciliado."
+          : "Documento comercial atualizado.",
+        result.publicId
+      ),
   });
   const confirmSale = trpc.erp.sales.confirm.useMutation({
     onSuccess: result =>
@@ -288,6 +327,30 @@ export function SalesPage({
   const cancelSale = trpc.erp.sales.cancel.useMutation({
     onSuccess: result => void done("Venda cancelada e títulos em aberto cancelados.", result.publicId),
   });
+  const duplicateSale = trpc.erp.sales.duplicate.useMutation({
+    onSuccess: result =>
+      void done(
+        result.replay ? "A duplicação já havia sido concluída." : "Documento duplicado como novo rascunho.",
+        result.publicId
+      ),
+  });
+  const changeCommercialStatus = trpc.erp.sales.commercialTransition.useMutation({
+    onSuccess: result =>
+      void done(
+        `Orçamento atualizado para ${commercialStatusLabels[result.commercialStatus as keyof typeof commercialStatusLabels]}.`,
+        result.publicId
+      ),
+  });
+  const convertQuote = trpc.erp.sales.convertQuote.useMutation({
+    onSuccess: result =>
+      void done(
+        result.replay ? "Este orçamento já havia sido convertido." : "Orçamento convertido em venda sem criar pagamento ou baixa de estoque.",
+        result.publicId
+      ),
+  });
+  const archiveSale = trpc.erp.sales.archive.useMutation({
+    onSuccess: () => void done("Documento arquivado com registro no histórico."),
+  });
   const correctAddress = trpc.erp.sales.correctAddress.useMutation({
     onSuccess: result => void done("Endereço corrigido com registro de auditoria.", result.publicId),
   });
@@ -311,22 +374,26 @@ export function SalesPage({
     confirmSale.error ??
     changeStage.error ??
     cancelSale.error ??
+    duplicateSale.error ??
+    changeCommercialStatus.error ??
+    convertQuote.error ??
+    archiveSale.error ??
     correctAddress.error;
 
   const save = (event: React.FormEvent) => {
     event.preventDefault();
     if (!form) return;
     if (!form.items.length) {
-      setMessage("Adicione ao menos um produto à venda.");
+      setLocalError("Adicione ao menos um produto ao documento.");
       return;
     }
     if (hasDuplicateSalesItemIdentity(form.items)) {
-      setMessage("A mesma variação não pode aparecer duas vezes na venda.");
+      setLocalError("A mesma variação não pode aparecer duas vezes no documento.");
       return;
     }
     const stockIssue = firstSalesStockIssue(form.items);
     if (stockIssue) {
-      setMessage(
+      setLocalError(
         `Estoque insuficiente para ${stockIssue.productName}. Disponível: ${formatQuantity(stockIssue.availableQuantity)}. Solicitado: ${formatQuantity(stockIssue.requestedQuantity)}.`
       );
       return;
@@ -337,24 +404,50 @@ export function SalesPage({
   };
 
   const edit = async (publicId: string) => {
-    const selected = await utils.erp.sales.detail.fetch({ publicId });
-    setForm(salesFormFromDetail(selected));
+    try {
+      const selected = await utils.erp.sales.detail.fetch({ publicId });
+      setForm(salesFormFromDetail(selected));
+      setCustomerSearch("");
+      setCatalogSearch("");
+      setSeparateBillingAddress(
+        !salesAddressesMatch(selected.shippingAddress, selected.billingAddress)
+      );
+      setExpandedCatalogProductId(null);
+      setCustomerPage(1);
+      setCatalogPage(1);
+      setLocalError("");
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Não foi possível editar o documento.");
+    }
+  };
+
+  const reviewConversion = async (publicId: string) => {
+    try {
+      setConversion(await utils.erp.sales.detail.fetch({ publicId }));
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Não foi possível revisar o orçamento.");
+    }
+  };
+
+  const startDocument = (documentType: "quote" | "sale") => {
+    setForm(blankSalesForm(documentType));
     setCustomerSearch("");
     setCatalogSearch("");
-    setSeparateBillingAddress(
-      !salesAddressesMatch(selected.shippingAddress, selected.billingAddress)
-    );
-    setExpandedCatalogProductId(null);
     setCustomerPage(1);
     setCatalogPage(1);
+    setSeparateBillingAddress(false);
+    setExpandedCatalogProductId(null);
+    setLocalError("");
   };
 
   const clearFilters = () => {
     setSearch("");
     setStage("all");
+    setCommercialStatus("all");
     setPaymentStatus("all");
     setPaymentMethod("all");
     setSellerUserId("all");
+    setIncludeArchived(false);
     setFilterCustomer(null);
     setFilterCustomerSearch("");
     setFrom(month.from);
@@ -363,21 +456,21 @@ export function SalesPage({
   };
   const exportCurrentPage = () => {
     if (!list.data?.items.length) return;
-    const columns = ["Venda", "Cliente", "Data", "Vendedor", "Total (BRL)", "Pagamento", "Etapa"];
+    const columns = ["Documento", "Tipo", "Cliente", "Data", "Vendedor", "Total (BRL)", "Situação", "Etapa"];
     const selectedOnPage = list.data.items.filter(order => selectedSaleIds.includes(order.publicId));
     const exportItems = selectedOnPage.length ? selectedOnPage : list.data.items;
     if (!exportItems.length) return;
     const rows = exportItems.map(order => [
-      order.orderNumber, order.customerName, date.format(new Date(order.createdAt)),
+      order.orderNumber, order.documentType === "quote" ? "Orçamento" : "Venda", order.customerName, date.format(salesCommercialDate(order.commercialDate)),
       order.sellerName ?? "", (order.totalCents / 100).toFixed(2).replace(".", ","),
-      paymentLabels[order.paymentStatus as keyof typeof paymentLabels] ?? order.paymentStatus,
-      order.cancelled ? "Cancelada" : stageLabels[order.currentStage as Stage],
+      order.documentType === "quote" ? commercialStatusLabels[order.commercialStatus] : paymentLabels[order.paymentStatus as keyof typeof paymentLabels] ?? order.paymentStatus,
+      order.documentType === "quote" ? "Fluxo comercial" : order.cancelled ? "Cancelada" : stageLabels[order.currentStage as Stage],
     ]);
     const csv = salesCsv([columns, ...rows]);
     const href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a");
     anchor.href = href;
-    anchor.download = `vendas-pagina-${page}.csv`;
+    anchor.download = `documentos-comerciais-pagina-${page}.csv`;
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(href), 0);
   };
@@ -392,7 +485,10 @@ export function SalesPage({
     to,
     defaultFrom: month.from,
     defaultTo: month.to,
-  });
+  }) + (commercialStatus === "all" ? 0 : 1) + (includeArchived ? 1 : 0);
+  const entityLabel = kind === "quotes" ? "orçamento" : kind === "orders" ? "venda" : "documento";
+  const entityLabelPlural = kind === "quotes" ? "orçamentos" : kind === "orders" ? "vendas" : "documentos";
+  const emptyStateTitle = kind === "orders" ? "Nenhuma venda encontrada neste período." : `Nenhum ${entityLabel} encontrado neste período.`;
 
   return (
     <div
@@ -407,59 +503,60 @@ export function SalesPage({
           <div className="flex items-center gap-2">
             <Button type="button" variant="outline" className="min-h-9 border-blue-500 text-blue-700" disabled={!list.data?.items.length} onClick={exportCurrentPage} title="Exportar a página atual ou as vendas selecionadas em CSV"><Share2 className="mr-2 h-4 w-4" />Exportar</Button>
           {canWrite && (
-            <Button
-              className="min-h-9 bg-blue-600 px-5 text-white shadow-sm hover:bg-blue-700"
-              onClick={() => {
-                setForm(blankSalesForm());
-                setCustomerSearch("");
-                setCatalogSearch("");
-                setCustomerPage(1);
-                setCatalogPage(1);
-                setSeparateBillingAddress(false);
-                setExpandedCatalogProductId(null);
-              }}
-            >
-              <Plus className="mr-2 h-4 w-4" /> Nova venda
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button className="min-h-10 bg-blue-600 px-5 text-white shadow-sm hover:bg-blue-700">
+                  <Plus className="mr-2 h-4 w-4" /> Novo documento <ChevronDown className="ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="z-[80] min-w-56 border-slate-200 bg-white shadow-xl">
+                <DropdownMenuItem onSelect={() => startDocument("sale")}>
+                  <ShoppingCart /> Nova venda
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => startDocument("quote")}>
+                  <FileClock /> Novo orçamento
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
           </div>
         }
       />
 
-      {(message || pendingError) && (
+      {(message || pendingError || localError) && (
         <div
-          role={pendingError ? "alert" : "status"}
+          role={pendingError || localError ? "alert" : "status"}
           className={cn(
             "flex items-start gap-3 rounded-xl px-4 py-3 text-sm font-medium",
-            pendingError ? "bg-rose-50 text-rose-900" : "bg-emerald-50 text-emerald-900"
+            pendingError || localError ? "bg-rose-50 text-rose-900" : "bg-emerald-50 text-emerald-900"
           )}
         >
-          {pendingError ? (
+          {pendingError || localError ? (
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           ) : (
             <Check className="mt-0.5 h-4 w-4 shrink-0" />
           )}
-          <span>{pendingError?.message ?? message}</span>
+          <span>{pendingError?.message ?? (localError || message)}</span>
         </div>
       )}
 
       <SalesMetrics data={metrics.data} loading={metrics.isLoading} periodLabel={metricPeriod.label} />
 
       <div className="min-w-0">
-        <section className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_8px_24px_-22px_rgba(15,23,42,0.45)]" aria-label="Lista de vendas">
+        <section className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_8px_24px_-22px_rgba(15,23,42,0.45)]" aria-label="Lista comercial">
           <nav className="flex gap-4 border-b border-slate-200 px-3 sm:gap-6 sm:px-5" aria-label="Tipos de venda">
-            {([ ["all", "Todas as vendas"], ["quotes", "Orçamentos"], ["orders", "Pedidos"] ] as const).map(([value, label]) => (
-              <button key={value} type="button" aria-current={kind === value ? "page" : undefined} className={cn("border-b-2 px-2 py-3 text-xs font-semibold sm:text-sm", kind === value ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-800")} onClick={() => { setKind(value); setPage(1); }}>{label}</button>
+            {([ ["orders", "Vendas"], ["quotes", "Orçamentos"], ["all", "Todos"] ] as const).map(([value, label]) => (
+              <button key={value} type="button" aria-current={kind === value ? "page" : undefined} className={cn("border-b-2 px-2 py-3 text-xs font-semibold sm:text-sm", kind === value ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-800")} onClick={() => { setKind(value); setStage("all"); setCommercialStatus("all"); setPage(1); }}>{label}</button>
             ))}
           </nav>
           <div className="border-b border-slate-100 px-3 py-3 sm:px-5" data-testid="sales-filters">
-            <div className="grid gap-2 min-[900px]:grid-cols-[minmax(220px,1fr)_130px_120px_130px_100px]">
+            <div className="grid gap-2 min-[980px]:grid-cols-[minmax(300px,1.6fr)_140px_135px_150px_116px]">
               <label className="relative min-w-0">
                 <span className="sr-only">Busca</span>
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                 <Input
-                  aria-label="Buscar por venda, cliente, produto ou SKU"
-                  className="bg-white pl-9"
+                  aria-label="Buscar por documento, cliente, produto ou SKU"
+                  className="h-10 bg-white pl-9"
                   placeholder="Buscar por número ou cliente..."
                   value={search}
                   onChange={event => {
@@ -484,16 +581,15 @@ export function SalesPage({
                 <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
                 <select
                   className="h-10 w-full rounded-md border border-input bg-white pl-9 pr-2 text-xs text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                  value={stage}
+                  value={kind === "quotes" ? commercialStatus : stage}
                   onChange={event => {
-                    setStage(event.target.value as typeof stage);
+                    if (kind === "quotes") setCommercialStatus(event.target.value as typeof commercialStatus);
+                    else setStage(event.target.value as typeof stage);
                     setPage(1);
                   }}
                 >
                   <option value="all">Status</option>
-                  {stageOrder.map(value => (
-                    <option key={value} value={value}>{stageLabels[value]}</option>
-                  ))}
+                  {kind === "quotes" ? (["draft", "negotiation", "approved", "converted", "lost"] as const).map(value => <option key={value} value={value}>{commercialStatusLabels[value]}</option>) : stageOrder.map(value => <option key={value} value={value}>{stageLabels[value]}</option>)}
                 </select>
               </label>
               <label className="relative">
@@ -503,14 +599,14 @@ export function SalesPage({
                   <option value="all">Vendedor</option>{options.data?.sellers.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}
                 </select>
               </label>
-              <Button type="button" variant="outline" className="justify-between px-3 text-xs" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
+              <Button type="button" variant="outline" className="h-10 justify-between px-3 text-xs" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
                 <SlidersHorizontal className="mr-1 h-4 w-4" /> Filtros
                 {activeFilterCount > 0 && <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">{activeFilterCount}</span>}
               </Button>
             </div>
 
             {advancedFiltersOpen && (
-              <div className="mt-3 grid gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Filtros avançados">
+              <div className="mt-3 grid gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2 lg:grid-cols-5" aria-label="Filtros avançados">
                 <div className="relative min-w-0">
                   <span className="text-xs font-semibold text-slate-600">Cliente</span>
                   {filterCustomer ? (
@@ -548,6 +644,7 @@ export function SalesPage({
                 <label className="text-xs font-semibold text-slate-600">Período personalizado
                   <span className="mt-1 grid grid-cols-2 gap-1"><Input type="date" aria-label="Data inicial" value={from} onChange={event => { setFrom(event.target.value); setPage(1); }} /><Input type="date" aria-label="Data final" value={to} onChange={event => { setTo(event.target.value); setPage(1); }} /></span>
                 </label>
+                <label className="flex h-10 self-end items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700"><input type="checkbox" checked={includeArchived} onChange={event => { setIncludeArchived(event.target.checked); setPage(1); }} />Incluir arquivados</label>
               </div>
             )}
 
@@ -556,64 +653,65 @@ export function SalesPage({
                 <Filter className="h-3.5 w-3.5 text-slate-500" /><span className="font-semibold text-slate-600">Filtros ativos:</span>
                 {search.trim() && <span className="rounded-full bg-slate-100 px-2.5 py-1">Busca: {search.trim()}</span>}
                 {stage !== "all" && <span className="rounded-full bg-blue-50 px-2.5 py-1 text-blue-800">Etapa: {stageLabels[stage]}</span>}
+                {commercialStatus !== "all" && <span className="rounded-full bg-violet-50 px-2.5 py-1 text-violet-800">Comercial: {commercialStatusLabels[commercialStatus]}</span>}
                 {filterCustomer && <span className="rounded-full bg-blue-50 px-2.5 py-1 text-blue-800">Cliente: {filterCustomer.customerName}</span>}
                 {paymentStatus !== "all" && <span className="rounded-full bg-slate-100 px-2.5 py-1">Pagamento: {paymentLabels[paymentStatus]}</span>}
                 {paymentMethod !== "all" && <span className="rounded-full bg-slate-100 px-2.5 py-1">Forma: {paymentMethod}</span>}
                 {sellerUserId !== "all" && <span className="rounded-full bg-slate-100 px-2.5 py-1">Vendedor selecionado</span>}
                 {(from !== month.from || to !== month.to) && <span className="rounded-full bg-slate-100 px-2.5 py-1">Período personalizado</span>}
+                {includeArchived && <span className="rounded-full bg-slate-100 px-2.5 py-1">Incluindo arquivados</span>}
                 <button type="button" className="font-semibold text-blue-700 hover:underline" onClick={clearFilters}>Limpar filtros</button>
               </div>
             )}
           </div>
 
           {list.isLoading ? (
-            <State title="Carregando vendas…" />
+            <State title={`Carregando ${entityLabelPlural}…`} />
           ) : list.error ? (
             <State
               title={
                 list.error.data?.code === "FORBIDDEN"
                   ? "Seu perfil não tem acesso à área de Vendas."
-                  : "Não foi possível carregar as vendas."
+                  : `Não foi possível carregar ${entityLabelPlural}.`
               }
               retry={() => void list.refetch()}
               error
             />
           ) : !list.data?.items.length ? (
             <State
-              title="Nenhuma venda encontrada neste período."
-              description="Ajuste os filtros ou crie uma nova venda."
+              title={emptyStateTitle}
+              description={`Ajuste os filtros ou crie um novo ${entityLabel}.`}
             />
           ) : (
             <div className="min-w-0">
               <div className="hidden overflow-x-auto md:block">
-                <table className="w-full min-w-[790px] table-fixed text-left text-xs" aria-label="Vendas">
-                  <colgroup><col className="w-9" /><col className="w-[18%]" /><col className="w-[16%]" /><col className="w-[11%]" /><col className="w-[10%]" /><col className="w-[12%]" /><col className="w-[10%]" /><col className="w-[13%]" /><col className="w-11" /></colgroup>
+                <table className="w-full min-w-[920px] table-fixed text-left text-xs" aria-label="Documentos comerciais">
+                  <colgroup><col className="w-9" /><col className="w-[23%]" /><col className="w-[15%]" /><col className="w-[10%]" /><col className="w-[10%]" /><col className="w-[11%]" /><col className="w-[10%]" /><col className="w-[13%]" /><col className="w-12" /></colgroup>
                   <thead className="bg-slate-50 text-[11px] font-semibold text-slate-700"><tr>
-                    <th className="px-2 py-2"><input type="checkbox" aria-label="Selecionar vendas desta página" checked={list.data.items.every(order => selectedSaleIds.includes(order.publicId))} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...new Set([...current, ...list.data!.items.map(order => order.publicId)])] : current.filter(id => !list.data!.items.some(order => order.publicId === id)))} /></th>
-                    <th className="px-2 py-2">Venda</th><th className="px-2 py-2">Cliente</th><th className="px-2 py-2">Data</th><th className="px-2 py-2">Vendedor</th><th className="px-2 py-2 text-right">Total</th><th className="px-2 py-2">Pagamento</th><th className="px-2 py-2">Status</th><th className="px-2 py-2 text-center">Ações</th>
+                    <th className="px-2 py-2"><input type="checkbox" aria-label="Selecionar documentos desta página" checked={list.data.items.every(order => selectedSaleIds.includes(order.publicId))} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...new Set([...current, ...list.data!.items.map(order => order.publicId)])] : current.filter(id => !list.data!.items.some(order => order.publicId === id)))} /></th>
+                    <th className="px-2 py-2">{kind === "quotes" ? "Orçamento" : kind === "orders" ? "Venda" : "Documento"}</th><th className="px-2 py-2">Cliente</th><th className="px-2 py-2">Data</th><th className="px-2 py-2">Vendedor</th><th className="px-2 py-2 text-right">Total</th><th className="px-2 py-2">{kind === "quotes" ? "Situação" : "Pagamento"}</th><th className="px-2 py-2">{kind === "quotes" ? "Fluxo" : "Status"}</th><th className="px-2 py-2 text-center">Ações</th>
                   </tr></thead>
                   <tbody className="divide-y divide-slate-100">
                     {list.data.items.map(order => (
-                      <tr key={order.publicId} className="hover:bg-blue-50/40" data-testid={`sale-row-${order.publicId}`}>
-                        <td className="px-2 py-2"><input type="checkbox" aria-label={`Selecionar venda ${order.orderNumber}`} checked={selectedSaleIds.includes(order.publicId)} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...current, order.publicId] : current.filter(id => id !== order.publicId))} /></td>
-                        <td className="px-2 py-1.5"><div className="flex min-w-0 items-center gap-2"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} compact /><div className="min-w-0"><button type="button" className="block truncate font-semibold text-blue-700 hover:underline" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><span className="block truncate text-[10px] text-slate-500">{order.firstProductName ?? "Produto histórico"}{order.itemCount > 1 ? ` · +${order.itemCount - 1}` : ""}</span></div></div></td>
+                      <tr key={order.publicId} className="group hover:bg-blue-50/40" data-testid={`sale-row-${order.publicId}`}>
+                        <td className="px-2 py-3"><input type="checkbox" aria-label={`Selecionar ${order.documentType === "quote" ? "orçamento" : "venda"} ${order.orderNumber}`} checked={selectedSaleIds.includes(order.publicId)} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...current, order.publicId] : current.filter(id => id !== order.publicId))} /></td>
+                        <td className="px-2 py-2"><div className="flex min-w-0 items-center gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} /><div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><button type="button" className="truncate font-semibold text-blue-700 hover:underline" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><span className="mt-0.5 block truncate text-[11px] text-slate-500">{order.firstProductName ?? "Produto histórico"}{order.itemCount > 1 ? ` · +${order.itemCount - 1}` : ""}</span></div></div></td>
                         <td className="truncate px-2 py-2 font-medium text-slate-800" title={order.customerName}>{order.customerName}</td>
-                        <td className="px-2 py-2 tabular-nums text-slate-700">{date.format(new Date(order.createdAt))}</td>
+                        <td className="px-2 py-2 tabular-nums text-slate-700">{date.format(salesCommercialDate(order.commercialDate))}</td>
                         <td className="truncate px-2 py-2 text-slate-700" title={order.sellerName ?? ""}>{order.sellerName ?? "—"}</td>
                         <td className="px-2 py-2 text-right font-semibold tabular-nums text-slate-900">{money.format(order.totalCents / 100)}</td>
-                        <td className="px-2 py-2"><PaymentBadge value={order.paymentStatus} compact /></td>
-                        <td className="px-2 py-2"><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></td>
-                        <td className="px-2 py-2 text-center"><DropdownMenu><DropdownMenuTrigger asChild><button type="button" className="rounded px-2 py-1 text-lg leading-none text-slate-600 hover:bg-slate-100" aria-label={`Ações da venda ${order.orderNumber}`}>⋯</button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => openSale(order.publicId)}>Ver detalhes</DropdownMenuItem>{canWrite && order.currentStage === "created" && !order.cancelled && <DropdownMenuItem onSelect={() => void edit(order.publicId)}>Editar rascunho</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu></td>
+                        <td className="px-2 py-2">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <PaymentBadge value={order.paymentStatus} compact />}</td>
+                        <td className="px-2 py-2">{order.documentType === "quote" ? <span className="text-[11px] text-slate-500">Fluxo comercial</span> : <StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact />}</td>
+                        <td className="px-2 py-2 text-center"><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "" })} /></td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
               <div className="divide-y divide-slate-100 md:hidden">
-                {list.data.items.map(order => <article key={order.publicId} className="p-3">
-                  <div className="flex items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} /><div className="min-w-0 flex-1"><button type="button" className="font-semibold text-blue-700" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><p className="truncate text-xs text-slate-600">{order.firstProductName ?? "Produto histórico"}</p><p className="mt-1 truncate text-xs font-medium text-slate-800">{order.customerName}</p></div><strong className="shrink-0 text-xs tabular-nums">{money.format(order.totalCents / 100)}</strong></div>
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 pl-[52px]"><span className="text-xs text-slate-500">{date.format(new Date(order.createdAt))} · {order.sellerName ?? "—"}</span><div className="flex gap-1"><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></div></div>
-                  <div className="mt-2 flex gap-3 pl-[52px]"><button type="button" className="text-xs font-semibold text-blue-700" onClick={() => openSale(order.publicId)}>Ver detalhes</button>{canWrite && order.currentStage === "created" && !order.cancelled && <button type="button" className="text-xs font-semibold text-blue-700" onClick={() => void edit(order.publicId)}>Editar rascunho</button>}</div>
+                {list.data.items.map(order => <article key={order.publicId} className="p-4">
+                  <div className="flex items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} large /><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate font-semibold text-blue-700" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-xs text-slate-600">{order.firstProductName ?? "Produto histórico"}</p><p className="mt-1 truncate text-xs font-medium text-slate-800">{order.customerName}</p></div><div className="flex shrink-0 flex-col items-end gap-1"><strong className="text-xs tabular-nums">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "" })} /></div></div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 pl-[68px]"><span className="text-xs text-slate-500">{date.format(salesCommercialDate(order.commercialDate))} · {order.sellerName ?? "—"}</span><div className="flex gap-1">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
                 </article>)}
               </div>
             </div>
@@ -623,8 +721,8 @@ export function SalesPage({
             <div className="flex flex-col gap-3 border-t border-slate-200 px-3 py-3 text-xs text-slate-600 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4">
               <span className="tabular-nums">
                 {list.data.total === 0
-                  ? "Nenhuma venda"
-                  : `Mostrando ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, list.data.total)} de ${list.data.total} vendas`}
+                  ? `Nenhum ${entityLabel}`
+                  : `Mostrando ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, list.data.total)} de ${list.data.total} ${entityLabelPlural}`}
               </span>
               <div className="flex flex-wrap items-center gap-3">
                 <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
@@ -642,7 +740,7 @@ export function SalesPage({
                   </select>
                 </label>
                 {list.data.totalPages > 1 && (
-                  <nav aria-label="Paginação das vendas" className="flex items-center gap-1">
+                  <nav aria-label="Paginação dos documentos comerciais" className="flex items-center gap-1">
                     <Button variant="outline" size="sm" aria-label="Página anterior" disabled={page <= 1} onClick={() => setPage(value => value - 1)}>‹</Button>
                     {salesPaginationItems(page, list.data.totalPages).map(item =>
                       typeof item === "number" ? (
@@ -699,6 +797,10 @@ export function SalesPage({
             })
           }
           onCancel={order => setCancellation({ publicId: order.publicId, reason: "" })}
+          onCommercialStatus={(order, toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })}
+          onConvert={setConversion}
+          onArchive={order => setArchiveRequest({ publicId: order.publicId, reason: "" })}
+          onRelatedNavigate={openSale}
           onCorrectAddress={order =>
             setAddressCorrection({
               publicId: order.publicId,
@@ -733,6 +835,8 @@ export function SalesPage({
         catalog={catalog}
         customerLookupEnabled={customerLookupEnabled}
         catalogLookupEnabled={catalogLookupEnabled}
+        sellers={options.data?.sellers ?? []}
+        paymentMethods={options.data?.paymentMethods ?? []}
         separateBillingAddress={separateBillingAddress}
         setSeparateBillingAddress={setSeparateBillingAddress}
         expandedCatalogProductId={expandedCatalogProductId}
@@ -774,6 +878,17 @@ export function SalesPage({
         }}
       />
 
+      <QuoteConversionDialog
+        order={conversion}
+        busy={convertQuote.isPending}
+        onClose={() => setConversion(null)}
+        onReview={order => {
+          setConversion(null);
+          void edit(order.publicId);
+        }}
+        onConfirm={order => convertQuote.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })}
+      />
+
       <ReasonDialog
         title="Cancelar venda"
         description="O cancelamento preserva a etapa e o histórico. Se houver recebimentos, a operação será bloqueada porque estornos ainda não estão disponíveis."
@@ -783,6 +898,23 @@ export function SalesPage({
         busy={cancelSale.isPending}
         destructive
         onConfirm={state => cancelSale.mutate(state)}
+      />
+
+      <ReasonDialog
+        title="Arquivar documento"
+        description="O documento sairá das listas ativas, mas continuará preservado no histórico e na auditoria."
+        confirmLabel="Arquivar documento"
+        state={archiveRequest}
+        setState={setArchiveRequest}
+        busy={archiveSale.isPending}
+        onConfirm={state => archiveSale.mutate(state)}
+      />
+
+      <CommercialReasonDialog
+        state={commercialChange}
+        setState={setCommercialChange}
+        busy={changeCommercialStatus.isPending}
+        onConfirm={state => changeCommercialStatus.mutate({ publicId: state.publicId, toStatus: state.toStatus, reason: state.reason })}
       />
 
       <TransitionDialog
@@ -947,6 +1079,10 @@ function SaleDetailPanel({
   onConfirm,
   onTransition,
   onCancel,
+  onCommercialStatus,
+  onConvert,
+  onArchive,
+  onRelatedNavigate,
   onCorrectAddress,
   onClientNavigate,
 }: {
@@ -957,6 +1093,10 @@ function SaleDetailPanel({
   onConfirm: (order: SaleDetail) => void;
   onTransition: (order: SaleDetail, stage: Stage, correction: boolean) => void;
   onCancel: (order: SaleDetail) => void;
+  onCommercialStatus: (order: SaleDetail, toStatus: "negotiation" | "approved" | "lost", requireReason: boolean) => void;
+  onConvert: (order: SaleDetail) => void;
+  onArchive: (order: SaleDetail) => void;
+  onRelatedNavigate: (publicId: string) => void;
   onCorrectAddress: (order: SaleDetail) => void;
   onClientNavigate?: (crmClientId: string) => void;
 }) {
@@ -976,6 +1116,7 @@ function SaleDetailPanel({
     );
   }
   const order = query.data;
+  const isQuote = order.documentType === "quote";
   const index = stageOrder.indexOf(order.currentStage as Stage);
   const next = stageOrder[index + 1];
   const correction =
@@ -986,21 +1127,38 @@ function SaleDetailPanel({
         : order.currentStage === "completed"
           ? "received"
           : null;
-  const canCancel = index < stageOrder.indexOf("shipped") && !order.cancelled;
-  const canCorrectAddress = ["confirmed", "separation"].includes(order.currentStage);
+  const canCancel = !isQuote && index < stageOrder.indexOf("shipped") && !order.cancelled;
+  const canCorrectAddress = !isQuote && ["confirmed", "separation"].includes(order.currentStage);
   const progress = order.totalCents > 0 ? Math.min(100, Math.round((order.paidCents / order.totalCents) * 100)) : 0;
+  const detailFacts = [
+    { label: "Cliente", value: order.customerName, detail: order.crmClientId, client: true },
+    { label: "Vendedor(a)", value: order.sellerName ?? "Histórico indisponível" },
+    { label: "Data comercial", value: date.format(salesCommercialDate(order.commercialDate)) },
+    { label: "Previsão de entrega", value: order.expectedDate ? date.format(new Date(`${order.expectedDate}T12:00:00`)) : "Não informada" },
+  ];
   return (
     <aside className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_14px_30px_-26px_rgba(15,23,42,0.65)]" aria-label="Detalhes da venda selecionada">
-      <header className="border-b border-slate-200 px-5 py-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-bold tracking-[-0.02em] text-slate-950">Pedido {order.orderNumber}</h2>
-            <p className="mt-1 text-xs text-slate-500">Criado em {dateTime.format(new Date(order.createdAt))}</p>
+      <header className="border-b border-slate-200 bg-slate-50/70 px-4 py-2 sm:px-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h2 className="text-lg font-bold tracking-[-0.02em] text-slate-950">{isQuote ? "Orçamento" : "Venda"} {order.orderNumber}</h2>
+            <DocumentTypeBadge documentType={order.documentType} />
+            {isQuote ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} /></>}
           </div>
-          <div className="flex flex-wrap justify-end gap-1.5">
-            <PaymentBadge value={order.paymentStatus} />
-            <StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} />
-          </div>
+          <p className="text-xs text-slate-500">Criada em {dateTime.format(new Date(order.createdAt))}</p>
+        </div>
+        <div className="mt-2 grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-2 xl:grid-cols-4" data-testid="sales-detail-facts">
+          {detailFacts.map(fact => (
+            <div key={fact.label} className="min-w-0 bg-white px-3 py-1.5">
+              <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">{fact.label}</span>
+              {fact.client && onClientNavigate ? (
+                <button type="button" className="mt-0.5 block max-w-full truncate text-left text-sm font-semibold text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" title={fact.value} onClick={() => onClientNavigate(order.crmClientId)}>{fact.value}</button>
+              ) : (
+                <strong className="mt-0.5 block truncate text-sm text-slate-900" title={fact.value}>{fact.value}</strong>
+              )}
+              {fact.detail && <span className="block truncate text-[10px] text-slate-400" title={fact.detail}>{fact.detail}</span>}
+            </div>
+          ))}
         </div>
         {order.cancelled && (
           <div className="mt-3 rounded-lg bg-rose-50 p-3 text-sm text-rose-900">
@@ -1008,35 +1166,69 @@ function SaleDetailPanel({
             <p className="mt-1">Última etapa: {stageLabels[order.currentStage as Stage]}. {order.cancellationReason}</p>
           </div>
         )}
+        {(order.sourceQuote || order.convertedSale) && (
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            {order.sourceQuote && <button type="button" className="rounded-full bg-violet-50 px-3 py-1.5 font-semibold text-violet-800 hover:bg-violet-100" onClick={() => onRelatedNavigate(order.sourceQuote!.publicId)}>Origem: orçamento {order.sourceQuote.orderNumber}</button>}
+            {order.convertedSale && <button type="button" className="rounded-full bg-blue-50 px-3 py-1.5 font-semibold text-blue-800 hover:bg-blue-100" onClick={() => onRelatedNavigate(order.convertedSale!.publicId)}>Venda resultante: {order.convertedSale.orderNumber}</button>}
+          </div>
+        )}
       </header>
 
-      <div className="grid gap-5 px-5 py-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
-        <section className="grid gap-4 rounded-xl border border-slate-200 p-4 text-sm xl:col-start-1 xl:row-start-1">
-          <div>
-            <InfoRow icon={UserRound} label="Cliente" value={order.customerName} detail={order.crmClientId} />
-            {onClientNavigate && (
-              <button
-                type="button"
-                className="ml-10 mt-1 text-xs font-semibold text-blue-700 hover:underline"
-                onClick={() => onClientNavigate(order.crmClientId)}
-              >
-                Ver dados do cliente <ArrowRight className="ml-1 inline h-3 w-3" />
-              </button>
-            )}
+      <div className="space-y-2 p-3 sm:p-3">
+        <section className="overflow-hidden rounded-xl border border-slate-200" data-testid="sales-detail-products">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2">
+            <h3 className="flex items-center gap-2 text-sm font-bold text-slate-950"><PackageOpen className="h-4 w-4 text-blue-600" />Produtos vendidos <span className="font-medium text-slate-500">({order.items.length})</span></h3>
+            <div className="flex items-center gap-4 text-xs text-slate-600"><span>Subtotal <strong className="ml-1 text-slate-950 tabular-nums">{money.format(order.subtotalCents / 100)}</strong></span><span>Total <strong className="ml-1 text-base text-slate-950 tabular-nums">{money.format(order.totalCents / 100)}</strong></span></div>
           </div>
-          <InfoRow icon={UserRound} label="Vendedor(a)" value={order.sellerName ?? "Histórico indisponível"} />
-          <InfoRow icon={CalendarDays} label="Previsão de entrega" value={order.expectedDate ? date.format(new Date(`${order.expectedDate}T12:00:00`)) : "Não informada"} />
+          {order.items.length ? (
+            <div className="divide-y divide-slate-100 bg-white">
+              {order.items.map(item => (
+                <div key={item.publicId} className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 px-4 py-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]" data-testid="sales-detail-product-row">
+                  <ProductThumb imagePath={item.canonicalImage?.thumbnailPath} name={item.productName} large />
+                  <div className="min-w-0">
+                    <strong className="block truncate text-sm text-slate-950" title={item.productName}>{item.productName}</strong>
+                    <span className="block truncate text-xs text-slate-500" title={[item.variantName, item.sku].filter(Boolean).join(" · ")}>{[item.variantName, item.sku].filter(Boolean).join(" · ") || "Produto histórico"}</span>
+                    <span className="mt-0.5 block text-xs text-slate-600"><strong className="font-semibold text-slate-800 tabular-nums">{formatQuantity(item.quantity)}</strong> × {money.format(item.unitPriceCents / 100)}{item.discountCents > 0 ? ` · desconto ${money.format(item.discountCents / 100)}` : ""}</span>
+                  </div>
+                  <div className="col-start-2 text-left sm:col-start-auto sm:text-right"><span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400">Total do item</span><strong className="text-sm text-slate-950 tabular-nums">{money.format(item.lineTotalCents / 100)}</strong></div>
+                </div>
+              ))}
+            </div>
+          ) : <p className="px-4 py-5 text-sm text-slate-500">Nenhum produto registrado nesta venda.</p>}
         </section>
 
-        <section className="rounded-xl border border-slate-200 p-4 xl:col-span-2 xl:row-start-2">
-          <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900"><Edit3 className="h-4 w-4 text-slate-500" />Etapa da venda</h3>
-          <SaleTimeline stage={order.currentStage as Stage} cancelled={order.cancelled} />
-          <p className="mt-3 text-xs leading-5 text-slate-600">
-            A confirmação não reserva estoque. A disponibilidade é revalidada e a baixa ocorre somente ao marcar como Enviado.
-          </p>
+        <section className="flex flex-col gap-2 rounded-xl border border-slate-200 px-4 py-2 sm:flex-row sm:items-start" data-testid="sales-detail-address">
+          <div className="flex shrink-0 items-center gap-2"><MapPin className="h-4 w-4 text-slate-500" /><h3 className="text-sm font-bold text-slate-900">Entrega</h3></div>
+          <div className="min-w-0 flex-1"><AddressSummary address={order.shippingAddress} /></div>
+          {canWrite && canCorrectAddress && !order.cancelled && <button type="button" className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => onCorrectAddress(order)}>Corrigir endereço</button>}
         </section>
 
-        <section className="rounded-xl bg-slate-50 p-4 xl:col-start-2 xl:row-start-1">
+        <section className="rounded-xl border border-slate-200 p-3" data-testid="sales-detail-workflow">
+          <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 text-sm font-bold text-slate-900"><Edit3 className="h-4 w-4 text-slate-500" />{isQuote ? "Fluxo comercial" : "Etapa da venda"}</h3>{!isQuote && <span className="text-xs text-slate-500">A baixa de estoque ocorre somente no envio.</span>}</div>
+          {isQuote ? <div className="mt-2 flex flex-wrap items-center gap-2"><CommercialBadge value={order.commercialStatus} /><span className="text-xs leading-5 text-slate-600">Rascunho → negociação → aprovação → conversão. A conversão cria uma nova venda rastreável, sem pagamentos nem baixa de estoque.</span></div> : <SaleTimeline stage={order.currentStage as Stage} cancelled={order.cancelled} />}
+          {canWrite && !order.archivedAt && (
+            <div className="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-3 sm:flex-row sm:items-center sm:justify-between" data-testid="sales-detail-actions">
+              <div className="flex flex-wrap items-center gap-2">
+                {isQuote ? <>
+                  {order.canEdit && <Button size="sm" variant="outline" onClick={() => onEdit(order.publicId)}><Edit3 className="mr-2 h-4 w-4" />Editar orçamento</Button>}
+                  {order.commercialStatus === "draft" && <Button size="sm" onClick={() => onCommercialStatus(order, "negotiation", false)}><FileClock className="mr-2 h-4 w-4" />Iniciar negociação</Button>}
+                  {order.commercialStatus === "negotiation" && <><Button size="sm" variant="outline" className="border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800" onClick={() => onCommercialStatus(order, "lost", true)}>Marcar como perdido</Button><Button size="sm" onClick={() => onCommercialStatus(order, "approved", false)}><Check className="mr-2 h-4 w-4" />Aprovar</Button></>}
+                  {order.commercialStatus === "approved" && <><Button size="sm" variant="outline" onClick={() => onCommercialStatus(order, "negotiation", true)}><RotateCcw className="mr-2 h-4 w-4" />Retomar negociação</Button><Button size="sm" onClick={() => onConvert(order)}><ShoppingCart className="mr-2 h-4 w-4" />Converter em venda</Button></>}
+                  {["converted", "lost", "cancelled"].includes(order.commercialStatus) && <Button size="sm" variant="outline" onClick={() => onArchive(order)}><Archive className="mr-2 h-4 w-4" />Arquivar</Button>}
+                </> : !order.cancelled && order.currentStage === "created" ? <><Button size="sm" variant="outline" onClick={() => onEdit(order.publicId)}><Edit3 className="mr-2 h-4 w-4" />Editar</Button><Button size="sm" className="bg-blue-600 text-white hover:bg-blue-700" onClick={() => onConfirm(order)}>Confirmar</Button></> : !order.cancelled && next ? <Button size="sm" className="bg-blue-600 text-white hover:bg-blue-700" onClick={() => onTransition(order, next, false)}>{nextActionLabel(next)} <ArrowRight className="ml-2 h-4 w-4" /></Button> : null}
+                {!isQuote && !order.cancelled && correction && <Button variant="outline" size="sm" className="border-slate-300 bg-slate-100 text-slate-800 shadow-sm hover:bg-slate-200" onClick={() => onTransition(order, correction, true)}><RotateCcw className="mr-2 h-4 w-4" />Corrigir etapa</Button>}
+                {!isQuote && (order.cancelled || order.currentStage === "completed") && <Button size="sm" variant="outline" onClick={() => onArchive(order)}><Archive className="mr-2 h-4 w-4" />Arquivar venda</Button>}
+              </div>
+              {!isQuote && canCancel && <Button variant="outline" size="sm" className="shrink-0 border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800" disabled={order.paidCents > 0} title={order.paidCents > 0 ? "Há recebimentos registrados; estorno ainda não está disponível." : undefined} onClick={() => onCancel(order)}><XCircle className="mr-2 h-4 w-4" />Cancelar venda</Button>}
+            </div>
+          )}
+          {order.paidCents > 0 && canCancel && <p className="mt-2 text-xs text-slate-500">Cancelamento bloqueado: há recebimentos e o estorno ainda não está disponível.</p>}
+          {!isQuote && order.currentStage === "confirmed" && <p className="mt-2 text-xs text-slate-500">Retornar para Criada apagaria o significado dos títulos confirmados; use o cancelamento auditado quando não houver recebimentos.</p>}
+          {!isQuote && order.currentStage === "shipped" && <p className="mt-2 text-xs text-slate-500">Retornar para Separação exige uma reversão específica de estoque e permanece bloqueado para evitar saldo inconsistente.</p>}
+        </section>
+
+        <div className="grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(300px,0.85fr)]">
+        {!isQuote && <section className="rounded-xl bg-slate-50 p-4">
           <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900"><WalletCards className="h-4 w-4 text-slate-500" />Pagamento</h3>
           <Progress value={progress} className="mt-3 h-2" />
           <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
@@ -1054,9 +1246,9 @@ function SaleDetailPanel({
             )}
           </div>
           <SalePaymentEditor key={order.publicId} order={order} canWrite={canWrite} />
-        </section>
+        </section>}
 
-        <section className="rounded-xl bg-blue-50 p-4 text-blue-950 xl:col-start-2 xl:row-start-3">
+        {!isQuote && <section className="rounded-xl bg-blue-50 p-4 text-blue-950">
           <h3 className="flex items-center gap-2 text-sm font-bold"><Box className="h-4 w-4" />Estoque</h3>
           <p className="mt-2 text-xs leading-5 text-blue-900">Saldo atual por variação, consultado no mesmo estoque de Produtos. Quantidade vendida e baixa são informações separadas.</p>
           <ul className="mt-3 divide-y divide-blue-100 rounded-lg bg-white/75 px-3">
@@ -1074,26 +1266,18 @@ function SaleDetailPanel({
             })}
           </ul>
           <p className="mt-2 text-xs text-blue-800">{order.items.some(item => item.stockExitRecorded) ? "A saída registrada ocorreu no envio; concluir não repete a baixa." : stageOrder.indexOf(order.currentStage as Stage) >= stageOrder.indexOf("shipped") ? "Esta venda não possui movimentação de saída verificável no histórico atual." : "A disponibilidade será revalidada no envio; a confirmação não altera o saldo."}</p>
-        </section>
+        </section>}
+        </div>
 
-        <section className="rounded-xl border border-slate-200 p-4 xl:col-start-1 xl:row-start-3">
-          <div className="flex items-center justify-between gap-3">
-            <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900"><MapPin className="h-4 w-4 text-slate-500" />Endereço de entrega</h3>
-            {canWrite && canCorrectAddress && !order.cancelled && (
-              <button type="button" className="text-xs font-semibold text-blue-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => onCorrectAddress(order)}>Corrigir</button>
-            )}
-          </div>
-          <AddressSummary address={order.shippingAddress} />
-        </section>
-
-        <div className="min-w-0 xl:col-start-1 xl:row-start-4">
+        <div className="grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(300px,0.85fr)]">
+        <div className="min-w-0">
           <SaleDocuments
             salePublicId={order.publicId}
             canWrite={canWrite && !order.cancelled}
           />
         </div>
 
-        <section className="min-w-0 rounded-xl border border-slate-200 p-4 xl:col-start-2 xl:row-start-4">
+        <section className="min-w-0 rounded-xl border border-slate-200 p-4">
           <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900"><Clock3 className="h-4 w-4 text-slate-500" />Histórico</h3>
           {!order.historyComplete && (
             <p className="mt-2 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">
@@ -1115,35 +1299,8 @@ function SaleDetailPanel({
             )) : <li className="text-xs text-slate-500">Nenhum evento histórico registrado.</li>}
           </ol>
         </section>
+        </div>
       </div>
-
-      {canWrite && !order.cancelled && (
-        <footer className="space-y-2 border-t border-slate-200 bg-white p-4">
-          {order.currentStage === "created" ? (
-            <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" onClick={() => onEdit(order.publicId)}><Edit3 className="mr-2 h-4 w-4" />Editar</Button>
-              <Button className="bg-blue-600 text-white hover:bg-blue-700" onClick={() => onConfirm(order)}>Confirmar</Button>
-            </div>
-          ) : next ? (
-            <Button className="w-full bg-blue-600 text-white hover:bg-blue-700" onClick={() => onTransition(order, next, false)}>
-              {nextActionLabel(next)} <ArrowRight className="ml-2 h-4 w-4" />
-            </Button>
-          ) : null}
-          <div className="grid grid-cols-2 gap-2">
-            {correction ? (
-              <Button variant="outline" size="sm" onClick={() => onTransition(order, correction, true)}>
-                <RotateCcw className="mr-2 h-4 w-4" />Corrigir etapa
-              </Button>
-            ) : <span />}
-            {canCancel && (
-              <Button variant="ghost" size="sm" className="text-rose-700 hover:bg-rose-50 hover:text-rose-800" disabled={order.paidCents > 0} title={order.paidCents > 0 ? "Há recebimentos registrados; estorno ainda não está disponível." : undefined} onClick={() => onCancel(order)}>
-                <XCircle className="mr-2 h-4 w-4" />Cancelar
-              </Button>
-            )}
-          </div>
-          {order.paidCents > 0 && canCancel && <p className="text-center text-xs text-slate-500">Cancelamento bloqueado: há recebimentos e o estorno ainda não está disponível.</p>}
-        </footer>
-      )}
     </aside>
   );
 }
@@ -1256,6 +1413,8 @@ function SaleFormDialog({
   catalog,
   customerLookupEnabled,
   catalogLookupEnabled,
+  sellers,
+  paymentMethods,
   separateBillingAddress,
   setSeparateBillingAddress,
   expandedCatalogProductId,
@@ -1277,6 +1436,8 @@ function SaleFormDialog({
   catalog: { data?: CatalogResults; isLoading: boolean; isError: boolean };
   customerLookupEnabled: boolean;
   catalogLookupEnabled: boolean;
+  sellers: Array<{ publicId: string; name: string }>;
+  paymentMethods: string[];
   separateBillingAddress: boolean;
   setSeparateBillingAddress: React.Dispatch<React.SetStateAction<boolean>>;
   expandedCatalogProductId: string | null;
@@ -1327,8 +1488,8 @@ function SaleFormDialog({
         <DialogHeader className="border-b border-slate-200 bg-white px-5 py-4 sm:px-7">
           <div className="pr-10">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Operação de vendas</p>
-            <DialogTitle className="mt-1 text-xl">{form.publicId ? "Editar venda" : "Nova venda"}</DialogTitle>
-            <p className="mt-1 text-sm text-slate-600">Complete a operação por etapas. A venda será salva primeiro como rascunho.</p>
+            <DialogTitle className="mt-1 text-xl">{form.publicId ? `Editar ${form.documentType === "quote" ? "orçamento" : "venda"}` : form.documentType === "quote" ? "Novo orçamento" : "Nova venda"}</DialogTitle>
+            <p className="mt-1 text-sm text-slate-600">Complete a operação por etapas. O documento será salvo primeiro como rascunho, sem movimentar estoque ou financeiro.</p>
           </div>
           <div className="mt-3 flex flex-wrap gap-2" aria-label="Progresso da nova venda">
             {progress.map((item, index) => <span key={item.key} className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold", item.complete ? "bg-emerald-50 text-emerald-800" : "bg-slate-100 text-slate-600")}><span className={cn("flex h-4 w-4 items-center justify-center rounded-full text-[10px]", item.complete ? "bg-emerald-600 text-white" : "bg-slate-300 text-slate-700")}>{item.complete ? <Check className="h-3 w-3" /> : index + 1}</span>{item.label}</span>)}
@@ -1396,20 +1557,60 @@ function SaleFormDialog({
 
                 <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5" aria-labelledby="sale-values-heading">
                   <div><p className="text-xs font-semibold text-blue-700">4. Valores e prazo</p><h3 id="sale-values-heading" className="mt-1 font-bold text-slate-950">Condições comerciais</h3></div>
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><label className="text-xs font-semibold text-slate-700">Previsão de entrega<Input className="mt-1" type="date" value={form.expectedDate} onChange={event => setForm(current => current ? { ...current, expectedDate: event.target.value } : current)} /></label><MoneyOrQuantity money label="Desconto da venda" value={form.orderDiscountCents ?? 0} onChange={value => setForm(current => current ? { ...current, orderDiscountCents: value } : current)} /><MoneyOrQuantity money label="Frete" value={form.freightCents ?? 0} onChange={value => setForm(current => current ? { ...current, freightCents: value } : current)} /></div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <label className="text-xs font-semibold text-slate-700">Data comercial<Input className="mt-1" type="date" value={form.commercialDate} onChange={event => setForm(current => current ? { ...current, commercialDate: event.target.value } : current)} /></label>
+                    <label className="text-xs font-semibold text-slate-700">Vendedor(a)<select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={form.sellerUserId} onChange={event => setForm(current => current ? { ...current, sellerUserId: event.target.value } : current)}><option value="">{form.publicId ? "Preservar vendedor atual" : "Responsável atual"}</option>{sellers.map(seller => <option key={seller.publicId} value={seller.publicId}>{seller.name}</option>)}</select></label>
+                    <label className="text-xs font-semibold text-slate-700">Previsão de entrega<Input className="mt-1" type="date" value={form.expectedDate} onChange={event => setForm(current => current ? { ...current, expectedDate: event.target.value } : current)} /></label>
+                    <label className="text-xs font-semibold text-slate-700">Forma de pagamento<select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={form.paymentMethod} onChange={event => setForm(current => current ? { ...current, paymentMethod: event.target.value } : current)}><option value="">Definir na confirmação</option>{paymentMethods.map(method => <option key={method} value={method}>{method}</option>)}</select></label>
+                    <label className="text-xs font-semibold text-slate-700">Condições de pagamento<Input className="mt-1" maxLength={255} placeholder="Ex.: 30/60 dias" value={form.paymentTerms ?? ""} onChange={event => setForm(current => current ? { ...current, paymentTerms: event.target.value } : current)} /></label>
+                    <MoneyOrQuantity money label="Desconto do documento" value={form.orderDiscountCents ?? 0} onChange={value => setForm(current => current ? { ...current, orderDiscountCents: value } : current)} />
+                    <MoneyOrQuantity money label="Frete" value={form.freightCents ?? 0} onChange={value => setForm(current => current ? { ...current, freightCents: value } : current)} />
+                    <MoneyOrQuantity money label="Outros encargos" value={form.chargesCents ?? 0} onChange={value => setForm(current => current ? { ...current, chargesCents: value } : current)} />
+                  </div>
                   <label className="mt-4 block text-xs font-semibold text-slate-700">Observações<textarea className="mt-1 min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={form.notes} onChange={event => setForm(current => current ? { ...current, notes: event.target.value } : current)} /></label>
                 </section>
               </div>
 
               <aside className="self-start rounded-xl border border-slate-200 bg-white p-5 xl:sticky xl:top-0" aria-label="Resumo da venda em edição">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Resumo</p><h3 className="mt-1 text-lg font-bold text-slate-950">{completeSteps}/{progress.length} etapas preenchidas</h3>
-                <div className="mt-4 space-y-2 text-sm"><div className="flex justify-between gap-3 text-slate-600"><span>Produtos</span><strong className="text-slate-950">{form.items.length}</strong></div><div className="flex justify-between gap-3 text-slate-600"><span>Subtotal</span><strong className="tabular-nums text-slate-950">{money.format(totals.subtotalCents / 100)}</strong></div><div className="flex justify-between gap-3 text-slate-600"><span>Descontos</span><strong className="tabular-nums text-slate-950">− {money.format(totals.discountCents / 100)}</strong></div><div className="flex justify-between gap-3 text-slate-600"><span>Frete</span><strong className="tabular-nums text-slate-950">{money.format((form.freightCents ?? 0) / 100)}</strong></div><div className="flex justify-between gap-3 border-t border-slate-200 pt-3 text-base"><strong>Total</strong><strong className="tabular-nums text-blue-700">{money.format(totals.totalCents / 100)}</strong></div></div>
-                <div className="mt-5 rounded-lg bg-blue-50 p-3 text-xs leading-5 text-blue-900"><strong className="block">Próximo passo</strong>Salve o rascunho. A forma de pagamento, categoria, conta prevista e parcelas serão revisadas antes da confirmação.</div>
+                <div className="mt-4 space-y-2 text-sm"><div className="flex justify-between gap-3 text-slate-600"><span>Produtos</span><strong className="text-slate-950">{form.items.length}</strong></div><div className="flex justify-between gap-3 text-slate-600"><span>Subtotal</span><strong className="tabular-nums text-slate-950">{money.format(totals.subtotalCents / 100)}</strong></div><div className="flex justify-between gap-3 text-slate-600"><span>Descontos</span><strong className="tabular-nums text-slate-950">− {money.format(totals.discountCents / 100)}</strong></div><div className="flex justify-between gap-3 text-slate-600"><span>Frete</span><strong className="tabular-nums text-slate-950">{money.format((form.freightCents ?? 0) / 100)}</strong></div><div className="flex justify-between gap-3 text-slate-600"><span>Encargos</span><strong className="tabular-nums text-slate-950">{money.format((form.chargesCents ?? 0) / 100)}</strong></div><div className="flex justify-between gap-3 border-t border-slate-200 pt-3 text-base"><strong>Total</strong><strong className="tabular-nums text-blue-700">{money.format(totals.totalCents / 100)}</strong></div></div>
+                <div className="mt-5 rounded-lg bg-blue-50 p-3 text-xs leading-5 text-blue-900"><strong className="block">Próximo passo</strong>{form.documentType === "quote" ? "Salve o orçamento e conduza-o por negociação e aprovação antes de converter em venda." : "Salve o rascunho. Categoria, conta e parcelas serão revisadas antes da confirmação."}</div>
               </aside>
             </div>
           </div>
-          <DialogFooter className="border-t border-slate-200 bg-white px-5 py-3 sm:px-7"><Button type="button" variant="outline" onClick={() => setForm(null)}>Cancelar</Button><Button type="submit" disabled={busy || Boolean(stockIssue) || !form.crmClientId || !form.items.length || totals.totalCents <= 0 || (form.freightCents ?? 0) < 0}>{busy ? "Salvando…" : "Salvar rascunho"}</Button></DialogFooter>
+          <DialogFooter className="border-t border-slate-200 bg-white px-5 py-3 sm:px-7"><Button type="button" variant="outline" onClick={() => setForm(null)}>Cancelar</Button><Button type="submit" disabled={busy || Boolean(stockIssue) || !form.crmClientId || !form.items.length || totals.totalCents <= 0 || (form.freightCents ?? 0) < 0 || (form.chargesCents ?? 0) < 0}>{busy ? "Salvando…" : `Salvar ${form.documentType === "quote" ? "orçamento" : "venda"}`}</Button></DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function QuoteConversionDialog({ order, busy, onClose, onReview, onConfirm }: {
+  order: SaleDetail | null;
+  busy: boolean;
+  onClose: () => void;
+  onReview: (order: SaleDetail) => void;
+  onConfirm: (order: SaleDetail) => void;
+}) {
+  if (!order) return null;
+  return (
+    <Dialog open onOpenChange={open => !open && !busy && onClose()}>
+      <DialogContent className="bg-slate-50 p-0 sm:max-w-2xl">
+        <DialogHeader className="border-b border-slate-200 bg-white px-6 py-5">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-violet-700">Conversão rastreável</p>
+          <DialogTitle className="mt-1">Converter {order.orderNumber} em venda</DialogTitle>
+          <p className="mt-1 text-sm leading-6 text-slate-600">Revise o resumo aprovado. A operação criará uma nova venda vinculada e manterá o orçamento original no histórico.</p>
+        </DialogHeader>
+        <div className="space-y-4 p-5">
+          <section className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm sm:grid-cols-2">
+            <InfoRow icon={UserRound} label="Cliente" value={order.customerName} />
+            <InfoRow icon={UserRound} label="Responsável" value={order.sellerName ?? "Não informado"} />
+            <InfoRow icon={ReceiptText} label="Itens aprovados" value={`${order.items.length} item(ns)`} detail={order.items.map(item => item.productName).slice(0, 2).join(" · ")} />
+            <InfoRow icon={CircleDollarSign} label="Valor aprovado" value={money.format(order.totalCents / 100)} detail={order.paymentTerms || "Condição a revisar na confirmação"} />
+          </section>
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-950"><strong className="block">Sem efeitos operacionais antecipados</strong>A conversão não cria títulos, não registra pagamento e não movimenta estoque. A venda resultante começa como rascunho.</div>
+        </div>
+        <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4"><Button variant="outline" disabled={busy} onClick={() => onReview(order)}>Revisar dados</Button><Button variant="outline" disabled={busy} onClick={onClose}>Cancelar</Button><Button disabled={busy} onClick={() => onConfirm(order)}>{busy ? "Convertendo…" : "Converter em venda"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -1468,66 +1669,63 @@ function ConfirmationDialog({ state, setState, categories, accounts, paymentMeth
   const focus = (key: string) => document.getElementById(`sales-confirm-${key}`)?.focus();
   return (
     <Dialog open onOpenChange={open => !open && setState(null)}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto bg-slate-50 p-0 [scrollbar-width:thin] sm:max-w-4xl">
-        <DialogHeader className="border-b border-slate-200 bg-white px-6 py-5"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">Conferência final</p><DialogTitle className="mt-1">Confirmar venda</DialogTitle><p className="mt-1 text-sm text-slate-600">A venda e seus títulos serão confirmados na mesma transação. A confirmação não reserva estoque.</p></DialogHeader>
-        <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_300px]">
-          <div className="space-y-4">
-            <section className="rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="confirmation-requirements-heading"><h3 id="confirmation-requirements-heading" className="font-bold text-slate-950">Esta venda pode ser confirmada?</h3><div className="mt-3 space-y-2">{requirements.map(requirement => <div key={requirement.key} className={cn("flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm", requirement.complete ? "bg-emerald-50 text-emerald-900" : "bg-amber-50 text-amber-950")}><span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-full", requirement.complete ? "bg-emerald-600 text-white" : "border border-amber-400 bg-white text-amber-700")}>{requirement.complete ? <Check className="h-3.5 w-3.5" /> : "!"}</span><strong className="flex-1">{requirement.label}</strong>{!requirement.complete && requirement.actionLabel && <button type="button" className="font-semibold text-blue-700 hover:underline" onClick={() => focus(requirement.key === "payment" ? "payment" : requirement.key === "installments" ? "installments" : requirement.key)}>{requirement.actionLabel}</button>}</div>)}</div></section>
-
-            <section className="rounded-xl border border-slate-200 bg-white p-4"><h3 className="font-bold text-slate-950">Condições financeiras</h3>
-            {optionsLoading && <p role="status" className="mt-3 rounded-lg bg-blue-50 p-3 text-sm text-blue-900">Carregando categorias, contas e formas de pagamento…</p>}
-            {optionsError && <div role="alert" className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-rose-50 p-3 text-sm text-rose-900"><span>Não foi possível carregar os cadastros financeiros. Nenhuma confirmação será enviada enquanto este gate estiver incompleto.</span><Button type="button" size="sm" variant="outline" onClick={onRetryOptions}>Tentar novamente</Button></div>}
-            <fieldset className="mt-3">
-              <legend className="text-xs font-semibold text-slate-700">Situação no momento da confirmação</legend>
-              <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                {(["pending", "partial", "paid"] as const).map(status => (
-                  <button
-                    key={status}
-                    type="button"
-                    className={cn("rounded-lg border px-3 py-2 text-left text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500", state.paymentStatus === status ? "border-blue-500 bg-blue-50 text-blue-900" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50")}
-                    aria-pressed={state.paymentStatus === status}
-                    disabled={status === "partial" && state.totalCents <= 1}
-                    onClick={() => setState({
-                      ...state,
-                      paymentStatus: status,
-                      receivedCents: status === "pending" ? 0 : status === "paid" ? state.totalCents : Math.max(1, Math.min(state.totalCents - 1, Math.floor(state.totalCents / 2))),
-                    })}
-                  >
-                    {status === "pending" ? "Pendente" : status === "partial" ? "Pagamento parcial" : "Pago"}
-                  </button>
-                ))}
+      <DialogContent className="max-h-[96dvh] overflow-y-auto bg-slate-50 p-0 [scrollbar-width:thin] sm:max-w-[min(96vw,1180px)]">
+        <DialogHeader className="border-b border-slate-200 bg-white px-5 py-3.5"><div className="flex flex-wrap items-baseline justify-between gap-2"><div><p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">Conferência final</p><DialogTitle className="mt-0.5">Confirmar venda</DialogTitle></div><p className="max-w-xl text-xs text-slate-600">A venda e seus títulos serão confirmados na mesma transação. A confirmação não reserva estoque.</p></div></DialogHeader>
+        <div className="p-3 sm:p-4">
+          <div className="grid overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:grid-cols-[minmax(0,1.55fr)_minmax(330px,0.85fr)]" data-testid="sales-confirmation-layout">
+            <section className="min-w-0 p-4" aria-labelledby="confirmation-financial-heading" data-testid="sales-confirmation-financial">
+              <div className="flex flex-wrap items-center justify-between gap-2"><h3 id="confirmation-financial-heading" className="font-bold text-slate-950">Condições financeiras</h3><div className="flex items-baseline gap-2 text-xs text-slate-500"><span>Total</span><strong className="text-lg text-slate-950 tabular-nums">{money.format(state.totalCents / 100)}</strong></div></div>
+              {optionsLoading && <p role="status" className="mt-2 rounded-lg bg-blue-50 p-2.5 text-sm text-blue-900">Carregando categorias, contas e formas de pagamento…</p>}
+              {optionsError && <div role="alert" className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-rose-50 p-2.5 text-sm text-rose-900"><span>Não foi possível carregar os cadastros financeiros. Nenhuma confirmação será enviada enquanto este gate estiver incompleto.</span><Button type="button" size="sm" variant="outline" onClick={onRetryOptions}>Tentar novamente</Button></div>}
+              <fieldset className="mt-3">
+                <legend className="text-xs font-semibold text-slate-700">Situação no momento da confirmação</legend>
+                <div className="mt-1.5 grid gap-2 sm:grid-cols-3">
+                  {(["pending", "partial", "paid"] as const).map(status => (
+                    <button key={status} type="button" className={cn("rounded-lg border px-3 py-2 text-left text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500", state.paymentStatus === status ? "border-blue-500 bg-blue-50 text-blue-900 shadow-sm" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50")} aria-pressed={state.paymentStatus === status} disabled={status === "partial" && state.totalCents <= 1} onClick={() => setState({ ...state, paymentStatus: status, receivedCents: status === "pending" ? 0 : status === "paid" ? state.totalCents : Math.max(1, Math.min(state.totalCents - 1, Math.floor(state.totalCents / 2))) })}>{status === "pending" ? "Pendente" : status === "partial" ? "Pagamento parcial" : "Pago"}</button>
+                  ))}
+                </div>
+              </fieldset>
+              <div className="mt-3 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+                {state.paymentStatus === "partial" && <label className="text-xs font-semibold text-slate-700 xl:col-span-2">Valor já recebido<MoneyInput className="mt-1 tabular-nums" label="Valor já recebido" valueCents={state.receivedCents} onChangeCents={receivedCents => setState({ ...state, receivedCents })} /></label>}
+                <label className="text-xs font-semibold text-slate-700">Forma de pagamento<select id="sales-confirm-payment" className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={state.paymentMethod} onChange={event => setState({ ...state, paymentMethod: event.target.value })}><option value="">Selecione</option>{paymentMethods.map(value => <option key={value}>{value}</option>)}</select></label>
+                <label className="text-xs font-semibold text-slate-700">Categoria financeira<select id="sales-confirm-category" required className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={state.categoryPublicId} onChange={event => setState({ ...state, categoryPublicId: event.target.value })}><option value="">Selecione</option>{categories.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}</select></label>
+                <label className="text-xs font-semibold text-slate-700">Conta prevista<select id="sales-confirm-account" required className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={state.financialAccountPublicId} onChange={event => setState({ ...state, financialAccountPublicId: event.target.value })}><option value="">Selecione</option>{accounts.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}</select></label>
+                <div id="sales-confirm-installments" className="grid grid-cols-2 gap-2 sm:col-span-2 xl:col-span-1"><label className="text-xs font-semibold text-slate-700">Parcelas<Input className="mt-1" type="number" min={1} max={120} value={state.installmentCount} onChange={event => setState({ ...state, installmentCount: Math.max(1, Number(event.target.value)) })} /></label><label className="text-xs font-semibold text-slate-700">1º vencimento<Input className="mt-1" type="date" value={state.firstDueDate} onChange={event => setState({ ...state, firstDueDate: event.target.value })} /></label></div>
               </div>
-              {state.paymentStatus === "partial" && (
-                <label className="mt-3 block text-xs font-semibold text-slate-700">
-                  Valor já recebido
-                  <MoneyInput className="mt-1 tabular-nums" label="Valor já recebido" valueCents={state.receivedCents} onChangeCents={receivedCents => setState({ ...state, receivedCents })} />
-                </label>
-              )}
               {!paymentReady && <p role="alert" className="mt-2 text-sm text-rose-700">O valor recebido deve ser maior que zero e menor que o total para um pagamento parcial.</p>}
-              <p className="mt-2 text-xs leading-5 text-slate-500">Isenção não está disponível porque o domínio financeiro atual não possui um lançamento isento auditável. Nenhum status fictício será gravado.</p>
-            </fieldset>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="text-xs font-semibold text-slate-700">Forma de pagamento<select id="sales-confirm-payment" className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={state.paymentMethod} onChange={event => setState({ ...state, paymentMethod: event.target.value })}><option value="">Selecione</option>{paymentMethods.map(value => <option key={value}>{value}</option>)}</select></label>
-              <label className="text-xs font-semibold text-slate-700">Categoria financeira<select id="sales-confirm-category" required className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={state.categoryPublicId} onChange={event => setState({ ...state, categoryPublicId: event.target.value })}><option value="">Selecione</option>{categories.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}</select></label>
-              <label className="text-xs font-semibold text-slate-700">Conta prevista<select id="sales-confirm-account" required className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={state.financialAccountPublicId} onChange={event => setState({ ...state, financialAccountPublicId: event.target.value })}><option value="">Selecione</option>{accounts.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}</select></label>
-              <div id="sales-confirm-installments" className="grid grid-cols-2 gap-2"><label className="text-xs font-semibold text-slate-700">Parcelas<Input className="mt-1" type="number" min={1} max={120} value={state.installmentCount} onChange={event => setState({ ...state, installmentCount: Math.max(1, Number(event.target.value)) })} /></label><label className="text-xs font-semibold text-slate-700">1º vencimento<Input className="mt-1" type="date" value={state.firstDueDate} onChange={event => setState({ ...state, firstDueDate: event.target.value })} /></label></div>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setSetup(setup === "category" ? null : "category")}><Plus className="mr-1.5 h-3.5 w-3.5" />Nova categoria a receber</Button><Button type="button" size="sm" variant="outline" onClick={() => setSetup(setup === "account" ? null : "account")}><Plus className="mr-1.5 h-3.5 w-3.5" />Nova conta</Button></div>
-            {setup === "category" && <div className="mt-3 flex flex-col gap-2 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-end"><label className="flex-1 text-xs font-semibold text-slate-700">Nome da categoria<Input autoFocus className="mt-1" value={categoryName} onChange={event => setCategoryName(event.target.value)} placeholder="Ex.: Receita de vendas" /></label><Button type="button" disabled={categoryCreationBusy || categoryName.trim().length < 2} onClick={() => onCreateCategory(categoryName.trim())}>{categoryCreationBusy ? "Criando…" : "Criar e selecionar"}</Button></div>}
-            {setup === "account" && <div className="mt-3 grid gap-2 rounded-lg bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_140px_auto] sm:items-end"><label className="text-xs font-semibold text-slate-700">Nome da conta<Input autoFocus className="mt-1" value={accountName} onChange={event => setAccountName(event.target.value)} placeholder="Ex.: Banco principal" /></label><label className="text-xs font-semibold text-slate-700">Tipo<select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={accountType} onChange={event => setAccountType(event.target.value as "cash" | "bank")}><option value="bank">Banco</option><option value="cash">Caixa</option></select></label><Button type="button" disabled={accountCreationBusy || accountName.trim().length < 2} onClick={() => onCreateAccount(accountName.trim(), accountType)}>{accountCreationBusy ? "Criando…" : "Criar e selecionar"}</Button></div>}
-            {financialSetupError && <p role="alert" className="mt-3 rounded-lg bg-rose-50 p-3 text-sm text-rose-900">{financialSetupError}</p>}
+              <p className="mt-2 text-[11px] leading-4 text-slate-500">Isenção não está disponível porque o domínio financeiro atual não possui um lançamento isento auditável. Nenhum status fictício será gravado.</p>
+              <div className="mt-3 grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-3" aria-label="Resumo financeiro da confirmação">
+                <div className="bg-slate-50 px-3 py-2"><span className="block text-[10px] uppercase tracking-wide text-slate-500">Total</span><strong className="text-sm text-slate-950 tabular-nums">{money.format(state.totalCents / 100)}</strong></div>
+                <div className="bg-slate-50 px-3 py-2"><span className="block text-[10px] uppercase tracking-wide text-slate-500">Recebido</span><strong className="text-sm text-emerald-700 tabular-nums">{money.format(state.receivedCents / 100)}</strong></div>
+                <div className="bg-slate-50 px-3 py-2"><span className="block text-[10px] uppercase tracking-wide text-slate-500">Restante</span><strong className="text-sm text-slate-950 tabular-nums">{money.format(Math.max(0, state.totalCents - state.receivedCents) / 100)}</strong></div>
+              </div>
+              <div className="mt-2 grid gap-1.5 sm:grid-cols-2 xl:grid-cols-3" aria-label="Parcelas previstas">{installments.length ? installments.map((entry, index) => <div key={`${entry.dueDate}-${index}`} className="flex justify-between gap-2 rounded-md bg-slate-50 px-2.5 py-1.5 text-xs"><span className="text-slate-600">{index + 1}/{installments.length} · {date.format(new Date(`${entry.dueDate}T12:00:00`))}</span><strong className="tabular-nums text-slate-900">{money.format(entry.amountCents / 100)}</strong></div>) : <p className="text-sm text-amber-800">Defina parcelas e vencimento.</p>}</div>
+              <div className="mt-3 flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setSetup(setup === "category" ? null : "category")}><Plus className="mr-1.5 h-3.5 w-3.5" />Nova categoria a receber</Button><Button type="button" size="sm" variant="outline" onClick={() => setSetup(setup === "account" ? null : "account")}><Plus className="mr-1.5 h-3.5 w-3.5" />Nova conta</Button></div>
+              {setup === "category" && <div className="mt-2 flex flex-col gap-2 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-end"><label className="flex-1 text-xs font-semibold text-slate-700">Nome da categoria<Input autoFocus className="mt-1" value={categoryName} onChange={event => setCategoryName(event.target.value)} placeholder="Ex.: Receita de vendas" /></label><Button type="button" disabled={categoryCreationBusy || categoryName.trim().length < 2} onClick={() => onCreateCategory(categoryName.trim())}>{categoryCreationBusy ? "Criando…" : "Criar e selecionar"}</Button></div>}
+              {setup === "account" && <div className="mt-2 grid gap-2 rounded-lg bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_140px_auto] sm:items-end"><label className="text-xs font-semibold text-slate-700">Nome da conta<Input autoFocus className="mt-1" value={accountName} onChange={event => setAccountName(event.target.value)} placeholder="Ex.: Banco principal" /></label><label className="text-xs font-semibold text-slate-700">Tipo<select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={accountType} onChange={event => setAccountType(event.target.value as "cash" | "bank")}><option value="bank">Banco</option><option value="cash">Caixa</option></select></label><Button type="button" disabled={accountCreationBusy || accountName.trim().length < 2} onClick={() => onCreateAccount(accountName.trim(), accountType)}>{accountCreationBusy ? "Criando…" : "Criar e selecionar"}</Button></div>}
+              {financialSetupError && <p role="alert" className="mt-2 rounded-lg bg-rose-50 p-2.5 text-sm text-rose-900">{financialSetupError}</p>}
             </section>
-          </div>
 
-          <aside className="self-start rounded-xl bg-slate-950 p-5 text-white lg:sticky lg:top-0"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Resumo financeiro</p><strong className="mt-2 block text-2xl tabular-nums">{money.format(state.totalCents / 100)}</strong><div className="mt-3 space-y-1 border-t border-slate-700 pt-3 text-sm"><div className="flex justify-between gap-3"><span className="text-slate-300">Recebido</span><strong className="tabular-nums text-emerald-300">{money.format(state.receivedCents / 100)}</strong></div><div className="flex justify-between gap-3"><span className="text-slate-300">Restante</span><strong className="tabular-nums">{money.format(Math.max(0, state.totalCents - state.receivedCents) / 100)}</strong></div></div><div className="mt-4 max-h-64 space-y-2 overflow-y-auto border-t border-slate-700 pt-4 [scrollbar-width:thin]">{installments.length ? installments.map((entry, index) => <div key={`${entry.dueDate}-${index}`} className="flex justify-between gap-3 text-sm"><span className="text-slate-300">{index + 1}/{installments.length} · {date.format(new Date(`${entry.dueDate}T12:00:00`))}</span><strong className="tabular-nums">{money.format(entry.amountCents / 100)}</strong></div>) : <p className="text-sm text-amber-200">Defina parcelas e vencimento.</p>}</div><div className={cn("mt-5 rounded-lg p-3 text-sm", ready ? "bg-emerald-500/15 text-emerald-100" : "bg-amber-500/15 text-amber-100")}><strong className="block">{ready ? "Pronta para confirmar" : "Confirmação bloqueada"}</strong>{ready ? "Todos os requisitos foram atendidos." : `${requirements.filter(item => !item.complete).length + (paymentReady ? 0 : 1)} requisito(s) ainda precisam de atenção.`}</div></aside>
+            <aside className="flex min-w-0 flex-col border-t border-slate-200 bg-slate-50 p-4 lg:border-l lg:border-t-0" aria-labelledby="confirmation-requirements-heading" data-testid="sales-confirmation-decision">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Validação</p>
+              <h3 id="confirmation-requirements-heading" className="mt-1 text-lg font-bold text-slate-950">Esta venda pode ser confirmada?</h3>
+              <div className={cn("mt-3 rounded-lg border px-3 py-2.5 text-sm", ready ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-950")}><strong className="block">{ready ? "Pronta para confirmar" : "Confirmação bloqueada"}</strong><span className="text-xs">{ready ? "Todos os requisitos foram atendidos." : `${requirements.filter(item => !item.complete).length + (paymentReady ? 0 : 1)} requisito(s) ainda precisam de atenção.`}</span></div>
+              <div className="mt-3 divide-y divide-slate-200 border-y border-slate-200">{requirements.map(requirement => <div key={requirement.key} className="flex items-center gap-2 py-2 text-sm"><span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-full", requirement.complete ? "bg-emerald-600 text-white" : "border border-amber-400 bg-white text-amber-700")}>{requirement.complete ? <Check className="h-3.5 w-3.5" /> : "!"}</span><strong className={cn("min-w-0 flex-1", requirement.complete ? "text-slate-700" : "text-amber-950")}>{requirement.label}</strong>{!requirement.complete && requirement.actionLabel && <button type="button" className="shrink-0 text-xs font-semibold text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => focus(requirement.key === "payment" ? "payment" : requirement.key === "installments" ? "installments" : requirement.key)}>{requirement.actionLabel}</button>}</div>)}</div>
+              {optionsError && <p role="alert" className="mt-3 text-xs leading-5 text-rose-800">Os cadastros financeiros precisam ser carregados antes da confirmação.</p>}
+              {financialSetupError && <p role="alert" className="mt-3 text-xs leading-5 text-rose-800">{financialSetupError}</p>}
+              <div className="mt-auto grid grid-cols-1 gap-2 pt-4 sm:grid-cols-[auto_minmax(0,1fr)] lg:grid-cols-1 xl:grid-cols-[auto_minmax(0,1fr)]"><Button variant="outline" onClick={() => setState(null)}>Voltar</Button><Button className="bg-blue-600 text-white hover:bg-blue-700" disabled={busy || !ready} onClick={() => onConfirm(state)}>{busy ? "Confirmando…" : "Confirmar venda e criar títulos"}</Button></div>
+            </aside>
+          </div>
         </div>
-        <DialogFooter className="sticky bottom-0 border-t border-slate-200 bg-white px-6 py-4"><Button variant="outline" onClick={() => setState(null)}>Voltar</Button><Button disabled={busy || !ready} onClick={() => onConfirm(state)}>{busy ? "Confirmando…" : "Confirmar venda e criar títulos"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
 type ReasonState = { publicId: string; reason: string };
+type CommercialChangeState = ReasonState & {
+  toStatus: "negotiation" | "approved" | "lost";
+};
 function ReasonDialog({ title, description, confirmLabel, state, setState, busy, destructive, onConfirm }: {
   title: string;
   description: string;
@@ -1541,6 +1739,28 @@ function ReasonDialog({ title, description, confirmLabel, state, setState, busy,
   if (!state) return null;
   return (
     <Dialog open onOpenChange={open => !open && setState(null)}><DialogContent className="bg-white"><DialogHeader><DialogTitle>{title}</DialogTitle><p className="text-sm leading-6 text-slate-600">{description}</p></DialogHeader><label className="text-sm font-semibold text-slate-700">Motivo<textarea autoFocus className="mt-1 min-h-24 w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={state.reason} onChange={event => setState({ ...state, reason: event.target.value })} /></label><DialogFooter><Button variant="outline" onClick={() => setState(null)}>Voltar</Button><Button className={destructive ? "bg-rose-600 text-white hover:bg-rose-700" : undefined} disabled={busy || state.reason.trim().length < 3} onClick={() => onConfirm(state)}>{busy ? "Processando…" : confirmLabel}</Button></DialogFooter></DialogContent></Dialog>
+  );
+}
+
+function CommercialReasonDialog({ state, setState, busy, onConfirm }: {
+  state: CommercialChangeState | null;
+  setState: React.Dispatch<React.SetStateAction<CommercialChangeState | null>>;
+  busy: boolean;
+  onConfirm: (state: CommercialChangeState) => void;
+}) {
+  if (!state) return null;
+  const losing = state.toStatus === "lost";
+  return (
+    <Dialog open onOpenChange={open => !open && setState(null)}>
+      <DialogContent className="bg-white">
+        <DialogHeader>
+          <DialogTitle>{losing ? "Marcar orçamento como perdido" : "Retomar negociação"}</DialogTitle>
+          <p className="text-sm leading-6 text-slate-600">{losing ? "O motivo ajuda a qualificar o histórico comercial e permanece auditável." : "A correção reabre a negociação sem apagar a aprovação anterior do histórico."}</p>
+        </DialogHeader>
+        <label className="text-sm font-semibold text-slate-700">Motivo obrigatório<textarea autoFocus className="mt-1 min-h-24 w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={state.reason} onChange={event => setState({ ...state, reason: event.target.value })} /></label>
+        <DialogFooter><Button variant="outline" onClick={() => setState(null)}>Voltar</Button><Button className={losing ? "bg-rose-600 text-white hover:bg-rose-700" : undefined} disabled={busy || state.reason.trim().length < 3} onClick={() => onConfirm(state)}>{busy ? "Atualizando…" : "Confirmar alteração"}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1609,11 +1829,79 @@ function MoneyOrQuantity({ label, value, onChange, money: monetary }: { label: s
   );
 }
 
-function ProductThumb({ imagePath, name, compact = false }: { imagePath?: string | null; name: string; compact?: boolean }) {
+function SaleActionsMenu({ order, canWrite, onOpen, onPrint, onEdit, onDuplicate, onCommercialStatus, onConvert, onConfirm, onTransition, onCancel, onArchive }: {
+  order: SaleListItem;
+  canWrite: boolean;
+  onOpen: () => void;
+  onPrint: () => void;
+  onEdit: () => void;
+  onDuplicate: () => void;
+  onCommercialStatus: (toStatus: "negotiation" | "approved" | "lost", requireReason: boolean) => void;
+  onConvert: () => void;
+  onConfirm: () => void;
+  onTransition: (toStage: Stage) => void;
+  onCancel: () => void;
+  onArchive: () => void;
+}) {
+  const currentIndex = stageOrder.indexOf(order.currentStage as Stage);
+  const next = stageOrder[currentIndex + 1];
+  const correctionTarget: Stage | null = order.currentStage === "separation"
+    ? "confirmed"
+    : order.currentStage === "received"
+      ? "shipped"
+      : order.currentStage === "completed"
+        ? "received"
+        : null;
+  const terminal = order.documentType === "quote"
+    ? ["converted", "lost", "cancelled"].includes(order.commercialStatus)
+    : order.cancelled || order.currentStage === "completed";
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" aria-label={`Ações de ${order.documentType === "quote" ? "orçamento" : "venda"} ${order.orderNumber}`}>
+          <MoreHorizontal className="h-5 w-5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="z-[80] min-w-60 border-slate-200 bg-white shadow-xl">
+        <DropdownMenuItem onSelect={onOpen}><Eye className="mr-2 h-4 w-4" />Ver detalhes</DropdownMenuItem>
+        <DropdownMenuItem onSelect={onPrint}><ReceiptText className="mr-2 h-4 w-4" />Imprimir documento</DropdownMenuItem>
+        {canWrite && order.canEdit && <DropdownMenuItem onSelect={onEdit}><Edit3 className="mr-2 h-4 w-4" />Editar documento</DropdownMenuItem>}
+        {canWrite && <DropdownMenuItem onSelect={onDuplicate}><Copy className="mr-2 h-4 w-4" />Duplicar como rascunho</DropdownMenuItem>}
+        {canWrite && order.documentType === "quote" && ["draft", "negotiation", "approved"].includes(order.commercialStatus) && <DropdownMenuSeparator />}
+        {canWrite && order.documentType === "quote" && order.commercialStatus === "draft" && <DropdownMenuItem onSelect={() => onCommercialStatus("negotiation", false)}><FileClock className="mr-2 h-4 w-4" />Iniciar negociação</DropdownMenuItem>}
+        {canWrite && order.documentType === "quote" && order.commercialStatus === "negotiation" && <DropdownMenuItem onSelect={() => onCommercialStatus("approved", false)}><Check className="mr-2 h-4 w-4" />Aprovar orçamento</DropdownMenuItem>}
+        {canWrite && order.documentType === "quote" && order.commercialStatus === "negotiation" && <DropdownMenuItem onSelect={() => onCommercialStatus("lost", true)} className="text-rose-700"><XCircle className="mr-2 h-4 w-4" />Marcar como perdido</DropdownMenuItem>}
+        {canWrite && order.documentType === "quote" && order.commercialStatus === "approved" && <DropdownMenuItem onSelect={onConvert}><ShoppingCart className="mr-2 h-4 w-4" />Converter em venda</DropdownMenuItem>}
+        {canWrite && order.documentType === "quote" && order.commercialStatus === "approved" && <DropdownMenuItem onSelect={() => onCommercialStatus("negotiation", true)}><RotateCcw className="mr-2 h-4 w-4" />Retomar negociação</DropdownMenuItem>}
+        {canWrite && order.documentType === "sale" && !order.cancelled && <DropdownMenuSeparator />}
+        {canWrite && order.documentType === "sale" && !order.cancelled && order.currentStage === "created" && <DropdownMenuItem onSelect={onConfirm}><Check className="mr-2 h-4 w-4" />Revisar e confirmar</DropdownMenuItem>}
+        {canWrite && order.documentType === "sale" && !order.cancelled && next && order.currentStage !== "created" && <DropdownMenuItem onSelect={() => onTransition(next)}><ArrowRight className="mr-2 h-4 w-4" />{nextActionLabel(next)}</DropdownMenuItem>}
+        {canWrite && order.documentType === "sale" && !order.cancelled && correctionTarget && <DropdownMenuItem onSelect={() => onTransition(correctionTarget)}><RotateCcw className="mr-2 h-4 w-4" />Corrigir para {stageLabels[correctionTarget]}</DropdownMenuItem>}
+        {canWrite && order.documentType === "sale" && !order.cancelled && currentIndex < stageOrder.indexOf("shipped") && order.paidCents === 0 && <DropdownMenuItem onSelect={onCancel} className="text-rose-700"><XCircle className="mr-2 h-4 w-4" />Cancelar venda</DropdownMenuItem>}
+        {canWrite && order.documentType === "sale" && !order.cancelled && currentIndex < stageOrder.indexOf("shipped") && order.paidCents > 0 && <DropdownMenuItem disabled><XCircle className="mr-2 h-4 w-4" />Cancelamento exige estorno</DropdownMenuItem>}
+        {canWrite && order.documentType === "sale" && order.currentStage === "confirmed" && <DropdownMenuItem disabled><RotateCcw className="mr-2 h-4 w-4" />Retorno exige cancelar títulos</DropdownMenuItem>}
+        {canWrite && order.documentType === "sale" && order.currentStage === "shipped" && <DropdownMenuItem disabled><RotateCcw className="mr-2 h-4 w-4" />Retorno exige reversão de estoque</DropdownMenuItem>}
+        {canWrite && terminal && !order.archivedAt && <><DropdownMenuSeparator /><DropdownMenuItem onSelect={onArchive}><Archive className="mr-2 h-4 w-4" />Arquivar</DropdownMenuItem></>}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function DocumentTypeBadge({ documentType }: { documentType: "quote" | "sale" }) {
+  return <span className={cn("inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide", documentType === "quote" ? "bg-violet-100 text-violet-800" : "bg-blue-100 text-blue-800")}>{documentType === "quote" ? "Orçamento" : "Venda"}</span>;
+}
+
+function CommercialBadge({ value }: { value: string }) {
+  const style = value === "approved" ? "bg-emerald-100 text-emerald-800" : value === "lost" || value === "cancelled" ? "bg-rose-100 text-rose-800" : value === "converted" ? "bg-blue-100 text-blue-800" : value === "negotiation" ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-700";
+  return <span className={cn("inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold", style)}>{commercialStatusLabels[value as keyof typeof commercialStatusLabels] ?? value}</span>;
+}
+
+function ProductThumb({ imagePath, name, compact = false, large = false }: { imagePath?: string | null; name: string; compact?: boolean; large?: boolean }) {
+  const size = large ? "h-14 w-14" : compact ? "h-9 w-9" : "h-11 w-11";
   return imagePath ? (
-    <img src={productMediaUrl(imagePath)} crossOrigin="use-credentials" alt="" className={cn("shrink-0 rounded-md bg-slate-100 object-cover", compact ? "h-7 w-7" : "h-10 w-10")} />
+    <img src={productMediaUrl(imagePath)} crossOrigin="use-credentials" alt={`Imagem de ${name}`} className={cn("shrink-0 rounded-lg bg-slate-100 object-cover ring-1 ring-slate-200", size)} />
   ) : (
-    <span className={cn("flex shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500", compact ? "h-7 w-7" : "h-10 w-10")} aria-label={`Sem imagem para ${name}`}><PackageOpen className="h-5 w-5" /></span>
+    <span className={cn("flex shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 ring-1 ring-slate-200", size)} aria-label={`Sem imagem para ${name}`}><PackageOpen className={large ? "h-6 w-6" : "h-5 w-5"} /></span>
   );
 }
 
@@ -1782,10 +2070,10 @@ function SaleDocuments({ salePublicId, canWrite }: { salePublicId: string; canWr
 }
 
 function AddressSummary({ address }: { address: SalesAddress | null }) {
-  if (!address) return <p className="mt-2 text-xs leading-5 text-amber-800">Endereço histórico não registrado nesta venda legada.</p>;
+  if (!address) return <p className="text-xs leading-5 text-amber-800">Endereço histórico não registrado nesta venda legada.</p>;
   const line = [address.street, address.number, address.complement].filter(Boolean).join(", ");
   const city = [address.district, address.city, address.state].filter(Boolean).join(" · ");
-  return <address className="mt-2 not-italic text-xs leading-5 text-slate-600"><strong className="block text-slate-800">{address.recipientName || "Destinatário não informado"}</strong>{line || "Logradouro não informado"}<br />{city || "Cidade não informada"}{address.postalCode ? <><br />CEP {address.postalCode}</> : null}</address>;
+  return <address className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 not-italic text-xs leading-5 text-slate-600"><strong className="text-slate-800">{address.recipientName || "Destinatário não informado"}</strong><span className="min-w-0 break-words">{line || "Logradouro não informado"} · {city || "Cidade não informada"}{address.postalCode ? ` · CEP ${address.postalCode}` : ""}</span></address>;
 }
 
 function State({ title, description, retry, error }: { title: string; description?: string; retry?: () => void; error?: boolean }) {
@@ -1813,6 +2101,11 @@ function eventLabel(eventType: string, toStage: string | null) {
   if (eventType === "payment_registered") return "Recebimento registrado";
   if (eventType === "document_added") return "Documento anexado";
   if (eventType === "document_removed") return "Documento removido";
+  if (eventType === "duplicated") return "Documento duplicado";
+  if (eventType === "quote_status_changed") return "Status comercial atualizado";
+  if (eventType === "quote_converted") return "Orçamento convertido em venda";
+  if (eventType === "archived") return "Documento arquivado";
+  if (eventType === "financial_adjusted") return "Títulos conciliados após edição";
   if (eventType === "stage_transition" && toStage && toStage in stageLabels) return `Etapa alterada para ${stageLabels[toStage as Stage]}`;
   return "Evento registrado";
 }

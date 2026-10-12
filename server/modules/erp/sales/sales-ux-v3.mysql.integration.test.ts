@@ -46,6 +46,7 @@ async function clean() {
     "DELETE h FROM erp_sale_order_history h INNER JOIN erp_sale_orders o ON o.id=h.sale_order_id WHERE o.client_id IN (?,?)",
     "DELETE i FROM erp_sale_order_items i INNER JOIN erp_sale_orders o ON o.id=i.sale_order_id WHERE o.client_id IN (?,?)",
     "DELETE FROM erp_sale_orders WHERE client_id IN (?,?)",
+    "DELETE FROM erp_sale_document_sequences WHERE client_id IN (?,?)",
     "DELETE FROM erp_sale_order_sequences WHERE client_id IN (?,?)",
     "DELETE FROM erp_stock_movements WHERE client_id IN (?,?)",
     "DELETE FROM erp_stock_balances WHERE client_id IN (?,?)",
@@ -438,6 +439,114 @@ physical.sequential("ERP sales UX v3 physical flow", () => {
     expect(financeState[0]).toMatchObject({
       current_balance_cents: 40_000,
       ledgerCount: 1,
+    });
+  });
+
+  it("serializes V/O codes, duplication, quote conversion, transitions and archive", async () => {
+    const db = getPool();
+    const crmClientId = crypto.randomUUID();
+    await db.execute(
+      `INSERT INTO megadesk_crm_clients
+        (crm_client_id,client_id,company_name,responsible_name,status)
+       VALUES(?,?,?,'Responsável físico','ativo')`,
+      [crmClientId, identity.clientId, "Cliente concorrência V5"]
+    );
+
+    const erp = new ErpService(new ErpRepository(), undefined, silent);
+    const product = await erp.createProduct(identity, {
+      name: "Produto concorrência V5",
+      sku: "CONC-V5",
+      barcode: null,
+      description: null,
+      category: "Vendas",
+      unit: "unit",
+      costPriceCents: 100,
+      salePriceCents: 200,
+      minimumStock: "0",
+    });
+    const sales = new SaleService(new SaleRepository(), silent);
+    const inventoryItemPublicId = (await sales.catalog(identity, {
+      search: "CONC-V5",
+      page: 1,
+      pageSize: 12,
+    })).items[0].inventoryItemPublicId;
+    await erp.moveStock(identity, {
+      productPublicId: product.publicId,
+      inventoryItemPublicId,
+      type: "manual_in",
+      quantity: "100.000",
+      reason: "Saldo sintético concorrente",
+      idempotencyKey: crypto.randomUUID(),
+    });
+    const command = (documentType: "sale" | "quote") => saleDraftInput.parse({
+      documentType,
+      crmClientId,
+      items: [{
+        productPublicId: product.publicId,
+        inventoryItemPublicId,
+        quantity: "1.000",
+        unitPriceCents: 200,
+      }],
+    });
+
+    const createdSales = await Promise.all(
+      Array.from({ length: 4 }, () => sales.create(identity, command("sale")))
+    );
+    const createdQuotes = await Promise.all(
+      Array.from({ length: 4 }, () => sales.create(identity, command("quote")))
+    );
+    expect(createdSales.map(order => order.orderNumber).sort()).toEqual([
+      "V-1", "V-2", "V-3", "V-4",
+    ]);
+    expect(createdQuotes.map(order => order.orderNumber).sort()).toEqual([
+      "O-1", "O-2", "O-3", "O-4",
+    ]);
+
+    const duplicateKey = crypto.randomUUID();
+    const duplicates = await Promise.all([
+      sales.duplicate(identity, createdSales[0].publicId, duplicateKey),
+      sales.duplicate(identity, createdSales[0].publicId, duplicateKey),
+    ]);
+    expect(new Set(duplicates.map(result => result.publicId)).size).toBe(1);
+    expect(duplicates.map(result => result.replay).sort()).toEqual([false, true]);
+
+    const quote = createdQuotes[0];
+    expect((await sales.commercialTransition(identity, {
+      publicId: quote.publicId,
+      toStatus: "negotiation",
+      reason: null,
+    })).commercialStatus).toBe("negotiation");
+    expect((await sales.commercialTransition(identity, {
+      publicId: quote.publicId,
+      toStatus: "approved",
+      reason: null,
+    })).commercialStatus).toBe("approved");
+
+    const conversionKey = crypto.randomUUID();
+    const conversions = await Promise.all([
+      sales.convertQuote(identity, quote.publicId, conversionKey),
+      sales.convertQuote(identity, quote.publicId, conversionKey),
+    ]);
+    expect(new Set(conversions.map(result => result.publicId)).size).toBe(1);
+    expect(conversions.map(result => result.replay).sort()).toEqual([false, true]);
+    expect(conversions[0].orderNumber).toMatch(/^V-\d+$/);
+
+    const archived = await sales.archive(
+      identity,
+      quote.publicId,
+      "Orçamento convertido no ensaio físico"
+    );
+    expect(archived.archivedAt).not.toBeNull();
+    const [events] = await db.execute<RowDataPacket[]>(
+      `SELECT event_type,COUNT(*) total FROM erp_sale_order_events
+       WHERE client_id=? AND sale_order_id=?
+       GROUP BY event_type`,
+      [identity.clientId, quote.id]
+    );
+    expect(Object.fromEntries(events.map(row => [row.event_type, Number(row.total)]))).toMatchObject({
+      quote_status_changed: 2,
+      quote_converted: 1,
+      archived: 1,
     });
   });
 });

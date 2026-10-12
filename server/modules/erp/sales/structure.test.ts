@@ -11,6 +11,10 @@ const migration = readFileSync(
   "drizzle/main-migrations/0037_spicy_wilson_fisk.sql",
   "utf8"
 );
+const commercialMigration = readFileSync(
+  "drizzle/main-migrations/0039_sweet_firelord.sql",
+  "utf8"
+);
 
 describe("sales B+C architecture", () => {
   it("keeps every product and inventory join tenant-scoped", () => {
@@ -181,5 +185,30 @@ describe("sales B+C architecture", () => {
     expect(migration).not.toMatch(/(?:^|statement-breakpoint\s*)(?:DROP|TRUNCATE|DELETE|RENAME)\b/i);
     expect(migration).not.toContain("Evolution");
     expect(migration).not.toContain("Cloudflare");
+  });
+
+  it("keeps the commercial document migration additive and concurrency-safe", () => {
+    expect(commercialMigration).toContain("erp_sale_document_sequences");
+    expect(commercialMigration).toContain("document_type");
+    expect(commercialMigration).toContain("commercial_status");
+    expect(commercialMigration).toContain("source_quote_id");
+    expect(commercialMigration).toContain("conversion_idempotency_key");
+    expect(commercialMigration).not.toMatch(/(?:^|statement-breakpoint\s*)(?:DROP|TRUNCATE|DELETE|RENAME)\b/i);
+  });
+
+  it("converts quotes transactionally without payments or stock effects", () => {
+    const conversion = repository.slice(
+      repository.indexOf("async convertQuote("),
+      repository.indexOf("async archive(")
+    );
+    expect(conversion).toContain("beginTransaction");
+    expect(conversion).toContain("nextCommercialCode");
+    expect(conversion).toContain("source_quote_id");
+    expect(conversion).toContain("conversion_idempotency_key");
+    expect(conversion).toContain("commercial_status='converted'");
+    expect(conversion).not.toContain("erp_financial_entries");
+    expect(conversion).not.toContain("erp_stock_movements");
+    expect(conversion).toContain("await connection.commit()");
+    expect(conversion).toContain("await connection.rollback()");
   });
 });

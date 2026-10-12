@@ -16,13 +16,18 @@ import { InventoryRepository } from "../inventory/repository";
 import {
   calculateSaleTotals,
   canCancelSaleAtStage,
+  commercialCode,
   derivePaymentStatus,
   isStockExitTransition,
   legacySaleStage,
   lineTotalCents,
   saleTransitionKind,
+  saleCommercialTransitionKind,
   type SaleAddressCorrectionInput,
+  type SaleCommercialStatus,
+  type SaleCommercialTransitionInput,
   type SaleConfirmationInput,
+  type SaleDocumentType,
   type SaleDraftInput,
   type SaleListInput,
   type SaleStage,
@@ -40,9 +45,13 @@ type OrderRow = RowDataPacket & {
   public_id: string;
   client_id: string;
   order_number: string;
+  document_type: SaleDocumentType;
+  commercial_status: SaleCommercialStatus;
+  commercial_date: string | null;
   crm_client_id: string;
   customer_name_snapshot: string;
   seller_name_snapshot: string | null;
+  seller_user_id: string | null;
   status: SaleStatus;
   current_stage: SaleStage | null;
   notes: string | null;
@@ -52,14 +61,21 @@ type OrderRow = RowDataPacket & {
   subtotal_cents: number;
   discount_cents: number;
   freight_cents: number;
+  charges_cents: number;
   total_cents: number;
   payment_method_snapshot: string | null;
+  payment_terms_snapshot: string | null;
   confirmation_idempotency_key: string | null;
   confirmation_payload_hash: string | null;
+  source_quote_id: number | null;
+  conversion_idempotency_key: string | null;
+  duplicate_source_id: number | null;
+  duplication_idempotency_key: string | null;
   confirmed_at: string | null;
   fulfilled_at: string | null;
   cancelled_at: string | null;
   cancellation_reason: string | null;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
   paid_cents?: number;
@@ -138,6 +154,71 @@ export class SaleRepository {
     return new InventoryRepository(this.db());
   }
 
+  private async nextCommercialCode(
+    connection: PoolConnection,
+    clientId: string,
+    documentType: SaleDocumentType
+  ) {
+    const prefix = documentType === "quote" ? "O" : "V";
+    await connection.execute(
+      `INSERT INTO erp_sale_document_sequences(client_id,document_type,next_number)
+       SELECT ?,?,COALESCE(MAX(CAST(SUBSTRING(order_number,3) AS UNSIGNED)),0)+1
+       FROM erp_sale_orders
+       WHERE client_id=? AND document_type=? AND order_number REGEXP ?
+       ON DUPLICATE KEY UPDATE next_number=next_number`,
+      [clientId, documentType, clientId, documentType, `^${prefix}-[0-9]+$`]
+    );
+    const [rows] = await connection.execute<RowDataPacket[]>(
+      `SELECT next_number FROM erp_sale_document_sequences
+       WHERE client_id=? AND document_type=? FOR UPDATE`,
+      [clientId, documentType]
+    );
+    const next = Number(rows[0]?.next_number);
+    if (!Number.isSafeInteger(next) || next < 1) {
+      throw new ErpDomainError("CONFLICT", "Sequência comercial inválida.");
+    }
+    await connection.execute(
+      `UPDATE erp_sale_document_sequences SET next_number=?
+       WHERE client_id=? AND document_type=?`,
+      [next + 1, clientId, documentType]
+    );
+    return commercialCode(documentType, next);
+  }
+
+  private async resolveSeller(
+    connection: PoolConnection,
+    clientId: string,
+    fallback: Actor,
+    sellerUserId?: string | null
+  ) {
+    const publicId = sellerUserId || fallback.userId;
+    const [rows] = await connection.execute<RowDataPacket[]>(
+      `SELECT u.user_id publicId,COALESCE(NULLIF(u.name,''),u.user_id) name
+       FROM megadesk_domain_client_users u
+       WHERE u.client_id=? AND u.user_id=? LIMIT 1`,
+      [clientId, publicId]
+    );
+    if (!rows[0]) {
+      if (!sellerUserId) return { publicId: fallback.userId, name: fallback.name };
+      throw new ErpDomainError("NOT_FOUND", "Vendedor não encontrado neste tenant.");
+    }
+    return { publicId: String(rows[0].publicId), name: String(rows[0].name) };
+  }
+
+  private canEditOrder(order: {
+    documentType: SaleDocumentType;
+    commercialStatus: SaleCommercialStatus;
+    currentStage: SaleStage;
+    cancelled: boolean;
+    archivedAt: string | null;
+  }) {
+    if (order.cancelled || order.archivedAt) return false;
+    if (order.documentType === "quote") {
+      return !["converted", "lost", "cancelled"].includes(order.commercialStatus);
+    }
+    return ["created", "confirmed", "separation"].includes(order.currentStage);
+  }
+
   private async insertEvent(
     connection: PoolConnection,
     input: {
@@ -150,7 +231,12 @@ export class SaleRepository {
         | "stage_transition"
         | "cancelled"
         | "address_corrected"
-        | "payment_registered";
+        | "payment_registered"
+        | "duplicated"
+        | "quote_status_changed"
+        | "quote_converted"
+        | "archived"
+        | "financial_adjusted";
       actor: Actor;
       fromStage?: SaleStage | null;
       toStage?: SaleStage | null;
@@ -214,13 +300,16 @@ export class SaleRepository {
       [clientId]
     );
     const [sellers] = await this.db().execute<RowDataPacket[]>(
-      `SELECT DISTINCT o.created_by publicId,
-              COALESCE(u.name,o.seller_name_snapshot,o.created_by) name
+      `SELECT DISTINCT u.user_id publicId,COALESCE(NULLIF(u.name,''),u.user_id) name
+       FROM megadesk_domain_client_users u
+       WHERE u.client_id=?
+       UNION
+       SELECT DISTINCT COALESCE(o.seller_user_id,o.created_by) publicId,
+              COALESCE(o.seller_name_snapshot,o.seller_user_id,o.created_by) name
        FROM erp_sale_orders o
-       LEFT JOIN megadesk_domain_client_users u
-         ON u.client_id=o.client_id AND u.user_id=o.created_by
-       WHERE o.client_id=? ORDER BY name`,
-      [clientId]
+       WHERE o.client_id=?
+       ORDER BY name`,
+      [clientId, clientId]
     );
     return {
       categories: categories.map(row => ({
@@ -367,14 +456,15 @@ export class SaleRepository {
          WHERE e.source_type='sales_order'
          GROUP BY e.client_id,e.source_public_id
        ) fin ON fin.client_id=o.client_id AND fin.source_public_id=o.public_id
-       WHERE o.client_id=? AND DATE(o.created_at) BETWEEN ? AND ?`,
+       WHERE o.client_id=? AND o.document_type='sale' AND o.archived_at IS NULL
+         AND DATE(COALESCE(o.commercial_date,o.created_at)) BETWEEN ? AND ?`,
       [clientId, start, end]
     );
     const value = rows[0] ?? {};
     const orderCount = Number(value.orderCount ?? 0);
     const salesCents = Number(value.salesCents ?? 0);
     return {
-      period: { from: start, to: end, criterion: "data de criação da venda" },
+      period: { from: start, to: end, criterion: "data comercial (criação nos registros legados)" },
       salesCents,
       receivableCents: Number(value.receivableCents ?? 0),
       orderCount,
@@ -391,8 +481,9 @@ export class SaleRepository {
     const offset = (integer(options.page, 1, Number.MAX_SAFE_INTEGER) - 1) * limit;
     const where = ["o.client_id=?"];
     const values: Array<string | number> = [clientId];
-    if (options.kind === "quotes") where.push("o.status='draft'");
-    if (options.kind === "orders") where.push("o.status<>'draft'");
+    if (options.kind === "quotes") where.push("o.document_type='quote'");
+    if (options.kind === "orders") where.push("o.document_type='sale'");
+    if (!options.includeArchived) where.push("o.archived_at IS NULL");
     if (options.search) {
       where.push(`(o.order_number LIKE ? OR o.customer_name_snapshot LIKE ? OR EXISTS(
         SELECT 1 FROM erp_sale_order_items si
@@ -413,6 +504,10 @@ export class SaleRepository {
       where.push(`${STAGE_SQL}=?`);
       values.push(options.stage);
     }
+    if (options.commercialStatus) {
+      where.push("o.commercial_status=?");
+      values.push(options.commercialStatus);
+    }
     if (options.paymentStatus) {
       where.push(
         options.paymentStatus === "pending"
@@ -427,15 +522,15 @@ export class SaleRepository {
       values.push(options.paymentMethod);
     }
     if (options.sellerUserId) {
-      where.push("o.created_by=?");
+      where.push("COALESCE(o.seller_user_id,o.created_by)=?");
       values.push(options.sellerUserId);
     }
     if (options.from) {
-      where.push("DATE(o.created_at)>=?");
+      where.push("DATE(COALESCE(o.commercial_date,o.created_at))>=?");
       values.push(options.from);
     }
     if (options.to) {
-      where.push("DATE(o.created_at)<=?");
+      where.push("DATE(COALESCE(o.commercial_date,o.created_at))<=?");
       values.push(options.to);
     }
     const joins = `
@@ -570,6 +665,14 @@ export class SaleRepository {
        WHERE h.sale_order_id=? ORDER BY h.created_at,h.id`,
       [clientId, order.id]
     );
+    const [relations] = await connection.execute<RowDataPacket[]>(
+      `SELECT 'source_quote' relation_type,public_id,order_number
+       FROM erp_sale_orders WHERE client_id=? AND id=?
+       UNION ALL
+       SELECT 'converted_sale' relation_type,public_id,order_number
+       FROM erp_sale_orders WHERE client_id=? AND source_quote_id=?`,
+      [clientId, order.source_quote_id ?? 0, clientId, order.id]
+    );
     const installments = entries.map(entry => ({
       publicId: String(entry.publicId),
       installment: Number(entry.installment),
@@ -641,6 +744,18 @@ export class SaleRepository {
           after: parseJson(entry.afterJson ? String(entry.afterJson) : null),
         })),
       ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+      sourceQuote: relations.find(row => row.relation_type === "source_quote")
+        ? {
+            publicId: String(relations.find(row => row.relation_type === "source_quote")!.public_id),
+            orderNumber: String(relations.find(row => row.relation_type === "source_quote")!.order_number),
+          }
+        : null,
+      convertedSale: relations.find(row => row.relation_type === "converted_sale")
+        ? {
+            publicId: String(relations.find(row => row.relation_type === "converted_sale")!.public_id),
+            orderNumber: String(relations.find(row => row.relation_type === "converted_sale")!.order_number),
+          }
+        : null,
       currentStage,
     };
   }
@@ -761,6 +876,120 @@ export class SaleRepository {
     }
   }
 
+  private async reconcileConfirmedTotal(
+    connection: PoolConnection,
+    clientId: string,
+    actor: Actor,
+    order: NonNullable<Awaited<ReturnType<SaleRepository["detail"]>>>,
+    newTotalCents: number
+  ) {
+    const previousTotalCents = order.totalCents;
+    if (previousTotalCents === newTotalCents || order.documentType !== "sale") return null;
+    if (order.currentStage === "created") return null;
+    const [entries] = await connection.execute<RowDataPacket[]>(
+      `SELECT id,amount_cents,status,source_installment
+       FROM erp_financial_entries
+       WHERE client_id=? AND source_type='sales_order' AND source_public_id=?
+       ORDER BY source_installment,id FOR UPDATE`,
+      [clientId, order.publicId]
+    );
+    if (!entries.length) {
+      throw new ErpDomainError(
+        "CONFLICT",
+        "A venda confirmada não possui títulos conciliáveis. Corrija o financeiro antes de editar o total."
+      );
+    }
+    const enriched: Array<RowDataPacket & { paidCents: number }> = [];
+    for (const entry of entries) {
+      const [payments] = await connection.execute<RowDataPacket[]>(
+        `SELECT amount_cents FROM erp_financial_settlements
+         WHERE client_id=? AND financial_entry_id=? ORDER BY id FOR UPDATE`,
+        [clientId, entry.id]
+      );
+      enriched.push({
+        ...entry,
+        paidCents: payments.reduce((sum, payment) => sum + Number(payment.amount_cents), 0),
+      });
+    }
+    const paidCents = enriched.reduce((sum, entry) => sum + entry.paidCents, 0);
+    const titleTotalCents = enriched.reduce((sum, entry) => sum + Number(entry.amount_cents), 0);
+    if (titleTotalCents !== previousTotalCents) {
+      throw new ErpDomainError(
+        "CONFLICT",
+        "Os títulos atuais não correspondem ao total da venda. Corrija o financeiro antes de editar valores."
+      );
+    }
+    if (newTotalCents < paidCents) {
+      throw new ErpDomainError(
+        "CONFLICT",
+        `O novo total não pode ser menor que o valor já recebido (${paidCents} centavos). Os recebimentos foram preservados.`
+      );
+    }
+    let delta = newTotalCents - previousTotalCents;
+    if (delta > 0) {
+      const target = [...enriched].reverse().find(entry => entry.status !== "cancelled");
+      if (!target) throw new ErpDomainError("CONFLICT", "Nenhum título pode receber o ajuste financeiro.");
+      await connection.execute(
+        `UPDATE erp_financial_entries
+         SET amount_cents=amount_cents+?,status='open',settled_at=NULL,settled_by=NULL
+         WHERE client_id=? AND id=?`,
+        [delta, clientId, target.id]
+      );
+      delta = 0;
+    } else if (delta < 0) {
+      let reduction = Math.abs(delta);
+      for (const entry of [...enriched].reverse()) {
+        if (entry.status === "cancelled" || reduction <= 0) continue;
+        const amountCents = Number(entry.amount_cents);
+        const reducible = Math.max(0, amountCents - entry.paidCents);
+        if (!reducible) continue;
+        const applied = Math.min(reduction, reducible);
+        const nextAmount = amountCents - applied;
+        const nextStatus = nextAmount === 0 ? "cancelled" : nextAmount === entry.paidCents ? "settled" : "open";
+        await connection.execute(
+          `UPDATE erp_financial_entries SET amount_cents=?,status=?,
+           cancelled_at=CASE WHEN ?='cancelled' THEN NOW() ELSE cancelled_at END,
+           cancelled_by=CASE WHEN ?='cancelled' THEN ? ELSE cancelled_by END,
+           cancellation_reason=CASE WHEN ?='cancelled' THEN 'Ajuste transacional da venda' ELSE cancellation_reason END,
+           settled_at=CASE WHEN ?='settled' THEN COALESCE(settled_at,NOW()) ELSE NULL END,
+           settled_by=CASE WHEN ?='settled' THEN COALESCE(settled_by,?) ELSE NULL END
+           WHERE client_id=? AND id=?`,
+          [
+            nextAmount,
+            nextStatus,
+            nextStatus,
+            nextStatus,
+            actor.userId,
+            nextStatus,
+            nextStatus,
+            nextStatus,
+            actor.userId,
+            clientId,
+            entry.id,
+          ]
+        );
+        reduction -= applied;
+      }
+      if (reduction > 0) {
+        throw new ErpDomainError(
+          "CONFLICT",
+          "O total não pode ser reduzido sem reescrever recebimentos já registrados."
+        );
+      }
+    }
+    await this.insertEvent(connection, {
+      clientId,
+      orderId: order.id,
+      eventType: "financial_adjusted",
+      actor,
+      fromStage: order.currentStage,
+      toStage: order.currentStage,
+      before: { totalCents: previousTotalCents, paidCents },
+      after: { totalCents: newTotalCents, paidCents },
+    });
+    return { previousTotalCents, newTotalCents, paidCents };
+  }
+
   async save(
     clientId: string,
     actor: Actor,
@@ -770,10 +999,16 @@ export class SaleRepository {
     const connection = await this.db().getConnection();
     let orderId = 0;
     const target = publicId ?? randomUUID();
+    let financialAdjustment: { previousTotalCents: number; newTotalCents: number; paidCents: number } | null = null;
     try {
       await connection.beginTransaction();
       const refs = await this.validateReferences(connection, clientId, actor.userId, input);
-      const totals = calculateSaleTotals(input.items, input.orderDiscountCents, input.freightCents);
+      const totals = calculateSaleTotals(
+        input.items,
+        input.orderDiscountCents,
+        input.freightCents,
+        input.chargesCents
+      );
       const customerAddress = {
         recipientName: String(refs.customer.responsible_name || refs.customer.company_name || ""),
         postalCode: String(refs.customer.cep || ""),
@@ -786,46 +1021,58 @@ export class SaleRepository {
       };
       const shippingAddress = input.shippingAddress ?? customerAddress;
       const billingAddress = input.billingAddress ?? shippingAddress;
+      let current: NonNullable<Awaited<ReturnType<SaleRepository["detail"]>>> | null = null;
       if (publicId) {
-        const current = await this.detail(clientId, publicId, connection, true);
+        current = await this.detail(clientId, publicId, connection, true);
         if (!current) throw new ErpDomainError("NOT_FOUND", "Pedido não encontrado.");
-        if (current.status !== "draft" || current.currentStage !== "created") {
-          throw new ErpDomainError("CONFLICT", "Somente vendas na etapa Criada podem ser editadas.");
+        if (!this.canEditOrder(current)) {
+          throw new ErpDomainError(
+            "CONFLICT",
+            "Este documento não pode mais ser editado com segurança. Vendas enviadas e orçamentos encerrados são imutáveis."
+          );
+        }
+        if (input.documentType !== current.documentType) {
+          throw new ErpDomainError("CONFLICT", "O tipo comercial do documento não pode ser alterado.");
         }
         const [rows] = await connection.execute<RowDataPacket[]>(
           "SELECT id FROM erp_sale_orders WHERE client_id=? AND public_id=?",
           [clientId, publicId]
         );
         orderId = Number(rows[0].id);
-        await connection.execute("DELETE FROM erp_sale_order_items WHERE sale_order_id=?", [orderId]);
-      } else {
-        const year = new Date().getUTCFullYear();
-        await connection.execute(
-          "INSERT IGNORE INTO erp_sale_order_sequences(client_id,year,next_number) VALUES(?,?,1)",
-          [clientId, year]
+        financialAdjustment = await this.reconcileConfirmedTotal(
+          connection,
+          clientId,
+          actor,
+          current,
+          totals.totalCents
         );
-        const [sequence] = await connection.execute<RowDataPacket[]>(
-          "SELECT next_number FROM erp_sale_order_sequences WHERE client_id=? AND year=? FOR UPDATE",
-          [clientId, year]
-        );
-        const next = Number(sequence[0].next_number);
-        await connection.execute(
-          "UPDATE erp_sale_order_sequences SET next_number=? WHERE client_id=? AND year=?",
-          [next + 1, clientId, year]
-        );
-        const orderNumber = `VD-${String(next).padStart(5, "0")}`;
+      }
+      const seller = current && input.sellerUserId === undefined
+        ? { publicId: current.sellerUserId, name: current.sellerName }
+        : await this.resolveSeller(connection, clientId, actor, input.sellerUserId);
+      if (!publicId) {
+        const orderNumber = await this.nextCommercialCode(connection, clientId, input.documentType);
         const [result] = await connection.execute<ResultSetHeader>(
           `INSERT INTO erp_sale_orders
-           (public_id,client_id,order_number,crm_client_id,customer_name_snapshot,seller_name_snapshot,status,current_stage,notes,expected_date,shipping_address_snapshot,billing_address_snapshot,subtotal_cents,discount_cents,freight_cents,total_cents,created_by)
-           VALUES(?,?,?,?,?,?,'draft','created',?,?,?,?,0,0,0,0,?)`,
+           (public_id,client_id,order_number,document_type,commercial_status,commercial_date,
+            crm_client_id,customer_name_snapshot,seller_user_id,seller_name_snapshot,status,current_stage,
+            notes,payment_terms_snapshot,payment_method_snapshot,expected_date,shipping_address_snapshot,
+            billing_address_snapshot,subtotal_cents,discount_cents,freight_cents,charges_cents,total_cents,created_by)
+           VALUES(?,?,?,?,?,?, ?,?,?,?,'draft','created', ?,?,?,?,?,?,0,0,0,0,0,?)`,
           [
             target,
             clientId,
             orderNumber,
+            input.documentType,
+            input.documentType === "quote" ? "draft" : "active",
+            input.commercialDate ?? new Date().toISOString().slice(0, 10),
             refs.customer.crm_client_id,
             refs.customer.company_name,
-            actor.name,
+            seller.publicId,
+            seller.name,
             input.notes,
+            input.paymentTerms,
+            input.paymentMethod,
             input.expectedDate,
             json(shippingAddress),
             json(billingAddress),
@@ -841,40 +1088,86 @@ export class SaleRepository {
           toStage: "created",
         });
       }
+      const [existingItems] = await connection.execute<RowDataPacket[]>(
+        `SELECT id,inventory_item_id FROM erp_sale_order_items
+         WHERE sale_order_id=? ORDER BY id FOR UPDATE`,
+        [orderId]
+      );
+      const existingByInventory = new Map(
+        existingItems.map(entry => [Number(entry.inventory_item_id), Number(entry.id)])
+      );
+      const retainedItemIds: number[] = [];
       for (const product of refs.products) {
+        const existingId = existingByInventory.get(product.inventoryItemId);
+        if (existingId) {
+          await connection.execute(
+            `UPDATE erp_sale_order_items SET product_id=?,inventory_item_id=?,product_name_snapshot=?,
+             sku_snapshot=?,quantity=?,unit_price_cents=?,discount_cents=?,line_total_cents=?
+             WHERE sale_order_id=? AND id=?`,
+            [
+              product.id,
+              product.inventoryItemId,
+              product.name,
+              product.sku,
+              product.quantity,
+              product.unitPriceCents,
+              product.discountCents,
+              product.lineTotalCents,
+              orderId,
+              existingId,
+            ]
+          );
+          retainedItemIds.push(existingId);
+        } else {
+          const [created] = await connection.execute<ResultSetHeader>(
+            `INSERT INTO erp_sale_order_items
+             (public_id,sale_order_id,product_id,inventory_item_id,product_name_snapshot,sku_snapshot,quantity,unit_price_cents,discount_cents,line_total_cents)
+             VALUES(?,?,?,?,?,?,?,?,?,?)`,
+            [
+              randomUUID(),
+              orderId,
+              product.id,
+              product.inventoryItemId,
+              product.name,
+              product.sku,
+              product.quantity,
+              product.unitPriceCents,
+              product.discountCents,
+              product.lineTotalCents,
+            ]
+          );
+          retainedItemIds.push(created.insertId);
+        }
+      }
+      if (existingItems.length) {
         await connection.execute(
-          `INSERT INTO erp_sale_order_items
-           (public_id,sale_order_id,product_id,inventory_item_id,product_name_snapshot,sku_snapshot,quantity,unit_price_cents,discount_cents,line_total_cents)
-           VALUES(?,?,?,?,?,?,?,?,?,?)`,
-          [
-            randomUUID(),
-            orderId,
-            product.id,
-            product.inventoryItemId,
-            product.name,
-            product.sku,
-            product.quantity,
-            product.unitPriceCents,
-            product.discountCents,
-            product.lineTotalCents,
-          ]
+          `DELETE FROM erp_sale_order_items
+           WHERE sale_order_id=? AND id NOT IN (${retainedItemIds.map(() => "?").join(",")})`,
+          [orderId, ...retainedItemIds]
         );
       }
       await connection.execute(
-        `UPDATE erp_sale_orders SET crm_client_id=?,customer_name_snapshot=?,seller_name_snapshot=COALESCE(seller_name_snapshot,?),
-         notes=?,expected_date=?,shipping_address_snapshot=?,billing_address_snapshot=?,subtotal_cents=?,discount_cents=?,freight_cents=?,total_cents=?
+        `UPDATE erp_sale_orders SET crm_client_id=?,customer_name_snapshot=?,seller_user_id=?,seller_name_snapshot=?,
+         commercial_date=?,notes=?,payment_terms_snapshot=?,payment_method_snapshot=?,
+         expected_date=?,shipping_address_snapshot=?,billing_address_snapshot=?,subtotal_cents=?,discount_cents=?,
+         freight_cents=?,charges_cents=?,total_cents=?
          WHERE client_id=? AND id=?`,
         [
           refs.customer.crm_client_id,
           refs.customer.company_name,
-          actor.name,
+          seller.publicId,
+          seller.name,
+          input.commercialDate ?? current?.commercialDate ?? new Date().toISOString().slice(0, 10),
           input.notes,
+          input.paymentTerms,
+          input.paymentMethod,
           input.expectedDate,
           json(shippingAddress),
           json(billingAddress),
           totals.subtotalCents,
           totals.itemDiscountCents + totals.orderDiscountCents,
           totals.freightCents,
+          totals.chargesCents,
           totals.totalCents,
           clientId,
           orderId,
@@ -886,8 +1179,20 @@ export class SaleRepository {
           orderId,
           eventType: "updated",
           actor,
-          fromStage: "created",
-          toStage: "created",
+          fromStage: current!.currentStage,
+          toStage: current!.currentStage,
+          before: {
+            customer: current!.customerName,
+            seller: current!.sellerName,
+            totalCents: current!.totalCents,
+            itemCount: current!.items.length,
+          },
+          after: {
+            customer: refs.customer.company_name,
+            seller: seller.name,
+            totalCents: totals.totalCents,
+            itemCount: refs.products.length,
+          },
         });
       }
       await connection.commit();
@@ -897,7 +1202,8 @@ export class SaleRepository {
     } finally {
       connection.release();
     }
-    return this.detail(clientId, target);
+    const order = await this.detail(clientId, target);
+    return order ? { ...order, financialAdjustment } : order;
   }
 
   async confirm(clientId: string, actor: Actor, input: SaleConfirmationInput) {
@@ -915,6 +1221,13 @@ export class SaleRepository {
       await connection.beginTransaction();
       const order = await this.detail(clientId, input.publicId, connection, true);
       if (!order) throw new ErpDomainError("NOT_FOUND", "Venda não encontrada.");
+      if (order.documentType !== "sale") {
+        throw new ErpDomainError(
+          "CONFLICT",
+          "Orçamentos devem ser convertidos em venda antes da confirmação financeira."
+        );
+      }
+      if (order.archivedAt) throw new ErpDomainError("CONFLICT", "Documento arquivado é imutável.");
       const [keyOwners] = await connection.execute<RowDataPacket[]>(
         `SELECT public_id,confirmation_payload_hash
          FROM erp_sale_orders
@@ -1098,7 +1411,7 @@ export class SaleRepository {
       }
       await connection.execute(
         `UPDATE erp_sale_orders
-         SET status='confirmed',current_stage='confirmed',confirmed_by=?,confirmed_at=NOW(),
+         SET status='confirmed',current_stage='confirmed',commercial_status='active',confirmed_by=?,confirmed_at=NOW(),
              payment_method_snapshot=?,confirmation_idempotency_key=?,confirmation_payload_hash=?
          WHERE client_id=? AND id=?`,
         [
@@ -1296,6 +1609,9 @@ export class SaleRepository {
       await connection.beginTransaction();
       const order = await this.detail(clientId, input.publicId, connection, true);
       if (!order) throw new ErpDomainError("NOT_FOUND", "Venda não encontrada.");
+      if (order.documentType !== "sale" || order.archivedAt) {
+        throw new ErpDomainError("CONFLICT", "Somente vendas ativas mudam de etapa operacional.");
+      }
       const oldEvent = await this.transitionEventByIdempotencyKey(
         connection,
         clientId,
@@ -1338,10 +1654,12 @@ export class SaleRepository {
       await connection.execute(
         `UPDATE erp_sale_orders SET current_stage=?,
          status=CASE WHEN ?='completed' THEN 'fulfilled' ELSE 'confirmed' END,
+         commercial_status=CASE WHEN ?='completed' THEN 'completed' ELSE commercial_status END,
          fulfilled_by=CASE WHEN ?='completed' THEN ? ELSE fulfilled_by END,
          fulfilled_at=CASE WHEN ?='completed' THEN NOW() ELSE fulfilled_at END
          WHERE client_id=? AND id=?`,
         [
+          input.toStage,
           input.toStage,
           input.toStage,
           input.toStage,
@@ -1438,7 +1756,7 @@ export class SaleRepository {
         [actor.userId, reason, clientId, publicId]
       );
       await connection.execute(
-        `UPDATE erp_sale_orders SET status='cancelled',current_stage=COALESCE(current_stage,?),
+        `UPDATE erp_sale_orders SET status='cancelled',commercial_status='cancelled',current_stage=COALESCE(current_stage,?),
          cancelled_by=?,cancelled_at=NOW(),cancellation_reason=? WHERE client_id=? AND id=?`,
         [order.currentStage, actor.userId, reason, clientId, order.id]
       );
@@ -1508,6 +1826,268 @@ export class SaleRepository {
     return this.detail(clientId, input.publicId);
   }
 
+  async duplicate(
+    clientId: string,
+    actor: Actor,
+    publicId: string,
+    idempotencyKey: string
+  ) {
+    const connection = await this.db().getConnection();
+    let target = "";
+    let replay = false;
+    try {
+      await connection.beginTransaction();
+      const source = await this.detail(clientId, publicId, connection, true);
+      if (!source) throw new ErpDomainError("NOT_FOUND", "Documento comercial não encontrado.");
+      const [existing] = await connection.execute<RowDataPacket[]>(
+        `SELECT public_id,duplicate_source_id FROM erp_sale_orders
+         WHERE client_id=? AND duplication_idempotency_key=? LIMIT 1 FOR UPDATE`,
+        [clientId, idempotencyKey]
+      );
+      if (existing[0]) {
+        if (Number(existing[0].duplicate_source_id) !== source.id) {
+          throw new ErpDomainError(
+            "IDEMPOTENCY_CONFLICT",
+            "Chave idempotente já usada para duplicar outro documento."
+          );
+        }
+        target = String(existing[0].public_id);
+        replay = true;
+        await connection.commit();
+        return { order: await this.detail(clientId, target), replay };
+      }
+      const orderNumber = await this.nextCommercialCode(connection, clientId, source.documentType);
+      target = randomUUID();
+      const [created] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO erp_sale_orders
+         (public_id,client_id,order_number,document_type,commercial_status,commercial_date,
+          crm_client_id,customer_name_snapshot,seller_user_id,seller_name_snapshot,status,current_stage,
+          notes,payment_terms_snapshot,payment_method_snapshot,expected_date,shipping_address_snapshot,
+          billing_address_snapshot,subtotal_cents,discount_cents,freight_cents,charges_cents,total_cents,
+          duplicate_source_id,duplication_idempotency_key,created_by)
+         SELECT ?,client_id,?,document_type,CASE WHEN document_type='quote' THEN 'draft' ELSE 'active' END,
+          CURRENT_DATE,crm_client_id,customer_name_snapshot,seller_user_id,seller_name_snapshot,'draft','created',
+          notes,payment_terms_snapshot,payment_method_snapshot,expected_date,shipping_address_snapshot,
+          billing_address_snapshot,subtotal_cents,discount_cents,freight_cents,charges_cents,total_cents,
+          id,?,?
+         FROM erp_sale_orders WHERE client_id=? AND id=?`,
+        [target, orderNumber, idempotencyKey, actor.userId, clientId, source.id]
+      );
+      await connection.execute(
+        `INSERT INTO erp_sale_order_items
+         (public_id,sale_order_id,product_id,inventory_item_id,product_name_snapshot,sku_snapshot,
+          quantity,unit_price_cents,discount_cents,line_total_cents)
+         SELECT UUID(),?,product_id,inventory_item_id,product_name_snapshot,sku_snapshot,
+          quantity,unit_price_cents,discount_cents,line_total_cents
+         FROM erp_sale_order_items WHERE sale_order_id=? ORDER BY id`,
+        [created.insertId, source.id]
+      );
+      await this.insertEvent(connection, {
+        clientId,
+        orderId: created.insertId,
+        eventType: "duplicated",
+        actor,
+        toStage: "created",
+        idempotencyKey,
+        payloadHash: hash({ sourcePublicId: publicId, documentType: source.documentType }),
+        after: { sourcePublicId: publicId, sourceNumber: source.orderNumber },
+      });
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+    return { order: await this.detail(clientId, target), replay };
+  }
+
+  async commercialTransition(
+    clientId: string,
+    actor: Actor,
+    input: SaleCommercialTransitionInput
+  ) {
+    const connection = await this.db().getConnection();
+    try {
+      await connection.beginTransaction();
+      const order = await this.detail(clientId, input.publicId, connection, true);
+      if (!order) throw new ErpDomainError("NOT_FOUND", "Orçamento não encontrado.");
+      if (order.documentType !== "quote" || order.archivedAt) {
+        throw new ErpDomainError("CONFLICT", "Somente orçamentos ativos possuem fluxo comercial.");
+      }
+      const transitionKind = saleCommercialTransitionKind(order.commercialStatus, input.toStatus);
+      if (transitionKind === "blocked") {
+        throw new ErpDomainError("CONFLICT", "Transição comercial não permitida.");
+      }
+      if ((transitionKind === "correction" || input.toStatus === "lost") && !input.reason) {
+        throw new ErpDomainError("VALIDATION", "Informe o motivo da correção comercial.");
+      }
+      await connection.execute(
+        `UPDATE erp_sale_orders SET commercial_status=? WHERE client_id=? AND id=?`,
+        [input.toStatus, clientId, order.id]
+      );
+      await this.insertEvent(connection, {
+        clientId,
+        orderId: order.id,
+        eventType: "quote_status_changed",
+        actor,
+        fromStage: order.currentStage,
+        toStage: order.currentStage,
+        reason: input.reason,
+        before: { commercialStatus: order.commercialStatus },
+        after: { commercialStatus: input.toStatus },
+      });
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+    return this.detail(clientId, input.publicId);
+  }
+
+  async convertQuote(
+    clientId: string,
+    actor: Actor,
+    publicId: string,
+    idempotencyKey: string
+  ) {
+    const connection = await this.db().getConnection();
+    let target = "";
+    let replay = false;
+    try {
+      await connection.beginTransaction();
+      const quote = await this.detail(clientId, publicId, connection, true);
+      if (!quote) throw new ErpDomainError("NOT_FOUND", "Orçamento não encontrado.");
+      if (quote.documentType !== "quote") {
+        throw new ErpDomainError("CONFLICT", "Somente orçamentos podem ser convertidos.");
+      }
+      const [existing] = await connection.execute<RowDataPacket[]>(
+        `SELECT public_id,source_quote_id,conversion_idempotency_key FROM erp_sale_orders
+         WHERE client_id=? AND (source_quote_id=? OR conversion_idempotency_key=?)
+         LIMIT 1 FOR UPDATE`,
+        [clientId, quote.id, idempotencyKey]
+      );
+      if (existing[0]) {
+        if (Number(existing[0].source_quote_id) !== quote.id) {
+          throw new ErpDomainError(
+            "IDEMPOTENCY_CONFLICT",
+            "Chave idempotente já usada para converter outro orçamento."
+          );
+        }
+        target = String(existing[0].public_id);
+        replay = true;
+        await connection.commit();
+        return { order: await this.detail(clientId, target), replay };
+      }
+      if (quote.commercialStatus !== "approved" || quote.archivedAt) {
+        throw new ErpDomainError(
+          "CONFLICT",
+          "Apenas um orçamento aprovado e ativo pode ser convertido em venda."
+        );
+      }
+      const orderNumber = await this.nextCommercialCode(connection, clientId, "sale");
+      target = randomUUID();
+      const [created] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO erp_sale_orders
+         (public_id,client_id,order_number,document_type,commercial_status,commercial_date,
+          crm_client_id,customer_name_snapshot,seller_user_id,seller_name_snapshot,status,current_stage,
+          notes,payment_terms_snapshot,payment_method_snapshot,expected_date,shipping_address_snapshot,
+          billing_address_snapshot,subtotal_cents,discount_cents,freight_cents,charges_cents,total_cents,
+          source_quote_id,conversion_idempotency_key,created_by)
+         SELECT ?,client_id,?,'sale','active',CURRENT_DATE,
+          crm_client_id,customer_name_snapshot,seller_user_id,seller_name_snapshot,'draft','created',
+          notes,payment_terms_snapshot,payment_method_snapshot,expected_date,shipping_address_snapshot,
+          billing_address_snapshot,subtotal_cents,discount_cents,freight_cents,charges_cents,total_cents,
+          id,?,?
+         FROM erp_sale_orders WHERE client_id=? AND id=?`,
+        [target, orderNumber, idempotencyKey, actor.userId, clientId, quote.id]
+      );
+      await connection.execute(
+        `INSERT INTO erp_sale_order_items
+         (public_id,sale_order_id,product_id,inventory_item_id,product_name_snapshot,sku_snapshot,
+          quantity,unit_price_cents,discount_cents,line_total_cents)
+         SELECT UUID(),?,product_id,inventory_item_id,product_name_snapshot,sku_snapshot,
+          quantity,unit_price_cents,discount_cents,line_total_cents
+         FROM erp_sale_order_items WHERE sale_order_id=? ORDER BY id`,
+        [created.insertId, quote.id]
+      );
+      await connection.execute(
+        `UPDATE erp_sale_orders SET commercial_status='converted' WHERE client_id=? AND id=?`,
+        [clientId, quote.id]
+      );
+      await this.insertEvent(connection, {
+        clientId,
+        orderId: quote.id,
+        eventType: "quote_converted",
+        actor,
+        fromStage: quote.currentStage,
+        toStage: quote.currentStage,
+        idempotencyKey,
+        payloadHash: hash({ quotePublicId: publicId }),
+        after: { salePublicId: target, saleNumber: orderNumber },
+      });
+      await this.insertEvent(connection, {
+        clientId,
+        orderId: created.insertId,
+        eventType: "quote_converted",
+        actor,
+        toStage: "created",
+        after: { quotePublicId: publicId, quoteNumber: quote.orderNumber },
+      });
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+    return { order: await this.detail(clientId, target), replay };
+  }
+
+  async archive(clientId: string, actor: Actor, publicId: string, reason: string) {
+    const connection = await this.db().getConnection();
+    try {
+      await connection.beginTransaction();
+      const order = await this.detail(clientId, publicId, connection, true);
+      if (!order) throw new ErpDomainError("NOT_FOUND", "Documento comercial não encontrado.");
+      if (order.archivedAt) {
+        await connection.commit();
+        return order;
+      }
+      const terminal = order.documentType === "quote"
+        ? ["converted", "lost", "cancelled"].includes(order.commercialStatus)
+        : order.cancelled || order.currentStage === "completed";
+      if (!terminal) {
+        throw new ErpDomainError(
+          "CONFLICT",
+          "Somente documentos concluídos, convertidos, perdidos ou cancelados podem ser arquivados."
+        );
+      }
+      await connection.execute(
+        `UPDATE erp_sale_orders SET archived_by=?,archived_at=NOW() WHERE client_id=? AND id=?`,
+        [actor.userId, clientId, order.id]
+      );
+      await this.insertEvent(connection, {
+        clientId,
+        orderId: order.id,
+        eventType: "archived",
+        actor,
+        fromStage: order.currentStage,
+        toStage: order.currentStage,
+        reason,
+      });
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+    return this.detail(clientId, publicId);
+  }
+
   async fulfill(clientId: string, actor: Actor, publicId: string, key: string) {
     return this.transition(clientId, actor, {
       publicId,
@@ -1522,13 +2102,25 @@ function publicOrder(row: OrderRow) {
   const currentStage = row.current_stage ?? legacySaleStage(row.status);
   const paidCents = Number(row.paid_cents ?? 0);
   const totalCents = Number(row.total_cents);
+  const documentType = row.document_type ?? "sale";
+  const commercialStatus = row.commercial_status ?? (documentType === "quote" ? "draft" : "active");
+  const archivedAt = row.archived_at ?? null;
+  const canEdit = !archivedAt && row.status !== "cancelled" && (
+    documentType === "quote"
+      ? !["converted", "lost", "cancelled"].includes(commercialStatus)
+      : ["created", "confirmed", "separation"].includes(currentStage)
+  );
   return {
     id: Number(row.id),
     publicId: row.public_id,
     orderNumber: row.order_number,
+    documentType,
+    commercialStatus,
+    commercialDate: row.commercial_date ? dateOnly(row.commercial_date) : dateOnly(row.created_at),
     crmClientId: row.crm_client_id,
     customerName: row.customer_name_snapshot,
     sellerName: row.seller_name_snapshot,
+    sellerUserId: row.seller_user_id,
     status: row.status,
     currentStage,
     cancelled: row.status === "cancelled",
@@ -1539,8 +2131,10 @@ function publicOrder(row: OrderRow) {
     subtotalCents: Number(row.subtotal_cents),
     discountCents: Number(row.discount_cents),
     freightCents: Number(row.freight_cents),
+    chargesCents: Number(row.charges_cents ?? 0),
     totalCents,
     paymentMethod: row.payment_method_snapshot,
+    paymentTerms: row.payment_terms_snapshot,
     paidCents,
     balanceCents: Math.max(0, totalCents - paidCents),
     paymentStatus: derivePaymentStatus(totalCents, paidCents),
@@ -1561,6 +2155,9 @@ function publicOrder(row: OrderRow) {
     fulfilledAt: row.fulfilled_at,
     cancelledAt: row.cancelled_at,
     cancellationReason: row.cancellation_reason,
+    sourceQuoteId: row.source_quote_id,
+    archivedAt,
+    canEdit,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

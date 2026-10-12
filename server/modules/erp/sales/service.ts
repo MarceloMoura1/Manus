@@ -7,6 +7,7 @@ import {
   normalizeSaleDraft,
   saleEvent,
   type SaleAddressCorrectionInput,
+  type SaleCommercialTransitionInput,
   type SaleConfirmationInput,
   type SaleDraftInput,
   type SaleListInput,
@@ -201,6 +202,62 @@ export class SaleService {
     );
     if (!result) throw new Error("Correção de endereço não persistida.");
     await this.publish(identity.clientId, input.publicId, "address_corrected");
+    return result;
+  }
+
+  async duplicate(identity: Identity, publicId: string, idempotencyKey: string) {
+    this.write(identity);
+    const result = await this.repository.duplicate(
+      identity.clientId,
+      this.actor(identity),
+      publicId,
+      idempotencyKey
+    );
+    if (!result.order) throw new Error("Duplicação do documento não persistida.");
+    if (!result.replay) {
+      await this.publish(identity.clientId, result.order.publicId, "duplicated");
+    }
+    return { ...result.order, replay: result.replay };
+  }
+
+  async commercialTransition(identity: Identity, input: SaleCommercialTransitionInput) {
+    this.write(identity);
+    const result = await this.repository.commercialTransition(
+      identity.clientId,
+      this.actor(identity),
+      input
+    );
+    if (!result) throw new Error("Status comercial não persistido.");
+    await this.publish(identity.clientId, input.publicId, "quote_status_changed");
+    return result;
+  }
+
+  async convertQuote(identity: Identity, publicId: string, idempotencyKey: string) {
+    this.write(identity);
+    const result = await this.repository.convertQuote(
+      identity.clientId,
+      this.actor(identity),
+      publicId,
+      idempotencyKey
+    );
+    if (!result.order) throw new Error("Conversão do orçamento não persistida.");
+    if (!result.replay) {
+      await this.publish(identity.clientId, publicId, "quote_converted");
+      await this.publish(identity.clientId, result.order.publicId, "created");
+    }
+    return { ...result.order, replay: result.replay };
+  }
+
+  async archive(identity: Identity, publicId: string, reason: string) {
+    this.write(identity);
+    const result = await this.repository.archive(
+      identity.clientId,
+      this.actor(identity),
+      publicId,
+      reason
+    );
+    if (!result) throw new Error("Arquivamento não persistido.");
+    await this.publish(identity.clientId, publicId, "archived");
     return result;
   }
 

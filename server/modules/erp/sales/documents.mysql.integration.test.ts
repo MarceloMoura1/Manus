@@ -74,6 +74,7 @@ async function clean(): Promise<void> {
     "DELETE FROM erp_sale_order_events WHERE client_id IN (?,?)",
     "DELETE i FROM erp_sale_order_items i INNER JOIN erp_sale_orders o ON o.id=i.sale_order_id WHERE o.client_id IN (?,?)",
     "DELETE FROM erp_sale_orders WHERE client_id IN (?,?)",
+    "DELETE FROM erp_sale_document_sequences WHERE client_id IN (?,?)",
     "DELETE FROM erp_sale_order_sequences WHERE client_id IN (?,?)",
     "DELETE FROM megadesk_crm_clients WHERE client_id IN (?,?)",
     "DELETE FROM megadesk_domain_clients WHERE client_id IN (?,?)",

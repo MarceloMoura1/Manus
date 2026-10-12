@@ -31,6 +31,12 @@ const physical = describe.runIf(isTestDatabaseEnabled()),
     role: "admin" as const,
   },
   viewerA = { ...adminA, userId: "viewer-a", role: "viewer" as const },
+  managerA = {
+    ...adminA,
+    userId: "manager-a",
+    userName: "Manager A",
+    role: "manager" as const,
+  },
   adminB = {
     clientId: "sale-b",
     userId: "admin-b",
@@ -51,6 +57,7 @@ async function clean() {
     "DELETE h FROM erp_sale_order_history h INNER JOIN erp_sale_orders o ON o.id=h.sale_order_id WHERE o.client_id IN (?,?)",
     "DELETE i FROM erp_sale_order_items i INNER JOIN erp_sale_orders o ON o.id=i.sale_order_id WHERE o.client_id IN (?,?)",
     "DELETE FROM erp_sale_orders WHERE client_id IN (?,?)",
+    "DELETE FROM erp_sale_document_sequences WHERE client_id IN (?,?)",
     "DELETE FROM erp_sale_order_sequences WHERE client_id IN (?,?)",
     "DELETE FROM erp_purchase_order_sequences WHERE client_id IN (?,?)",
     "DELETE FROM erp_stock_movements WHERE client_id IN (?,?)",
@@ -62,6 +69,7 @@ async function clean() {
     "DELETE FROM erp_financial_categories WHERE client_id IN (?,?)",
     "DELETE FROM erp_financial_accounts WHERE client_id IN (?,?)",
     "DELETE FROM megadesk_crm_clients WHERE client_id IN (?,?)",
+    "DELETE FROM megadesk_domain_client_users WHERE client_id IN (?,?)",
   ])
     await db.execute(sql, [adminA.clientId, adminB.clientId]);
 }
@@ -169,7 +177,7 @@ physical("ERP sales MySQL behavior matrix", () => {
       await count(
         "SELECT COUNT(*) total FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name LIKE 'erp_sale_%'"
       )
-    ).toBe(8);
+    ).toBe(9);
   });
   it("02 creates draft with server totals and snapshots", async () => {
     const f = await fixture(),
@@ -189,7 +197,7 @@ physical("ERP sales MySQL behavior matrix", () => {
     });
     expect(order).not.toHaveProperty("clientId");
   });
-  it("03 edits only draft and approves", async () => {
+  it("03 edits a draft and adjusts an unpaid confirmed sale", async () => {
     const f = await fixture(),
       s = new SaleService(new SaleRepository(), silent),
       order = await s.create(
@@ -216,13 +224,23 @@ physical("ERP sales MySQL behavior matrix", () => {
       f.categoryPublicId
     );
     expect(confirmed?.status).toBe("confirmed");
-    await expect(
-      s.update(
-        adminA,
-        order.publicId,
-        draft(f.customer.crmClientId, f.product.publicId)
-      )
-    ).rejects.toMatchObject({ code: "CONFLICT" });
+    const adjusted = await s.update(
+      adminA,
+      order.publicId,
+      draft(f.customer.crmClientId, f.product.publicId)
+    );
+    expect(adjusted).toMatchObject({
+      status: "confirmed",
+      totalCents: 102,
+      financialAdjustment: {
+        previousTotalCents: 200,
+        newTotalCents: 102,
+        paidCents: 0,
+      },
+    });
+    expect(adjusted.installments).toEqual([
+      expect.objectContaining({ amountCents: 102, status: "open" }),
+    ]);
   });
   it("04 cancels draft and confirmed but not fulfilled", async () => {
     const f = await fixture(),
@@ -595,7 +613,7 @@ physical("ERP sales MySQL behavior matrix", () => {
     const f = await fixture(), s = new SaleService(new SaleRepository(), silent);
     await getPool().execute("INSERT INTO erp_purchase_order_sequences(client_id,year,next_number) VALUES(?,?,?) ON DUPLICATE KEY UPDATE next_number=VALUES(next_number)", [adminA.clientId, new Date().getUTCFullYear(), 42]);
     const order = await s.create(adminA, draft(f.customer.crmClientId, f.product.publicId));
-    expect(order.orderNumber).toBe("VD-00001");
+    expect(order.orderNumber).toBe("V-1");
     const [rows] = await getPool().execute<RowDataPacket[]>("SELECT next_number FROM erp_purchase_order_sequences WHERE client_id=?", [adminA.clientId]);
     expect(Number(rows[0].next_number)).toBe(42);
   });
@@ -803,5 +821,47 @@ physical("ERP sales MySQL behavior matrix", () => {
       "SELECT COUNT(*) total FROM erp_sale_orders WHERE client_id=? AND current_stage='separation' AND public_id IN (?,?)",
       [adminA.clientId, a.publicId, b.publicId]
     )).toBe(1);
+  });
+
+  it("28 preserves an absent legacy seller unless reassignment is explicit", async () => {
+    const f = await fixture();
+    const service = new SaleService(new SaleRepository(), silent);
+    const input = draft(f.customer.crmClientId, f.product.publicId);
+    const created = await service.create(adminA, input);
+    expect(created).toMatchObject({
+      sellerUserId: adminA.userId,
+      sellerName: adminA.userName,
+    });
+
+    await getPool().execute(
+      "UPDATE erp_sale_orders SET seller_user_id=NULL,seller_name_snapshot='Vendedor legado' WHERE client_id=? AND public_id=?",
+      [adminA.clientId, created.publicId]
+    );
+    const preserved = await service.update(managerA, created.publicId, {
+      ...input,
+      notes: "Apenas observação alterada",
+    });
+    expect(preserved).toMatchObject({
+      sellerUserId: null,
+      sellerName: "Vendedor legado",
+      notes: "Apenas observação alterada",
+    });
+
+    const explicitSellerId = `seller-explicit-${++serial}`;
+    await getPool().execute(
+      `INSERT INTO megadesk_domain_client_users
+       (user_id,client_id,name,email,role,status,permissions_json)
+       VALUES(?,?,?,?,'manager','active','["erp"]')`,
+      [explicitSellerId, adminA.clientId, "Vendedor explícito", `${explicitSellerId}@example.invalid`]
+    );
+    const reassigned = await service.update(managerA, created.publicId, {
+      ...input,
+      sellerUserId: explicitSellerId,
+      notes: "Vendedor alterado intencionalmente",
+    });
+    expect(reassigned).toMatchObject({
+      sellerUserId: explicitSellerId,
+      sellerName: "Vendedor explícito",
+    });
   });
 });

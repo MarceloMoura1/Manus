@@ -36,6 +36,7 @@ async function clean() {
     "DELETE FROM erp_purchase_orders WHERE client_id IN (?,?)",
     "DELETE FROM erp_purchase_order_sequences WHERE client_id IN (?,?)",
     "DELETE FROM erp_sale_orders WHERE client_id IN (?,?)",
+    "DELETE FROM erp_sale_document_sequences WHERE client_id IN (?,?)",
     "DELETE FROM erp_sale_order_sequences WHERE client_id IN (?,?)",
     "DELETE FROM erp_suppliers WHERE client_id IN (?,?)",
     "DELETE FROM megadesk_crm_clients WHERE client_id IN (?,?)",
