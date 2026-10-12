@@ -3017,6 +3017,22 @@ export const erpSaleOrderSequences = mysqlTable(
   ]
 );
 
+export const erpSaleDocumentSequences = mysqlTable(
+  "erp_sale_document_sequences",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    documentType: mysqlEnum("document_type", ["quote", "sale"]).notNull(),
+    nextNumber: int("next_number").default(1).notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_sale_document_sequence").on(
+      table.clientId,
+      table.documentType
+    ),
+  ]
+);
+
 export const erpSaleOrders = mysqlTable(
   "erp_sale_orders",
   {
@@ -3024,6 +3040,22 @@ export const erpSaleOrders = mysqlTable(
     publicId: varchar("public_id", { length: 36 }).notNull(),
     clientId: varchar("client_id", { length: 80 }).notNull(),
     orderNumber: varchar("order_number", { length: 32 }).notNull(),
+    documentType: mysqlEnum("document_type", ["quote", "sale"])
+      .default("sale")
+      .notNull(),
+    commercialStatus: mysqlEnum("commercial_status", [
+      "draft",
+      "negotiation",
+      "approved",
+      "converted",
+      "active",
+      "completed",
+      "lost",
+      "cancelled",
+    ])
+      .default("active")
+      .notNull(),
+    commercialDate: date("commercial_date", { mode: "string" }),
     crmClientId: varchar("crm_client_id", { length: 80 }).notNull(),
     customerNameSnapshot: varchar("customer_name_snapshot", {
       length: 255,
@@ -3040,6 +3072,7 @@ export const erpSaleOrders = mysqlTable(
       "completed",
     ]),
     sellerNameSnapshot: varchar("seller_name_snapshot", { length: 180 }),
+    sellerUserId: varchar("seller_user_id", { length: 80 }),
     shippingAddressSnapshot: text("shipping_address_snapshot"),
     billingAddressSnapshot: text("billing_address_snapshot"),
     discountCents: bigint("discount_cents", { mode: "number" })
@@ -3048,12 +3081,24 @@ export const erpSaleOrders = mysqlTable(
     freightCents: bigint("freight_cents", { mode: "number" })
       .default(0)
       .notNull(),
+    chargesCents: bigint("charges_cents", { mode: "number" })
+      .default(0)
+      .notNull(),
     paymentMethodSnapshot: varchar("payment_method_snapshot", { length: 80 }),
+    paymentTermsSnapshot: varchar("payment_terms_snapshot", { length: 500 }),
     confirmationIdempotencyKey: varchar("confirmation_idempotency_key", {
       length: 100,
     }),
     confirmationPayloadHash: varchar("confirmation_payload_hash", {
       length: 64,
+    }),
+    sourceQuoteId: bigint("source_quote_id", { mode: "number" }),
+    conversionIdempotencyKey: varchar("conversion_idempotency_key", {
+      length: 100,
+    }),
+    duplicateSourceId: bigint("duplicate_source_id", { mode: "number" }),
+    duplicationIdempotencyKey: varchar("duplication_idempotency_key", {
+      length: 100,
     }),
     notes: text(),
     expectedDate: date("expected_date", { mode: "string" }),
@@ -3068,6 +3113,8 @@ export const erpSaleOrders = mysqlTable(
     cancelledBy: varchar("cancelled_by", { length: 80 }),
     cancelledAt: timestamp("cancelled_at", { mode: "string" }),
     cancellationReason: varchar("cancellation_reason", { length: 500 }),
+    archivedBy: varchar("archived_by", { length: 80 }),
+    archivedAt: timestamp("archived_at", { mode: "string" }),
     createdBy: varchar("created_by", { length: 80 }).notNull(),
     createdAt: timestamp("created_at", { mode: "string" })
       .defaultNow()
@@ -3091,6 +3138,18 @@ export const erpSaleOrders = mysqlTable(
       table.clientId,
       table.confirmationIdempotencyKey
     ),
+    uniqueIndex("uq_erp_sale_orders_tenant_source_quote").on(
+      table.clientId,
+      table.sourceQuoteId
+    ),
+    uniqueIndex("uq_erp_sale_orders_tenant_conversion_key").on(
+      table.clientId,
+      table.conversionIdempotencyKey
+    ),
+    uniqueIndex("uq_erp_sale_orders_tenant_duplication_key").on(
+      table.clientId,
+      table.duplicationIdempotencyKey
+    ),
     index("idx_erp_sale_orders_tenant_status_date").on(
       table.clientId,
       table.status,
@@ -3104,6 +3163,12 @@ export const erpSaleOrders = mysqlTable(
       table.clientId,
       table.currentStage,
       table.createdAt
+    ),
+    index("idx_erp_sale_orders_tenant_document_status").on(
+      table.clientId,
+      table.documentType,
+      table.commercialStatus,
+      table.commercialDate
     ),
     foreignKey({
       name: "fk_erp_so_customer",
@@ -3219,6 +3284,11 @@ export const erpSaleOrderEvents = mysqlTable(
       "payment_registered",
       "document_added",
       "document_removed",
+      "duplicated",
+      "quote_status_changed",
+      "quote_converted",
+      "archived",
+      "financial_adjusted",
     ]).notNull(),
     fromStage: mysqlEnum("from_stage", [
       "created",

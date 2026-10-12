@@ -5,8 +5,12 @@ import { megadeskProcedure, router } from "../../../_core/trpc";
 import { ErpDomainError, erpTrpcCode } from "../errors";
 import {
   cancellationInput,
+  quoteConversionInput,
+  saleArchiveInput,
   saleAddressCorrectionInput,
+  saleCommercialTransitionInput,
   saleConfirmationInput,
+  saleDuplicateInput,
   saleDraftInput,
   saleListInput,
   saleSearchInput,
@@ -212,6 +216,34 @@ export const salesRouter = router({
     .mutation(({ ctx, input }) =>
       runSalesOperation("sales.correctAddress", () =>
         service.correctAddress(identity(ctx), input)
+      )
+    ),
+  duplicate: salesProcedure
+    .input(saleDuplicateInput)
+    .mutation(({ ctx, input }) =>
+      runSalesOperation("sales.duplicate", () =>
+        service.duplicate(identity(ctx), input.publicId, input.idempotencyKey)
+      )
+    ),
+  commercialTransition: salesProcedure
+    .input(saleCommercialTransitionInput)
+    .mutation(({ ctx, input }) =>
+      runSalesOperation("sales.commercialTransition", () =>
+        service.commercialTransition(identity(ctx), input)
+      )
+    ),
+  convertQuote: salesProcedure
+    .input(quoteConversionInput)
+    .mutation(({ ctx, input }) =>
+      runSalesOperation("sales.convertQuote", () =>
+        service.convertQuote(identity(ctx), input.publicId, input.idempotencyKey)
+      )
+    ),
+  archive: salesProcedure
+    .input(saleArchiveInput)
+    .mutation(({ ctx, input }) =>
+      runSalesOperation("sales.archive", () =>
+        service.archive(identity(ctx), input.publicId, input.reason)
       )
     ),
   fulfill: salesProcedure

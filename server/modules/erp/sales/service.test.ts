@@ -3,13 +3,19 @@ import type { OperationalRole } from "../contracts";
 import { SaleService } from "./service";
 
 const draft = {
+  documentType: "sale" as const,
   crmClientId: "customer-1",
+  sellerUserId: null,
+  commercialDate: "2026-10-11",
   notes: null,
+  paymentTerms: null,
+  paymentMethod: null,
   expectedDate: null,
   shippingAddress: null,
   billingAddress: null,
   orderDiscountCents: 0,
   freightCents: 0,
+  chargesCents: 0,
   items: [
     {
       productPublicId: "10000000-0000-4000-8000-000000000001",

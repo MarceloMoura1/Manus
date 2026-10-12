@@ -27,6 +27,21 @@ export type SaleStage = (typeof saleStages)[number];
 export const salePaymentStatuses = ["pending", "partial", "paid"] as const;
 export type SalePaymentStatus = (typeof salePaymentStatuses)[number];
 
+export const saleDocumentTypes = ["quote", "sale"] as const;
+export type SaleDocumentType = (typeof saleDocumentTypes)[number];
+
+export const saleCommercialStatuses = [
+  "draft",
+  "negotiation",
+  "approved",
+  "converted",
+  "active",
+  "completed",
+  "lost",
+  "cancelled",
+] as const;
+export type SaleCommercialStatus = (typeof saleCommercialStatuses)[number];
+
 export type SaleOperation =
   | "created"
   | "updated"
@@ -35,7 +50,11 @@ export type SaleOperation =
   | "stage_changed"
   | "shipped"
   | "payment_changed"
-  | "address_corrected";
+  | "address_corrected"
+  | "duplicated"
+  | "quote_status_changed"
+  | "quote_converted"
+  | "archived";
 
 const quantity = z
   .string()
@@ -65,13 +84,19 @@ const item = z.object({
 
 export const saleDraftInput = z
   .object({
+    documentType: z.enum(saleDocumentTypes).default("sale"),
     crmClientId: z.string().trim().min(1).max(80),
+    sellerUserId: z.string().trim().min(1).max(80).optional().transform(value => value || null),
+    commercialDate: z.string().date().optional().transform(value => value || null),
     notes: z.string().trim().max(4_000).optional().transform(value => value || null),
+    paymentTerms: z.string().trim().max(500).optional().transform(value => value || null),
+    paymentMethod: z.string().trim().max(80).optional().transform(value => value || null),
     expectedDate: z.string().date().optional().transform(value => value || null),
     shippingAddress: saleAddressSchema.nullish().transform(value => value ?? null),
     billingAddress: saleAddressSchema.nullish().transform(value => value ?? null),
     orderDiscountCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).default(0),
     freightCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).default(0),
+    chargesCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).default(0),
     items: z.array(item).min(1).max(100),
   })
   .superRefine((value, context) => {
@@ -96,7 +121,12 @@ export const saleDraftInput = z
       }
     });
     try {
-      calculateSaleTotals(value.items, value.orderDiscountCents, value.freightCents);
+      calculateSaleTotals(
+        value.items,
+        value.orderDiscountCents,
+        value.freightCents,
+        value.chargesCents
+      );
     } catch (error) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -112,9 +142,11 @@ export const saleListInput = z.object({
   crmClientId: z.string().trim().min(1).max(80).optional(),
   status: z.enum(saleStatuses).optional(),
   stage: z.enum(saleStages).optional(),
+  commercialStatus: z.enum(saleCommercialStatuses).optional(),
   paymentStatus: z.enum(salePaymentStatuses).optional(),
   paymentMethod: z.string().trim().max(80).optional(),
   sellerUserId: z.string().trim().max(80).optional(),
+  includeArchived: z.boolean().default(false),
   from: z.string().date().optional(),
   to: z.string().date().optional(),
   sort: z.enum(["orderNumber", "createdAt", "total"]).default("createdAt"),
@@ -171,11 +203,35 @@ export const fulfillInput = z.object({
   idempotencyKey: z.string().uuid(),
 });
 
+export const saleDuplicateInput = z.object({
+  publicId: z.string().uuid(),
+  idempotencyKey: z.string().uuid(),
+});
+
+export const quoteConversionInput = z.object({
+  publicId: z.string().uuid(),
+  idempotencyKey: z.string().uuid(),
+});
+
+export const saleCommercialTransitionInput = z.object({
+  publicId: z.string().uuid(),
+  toStatus: z.enum(["negotiation", "approved", "lost"]),
+  reason: z.string().trim().max(500).optional().transform(value => value || null),
+});
+
+export const saleArchiveInput = z.object({
+  publicId: z.string().uuid(),
+  reason: z.string().trim().min(3).max(500),
+});
+
 export type SaleDraftInput = z.infer<typeof saleDraftInput>;
 export type SaleListInput = z.infer<typeof saleListInput>;
 export type SaleConfirmationInput = z.infer<typeof saleConfirmationInput>;
 export type SaleTransitionInput = z.infer<typeof saleTransitionInput>;
 export type SaleAddressCorrectionInput = z.infer<typeof saleAddressCorrectionInput>;
+export type SaleDuplicateInput = z.infer<typeof saleDuplicateInput>;
+export type QuoteConversionInput = z.infer<typeof quoteConversionInput>;
+export type SaleCommercialTransitionInput = z.infer<typeof saleCommercialTransitionInput>;
 
 export function lineTotalCents(quantityValue: string, unitPriceCents: number): number {
   const total = (quantityMillis(quantityValue) * BigInt(unitPriceCents) + 500n) / 1_000n;
@@ -192,7 +248,8 @@ export function calculateSaleTotals(
     discountCents?: number;
   }>,
   orderDiscountCents = 0,
-  freightCents = 0
+  freightCents = 0,
+  chargesCents = 0
 ) {
   let subtotalCents = 0n;
   let itemDiscountCents = 0n;
@@ -206,10 +263,11 @@ export function calculateSaleTotals(
   const netProductsCents = subtotalCents - itemDiscountCents;
   const orderDiscount = BigInt(orderDiscountCents);
   const freight = BigInt(freightCents);
+  const charges = BigInt(chargesCents);
   if (orderDiscount > netProductsCents) {
     throw new Error("O desconto da venda não pode superar o valor dos produtos.");
   }
-  const totalCents = netProductsCents - orderDiscount + freight;
+  const totalCents = netProductsCents - orderDiscount + freight + charges;
   const safeLimit = BigInt(Number.MAX_SAFE_INTEGER);
   if (
     subtotalCents > safeLimit ||
@@ -224,6 +282,7 @@ export function calculateSaleTotals(
     itemDiscountCents: Number(itemDiscountCents),
     orderDiscountCents,
     freightCents,
+    chargesCents,
     totalCents: Number(totalCents),
   };
 }
@@ -237,6 +296,25 @@ export function normalizeSaleDraft(value: SaleDraftInput): SaleDraftInput {
       quantity: millisQuantity(quantityMillis(entry.quantity)),
     })),
   };
+}
+
+export function saleCommercialTransitionKind(
+  from: SaleCommercialStatus,
+  to: "negotiation" | "approved" | "lost"
+) {
+  if (from === "draft" && to === "negotiation") return "forward" as const;
+  if (from === "negotiation" && (to === "approved" || to === "lost")) {
+    return "forward" as const;
+  }
+  if (from === "approved" && to === "negotiation") return "correction" as const;
+  return "blocked" as const;
+}
+
+export function commercialCode(type: SaleDocumentType, sequence: number) {
+  if (!Number.isSafeInteger(sequence) || sequence < 1) {
+    throw new Error("Sequência comercial inválida.");
+  }
+  return `${type === "quote" ? "O" : "V"}-${sequence}`;
 }
 
 const forwardStage: Partial<Record<SaleStage, SaleStage>> = {

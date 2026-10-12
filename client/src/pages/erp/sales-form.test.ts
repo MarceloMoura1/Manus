@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  blankSalesForm,
   calculateSalesFormTotals,
   firstSalesStockIssue,
   hasDuplicateSalesItemIdentity,
@@ -18,6 +19,7 @@ const inventoryItemPublicId = "20000000-0000-4000-8000-000000000001";
 describe("sales form inventory identity", () => {
   it("includes inventoryItemPublicId in a new sale command", () => {
     const command = salesDraftFromForm({
+      ...blankSalesForm(),
       crmClientId: "customer-1",
       notes: "",
       expectedDate: "",
@@ -147,11 +149,13 @@ describe("sales form inventory identity", () => {
   it("calculates discounts and freight from real form values", () => {
     expect(
       calculateSalesFormTotals({
+        ...blankSalesForm(),
         crmClientId: "customer-1",
         notes: "",
         expectedDate: "",
         orderDiscountCents: 200,
         freightCents: 80,
+        chargesCents: 40,
         items: [
           {
             productPublicId,
@@ -166,7 +170,8 @@ describe("sales form inventory identity", () => {
       subtotalCents: 2_400,
       itemDiscountCents: 100,
       discountCents: 300,
-      totalCents: 2_180,
+      chargesCents: 40,
+      totalCents: 2_220,
     });
   });
 

@@ -46,6 +46,7 @@ async function clean() {
     "DELETE h FROM erp_sale_order_history h INNER JOIN erp_sale_orders o ON o.id=h.sale_order_id WHERE o.client_id IN (?,?)",
     "DELETE i FROM erp_sale_order_items i INNER JOIN erp_sale_orders o ON o.id=i.sale_order_id WHERE o.client_id IN (?,?)",
     "DELETE FROM erp_sale_orders WHERE client_id IN (?,?)",
+    "DELETE FROM erp_sale_document_sequences WHERE client_id IN (?,?)",
     "DELETE FROM erp_sale_order_sequences WHERE client_id IN (?,?)",
     "DELETE FROM erp_stock_movements WHERE client_id IN (?,?)",
     "DELETE FROM erp_stock_balances WHERE client_id IN (?,?)",

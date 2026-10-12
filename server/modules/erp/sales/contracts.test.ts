@@ -4,12 +4,14 @@ import {
   calculateSaleTotals,
   canCancelSaleAtStage,
   canWriteSales,
+  commercialCode,
   derivePaymentStatus,
   isStockExitTransition,
   legacySaleStage,
   lineTotalCents,
   normalizeSaleDraft,
   saleConfirmationInput,
+  saleCommercialTransitionKind,
   saleDraftInput,
   saleEvent,
   saleListInput,
@@ -39,7 +41,7 @@ describe("sale contracts", () => {
     expect(lineTotalCents("0.001", 500)).toBe(1);
   });
 
-  it("calculates item discounts, order discount and freight exactly", () => {
+  it("calculates item discounts, order discount, freight and charges exactly", () => {
     expect(
       calculateSaleTotals(
         [
@@ -47,14 +49,16 @@ describe("sale contracts", () => {
           { quantity: "1.000", unitPriceCents: 500, discountCents: 0 },
         ],
         200,
-        80
+        80,
+        50
       )
     ).toEqual({
       subtotalCents: 2_900,
       itemDiscountCents: 100,
       orderDiscountCents: 200,
       freightCents: 80,
-      totalCents: 2_680,
+      chargesCents: 50,
+      totalCents: 2_730,
     });
     expect(() =>
       calculateSaleTotals([{ quantity: "1", unitPriceCents: 100, discountCents: 101 }])
@@ -135,6 +139,16 @@ describe("sale contracts", () => {
     expect(saleTransitionKind("received", "shipped")).toBe("correction");
     expect(saleTransitionKind("shipped", "separation")).toBe("blocked");
     expect(saleTransitionKind("confirmed", "completed")).toBe("blocked");
+  });
+
+  it("keeps commercial type, status and numbering independent", () => {
+    expect(commercialCode("sale", 1)).toBe("V-1");
+    expect(commercialCode("quote", 1_024)).toBe("O-1024");
+    expect(() => commercialCode("sale", 0)).toThrow("Sequência comercial inválida");
+    expect(saleCommercialTransitionKind("draft", "negotiation")).toBe("forward");
+    expect(saleCommercialTransitionKind("negotiation", "approved")).toBe("forward");
+    expect(saleCommercialTransitionKind("approved", "negotiation")).toBe("correction");
+    expect(saleCommercialTransitionKind("converted", "negotiation")).toBe("blocked");
   });
 
   it("creates stock movement only on Separation to Enviado", () => {

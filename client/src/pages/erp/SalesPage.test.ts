@@ -42,7 +42,7 @@ describe("ERP Vendas B+C interface", () => {
   });
 
   it("renders a compact list and a dedicated detail screen with historical states", () => {
-    expect(source).toContain("Lista de vendas");
+    expect(source).toContain("Lista comercial");
     expect(source).toContain("SaleDetailPanel");
     expect(source).toContain("sales-detail-screen");
     expect(source).toContain("Voltar para vendas");
@@ -61,11 +61,13 @@ describe("ERP Vendas B+C interface", () => {
   });
 
   it("includes loading, empty, error, denied and responsive compositions", () => {
-    expect(source).toContain("Carregando vendas");
-    expect(source).toContain("Nenhuma venda encontrada");
-    expect(source).toContain("Não foi possível carregar as vendas");
+    expect(source).toContain("Carregando ${entityLabelPlural}");
+    expect(source).toContain("Nenhum ${entityLabel} encontrado");
+    expect(source).toContain("Não foi possível carregar ${entityLabelPlural}");
     expect(source).toContain("Seu perfil não tem acesso");
-    expect(source).toContain("xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]");
+    expect(source).toContain('data-testid="sales-detail-facts"');
+    expect(source).toContain('data-testid="sales-detail-products"');
+    expect(source).toContain('data-testid="sales-detail-actions"');
     expect(source).toContain("sm:max-w-[min(96vw,1440px)]");
   });
 
@@ -94,7 +96,7 @@ describe("ERP Vendas B+C interface", () => {
     );
     expect(compactRow).toContain("sellerName");
     expect(compactRow).toContain("firstProductImage");
-    expect(compactRow).toContain("Ver detalhes");
+    expect(compactRow).toContain("SaleActionsMenu");
   });
 
   it("offers one primary filter bar and server-side page sizes", () => {
@@ -125,5 +127,70 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain("await utils.erp.invalidate()");
     expect(source).toContain("Reverter um recebimento exige estorno financeiro");
     expect(source).not.toContain("setPaymentStatus(order.publicId");
+  });
+
+  it("separates quote and sale workflows with real contextual operations", () => {
+    expect(source).toContain("DocumentTypeBadge");
+    expect(source).toContain("CommercialBadge");
+    expect(source).toContain("Converter em venda");
+    expect(source).toContain("Iniciar negociação");
+    expect(source).toContain("Aprovar orçamento");
+    expect(source).toContain("Duplicar como rascunho");
+    expect(source).toContain("trpc.erp.sales.convertQuote.useMutation");
+    expect(source).toContain("trpc.erp.sales.commercialTransition.useMutation");
+    expect(source).toContain("trpc.erp.sales.archive.useMutation");
+  });
+
+  it("renders solid portal menus, larger product media and complete commercial fields", () => {
+    expect(source).toContain('className="z-[80] min-w-60 border-slate-200 bg-white shadow-xl"');
+    expect(source).toContain('large ? "h-14 w-14"');
+    expect(source).toContain('compact ? "h-9 w-9"');
+    expect(source).toContain("Data comercial");
+    expect(source).toContain("Condições de pagamento");
+    expect(source).toContain("Outros encargos");
+  });
+
+  it("places financial conditions and the confirmation decision side by side", () => {
+    expect(source).toContain('data-testid="sales-confirmation-layout"');
+    expect(source).toContain('data-testid="sales-confirmation-financial"');
+    expect(source).toContain('data-testid="sales-confirmation-decision"');
+    expect(source).toContain("lg:grid-cols-[minmax(0,1.55fr)_minmax(330px,0.85fr)]");
+    expect(source).not.toContain("max-h-64 space-y-2 overflow-y-auto border-t");
+    const decision = source.slice(
+      source.indexOf('data-testid="sales-confirmation-decision"'),
+      source.indexOf("</aside>", source.indexOf('data-testid="sales-confirmation-decision"'))
+    );
+    expect(decision).toContain("Esta venda pode ser confirmada?");
+    expect(decision).toContain("Confirmar venda e criar títulos");
+  });
+
+  it("prioritizes real sale products in compact rows with quantities and values", () => {
+    const products = source.slice(
+      source.indexOf('data-testid="sales-detail-products"'),
+      source.indexOf('data-testid="sales-detail-address"')
+    );
+    expect(products).toContain("item.canonicalImage?.thumbnailPath");
+    expect(products).toContain("item.productName");
+    expect(products).toContain("item.quantity");
+    expect(products).toContain("item.unitPriceCents");
+    expect(products).toContain("item.lineTotalCents");
+    expect(products).toContain('data-testid="sales-detail-product-row"');
+    expect(source).toContain("Nenhum produto registrado nesta venda.");
+    expect(source).toContain("Imagem de ${name}");
+  });
+
+  it("keeps workflow actions together with solid correction and destructive treatments", () => {
+    const actions = source.slice(
+      source.indexOf('data-testid="sales-detail-actions"'),
+      source.indexOf("</section>", source.indexOf('data-testid="sales-detail-actions"'))
+    );
+    expect(actions).toContain("nextActionLabel(next)");
+    expect(source).toContain('if (stage === "separation") return "Iniciar separação"');
+    expect(source).toContain('if (stage === "shipped") return "Marcar como enviado"');
+    expect(actions).toContain("Corrigir etapa");
+    expect(actions).toContain("bg-slate-100");
+    expect(actions).toContain("Cancelar venda");
+    expect(actions).toContain("bg-rose-50");
+    expect(actions).toContain("order.paidCents > 0");
   });
 });

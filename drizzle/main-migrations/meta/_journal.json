@@ -276,6 +276,13 @@
       "when": 1791263011437,
       "tag": "0038_quick_lenny_balinger",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "5",
+      "when": 1791766599704,
+      "tag": "0039_sweet_firelord",
+      "breakpoints": true
     }
   ]
 }

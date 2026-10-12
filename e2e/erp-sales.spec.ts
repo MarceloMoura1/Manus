@@ -15,12 +15,17 @@ const session = {
   order = {
     publicId: "77777777-7777-4777-8777-777777777777",
     orderNumber: "VD-00128",
+    documentType: "sale",
+    commercialStatus: "converted",
+    commercialDate: "2026-10-05",
+    archivedAt: null,
     crmClientId: "33333333-3333-4333-8333-333333333333",
     customerName: "Alfa Comércio",
     sellerName: "Ana Gestora",
     status: "confirmed",
     currentStage: "separation",
     cancelled: false,
+    canEdit: true,
     notes: "Entrega comercial",
     expectedDate: "2026-10-09",
     shippingAddress: {
@@ -65,7 +70,7 @@ const session = {
     lineTotalCents: 240000,
     currentAvailable: "18.000",
     stockExitRecorded: false,
-    canonicalImage: null,
+    canonicalImage: { mediaId: "99999999-9999-4999-8999-999999999999", path: "/api/products/44444444-4444-4444-8444-444444444444/image", thumbnailPath: "/api/products/44444444-4444-4444-8444-444444444444/image?variant=thumbnail" },
   },
   customerResult = {
     items: [{
@@ -109,6 +114,7 @@ async function prepare(
     paymentFlow?: boolean;
     exportNames?: Array<{ customerName: string; sellerName: string }>;
     metricRequests?: string[];
+    multiItemDetail?: boolean;
   } = {}
 ) {
   const {
@@ -122,6 +128,7 @@ async function prepare(
     paymentFlow = false,
     exportNames,
     metricRequests,
+    multiItemDetail = false,
     stage = "separation",
     stockAvailable = "18.000",
     stockExitRecorded = false,
@@ -194,7 +201,11 @@ async function prepare(
           ...activeOrder,
           paidCents: activeOrder.paidCents + extraPaidCents,
           balanceCents: activeOrder.balanceCents - extraPaidCents,
-          items: [{ ...saleItem, currentAvailable: stockAvailable, stockExitRecorded }],
+          items: multiItemDetail ? [
+            { ...saleItem, currentAvailable: stockAvailable, stockExitRecorded },
+            { ...saleItem, publicId: "92222222-2222-4222-8222-222222222222", productPublicId: "44444444-4444-4444-8444-444444444445", inventoryItemPublicId: "55555555-5555-4555-8555-555555555558", productName: "Mouse sem fio", variantName: "Grafite", sku: "MOU-WLS-GRA", quantity: "2.000", unitPriceCents: 12500, lineTotalCents: 25000, currentAvailable: "34.000", canonicalImage: { mediaId: "99999999-9999-4999-8999-999999999998", path: "/api/products/44444444-4444-4444-8444-444444444445/image", thumbnailPath: "/api/products/44444444-4444-4444-8444-444444444445/image?variant=thumbnail" } },
+            { ...saleItem, publicId: "93333333-3333-4333-8333-333333333333", productPublicId: "44444444-4444-4444-8444-444444444446", inventoryItemPublicId: "55555555-5555-4555-8555-555555555559", productName: "Suporte articulado para monitor", variantName: null, sku: "SUP-ART-01", quantity: "1.000", unitPriceCents: 20000, lineTotalCents: 20000, currentAvailable: "9.000", canonicalImage: null },
+          ] : [{ ...saleItem, currentAvailable: stockAvailable, stockExitRecorded }],
           installments: [
             { publicId: "a1111111-1111-4111-8111-111111111111", installment: 1, dueDate: "2026-10-05", amountCents: 95000, paidCents: 95000, status: "settled", paymentStatus: "paid" },
             { publicId: "a2222222-2222-4222-8222-222222222222", installment: 2, dueDate: "2026-11-05", amountCents: 95000, paidCents: extraPaidCents, status: "open", paymentStatus: extraPaidCents ? "partial" : "pending" },
@@ -241,12 +252,12 @@ async function prepare(
   await page.goto("/erp/vendas");
 }
 
-async function capture(page: Page, name: string) {
+async function capture(page: Page, name: string, fullPage = true) {
   const root = process.env.SALES_UX_SCREENSHOT_DIR;
   if (!root) return;
   const path = `${root}/${name}.png`;
   mkdirSync(dirname(path), { recursive: true });
-  await page.screenshot({ path, fullPage: true });
+  await page.screenshot({ path, fullPage });
 }
 
 test("sales route exposes compact overview and wide detail", async ({ page }) => {
@@ -332,11 +343,11 @@ test("sales export downloads formula-safe CSV with normal text, accents, quotes 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Exportar" }).click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe("vendas-pagina-1.csv");
+  expect(download.suggestedFilename()).toBe("documentos-comerciais-pagina-1.csv");
   const stream = await download.createReadStream();
   let csv = "";
   for await (const chunk of stream) csv += chunk.toString("utf8");
-  expect(csv).toMatch(/^\uFEFF"Venda";"Cliente";"Data";"Vendedor"/);
+  expect(csv).toMatch(/^\uFEFF"Documento";"Tipo";"Cliente";"Data";"Vendedor"/);
   expect(csv).toContain('"\t\'=HYPERLINK(""https://example.invalid"",""abrir"")";"');
   expect(csv).toContain('"\t\'+COMANDO"');
   expect(csv).toContain('"\t\' \t@SOMA(1,2)"');
@@ -365,7 +376,7 @@ test("sales download protects Unicode formula variants in customer and seller fi
   const stream = await (await downloadPromise).createReadStream();
   let csv = "";
   for await (const chunk of stream) csv += chunk.toString("utf8");
-  expect(csv).toMatch(/^\uFEFF"Venda";"Cliente";"Data";"Vendedor"/);
+  expect(csv).toMatch(/^\uFEFF"Documento";"Tipo";"Cliente";"Data";"Vendedor"/);
   expect(csv).toContain('"\t\'＝1+1";');
   expect(csv).toContain('"\t\'＋IMPORTDATA"');
   expect(csv).toContain('"\t\'－1+1";');
@@ -410,22 +421,24 @@ test("sales metric label follows the actual monthly, complete, custom and partia
 });
 
 test("sales list keeps the approved dense desktop composition and product images", async ({ page }) => {
-  await page.setViewportSize({ width: 950, height: 700 });
+  await page.setViewportSize({ width: 1366, height: 768 });
   await prepare(page, { visualRows: true });
-  await expect(page.getByRole("table", { name: "Vendas" }).locator("tbody tr")).toHaveCount(6);
+  const salesTable = page.getByRole("table", { name: "Documentos comerciais" });
+  await expect(salesTable.locator("tbody tr")).toHaveCount(6);
   await expect(page.getByText("Mostrando 1–6 de 6 vendas")).toBeVisible();
-  await expect(page.getByRole("table", { name: "Vendas" }).locator("tbody img")).toHaveCount(6);
-  expect(await page.getByRole("table", { name: "Vendas" }).locator("tbody img").first().evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
-  await expect(page.getByRole("table", { name: "Vendas" }).getByText("Em andamento").first()).toBeVisible();
+  await expect(salesTable.locator("tbody img")).toHaveCount(6);
+  expect(await salesTable.locator("tbody img").first().evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+  await expect(salesTable.getByText("Em andamento").first()).toBeVisible();
   await capture(page, "sales-list-reference-width");
-  await page.getByRole("button", { name: "Ações da venda VD-00126" }).click();
-  await expect(page.getByRole("menuitem", { name: "Editar rascunho" })).toBeVisible();
+  await page.getByRole("button", { name: "Ações de venda VD-00126" }).click();
+  await expect(page.getByRole("menuitem", { name: "Editar documento" })).toBeVisible();
 });
 test("sales searches incrementally and reveals variants only on demand", async ({ page }) => {
   const counters = { customers: 0, catalog: 0 };
   await page.setViewportSize({ width: 1440, height: 1000 });
   await prepare(page, { stage: "created", counters });
-  await page.getByRole("button", { name: "Nova venda" }).click();
+  await page.getByRole("button", { name: "Novo documento" }).click();
+  await page.getByRole("menuitem", { name: "Nova venda" }).click();
   const dialog = page.getByRole("dialog", { name: "Nova venda" });
   await expect(dialog).toBeVisible();
   expect((await dialog.boundingBox())?.width).toBeGreaterThan(1100);
@@ -451,7 +464,7 @@ test("sales searches incrementally and reveals variants only on demand", async (
   await expect(dialog.getByRole("button", { name: "Remover Monitor 24 IPS" })).toBeVisible();
   await dialog.getByLabel("Quantidade").fill("19");
   await expect(dialog.getByRole("alert")).toContainText("Estoque insuficiente");
-  await expect(dialog.getByRole("button", { name: "Salvar rascunho" })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Salvar venda" })).toBeDisabled();
   await dialog.getByLabel("Quantidade").fill("2");
   await expect(dialog.getByText("Estoque insuficiente")).toHaveCount(0);
   await dialog.getByLabel("Frete").fill("125,90");
@@ -463,7 +476,7 @@ test("sales searches incrementally and reveals variants only on demand", async (
   await capture(page, "sales-new-workspace-desktop");
 });
 test("sales confirms through the guided financial checklist", async ({ page }) => {
-  await page.setViewportSize({ width: 1366, height: 900 });
+  await page.setViewportSize({ width: 1366, height: 768 });
   await prepare(page, { stage: "created" });
   await page.getByRole("button", { name: "VD-00128", exact: true }).click();
   await page.getByRole("button", { name: "Confirmar" }).click();
@@ -479,9 +492,39 @@ test("sales confirms through the guided financial checklist", async ({ page }) =
   await dialog.getByRole("button", { name: "Pago" }).click();
   await expect(dialog.getByText("R$ 0,00")).toBeVisible();
   await dialog.getByRole("button", { name: "Pendente" }).click();
-  await expect(dialog.getByRole("button", { name: "Confirmar venda e criar títulos" })).toBeEnabled();
-  await capture(page, "sales-confirmation-1366");
+  const confirm = dialog.getByRole("button", { name: "Confirmar venda e criar títulos" });
+  await expect(confirm).toBeEnabled();
+  await expect(confirm).toBeInViewport();
+  await expect(dialog.getByTestId("sales-confirmation-financial")).toBeVisible();
+  await expect(dialog.getByTestId("sales-confirmation-decision")).toBeVisible();
+  expect(await dialog.evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+  await capture(page, "sales-confirmation-1366x768", false);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(confirm).toBeInViewport();
+  expect(await dialog.evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+  await capture(page, "sales-confirmation-1440x900", false);
 });
+
+for (const viewport of [{ width: 1366, height: 768 }, { width: 1440, height: 900 }]) {
+  test(`sales premium detail keeps products and actions usable at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await prepare(page, { multiItemDetail: true });
+    await page.getByRole("button", { name: "VD-00128", exact: true }).click();
+    const detail = page.getByTestId("sales-detail-screen");
+    await expect(detail.getByTestId("sales-detail-facts").locator(":scope > div")).toHaveCount(4);
+    await expect(detail.getByTestId("sales-detail-product-row")).toHaveCount(3);
+    await expect(detail.getByRole("img", { name: "Imagem de Monitor 24 IPS" })).toBeVisible();
+    await expect(detail.getByLabel("Sem imagem para Suporte articulado para monitor")).toBeVisible();
+    await expect(detail.getByTestId("sales-detail-address")).toContainText("Praça da Sé, 100, Sala 4");
+    await expect(detail.getByTestId("sales-detail-actions")).toBeVisible();
+    await expect(detail.getByTestId("sales-detail-actions")).toBeInViewport();
+    await expect(detail.getByRole("button", { name: "Marcar como enviado" })).toBeVisible();
+    await expect(detail.getByRole("button", { name: "Corrigir etapa" })).toBeVisible();
+    await expect(detail.getByRole("button", { name: "Cancelar venda" })).toBeDisabled();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await capture(page, `sales-detail-premium-${viewport.width}x${viewport.height}`, false);
+  });
+}
 test("sales explains a blocked financial confirmation", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 900 });
   await prepare(page, { stage: "created", missingFinance: true });
