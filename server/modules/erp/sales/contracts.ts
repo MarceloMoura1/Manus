@@ -86,7 +86,9 @@ export const saleDraftInput = z
   .object({
     documentType: z.enum(saleDocumentTypes).default("sale"),
     crmClientId: z.string().trim().min(1).max(80),
-    sellerUserId: z.string().trim().min(1).max(80).optional().transform(value => value || null),
+    // Omission has update semantics: keep the persisted seller.  A concrete
+    // identifier is the only way to request an intentional reassignment.
+    sellerUserId: z.string().trim().min(1).max(80).optional(),
     commercialDate: z.string().date().optional().transform(value => value || null),
     notes: z.string().trim().max(4_000).optional().transform(value => value || null),
     paymentTerms: z.string().trim().max(500).optional().transform(value => value || null),

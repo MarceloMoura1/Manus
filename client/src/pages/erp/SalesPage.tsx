@@ -65,6 +65,7 @@ import {
   hasDuplicateSalesItemIdentity,
   salesDraftFromForm,
   salesFormFromDetail,
+  salesCommercialDate,
   splitInstallments,
   type SalesAddress,
   type SalesForm,
@@ -460,7 +461,7 @@ export function SalesPage({
     const exportItems = selectedOnPage.length ? selectedOnPage : list.data.items;
     if (!exportItems.length) return;
     const rows = exportItems.map(order => [
-      order.orderNumber, order.documentType === "quote" ? "Orçamento" : "Venda", order.customerName, date.format(new Date(`${order.commercialDate}T12:00:00`)),
+      order.orderNumber, order.documentType === "quote" ? "Orçamento" : "Venda", order.customerName, date.format(salesCommercialDate(order.commercialDate)),
       order.sellerName ?? "", (order.totalCents / 100).toFixed(2).replace(".", ","),
       order.documentType === "quote" ? commercialStatusLabels[order.commercialStatus] : paymentLabels[order.paymentStatus as keyof typeof paymentLabels] ?? order.paymentStatus,
       order.documentType === "quote" ? "Fluxo comercial" : order.cancelled ? "Cancelada" : stageLabels[order.currentStage as Stage],
@@ -696,7 +697,7 @@ export function SalesPage({
                         <td className="px-2 py-3"><input type="checkbox" aria-label={`Selecionar ${order.documentType === "quote" ? "orçamento" : "venda"} ${order.orderNumber}`} checked={selectedSaleIds.includes(order.publicId)} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...current, order.publicId] : current.filter(id => id !== order.publicId))} /></td>
                         <td className="px-2 py-2"><div className="flex min-w-0 items-center gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} /><div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><button type="button" className="truncate font-semibold text-blue-700 hover:underline" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><span className="mt-0.5 block truncate text-[11px] text-slate-500">{order.firstProductName ?? "Produto histórico"}{order.itemCount > 1 ? ` · +${order.itemCount - 1}` : ""}</span></div></div></td>
                         <td className="truncate px-2 py-2 font-medium text-slate-800" title={order.customerName}>{order.customerName}</td>
-                        <td className="px-2 py-2 tabular-nums text-slate-700">{date.format(new Date(`${order.commercialDate}T12:00:00`))}</td>
+                        <td className="px-2 py-2 tabular-nums text-slate-700">{date.format(salesCommercialDate(order.commercialDate))}</td>
                         <td className="truncate px-2 py-2 text-slate-700" title={order.sellerName ?? ""}>{order.sellerName ?? "—"}</td>
                         <td className="px-2 py-2 text-right font-semibold tabular-nums text-slate-900">{money.format(order.totalCents / 100)}</td>
                         <td className="px-2 py-2">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <PaymentBadge value={order.paymentStatus} compact />}</td>
@@ -710,7 +711,7 @@ export function SalesPage({
               <div className="divide-y divide-slate-100 md:hidden">
                 {list.data.items.map(order => <article key={order.publicId} className="p-4">
                   <div className="flex items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} large /><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate font-semibold text-blue-700" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-xs text-slate-600">{order.firstProductName ?? "Produto histórico"}</p><p className="mt-1 truncate text-xs font-medium text-slate-800">{order.customerName}</p></div><div className="flex shrink-0 flex-col items-end gap-1"><strong className="text-xs tabular-nums">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "" })} /></div></div>
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 pl-[68px]"><span className="text-xs text-slate-500">{date.format(new Date(order.commercialDate ?? order.createdAt))} · {order.sellerName ?? "—"}</span><div className="flex gap-1">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 pl-[68px]"><span className="text-xs text-slate-500">{date.format(salesCommercialDate(order.commercialDate))} · {order.sellerName ?? "—"}</span><div className="flex gap-1">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
                 </article>)}
               </div>
             </div>
@@ -1132,7 +1133,7 @@ function SaleDetailPanel({
   const detailFacts = [
     { label: "Cliente", value: order.customerName, detail: order.crmClientId, client: true },
     { label: "Vendedor(a)", value: order.sellerName ?? "Histórico indisponível" },
-    { label: "Data comercial", value: date.format(new Date(`${order.commercialDate}T12:00:00`)) },
+    { label: "Data comercial", value: date.format(salesCommercialDate(order.commercialDate)) },
     { label: "Previsão de entrega", value: order.expectedDate ? date.format(new Date(`${order.expectedDate}T12:00:00`)) : "Não informada" },
   ];
   return (
@@ -1558,7 +1559,7 @@ function SaleFormDialog({
                   <div><p className="text-xs font-semibold text-blue-700">4. Valores e prazo</p><h3 id="sale-values-heading" className="mt-1 font-bold text-slate-950">Condições comerciais</h3></div>
                   <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <label className="text-xs font-semibold text-slate-700">Data comercial<Input className="mt-1" type="date" value={form.commercialDate} onChange={event => setForm(current => current ? { ...current, commercialDate: event.target.value } : current)} /></label>
-                    <label className="text-xs font-semibold text-slate-700">Vendedor(a)<select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={form.sellerUserId} onChange={event => setForm(current => current ? { ...current, sellerUserId: event.target.value } : current)}><option value="">Responsável atual</option>{sellers.map(seller => <option key={seller.publicId} value={seller.publicId}>{seller.name}</option>)}</select></label>
+                    <label className="text-xs font-semibold text-slate-700">Vendedor(a)<select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={form.sellerUserId} onChange={event => setForm(current => current ? { ...current, sellerUserId: event.target.value } : current)}><option value="">{form.publicId ? "Preservar vendedor atual" : "Responsável atual"}</option>{sellers.map(seller => <option key={seller.publicId} value={seller.publicId}>{seller.name}</option>)}</select></label>
                     <label className="text-xs font-semibold text-slate-700">Previsão de entrega<Input className="mt-1" type="date" value={form.expectedDate} onChange={event => setForm(current => current ? { ...current, expectedDate: event.target.value } : current)} /></label>
                     <label className="text-xs font-semibold text-slate-700">Forma de pagamento<select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm" value={form.paymentMethod} onChange={event => setForm(current => current ? { ...current, paymentMethod: event.target.value } : current)}><option value="">Definir na confirmação</option>{paymentMethods.map(method => <option key={method} value={method}>{method}</option>)}</select></label>
                     <label className="text-xs font-semibold text-slate-700">Condições de pagamento<Input className="mt-1" maxLength={255} placeholder="Ex.: 30/60 dias" value={form.paymentTerms ?? ""} onChange={event => setForm(current => current ? { ...current, paymentTerms: event.target.value } : current)} /></label>

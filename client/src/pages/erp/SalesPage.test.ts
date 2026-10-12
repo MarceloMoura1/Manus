@@ -150,6 +150,11 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain("Outros encargos");
   });
 
+  it("uses the shared calendar-date parser in export, desktop, mobile and detail", () => {
+    expect(source.match(/date\.format\(salesCommercialDate\(order\.commercialDate\)\)/g)).toHaveLength(4);
+    expect(source).not.toContain("new Date(order.commercialDate ?? order.createdAt)");
+  });
+
   it("places financial conditions and the confirmation decision side by side", () => {
     expect(source).toContain('data-testid="sales-confirmation-layout"');
     expect(source).toContain('data-testid="sales-confirmation-financial"');

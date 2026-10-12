@@ -89,6 +89,10 @@ export const blankSalesForm = (documentType: "quote" | "sale" = "sale"): SalesFo
   items: [],
 });
 
+export function salesCommercialDate(value: string): Date {
+  return new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T12:00:00` : value);
+}
+
 export const salesItemIdentity = (item: SalesFormItem) =>
   `${item.productPublicId}:${item.inventoryItemPublicId ?? "product-only"}`;
 

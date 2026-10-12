@@ -90,6 +90,16 @@ describe("sale contracts", () => {
     expect(normalized.items[0].inventoryItemPublicId).toBe(inventoryItemPublicId);
   });
 
+  it("preserves seller omission separately from an explicit seller selection", () => {
+    const base = {
+      crmClientId: crypto.randomUUID(),
+      items: [{ productPublicId: crypto.randomUUID(), quantity: "1", unitPriceCents: 100 }],
+    };
+
+    expect(saleDraftInput.parse(base).sellerUserId).toBeUndefined();
+    expect(saleDraftInput.parse({ ...base, sellerUserId: "seller-2" }).sellerUserId).toBe("seller-2");
+  });
+
   it("rejects only a duplicate resolved stock identity", () => {
     const productPublicId = crypto.randomUUID();
     const variation = crypto.randomUUID();

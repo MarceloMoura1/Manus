@@ -1003,7 +1003,6 @@ export class SaleRepository {
     try {
       await connection.beginTransaction();
       const refs = await this.validateReferences(connection, clientId, actor.userId, input);
-      const seller = await this.resolveSeller(connection, clientId, actor, input.sellerUserId);
       const totals = calculateSaleTotals(
         input.items,
         input.orderDiscountCents,
@@ -1047,7 +1046,11 @@ export class SaleRepository {
           current,
           totals.totalCents
         );
-      } else {
+      }
+      const seller = current && input.sellerUserId === undefined
+        ? { publicId: current.sellerUserId, name: current.sellerName }
+        : await this.resolveSeller(connection, clientId, actor, input.sellerUserId);
+      if (!publicId) {
         const orderNumber = await this.nextCommercialCode(connection, clientId, input.documentType);
         const [result] = await connection.execute<ResultSetHeader>(
           `INSERT INTO erp_sale_orders
