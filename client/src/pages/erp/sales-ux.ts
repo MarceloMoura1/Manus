@@ -108,6 +108,30 @@ export function salesAddressesMatch(
   );
 }
 
+/**
+ * Formats the delivery snapshot kept on the order.  It intentionally does not
+ * fall back to billing data or to the current customer record: those values
+ * can describe a different address after an order has been created.
+ */
+export function formatSalesDeliveryAddress(address: SalesAddress | null | undefined) {
+  if (!address) return "Endereço de entrega não informado";
+
+  const value = (field: string | null | undefined) => field?.trim() ?? "";
+  const street = value(address.street);
+  const number = value(address.number);
+  const locality = [value(address.district), [value(address.city), value(address.state)].filter(Boolean).join(" - ")]
+    .filter(Boolean)
+    .join(", ");
+  const parts = [
+    [street, number ? `nº ${number}` : ""].filter(Boolean).join(", "),
+    value(address.complement),
+    locality,
+    value(address.postalCode) ? `CEP ${value(address.postalCode)}` : "",
+  ].filter(Boolean);
+
+  return parts.join(", ") || "Endereço de entrega não informado";
+}
+
 export function salesDraftProgress(form: SalesForm) {
   return [
     { key: "customer", label: "Cliente", complete: Boolean(form.crmClientId) },

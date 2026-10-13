@@ -123,11 +123,19 @@ export function salesStockIssue(item: SalesFormItem) {
 }
 
 export function firstSalesStockIssue(items: SalesFormItem[]) {
-  for (const item of items) {
+  return salesStockIssues(items)[0] ?? null;
+}
+
+/**
+ * Quotes may be recorded with a shortage, but users must see every affected
+ * line before they explicitly continue. A sale remains blocked separately by
+ * the server-side stock lock.
+ */
+export function salesStockIssues(items: SalesFormItem[]) {
+  return items.flatMap(item => {
     const issue = salesStockIssue(item);
-    if (issue) return issue;
-  }
-  return null;
+    return issue ? [issue] : [];
+  });
 }
 
 export function salesFormFromDetail(detail: SaleDetailForForm): SalesForm {

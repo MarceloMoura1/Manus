@@ -521,6 +521,10 @@ physical.sequential("ERP sales UX v3 physical flow", () => {
       toStatus: "approved",
       reason: null,
     })).commercialStatus).toBe("approved");
+    const [ordersBeforeConversion] = await db.execute<RowDataPacket[]>(
+      "SELECT COUNT(*) total FROM erp_sale_orders WHERE client_id=?",
+      [identity.clientId]
+    );
 
     const conversionKey = crypto.randomUUID();
     const conversions = await Promise.all([
@@ -530,13 +534,31 @@ physical.sequential("ERP sales UX v3 physical flow", () => {
     expect(new Set(conversions.map(result => result.publicId)).size).toBe(1);
     expect(conversions.map(result => result.replay).sort()).toEqual([false, true]);
     expect(conversions[0].orderNumber).toMatch(/^V-\d+$/);
-
-    const archived = await sales.archive(
-      identity,
-      quote.publicId,
-      "Orçamento convertido no ensaio físico"
+    expect(conversions[0]).toMatchObject({
+      id: quote.id,
+      publicId: quote.publicId,
+      documentType: "sale",
+      commercialStatus: "active",
+      currentStage: "created",
+    });
+    const [convertedRows] = await db.execute<RowDataPacket[]>(
+      "SELECT id,public_id,document_type,commercial_status,source_quote_id FROM erp_sale_orders WHERE client_id=? AND id=?",
+      [identity.clientId, quote.id]
     );
-    expect(archived.archivedAt).not.toBeNull();
+    expect(convertedRows).toEqual([
+      expect.objectContaining({
+        id: quote.id,
+        public_id: quote.publicId,
+        document_type: "sale",
+        commercial_status: "active",
+        source_quote_id: null,
+      }),
+    ]);
+    const [ordersAfterConversion] = await db.execute<RowDataPacket[]>(
+      "SELECT COUNT(*) total FROM erp_sale_orders WHERE client_id=?",
+      [identity.clientId]
+    );
+    expect(Number(ordersAfterConversion[0].total)).toBe(Number(ordersBeforeConversion[0].total));
     const [events] = await db.execute<RowDataPacket[]>(
       `SELECT event_type,COUNT(*) total FROM erp_sale_order_events
        WHERE client_id=? AND sale_order_id=?
@@ -546,7 +568,6 @@ physical.sequential("ERP sales UX v3 physical flow", () => {
     expect(Object.fromEntries(events.map(row => [row.event_type, Number(row.total)]))).toMatchObject({
       quote_status_changed: 2,
       quote_converted: 1,
-      archived: 1,
     });
   });
 });

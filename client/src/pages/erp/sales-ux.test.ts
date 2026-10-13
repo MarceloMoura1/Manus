@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   activeSalesFilterCount,
   canRunSalesLookup,
+  formatSalesDeliveryAddress,
   salesAddressesMatch,
   salesConfirmationRequirements,
   salesDraftProgress,
@@ -102,6 +103,34 @@ describe("sales UX state", () => {
   it("keeps one address by default and detects an explicit billing exception", () => {
     expect(salesAddressesMatch(address, { ...address })).toBe(true);
     expect(salesAddressesMatch(address, { ...address, number: "2" })).toBe(false);
+  });
+
+  it("formats the persisted delivery address without billing or customer fallbacks", () => {
+    expect(formatSalesDeliveryAddress(address)).toBe(
+      "Praça da Sé, nº 1, Sé, São Paulo - SP, CEP 01001-000"
+    );
+  });
+
+  it("formats a partial delivery address without empty fields or dangling punctuation", () => {
+    expect(
+      formatSalesDeliveryAddress({
+        ...address,
+        street: "Rua das Flores",
+        number: "",
+        complement: "",
+        district: "",
+        city: "Curitiba",
+        state: "PR",
+        postalCode: "",
+      })
+    ).toBe("Rua das Flores, Curitiba - PR");
+  });
+
+  it("uses an honest fallback when a delivery snapshot is absent or empty", () => {
+    expect(formatSalesDeliveryAddress(null)).toBe("Endereço de entrega não informado");
+    expect(formatSalesDeliveryAddress({ ...address, street: "", number: "", complement: "", district: "", city: "", state: "", postalCode: "" })).toBe(
+      "Endereço de entrega não informado"
+    );
   });
 
   it("reports draft progress from real form data", () => {

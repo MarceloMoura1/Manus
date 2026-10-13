@@ -47,7 +47,7 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain("sales-detail-screen");
     expect(source).toContain("Voltar para vendas");
     expect(source).toContain("onSaleNavigate?.(publicId)");
-    expect(source).toContain("Endereço histórico não registrado");
+    expect(source).toContain("formatSalesDeliveryAddress(order.shippingAddress)");
     expect(source).toContain("Parte do histórico é anterior à timeline auditada");
     expect(source).toContain("productMediaUrl");
   });
@@ -197,5 +197,66 @@ describe("ERP Vendas B+C interface", () => {
     expect(actions).toContain("Cancelar venda");
     expect(actions).toContain("bg-rose-50");
     expect(actions).toContain("order.paidCents > 0");
+  });
+
+  it("keeps a failed quote edit open and exposes the real mutation error", () => {
+    expect(source).toContain("onError: error => setLocalError(salesMutationErrorMessage(error))");
+    expect(source).toContain("function salesMutationErrorMessage(error: unknown)");
+    expect(source).toContain("formError={localError}");
+    expect(source).toContain('{formError && <p role="alert"');
+    expect(source).toContain("create.reset()");
+    expect(source).toContain("update.reset()");
+    expect(source).toContain("{busy ? \"Salvando…\" : `Salvar ${form.documentType === \"quote\" ? \"orçamento\" : \"venda\"}`}");
+  });
+
+  it("allows an explicit quote-only shortage confirmation while keeping sales blocked", () => {
+    expect(source).toContain('if (stockIssues.length && form.documentType === "sale")');
+    expect(source).toContain("QuoteStockConfirmationDialog");
+    expect(source).toContain("Produto sem estoque");
+    expect(source).toContain("Este produto não possui estoque suficiente para atender à quantidade solicitada. Deseja continuar com o orçamento mesmo assim?");
+    expect(source).toContain("salesStockIssues(form.items)");
+    expect(source).toContain("Voltar e revisar");
+    expect(source).toContain("Continuar orçamento");
+    expect(source).toContain('form.documentType === "sale" && stockIssues.length > 0');
+    expect(source).toContain('if (form.documentType === "sale" && Number(product.availableQuantity) <= 0) return;');
+  });
+
+  it("keeps commercial history factual, collapsible and free of CRM technical ids", () => {
+    expect(source).toContain("function DocumentHistory");
+    expect(source).toContain("aria-expanded={expanded}");
+    expect(source).toContain("Histórico <span className=\"rounded-full bg-slate-100");
+    expect(source).toContain('documentType === "quote" ? "Orçamento criado" : "Venda criada"');
+    expect(source).toContain("Negociação iniciada");
+    expect(source).toContain("Venda criada a partir do orçamento");
+    expect(source).not.toContain("detail: order.crmClientId");
+  });
+
+  it("keeps quote conversion identity and reports a server-side stock failure in its dialog", () => {
+    expect(source).toContain("A operação preservará a identidade do pedido");
+    expect(source).toContain("validará o estoque no servidor");
+    expect(source).toContain("error={conversionError}");
+  });
+
+  it("uses the requested delivery label, visual separators and individual action feedback", () => {
+    expect(source).toContain("formatSalesDeliveryAddress(order.shippingAddress)");
+    expect(source).toContain("sm:divide-x sm:divide-y-0");
+    expect(source).toContain("Novo Pedido");
+    expect(source).toContain("Nova venda/Pedido");
+    expect(source).toContain("border-amber-200 bg-amber-50");
+  });
+
+  it("uses a quote-only, auditable delete action without offering physical sale deletion", () => {
+    expect(source).toContain("Excluir orçamento");
+    expect(source).toContain('order.documentType === "quote" && order.commercialStatus !== "converted"');
+    expect(source).toContain("O orçamento será removido apenas das listas ativas");
+    expect(source).toContain("nenhuma venda será excluída");
+  });
+
+  it("gives the sales-specific action controls a visible surface and interaction states", () => {
+    expect(source).toContain("function Button({ className, variant = \"default\", ...props }");
+    expect(source).toContain("bg-slate-50 text-slate-800 shadow-sm");
+    expect(source).toContain("motion-reduce:transition-none");
+    expect(source).toContain("data-[highlighted]:bg-slate-100");
+    expect(source).toContain('data-testid="sales-row-actions"');
   });
 });
