@@ -47,7 +47,7 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain("sales-detail-screen");
     expect(source).toContain("Voltar para vendas");
     expect(source).toContain("onSaleNavigate?.(publicId)");
-    expect(source).toContain("Endereço da entrega: End. cadastrado");
+    expect(source).toContain("formatSalesDeliveryAddress(order.shippingAddress)");
     expect(source).toContain("Parte do histórico é anterior à timeline auditada");
     expect(source).toContain("productMediaUrl");
   });
@@ -238,7 +238,7 @@ describe("ERP Vendas B+C interface", () => {
   });
 
   it("uses the requested delivery label, visual separators and individual action feedback", () => {
-    expect(source).toContain("Endereço da entrega: End. cadastrado");
+    expect(source).toContain("formatSalesDeliveryAddress(order.shippingAddress)");
     expect(source).toContain("sm:divide-x sm:divide-y-0");
     expect(source).toContain("Novo Pedido");
     expect(source).toContain("Nova venda/Pedido");
@@ -250,5 +250,13 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain('order.documentType === "quote" && order.commercialStatus !== "converted"');
     expect(source).toContain("O orçamento será removido apenas das listas ativas");
     expect(source).toContain("nenhuma venda será excluída");
+  });
+
+  it("gives the sales-specific action controls a visible surface and interaction states", () => {
+    expect(source).toContain("function Button({ className, variant = \"default\", ...props }");
+    expect(source).toContain("bg-slate-50 text-slate-800 shadow-sm");
+    expect(source).toContain("motion-reduce:transition-none");
+    expect(source).toContain("data-[highlighted]:bg-slate-100");
+    expect(source).toContain('data-testid="sales-row-actions"');
   });
 });

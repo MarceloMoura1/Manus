@@ -109,6 +109,8 @@ async function prepare(
     stockAvailable?: string | null;
     stockExitRecorded?: boolean;
     counters?: { customers: number; catalog: number };
+    documentType?: "sale" | "quote";
+    shippingAddress?: (typeof order)["shippingAddress"] | null;
     onSaleListRequest?: () => void;
     visualRows?: boolean;
     paymentFlow?: boolean;
@@ -132,10 +134,16 @@ async function prepare(
     stage = "separation",
     stockAvailable = "18.000",
     stockExitRecorded = false,
+    documentType = "sale",
+    shippingAddress = order.shippingAddress,
   } = options;
   let extraPaidCents = 0;
   const activeOrder = {
     ...order,
+    documentType,
+    orderNumber: documentType === "quote" ? "O-00128" : order.orderNumber,
+    commercialStatus: documentType === "quote" ? "negotiation" : order.commercialStatus,
+    shippingAddress,
     status: stage === "created" ? "draft" : "confirmed",
     currentStage: stage,
   };
@@ -437,8 +445,8 @@ test("sales searches incrementally and reveals variants only on demand", async (
   const counters = { customers: 0, catalog: 0 };
   await page.setViewportSize({ width: 1440, height: 1000 });
   await prepare(page, { stage: "created", counters });
-  await page.getByRole("button", { name: "Novo documento" }).click();
-  await page.getByRole("menuitem", { name: "Nova venda" }).click();
+  await page.getByRole("button", { name: "Novo Pedido" }).click();
+  await page.getByRole("menuitem", { name: "Nova venda/Pedido" }).click();
   const dialog = page.getByRole("dialog", { name: "Nova venda" });
   await expect(dialog).toBeVisible();
   expect((await dialog.boundingBox())?.width).toBeGreaterThan(1100);
@@ -463,10 +471,11 @@ test("sales searches incrementally and reveals variants only on demand", async (
   await dialog.getByRole("button", { name: /Cor: Preto/ }).click();
   await expect(dialog.getByRole("button", { name: "Remover Monitor 24 IPS" })).toBeVisible();
   await dialog.getByLabel("Quantidade").fill("19");
-  await expect(dialog.getByRole("alert")).toContainText("Estoque insuficiente");
+  await expect(dialog.getByRole("alert")).toContainText("A venda não pode ser salva enquanto houver saldo insuficiente.");
+  await expect(dialog.getByRole("alert")).toContainText("Monitor 24 IPS: solicitado 19, disponível 18.");
   await expect(dialog.getByRole("button", { name: "Salvar venda" })).toBeDisabled();
   await dialog.getByLabel("Quantidade").fill("2");
-  await expect(dialog.getByText("Estoque insuficiente")).toHaveCount(0);
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
   await dialog.getByLabel("Frete").fill("125,90");
   await dialog.getByLabel("Frete").blur();
   await expect(dialog.getByLabel("Frete")).toHaveValue("125,90");
@@ -515,7 +524,7 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 1440, height: 900
     await expect(detail.getByTestId("sales-detail-product-row")).toHaveCount(3);
     await expect(detail.getByRole("img", { name: "Imagem de Monitor 24 IPS" })).toBeVisible();
     await expect(detail.getByLabel("Sem imagem para Suporte articulado para monitor")).toBeVisible();
-    await expect(detail.getByTestId("sales-detail-address")).toContainText("Praça da Sé, 100, Sala 4");
+    await expect(detail.getByTestId("sales-detail-address")).toContainText("Praça da Sé, nº 100, Sala 4, Sé, São Paulo - SP, CEP 01001-000");
     await expect(detail.getByTestId("sales-detail-actions")).toBeVisible();
     await expect(detail.getByTestId("sales-detail-actions")).toBeInViewport();
     await expect(detail.getByRole("button", { name: "Marcar como enviado" })).toBeVisible();
@@ -525,6 +534,102 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 1440, height: 900
     await capture(page, `sales-detail-premium-${viewport.width}x${viewport.height}`, false);
   });
 }
+
+for (const deliveryCase of [
+  {
+    label: "partial delivery address on mobile",
+    viewport: { width: 390, height: 844 },
+    shippingAddress: {
+      ...order.shippingAddress,
+      street: "Rua das Flores",
+      number: "",
+      complement: "",
+      district: "",
+      city: "Curitiba",
+      state: "PR",
+      postalCode: "",
+    },
+    expected: "Rua das Flores, Curitiba - PR",
+  },
+  {
+    label: "missing delivery address",
+    viewport: { width: 1366, height: 768 },
+    shippingAddress: null,
+    expected: "Endereço de entrega não informado",
+  },
+] as const) {
+  test(`sales detail shows ${deliveryCase.label} without billing fallbacks`, async ({ page }) => {
+    await page.setViewportSize(deliveryCase.viewport);
+    await prepare(page, { shippingAddress: deliveryCase.shippingAddress });
+    await page.getByRole("button", { name: "VD-00128", exact: true }).click();
+    const detail = page.getByTestId("sales-detail-screen");
+    const deliveryAddress = detail.getByTestId("sales-detail-address");
+    await expect(deliveryAddress).toHaveText(`Endereço da entrega: ${deliveryCase.expected}Corrigir endereço`);
+    await deliveryAddress.scrollIntoViewIfNeeded();
+    await expect(deliveryAddress).toBeInViewport();
+    expect(await deliveryAddress.locator("p").evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await capture(page, `sales-delivery-${deliveryCase.label.replaceAll(" ", "-")}`, false);
+  });
+}
+
+test("sales action controls expose pointer, keyboard, pressed, disabled and reduced-motion states", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await prepare(page, { stage: "created" });
+
+  const action = page.getByRole("button", { name: "Ações de venda VD-00128" });
+  const restingBackground = await action.evaluate(element => getComputedStyle(element).backgroundColor);
+  await action.hover();
+  expect(await action.evaluate(element => element.matches(":hover"))).toBe(true);
+  expect(await action.evaluate(element => getComputedStyle(element).backgroundColor)).not.toBe(restingBackground);
+  expect(await action.evaluate(element => getComputedStyle(element).transitionProperty)).toBe("none");
+  await action.click();
+
+  const viewDetails = page.getByRole("menuitem", { name: "Ver detalhes" });
+  const menuBackground = await viewDetails.evaluate(element => getComputedStyle(element).backgroundColor);
+  await viewDetails.hover();
+  await expect(viewDetails).toHaveAttribute("data-highlighted", "");
+  expect(await viewDetails.evaluate(element => getComputedStyle(element).backgroundColor)).not.toBe(menuBackground);
+  await page.keyboard.press("Escape");
+
+  const createDocument = page.getByRole("button", { name: "Novo Pedido" });
+  await createDocument.focus();
+  await page.keyboard.press("Enter");
+  const createSale = page.getByRole("menuitem", { name: "Nova venda/Pedido" });
+  await expect(createSale).toBeFocused();
+  expect(await createSale.evaluate(element => element.matches(":focus-visible"))).toBe(true);
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "Nova venda" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("button", { name: "VD-00128", exact: true }).click();
+  const detail = page.getByTestId("sales-detail-screen");
+  await expect(detail.getByRole("button", { name: "Cancelar venda" })).toBeDisabled();
+  await detail.getByRole("button", { name: "Confirmar" }).click();
+  const confirmation = page.getByRole("dialog", { name: "Confirmar venda" });
+  const partial = confirmation.getByRole("button", { name: "Pagamento parcial" });
+  await expect(partial).toHaveAttribute("aria-pressed", "false");
+  await partial.focus();
+  await page.keyboard.press("Space");
+  await expect(partial).toHaveAttribute("aria-pressed", "true");
+  await capture(page, "sales-interaction-states", false);
+});
+
+test("sales quote action menu remains keyboard-accessible on mobile", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await prepare(page, { documentType: "quote" });
+  const action = page.getByRole("button", { name: "Ações de orçamento O-00128" });
+  await action.focus();
+  await page.keyboard.press("Enter");
+  const viewDetails = page.getByRole("menuitem", { name: "Ver detalhes" });
+  await expect(viewDetails).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(action).toBeFocused();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await capture(page, "sales-quote-actions-mobile", false);
+});
+
 test("sales explains a blocked financial confirmation", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 900 });
   await prepare(page, { stage: "created", missingFinance: true });
