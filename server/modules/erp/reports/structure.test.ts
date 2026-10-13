@@ -18,9 +18,9 @@ describe("reports structure", () => {
       /SELECT \*|eval\(|query builder|materialized|warehouse/i
     );
   });
-  it("uses existing ERP events with coalesced invalidation and no report event", () => {
-    expect(workspace).toContain("setTimeout(() => void utils.erp.reports.invalidate(), 250)");
-    expect(workspace).not.toContain("setTimeout(() => void utils.erp.invalidate(), 250)");
+  it("uses existing ERP events with coalesced ERP invalidation and no report event", () => {
+    expect(workspace).toContain("setTimeout(() => void utils.erp.invalidate(), 250)");
+    expect(workspace).not.toContain("setTimeout(() => void utils.erp.reports.invalidate(), 250)");
     expect(workspace).not.toContain("erp:report.changed");
   });
   it("keeps Reports functional and Integrations disabled", () => {
