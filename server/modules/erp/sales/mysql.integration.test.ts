@@ -864,4 +864,34 @@ physical("ERP sales MySQL behavior matrix", () => {
       sellerName: "Vendedor explícito",
     });
   });
+
+  it("29 lets a quote record a stock shortage but keeps real sales blocked and quote removal auditable", async () => {
+    const f = await fixture();
+    const service = new SaleService(new SaleRepository(), silent);
+    await getPool().execute(
+      `UPDATE erp_inventory_item_balances b
+       INNER JOIN erp_inventory_items i ON i.id=b.inventory_item_id AND i.client_id=b.client_id
+       INNER JOIN erp_products p ON p.id=i.product_id AND p.client_id=i.client_id
+       SET b.quantity='0.000'
+       WHERE b.client_id=? AND p.public_id=?`,
+      [adminA.clientId, f.product.publicId]
+    );
+
+    const quote = await service.create(
+      adminA,
+      draft(f.customer.crmClientId, f.product.publicId, { documentType: "quote" })
+    );
+    expect(quote).toMatchObject({ documentType: "quote", commercialStatus: "draft" });
+
+    await expect(
+      service.create(adminA, draft(f.customer.crmClientId, f.product.publicId))
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_STOCK" });
+
+    const archived = await service.archive(adminA, quote.publicId, "Orçamento descartado no ensaio");
+    expect(archived.archivedAt).not.toBeNull();
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_sale_order_events WHERE client_id=? AND sale_order_id=? AND event_type='archived'",
+      [adminA.clientId, quote.id]
+    )).toBe(1);
+  });
 });

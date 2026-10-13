@@ -764,7 +764,8 @@ export class SaleRepository {
     connection: PoolConnection,
     clientId: string,
     userId: string,
-    input: SaleDraftInput
+    input: SaleDraftInput,
+    options: { enforceStock: boolean }
   ) {
     const [customers] = await connection.execute<RowDataPacket[]>(
       `SELECT crm_client_id,company_name,responsible_name,address,city,state,cep,status
@@ -801,16 +802,21 @@ export class SaleRepository {
         userId,
         productMinimumStock: String(rows[0].minimum_stock ?? "0.000"),
       });
-      const availableQuantity = await this.inventory().lockBalance(
-        connection,
-        clientId,
-        inventoryItem.id
-      );
-      if (quantityMillis(requested.quantity) > quantityMillis(availableQuantity)) {
-        throw new ErpDomainError(
-          "INSUFFICIENT_STOCK",
-          `Estoque insuficiente para ${String(rows[0].name)}. Disponível: ${availableQuantity}. Solicitado: ${requested.quantity}.`
+      // Quotes are commercial proposals: they must reference an active, tenant-owned
+      // inventory item, but do not reserve or consume stock. A real sale is still
+      // validated while its balance is locked, so concurrent writes cannot oversell.
+      if (options.enforceStock) {
+        const availableQuantity = await this.inventory().lockBalance(
+          connection,
+          clientId,
+          inventoryItem.id
         );
+        if (quantityMillis(requested.quantity) > quantityMillis(availableQuantity)) {
+          throw new ErpDomainError(
+            "INSUFFICIENT_STOCK",
+            `Estoque insuficiente para ${String(rows[0].name)}. Disponível: ${availableQuantity}. Solicitado: ${requested.quantity}.`
+          );
+        }
       }
       const [variant] = await connection.execute<RowDataPacket[]>(
         `SELECT v.sku,v.name,
@@ -1002,7 +1008,9 @@ export class SaleRepository {
     let financialAdjustment: { previousTotalCents: number; newTotalCents: number; paidCents: number } | null = null;
     try {
       await connection.beginTransaction();
-      const refs = await this.validateReferences(connection, clientId, actor.userId, input);
+      const refs = await this.validateReferences(connection, clientId, actor.userId, input, {
+        enforceStock: input.documentType === "sale",
+      });
       const totals = calculateSaleTotals(
         input.items,
         input.orderDiscountCents,
@@ -2056,8 +2064,10 @@ export class SaleRepository {
         await connection.commit();
         return order;
       }
+      // The UI's "Excluir orçamento" is an auditable archive, never a physical
+      // delete. Converted quotes are retained as part of the sale relationship.
       const terminal = order.documentType === "quote"
-        ? ["converted", "lost", "cancelled"].includes(order.commercialStatus)
+        ? order.commercialStatus !== "converted"
         : order.cancelled || order.currentStage === "completed";
       if (!terminal) {
         throw new ErpDomainError(

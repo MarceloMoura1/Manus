@@ -198,4 +198,40 @@ describe("ERP Vendas B+C interface", () => {
     expect(actions).toContain("bg-rose-50");
     expect(actions).toContain("order.paidCents > 0");
   });
+
+  it("keeps a failed quote edit open and exposes the real mutation error", () => {
+    expect(source).toContain("onError: error => setLocalError(salesMutationErrorMessage(error))");
+    expect(source).toContain("function salesMutationErrorMessage(error: unknown)");
+    expect(source).toContain("formError={localError}");
+    expect(source).toContain('{formError && <p role="alert"');
+    expect(source).toContain("create.reset()");
+    expect(source).toContain("update.reset()");
+    expect(source).toContain("{busy ? \"Salvando…\" : `Salvar ${form.documentType === \"quote\" ? \"orçamento\" : \"venda\"}`}");
+  });
+
+  it("allows an explicit quote-only shortage confirmation while keeping sales blocked", () => {
+    expect(source).toContain('if (stockIssue && form.documentType === "sale")');
+    expect(source).toContain("QuoteStockConfirmationDialog");
+    expect(source).toContain("Produto sem estoque suficiente. Deseja continuar o orçamento mesmo assim?");
+    expect(source).toContain("Continuar orçamento");
+    expect(source).toContain('form.documentType === "sale" && Boolean(stockIssue)');
+    expect(source).toContain('if (form.documentType === "sale" && Number(product.availableQuantity) <= 0) return;');
+  });
+
+  it("keeps commercial history factual, collapsible and free of CRM technical ids", () => {
+    expect(source).toContain("function DocumentHistory");
+    expect(source).toContain("aria-expanded={expanded}");
+    expect(source).toContain("Histórico <span className=\"font-medium text-slate-500\">({events.length})</span>");
+    expect(source).toContain('documentType === "quote" ? "Orçamento criado" : "Venda criada"');
+    expect(source).toContain("Negociação iniciada");
+    expect(source).toContain("Venda criada a partir do orçamento");
+    expect(source).not.toContain("detail: order.crmClientId");
+  });
+
+  it("uses a quote-only, auditable delete action without offering physical sale deletion", () => {
+    expect(source).toContain("Excluir orçamento");
+    expect(source).toContain('order.documentType === "quote" && order.commercialStatus !== "converted"');
+    expect(source).toContain("O orçamento será removido apenas das listas ativas");
+    expect(source).toContain("nenhuma venda será excluída");
+  });
 });

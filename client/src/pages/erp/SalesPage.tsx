@@ -196,7 +196,8 @@ export function SalesPage({
   const [localError, setLocalError] = React.useState("");
   const [confirmation, setConfirmation] = React.useState<ConfirmationState | null>(null);
   const [cancellation, setCancellation] = React.useState<ReasonState | null>(null);
-  const [archiveRequest, setArchiveRequest] = React.useState<ReasonState | null>(null);
+  const [archiveRequest, setArchiveRequest] = React.useState<ArchiveRequestState | null>(null);
+  const [quoteStockConfirmation, setQuoteStockConfirmation] = React.useState<QuoteStockConfirmationState | null>(null);
   const [commercialChange, setCommercialChange] = React.useState<CommercialChangeState | null>(null);
   const [conversion, setConversion] = React.useState<SaleDetail | null>(null);
   const [transition, setTransition] = React.useState<TransitionState | null>(null);
@@ -280,6 +281,7 @@ export function SalesPage({
       setConfirmation(null);
       setCancellation(null);
       setArchiveRequest(null);
+      setQuoteStockConfirmation(null);
       setCommercialChange(null);
       setConversion(null);
       setTransition(null);
@@ -294,6 +296,7 @@ export function SalesPage({
 
   const create = trpc.erp.sales.create.useMutation({
     onSuccess: result => void done("Documento comercial criado como rascunho.", result.publicId),
+    onError: error => setLocalError(salesMutationErrorMessage(error)),
   });
   const update = trpc.erp.sales.update.useMutation({
     onSuccess: result =>
@@ -303,6 +306,7 @@ export function SalesPage({
           : "Documento comercial atualizado.",
         result.publicId
       ),
+    onError: error => setLocalError(salesMutationErrorMessage(error)),
   });
   const confirmSale = trpc.erp.sales.confirm.useMutation({
     onSuccess: result =>
@@ -369,8 +373,6 @@ export function SalesPage({
 
   const canWrite = list.data?.canWrite === true;
   const pendingError =
-    create.error ??
-    update.error ??
     confirmSale.error ??
     changeStage.error ??
     cancelSale.error ??
@@ -379,6 +381,16 @@ export function SalesPage({
     convertQuote.error ??
     archiveSale.error ??
     correctAddress.error;
+
+  const persistDraft = (draft: SalesForm) => {
+    setMessage("");
+    setLocalError("");
+    create.reset();
+    update.reset();
+    const command = salesDraftFromForm(draft);
+    if (draft.publicId) update.mutate({ ...command, publicId: draft.publicId });
+    else create.mutate(command);
+  };
 
   const save = (event: React.FormEvent) => {
     event.preventDefault();
@@ -392,15 +404,17 @@ export function SalesPage({
       return;
     }
     const stockIssue = firstSalesStockIssue(form.items);
-    if (stockIssue) {
+    if (stockIssue && form.documentType === "sale") {
       setLocalError(
         `Estoque insuficiente para ${stockIssue.productName}. Disponível: ${formatQuantity(stockIssue.availableQuantity)}. Solicitado: ${formatQuantity(stockIssue.requestedQuantity)}.`
       );
       return;
     }
-    const command = salesDraftFromForm(form);
-    if (form.publicId) update.mutate({ ...command, publicId: form.publicId });
-    else create.mutate(command);
+    if (stockIssue) {
+      setQuoteStockConfirmation({ issue: stockIssue });
+      return;
+    }
+    persistDraft(form);
   };
 
   const edit = async (publicId: string) => {
@@ -416,6 +430,8 @@ export function SalesPage({
       setCustomerPage(1);
       setCatalogPage(1);
       setLocalError("");
+      create.reset();
+      update.reset();
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "Não foi possível editar o documento.");
     }
@@ -438,6 +454,8 @@ export function SalesPage({
     setSeparateBillingAddress(false);
     setExpandedCatalogProductId(null);
     setLocalError("");
+    create.reset();
+    update.reset();
   };
 
   const clearFilters = () => {
@@ -623,7 +641,7 @@ export function SalesPage({
                           {filterCustomers.isLoading ? <p className="p-3 text-sm text-slate-500">Buscando clientes…</p> : filterCustomers.isError ? <p className="p-3 text-sm text-rose-700">Não foi possível buscar clientes.</p> : filterCustomers.data?.items.length ? filterCustomers.data.items.map(customer => (
                             <button type="button" key={customer.crmClientId} className="block w-full rounded-md px-3 py-2 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => { setFilterCustomer(customer); setFilterCustomerSearch(""); setPage(1); }}>
                               <strong className="block truncate text-sm text-slate-900">{customer.customerName}</strong>
-                              <span className="block truncate text-xs text-slate-500">{customer.document || customer.responsibleName || customer.crmClientId}</span>
+                              <span className="block truncate text-xs text-slate-500">{customer.document || customer.responsibleName || "Cadastro encontrado"}</span>
                             </button>
                           )) : <p className="p-3 text-sm text-slate-500">Nenhum cliente encontrado.</p>}
                         </div>
@@ -702,7 +720,7 @@ export function SalesPage({
                         <td className="px-2 py-2 text-right font-semibold tabular-nums text-slate-900">{money.format(order.totalCents / 100)}</td>
                         <td className="px-2 py-2">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <PaymentBadge value={order.paymentStatus} compact />}</td>
                         <td className="px-2 py-2">{order.documentType === "quote" ? <span className="text-[11px] text-slate-500">Fluxo comercial</span> : <StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact />}</td>
-                        <td className="px-2 py-2 text-center"><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "" })} /></td>
+                        <td className="px-2 py-2 text-center"><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></td>
                       </tr>
                     ))}
                   </tbody>
@@ -710,7 +728,7 @@ export function SalesPage({
               </div>
               <div className="divide-y divide-slate-100 md:hidden">
                 {list.data.items.map(order => <article key={order.publicId} className="p-4">
-                  <div className="flex items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} large /><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate font-semibold text-blue-700" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-xs text-slate-600">{order.firstProductName ?? "Produto histórico"}</p><p className="mt-1 truncate text-xs font-medium text-slate-800">{order.customerName}</p></div><div className="flex shrink-0 flex-col items-end gap-1"><strong className="text-xs tabular-nums">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "" })} /></div></div>
+                  <div className="flex items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} large /><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate font-semibold text-blue-700" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-xs text-slate-600">{order.firstProductName ?? "Produto histórico"}</p><p className="mt-1 truncate text-xs font-medium text-slate-800">{order.customerName}</p></div><div className="flex shrink-0 flex-col items-end gap-1"><strong className="text-xs tabular-nums">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></div></div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2 pl-[68px]"><span className="text-xs text-slate-500">{date.format(salesCommercialDate(order.commercialDate))} · {order.sellerName ?? "—"}</span><div className="flex gap-1">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
                 </article>)}
               </div>
@@ -799,7 +817,7 @@ export function SalesPage({
           onCancel={order => setCancellation({ publicId: order.publicId, reason: "" })}
           onCommercialStatus={(order, toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })}
           onConvert={setConversion}
-          onArchive={order => setArchiveRequest({ publicId: order.publicId, reason: "" })}
+          onArchive={order => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })}
           onRelatedNavigate={openSale}
           onCorrectAddress={order =>
             setAddressCorrection({
@@ -842,6 +860,7 @@ export function SalesPage({
         expandedCatalogProductId={expandedCatalogProductId}
         setExpandedCatalogProductId={setExpandedCatalogProductId}
         busy={create.isPending || update.isPending}
+        formError={localError}
         onSubmit={save}
       />
 
@@ -901,13 +920,27 @@ export function SalesPage({
       />
 
       <ReasonDialog
-        title="Arquivar documento"
-        description="O documento sairá das listas ativas, mas continuará preservado no histórico e na auditoria."
-        confirmLabel="Arquivar documento"
+        title={archiveRequest?.documentType === "quote" ? "Excluir orçamento" : "Arquivar documento"}
+        description={archiveRequest?.documentType === "quote"
+          ? "O orçamento será removido apenas das listas ativas. Ele continuará preservado no histórico e na auditoria; nenhuma venda será excluída."
+          : "O documento sairá das listas ativas, mas continuará preservado no histórico e na auditoria."}
+        confirmLabel={archiveRequest?.documentType === "quote" ? "Excluir orçamento" : "Arquivar documento"}
         state={archiveRequest}
         setState={setArchiveRequest}
         busy={archiveSale.isPending}
+        destructive={archiveRequest?.documentType === "quote"}
         onConfirm={state => archiveSale.mutate(state)}
+      />
+
+      <QuoteStockConfirmationDialog
+        state={quoteStockConfirmation}
+        busy={create.isPending || update.isPending}
+        onBack={() => setQuoteStockConfirmation(null)}
+        onContinue={() => {
+          const draft = form;
+          setQuoteStockConfirmation(null);
+          if (draft) persistDraft(draft);
+        }}
       />
 
       <CommercialReasonDialog
@@ -1130,8 +1163,8 @@ function SaleDetailPanel({
   const canCancel = !isQuote && index < stageOrder.indexOf("shipped") && !order.cancelled;
   const canCorrectAddress = !isQuote && ["confirmed", "separation"].includes(order.currentStage);
   const progress = order.totalCents > 0 ? Math.min(100, Math.round((order.paidCents / order.totalCents) * 100)) : 0;
-  const detailFacts = [
-    { label: "Cliente", value: order.customerName, detail: order.crmClientId, client: true },
+  const detailFacts: Array<{ label: string; value: string; detail?: string; client?: boolean }> = [
+    { label: "Cliente", value: order.customerName, client: true },
     { label: "Vendedor(a)", value: order.sellerName ?? "Histórico indisponível" },
     { label: "Data comercial", value: date.format(salesCommercialDate(order.commercialDate)) },
     { label: "Previsão de entrega", value: order.expectedDate ? date.format(new Date(`${order.expectedDate}T12:00:00`)) : "Não informada" },
@@ -1149,7 +1182,7 @@ function SaleDetailPanel({
         </div>
         <div className="mt-2 grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-2 xl:grid-cols-4" data-testid="sales-detail-facts">
           {detailFacts.map(fact => (
-            <div key={fact.label} className="min-w-0 bg-white px-3 py-1.5">
+            <div key={fact.label} className="flex min-h-20 min-w-0 flex-col justify-center bg-white px-3 py-1.5">
               <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">{fact.label}</span>
               {fact.client && onClientNavigate ? (
                 <button type="button" className="mt-0.5 block max-w-full truncate text-left text-sm font-semibold text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" title={fact.value} onClick={() => onClientNavigate(order.crmClientId)}>{fact.value}</button>
@@ -1211,10 +1244,10 @@ function SaleDetailPanel({
               <div className="flex flex-wrap items-center gap-2">
                 {isQuote ? <>
                   {order.canEdit && <Button size="sm" variant="outline" onClick={() => onEdit(order.publicId)}><Edit3 className="mr-2 h-4 w-4" />Editar orçamento</Button>}
-                  {order.commercialStatus === "draft" && <Button size="sm" onClick={() => onCommercialStatus(order, "negotiation", false)}><FileClock className="mr-2 h-4 w-4" />Iniciar negociação</Button>}
-                  {order.commercialStatus === "negotiation" && <><Button size="sm" variant="outline" className="border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800" onClick={() => onCommercialStatus(order, "lost", true)}>Marcar como perdido</Button><Button size="sm" onClick={() => onCommercialStatus(order, "approved", false)}><Check className="mr-2 h-4 w-4" />Aprovar</Button></>}
-                  {order.commercialStatus === "approved" && <><Button size="sm" variant="outline" onClick={() => onCommercialStatus(order, "negotiation", true)}><RotateCcw className="mr-2 h-4 w-4" />Retomar negociação</Button><Button size="sm" onClick={() => onConvert(order)}><ShoppingCart className="mr-2 h-4 w-4" />Converter em venda</Button></>}
-                  {["converted", "lost", "cancelled"].includes(order.commercialStatus) && <Button size="sm" variant="outline" onClick={() => onArchive(order)}><Archive className="mr-2 h-4 w-4" />Arquivar</Button>}
+                  {order.commercialStatus === "draft" && <Button size="sm" className="transition-colors motion-reduce:transition-none active:translate-y-px" onClick={() => onCommercialStatus(order, "negotiation", false)}><FileClock className="mr-2 h-4 w-4" />Iniciar negociação</Button>}
+                  {order.commercialStatus === "negotiation" && <><Button size="sm" variant="outline" className="border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800" onClick={() => onCommercialStatus(order, "lost", true)}>Marcar como perdido</Button><Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700 transition-colors motion-reduce:transition-none active:translate-y-px" onClick={() => onCommercialStatus(order, "approved", false)}><Check className="mr-2 h-4 w-4" />Aprovar</Button></>}
+                  {order.commercialStatus === "approved" && <><Button size="sm" variant="outline" onClick={() => onCommercialStatus(order, "negotiation", true)}><RotateCcw className="mr-2 h-4 w-4" />Retomar negociação</Button><Button size="sm" className="bg-blue-600 text-white hover:bg-blue-700 transition-colors motion-reduce:transition-none active:translate-y-px" onClick={() => onConvert(order)}><ShoppingCart className="mr-2 h-4 w-4" />Converter em venda</Button></>}
+                  {order.commercialStatus !== "converted" && <Button size="sm" variant="outline" className="border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800" onClick={() => onArchive(order)}><Trash2 className="mr-2 h-4 w-4" />Excluir orçamento</Button>}
                 </> : !order.cancelled && order.currentStage === "created" ? <><Button size="sm" variant="outline" onClick={() => onEdit(order.publicId)}><Edit3 className="mr-2 h-4 w-4" />Editar</Button><Button size="sm" className="bg-blue-600 text-white hover:bg-blue-700" onClick={() => onConfirm(order)}>Confirmar</Button></> : !order.cancelled && next ? <Button size="sm" className="bg-blue-600 text-white hover:bg-blue-700" onClick={() => onTransition(order, next, false)}>{nextActionLabel(next)} <ArrowRight className="ml-2 h-4 w-4" /></Button> : null}
                 {!isQuote && !order.cancelled && correction && <Button variant="outline" size="sm" className="border-slate-300 bg-slate-100 text-slate-800 shadow-sm hover:bg-slate-200" onClick={() => onTransition(order, correction, true)}><RotateCcw className="mr-2 h-4 w-4" />Corrigir etapa</Button>}
                 {!isQuote && (order.cancelled || order.currentStage === "completed") && <Button size="sm" variant="outline" onClick={() => onArchive(order)}><Archive className="mr-2 h-4 w-4" />Arquivar venda</Button>}
@@ -1277,31 +1310,51 @@ function SaleDetailPanel({
           />
         </div>
 
-        <section className="min-w-0 rounded-xl border border-slate-200 p-4">
-          <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900"><Clock3 className="h-4 w-4 text-slate-500" />Histórico</h3>
-          {!order.historyComplete && (
-            <p className="mt-2 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">
-              Parte do histórico é anterior à timeline auditada. Apenas eventos realmente registrados são exibidos.
-            </p>
-          )}
-          <ol className="mt-3 space-y-0">
-            {order.history.length ? order.history.slice().reverse().map((event, eventIndex) => (
-              <li key={`${event.createdAt}-${eventIndex}`} className="relative grid grid-cols-[18px_1fr_auto] gap-2 pb-4 text-xs last:pb-0">
-                <span className="relative z-10 mt-1.5 h-2.5 w-2.5 rounded-full bg-blue-600 ring-4 ring-white" />
-                {eventIndex < order.history.length - 1 && <span className="absolute left-[4px] top-3 h-full w-px bg-slate-200" />}
-                <div>
-                  <strong className="text-slate-800">{eventLabel(event.eventType, event.toStage)}</strong>
-                  <p className="mt-0.5 text-slate-500">Por {event.changedByName ?? event.changedBy}</p>
-                  {event.reason && <p className="mt-1 leading-4 text-slate-600">Motivo: {event.reason}</p>}
-                </div>
-                <time className="text-right text-slate-500 tabular-nums">{dateTime.format(new Date(event.createdAt))}</time>
-              </li>
-            )) : <li className="text-xs text-slate-500">Nenhum evento histórico registrado.</li>}
-          </ol>
-        </section>
+        <DocumentHistory order={order} />
         </div>
       </div>
     </aside>
+  );
+}
+
+function DocumentHistory({ order }: { order: SaleDetail }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const historyId = `sales-history-${order.publicId}`;
+  const events = order.history.slice().reverse();
+  return (
+    <section className="min-w-0 rounded-xl border border-slate-200 p-4">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 rounded-md text-left transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none"
+        aria-expanded={expanded}
+        aria-controls={historyId}
+        onClick={() => setExpanded(value => !value)}
+      >
+        <span className="flex items-center gap-2 text-sm font-bold text-slate-900"><Clock3 className="h-4 w-4 text-slate-500" />Histórico <span className="font-medium text-slate-500">({events.length})</span></span>
+        <ChevronDown className={cn("h-4 w-4 text-slate-500 transition-transform motion-reduce:transition-none", expanded && "rotate-180")} aria-hidden="true" />
+      </button>
+      <div id={historyId} hidden={!expanded}>
+        {!order.historyComplete && (
+          <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+            Parte do histórico é anterior à timeline auditada. Apenas eventos realmente registrados são exibidos.
+          </p>
+        )}
+        <ol className="mt-3 space-y-0">
+          {events.length ? events.map((event, eventIndex) => (
+            <li key={`${event.createdAt}-${eventIndex}`} className="relative grid grid-cols-[18px_1fr_auto] gap-2 pb-4 text-xs last:pb-0">
+              <span className="relative z-10 mt-1.5 h-2.5 w-2.5 rounded-full bg-blue-600 ring-4 ring-white" />
+              {eventIndex < events.length - 1 && <span className="absolute left-[4px] top-3 h-full w-px bg-slate-200" />}
+              <div>
+                <strong className="text-slate-800">{eventLabel(event.eventType, event.toStage, order.documentType, event.after)}</strong>
+                <p className="mt-0.5 text-slate-500">Por {event.changedByName ?? event.changedBy}</p>
+                {event.reason && <p className="mt-1 leading-4 text-slate-600">Motivo: {event.reason}</p>}
+              </div>
+              <time className="text-right text-slate-500 tabular-nums">{dateTime.format(new Date(event.createdAt))}</time>
+            </li>
+          )) : <li className="text-xs text-slate-500">Nenhum evento histórico registrado.</li>}
+        </ol>
+      </div>
+    </section>
   );
 }
 
@@ -1420,6 +1473,7 @@ function SaleFormDialog({
   expandedCatalogProductId,
   setExpandedCatalogProductId,
   busy,
+  formError,
   onSubmit,
 }: {
   form: SalesForm | null;
@@ -1443,6 +1497,7 @@ function SaleFormDialog({
   expandedCatalogProductId: string | null;
   setExpandedCatalogProductId: React.Dispatch<React.SetStateAction<string | null>>;
   busy: boolean;
+  formError: string;
   onSubmit: (event: React.FormEvent) => void;
 }) {
   if (!form) return null;
@@ -1457,7 +1512,7 @@ function SaleFormDialog({
         : current
     );
   const addCatalogItem = (product: CatalogOption) => {
-    if (Number(product.availableQuantity) <= 0) return;
+    if (form.documentType === "sale" && Number(product.availableQuantity) <= 0) return;
     if (form.items.some(item => item.inventoryItemPublicId === product.inventoryItemPublicId)) return;
     setForm(current => current ? { ...current, items: [...current.items, {
       productPublicId: product.productPublicId,
@@ -1494,6 +1549,7 @@ function SaleFormDialog({
           <div className="mt-3 flex flex-wrap gap-2" aria-label="Progresso da nova venda">
             {progress.map((item, index) => <span key={item.key} className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold", item.complete ? "bg-emerald-50 text-emerald-800" : "bg-slate-100 text-slate-600")}><span className={cn("flex h-4 w-4 items-center justify-center rounded-full text-[10px]", item.complete ? "bg-emerald-600 text-white" : "bg-slate-300 text-slate-700")}>{item.complete ? <Check className="h-3 w-3" /> : index + 1}</span>{item.label}</span>)}
           </div>
+          {formError && <p role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">{formError}</p>}
         </DialogHeader>
 
         <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
@@ -1510,7 +1566,7 @@ function SaleFormDialog({
                       <Input autoComplete="off" className="pl-9" aria-label="Buscar cliente para a venda" placeholder="Digite ao menos 2 caracteres" value={customerSearch} onChange={event => setCustomerSearch(event.target.value)} />
                       <div className="mt-2 rounded-lg border border-slate-200 bg-white">
                         {!customerLookupEnabled ? <p className="p-4 text-sm text-slate-500">Comece a digitar para localizar um cliente.</p> : customers.isLoading ? <p role="status" className="p-4 text-sm text-slate-500">Buscando clientes…</p> : customers.isError ? <p role="alert" className="p-4 text-sm text-rose-700">Não foi possível buscar clientes.</p> : customers.data?.items.length ? <div className="max-h-56 divide-y divide-slate-100 overflow-y-auto [scrollbar-width:thin]">{customers.data.items.map(customer => (
-                          <button type="button" key={customer.crmClientId} className="flex w-full items-start gap-3 px-3 py-3 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500" onClick={() => { const address: SalesAddress = { recipientName: customer.responsibleName || customer.customerName, postalCode: customer.postalCode || "", street: customer.address || "", number: "", complement: "", district: "", city: customer.city || "", state: customer.state || "" }; setForm(current => current ? { ...current, crmClientId: customer.crmClientId, customerName: customer.customerName, shippingAddress: address, billingAddress: { ...address } } : current); setCustomerSearch(""); setSeparateBillingAddress(false); }}><UserRound className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" /><span className="min-w-0"><strong className="block truncate text-sm text-slate-900">{customer.customerName}</strong><span className="block truncate text-xs text-slate-500">{[customer.document, customer.responsibleName, [customer.city, customer.state].filter(Boolean).join("/")].filter(Boolean).join(" · ") || customer.crmClientId}</span></span></button>
+                          <button type="button" key={customer.crmClientId} className="flex w-full items-start gap-3 px-3 py-3 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500" onClick={() => { const address: SalesAddress = { recipientName: customer.responsibleName || customer.customerName, postalCode: customer.postalCode || "", street: customer.address || "", number: "", complement: "", district: "", city: customer.city || "", state: customer.state || "" }; setForm(current => current ? { ...current, crmClientId: customer.crmClientId, customerName: customer.customerName, shippingAddress: address, billingAddress: { ...address } } : current); setCustomerSearch(""); setSeparateBillingAddress(false); }}><UserRound className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" /><span className="min-w-0"><strong className="block truncate text-sm text-slate-900">{customer.customerName}</strong><span className="block truncate text-xs text-slate-500">{[customer.document, customer.responsibleName, [customer.city, customer.state].filter(Boolean).join("/")].filter(Boolean).join(" · ") || "Cadastro encontrado"}</span></span></button>
                         ))}</div> : <p className="p-4 text-sm text-slate-500">Nenhum cliente encontrado para “{customerSearch.trim()}”.</p>}
                       </div>
                       {customerLookupEnabled && <SearchPager page={customerPage} total={customers.data?.total ?? 0} pageSize={customers.data?.pageSize ?? 12} onPage={setCustomerPage} />}
@@ -1526,7 +1582,8 @@ function SaleFormDialog({
                       const expanded = expandedCatalogProductId === group.productPublicId;
                       const singleOption = group.options.length === 1 ? group.options[0] : null;
                       const singleUnavailable = Boolean(singleOption && Number(singleOption.availableQuantity) <= 0);
-                      return <div key={group.productPublicId} className="p-2"><button type="button" disabled={singleUnavailable} className="flex w-full items-center gap-3 rounded-md p-2 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50" aria-expanded={group.options.length > 1 ? expanded : undefined} onClick={() => singleOption ? addCatalogItem(singleOption) : setExpandedCatalogProductId(expanded ? null : group.productPublicId)}><ProductThumb imagePath={group.imagePath} name={group.name} /><span className="min-w-0 flex-1"><strong className="block truncate text-sm text-slate-900">{group.name}</strong><span className="block text-xs text-slate-500">{singleOption ? `${singleOption.sku} · ${singleUnavailable ? "sem estoque" : `disponível ${formatQuantity(singleOption.availableQuantity)}`}` : `${group.options.length} variações encontradas`}</span></span>{singleOption ? <Plus className="h-4 w-4 text-blue-700" /> : expanded ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronRight className="h-4 w-4 text-slate-500" />}</button>{expanded && <div className="ml-12 mt-1 space-y-1 border-l border-slate-200 pl-3">{group.options.map(option => { const used = form.items.some(item => item.inventoryItemPublicId === option.inventoryItemPublicId); const unavailable = Number(option.availableQuantity) <= 0; return <button type="button" key={option.inventoryItemPublicId} disabled={used || unavailable} className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-45" onClick={() => addCatalogItem(option)}><span className="min-w-0"><strong className="block truncate text-slate-900">{option.variantAttributes || option.variantName || "Produto padrão"}</strong><span className="block truncate text-xs text-slate-500">{option.sku} · {unavailable ? "sem estoque" : `disponível ${formatQuantity(option.availableQuantity)}`}</span></span><span className="shrink-0 font-semibold tabular-nums">{money.format(option.salePriceCents / 100)}</span></button>; })}</div>}</div>;
+                      const blockedByStock = form.documentType === "sale" && singleUnavailable;
+                      return <div key={group.productPublicId} className="p-2"><button type="button" disabled={blockedByStock} className="flex w-full items-center gap-3 rounded-md p-2 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50" aria-expanded={group.options.length > 1 ? expanded : undefined} onClick={() => singleOption ? addCatalogItem(singleOption) : setExpandedCatalogProductId(expanded ? null : group.productPublicId)}><ProductThumb imagePath={group.imagePath} name={group.name} /><span className="min-w-0 flex-1"><strong className="block truncate text-sm text-slate-900">{group.name}</strong><span className="block text-xs text-slate-500">{singleOption ? `${singleOption.sku} · ${singleUnavailable ? "sem estoque" : `disponível ${formatQuantity(singleOption.availableQuantity)}`}` : `${group.options.length} variações encontradas`}</span></span>{singleOption ? <Plus className="h-4 w-4 text-blue-700" /> : expanded ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronRight className="h-4 w-4 text-slate-500" />}</button>{expanded && <div className="ml-12 mt-1 space-y-1 border-l border-slate-200 pl-3">{group.options.map(option => { const used = form.items.some(item => item.inventoryItemPublicId === option.inventoryItemPublicId); const unavailable = Number(option.availableQuantity) <= 0; const unavailableForSale = form.documentType === "sale" && unavailable; return <button type="button" key={option.inventoryItemPublicId} disabled={used || unavailableForSale} className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-45" onClick={() => addCatalogItem(option)}><span className="min-w-0"><strong className="block truncate text-slate-900">{option.variantAttributes || option.variantName || "Produto padrão"}</strong><span className="block truncate text-xs text-slate-500">{option.sku} · {unavailable ? "sem estoque" : `disponível ${formatQuantity(option.availableQuantity)}`}</span></span><span className="shrink-0 font-semibold tabular-nums">{money.format(option.salePriceCents / 100)}</span></button>; })}</div>}</div>;
                     })}</div> : <p className="p-4 text-sm text-slate-500">Nenhum produto encontrado para “{catalogSearch.trim()}”.</p>}
                   </div>
                   {catalogLookupEnabled && <SearchPager page={catalogPage} total={catalog.data?.total ?? 0} pageSize={catalog.data?.pageSize ?? 12} onPage={setCatalogPage} />}
@@ -1544,8 +1601,8 @@ function SaleFormDialog({
                     )) : <div className="rounded-lg border border-dashed border-slate-300 p-5 text-center text-sm text-slate-500">Pesquise e adicione o primeiro produto da venda.</div>}
                   </div>
                   {stockIssue && (
-                    <p role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
-                      Estoque insuficiente para {stockIssue.productName}. Disponível: {formatQuantity(stockIssue.availableQuantity)}. Solicitado: {formatQuantity(stockIssue.requestedQuantity)}.
+                    <p role={form.documentType === "sale" ? "alert" : "status"} className={cn("mt-3 rounded-lg border p-3 text-sm", form.documentType === "sale" ? "border-rose-200 bg-rose-50 text-rose-900" : "border-amber-200 bg-amber-50 text-amber-900")}>
+                      {form.documentType === "quote" ? "Este orçamento poderá continuar após sua confirmação." : "A venda não pode ser salva enquanto houver saldo insuficiente."} Estoque insuficiente para {stockIssue.productName}. Disponível: {formatQuantity(stockIssue.availableQuantity)}. Solicitado: {formatQuantity(stockIssue.requestedQuantity)}.
                     </p>
                   )}
                 </section>
@@ -1578,7 +1635,7 @@ function SaleFormDialog({
               </aside>
             </div>
           </div>
-          <DialogFooter className="border-t border-slate-200 bg-white px-5 py-3 sm:px-7"><Button type="button" variant="outline" onClick={() => setForm(null)}>Cancelar</Button><Button type="submit" disabled={busy || Boolean(stockIssue) || !form.crmClientId || !form.items.length || totals.totalCents <= 0 || (form.freightCents ?? 0) < 0 || (form.chargesCents ?? 0) < 0}>{busy ? "Salvando…" : `Salvar ${form.documentType === "quote" ? "orçamento" : "venda"}`}</Button></DialogFooter>
+          <DialogFooter className="border-t border-slate-200 bg-white px-5 py-3 sm:px-7"><Button type="button" variant="outline" disabled={busy} onClick={() => setForm(null)}>Cancelar</Button><Button type="submit" className="transition-colors motion-reduce:transition-none active:translate-y-px" disabled={busy || (form.documentType === "sale" && Boolean(stockIssue)) || !form.crmClientId || !form.items.length || totals.totalCents <= 0 || (form.freightCents ?? 0) < 0 || (form.chargesCents ?? 0) < 0}>{busy ? "Salvando…" : `Salvar ${form.documentType === "quote" ? "orçamento" : "venda"}`}</Button></DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
@@ -1723,22 +1780,67 @@ function ConfirmationDialog({ state, setState, categories, accounts, paymentMeth
 }
 
 type ReasonState = { publicId: string; reason: string };
+type ArchiveRequestState = ReasonState & {
+  documentType: "quote" | "sale";
+  orderNumber: string;
+};
+type QuoteStockConfirmationState = {
+  issue: NonNullable<ReturnType<typeof firstSalesStockIssue>>;
+};
 type CommercialChangeState = ReasonState & {
   toStatus: "negotiation" | "approved" | "lost";
 };
-function ReasonDialog({ title, description, confirmLabel, state, setState, busy, destructive, onConfirm }: {
+function ReasonDialog<T extends ReasonState>({ title, description, confirmLabel, state, setState, busy, destructive, onConfirm }: {
   title: string;
   description: string;
   confirmLabel: string;
-  state: ReasonState | null;
-  setState: React.Dispatch<React.SetStateAction<ReasonState | null>>;
+  state: T | null;
+  setState: React.Dispatch<React.SetStateAction<T | null>>;
   busy: boolean;
   destructive?: boolean;
-  onConfirm: (state: ReasonState) => void;
+  onConfirm: (state: T) => void;
 }) {
   if (!state) return null;
   return (
     <Dialog open onOpenChange={open => !open && setState(null)}><DialogContent className="bg-white"><DialogHeader><DialogTitle>{title}</DialogTitle><p className="text-sm leading-6 text-slate-600">{description}</p></DialogHeader><label className="text-sm font-semibold text-slate-700">Motivo<textarea autoFocus className="mt-1 min-h-24 w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={state.reason} onChange={event => setState({ ...state, reason: event.target.value })} /></label><DialogFooter><Button variant="outline" onClick={() => setState(null)}>Voltar</Button><Button className={destructive ? "bg-rose-600 text-white hover:bg-rose-700" : undefined} disabled={busy || state.reason.trim().length < 3} onClick={() => onConfirm(state)}>{busy ? "Processando…" : confirmLabel}</Button></DialogFooter></DialogContent></Dialog>
+  );
+}
+
+function QuoteStockConfirmationDialog({
+  state,
+  busy,
+  onBack,
+  onContinue,
+}: {
+  state: QuoteStockConfirmationState | null;
+  busy: boolean;
+  onBack: () => void;
+  onContinue: () => void;
+}) {
+  if (!state) return null;
+  const shortage = Math.max(
+    0,
+    Number(state.issue.requestedQuantity.replace(",", ".")) - Number(state.issue.availableQuantity.replace(",", "."))
+  );
+  return (
+    <Dialog open onOpenChange={open => !open && !busy && onBack()}>
+      <DialogContent className="bg-white">
+        <DialogHeader>
+          <DialogTitle>Continuar orçamento sem estoque suficiente?</DialogTitle>
+          <p className="text-sm leading-6 text-slate-600">Produto sem estoque suficiente. Deseja continuar o orçamento mesmo assim?</p>
+        </DialogHeader>
+        <dl className="grid grid-cols-3 gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+          <div><dt className="text-xs font-medium text-amber-800">Solicitado</dt><dd className="mt-1 font-bold tabular-nums">{formatQuantity(state.issue.requestedQuantity)}</dd></div>
+          <div><dt className="text-xs font-medium text-amber-800">Disponível</dt><dd className="mt-1 font-bold tabular-nums">{formatQuantity(state.issue.availableQuantity)}</dd></div>
+          <div><dt className="text-xs font-medium text-amber-800">Falta</dt><dd className="mt-1 font-bold tabular-nums">{formatQuantity(shortage)}</dd></div>
+        </dl>
+        <p className="text-xs leading-5 text-slate-600">O orçamento não reserva nem baixa estoque. Uma venda continuará validando o saldo de forma transacional.</p>
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={busy} onClick={onBack}>Voltar</Button>
+          <Button type="button" className="transition-colors motion-reduce:transition-none active:translate-y-px" disabled={busy} onClick={onContinue}>{busy ? "Salvando…" : "Continuar orçamento"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1868,11 +1970,12 @@ function SaleActionsMenu({ order, canWrite, onOpen, onPrint, onEdit, onDuplicate
         {canWrite && order.canEdit && <DropdownMenuItem onSelect={onEdit}><Edit3 className="mr-2 h-4 w-4" />Editar documento</DropdownMenuItem>}
         {canWrite && <DropdownMenuItem onSelect={onDuplicate}><Copy className="mr-2 h-4 w-4" />Duplicar como rascunho</DropdownMenuItem>}
         {canWrite && order.documentType === "quote" && ["draft", "negotiation", "approved"].includes(order.commercialStatus) && <DropdownMenuSeparator />}
-        {canWrite && order.documentType === "quote" && order.commercialStatus === "draft" && <DropdownMenuItem onSelect={() => onCommercialStatus("negotiation", false)}><FileClock className="mr-2 h-4 w-4" />Iniciar negociação</DropdownMenuItem>}
-        {canWrite && order.documentType === "quote" && order.commercialStatus === "negotiation" && <DropdownMenuItem onSelect={() => onCommercialStatus("approved", false)}><Check className="mr-2 h-4 w-4" />Aprovar orçamento</DropdownMenuItem>}
+        {canWrite && order.documentType === "quote" && order.commercialStatus === "draft" && <DropdownMenuItem className="transition-colors focus:bg-blue-50 focus:text-blue-800" onSelect={() => onCommercialStatus("negotiation", false)}><FileClock className="mr-2 h-4 w-4" />Iniciar negociação</DropdownMenuItem>}
+        {canWrite && order.documentType === "quote" && order.commercialStatus === "negotiation" && <DropdownMenuItem className="text-emerald-700 transition-colors focus:bg-emerald-50 focus:text-emerald-800" onSelect={() => onCommercialStatus("approved", false)}><Check className="mr-2 h-4 w-4" />Aprovar orçamento</DropdownMenuItem>}
         {canWrite && order.documentType === "quote" && order.commercialStatus === "negotiation" && <DropdownMenuItem onSelect={() => onCommercialStatus("lost", true)} className="text-rose-700"><XCircle className="mr-2 h-4 w-4" />Marcar como perdido</DropdownMenuItem>}
-        {canWrite && order.documentType === "quote" && order.commercialStatus === "approved" && <DropdownMenuItem onSelect={onConvert}><ShoppingCart className="mr-2 h-4 w-4" />Converter em venda</DropdownMenuItem>}
+        {canWrite && order.documentType === "quote" && order.commercialStatus === "approved" && <DropdownMenuItem className="text-blue-700 transition-colors focus:bg-blue-50 focus:text-blue-800" onSelect={onConvert}><ShoppingCart className="mr-2 h-4 w-4" />Converter em venda</DropdownMenuItem>}
         {canWrite && order.documentType === "quote" && order.commercialStatus === "approved" && <DropdownMenuItem onSelect={() => onCommercialStatus("negotiation", true)}><RotateCcw className="mr-2 h-4 w-4" />Retomar negociação</DropdownMenuItem>}
+        {canWrite && order.documentType === "quote" && order.commercialStatus !== "converted" && !order.archivedAt && <><DropdownMenuSeparator /><DropdownMenuItem className="text-rose-700 transition-colors focus:bg-rose-50 focus:text-rose-800" onSelect={onArchive}><Trash2 className="mr-2 h-4 w-4" />Excluir orçamento</DropdownMenuItem></>}
         {canWrite && order.documentType === "sale" && !order.cancelled && <DropdownMenuSeparator />}
         {canWrite && order.documentType === "sale" && !order.cancelled && order.currentStage === "created" && <DropdownMenuItem onSelect={onConfirm}><Check className="mr-2 h-4 w-4" />Revisar e confirmar</DropdownMenuItem>}
         {canWrite && order.documentType === "sale" && !order.cancelled && next && order.currentStage !== "created" && <DropdownMenuItem onSelect={() => onTransition(next)}><ArrowRight className="mr-2 h-4 w-4" />{nextActionLabel(next)}</DropdownMenuItem>}
@@ -1881,7 +1984,7 @@ function SaleActionsMenu({ order, canWrite, onOpen, onPrint, onEdit, onDuplicate
         {canWrite && order.documentType === "sale" && !order.cancelled && currentIndex < stageOrder.indexOf("shipped") && order.paidCents > 0 && <DropdownMenuItem disabled><XCircle className="mr-2 h-4 w-4" />Cancelamento exige estorno</DropdownMenuItem>}
         {canWrite && order.documentType === "sale" && order.currentStage === "confirmed" && <DropdownMenuItem disabled><RotateCcw className="mr-2 h-4 w-4" />Retorno exige cancelar títulos</DropdownMenuItem>}
         {canWrite && order.documentType === "sale" && order.currentStage === "shipped" && <DropdownMenuItem disabled><RotateCcw className="mr-2 h-4 w-4" />Retorno exige reversão de estoque</DropdownMenuItem>}
-        {canWrite && terminal && !order.archivedAt && <><DropdownMenuSeparator /><DropdownMenuItem onSelect={onArchive}><Archive className="mr-2 h-4 w-4" />Arquivar</DropdownMenuItem></>}
+        {canWrite && order.documentType === "sale" && terminal && !order.archivedAt && <><DropdownMenuSeparator /><DropdownMenuItem onSelect={onArchive}><Archive className="mr-2 h-4 w-4" />Arquivar</DropdownMenuItem></>}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -2084,6 +2187,11 @@ function formatQuantity(value: string | number) {
   return Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 3 });
 }
 
+function salesMutationErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return "Não foi possível salvar o documento. Revise os dados e tente novamente.";
+}
+
 function nextActionLabel(stage: Stage) {
   if (stage === "separation") return "Iniciar separação";
   if (stage === "shipped") return "Marcar como enviado";
@@ -2092,9 +2200,14 @@ function nextActionLabel(stage: Stage) {
   return `Mover para ${stageLabels[stage]}`;
 }
 
-function eventLabel(eventType: string, toStage: string | null) {
-  if (eventType === "created" || eventType === "draft") return "Venda criada";
-  if (eventType === "updated") return "Rascunho atualizado";
+function eventLabel(
+  eventType: string,
+  toStage: string | null,
+  documentType: "quote" | "sale",
+  after?: unknown
+) {
+  if (eventType === "created" || eventType === "draft") return documentType === "quote" ? "Orçamento criado" : "Venda criada";
+  if (eventType === "updated") return documentType === "quote" ? "Orçamento atualizado" : "Rascunho atualizado";
   if (eventType === "confirmed") return "Venda confirmada";
   if (eventType === "cancelled") return "Venda cancelada";
   if (eventType === "address_corrected") return "Endereço corrigido";
@@ -2102,9 +2215,20 @@ function eventLabel(eventType: string, toStage: string | null) {
   if (eventType === "document_added") return "Documento anexado";
   if (eventType === "document_removed") return "Documento removido";
   if (eventType === "duplicated") return "Documento duplicado";
-  if (eventType === "quote_status_changed") return "Status comercial atualizado";
-  if (eventType === "quote_converted") return "Orçamento convertido em venda";
-  if (eventType === "archived") return "Documento arquivado";
+  if (eventType === "quote_status_changed") {
+    const status =
+      typeof after === "object" && after !== null &&
+      typeof (after as Record<string, unknown>).commercialStatus === "string"
+        ? (after as Record<string, string>).commercialStatus
+        : null;
+    if (status === "negotiation") return "Negociação iniciada";
+    if (status === "approved") return "Orçamento aprovado";
+    if (status === "lost") return "Orçamento marcado como perdido";
+    if (status === "draft") return "Orçamento reaberto";
+    return "Status do orçamento atualizado";
+  }
+  if (eventType === "quote_converted") return documentType === "quote" ? "Orçamento convertido em venda" : "Venda criada a partir do orçamento";
+  if (eventType === "archived") return documentType === "quote" ? "Orçamento arquivado" : "Venda arquivada";
   if (eventType === "financial_adjusted") return "Títulos conciliados após edição";
   if (eventType === "stage_transition" && toStage && toStage in stageLabels) return `Etapa alterada para ${stageLabels[toStage as Stage]}`;
   return "Evento registrado";
