@@ -861,12 +861,11 @@ export class SaleRepository {
        WHERE i.sale_order_id=? ORDER BY i.inventory_item_id`,
       [clientId, orderId]
     );
+    const unavailable: string[] = [];
     for (const item of items) {
       if (!item.resolved_inventory_item_id || !Number(item.inventory_item_active)) {
-        throw new ErpDomainError(
-          "CONFLICT",
-          `O item de estoque de ${String(item.product_name_snapshot)} não está disponível para confirmação.`
-        );
+        unavailable.push(`${String(item.product_name_snapshot)} (item indisponível)`);
+        continue;
       }
       const available = await this.inventory().lockBalance(
         connection,
@@ -874,11 +873,16 @@ export class SaleRepository {
         Number(item.inventory_item_id)
       );
       if (quantityMillis(String(item.quantity)) > quantityMillis(available)) {
-        throw new ErpDomainError(
-          "INSUFFICIENT_STOCK",
-          `Estoque insuficiente para ${String(item.product_name_snapshot)}. Disponível: ${available}. Solicitado: ${String(item.quantity)}.`
+        unavailable.push(
+          `${String(item.product_name_snapshot)} (solicitado: ${String(item.quantity)}; disponível: ${available})`
         );
       }
+    }
+    if (unavailable.length) {
+      throw new ErpDomainError(
+        "INSUFFICIENT_STOCK",
+        `Estoque insuficiente para concluir a venda: ${unavailable.join("; ")}.`
+      );
     }
   }
 
@@ -1962,69 +1966,74 @@ export class SaleRepository {
     idempotencyKey: string
   ) {
     const connection = await this.db().getConnection();
-    let target = "";
+    let target = publicId;
     let replay = false;
     try {
       await connection.beginTransaction();
       const quote = await this.detail(clientId, publicId, connection, true);
       if (!quote) throw new ErpDomainError("NOT_FOUND", "Orçamento não encontrado.");
-      if (quote.documentType !== "quote") {
-        throw new ErpDomainError("CONFLICT", "Somente orçamentos podem ser convertidos.");
-      }
-      const [existing] = await connection.execute<RowDataPacket[]>(
+      const [legacyConversion] = await connection.execute<RowDataPacket[]>(
         `SELECT public_id,source_quote_id,conversion_idempotency_key FROM erp_sale_orders
-         WHERE client_id=? AND (source_quote_id=? OR conversion_idempotency_key=?)
+         WHERE client_id=? AND source_quote_id=?
          LIMIT 1 FOR UPDATE`,
-        [clientId, quote.id, idempotencyKey]
+        [clientId, quote.id]
       );
-      if (existing[0]) {
-        if (Number(existing[0].source_quote_id) !== quote.id) {
-          throw new ErpDomainError(
-            "IDEMPOTENCY_CONFLICT",
-            "Chave idempotente já usada para converter outro orçamento."
-          );
-        }
-        target = String(existing[0].public_id);
+      if (legacyConversion[0]) {
+        target = String(legacyConversion[0].public_id);
         replay = true;
         await connection.commit();
         return { order: await this.detail(clientId, target), replay };
       }
-      if (quote.commercialStatus !== "approved" || quote.archivedAt) {
+      const [locked] = await connection.execute<RowDataPacket[]>(
+        `SELECT id,public_id,document_type,commercial_status,archived_at,conversion_idempotency_key
+         FROM erp_sale_orders WHERE client_id=? AND id=? LIMIT 1 FOR UPDATE`,
+        [clientId, quote.id]
+      );
+      const row = locked[0];
+      if (!row) throw new ErpDomainError("NOT_FOUND", "Orçamento não encontrado.");
+      target = String(row.public_id);
+      if (String(row.document_type) === "sale") {
+        if (String(row.conversion_idempotency_key ?? "") !== idempotencyKey) {
+          throw new ErpDomainError(
+            "IDEMPOTENCY_CONFLICT",
+            "Este orçamento já foi convertido em venda por outra solicitação."
+          );
+        }
+        replay = true;
+        await connection.commit();
+        return { order: await this.detail(clientId, target), replay };
+      }
+      if (quote.documentType !== "quote" || quote.commercialStatus !== "approved" || quote.archivedAt) {
         throw new ErpDomainError(
           "CONFLICT",
           "Apenas um orçamento aprovado e ativo pode ser convertido em venda."
         );
       }
+      const [keyOwner] = await connection.execute<RowDataPacket[]>(
+        `SELECT id FROM erp_sale_orders WHERE client_id=? AND conversion_idempotency_key=? LIMIT 1 FOR UPDATE`,
+        [clientId, idempotencyKey]
+      );
+      if (keyOwner[0] && Number(keyOwner[0].id) !== quote.id) {
+        throw new ErpDomainError(
+          "IDEMPOTENCY_CONFLICT",
+          "Chave idempotente já usada para converter outro orçamento."
+        );
+      }
+      await this.assertOrderStockAvailable(connection, clientId, quote.id);
       const orderNumber = await this.nextCommercialCode(connection, clientId, "sale");
-      target = randomUUID();
-      const [created] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO erp_sale_orders
-         (public_id,client_id,order_number,document_type,commercial_status,commercial_date,
-          crm_client_id,customer_name_snapshot,seller_user_id,seller_name_snapshot,status,current_stage,
-          notes,payment_terms_snapshot,payment_method_snapshot,expected_date,shipping_address_snapshot,
-          billing_address_snapshot,subtotal_cents,discount_cents,freight_cents,charges_cents,total_cents,
-          source_quote_id,conversion_idempotency_key,created_by)
-         SELECT ?,client_id,?,'sale','active',CURRENT_DATE,
-          crm_client_id,customer_name_snapshot,seller_user_id,seller_name_snapshot,'draft','created',
-          notes,payment_terms_snapshot,payment_method_snapshot,expected_date,shipping_address_snapshot,
-          billing_address_snapshot,subtotal_cents,discount_cents,freight_cents,charges_cents,total_cents,
-          id,?,?
-         FROM erp_sale_orders WHERE client_id=? AND id=?`,
-        [target, orderNumber, idempotencyKey, actor.userId, clientId, quote.id]
+      const [updated] = await connection.execute<ResultSetHeader>(
+        `UPDATE erp_sale_orders
+         SET order_number=?,document_type='sale',commercial_status='active',commercial_date=CURRENT_DATE,
+             status='draft',current_stage='created',source_quote_id=NULL,conversion_idempotency_key=?
+         WHERE client_id=? AND id=? AND document_type='quote'`,
+        [orderNumber, idempotencyKey, clientId, quote.id]
       );
-      await connection.execute(
-        `INSERT INTO erp_sale_order_items
-         (public_id,sale_order_id,product_id,inventory_item_id,product_name_snapshot,sku_snapshot,
-          quantity,unit_price_cents,discount_cents,line_total_cents)
-         SELECT UUID(),?,product_id,inventory_item_id,product_name_snapshot,sku_snapshot,
-          quantity,unit_price_cents,discount_cents,line_total_cents
-         FROM erp_sale_order_items WHERE sale_order_id=? ORDER BY id`,
-        [created.insertId, quote.id]
-      );
-      await connection.execute(
-        `UPDATE erp_sale_orders SET commercial_status='converted' WHERE client_id=? AND id=?`,
-        [clientId, quote.id]
-      );
+      if (updated.affectedRows !== 1) {
+        throw new ErpDomainError(
+          "CONFLICT",
+          "O orçamento mudou durante a conversão; atualize a tela e tente novamente."
+        );
+      }
       await this.insertEvent(connection, {
         clientId,
         orderId: quote.id,
@@ -2033,16 +2042,13 @@ export class SaleRepository {
         fromStage: quote.currentStage,
         toStage: quote.currentStage,
         idempotencyKey,
-        payloadHash: hash({ quotePublicId: publicId }),
-        after: { salePublicId: target, saleNumber: orderNumber },
-      });
-      await this.insertEvent(connection, {
-        clientId,
-        orderId: created.insertId,
-        eventType: "quote_converted",
-        actor,
-        toStage: "created",
-        after: { quotePublicId: publicId, quoteNumber: quote.orderNumber },
+        payloadHash: hash({ quotePublicId: publicId, quoteId: quote.id }),
+        after: {
+          orderPublicId: target,
+          orderId: quote.id,
+          quoteNumber: quote.orderNumber,
+          saleNumber: orderNumber,
+        },
       });
       await connection.commit();
     } catch (error) {

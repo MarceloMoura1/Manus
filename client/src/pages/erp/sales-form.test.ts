@@ -8,6 +8,7 @@ import {
   salesDraftFromForm,
   salesCommercialDate,
   salesFormFromDetail,
+  salesStockIssues,
   selectSalesItemProduct,
   splitInstallments,
   salesStockIssue,
@@ -163,6 +164,22 @@ describe("sales form inventory identity", () => {
     });
     expect(salesStockIssue(size40)).toBeNull();
     expect(firstSalesStockIssue([size40, size39])?.productName).toBe("Tênis X / 39");
+    expect(salesStockIssues([
+      size39,
+      { ...size39, productName: "Tênis X / 41", availableQuantity: "1.000", quantity: "3.000" },
+      size40,
+    ])).toEqual([
+      {
+        productName: "Tênis X / 39",
+        availableQuantity: "5.000",
+        requestedQuantity: "6.000",
+      },
+      {
+        productName: "Tênis X / 41",
+        availableQuantity: "1.000",
+        requestedQuantity: "3.000",
+      },
+    ]);
   });
 
   it("does not invent a stock block for historical items without a current balance", () => {

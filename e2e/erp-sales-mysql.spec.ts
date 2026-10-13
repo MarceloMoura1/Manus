@@ -131,8 +131,8 @@ async function login(page: Page, email: string, password: string) {
   await expect(page).toHaveURL(/\/erp\/vendas$/);
 }
 async function createDraft(page: Page, commercialDate = "2026-10-05") {
-  await page.getByRole("button", { name: "Novo documento" }).click();
-  await page.getByRole("menuitem", { name: "Nova venda" }).click();
+  await page.getByRole("button", { name: "Novo Pedido" }).click();
+  await page.getByRole("menuitem", { name: "Nova venda/Pedido" }).click();
   const dialog = page.getByRole("dialog", { name: "Nova venda" });
   await dialog.getByLabel("Buscar cliente para a venda").fill("Cliente Venda A");
   await dialog.getByRole("button", { name: /Cliente Venda A/ }).click();
@@ -255,7 +255,7 @@ test.describe.serial("ERP sales real MySQL", () => {
       try {
         await login(page, identity.email, passwordA!);
         await expect(
-          page.getByRole("button", { name: "Novo documento" })
+          page.getByRole("button", { name: "Novo Pedido" })
         ).toHaveCount(0);
         await expect(page.getByRole("button", { name: "Confirmar" })).toHaveCount(
           0

@@ -882,6 +882,39 @@ physical("ERP sales MySQL behavior matrix", () => {
       draft(f.customer.crmClientId, f.product.publicId, { documentType: "quote" })
     );
     expect(quote).toMatchObject({ documentType: "quote", commercialStatus: "draft" });
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_stock_movements WHERE client_id=? AND reference_type='sale' AND reference_id=?",
+      [adminA.clientId, quote.publicId]
+    )).toBe(0);
+
+    await service.commercialTransition(adminA, {
+      publicId: quote.publicId,
+      toStatus: "negotiation",
+      reason: null,
+    });
+    await service.commercialTransition(adminA, {
+      publicId: quote.publicId,
+      toStatus: "approved",
+      reason: null,
+    });
+    await expect(
+      service.convertQuote(adminA, quote.publicId, crypto.randomUUID())
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_STOCK" });
+    const unchangedQuote = await service.detail(adminA, quote.publicId);
+    expect(unchangedQuote).toMatchObject({
+      id: quote.id,
+      publicId: quote.publicId,
+      documentType: "quote",
+      commercialStatus: "approved",
+    });
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_sale_orders WHERE client_id=? AND id=?",
+      [adminA.clientId, quote.id]
+    )).toBe(1);
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_stock_movements WHERE client_id=? AND reference_type='sale' AND reference_id=?",
+      [adminA.clientId, quote.publicId]
+    )).toBe(0);
 
     await expect(
       service.create(adminA, draft(f.customer.crmClientId, f.product.publicId))
