@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -19,6 +19,15 @@ async function fixture() {
   await writeFile(path.join(runtime, "package.json"), `${JSON.stringify({ dependencies: { example: "1.0.0" } })}\n`);
   await writeFile(path.join(runtime, "node_modules", "example", "package.json"), `${JSON.stringify({ name: "example", version: "1.0.0" })}\n`);
   return { root, source, runtime };
+}
+
+async function replaceDependencyWithInternalLink(runtime) {
+  const directDependency = path.join(runtime, "node_modules", "example");
+  const linkedDependency = path.join(runtime, "node_modules", ".pnpm", "example@1.0.0", "node_modules", "example");
+  await rm(directDependency, { recursive: true, force: true });
+  await mkdir(linkedDependency, { recursive: true });
+  await writeFile(path.join(linkedDependency, "package.json"), `${JSON.stringify({ name: "example", version: "1.0.0" })}\n`);
+  await symlink(linkedDependency, directDependency, process.platform === "win32" ? "junction" : "dir");
 }
 
 afterEach(async () => {
@@ -44,6 +53,13 @@ describe("assembleRuntime", () => {
     expect(result.removedEnvironmentFiles).toEqual([".env.example", ".env.local"]);
     await expect(readFile(path.join(runtime, "dist", "index.js"), "utf8")).resolves.toContain("candidate");
     await expect(validateRuntime(runtime)).resolves.toMatchObject({ dependencyCount: 1 });
+  });
+
+  it("accepts a production dependency link only when it resolves inside node_modules", async () => {
+    const { source, runtime } = await fixture();
+    await replaceDependencyWithInternalLink(runtime);
+
+    await expect(assembleRuntime({ source, runtime })).resolves.toMatchObject({ dependencyCount: 1 });
   });
 
   it("fails before producing a runtime when the source build is incomplete", async () => {

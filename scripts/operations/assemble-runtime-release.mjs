@@ -103,8 +103,25 @@ async function assertDeclaredDependencies(runtimePath) {
   const physicalNodeModules = await realpath(nodeModulesPath);
   for (const dependency of dependencies) {
     const dependencyPath = path.join(nodeModulesPath, dependency);
-    await assertDirectory(dependencyPath, `Runtime dependency ${dependency}`);
-    const physicalDependency = await realpath(dependencyPath);
+    let logicalDependency;
+    try {
+      logicalDependency = await lstat(dependencyPath);
+    } catch {
+      fail(`Runtime dependency is missing: ${dependency}`);
+    }
+    if (!logicalDependency.isDirectory() && !logicalDependency.isSymbolicLink()) {
+      fail(`Runtime dependency must be a directory or symbolic link: ${dependency}`);
+    }
+    let physicalDependency;
+    try {
+      physicalDependency = await realpath(dependencyPath);
+    } catch {
+      fail(`Runtime dependency is a dangling symbolic link: ${dependency}`);
+    }
+    const physicalInfo = await stat(physicalDependency);
+    if (!physicalInfo.isDirectory()) {
+      fail(`Runtime dependency does not resolve to a directory: ${dependency}`);
+    }
     if (!isPathInside(physicalDependency, physicalNodeModules)) {
       fail(`Runtime dependency resolves outside node_modules: ${dependency}`);
     }
