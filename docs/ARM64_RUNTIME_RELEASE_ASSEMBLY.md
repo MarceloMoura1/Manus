@@ -58,6 +58,22 @@ externo com hashes SHA-256, reextraia o TAR em diretório vazio e compare cada
 arquivo com o manifesto. O manifesto fica fora do TAR para evitar referência
 circular.
 
+## Contrato de ferramentas de audio no Linux
+
+`ffmpeg-static` e `ffprobe-static` permanecem dependencias de producao para o
+runtime Windows nativo. Elas nao devem ser resolvidas nem executadas durante a
+validacao Linux ARM64: `outboundAudioRuntimeExecutable` seleciona
+`/usr/bin/ffmpeg` e `/usr/bin/ffprobe` antes de tentar resolver os pacotes
+estaticos. O `Dockerfile.app-runtime` e o contrato versionado que instala o
+pacote de sistema `ffmpeg`, que fornece ambos os executaveis para a imagem
+Linux.
+
+Portanto, o gate Linux ARM64 deve validar `sharp` e os imports efetivamente
+usados pelo runtime montado, alem da selecao dos caminhos de sistema. A
+execucao fisica de FFmpeg/FFprobe pertence ao gate da imagem Linux, nao ao
+artefato Node isolado. A ausencia de `bin/linux/arm64/ffprobe` em
+`ffprobe-static` nao representa a ausencia da ferramenta de runtime Linux.
+
 ## Limites
 
 Esta receita é exclusivamente de preparação de artefato. Backup consistente,
