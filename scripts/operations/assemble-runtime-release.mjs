@@ -154,14 +154,15 @@ export async function assembleRuntime({ source, runtime }) {
   }
 }
 
-function parseArguments(argumentsList) {
-  if (argumentsList.length !== 4) {
+export function parseArguments(argumentsList) {
+  const normalizedArguments = argumentsList[0] === "--" ? argumentsList.slice(1) : argumentsList;
+  if (normalizedArguments.length !== 4) {
     fail("Usage: node scripts/operations/assemble-runtime-release.mjs --source <built-checkout> --runtime <pnpm-deploy-destination>");
   }
   const options = {};
-  for (let index = 0; index < argumentsList.length; index += 2) {
-    const flag = argumentsList[index];
-    const value = argumentsList[index + 1];
+  for (let index = 0; index < normalizedArguments.length; index += 2) {
+    const flag = normalizedArguments[index];
+    const value = normalizedArguments[index + 1];
     if ((flag !== "--source" && flag !== "--runtime") || !value || options[flag]) {
       fail("Usage: node scripts/operations/assemble-runtime-release.mjs --source <built-checkout> --runtime <pnpm-deploy-destination>");
     }

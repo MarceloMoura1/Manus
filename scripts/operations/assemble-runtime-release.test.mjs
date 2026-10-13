@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { assembleRuntime, validateRuntime } from "./assemble-runtime-release.mjs";
+import { assembleRuntime, parseArguments, validateRuntime } from "./assemble-runtime-release.mjs";
 
 const temporaryRoots = [];
 
@@ -26,6 +26,13 @@ afterEach(async () => {
 });
 
 describe("assembleRuntime", () => {
+  it("accepts the pnpm argument separator before the required flags", () => {
+    expect(parseArguments(["--", "--source", "/candidate/source", "--runtime", "/candidate/runtime"])).toEqual({
+      source: "/candidate/source",
+      runtime: "/candidate/runtime",
+    });
+  });
+
   it("copies the built dist after deploy and removes root environment files", async () => {
     const { source, runtime } = await fixture();
     await writeFile(path.join(runtime, ".env.example"), "not-a-secret\n");
