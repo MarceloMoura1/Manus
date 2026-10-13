@@ -51,8 +51,11 @@ function packagedAudioExecutable(tool: OutboundAudioRuntimeTool): string {
   return validatePackagedAudioExecutable({ tool, candidate, packageRoot });
 }
 
-function outboundAudioRuntimeExecutable(tool: OutboundAudioRuntimeTool): string {
-  if (process.platform === "linux") return `/usr/bin/${tool}`;
+export function outboundAudioRuntimeExecutable(
+  tool: OutboundAudioRuntimeTool,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform === "linux") return `/usr/bin/${tool}`;
   return packagedAudioExecutable(tool);
 }
 
