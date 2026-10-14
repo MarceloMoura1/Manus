@@ -61,6 +61,8 @@ jobs:
           server/modules/erp
           server/test-integration-gates.test.ts
           server/canonical-migrations.test.ts
+          scripts/operations/assemble-runtime-release.test.mjs
+          scripts/operations/package-runtime-release.test.mjs
           --exclude server/modules/erp/reports/structure.test.ts
 
       - name: Build application
