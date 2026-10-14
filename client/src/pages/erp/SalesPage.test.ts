@@ -141,10 +141,11 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain("trpc.erp.sales.archive.useMutation");
   });
 
-  it("renders solid portal menus, larger product media and complete commercial fields", () => {
+  it("renders solid portal menus, prominent sale-product media and complete commercial fields", () => {
     expect(source).toContain('className="z-[80] min-w-60 border-slate-200 bg-white shadow-xl"');
-    expect(source).toContain('large ? "h-14 w-14"');
+    expect(source).toContain('featured ? "h-24 w-24 sm:h-28 sm:w-28"');
     expect(source).toContain('compact ? "h-9 w-9"');
+    expect(source).toContain("object-contain p-1");
     expect(source).toContain("Data comercial");
     expect(source).toContain("Condições de pagamento");
     expect(source).toContain("Outros encargos");
@@ -258,5 +259,16 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain("motion-reduce:transition-none");
     expect(source).toContain("data-[highlighted]:bg-slate-100");
     expect(source).toContain('data-testid="sales-row-actions"');
+  });
+
+  it("keeps the main list as responsive product-first cards without changing filters or pagination logic", () => {
+    expect(source).toContain('data-testid={`sale-row-${order.publicId}`}');
+    expect(source).toContain("produtos neste documento");
+    expect(source).toContain("firstProductImage?.thumbnailPath");
+    expect(source).toContain('data-testid="sales-premium-pagination"');
+    expect(source).toContain("from-slate-950 via-slate-900 to-slate-800");
+    expect(source).toContain("salesPaginationItems(page, list.data.totalPages)");
+    expect(source).toContain("activeFilterCount");
+    expect(source).toContain("motion-reduce:transition-none");
   });
 });

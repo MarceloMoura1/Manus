@@ -274,7 +274,7 @@ test("sales route exposes compact overview and wide detail", async ({ page }) =>
   await expect(page).toHaveURL(/\/erp\/vendas$/);
   await expect(page.getByTestId("erp-sales-page")).toBeVisible();
   await expect(page.getByText("VD-00128").first()).toBeVisible();
-  await expect(page.locator('tr[data-testid^="sale-row-"] img')).toBeVisible();
+  await expect(page.locator('[data-testid^="sale-row-"]:visible').first().locator("img")).toBeVisible();
   await capture(page, "sales-list-desktop");
   await expect(page.getByLabel("Timeline das etapas da venda")).toHaveCount(0);
   await page.getByRole("button", { name: "VD-00128", exact: true }).click();
@@ -428,15 +428,18 @@ test("sales metric label follows the actual monthly, complete, custom and partia
   await expect(page.getByText("Vendas no mês", { exact: true })).toBeVisible();
 });
 
-test("sales list keeps the approved dense desktop composition and product images", async ({ page }) => {
+test("sales list keeps prominent product cards and premium pagination on desktop", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 });
   await prepare(page, { visualRows: true });
-  const salesTable = page.getByRole("table", { name: "Documentos comerciais" });
-  await expect(salesTable.locator("tbody tr")).toHaveCount(6);
+  const salesCards = page.locator('[data-testid^="sale-row-"]:visible');
+  await expect(salesCards).toHaveCount(6);
   await expect(page.getByText("Mostrando 1–6 de 6 vendas")).toBeVisible();
-  await expect(salesTable.locator("tbody img")).toHaveCount(6);
-  expect(await salesTable.locator("tbody img").first().evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
-  await expect(salesTable.getByText("Em andamento").first()).toBeVisible();
+  const firstImage = salesCards.first().locator("img");
+  await expect(firstImage).toBeVisible();
+  expect(await firstImage.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0 && image.clientWidth >= 96)).toBe(true);
+  await expect(salesCards.first().getByText("3 produtos neste documento")).toBeVisible();
+  await expect(salesCards.getByText("Em andamento").first()).toBeVisible();
+  await expect(page.getByTestId("sales-premium-pagination")).toBeVisible();
   await capture(page, "sales-list-reference-width");
   await page.getByRole("button", { name: "Ações de venda VD-00126" }).click();
   await expect(page.getByRole("menuitem", { name: "Editar documento" })).toBeVisible();
@@ -525,8 +528,10 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 1440, height: 900
     await expect(detail.getByRole("img", { name: "Imagem de Monitor 24 IPS" })).toBeVisible();
     await expect(detail.getByLabel("Sem imagem para Suporte articulado para monitor")).toBeVisible();
     await expect(detail.getByTestId("sales-detail-address")).toContainText("Praça da Sé, nº 100, Sala 4, Sé, São Paulo - SP, CEP 01001-000");
-    await expect(detail.getByTestId("sales-detail-actions")).toBeVisible();
-    await expect(detail.getByTestId("sales-detail-actions")).toBeInViewport();
+    const actions = detail.getByTestId("sales-detail-actions");
+    await expect(actions).toBeVisible();
+    await actions.scrollIntoViewIfNeeded();
+    await expect(actions).toBeInViewport();
     await expect(detail.getByRole("button", { name: "Marcar como enviado" })).toBeVisible();
     await expect(detail.getByRole("button", { name: "Corrigir etapa" })).toBeVisible();
     await expect(detail.getByRole("button", { name: "Cancelar venda" })).toBeDisabled();
