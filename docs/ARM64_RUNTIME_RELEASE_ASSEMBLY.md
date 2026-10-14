@@ -55,8 +55,52 @@ pnpm vitest run scripts/operations/assemble-runtime-release.test.mjs
 Depois da montagem e do verificador de imports, valide os imports funcionais
 dos módulos nativos na própria candidata. Só então gere um TAR e um manifesto
 externo com hashes SHA-256, reextraia o TAR em diretório vazio e compare cada
-arquivo com o manifesto. O manifesto fica fora do TAR para evitar referência
+entrada com o manifesto. O manifesto fica fora do TAR para evitar referência
 circular.
+
+## Empacotamento de dependências pnpm
+
+O diretório `node_modules` produzido pelo pnpm contém symlinks relativos para
+o store `.pnpm`. Eles são parte do runtime: **não use `tar --dereference`**.
+O uso dessa opção transforma alguns links em cópias incompletas e pode deixar
+dependências transitivas, como `detect-libc` do `sharp`, fora da resolução do
+Node.
+
+Use o empacotador versionado, depois de `release:assemble-runtime`:
+
+```bash
+pnpm release:package-runtime -- package \
+  --runtime "$RUNTIME" \
+  --tar /caminho/novo/megadesk-runtime.tar.gz \
+  --manifest /caminho/novo/megadesk-runtime.manifest.json \
+  --extract /caminho/novo/megadesk-runtime-reextract \
+  --commit "$(git rev-parse HEAD)" \
+  --tree "$(git rev-parse HEAD^{tree})" \
+  --node "$(node --version)" \
+  --pnpm "$(pnpm --version)"
+```
+
+O manifesto de esquema 2 registra arquivos regulares (`type: "file"`,
+tamanho e SHA-256) e symlinks (`type: "symlink"`, alvo literal e hash do
+alvo). O gerador não percorre links. Para cada link ele rejeita alvo absoluto,
+escape lexical por `..`, destino quebrado, ciclo e qualquer cadeia cujo destino
+real saia do payload. A extração limpa exige que os nomes do TAR permaneçam
+abaixo da raiz declarada e a verificação repete a validação estrutural e os
+hashes.
+
+O comando recusa destinos preexistentes e só retorna sucesso depois de
+reextrair o TAR no diretório indicado e verificar integralmente o manifesto.
+Para uma conferência posterior, execute:
+
+```bash
+pnpm release:package-runtime -- verify \
+  --runtime /caminho/extraido/runtime \
+  --manifest /caminho/novo/megadesk-runtime.manifest.json
+```
+
+O gate ARM64 continua exigindo o import e uma transformação real de `sharp`
+no runtime extraído; uma checagem superficial de `require.resolve("sharp")`
+não prova que suas dependências transitivas foram preservadas.
 
 ## Contrato de ferramentas de audio no Linux
 
