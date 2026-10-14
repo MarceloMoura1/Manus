@@ -591,8 +591,8 @@ export function SalesPage({
             ))}
           </nav>
           <div className="border-b border-slate-100 bg-slate-50/70 px-3 py-3 sm:px-5" data-testid="sales-filters">
-            <div className="grid items-center gap-2 rounded-xl border border-slate-200/80 bg-white p-2 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.7)] min-[980px]:grid-cols-[minmax(220px,1.45fr)_132px_132px_145px_110px]">
-              <label className="relative min-w-0">
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200/80 bg-white p-2 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.7)]">
+              <label className="relative min-w-0 flex-[2_1_18rem]">
                 <span className="sr-only">Busca</span>
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
                 <Input
@@ -606,7 +606,7 @@ export function SalesPage({
                   }}
                 />
               </label>
-              <label className="relative">
+              <label className="relative min-w-[8.25rem] flex-1">
                 <span className="sr-only">Período</span>
                 <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" />
                 <select
@@ -617,7 +617,7 @@ export function SalesPage({
                   <option value="month">Este mês</option><option value="all">Todo o período</option><option value="custom">Personalizado</option>
                 </select>
               </label>
-              <label className="relative">
+              <label className="relative min-w-[8.25rem] flex-1">
                 <span className="sr-only">Status</span>
                 <Filter className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" />
                 <select
@@ -633,21 +633,21 @@ export function SalesPage({
                   {kind === "quotes" ? (["draft", "negotiation", "approved", "converted", "lost"] as const).map(value => <option key={value} value={value}>{commercialStatusLabels[value]}</option>) : stageOrder.map(value => <option key={value} value={value}>{stageLabels[value]}</option>)}
                 </select>
               </label>
-              <label className="relative">
+              <label className="relative min-w-[8.25rem] flex-1">
                 <span className="sr-only">Vendedor</span>
                 <UserRound className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" />
                 <select className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2 text-xs font-medium text-slate-800 transition-colors focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={sellerUserId} onChange={event => { setSellerUserId(event.target.value); setPage(1); }}>
                   <option value="all">Vendedor</option>{options.data?.sellers.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}
                 </select>
               </label>
-              <Button type="button" variant="outline" className="h-9 justify-between rounded-lg border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold shadow-none hover:bg-slate-100" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
+              <Button type="button" variant="outline" className="h-9 min-w-[7.5rem] flex-1 justify-between rounded-lg border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold shadow-none hover:bg-slate-100 sm:flex-none" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
                 <SlidersHorizontal className="mr-1 h-3.5 w-3.5" /> Filtros
                 {activeFilterCount > 0 && <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-800">{activeFilterCount}</span>}
               </Button>
             </div>
 
             {advancedFiltersOpen && (
-              <div className="mt-3 grid items-end gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-[0_12px_28px_-26px_rgba(15,23,42,0.8)] sm:grid-cols-2 lg:grid-cols-5" aria-label="Filtros avançados">
+              <div className="mt-3 grid grid-cols-1 items-end gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-[0_12px_28px_-26px_rgba(15,23,42,0.8)] sm:grid-cols-2 xl:grid-cols-5" aria-label="Filtros avançados">
                 <div className="relative min-w-0">
                   <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">Cliente</span>
                   {filterCustomer ? (
@@ -660,7 +660,7 @@ export function SalesPage({
                       <Search className="pointer-events-none absolute bottom-2.5 left-2.5 h-3.5 w-3.5 text-slate-500" />
                       <Input aria-label="Filtrar por cliente" className="mt-1 h-9 border-slate-200 bg-slate-50/70 pl-8 text-xs focus-visible:bg-white" placeholder="Buscar cliente" value={filterCustomerSearch} onChange={event => setFilterCustomerSearch(event.target.value)} />
                       {filterCustomerLookupEnabled && (
-                        <div className="absolute left-0 top-[4.25rem] z-30 w-full min-w-[min(18rem,calc(100vw-2rem))] max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl [scrollbar-width:thin]">
+                        <div className="absolute inset-x-0 top-[4.25rem] z-30 max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl [scrollbar-width:thin]" data-testid="sales-customer-filter-options">
                           {filterCustomers.isLoading ? <p className="p-3 text-sm text-slate-500">Buscando clientes…</p> : filterCustomers.isError ? <p className="p-3 text-sm text-rose-700">Não foi possível buscar clientes.</p> : filterCustomers.data?.items.length ? filterCustomers.data.items.map(customer => (
                             <button type="button" key={customer.crmClientId} className="block w-full rounded-md px-3 py-2 text-left transition-colors duration-150 hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => { setFilterCustomer(customer); setFilterCustomerSearch(""); setPage(1); }}>
                               <strong className="block truncate text-sm text-slate-900">{customer.customerName}</strong>
@@ -725,43 +725,35 @@ export function SalesPage({
             />
           ) : (
             <div className="min-w-0">
-              <div className="hidden grid-cols-1 gap-4 p-4 md:grid xl:grid-cols-2">
-                <label className="col-span-full flex items-center gap-2 px-1 text-xs font-semibold text-slate-600">
-                  <input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" aria-label="Selecionar documentos desta página" checked={list.data.items.every(order => selectedSaleIds.includes(order.publicId))} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...new Set([...current, ...list.data!.items.map(order => order.publicId)])] : current.filter(id => !list.data!.items.some(order => order.publicId === id)))} />
-                  Selecionar documentos desta página
-                </label>
-                {list.data.items.map(order => (
-                  <article key={order.publicId} className="group relative min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-white to-slate-50/80 p-4 shadow-[0_14px_30px_-28px_rgba(15,23,42,0.75)] transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_20px_38px_-26px_rgba(37,99,235,0.34)] focus-within:border-blue-300 focus-within:shadow-[0_20px_38px_-26px_rgba(37,99,235,0.34)] motion-reduce:transform-none motion-reduce:transition-none" data-testid={`sale-row-${order.publicId}`}>
-                    <div className="flex min-w-0 items-start gap-4">
-                      <input className="mt-1 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" aria-label={`Selecionar ${order.documentType === "quote" ? "orçamento" : "venda"} ${order.orderNumber}`} checked={selectedSaleIds.includes(order.publicId)} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...current, order.publicId] : current.filter(id => id !== order.publicId))} />
-                      <ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} featured />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          <button type="button" className="truncate rounded-sm text-sm font-bold tracking-tight text-blue-800 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button>
-                          <DocumentTypeBadge documentType={order.documentType} />
-                          {order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}
-                        </div>
-                        <p className="mt-2 line-clamp-2 text-base font-extrabold leading-snug tracking-[-0.015em] text-slate-950">{order.firstProductName ?? "Produto histórico"}</p>
-                        <p className="mt-1 text-xs font-medium text-slate-500">{order.itemCount > 1 ? `${order.itemCount} produtos neste documento` : "1 produto neste documento"}</p>
-                      </div>
-                      <div className="flex shrink-0 flex-col items-end gap-2">
-                        <strong className="text-sm font-extrabold tabular-nums text-slate-950">{money.format(order.totalCents / 100)}</strong>
-                        <SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} />
-                      </div>
-                    </div>
-                    <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-slate-200/90 pt-4 text-xs sm:grid-cols-4">
-                      <div className="min-w-0"><dt className="font-bold uppercase tracking-[0.08em] text-slate-400">Cliente</dt><dd className="mt-1 truncate font-semibold text-slate-800" title={order.customerName}>{order.customerName}</dd></div>
-                      <div><dt className="font-bold uppercase tracking-[0.08em] text-slate-400">Data</dt><dd className="mt-1 font-medium tabular-nums text-slate-700">{date.format(salesCommercialDate(order.commercialDate))}</dd></div>
-                      <div className="min-w-0"><dt className="font-bold uppercase tracking-[0.08em] text-slate-400">Vendedor</dt><dd className="mt-1 truncate font-medium text-slate-700" title={order.sellerName ?? ""}>{order.sellerName ?? "—"}</dd></div>
-                      <div className="flex min-w-0 flex-wrap content-start gap-1.5"><dt className="w-full font-bold uppercase tracking-[0.08em] text-slate-400">Situação</dt><dd>{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <div className="flex flex-wrap gap-1"><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></div>}</dd></div>
-                    </dl>
-                  </article>
-                ))}
+              <div className="hidden overflow-x-auto md:block">
+                <table className="min-w-[1120px] w-full text-sm">
+                  <thead className="bg-slate-50 text-left text-xs text-slate-600">
+                    <tr>
+                      <th className="px-2 py-2"><input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" aria-label="Selecionar documentos desta página" checked={list.data.items.every(order => selectedSaleIds.includes(order.publicId))} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...new Set([...current, ...list.data!.items.map(order => order.publicId)])] : current.filter(id => !list.data!.items.some(order => order.publicId === id)))} /></th>
+                      <th className="px-2 py-2">{kind === "quotes" ? "Orçamento" : kind === "orders" ? "Venda" : "Documento"}</th><th className="px-2 py-2">Cliente</th><th className="px-2 py-2">Data</th><th className="px-2 py-2">Vendedor</th><th className="px-2 py-2 text-right">Total</th><th className="px-2 py-2">{kind === "quotes" ? "Situação" : "Pagamento"}</th><th className="px-2 py-2">{kind === "quotes" ? "Fluxo" : "Status"}</th><th className="px-2 py-2 text-center">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {list.data.items.map(order => (
+                      <tr key={order.publicId} className="group transition-colors duration-150 hover:bg-blue-50/40 focus-within:bg-blue-50/40 motion-reduce:transition-none" data-testid={`sale-row-${order.publicId}`}>
+                        <td className="px-2 py-3"><input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" aria-label={`Selecionar ${order.documentType === "quote" ? "orçamento" : "venda"} ${order.orderNumber}`} checked={selectedSaleIds.includes(order.publicId)} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...current, order.publicId] : current.filter(id => id !== order.publicId))} /></td>
+                        <td className="px-2 py-3"><div className="flex min-w-0 items-center gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} featured /><div className="min-w-0"><div className="flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-sm font-bold text-slate-900" title={order.firstProductName ?? "Produto histórico"}>{order.firstProductName ?? "Produto histórico"}</p><p className="mt-0.5 text-[11px] text-slate-500">{order.itemCount > 1 ? `+${order.itemCount - 1} produto${order.itemCount > 2 ? "s" : ""}` : "1 produto"}</p></div></div></td>
+                        <td className="max-w-48 truncate px-2 py-3 font-medium text-slate-800" title={order.customerName}>{order.customerName}</td>
+                        <td className="whitespace-nowrap px-2 py-3 tabular-nums text-slate-700">{date.format(salesCommercialDate(order.commercialDate))}</td>
+                        <td className="max-w-40 truncate px-2 py-3 text-slate-700" title={order.sellerName ?? ""}>{order.sellerName ?? "—"}</td>
+                        <td className="whitespace-nowrap px-2 py-3 text-right font-semibold tabular-nums text-slate-900">{money.format(order.totalCents / 100)}</td>
+                        <td className="px-2 py-3">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <PaymentBadge value={order.paymentStatus} compact />}</td>
+                        <td className="px-2 py-3">{order.documentType === "quote" ? <span className="text-[11px] text-slate-500">Fluxo comercial</span> : <StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact />}</td>
+                        <td className="px-2 py-3 text-center"><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div className="grid gap-3 p-3 md:hidden">
-                {list.data.items.map(order => <article key={order.publicId} className="min-w-0 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50/80 p-4 shadow-[0_14px_30px_-28px_rgba(15,23,42,0.75)]" data-testid={`sale-row-${order.publicId}`}>
-                  <div className="flex min-w-0 items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} featured /><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-1.5"><button type="button" className="truncate rounded-sm text-sm font-bold tracking-tight text-blue-800 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-2 line-clamp-2 text-base font-extrabold leading-snug tracking-[-0.015em] text-slate-950">{order.firstProductName ?? "Produto histórico"}</p><p className="mt-1 text-xs font-medium text-slate-500">{order.itemCount > 1 ? `${order.itemCount} produtos neste documento` : "1 produto neste documento"}</p></div><div className="flex shrink-0 flex-col items-end gap-2"><strong className="text-sm font-extrabold tabular-nums text-slate-950">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></div></div>
-                  <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3"><span className="text-xs text-slate-600">{date.format(salesCommercialDate(order.commercialDate))} · {order.sellerName ?? "—"}</span><div className="flex flex-wrap gap-1">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
+              <div className="divide-y divide-slate-100 md:hidden">
+                {list.data.items.map(order => <article key={order.publicId} className="p-4" data-testid={`sale-row-${order.publicId}`}>
+                  <div className="flex min-w-0 items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} large /><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-sm font-bold text-slate-900">{order.firstProductName ?? "Produto histórico"}</p><p className="mt-1 truncate text-xs font-medium text-slate-800">{order.customerName}</p></div><div className="flex shrink-0 flex-col items-end gap-1"><strong className="text-xs tabular-nums">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></div></div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 pl-[92px]"><span className="text-xs text-slate-500">{date.format(salesCommercialDate(order.commercialDate))} · {order.sellerName ?? "—"}</span><div className="flex gap-1">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
                 </article>)}
               </div>
             </div>
@@ -1034,54 +1026,41 @@ function SalesMetrics({
       label: periodLabel,
       value: data ? money.format(data.salesCents / 100) : "—",
       icon: ShoppingCart,
-      tone: "from-blue-600 via-blue-600 to-indigo-700",
-      iconSurface: "bg-blue-500/15 text-blue-700 ring-blue-100",
       detail: data?.period.criterion ?? "data de criação da venda",
     },
     {
       label: "Pedidos",
       value: data ? String(data.orderCount) : "—",
       icon: ReceiptText,
-      tone: "from-violet-600 via-violet-600 to-fuchsia-700",
-      iconSurface: "bg-violet-500/15 text-violet-700 ring-violet-100",
       detail: "vendas confirmadas no período",
     },
     {
       label: "Ticket médio",
       value: data ? money.format(data.averageTicketCents / 100) : "—",
       icon: CircleDollarSign,
-      tone: "from-emerald-600 via-emerald-600 to-teal-700",
-      iconSurface: "bg-emerald-500/15 text-emerald-700 ring-emerald-100",
       detail: "total vendido dividido pelos pedidos",
     },
     {
       label: "A receber",
       value: data ? money.format(data.receivableCents / 100) : "—",
       icon: CreditCard,
-      tone: "from-orange-500 via-orange-500 to-amber-600",
-      iconSurface: "bg-orange-500/15 text-orange-700 ring-orange-100",
       detail: "total da venda menos recebimentos reais",
     },
   ];
   return (
-    <section className="grid gap-3 sm:grid-cols-2 min-[1000px]:grid-cols-4" aria-label="Indicadores de vendas">
+    <section className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4" aria-label="Indicadores de vendas">
       {metrics.map(metric => (
-        <article key={metric.label} tabIndex={0} className="group relative min-h-32 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_14px_30px_-26px_rgba(15,23,42,0.55)] transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-1 hover:border-slate-300 hover:shadow-[0_22px_38px_-26px_rgba(15,23,42,0.48)] focus-visible:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 motion-reduce:transform-none motion-reduce:transition-none">
-          <span aria-hidden="true" className={cn("absolute inset-x-0 top-0 h-1 bg-gradient-to-r", metric.tone)} />
-          <div className="flex items-start justify-between gap-3">
-            <span className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ring-1", metric.iconSurface)}>
-              <metric.icon className="h-5 w-5" />
-            </span>
-            <span className="mt-1 h-2 w-2 rounded-full bg-slate-200 transition-colors duration-200 group-hover:bg-slate-400 motion-reduce:transition-none" />
-          </div>
-          <div className="mt-4 min-w-0">
-            <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-500">{metric.label}</p>
-            <p className="mt-1 truncate text-2xl font-extrabold tracking-[-0.035em] text-slate-950 tabular-nums">
+        <article key={metric.label} data-testid="sales-metric-card" className="flex min-h-[5.25rem] items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-[0_8px_20px_-20px_rgba(15,23,42,0.6)] transition-[border-color,box-shadow] duration-150 hover:border-slate-300 hover:shadow-[0_12px_24px_-20px_rgba(15,23,42,0.35)] focus-within:border-blue-300 focus-within:outline-none motion-reduce:transition-none">
+          <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-full", metric.label === "Ticket médio" ? "bg-emerald-50 text-emerald-600" : metric.label === "A receber" ? "bg-orange-50 text-orange-600" : "bg-blue-50 text-blue-600")}>
+            <metric.icon className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-slate-600">{metric.label}</p>
+            <p className="mt-0.5 truncate text-lg font-bold tracking-[-0.02em] text-slate-950 tabular-nums">
               {loading ? "Carregando…" : metric.value}
             </p>
+            <p className="sr-only">{metric.detail}</p>
           </div>
-          <p className="mt-1 truncate text-xs font-medium text-slate-500">{metric.detail}</p>
-          <p className="sr-only">{metric.detail}</p>
         </article>
       ))}
     </section>
@@ -2052,7 +2031,7 @@ function CommercialBadge({ value }: { value: string }) {
 }
 
 function ProductThumb({ imagePath, name, compact = false, large = false, featured = false }: { imagePath?: string | null; name: string; compact?: boolean; large?: boolean; featured?: boolean }) {
-  const size = featured ? "h-24 w-24 sm:h-28 sm:w-28" : large ? "h-20 w-20" : compact ? "h-9 w-9" : "h-11 w-11";
+  const size = featured ? "h-14 w-14" : large ? "h-20 w-20" : compact ? "h-9 w-9" : "h-11 w-11";
   return imagePath ? (
     <img src={productMediaUrl(imagePath)} crossOrigin="use-credentials" alt={`Imagem de ${name}`} className={cn("shrink-0 rounded-xl bg-slate-100 object-contain p-1 ring-1 ring-slate-200", size)} />
   ) : (

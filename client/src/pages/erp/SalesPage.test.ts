@@ -141,9 +141,9 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain("trpc.erp.sales.archive.useMutation");
   });
 
-  it("renders solid portal menus, prominent sale-product media and complete commercial fields", () => {
+  it("renders solid portal menus, proportional sale-product media and complete commercial fields", () => {
     expect(source).toContain('className="z-[80] min-w-60 border-slate-200 bg-white shadow-xl"');
-    expect(source).toContain('featured ? "h-24 w-24 sm:h-28 sm:w-28"');
+    expect(source).toContain('featured ? "h-14 w-14"');
     expect(source).toContain('compact ? "h-9 w-9"');
     expect(source).toContain("object-contain p-1");
     expect(source).toContain("Data comercial");
@@ -261,10 +261,19 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain('data-testid="sales-row-actions"');
   });
 
-  it("keeps the main list as responsive product-first cards without changing filters or pagination logic", () => {
+  it("keeps a vertical desktop table, anchored filters and the existing premium pagination", () => {
     expect(source).toContain('data-testid={`sale-row-${order.publicId}`}');
-    expect(source).toContain("produtos neste documento");
+    expect(source).toContain('className="min-w-[1120px] w-full text-sm"');
+    expect(source).toContain('<th className="px-2 py-2">Cliente</th>');
+    expect(source).toContain('<th className="px-2 py-2">Vendedor</th>');
     expect(source).toContain("firstProductImage?.thumbnailPath");
+    expect(source).toContain('text-sm font-bold text-slate-900');
+    expect(source).toContain('flex flex-wrap items-center gap-2 rounded-xl border');
+    expect(source).toContain('data-testid="sales-customer-filter-options"');
+    expect(source).not.toContain('min-[980px]:grid-cols');
+    expect(source).not.toContain('min-w-[min(18rem,calc(100vw-2rem))]');
+    expect(source).toContain('data-testid="sales-metric-card"');
+    expect(source).toContain('lg:grid-cols-4');
     expect(source).toContain('data-testid="sales-premium-pagination"');
     expect(source).toContain("from-slate-950 via-slate-900 to-slate-800");
     expect(source).toContain("salesPaginationItems(page, list.data.totalPages)");

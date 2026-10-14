@@ -428,18 +428,27 @@ test("sales metric label follows the actual monthly, complete, custom and partia
   await expect(page.getByText("Vendas no mês", { exact: true })).toBeVisible();
 });
 
-test("sales list keeps prominent product cards and premium pagination on desktop", async ({ page }) => {
+test("sales list keeps vertical table columns, compact KPIs and premium pagination on desktop", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 });
   await prepare(page, { visualRows: true });
-  const salesCards = page.locator('[data-testid^="sale-row-"]:visible');
-  await expect(salesCards).toHaveCount(6);
+  const salesRows = page.locator('table tbody [data-testid^="sale-row-"]:visible');
+  await expect(salesRows).toHaveCount(6);
   await expect(page.getByText("Mostrando 1–6 de 6 vendas")).toBeVisible();
-  const firstImage = salesCards.first().locator("img");
+  await expect(page.getByRole("columnheader", { name: "Cliente" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Vendedor" })).toBeVisible();
+  expect(await salesRows.first().evaluate(element => element.tagName)).toBe("TR");
+  const firstImage = salesRows.first().locator("img");
   await expect(firstImage).toBeVisible();
-  expect(await firstImage.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0 && image.clientWidth >= 96)).toBe(true);
-  await expect(salesCards.first().getByText("3 produtos neste documento")).toBeVisible();
-  await expect(salesCards.getByText("Em andamento").first()).toBeVisible();
-  await expect(page.getByTestId("sales-premium-pagination")).toBeVisible();
+  expect(await firstImage.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0 && image.clientWidth >= 56)).toBe(true);
+  await expect(salesRows.first().getByText("Monitor 24 IPS")).toBeVisible();
+  await expect(salesRows.getByText("Em andamento").first()).toBeVisible();
+  const metrics = page.getByTestId("sales-metric-card");
+  await expect(metrics).toHaveCount(4);
+  const metricTopEdges = await metrics.evaluateAll(cards => cards.map(card => Math.round(card.getBoundingClientRect().top)));
+  expect(new Set(metricTopEdges).size).toBe(1);
+  const pagination = page.getByTestId("sales-premium-pagination");
+  await expect(pagination).toBeVisible();
+  expect(await pagination.evaluate(element => getComputedStyle(element).backgroundImage)).toContain("gradient");
   await capture(page, "sales-list-reference-width");
   await page.getByRole("button", { name: "Ações de venda VD-00126" }).click();
   await expect(page.getByRole("menuitem", { name: "Editar documento" })).toBeVisible();
@@ -662,11 +671,21 @@ test("sales exposes empty state", async ({ page }) => {
   ).toBeVisible();
 });
 test("sales keeps secondary filters behind an explicit control", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
   await prepare(page);
   await expect(page.getByLabel("Filtros avançados")).toHaveCount(0);
   await page.getByRole("button", { name: /Filtros/ }).click();
   await expect(page.getByLabel("Filtros avançados")).toBeVisible();
   await expect(page.getByLabel("Forma de pagamento")).toBeVisible();
+  const customerInput = page.getByLabel("Filtrar por cliente");
+  await customerInput.fill("Al");
+  const customerOptions = page.getByTestId("sales-customer-filter-options");
+  await expect(customerOptions).toBeVisible();
+  const [inputBox, optionsBox] = await Promise.all([customerInput.boundingBox(), customerOptions.boundingBox()]);
+  expect(inputBox).not.toBeNull();
+  expect(optionsBox).not.toBeNull();
+  expect(optionsBox!.x).toBeGreaterThanOrEqual(inputBox!.x - 1);
+  expect(optionsBox!.x + optionsBox!.width).toBeLessThanOrEqual(inputBox!.x + inputBox!.width + 1);
   await capture(page, "sales-filters-open");
 });
 test("sales exposes online error and retry", async ({ page }) => {
