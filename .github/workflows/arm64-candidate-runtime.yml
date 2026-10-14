@@ -138,7 +138,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pnpm release:package-runtime -- package \
+          pnpm release:package-runtime package \
             --runtime "${{ steps.paths.outputs.runtime }}" \
             --tar "${{ steps.paths.outputs.tarball }}" \
             --manifest "${{ steps.paths.outputs.manifest }}" \
@@ -148,7 +148,7 @@ jobs:
             --node "$(node --version)" \
             --pnpm "$(pnpm --version)" \
             | tee "${{ steps.paths.outputs.logs }}/runtime-package.log"
-          pnpm release:package-runtime -- verify \
+          pnpm release:package-runtime verify \
             --runtime "${{ steps.paths.outputs.extract }}/runtime" \
             --manifest "${{ steps.paths.outputs.manifest }}" \
             | tee "${{ steps.paths.outputs.logs }}/runtime-manifest-verify.log"
