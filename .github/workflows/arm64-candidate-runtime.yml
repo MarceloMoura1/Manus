@@ -1,0 +1,219 @@
+name: ARM64 candidate runtime validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arm64-candidate-runtime-851573d37b34c603ae210f548489c2595c1d0e6b
+  cancel-in-progress: false
+
+jobs:
+  build-and-validate:
+    name: Build and validate Linux ARM64 candidate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    env:
+      EXPECTED_SHA: 851573d37b34c603ae210f548489c2595c1d0e6b
+      EXPECTED_TREE: 6a423fdc98531a29771aeaafb297745a6634a67f
+      EXPECTED_NODE: v22.23.2
+      EXPECTED_PNPM: 10.18.0
+      CI: "true"
+      RUN_DATABASE_INTEGRATION: "0"
+      RUN_ATTACHMENT_DELETE_MYSQL_INTEGRATION: "0"
+      RUN_CRM_LIFECYCLE_AUDIT: "0"
+      RUN_CRM_NULL_AUDIT: "0"
+      RUN_EVOLUTION_E2E: "0"
+      RUN_PRODUCT_MEDIA_MYSQL: "0"
+      MEGADESK_WRITE_FREEZE_MYSQL_PHYSICAL: "0"
+
+    steps:
+      - name: Check out the immutable candidate commit
+        uses: actions/checkout@v4
+        with:
+          ref: 851573d37b34c603ae210f548489c2595c1d0e6b
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+          cache: pnpm
+
+      - name: Prepare fresh candidate paths
+        id: paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK_ROOT="$RUNNER_TEMP/megadesk-arm64-candidate-$GITHUB_RUN_ID"
+          RUNTIME="$WORK_ROOT/runtime"
+          PACKAGE_ROOT="$WORK_ROOT/package"
+          LOGS="$WORK_ROOT/logs"
+          TARBALL="$PACKAGE_ROOT/megadesk-runtime-${EXPECTED_SHA}-linux-arm64.tar.gz"
+          MANIFEST="$PACKAGE_ROOT/megadesk-runtime-${EXPECTED_SHA}-linux-arm64.manifest.json"
+          EXTRACT="$PACKAGE_ROOT/extracted"
+          test ! -e "$WORK_ROOT"
+          mkdir -p "$PACKAGE_ROOT" "$LOGS"
+          printf 'runtime=%s\npackage_root=%s\nlogs=%s\ntarball=%s\nmanifest=%s\nextract=%s\n' \
+            "$RUNTIME" "$PACKAGE_ROOT" "$LOGS" "$TARBALL" "$MANIFEST" "$EXTRACT" >> "$GITHUB_OUTPUT"
+
+      - name: Prove runner and source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Linux"
+          test "$(uname -m)" = "aarch64"
+          test "$(node --version)" = "$EXPECTED_NODE"
+          test "$(pnpm --version)" = "$EXPECTED_PNPM"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test -z "$(git status --porcelain)"
+          printf 'platform=linux/arm64\nnode=%s\npnpm=%s\ncommit=%s\ntree=%s\n' \
+            "$(node --version)" "$(pnpm --version)" "$(git rev-parse HEAD)" "$(git rev-parse HEAD^{tree})" \
+            | tee "${{ steps.paths.outputs.logs }}/identity.log"
+
+      - name: Install frozen dependencies
+        shell: bash
+        run: set -o pipefail; pnpm install --frozen-lockfile | tee "${{ steps.paths.outputs.logs }}/install.log"
+
+      - name: Check TypeScript
+        shell: bash
+        run: set -o pipefail; pnpm check | tee "${{ steps.paths.outputs.logs }}/typecheck.log"
+
+      - name: Validate canonical migrations without applying them
+        shell: bash
+        run: set -o pipefail; pnpm db:validate | tee "${{ steps.paths.outputs.logs }}/migration-validation.log"
+
+      - name: Run safe unit and contract tests
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm vitest run \
+            client/src \
+            server/modules/erp \
+            server/test-integration-gates.test.ts \
+            server/canonical-migrations.test.ts \
+            server/outbound-audio-normalization.test.ts \
+            scripts/operations/assemble-runtime-release.test.mjs \
+            scripts/operations/package-runtime-release.test.mjs \
+            --exclude server/modules/erp/reports/structure.test.ts \
+            | tee "${{ steps.paths.outputs.logs }}/vitest.log"
+
+      - name: Build application
+        shell: bash
+        run: set -o pipefail; pnpm run build | tee "${{ steps.paths.outputs.logs }}/build.log"
+
+      - name: Assemble isolated production runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ steps.paths.outputs.runtime }}"
+          test ! -e "$RUNTIME"
+          pnpm --filter megadesk-platform --prod deploy --legacy "$RUNTIME" \
+            | tee "${{ steps.paths.outputs.logs }}/production-deploy.log"
+          pnpm release:assemble-runtime -- --source "$GITHUB_WORKSPACE" --runtime "$RUNTIME" \
+            | tee "${{ steps.paths.outputs.logs }}/runtime-assembly.log"
+          node --experimental-vm-modules windows/Assert-MegaDeskProductionRelease.mjs --release "$RUNTIME" \
+            | tee "${{ steps.paths.outputs.logs }}/runtime-imports-before-package.log"
+
+      - name: Reject secrets and protected-state residues
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME="${{ steps.paths.outputs.runtime }}"
+          test -z "$(find "$RUNTIME" -type f -name '.env*' -print -quit)"
+          test -z "$(find "$RUNTIME" -name '.megadesk-write-freeze' -print -quit)"
+          test -z "$(find "$RUNTIME" -name '.write-freeze' -print -quit)"
+
+      - name: Package and cleanly extract the runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm release:package-runtime -- package \
+            --runtime "${{ steps.paths.outputs.runtime }}" \
+            --tar "${{ steps.paths.outputs.tarball }}" \
+            --manifest "${{ steps.paths.outputs.manifest }}" \
+            --extract "${{ steps.paths.outputs.extract }}" \
+            --commit "$EXPECTED_SHA" \
+            --tree "$EXPECTED_TREE" \
+            --node "$(node --version)" \
+            --pnpm "$(pnpm --version)" \
+            | tee "${{ steps.paths.outputs.logs }}/runtime-package.log"
+          pnpm release:package-runtime -- verify \
+            --runtime "${{ steps.paths.outputs.extract }}/runtime" \
+            --manifest "${{ steps.paths.outputs.manifest }}" \
+            | tee "${{ steps.paths.outputs.logs }}/runtime-manifest-verify.log"
+          sha256sum "${{ steps.paths.outputs.tarball }}" "${{ steps.paths.outputs.manifest }}" \
+            | tee "${{ steps.paths.outputs.package_root }}/checksums.sha256"
+
+      - name: Prove extracted runtime structure and ARM64 native module
+        shell: bash
+        env:
+          EXTRACTED_RUNTIME: ${{ steps.paths.outputs.extract }}/runtime
+          MANIFEST: ${{ steps.paths.outputs.manifest }}
+        run: |
+          set -euo pipefail
+          test -f "$EXTRACTED_RUNTIME/dist/index.js"
+          test -f "$EXTRACTED_RUNTIME/dist/public/index.html"
+          test -d "$EXTRACTED_RUNTIME/dist/public/assets"
+          test -d "$EXTRACTED_RUNTIME/node_modules"
+          SHARP_NODE="$(find -L "$EXTRACTED_RUNTIME/node_modules" -type f -name '*.node' -path '*sharp*' -print -quit)"
+          test -n "$SHARP_NODE"
+          readelf -h "$SHARP_NODE" | tee "${{ steps.paths.outputs.logs }}/sharp-elf-header.txt"
+          readelf -h "$SHARP_NODE" | grep -q 'Machine:.*AArch64'
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import { createRequire } from "node:module";
+          import path from "node:path";
+          const runtime = process.env.EXTRACTED_RUNTIME;
+          const require = createRequire(path.join(runtime, "package.json"));
+          const sharp = require("sharp");
+          const detectLibc = require("detect-libc");
+          assert.equal(process.platform, "linux");
+          assert.equal(process.arch, "arm64");
+          assert.ok(require.resolve("sharp").startsWith(runtime + path.sep));
+          assert.ok(require.resolve("detect-libc").startsWith(runtime + path.sep));
+          assert.equal(typeof detectLibc.familySync, "function");
+          const png = await sharp({ create: { width: 2, height: 3, channels: 4, background: "#336699" } }).png().toBuffer();
+          const metadata = await sharp(png).metadata();
+          assert.equal(metadata.format, "png");
+          assert.equal(metadata.width, 2);
+          assert.equal(metadata.height, 3);
+          assert.ok(png.length > 0);
+          console.log(`sharp_png=PASS bytes=${png.length} dimensions=${metadata.width}x${metadata.height}`);
+          NODE
+          node --experimental-vm-modules windows/Assert-MegaDeskProductionRelease.mjs --release "$EXTRACTED_RUNTIME" \
+            | tee "${{ steps.paths.outputs.logs }}/runtime-imports-after-extract.log"
+          node -e 'const fs=require("node:fs"); const manifest=JSON.parse(fs.readFileSync(process.env.MANIFEST,"utf8")); const files=manifest.files.filter(entry=>entry.type==="file").length; const links=manifest.files.filter(entry=>entry.type==="symlink").length; console.log(`manifest_files=${files} manifest_symlinks=${links}`)' \
+            | tee "${{ steps.paths.outputs.logs }}/manifest-counts.log"
+
+      - name: Record Linux FFmpeg and FFprobe selection contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm vitest run server/outbound-audio-normalization.test.ts \
+            | tee "${{ steps.paths.outputs.logs }}/linux-audio-selection.log"
+          printf 'linux_ffmpeg=/usr/bin/ffmpeg\nlinux_ffprobe=/usr/bin/ffprobe\n' \
+            | tee -a "${{ steps.paths.outputs.logs }}/linux-audio-selection.log"
+
+      - name: Upload candidate evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: megadesk-arm64-candidate-${{ github.run_id }}
+          path: |
+            ${{ steps.paths.outputs.tarball }}
+            ${{ steps.paths.outputs.manifest }}
+            ${{ steps.paths.outputs.package_root }}/checksums.sha256
+            ${{ steps.paths.outputs.logs }}/**
+          if-no-files-found: warn
+          retention-days: 7
