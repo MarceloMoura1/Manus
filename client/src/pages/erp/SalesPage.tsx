@@ -590,14 +590,14 @@ export function SalesPage({
               <button key={value} type="button" aria-current={kind === value ? "page" : undefined} className={cn("border-b-2 px-2 py-3 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 motion-reduce:transition-none sm:text-sm", kind === value ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-800")} onClick={() => { setKind(value); setStage("all"); setCommercialStatus("all"); setPage(1); }}>{label}</button>
             ))}
           </nav>
-          <div className="border-b border-slate-100 px-3 py-3 sm:px-5" data-testid="sales-filters">
-            <div className="grid gap-2 min-[980px]:grid-cols-[minmax(300px,1.6fr)_140px_135px_150px_116px]">
+          <div className="border-b border-slate-100 bg-slate-50/70 px-3 py-3 sm:px-5" data-testid="sales-filters">
+            <div className="grid items-center gap-2 rounded-xl border border-slate-200/80 bg-white p-2 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.7)] min-[980px]:grid-cols-[minmax(220px,1.45fr)_132px_132px_145px_110px]">
               <label className="relative min-w-0">
                 <span className="sr-only">Busca</span>
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
                 <Input
                   aria-label="Buscar por documento, cliente, produto ou SKU"
-                  className="h-10 bg-white pl-9"
+                  className="h-9 border-slate-200 bg-slate-50/70 pl-8 text-xs shadow-none placeholder:text-slate-400 focus-visible:bg-white"
                   placeholder="Buscar por número ou cliente..."
                   value={search}
                   onChange={event => {
@@ -608,9 +608,9 @@ export function SalesPage({
               </label>
               <label className="relative">
                 <span className="sr-only">Período</span>
-                <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
+                <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" />
                 <select
-                  className="h-10 w-full rounded-md border border-input bg-white pl-9 pr-2 text-xs text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2 text-xs font-medium text-slate-800 transition-colors focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                   value={from === month.from && to === month.to ? "month" : !from && !to ? "all" : "custom"}
                   onChange={event => { if (event.target.value === "month") { setFrom(month.from); setTo(month.to); } else if (event.target.value === "all") { setFrom(""); setTo(""); } else { setAdvancedFiltersOpen(true); } setPage(1); }}
                 >
@@ -619,9 +619,9 @@ export function SalesPage({
               </label>
               <label className="relative">
                 <span className="sr-only">Status</span>
-                <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
+                <Filter className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" />
                 <select
-                  className="h-10 w-full rounded-md border border-input bg-white pl-9 pr-2 text-xs text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2 text-xs font-medium text-slate-800 transition-colors focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                   value={kind === "quotes" ? commercialStatus : stage}
                   onChange={event => {
                     if (kind === "quotes") setCommercialStatus(event.target.value as typeof commercialStatus);
@@ -635,32 +635,32 @@ export function SalesPage({
               </label>
               <label className="relative">
                 <span className="sr-only">Vendedor</span>
-                <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
-                <select className="h-10 w-full rounded-md border border-input bg-white pl-9 pr-2 text-xs text-slate-800" value={sellerUserId} onChange={event => { setSellerUserId(event.target.value); setPage(1); }}>
+                <UserRound className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" />
+                <select className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2 text-xs font-medium text-slate-800 transition-colors focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={sellerUserId} onChange={event => { setSellerUserId(event.target.value); setPage(1); }}>
                   <option value="all">Vendedor</option>{options.data?.sellers.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}
                 </select>
               </label>
-              <Button type="button" variant="outline" className="h-10 justify-between px-3 text-xs" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
-                <SlidersHorizontal className="mr-1 h-4 w-4" /> Filtros
-                {activeFilterCount > 0 && <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">{activeFilterCount}</span>}
+              <Button type="button" variant="outline" className="h-9 justify-between rounded-lg border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold shadow-none hover:bg-slate-100" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
+                <SlidersHorizontal className="mr-1 h-3.5 w-3.5" /> Filtros
+                {activeFilterCount > 0 && <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-800">{activeFilterCount}</span>}
               </Button>
             </div>
 
             {advancedFiltersOpen && (
-              <div className="mt-3 grid gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2 lg:grid-cols-5" aria-label="Filtros avançados">
+              <div className="mt-3 grid items-end gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-[0_12px_28px_-26px_rgba(15,23,42,0.8)] sm:grid-cols-2 lg:grid-cols-5" aria-label="Filtros avançados">
                 <div className="relative min-w-0">
-                  <span className="text-xs font-semibold text-slate-600">Cliente</span>
+                  <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">Cliente</span>
                   {filterCustomer ? (
-                    <div className="mt-1 flex h-10 items-center justify-between gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 text-sm text-blue-950">
+                    <div className="mt-1 flex h-9 items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-xs text-blue-950">
                       <span className="truncate font-medium">{filterCustomer.customerName}</span>
                       <button type="button" aria-label="Remover filtro de cliente" className="rounded-md bg-blue-100/80 p-1 text-blue-800 transition-[background-color,color,transform] duration-150 hover:bg-blue-200 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transform-none motion-reduce:transition-none" onClick={() => { setFilterCustomer(null); setPage(1); }}><XCircle className="h-4 w-4" /></button>
                     </div>
                   ) : (
                     <>
-                      <Search className="pointer-events-none absolute bottom-3 left-3 h-4 w-4 text-slate-500" />
-                      <Input aria-label="Filtrar por cliente" className="mt-1 pl-9" placeholder="Buscar cliente" value={filterCustomerSearch} onChange={event => setFilterCustomerSearch(event.target.value)} />
+                      <Search className="pointer-events-none absolute bottom-2.5 left-2.5 h-3.5 w-3.5 text-slate-500" />
+                      <Input aria-label="Filtrar por cliente" className="mt-1 h-9 border-slate-200 bg-slate-50/70 pl-8 text-xs focus-visible:bg-white" placeholder="Buscar cliente" value={filterCustomerSearch} onChange={event => setFilterCustomerSearch(event.target.value)} />
                       {filterCustomerLookupEnabled && (
-                        <div className="absolute left-0 right-0 top-[4.5rem] z-30 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl [scrollbar-width:thin]">
+                        <div className="absolute left-0 top-[4.25rem] z-30 w-full min-w-[min(18rem,calc(100vw-2rem))] max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl [scrollbar-width:thin]">
                           {filterCustomers.isLoading ? <p className="p-3 text-sm text-slate-500">Buscando clientes…</p> : filterCustomers.isError ? <p className="p-3 text-sm text-rose-700">Não foi possível buscar clientes.</p> : filterCustomers.data?.items.length ? filterCustomers.data.items.map(customer => (
                             <button type="button" key={customer.crmClientId} className="block w-full rounded-md px-3 py-2 text-left transition-colors duration-150 hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => { setFilterCustomer(customer); setFilterCustomerSearch(""); setPage(1); }}>
                               <strong className="block truncate text-sm text-slate-900">{customer.customerName}</strong>
@@ -672,20 +672,20 @@ export function SalesPage({
                     </>
                   )}
                 </div>
-                <label className="text-xs font-semibold text-slate-600">Pagamento
-                  <select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-slate-800" value={paymentStatus} onChange={event => { setPaymentStatus(event.target.value as typeof paymentStatus); setPage(1); }}>
+                <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">Pagamento
+                  <select className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 px-2.5 text-xs font-medium normal-case tracking-normal text-slate-800 focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={paymentStatus} onChange={event => { setPaymentStatus(event.target.value as typeof paymentStatus); setPage(1); }}>
                     <option value="all">Todos os pagamentos</option><option value="pending">Pendente</option><option value="partial">Pagamento parcial</option><option value="paid">Pago</option>
                   </select>
                 </label>
-                <label className="text-xs font-semibold text-slate-600">Forma de pagamento
-                  <select className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm text-slate-800" value={paymentMethod} onChange={event => { setPaymentMethod(event.target.value); setPage(1); }}>
+                <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">Forma de pagamento
+                  <select className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 px-2.5 text-xs font-medium normal-case tracking-normal text-slate-800 focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={paymentMethod} onChange={event => { setPaymentMethod(event.target.value); setPage(1); }}>
                     <option value="all">Todas as formas</option>{options.data?.paymentMethods.map(value => <option key={value} value={value}>{value}</option>)}
                   </select>
                 </label>
-                <label className="text-xs font-semibold text-slate-600">Período personalizado
-                  <span className="mt-1 grid grid-cols-2 gap-1"><Input type="date" aria-label="Data inicial" value={from} onChange={event => { setFrom(event.target.value); setPage(1); }} /><Input type="date" aria-label="Data final" value={to} onChange={event => { setTo(event.target.value); setPage(1); }} /></span>
+                <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">Período personalizado
+                  <span className="mt-1 grid grid-cols-2 gap-1"><Input className="h-9 border-slate-200 bg-slate-50/70 px-2 text-xs focus-visible:bg-white" type="date" aria-label="Data inicial" value={from} onChange={event => { setFrom(event.target.value); setPage(1); }} /><Input className="h-9 border-slate-200 bg-slate-50/70 px-2 text-xs focus-visible:bg-white" type="date" aria-label="Data final" value={to} onChange={event => { setTo(event.target.value); setPage(1); }} /></span>
                 </label>
-                <label className="flex h-10 self-end items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700"><input type="checkbox" checked={includeArchived} onChange={event => { setIncludeArchived(event.target.checked); setPage(1); }} />Incluir arquivados</label>
+                <label className="flex h-9 self-end items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100"><input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" checked={includeArchived} onChange={event => { setIncludeArchived(event.target.checked); setPage(1); }} />Incluir arquivados</label>
               </div>
             )}
 
@@ -725,52 +725,61 @@ export function SalesPage({
             />
           ) : (
             <div className="min-w-0">
-              <div className="hidden overflow-x-auto md:block">
-                <table className="w-full min-w-[920px] table-fixed text-left text-xs" aria-label="Documentos comerciais">
-                  <colgroup><col className="w-9" /><col className="w-[23%]" /><col className="w-[15%]" /><col className="w-[10%]" /><col className="w-[10%]" /><col className="w-[11%]" /><col className="w-[10%]" /><col className="w-[13%]" /><col className="w-12" /></colgroup>
-                  <thead className="bg-slate-50 text-[11px] font-semibold text-slate-700"><tr>
-                    <th className="px-2 py-2"><input type="checkbox" aria-label="Selecionar documentos desta página" checked={list.data.items.every(order => selectedSaleIds.includes(order.publicId))} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...new Set([...current, ...list.data!.items.map(order => order.publicId)])] : current.filter(id => !list.data!.items.some(order => order.publicId === id)))} /></th>
-                    <th className="px-2 py-2">{kind === "quotes" ? "Orçamento" : kind === "orders" ? "Venda" : "Documento"}</th><th className="px-2 py-2">Cliente</th><th className="px-2 py-2">Data</th><th className="px-2 py-2">Vendedor</th><th className="px-2 py-2 text-right">Total</th><th className="px-2 py-2">{kind === "quotes" ? "Situação" : "Pagamento"}</th><th className="px-2 py-2">{kind === "quotes" ? "Fluxo" : "Status"}</th><th className="px-2 py-2 text-center">Ações</th>
-                  </tr></thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {list.data.items.map(order => (
-                      <tr key={order.publicId} className="group hover:bg-blue-50/40" data-testid={`sale-row-${order.publicId}`}>
-                        <td className="px-2 py-3"><input type="checkbox" aria-label={`Selecionar ${order.documentType === "quote" ? "orçamento" : "venda"} ${order.orderNumber}`} checked={selectedSaleIds.includes(order.publicId)} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...current, order.publicId] : current.filter(id => id !== order.publicId))} /></td>
-                        <td className="px-2 py-2"><div className="flex min-w-0 items-center gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} /><div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><button type="button" className="truncate rounded-sm font-semibold text-blue-700 transition-colors duration-150 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><span className="mt-0.5 block truncate text-[11px] text-slate-500">{order.firstProductName ?? "Produto histórico"}{order.itemCount > 1 ? ` · +${order.itemCount - 1}` : ""}</span></div></div></td>
-                        <td className="truncate px-2 py-2 font-medium text-slate-800" title={order.customerName}>{order.customerName}</td>
-                        <td className="px-2 py-2 tabular-nums text-slate-700">{date.format(salesCommercialDate(order.commercialDate))}</td>
-                        <td className="truncate px-2 py-2 text-slate-700" title={order.sellerName ?? ""}>{order.sellerName ?? "—"}</td>
-                        <td className="px-2 py-2 text-right font-semibold tabular-nums text-slate-900">{money.format(order.totalCents / 100)}</td>
-                        <td className="px-2 py-2">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <PaymentBadge value={order.paymentStatus} compact />}</td>
-                        <td className="px-2 py-2">{order.documentType === "quote" ? <span className="text-[11px] text-slate-500">Fluxo comercial</span> : <StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact />}</td>
-                        <td className="px-2 py-2 text-center"><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="hidden grid-cols-1 gap-4 p-4 md:grid xl:grid-cols-2">
+                <label className="col-span-full flex items-center gap-2 px-1 text-xs font-semibold text-slate-600">
+                  <input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" aria-label="Selecionar documentos desta página" checked={list.data.items.every(order => selectedSaleIds.includes(order.publicId))} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...new Set([...current, ...list.data!.items.map(order => order.publicId)])] : current.filter(id => !list.data!.items.some(order => order.publicId === id)))} />
+                  Selecionar documentos desta página
+                </label>
+                {list.data.items.map(order => (
+                  <article key={order.publicId} className="group relative min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-white to-slate-50/80 p-4 shadow-[0_14px_30px_-28px_rgba(15,23,42,0.75)] transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_20px_38px_-26px_rgba(37,99,235,0.34)] focus-within:border-blue-300 focus-within:shadow-[0_20px_38px_-26px_rgba(37,99,235,0.34)] motion-reduce:transform-none motion-reduce:transition-none" data-testid={`sale-row-${order.publicId}`}>
+                    <div className="flex min-w-0 items-start gap-4">
+                      <input className="mt-1 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" aria-label={`Selecionar ${order.documentType === "quote" ? "orçamento" : "venda"} ${order.orderNumber}`} checked={selectedSaleIds.includes(order.publicId)} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...current, order.publicId] : current.filter(id => id !== order.publicId))} />
+                      <ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} featured />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <button type="button" className="truncate rounded-sm text-sm font-bold tracking-tight text-blue-800 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button>
+                          <DocumentTypeBadge documentType={order.documentType} />
+                          {order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}
+                        </div>
+                        <p className="mt-2 line-clamp-2 text-base font-extrabold leading-snug tracking-[-0.015em] text-slate-950">{order.firstProductName ?? "Produto histórico"}</p>
+                        <p className="mt-1 text-xs font-medium text-slate-500">{order.itemCount > 1 ? `${order.itemCount} produtos neste documento` : "1 produto neste documento"}</p>
+                      </div>
+                      <div className="flex shrink-0 flex-col items-end gap-2">
+                        <strong className="text-sm font-extrabold tabular-nums text-slate-950">{money.format(order.totalCents / 100)}</strong>
+                        <SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} />
+                      </div>
+                    </div>
+                    <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-slate-200/90 pt-4 text-xs sm:grid-cols-4">
+                      <div className="min-w-0"><dt className="font-bold uppercase tracking-[0.08em] text-slate-400">Cliente</dt><dd className="mt-1 truncate font-semibold text-slate-800" title={order.customerName}>{order.customerName}</dd></div>
+                      <div><dt className="font-bold uppercase tracking-[0.08em] text-slate-400">Data</dt><dd className="mt-1 font-medium tabular-nums text-slate-700">{date.format(salesCommercialDate(order.commercialDate))}</dd></div>
+                      <div className="min-w-0"><dt className="font-bold uppercase tracking-[0.08em] text-slate-400">Vendedor</dt><dd className="mt-1 truncate font-medium text-slate-700" title={order.sellerName ?? ""}>{order.sellerName ?? "—"}</dd></div>
+                      <div className="flex min-w-0 flex-wrap content-start gap-1.5"><dt className="w-full font-bold uppercase tracking-[0.08em] text-slate-400">Situação</dt><dd>{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <div className="flex flex-wrap gap-1"><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></div>}</dd></div>
+                    </dl>
+                  </article>
+                ))}
               </div>
-              <div className="divide-y divide-slate-100 md:hidden">
-                {list.data.items.map(order => <article key={order.publicId} className="p-4">
-                  <div className="flex items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} large /><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm font-semibold text-blue-700 transition-colors duration-150 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-xs text-slate-600">{order.firstProductName ?? "Produto histórico"}</p><p className="mt-1 truncate text-xs font-medium text-slate-800">{order.customerName}</p></div><div className="flex shrink-0 flex-col items-end gap-1"><strong className="text-xs tabular-nums">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></div></div>
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 pl-[68px]"><span className="text-xs text-slate-500">{date.format(salesCommercialDate(order.commercialDate))} · {order.sellerName ?? "—"}</span><div className="flex gap-1">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
+              <div className="grid gap-3 p-3 md:hidden">
+                {list.data.items.map(order => <article key={order.publicId} className="min-w-0 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50/80 p-4 shadow-[0_14px_30px_-28px_rgba(15,23,42,0.75)]" data-testid={`sale-row-${order.publicId}`}>
+                  <div className="flex min-w-0 items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} featured /><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-1.5"><button type="button" className="truncate rounded-sm text-sm font-bold tracking-tight text-blue-800 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-2 line-clamp-2 text-base font-extrabold leading-snug tracking-[-0.015em] text-slate-950">{order.firstProductName ?? "Produto histórico"}</p><p className="mt-1 text-xs font-medium text-slate-500">{order.itemCount > 1 ? `${order.itemCount} produtos neste documento` : "1 produto neste documento"}</p></div><div className="flex shrink-0 flex-col items-end gap-2"><strong className="text-sm font-extrabold tabular-nums text-slate-950">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></div></div>
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3"><span className="text-xs text-slate-600">{date.format(salesCommercialDate(order.commercialDate))} · {order.sellerName ?? "—"}</span><div className="flex flex-wrap gap-1">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
                 </article>)}
               </div>
             </div>
           )}
 
           {list.data && (
-            <div className="flex flex-col gap-3 border-t border-slate-200 px-3 py-3 text-xs text-slate-600 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4">
-              <span className="tabular-nums">
+            <div className="m-3 flex flex-col gap-3 rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 px-3 py-3 text-xs text-slate-200 shadow-[0_18px_34px_-24px_rgba(15,23,42,0.9)] sm:m-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4" data-testid="sales-premium-pagination">
+              <span className="tabular-nums text-slate-300">
                 {list.data.total === 0
                   ? `Nenhum ${entityLabel}`
                   : `Mostrando ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, list.data.total)} de ${list.data.total} ${entityLabelPlural}`}
               </span>
               <div className="flex flex-wrap items-center gap-3">
-                <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-200">
                   Itens por página
                   <select
                     aria-label="Itens por página"
-                    className="h-9 rounded-md border border-input bg-white px-2 text-sm"
+                    className="h-8 rounded-lg border border-white/15 bg-white/10 px-2 text-xs font-semibold text-white shadow-inner shadow-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
                     value={pageSize}
                     onChange={event => {
                       setPageSize(Number(event.target.value));
@@ -781,16 +790,16 @@ export function SalesPage({
                   </select>
                 </label>
                 {list.data.totalPages > 1 && (
-                  <nav aria-label="Paginação dos documentos comerciais" className="flex items-center gap-1">
-                    <Button variant="outline" size="sm" aria-label="Página anterior" disabled={page <= 1} onClick={() => setPage(value => value - 1)}>‹</Button>
+                  <nav aria-label="Paginação dos documentos comerciais" className="flex flex-wrap items-center justify-center gap-1.5">
+                    <Button variant="outline" size="sm" className="h-8 min-w-8 border-white/15 bg-white/5 px-2 text-white shadow-[0_0_18px_-7px_rgba(255,255,255,0.8)] hover:border-white/70 hover:bg-white hover:text-slate-950 disabled:border-white/10 disabled:bg-white/5 disabled:text-slate-500" aria-label="Página anterior" disabled={page <= 1} onClick={() => setPage(value => value - 1)}>‹</Button>
                     {salesPaginationItems(page, list.data.totalPages).map(item =>
                       typeof item === "number" ? (
-                        <Button key={item} variant={item === page ? "default" : "outline"} size="sm" aria-current={item === page ? "page" : undefined} aria-label={`Página ${item}`} onClick={() => setPage(item)}>{item}</Button>
+                        <Button key={item} variant={item === page ? "default" : "outline"} size="sm" className={cn("h-8 min-w-8 px-2 font-bold shadow-[0_0_18px_-8px_rgba(255,255,255,0.9)]", item === page ? "bg-white text-slate-950 hover:bg-slate-100" : "border-white/15 bg-white/5 text-white hover:border-white/70 hover:bg-white hover:text-slate-950")} aria-current={item === page ? "page" : undefined} aria-label={`Página ${item}`} onClick={() => setPage(item)}>{item}</Button>
                       ) : (
                         <span key={item} className="px-1 text-slate-400" aria-hidden="true">…</span>
                       )
                     )}
-                    <Button variant="outline" size="sm" aria-label="Próxima página" disabled={page >= list.data.totalPages} onClick={() => setPage(value => value + 1)}>›</Button>
+                    <Button variant="outline" size="sm" className="h-8 min-w-8 border-white/15 bg-white/5 px-2 text-white shadow-[0_0_18px_-7px_rgba(255,255,255,0.8)] hover:border-white/70 hover:bg-white hover:text-slate-950 disabled:border-white/10 disabled:bg-white/5 disabled:text-slate-500" aria-label="Próxima página" disabled={page >= list.data.totalPages} onClick={() => setPage(value => value + 1)}>›</Button>
                   </nav>
                 )}
               </div>
@@ -1025,42 +1034,55 @@ function SalesMetrics({
       label: periodLabel,
       value: data ? money.format(data.salesCents / 100) : "—",
       icon: ShoppingCart,
+      tone: "from-blue-600 via-blue-600 to-indigo-700",
+      iconSurface: "bg-blue-500/15 text-blue-700 ring-blue-100",
       detail: data?.period.criterion ?? "data de criação da venda",
     },
     {
       label: "Pedidos",
       value: data ? String(data.orderCount) : "—",
       icon: ReceiptText,
+      tone: "from-violet-600 via-violet-600 to-fuchsia-700",
+      iconSurface: "bg-violet-500/15 text-violet-700 ring-violet-100",
       detail: "vendas confirmadas no período",
     },
     {
       label: "Ticket médio",
       value: data ? money.format(data.averageTicketCents / 100) : "—",
       icon: CircleDollarSign,
+      tone: "from-emerald-600 via-emerald-600 to-teal-700",
+      iconSurface: "bg-emerald-500/15 text-emerald-700 ring-emerald-100",
       detail: "total vendido dividido pelos pedidos",
     },
     {
       label: "A receber",
       value: data ? money.format(data.receivableCents / 100) : "—",
       icon: CreditCard,
+      tone: "from-orange-500 via-orange-500 to-amber-600",
+      iconSurface: "bg-orange-500/15 text-orange-700 ring-orange-100",
       detail: "total da venda menos recebimentos reais",
     },
   ];
   return (
-    <section className="grid gap-2 min-[900px]:grid-cols-4" aria-label="Indicadores de vendas">
+    <section className="grid gap-3 sm:grid-cols-2 min-[1000px]:grid-cols-4" aria-label="Indicadores de vendas">
       {metrics.map(metric => (
-        <div key={metric.label} className="flex min-h-20 items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-[0_8px_20px_-20px_rgba(15,23,42,0.6)]">
-          <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-full", metric.label === "Ticket médio" ? "bg-emerald-50 text-emerald-600" : metric.label === "A receber" ? "bg-orange-50 text-orange-600" : "bg-blue-50 text-blue-600")}>
-            <metric.icon className="h-5 w-5" />
-          </span>
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-slate-600">{metric.label}</p>
-            <p className="mt-0.5 truncate text-lg font-bold tracking-[-0.02em] text-slate-950 tabular-nums">
+        <article key={metric.label} tabIndex={0} className="group relative min-h-32 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_14px_30px_-26px_rgba(15,23,42,0.55)] transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-1 hover:border-slate-300 hover:shadow-[0_22px_38px_-26px_rgba(15,23,42,0.48)] focus-visible:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 motion-reduce:transform-none motion-reduce:transition-none">
+          <span aria-hidden="true" className={cn("absolute inset-x-0 top-0 h-1 bg-gradient-to-r", metric.tone)} />
+          <div className="flex items-start justify-between gap-3">
+            <span className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ring-1", metric.iconSurface)}>
+              <metric.icon className="h-5 w-5" />
+            </span>
+            <span className="mt-1 h-2 w-2 rounded-full bg-slate-200 transition-colors duration-200 group-hover:bg-slate-400 motion-reduce:transition-none" />
+          </div>
+          <div className="mt-4 min-w-0">
+            <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-500">{metric.label}</p>
+            <p className="mt-1 truncate text-2xl font-extrabold tracking-[-0.035em] text-slate-950 tabular-nums">
               {loading ? "Carregando…" : metric.value}
             </p>
-            <p className="sr-only">{metric.detail}</p>
           </div>
-        </div>
+          <p className="mt-1 truncate text-xs font-medium text-slate-500">{metric.detail}</p>
+          <p className="sr-only">{metric.detail}</p>
+        </article>
       ))}
     </section>
   );
@@ -2029,12 +2051,12 @@ function CommercialBadge({ value }: { value: string }) {
   return <span className={cn("inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold", style)}>{commercialStatusLabels[value as keyof typeof commercialStatusLabels] ?? value}</span>;
 }
 
-function ProductThumb({ imagePath, name, compact = false, large = false }: { imagePath?: string | null; name: string; compact?: boolean; large?: boolean }) {
-  const size = large ? "h-14 w-14" : compact ? "h-9 w-9" : "h-11 w-11";
+function ProductThumb({ imagePath, name, compact = false, large = false, featured = false }: { imagePath?: string | null; name: string; compact?: boolean; large?: boolean; featured?: boolean }) {
+  const size = featured ? "h-24 w-24 sm:h-28 sm:w-28" : large ? "h-20 w-20" : compact ? "h-9 w-9" : "h-11 w-11";
   return imagePath ? (
-    <img src={productMediaUrl(imagePath)} crossOrigin="use-credentials" alt={`Imagem de ${name}`} className={cn("shrink-0 rounded-lg bg-slate-100 object-cover ring-1 ring-slate-200", size)} />
+    <img src={productMediaUrl(imagePath)} crossOrigin="use-credentials" alt={`Imagem de ${name}`} className={cn("shrink-0 rounded-xl bg-slate-100 object-contain p-1 ring-1 ring-slate-200", size)} />
   ) : (
-    <span className={cn("flex shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 ring-1 ring-slate-200", size)} aria-label={`Sem imagem para ${name}`}><PackageOpen className={large ? "h-6 w-6" : "h-5 w-5"} /></span>
+    <span className={cn("flex shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 ring-1 ring-slate-200", size)} aria-label={`Sem imagem para ${name}`}><PackageOpen className={featured ? "h-9 w-9" : large ? "h-7 w-7" : "h-5 w-5"} /></span>
   );
 }
 
