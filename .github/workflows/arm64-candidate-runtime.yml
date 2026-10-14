@@ -177,11 +177,12 @@ jobs:
           const runtime = process.env.EXTRACTED_RUNTIME;
           const require = createRequire(path.join(runtime, "package.json"));
           const sharp = require("sharp");
-          const detectLibc = require("detect-libc");
+          const sharpRequire = createRequire(require.resolve("sharp"));
+          const detectLibc = sharpRequire("detect-libc");
           assert.equal(process.platform, "linux");
           assert.equal(process.arch, "arm64");
           assert.ok(require.resolve("sharp").startsWith(runtime + path.sep));
-          assert.ok(require.resolve("detect-libc").startsWith(runtime + path.sep));
+          assert.ok(sharpRequire.resolve("detect-libc").startsWith(runtime + path.sep));
           assert.equal(typeof detectLibc.familySync, "function");
           const png = await sharp({ create: { width: 2, height: 3, channels: 4, background: "#336699" } }).png().toBuffer();
           const metadata = await sharp(png).metadata();
