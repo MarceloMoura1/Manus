@@ -254,7 +254,9 @@ export async function mergeStorage(options) {
   const oracleEntries = parseOracleManifest(await readFile(options.oracleManifest, "utf8"));
   const merged = mergeManifestEntries(windowsEntries, oracleEntries);
   const report = { version: 1, startedAt: new Date().toISOString(), ...merged.stats, final: merged.entries.length, copied: 0, replayed: 0, objects: [] };
-  const schema = options.databaseUrl ? assertStagingDatabaseUrl(options.databaseUrl).database : null;
+  const schema = options.databaseUrl ? assertStagingDatabaseUrl(options.databaseUrl, {
+    isolatedLinuxRunner: options.isolatedLinuxRunner === true,
+  }).database : null;
   const references = await databaseReferences(options.databaseUrl, schema);
   report.databaseReferences = references.length;
   const resolvedReferences = references.map(reference => ({ reference, resolved: resolveStorageReference(reference.storageKey, merged.entries) }));

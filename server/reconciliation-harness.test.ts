@@ -36,6 +36,23 @@ describe("deterministic reconciliation safety primitives", () => {
     expect(() => assertStagingDatabaseUrl("mysql://synthetic@127.0.0.1/megadesk_test_reconciliation_a")).not.toThrow();
   });
 
+  it("keeps the isolated Linux runner route behind an exact opt-in and platform guard", () => {
+    const isolated = "mysql://synthetic@host.docker.internal:33330/megadesk_test_reconciliation_a";
+    expect(() => assertStagingDatabaseUrl(isolated)).toThrowError(expect.objectContaining({ code: "NON_LOCAL_STAGING_HOST" }));
+    expect(() => assertStagingDatabaseUrl("mysql://synthetic@host.docker.internal:33331/megadesk_test_reconciliation_a", {
+      isolatedLinuxRunner: true,
+    })).toThrowError(expect.objectContaining({ code: "NON_LOCAL_STAGING_HOST" }));
+    if (process.platform !== "linux") return;
+    const previous = process.env.MEGADESK_PROMOTION_ISOLATED_REHEARSAL;
+    process.env.MEGADESK_PROMOTION_ISOLATED_REHEARSAL = "YES";
+    try {
+      expect(() => assertStagingDatabaseUrl(isolated, { isolatedLinuxRunner: true })).not.toThrow();
+    } finally {
+      if (previous === undefined) delete process.env.MEGADESK_PROMOTION_ISOLATED_REHEARSAL;
+      else process.env.MEGADESK_PROMOTION_ISOLATED_REHEARSAL = previous;
+    }
+  });
+
   it("rejects a tautological validation topology", () => {
     expect(() => assertDistinctDatabaseNames({ source: "megadesk_test_a", baseline: "megadesk_test_b", target: "megadesk_test_b" })).toThrowError(
       expect.objectContaining({ code: "DATABASE_ROLE_COLLISION" }),
