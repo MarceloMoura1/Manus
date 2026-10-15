@@ -102,6 +102,13 @@ export interface HistoricalReceiptVerificationOptions {
    * independently authenticated time authority. */
   timeEvidenceBytes?: Uint8Array;
   timeAuthorityPolicy?: TimeAuthorityPolicy;
+  /**
+   * Independently authenticated current trust state. The receipt itself is
+   * bound to the immutable policy snapshot supplied as `policy`; current
+   * revocation status is deliberately evaluated separately so a legitimate
+   * revocation does not rewrite that historical snapshot.
+   */
+  currentRevocationPolicy?: TrustPolicy;
 }
 
 export interface VerifiedEnvelope {
@@ -207,6 +214,16 @@ function equalDigest(left: string, right: string): boolean {
   const leftBytes = Buffer.from(left, "utf8");
   const rightBytes = Buffer.from(right, "utf8");
   return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
+}
+
+/**
+ * Policy hashes include ordered arrays. JCS orders object members by UTF-16
+ * code units; the same deterministic order is used for key arrays here. Do
+ * not use locale-sensitive collation for a value that participates in a hash.
+ */
+function compareUtf16CodeUnits(left: string, right: string): number {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
 }
 
 function publicKeyMaterialSha256(pem: string, invalidCode: string, label: string): string {
@@ -404,7 +421,7 @@ function keyPolicyValue(key: TrustedKey): StrictJsonRecord {
 export function canonicalTrustPolicyValue(policy: TrustPolicy): StrictJsonRecord {
   return {
     historicalReceiptRevocation: policy.historicalReceiptRevocation,
-    keys: [...policy.keys].sort((left, right) => left.keyId.localeCompare(right.keyId)).map(keyPolicyValue),
+    keys: [...policy.keys].sort((left, right) => compareUtf16CodeUnits(left.keyId, right.keyId)).map(keyPolicyValue),
     kind: policy.kind,
     maxAttestationTtlMs: policy.maxAttestationTtlMs,
     revocationSetSha256: policy.revocationSetSha256,
@@ -433,7 +450,7 @@ function timeAuthorityKeyValue(key: TimeAuthorityKey): StrictJsonRecord {
 function canonicalTimeAuthorityPolicyValue(policy: TimeAuthorityPolicy): StrictJsonRecord {
   return {
     authoritySetId: policy.authoritySetId,
-    keys: [...policy.keys].sort((left, right) => left.keyId.localeCompare(right.keyId)).map(timeAuthorityKeyValue),
+    keys: [...policy.keys].sort((left, right) => compareUtf16CodeUnits(left.keyId, right.keyId)).map(timeAuthorityKeyValue),
     kind: policy.kind,
     maxEvidenceTtlMs: policy.maxEvidenceTtlMs,
     revocationSetSha256: policy.revocationSetSha256,
@@ -463,7 +480,7 @@ function validateTrustPolicy(policy: TrustPolicy): void {
   const keyIds = new Set<string>();
   const publicKeyMaterials = new Set<string>();
   for (const key of policy.keys) {
-    if (!key.keyId || keyIds.has(key.keyId)) fail("TRUST_POLICY_INVALID", "Trust policy key IDs must be unique and non-empty.");
+    if (typeof key.keyId !== "string" || key.keyId.length === 0 || keyIds.has(key.keyId)) fail("TRUST_POLICY_INVALID", "Trust policy key IDs must be unique and non-empty.");
     keyIds.add(key.keyId);
     if (!equalDigest(createHash("sha256").update(key.publicKeyPem, "utf8").digest("hex"), key.publicKeySha256)) fail("TRUST_POLICY_INVALID", "Trust policy public-key digest does not match its PEM bytes.");
     const material = publicKeyMaterialSha256(key.publicKeyPem, "TRUST_POLICY_INVALID", "Trust policy");
@@ -497,7 +514,7 @@ function validateTimeAuthorityPolicy(policy: TimeAuthorityPolicy): void {
   const keyIds = new Set<string>();
   const publicKeyMaterials = new Set<string>();
   for (const key of policy.keys) {
-    if (!key.keyId || keyIds.has(key.keyId) || !SHA_256.test(key.publicKeySha256)) {
+    if (typeof key.keyId !== "string" || key.keyId.length === 0 || keyIds.has(key.keyId) || !SHA_256.test(key.publicKeySha256)) {
       fail("TRUST_TIME_AUTHORITY_INVALID", "Time-authority key identifiers and material must be unique.");
     }
     keyIds.add(key.keyId);
@@ -685,6 +702,35 @@ function assertReceiptPolicyBinding(payload: StrictJsonRecord, policy: TrustPoli
   }
 }
 
+/**
+ * A receipt authenticates the policy snapshot present when it was issued. A
+ * later revocation is current state, not a mutation of those signed bytes. The
+ * caller must independently authenticate both policies; this library only
+ * checks their continuity for the receipt signing key.
+ */
+function currentRevocationKeyFor(historicalKey: TrustedKey, historicalPolicy: TrustPolicy, currentPolicy: TrustPolicy | undefined): TrustedKey {
+  if (!currentPolicy) {
+    fail("TRUST_CURRENT_REVOCATION_UNAVAILABLE", "Historical receipt verification requires an independently authenticated current revocation policy.");
+  }
+  validateTrustPolicy(currentPolicy);
+  if (currentPolicy.revocationStatus !== "available") {
+    fail("TRUST_REVOCATION_UNAVAILABLE", "Current revocation status is unavailable; historical verification fails closed.");
+  }
+  if (currentPolicy.trustSetId !== historicalPolicy.trustSetId || currentPolicy.version !== historicalPolicy.version) {
+    fail("TRUST_CURRENT_REVOCATION_INCOMPATIBLE", "Current revocation policy does not continue the receipt trust set.");
+  }
+  const currentKey = currentPolicy.keys.find(candidate => candidate.keyId === historicalKey.keyId && candidate.purpose === historicalKey.purpose);
+  if (!currentKey) {
+    fail("TRUST_CURRENT_REVOCATION_INCOMPATIBLE", "Current revocation policy does not contain the historical receipt signing key.");
+  }
+  const historicalMaterial = publicKeyMaterialSha256(historicalKey.publicKeyPem, "TRUST_POLICY_INVALID", "Historical trust policy");
+  const currentMaterial = publicKeyMaterialSha256(currentKey.publicKeyPem, "TRUST_POLICY_INVALID", "Current revocation policy");
+  if (!equalDigest(historicalMaterial, currentMaterial)) {
+    fail("TRUST_CURRENT_REVOCATION_INCOMPATIBLE", "Current revocation policy changes the historical receipt signing key material.");
+  }
+  return currentKey;
+}
+
 function verifiedSignatureTime(input: Uint8Array, receiptPolicy: TrustPolicy, options: HistoricalReceiptVerificationOptions): { evidenceId: string; signedAt: number } {
   if (!options.timeEvidenceBytes || !options.timeAuthorityPolicy) fail("TRUST_TIME_AUTHORITY_UNAVAILABLE", "Historical receipt verification is blocked until an independently configured time authority is available.");
   const authorityPolicy = options.timeAuthorityPolicy;
@@ -729,17 +775,18 @@ export function verifyHistoricalReceiptEnvelopeBytes(input: Uint8Array, policy: 
   const time = verifiedSignatureTime(input, policy, options);
   if (time.signedAt > now) fail("TRUST_TIME_EVIDENCE_INVALID", "Verified signature time is in the future relative to verification.");
   assertPayloadValidity(validated.payload, time.signedAt, policy.maxAttestationTtlMs);
-  const key = trustedKeyFor(validated, policy);
-  const keyNotBefore = canonicalInstant(key.notBefore, "Trust policy key notBefore");
-  const keyNotAfter = canonicalInstant(key.notAfter, "Trust policy key notAfter");
+  const historicalKey = trustedKeyFor(validated, policy);
+  const keyNotBefore = canonicalInstant(historicalKey.notBefore, "Trust policy key notBefore");
+  const keyNotAfter = canonicalInstant(historicalKey.notAfter, "Trust policy key notAfter");
   if (time.signedAt < keyNotBefore || time.signedAt > keyNotAfter) fail("TRUST_KEY_EXPIRED", "The receipt signing key was outside its validity interval at the authenticated signature time.");
-  if (key.status === "revoked") {
-    const revocation = key.revocation!;
+  const currentKey = currentRevocationKeyFor(historicalKey, policy, options.currentRevocationPolicy);
+  if (currentKey.status === "revoked") {
+    const revocation = currentKey.revocation!;
     const revokedAt = canonicalInstant(revocation.occurredAt, "Trust policy key revocation time");
     const allowed = policy.historicalReceiptRevocation === "allow-superseded-before-revocation" && revocation.reason === "superseded" && time.signedAt < revokedAt;
     if (!allowed) fail("TRUST_KEY_REVOKED", "The receipt signing key is revoked under the historical-receipt policy.");
   }
-  assertSignature(validated, key);
+  assertSignature(validated, historicalKey);
   return asVerifiedWithPolicy(validated, policy);
 }
 
@@ -856,9 +903,10 @@ function validateAuthenticatedJournalStructure(value: StrictJsonValue, expectedC
 /** The only public receipt-to-journal verifier receives receipt envelope bytes,
  * not caller-owned payload objects. It verifies the signed receipt and then
  * derives the immutable payload used for journal binding internally. */
-export function verifyHistoricalReceiptJournalBytes(input: Uint8Array, journal: StrictJsonValue, policy: TrustPolicy, options: HistoricalReceiptVerificationOptions): VerifiedReceiptJournal {
+export function verifyHistoricalReceiptJournalBytes(input: Uint8Array, journalBytes: Uint8Array, policy: TrustPolicy, options: HistoricalReceiptVerificationOptions): VerifiedReceiptJournal {
   const receipt = verifyHistoricalReceiptEnvelopeBytes(input, policy, options);
   const payload = receipt.payload as StrictJsonRecord;
+  const journal = parseStrictJsonBytes(journalBytes);
   const reference = asRecord(payload.journal, "receipt payload.journal");
   const validatedJournal = validateAuthenticatedJournalStructure(journal, {
     receiptId: stringField(reference, "receiptId", "receipt payload.journal"),

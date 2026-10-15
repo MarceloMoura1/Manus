@@ -58,6 +58,12 @@ conformidade integral, a integração deverá adicionar uma referência imutáve
 origem e versão do corpus, incorporá-lo por revisão separada e executar seus
 vetores sem alteração.
 
+Os arrays de chaves que participam do hash de uma policy também recebem ordem
+determinística: `keyId` é comparado por unidades de código UTF-16, e nunca por
+`localeCompare`. Essa é a ordem de strings definida pelo mecanismo JCS usado
+pela biblioteca; não representa uma declaração de conformidade integral com
+RFC 8785.
+
 ## Trust policy, autorização atual e recibo histórico
 
 `TrustPolicy` é deliberadamente abstrata. A aplicação deve receber a política
@@ -81,11 +87,18 @@ e validade. Tanto `signedAt` quanto `issuedAt` devem estar na vigência da chave
 da autoridade temporal; o campo assinado `issuedAt` é autenticado, mas não é
 uma autoridade de tempo por si só.
 
-Um receipt de chave rotacionada pode ser verificado após a expiração somente se
-a evidência externa mostrar que a assinatura ocorreu durante a validade da
-chave. Chave revogada falha por padrão. A única exceção modelada requer política
-explícita, motivo `superseded` e prova de assinatura anterior à revogação;
-revogação por comprometimento nunca é aceita automaticamente. A origem,
+Para verificar um receipt histórico, a API recebe dois estados autenticados pelo
+chamador: o snapshot imutável ligado ao receipt e `currentRevocationPolicy`, o
+estado atual de revogação. Ambos devem ter o mesmo `trustSetId`, versão e
+material SPKI/DER para a chave do receipt; alterar o snapshot faz a verificação
+falhar. Isso permite avaliar uma revogação posterior sem reescrever o hash do
+snapshot original. A ausência, indisponibilidade ou descontinuidade da policy
+atual falha fechada.
+
+Chave revogada falha por padrão. A única exceção modelada requer a policy
+histórica explícita, motivo `superseded`, uma policy atual autenticada e prova
+de assinatura anterior à revogação; revogação por comprometimento nunca é
+aceita automaticamente. A origem,
 assinatura, retenção, rotação e revogação da policy temporal continuam decisões
 humanas e operacionais pendentes. Sem autoridade temporal configurada, a API
 histórica falha fechada.
@@ -133,11 +146,13 @@ hash do evento anterior e checksum do journal completo. O receipt v1 carrega
 `journal.kind`, `journal.version`, os três identificadores e o SHA-256 JCS do
 **objeto final inteiro do journal**, inclusive seu checksum de cadeia. O journal
 nunca inclui a assinatura do receipt, portanto não há referência circular.
-`verifyHistoricalReceiptJournalBytes` recebe os bytes do envelope, policy e
-evidência temporal e somente então deriva payload imutável para verificar
-contexto e digest. A validação estrutural do journal é privada a esse caminho:
-não existe API pública que aceite journal bruto e o associe a uma promoção, um
-receipt ou autenticidade histórica. `SyntheticJournal` é somente um contrato
+`verifyHistoricalReceiptJournalBytes` recebe bytes originais tanto do envelope
+quanto do journal, e aplica o parser UTF-8 estrito ao journal internamente antes
+de verificar contexto e digest. Assim, BOM, UTF-8 inválido, truncamento e chaves
+duplicadas não podem ser perdidos por um `JSON.parse` externo. A validação
+estrutural do journal é privada a esse caminho: não existe API pública que aceite
+journal bruto já parseado e o associe a uma promoção, um receipt ou autenticidade
+histórica. `SyntheticJournal` é somente um contrato
 de fixture; sua presença não é prova criptográfica.
 
 O hash encadeado sozinho não impede que um agente reescreva todo o histórico e

@@ -14,6 +14,7 @@ import {
   TIME_EVIDENCE_ENVELOPE_VERSION,
   TIME_EVIDENCE_PROTOCOL_DOMAIN,
   signedEnvelopeBytes,
+  canonicalTrustPolicyValue,
   timeAuthorityPolicySha256,
   trustPolicySha256,
   validateTrustPayload,
@@ -174,6 +175,10 @@ function appendSyntheticJournalFixture(journal: SyntheticJournal, event: Omit<Sy
   next.checksum = canonicalSha256(syntheticJournalEventBody(next));
   const withoutChecksum: Omit<SyntheticJournal, "checksum"> = { ...journal, events: [...journal.events, next] };
   return { ...withoutChecksum, checksum: canonicalSha256(syntheticJournalFixtureBody(withoutChecksum)) };
+}
+
+function journalBytes(journal: SyntheticJournal): Buffer {
+  return Buffer.from(JSON.stringify(journal));
 }
 
 function receiptPayload(
@@ -435,11 +440,11 @@ describe("closed signed trust envelopes", () => {
     const { envelope } = signedEnvelope(receipt.payload, "runtime-promotion-receipt", receiptSigner);
     const bytes = Buffer.from(JSON.stringify(envelope));
     const proof = signedTimeEvidence(bytes, receiptSigner.policy, undefined, { evidenceId: "e23e4567-e89b-42d3-a456-426614174004" });
-    const options = { now, timeEvidenceBytes: Buffer.from(JSON.stringify(proof.evidence)), timeAuthorityPolicy: proof.authorityPolicy };
-    expect(verifyHistoricalReceiptJournalBytes(bytes, receipt.journal, receiptSigner.policy, options).journal.receiptId).toBe(receipt.payload.receiptId);
+    const options = { now, timeEvidenceBytes: Buffer.from(JSON.stringify(proof.evidence)), timeAuthorityPolicy: proof.authorityPolicy, currentRevocationPolicy: receiptSigner.policy };
+    expect(verifyHistoricalReceiptJournalBytes(bytes, journalBytes(receipt.journal), receiptSigner.policy, options).journal.receiptId).toBe(receipt.payload.receiptId);
     const invalidEvidenceId = structuredClone(proof.evidence);
     invalidEvidenceId.payload.evidenceId = String(proof.evidence.payload.evidenceId).toUpperCase();
-    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, receipt.journal, receiptSigner.policy, { ...options, timeEvidenceBytes: Buffer.from(JSON.stringify(invalidEvidenceId)) }), "TRUST_SCHEMA_INVALID");
+    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, journalBytes(receipt.journal), receiptSigner.policy, { ...options, timeEvidenceBytes: Buffer.from(JSON.stringify(invalidEvidenceId)) }), "TRUST_SCHEMA_INVALID");
 
     const canonicalClaim = { ...claimInput(), authorizationId, operationId };
     expect(createAuthorizationClaim(canonicalClaim).authorizationId).toBe(authorizationId);
@@ -500,7 +505,7 @@ describe("closed signed trust envelopes", () => {
     const bytes = Buffer.from(JSON.stringify(envelope));
     const proof = signedTimeEvidence(bytes, signer.policy);
     const evidenceBytes = Buffer.from(JSON.stringify(proof.evidence));
-    const options = { now, expectedScope: "runtime-promotion-receipt", timeEvidenceBytes: evidenceBytes, timeAuthorityPolicy: proof.authorityPolicy };
+    const options = { now, expectedScope: "runtime-promotion-receipt", timeEvidenceBytes: evidenceBytes, timeAuthorityPolicy: proof.authorityPolicy, currentRevocationPolicy: signer.policy };
     expectCode(() => verifySignedEnvelopeBytes(bytes, signer.policy, { now }), "TRUST_HISTORICAL_RECEIPT_API_REQUIRED");
     expect(verifyHistoricalReceiptEnvelopeBytes(bytes, signer.policy, options).purpose).toBe("runtime-promotion-receipt");
     expectCode(() => verifyHistoricalReceiptEnvelopeBytes(bytes, signer.policy, { now }), "TRUST_TIME_AUTHORITY_UNAVAILABLE");
@@ -541,7 +546,7 @@ describe("closed signed trust envelopes", () => {
       { signedAt: historicalIssuedAt },
     );
     expectCode(
-      () => verifyHistoricalReceiptEnvelopeBytes(historicalBytes, signer.policy, { now, timeEvidenceBytes: Buffer.from(JSON.stringify(preAuthorityProof.evidence)), timeAuthorityPolicy: laterAuthorityPolicy }),
+      () => verifyHistoricalReceiptEnvelopeBytes(historicalBytes, signer.policy, { now, timeEvidenceBytes: Buffer.from(JSON.stringify(preAuthorityProof.evidence)), timeAuthorityPolicy: laterAuthorityPolicy, currentRevocationPolicy: signer.policy }),
       "TRUST_TIME_AUTHORITY_EXPIRED",
     );
 
@@ -570,7 +575,7 @@ describe("closed signed trust envelopes", () => {
       { pair: endBoundaryAuthority.pair, policy: endBoundaryPolicy },
       { signedAt: endBoundary, issuedAt: endBoundary, expiresAt: "2030-01-01T00:05:00.001Z" },
     );
-    expect(verifyHistoricalReceiptEnvelopeBytes(endBoundaryBytes, signer.policy, { now: new Date(endBoundary), timeEvidenceBytes: Buffer.from(JSON.stringify(endBoundaryProof.evidence)), timeAuthorityPolicy: endBoundaryPolicy }).purpose).toBe("runtime-promotion-receipt");
+    expect(verifyHistoricalReceiptEnvelopeBytes(endBoundaryBytes, signer.policy, { now: new Date(endBoundary), timeEvidenceBytes: Buffer.from(JSON.stringify(endBoundaryProof.evidence)), timeAuthorityPolicy: endBoundaryPolicy, currentRevocationPolicy: signer.policy }).purpose).toBe("runtime-promotion-receipt");
 
     const forgedDate = structuredClone(proof.evidence);
     forgedDate.payload.signedAt = "2029-01-01T00:00:00.000Z";
@@ -617,6 +622,7 @@ describe("closed signed trust envelopes", () => {
       now,
       timeEvidenceBytes: Buffer.from(JSON.stringify(permittedProof.evidence)),
       timeAuthorityPolicy: authority.policy,
+      currentRevocationPolicy: signer.policy,
     }).purpose).toBe("runtime-promotion-receipt");
 
     // Only notBefore changes. Both timestamps remain ordered, canonically
@@ -636,6 +642,7 @@ describe("closed signed trust envelopes", () => {
         now,
         timeEvidenceBytes: Buffer.from(JSON.stringify(preAuthorityProof.evidence)),
         timeAuthorityPolicy: laterNotBeforePolicy,
+        currentRevocationPolicy: signer.policy,
       }),
       "TRUST_TIME_AUTHORITY_EXPIRED",
     );
@@ -649,6 +656,112 @@ describe("closed signed trust envelopes", () => {
     relabeled.signature.keyId = "other";
     expectCode(() => verifySignedEnvelopeBytes(Buffer.from(JSON.stringify(relabeled)), signer.policy, { now }), "TRUST_KEY_ID_MISMATCH");
     expectCode(() => verifySignedEnvelopeBytes(bytes, { ...signer.policy, keys: [signer.policy.keys[0], { ...signer.policy.keys[0], keyId: "duplicate" }] }, { now }), "TRUST_POLICY_INVALID");
+  });
+
+  it("hashes policy key arrays with deterministic UTF-16 code-unit order", () => {
+    const first = signerPolicy("runtime-promotion-authorization");
+    const second = signerPolicy("runtime-promotion-authorization");
+    const policy: TrustPolicy = {
+      ...first.policy,
+      keys: [
+        { ...first.policy.keys[0], keyId: "\u00e4-key" },
+        { ...second.policy.keys[0], keyId: "z-key" },
+      ],
+    };
+    const permutedPolicy: TrustPolicy = { ...policy, keys: [...policy.keys].reverse() };
+    const orderedTrustKeys = (canonicalTrustPolicyValue(policy).keys as StrictJsonValue[])
+      .map(key => String((key as StrictJsonRecord).keyId));
+    expect(orderedTrustKeys).toEqual(["z-key", "\u00e4-key"]);
+    expect(trustPolicySha256(permutedPolicy)).toBe(trustPolicySha256(policy));
+
+    const firstAuthority = timeAuthorityPolicy();
+    const secondAuthority = timeAuthorityPolicy();
+    const authorityPolicy: TimeAuthorityPolicy = {
+      ...firstAuthority.policy,
+      keys: [
+        { ...firstAuthority.policy.keys[0], keyId: "\u00e4-key" },
+        { ...secondAuthority.policy.keys[0], keyId: "z-key" },
+      ],
+    };
+    const expectedAuthorityHash = canonicalSha256({
+      authoritySetId: authorityPolicy.authoritySetId,
+      keys: [
+        { keyId: "z-key", notAfter: authorityPolicy.keys[1].notAfter, notBefore: authorityPolicy.keys[1].notBefore, publicKeySha256: authorityPolicy.keys[1].publicKeySha256, revocation: null, status: authorityPolicy.keys[1].status },
+        { keyId: "\u00e4-key", notAfter: authorityPolicy.keys[0].notAfter, notBefore: authorityPolicy.keys[0].notBefore, publicKeySha256: authorityPolicy.keys[0].publicKeySha256, revocation: null, status: authorityPolicy.keys[0].status },
+      ],
+      kind: authorityPolicy.kind,
+      maxEvidenceTtlMs: authorityPolicy.maxEvidenceTtlMs,
+      revocationSetSha256: authorityPolicy.revocationSetSha256,
+      revocationStatus: authorityPolicy.revocationStatus,
+      version: authorityPolicy.version,
+    });
+    expect(timeAuthorityPolicySha256({ ...authorityPolicy, keys: [...authorityPolicy.keys].reverse() })).toBe(timeAuthorityPolicySha256(authorityPolicy));
+    expect(timeAuthorityPolicySha256(authorityPolicy)).toBe(expectedAuthorityHash);
+  });
+
+  it("uses a current superseding revocation policy without rewriting the authenticated receipt snapshot", () => {
+    const signer = signerPolicy("runtime-promotion-receipt");
+    const historicalPolicy: TrustPolicy = { ...signer.policy, historicalReceiptRevocation: "allow-superseded-before-revocation" };
+    const receipt = receiptPayload(historicalPolicy);
+    const { envelope } = signedEnvelope(receipt.payload, "runtime-promotion-receipt", { pair: signer.pair, policy: historicalPolicy });
+    const bytes = Buffer.from(JSON.stringify(envelope));
+    const proof = signedTimeEvidence(bytes, historicalPolicy);
+    const currentRevocationPolicy: TrustPolicy = {
+      ...historicalPolicy,
+      revocationSetSha256: hex("0"),
+      keys: [{
+        ...historicalPolicy.keys[0],
+        status: "revoked",
+        revocation: { occurredAt: "2030-01-01T00:06:00.000Z", reason: "superseded" },
+      }],
+    };
+    const options = {
+      now: new Date("2030-01-01T00:07:00.000Z"),
+      timeEvidenceBytes: Buffer.from(JSON.stringify(proof.evidence)),
+      timeAuthorityPolicy: proof.authorityPolicy,
+      currentRevocationPolicy,
+    };
+    expect(verifyHistoricalReceiptEnvelopeBytes(bytes, historicalPolicy, options).purpose).toBe("runtime-promotion-receipt");
+    expectCode(
+      () => verifyHistoricalReceiptEnvelopeBytes(bytes, historicalPolicy, { ...options, currentRevocationPolicy: undefined }),
+      "TRUST_CURRENT_REVOCATION_UNAVAILABLE",
+    );
+    expectCode(
+      () => verifyHistoricalReceiptEnvelopeBytes(bytes, historicalPolicy, {
+        ...options,
+        currentRevocationPolicy: { ...currentRevocationPolicy, revocationStatus: "unavailable" },
+      }),
+      "TRUST_REVOCATION_UNAVAILABLE",
+    );
+    expectCode(
+      () => verifyHistoricalReceiptEnvelopeBytes(bytes, { ...historicalPolicy, maxAttestationTtlMs: historicalPolicy.maxAttestationTtlMs + 1 }, options),
+      "TRUST_POLICY_BINDING_MISMATCH",
+    );
+    const compromisedCurrentPolicy: TrustPolicy = {
+      ...currentRevocationPolicy,
+      keys: [{ ...currentRevocationPolicy.keys[0], revocation: { occurredAt: "2030-01-01T00:06:00.000Z", reason: "compromise" } }],
+    };
+    expectCode(
+      () => verifyHistoricalReceiptEnvelopeBytes(bytes, historicalPolicy, { ...options, currentRevocationPolicy: compromisedCurrentPolicy }),
+      "TRUST_KEY_REVOKED",
+    );
+    const afterSignatureRevocation: TrustPolicy = {
+      ...currentRevocationPolicy,
+      keys: [{ ...currentRevocationPolicy.keys[0], revocation: { occurredAt: issuedAt, reason: "superseded" } }],
+    };
+    expectCode(
+      () => verifyHistoricalReceiptEnvelopeBytes(bytes, historicalPolicy, { ...options, currentRevocationPolicy: afterSignatureRevocation }),
+      "TRUST_KEY_REVOKED",
+    );
+    const differentSigner = signerPolicy("runtime-promotion-receipt");
+    const discontinuousCurrentPolicy: TrustPolicy = {
+      ...currentRevocationPolicy,
+      keys: [{ ...differentSigner.policy.keys[0], keyId: historicalPolicy.keys[0].keyId }],
+    };
+    expectCode(
+      () => verifyHistoricalReceiptEnvelopeBytes(bytes, historicalPolicy, { ...options, currentRevocationPolicy: discontinuousCurrentPolicy }),
+      "TRUST_CURRENT_REVOCATION_INCOMPATIBLE",
+    );
   });
 });
 
@@ -762,8 +875,8 @@ describe("synthetic receipt journal binding", () => {
     const { envelope } = signedEnvelope(payload, "runtime-promotion-receipt", signer);
     const bytes = Buffer.from(JSON.stringify(envelope));
     const proof = signedTimeEvidence(bytes, signer.policy);
-    const options = { now, timeEvidenceBytes: Buffer.from(JSON.stringify(proof.evidence)), timeAuthorityPolicy: proof.authorityPolicy };
-    const verified = verifyHistoricalReceiptJournalBytes(bytes, journal, signer.policy, options);
+    const options = { now, timeEvidenceBytes: Buffer.from(JSON.stringify(proof.evidence)), timeAuthorityPolicy: proof.authorityPolicy, currentRevocationPolicy: signer.policy };
+    const verified = verifyHistoricalReceiptJournalBytes(bytes, journalBytes(journal), signer.policy, options);
     expect(Object.isFrozen(verified.receipt.payload)).toBe(true);
     expect(Object.isFrozen(verified.journal)).toBe(true);
     expect(Object.isFrozen(verified.journal.events)).toBe(true);
@@ -773,10 +886,10 @@ describe("synthetic receipt journal binding", () => {
     // alternate textual representations rather than normalizing them.
     const upperJournalReceiptId = structuredClone(journal);
     upperJournalReceiptId.receiptId = journal.receiptId.toUpperCase();
-    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, upperJournalReceiptId, signer.policy, options), "JOURNAL_SCHEMA_INVALID");
+    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, journalBytes(upperJournalReceiptId), signer.policy, options), "JOURNAL_SCHEMA_INVALID");
     const mixedJournalOperationId = structuredClone(journal);
     mixedJournalOperationId.operationId = `${journal.operationId.slice(0, 1).toUpperCase()}${journal.operationId.slice(1)}`;
-    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, mixedJournalOperationId, signer.policy, options), "JOURNAL_SCHEMA_INVALID");
+    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, journalBytes(mixedJournalOperationId), signer.policy, options), "JOURNAL_SCHEMA_INVALID");
 
     // The journal is never accepted if either side of its authenticated proof
     // fails, even when the supplied journal is otherwise structurally valid.
@@ -784,42 +897,43 @@ describe("synthetic receipt journal binding", () => {
     invalidReceipt.signature.value = Buffer.alloc(64, 8).toString("base64");
     const invalidReceiptBytes = Buffer.from(JSON.stringify(invalidReceipt));
     const invalidReceiptProof = signedTimeEvidence(invalidReceiptBytes, signer.policy);
-    expectCode(() => verifyHistoricalReceiptJournalBytes(invalidReceiptBytes, journal, signer.policy, {
+    expectCode(() => verifyHistoricalReceiptJournalBytes(invalidReceiptBytes, journalBytes(journal), signer.policy, {
       now,
       timeEvidenceBytes: Buffer.from(JSON.stringify(invalidReceiptProof.evidence)),
       timeAuthorityPolicy: invalidReceiptProof.authorityPolicy,
+      currentRevocationPolicy: signer.policy,
     }), "TRUST_SIGNATURE_INVALID");
     const invalidTimeEvidence = structuredClone(proof.evidence);
     // Preserve canonical base64 so this exercises the time-evidence verifier,
     // rather than the generic envelope base64 parser.
     invalidTimeEvidence.signature.value = Buffer.alloc(64, 9).toString("base64");
-    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, journal, signer.policy, {
+    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, journalBytes(journal), signer.policy, {
       ...options,
       timeEvidenceBytes: Buffer.from(JSON.stringify(invalidTimeEvidence)),
     }), "TRUST_TIME_EVIDENCE_INVALID");
 
     let substitute = createSyntheticJournalFixture({ receiptId: journal.receiptId, operationId: journal.operationId, authorizationId: journal.authorizationId });
     substitute = appendSyntheticJournalFixture(substitute, { eventType: "OTHER", occurredAt: issuedAt, evidence: { result: "different" } });
-    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, substitute, signer.policy, options), "TRUST_JOURNAL_DIGEST_MISMATCH");
+    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, journalBytes(substitute), signer.policy, options), "TRUST_JOURNAL_DIGEST_MISMATCH");
     const altered = structuredClone(journal);
     altered.events[1].evidence.result = "altered";
-    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, altered, signer.policy, options), "JOURNAL_EVENT_CHECKSUM_INVALID");
+    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, journalBytes(altered), signer.policy, options), "JOURNAL_EVENT_CHECKSUM_INVALID");
     const reordered = structuredClone(journal);
     reordered.events.reverse();
-    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, reordered, signer.policy, options), "JOURNAL_SEQUENCE_INVALID");
+    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, journalBytes(reordered), signer.policy, options), "JOURNAL_SEQUENCE_INVALID");
     const duplicated = structuredClone(journal);
     duplicated.events.push(structuredClone(duplicated.events[1]));
-    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, duplicated, signer.policy, options), "JOURNAL_SEQUENCE_INVALID");
+    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, journalBytes(duplicated), signer.policy, options), "JOURNAL_SEQUENCE_INVALID");
     const deleted = structuredClone(journal);
     deleted.events.splice(0, 1);
-    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, deleted, signer.policy, options), "JOURNAL_SEQUENCE_INVALID");
+    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, journalBytes(deleted), signer.policy, options), "JOURNAL_SEQUENCE_INVALID");
     const unknownJournal = structuredClone(journal);
     unknownJournal.version = 2;
-    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, unknownJournal, signer.policy, options), "JOURNAL_SCHEMA_INVALID");
+    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, journalBytes(unknownJournal), signer.policy, options), "JOURNAL_SCHEMA_INVALID");
     const mutatedEnvelope = structuredClone(envelope);
     (mutatedEnvelope.payload.journal as StrictJsonRecord).sha256 = hex("0");
-    expectCode(() => verifyHistoricalReceiptJournalBytes(Buffer.from(JSON.stringify(mutatedEnvelope)), journal, signer.policy, options), "TRUST_PAYLOAD_DIGEST_MISMATCH");
-    expectCode(() => verifyHistoricalReceiptJournalBytes(Buffer.from(JSON.stringify(envelope)), { ...journal, operationId: randomUUID() }, signer.policy, options), "JOURNAL_CONTEXT_MISMATCH");
+    expectCode(() => verifyHistoricalReceiptJournalBytes(Buffer.from(JSON.stringify(mutatedEnvelope)), journalBytes(journal), signer.policy, options), "TRUST_PAYLOAD_DIGEST_MISMATCH");
+    expectCode(() => verifyHistoricalReceiptJournalBytes(Buffer.from(JSON.stringify(envelope)), journalBytes({ ...journal, operationId: randomUUID() }), signer.policy, options), "JOURNAL_CONTEXT_MISMATCH");
   });
 
   it("detects truncation and a broken chain before journal binding", async () => {
@@ -828,15 +942,39 @@ describe("synthetic receipt journal binding", () => {
     const { envelope } = signedEnvelope(payload, "runtime-promotion-receipt", signer);
     const bytes = Buffer.from(JSON.stringify(envelope));
     const proof = signedTimeEvidence(bytes, signer.policy);
-    const options = { now, timeEvidenceBytes: Buffer.from(JSON.stringify(proof.evidence)), timeAuthorityPolicy: proof.authorityPolicy };
+    const options = {
+      now,
+      timeEvidenceBytes: Buffer.from(JSON.stringify(proof.evidence)),
+      timeAuthorityPolicy: proof.authorityPolicy,
+      currentRevocationPolicy: signer.policy,
+    };
     const root = await syntheticRoot();
     const truncated = path.join(root, "synthetic-journal.json");
     await writeFile(truncated, JSON.stringify(journal).slice(0, -20), "utf8");
     const broken = structuredClone(journal);
     broken.events[1].previousChecksum = null;
-    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, broken, signer.policy, options), "JOURNAL_CHAIN_BROKEN");
-    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, { ...journal, events: [...journal.events.slice(0, 1)] }, signer.policy, options), "JOURNAL_CHECKSUM_INVALID");
+    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, journalBytes(broken), signer.policy, options), "JOURNAL_CHAIN_BROKEN");
+    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, journalBytes({ ...journal, events: [...journal.events.slice(0, 1)] }), signer.policy, options), "JOURNAL_CHECKSUM_INVALID");
     const truncatedBytes = await readFile(truncated);
     expectCode(() => parseStrictJsonBytes(truncatedBytes), "STRICT_JSON_TRUNCATED");
+  });
+
+  it("parses journal bytes strictly at the public verification boundary", () => {
+    const signer = signerPolicy("runtime-promotion-receipt");
+    const { payload, journal } = receiptPayload(signer.policy);
+    const { envelope } = signedEnvelope(payload, "runtime-promotion-receipt", signer);
+    const bytes = Buffer.from(JSON.stringify(envelope));
+    const proof = signedTimeEvidence(bytes, signer.policy);
+    const options = { now, timeEvidenceBytes: Buffer.from(JSON.stringify(proof.evidence)), timeAuthorityPolicy: proof.authorityPolicy, currentRevocationPolicy: signer.policy };
+    expectCode(
+      () => verifyHistoricalReceiptJournalBytes(bytes, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), journalBytes(journal)]), signer.policy, options),
+      "STRICT_JSON_BOM",
+    );
+    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, Buffer.from([0xc3, 0x28]), signer.policy, options), "STRICT_JSON_UTF8");
+    expectCode(
+      () => verifyHistoricalReceiptJournalBytes(bytes, Buffer.from(`{"receiptId":"${journal.receiptId}","receiptId":"${journal.receiptId}"}`), signer.policy, options),
+      "STRICT_JSON_DUPLICATE_KEY",
+    );
+    expectCode(() => verifyHistoricalReceiptJournalBytes(bytes, Buffer.from('{"events":"unterminated'), signer.policy, options), "STRICT_JSON_TRUNCATED");
   });
 });
