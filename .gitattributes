@@ -2,3 +2,7 @@ drizzle/main-migrations/*.sql text eol=lf
 drizzle/main-migrations/meta/*_snapshot.json text eol=lf
 drizzle/schema.ts text eol=lf
 server/_core/index.ts text eol=lf
+
+# Pinned trust roots are SHA-256 pinned; do not apply EOL conversion.
+scripts/reconciliation/trust/oracle-promotion-authority.v1.pem -text
+scripts/reconciliation/trust/oracle-write-freeze-authority.v1.pem -text
