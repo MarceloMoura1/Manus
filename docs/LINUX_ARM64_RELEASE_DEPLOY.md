@@ -29,6 +29,11 @@ trata a ausência como sucesso. Os valores de entrada devem vir do registro de
 aprovação independente da janela, e não de uma branch ou de texto fornecido
 pelo host de destino. Esse workflow prova integridade para a identidade
 informada, não cria uma assinatura, trust root ou autorização de deploy.
+O GitHub só permite dispará-lo depois que o arquivo do workflow estiver na
+branch padrão; portanto, o primeiro PR que o introduz não deve alegar uma
+execução manual dele. A evidência da candidata daquele PR permanece a execução
+imutável que a produziu e a revalidação manual passa a ser obrigatória para
+candidatas futuras enquanto a fonte selecionada estiver disponível.
 
 ## Limites de responsabilidade
 
