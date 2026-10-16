@@ -21,6 +21,7 @@ import {
   FileClock,
   Filter,
   MapPin,
+  LoaderCircle,
   MoreHorizontal,
   PackageCheck,
   PackageOpen,
@@ -707,7 +708,7 @@ export function SalesPage({
           </div>
 
           {list.isLoading ? (
-            <State title={`Carregando ${entityLabelPlural}…`} />
+            <State title={`Carregando ${entityLabelPlural}…`} loading />
           ) : list.error ? (
             <State
               title={
@@ -740,13 +741,20 @@ export function SalesPage({
                   </colgroup>
                   <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold text-slate-600">
                     <tr>
-                      <th className="px-2 py-2"><input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" aria-label="Selecionar documentos desta página" checked={list.data.items.every(order => selectedSaleIds.includes(order.publicId))} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...new Set([...current, ...list.data!.items.map(order => order.publicId)])] : current.filter(id => !list.data!.items.some(order => order.publicId === id)))} /></th>
-                      <th className="px-2 py-2">{kind === "quotes" ? "Orçamento" : kind === "orders" ? "Venda" : "Documento"}</th><th className="px-2 py-2">Cliente</th><th className="px-2 py-2">Data</th><th className="px-2 py-2">Vendedor</th><th className="px-2 py-2 text-right">Total</th><th className="px-2 py-2">{kind === "quotes" ? "Situação" : "Pagamento"}</th><th className="px-2 py-2">{kind === "quotes" ? "Fluxo" : "Status"}</th><th className="px-2 py-2 text-center">Ações</th>
+                      <th scope="col" className="px-3 py-3"><input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" aria-label="Selecionar documentos desta página" checked={list.data.items.every(order => selectedSaleIds.includes(order.publicId))} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...new Set([...current, ...list.data!.items.map(order => order.publicId)])] : current.filter(id => !list.data!.items.some(order => order.publicId === id)))} /></th>
+                      <th scope="col" className="px-3 py-3">{kind === "quotes" ? "Orçamento" : kind === "orders" ? "Venda" : "Documento"}</th>
+                      <th scope="col" className="px-3 py-3">Cliente</th>
+                      <th scope="col" className="whitespace-nowrap px-3 py-3">Data</th>
+                      <th scope="col" className="px-3 py-3">Vendedor</th>
+                      <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Total</th>
+                      <th scope="col" className="px-3 py-3">{kind === "quotes" ? "Situação" : "Pagamento"}</th>
+                      <th scope="col" className="px-3 py-3">{kind === "quotes" ? "Fluxo" : "Status"}</th>
+                      <th scope="col" className="px-3 py-3 text-center">Ações</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-slate-100 [&>tr>td]:px-3 [&>tr>td]:py-3.5">
                     {list.data.items.map(order => (
-                      <tr key={order.publicId} className="group transition-colors duration-150 hover:bg-blue-50/40 focus-within:bg-blue-50/40 motion-reduce:transition-none" data-testid={`sale-row-${order.publicId}`}>
+                      <tr key={order.publicId} className="group align-middle transition-colors duration-150 hover:bg-blue-50/40 focus-within:bg-blue-50/40 motion-reduce:transition-none" data-testid={`sale-row-${order.publicId}`}>
                         <td className="px-2 py-3"><input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" aria-label={`Selecionar ${order.documentType === "quote" ? "orçamento" : "venda"} ${order.orderNumber}`} checked={selectedSaleIds.includes(order.publicId)} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...current, order.publicId] : current.filter(id => id !== order.publicId))} /></td>
                         <td className="px-2 py-3"><div className="flex min-w-0 items-center gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} featured /><div className="min-w-0"><div className="flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-sm font-bold text-slate-900" title={order.firstProductName ?? "Produto histórico"}>{order.firstProductName ?? "Produto histórico"}</p><p className="mt-0.5 text-[11px] text-slate-500">{order.itemCount > 1 ? `+${order.itemCount - 1} produto${order.itemCount > 2 ? "s" : ""}` : "1 produto"}</p></div></div></td>
                         <td className="max-w-48 truncate px-2 py-3 font-medium text-slate-800" title={order.customerName}>{order.customerName}</td>
@@ -762,9 +770,9 @@ export function SalesPage({
                 </table>
               </div>
               <div className="divide-y divide-slate-100 md:hidden">
-                {list.data.items.map(order => <article key={order.publicId} className="p-4" data-testid={`sale-row-${order.publicId}`}>
+                {list.data.items.map(order => <article key={order.publicId} className="p-4 sm:p-5" data-testid={`sale-row-${order.publicId}`}>
                   <div className="flex min-w-0 items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} large /><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-sm font-bold text-slate-900">{order.firstProductName ?? "Produto histórico"}</p><p className="mt-1 truncate text-xs font-medium text-slate-800">{order.customerName}</p></div><div className="flex shrink-0 flex-col items-end gap-1"><strong className="text-xs tabular-nums">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></div></div>
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 pl-[92px]"><span className="text-xs text-slate-500">{date.format(salesCommercialDate(order.commercialDate))} · {order.sellerName ?? "—"}</span><div className="flex gap-1">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
+                  <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 pl-[92px]"><span className="min-w-0 truncate text-xs text-slate-500">{date.format(salesCommercialDate(order.commercialDate))} · {order.sellerName ?? "—"}</span><div className="flex flex-wrap justify-end gap-1">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
                 </article>)}
               </div>
             </div>
@@ -2229,8 +2237,14 @@ function SaleDocuments({ salePublicId, canWrite, isQuote }: { salePublicId: stri
   );
 }
 
-function State({ title, description, retry, error }: { title: string; description?: string; retry?: () => void; error?: boolean }) {
-  return <div role={error ? "alert" : "status"} className={cn("rounded-xl p-10 text-center", error ? "bg-rose-50 text-rose-900" : "border border-slate-200 bg-white text-slate-700")}><AlertCircle className={cn("mx-auto mb-3 h-6 w-6", error ? "text-rose-600" : "text-slate-400")} /><p className="font-semibold">{title}</p>{description && <p className="mt-1 text-sm text-slate-500">{description}</p>}{retry && <Button variant="outline" className="mt-4" onClick={retry}>Tentar novamente</Button>}</div>;
+function State({ title, description, retry, error, loading = false }: { title: string; description?: string; retry?: () => void; error?: boolean; loading?: boolean }) {
+  return <div role={error ? "alert" : "status"} aria-busy={loading || undefined} data-testid="sales-list-state" className={cn("min-h-48 rounded-xl px-5 py-10 text-center sm:px-10", error ? "bg-rose-50 text-rose-900" : "border border-slate-200 bg-white text-slate-700")}>
+    {loading ? <LoaderCircle className="mx-auto mb-3 h-6 w-6 animate-spin text-blue-600 motion-reduce:animate-none" aria-hidden="true" /> : <AlertCircle className={cn("mx-auto mb-3 h-6 w-6", error ? "text-rose-600" : "text-slate-400")} aria-hidden="true" />}
+    <p className="font-semibold">{title}</p>
+    {description && <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">{description}</p>}
+    {loading && <div className="mx-auto mt-5 grid max-w-md gap-2" aria-hidden="true"><span className="h-2 rounded-full bg-slate-100" /><span className="h-2 w-4/5 rounded-full bg-slate-100" /><span className="h-2 w-3/5 rounded-full bg-slate-100" /></div>}
+    {retry && <Button variant="outline" className="mt-4" onClick={retry}>Tentar novamente</Button>}
+  </div>;
 }
 
 function formatQuantity(value: string | number) {

@@ -436,6 +436,7 @@ test("sales list keeps vertical table columns, compact KPIs and premium paginati
   await expect(page.getByText("Mostrando 1–6 de 6 vendas")).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "Cliente" })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "Vendedor" })).toBeVisible();
+  await expect(page.locator("table:visible colgroup col")).toHaveCount(9);
   expect(await salesRows.first().evaluate(element => element.tagName)).toBe("TR");
   const firstImage = salesRows.first().locator("img");
   await expect(firstImage).toBeVisible();
@@ -666,6 +667,7 @@ test("sales read-only omits writes", async ({ page }) => {
 });
 test("sales exposes empty state", async ({ page }) => {
   await prepare(page, { empty: true });
+  await expect(page.getByTestId("sales-list-state")).toBeVisible();
   await expect(
     page.getByText("Nenhuma venda encontrada neste período.")
   ).toBeVisible();
@@ -716,5 +718,9 @@ for (const viewport of [
           document.documentElement.clientWidth
       )
     ).toBe(true);
-    if (viewport.width === 390) await capture(page, "sales-overview-narrow");
+    if (viewport.width === 390) {
+      const firstMobileRow = page.locator('[data-testid^="sale-row-"]:visible').first();
+      expect(await firstMobileRow.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      await capture(page, "sales-overview-narrow");
+    }
   });

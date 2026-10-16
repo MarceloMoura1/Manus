@@ -74,6 +74,9 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain("Nenhum ${entityLabel} encontrado");
     expect(source).toContain("Não foi possível carregar ${entityLabelPlural}");
     expect(source).toContain("Seu perfil não tem acesso");
+    expect(source).toContain('data-testid="sales-list-state"');
+    expect(source).toContain('aria-busy={loading || undefined}');
+    expect(source).toContain("<LoaderCircle");
     expect(source).toContain('data-testid="sales-detail-facts"');
     expect(source).toContain('data-testid="sales-detail-products"');
     expect(source).toContain('data-testid="sales-detail-actions"');
@@ -273,8 +276,11 @@ describe("ERP Vendas B+C interface", () => {
   it("keeps a vertical desktop table, anchored filters and the existing premium pagination", () => {
     expect(source).toContain('data-testid={`sale-row-${order.publicId}`}');
     expect(source).toContain('className="min-w-[1160px] w-full text-sm"');
-    expect(source).toContain('<th className="px-2 py-2">Cliente</th>');
-    expect(source).toContain('<th className="px-2 py-2">Vendedor</th>');
+    expect(source).toContain('<th scope="col" className="px-3 py-3">Cliente</th>');
+    expect(source).toContain('<th scope="col" className="px-3 py-3">Vendedor</th>');
+    expect(source).toContain("<colgroup>");
+    expect(source).toContain('[&>tr>td]:px-3 [&>tr>td]:py-3.5');
+    expect(source).toContain('grid-cols-[minmax(0,1fr)_auto] items-center gap-2 pl-[92px]');
     expect(source).toContain("firstProductImage?.thumbnailPath");
     expect(source).toContain('text-sm font-bold text-slate-900');
     expect(source).toContain('grid grid-cols-1 gap-2 rounded-xl border');
