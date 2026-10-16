@@ -11,9 +11,11 @@ import {
   readlink,
   realpath,
   rename,
+  rmdir,
   rm,
   stat,
   symlink,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { createReadStream } from "node:fs";
@@ -27,10 +29,13 @@ import {
 
 export const LINUX_DEPLOY_SCHEMA_VERSION = 1;
 export const BACKUP_RECEIPT_SCHEMA_VERSION = 1;
-export const STAGED_RELEASE_SCHEMA_VERSION = 1;
+export const STAGED_RELEASE_SCHEMA_VERSION = 2;
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const GIT_SHA = /^[a-f0-9]{40}$/;
+const DEPLOYMENT_LEASE_DIRECTORY = ".megadesk-linux-deploy.lock";
+const DEPLOYMENT_LEASE_TOKEN = "lease-token";
+const STAGED_MANIFEST_FILENAME = "stage-manifest.json";
 
 function fail(message) {
   throw new Error(`LINUX_DEPLOY: ${message}`);
@@ -98,6 +103,35 @@ async function assertRegularFile(file, label) {
     fail(`${label} does not exist: ${file}`);
   }
   if (!info.isFile() || info.isSymbolicLink()) fail(`${label} must be a real regular file: ${file}`);
+  return info;
+}
+
+function effectiveDeploymentUid() {
+  if (process.platform !== "linux" || typeof process.getuid !== "function") {
+    fail("Exclusive staging and activation require a Linux POSIX filesystem.");
+  }
+  const uid = process.getuid();
+  if (!Number.isSafeInteger(uid) || uid === 0) {
+    fail("Exclusive staging and activation require a dedicated non-root deployment account.");
+  }
+  return uid;
+}
+
+function assertExclusiveOwnership(info, label, uid, { directory = false, regularFile = false } = {}) {
+  if (directory && (!info.isDirectory() || info.isSymbolicLink())) fail(`${label} must be a real directory.`);
+  if (regularFile && (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1)) fail(`${label} must be a non-linked regular file.`);
+  if (info.uid !== uid) fail(`${label} is not owned by the dedicated deployment account.`);
+  if (!info.isSymbolicLink() && (info.mode & 0o022) !== 0) fail(`${label} is writable by group or other users.`);
+}
+
+async function assertExclusivePath(target, label, uid, options = {}) {
+  let info;
+  try {
+    info = await lstat(target);
+  } catch {
+    fail(`${label} does not exist: ${target}`);
+  }
+  assertExclusiveOwnership(info, label, uid, options);
   return info;
 }
 
@@ -335,18 +369,143 @@ export async function verifyArtifactBundle({ tarball, manifestPath, expected, co
   await assertGnuTar({ commandRunner });
   const listing = await commandRunner("tar", ["-tzf", tarball]);
   validateArchiveListing(listing.stdout, manifest);
-  return { manifest, tarball: path.resolve(tarball), manifestPath: path.resolve(manifestPath), size: tarballInfo.size };
+  return {
+    manifest,
+    manifestBytes,
+    tarball: path.resolve(tarball),
+    manifestPath: path.resolve(manifestPath),
+    size: tarballInfo.size,
+  };
 }
 
 async function assertManagedRoot(managedRoot) {
   const root = await assertRealDirectory(managedRoot, "Managed deployment root");
   const physical = await realpath(root);
+  const rootInfo = await stat(root);
   for (const child of ["releases", "staging", "backups"]) {
     const candidate = path.join(root, child);
     await assertRealDirectory(candidate, `Managed ${child} directory`);
     if (!isPathInside(await realpath(candidate), physical)) fail(`Managed ${child} directory resolves outside the deployment root.`);
+    if ((await stat(candidate)).dev !== rootInfo.dev) fail(`Managed ${child} directory must share the deployment root filesystem.`);
   }
   return { root, physical, releases: path.join(root, "releases"), staging: path.join(root, "staging"), backups: path.join(root, "backups") };
+}
+
+async function assertExclusiveDeploymentLayout(layout) {
+  const uid = effectiveDeploymentUid();
+  await assertExclusivePath(layout.root, "Managed deployment root", uid, { directory: true });
+  for (const [label, directory] of [["Managed releases directory", layout.releases], ["Managed staging directory", layout.staging], ["Managed backups directory", layout.backups]]) {
+    await assertExclusivePath(directory, label, uid, { directory: true });
+  }
+  return uid;
+}
+
+async function acquireDeploymentLease(layout) {
+  const uid = await assertExclusiveDeploymentLayout(layout);
+  const directory = path.join(layout.root, DEPLOYMENT_LEASE_DIRECTORY);
+  try {
+    await mkdir(directory, { mode: 0o700 });
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      fail("Deployment lease is unavailable; another operation is active or a stale lease requires audited recovery.");
+    }
+    throw error;
+  }
+
+  const token = randomUUID();
+  const tokenPath = path.join(directory, DEPLOYMENT_LEASE_TOKEN);
+  try {
+    await assertExclusivePath(directory, "Deployment lease", uid, { directory: true });
+    await writeFile(tokenPath, token, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    await assertExclusivePath(tokenPath, "Deployment lease token", uid, { regularFile: true });
+  } catch (error) {
+    try { await unlink(tokenPath); } catch { /* Preserve an ambiguous lease for audited recovery. */ }
+    try { await rmdir(directory); } catch { /* Preserve an ambiguous lease for audited recovery. */ }
+    throw error;
+  }
+  return { directory, token, tokenPath, uid };
+}
+
+async function assertDeploymentLease(lease) {
+  await assertExclusivePath(lease.directory, "Deployment lease", lease.uid, { directory: true });
+  await assertExclusivePath(lease.tokenPath, "Deployment lease token", lease.uid, { regularFile: true });
+  if (await readFile(lease.tokenPath, "utf8") !== lease.token) {
+    fail("Deployment lease was replaced or lost during the operation.");
+  }
+}
+
+async function releaseDeploymentLease(lease) {
+  await assertDeploymentLease(lease);
+  await unlink(lease.tokenPath);
+  try {
+    await rmdir(lease.directory);
+  } catch (error) {
+    fail(`Deployment lease could not be released safely: ${error.code ?? "unknown error"}.`);
+  }
+}
+
+async function withDeploymentLease(layout, operation) {
+  const lease = await acquireDeploymentLease(layout);
+  let operationError;
+  try {
+    return await operation(lease);
+  } catch (error) {
+    operationError = error;
+    throw error;
+  } finally {
+    try {
+      await releaseDeploymentLease(lease);
+    } catch (releaseError) {
+      if (!operationError) throw releaseError;
+    }
+  }
+}
+
+async function assertControlledRuntimeTree(runtime, uid) {
+  const root = await assertExclusivePath(runtime, "Staged runtime", uid, { directory: true });
+  const visit = async (directory) => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const candidate = path.join(directory, entry.name);
+      const info = await lstat(candidate);
+      if (info.isDirectory()) {
+        assertExclusiveOwnership(info, "Staged runtime directory", uid, { directory: true });
+        await visit(candidate);
+      } else if (info.isFile()) {
+        assertExclusiveOwnership(info, "Staged runtime file", uid, { regularFile: true });
+      } else if (info.isSymbolicLink()) {
+        if (info.uid !== uid) fail("Staged runtime symbolic link is not owned by the dedicated deployment account.");
+      } else {
+        fail("Staged runtime contains an unsupported filesystem type.");
+      }
+    }
+  };
+  await visit(runtime);
+  return root;
+}
+
+async function sealRuntimeTree(runtime, uid) {
+  const visit = async (directory) => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const candidate = path.join(directory, entry.name);
+      const info = await lstat(candidate);
+      if (info.isDirectory()) {
+        assertExclusiveOwnership(info, "Staged runtime directory", uid, { directory: true });
+        await visit(candidate);
+        await chmod(candidate, info.mode & ~0o222);
+      } else if (info.isFile()) {
+        assertExclusiveOwnership(info, "Staged runtime file", uid, { regularFile: true });
+        await chmod(candidate, info.mode & ~0o222);
+      } else if (info.isSymbolicLink()) {
+        if (info.uid !== uid) fail("Staged runtime symbolic link is not owned by the dedicated deployment account.");
+      } else {
+        fail("Staged runtime contains an unsupported filesystem type.");
+      }
+    }
+  };
+  await visit(runtime);
+  const root = await lstat(runtime);
+  await chmod(runtime, root.mode & ~0o222);
 }
 
 async function readActiveRelease(layout, activeLink) {
@@ -444,34 +603,36 @@ export function validateBackupReceiptShape(receipt) {
 
 export async function createVerifiedBackup({ managedRoot, activeLink, configurationRoot, stateRoot }) {
   const layout = await assertManagedRoot(managedRoot);
-  const active = await readActiveRelease(layout, activeLink);
-  const activeFingerprint = payloadFingerprint(await collectPayloadEntries(active.path));
-  await assertRealDirectory(configurationRoot, "Configuration root");
-  await assertRealDirectory(stateRoot, "State root");
-  const temporary = await mkdtemp(path.join(layout.backups, ".pending-"));
-  const finalDirectory = path.join(layout.backups, `backup-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID()}`);
-  try {
-    const configuration = await copySnapshotTree({ source: configurationRoot, destination: path.join(temporary, "configuration"), label: "Configuration" });
-    const state = await copySnapshotTree({ source: stateRoot, destination: path.join(temporary, "state"), label: "State" });
-    const receipt = {
-      schemaVersion: BACKUP_RECEIPT_SCHEMA_VERSION,
-      id: randomUUID(),
-      createdAt: new Date().toISOString(),
-      activeRelease: { path: active.relative, ...activeFingerprint },
-      snapshots: [
-        { role: "configuration", path: "configuration", ...configuration },
-        { role: "state", path: "state", ...state },
-      ],
-    };
-    await writeFile(path.join(temporary, "backup-receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
-    await rename(temporary, finalDirectory);
-    const receiptPath = path.join(finalDirectory, "backup-receipt.json");
-    await verifyBackupReceipt({ managedRoot, activeLink, receiptPath });
-    return { directory: finalDirectory, receiptPath, receipt };
-  } catch (error) {
-    await rm(temporary, { recursive: true, force: true });
-    throw error;
-  }
+  return withDeploymentLease(layout, async () => {
+    const active = await readActiveRelease(layout, activeLink);
+    const activeFingerprint = payloadFingerprint(await collectPayloadEntries(active.path));
+    await assertRealDirectory(configurationRoot, "Configuration root");
+    await assertRealDirectory(stateRoot, "State root");
+    const temporary = await mkdtemp(path.join(layout.backups, ".pending-"));
+    const finalDirectory = path.join(layout.backups, `backup-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID()}`);
+    try {
+      const configuration = await copySnapshotTree({ source: configurationRoot, destination: path.join(temporary, "configuration"), label: "Configuration" });
+      const state = await copySnapshotTree({ source: stateRoot, destination: path.join(temporary, "state"), label: "State" });
+      const receipt = {
+        schemaVersion: BACKUP_RECEIPT_SCHEMA_VERSION,
+        id: randomUUID(),
+        createdAt: new Date().toISOString(),
+        activeRelease: { path: active.relative, ...activeFingerprint },
+        snapshots: [
+          { role: "configuration", path: "configuration", ...configuration },
+          { role: "state", path: "state", ...state },
+        ],
+      };
+      await writeFile(path.join(temporary, "backup-receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      await rename(temporary, finalDirectory);
+      const receiptPath = path.join(finalDirectory, "backup-receipt.json");
+      await verifyBackupReceipt({ managedRoot, activeLink, receiptPath });
+      return { directory: finalDirectory, receiptPath, receipt };
+    } catch (error) {
+      await rm(temporary, { recursive: true, force: true });
+      throw error;
+    }
+  });
 }
 
 export async function verifyBackupReceipt({ managedRoot, activeLink, receiptPath, requireCurrentRelease = true }) {
@@ -499,33 +660,60 @@ export async function verifyBackupReceipt({ managedRoot, activeLink, receiptPath
 
 export async function stageVerifiedRelease({ managedRoot, tarball, manifestPath, expected, commandRunner = run, extractor = extractAndVerifyRuntimeArchive }) {
   const layout = await assertManagedRoot(managedRoot);
-  const bundle = await verifyArtifactBundle({ tarball, manifestPath, expected, commandRunner });
-  const stageDirectory = path.join(layout.staging, `${expected.commit}-${randomUUID()}`);
-  await assertAbsent(stageDirectory, "Staging destination");
-  try {
-    const extracted = await extractor({ tarball: bundle.tarball, manifestPath: bundle.manifestPath, destination: stageDirectory });
-    const runtime = path.resolve(extracted.runtime);
-    if (!isPathInside(runtime, stageDirectory) || path.basename(runtime) !== "runtime") fail("Extracted runtime has an unexpected location.");
-    await verifyManifest({ runtime, manifestPath: bundle.manifestPath });
-    const receipt = {
-      schemaVersion: STAGED_RELEASE_SCHEMA_VERSION,
-      id: randomUUID(),
-      stagedAt: new Date().toISOString(),
-      candidate: {
-        commit: expected.commit,
-        tree: expected.tree,
-        artifactName: expected.artifactName,
-        tarSha256: expected.tarSha256,
-        manifestSha256: expected.manifestSha256,
-      },
-      runtime: "runtime",
-    };
-    await writeFile(path.join(stageDirectory, "stage-receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
-    return { directory: stageDirectory, runtime, receipt };
-  } catch (error) {
-    await rm(stageDirectory, { recursive: true, force: true });
-    throw error;
-  }
+  return withDeploymentLease(layout, async (lease) => {
+    const stageDirectory = path.join(layout.staging, `${expected.commit}-${randomUUID()}`);
+    const inputDirectory = path.join(layout.staging, `.input-${randomUUID()}`);
+    await assertAbsent(stageDirectory, "Staging destination");
+    await assertAbsent(inputDirectory, "Staging input destination");
+    try {
+      const inputTarball = path.join(inputDirectory, expected.artifactName);
+      const inputManifest = path.join(inputDirectory, `${expected.commit}.manifest.json`);
+      await assertExclusivePath(tarball, "TAR artifact", lease.uid, { regularFile: true });
+      await assertExclusivePath(manifestPath, "Artifact manifest", lease.uid, { regularFile: true });
+      await mkdir(inputDirectory, { mode: 0o700 });
+      await copyFile(tarball, inputTarball, 1);
+      await copyFile(manifestPath, inputManifest, 1);
+      await assertExclusivePath(inputTarball, "Private staging TAR", lease.uid, { regularFile: true });
+      await assertExclusivePath(inputManifest, "Private staging manifest", lease.uid, { regularFile: true });
+      const bundle = await verifyArtifactBundle({ tarball: inputTarball, manifestPath: inputManifest, expected, commandRunner });
+      const extracted = await extractor({ tarball: bundle.tarball, manifestPath: bundle.manifestPath, destination: stageDirectory });
+      const runtime = path.resolve(extracted.runtime);
+      if (!isPathInside(runtime, stageDirectory) || path.basename(runtime) !== "runtime") fail("Extracted runtime has an unexpected location.");
+      await assertExclusivePath(stageDirectory, "Stage directory", lease.uid, { directory: true });
+      await assertControlledRuntimeTree(runtime, lease.uid);
+      const stagedManifestPath = path.join(stageDirectory, STAGED_MANIFEST_FILENAME);
+      await writeFile(stagedManifestPath, bundle.manifestBytes, { flag: "wx", mode: 0o400 });
+      await assertExclusivePath(stagedManifestPath, "Staged manifest", lease.uid, { regularFile: true });
+      if (await sha256File(stagedManifestPath) !== expected.manifestSha256) fail("Staged manifest differs from the approved manifest hash.");
+      await verifyManifest({ runtime, manifestPath: stagedManifestPath });
+      const fingerprint = payloadFingerprint(await collectPayloadEntries(runtime));
+      const receipt = {
+        schemaVersion: STAGED_RELEASE_SCHEMA_VERSION,
+        id: randomUUID(),
+        stagedAt: new Date().toISOString(),
+        candidate: {
+          commit: expected.commit,
+          tree: expected.tree,
+          artifactName: expected.artifactName,
+          tarSha256: expected.tarSha256,
+          manifestSha256: expected.manifestSha256,
+        },
+        manifest: { path: STAGED_MANIFEST_FILENAME, sha256: expected.manifestSha256 },
+        runtime: { path: "runtime", ...fingerprint },
+      };
+      const receiptPath = path.join(stageDirectory, "stage-receipt.json");
+      await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o400 });
+      await assertExclusivePath(receiptPath, "Stage receipt", lease.uid, { regularFile: true });
+      await sealRuntimeTree(runtime, lease.uid);
+      await assertDeploymentLease(lease);
+      return { directory: stageDirectory, runtime, receipt };
+    } catch (error) {
+      await rm(stageDirectory, { recursive: true, force: true });
+      throw error;
+    } finally {
+      await rm(inputDirectory, { recursive: true, force: true });
+    }
+  });
 }
 
 async function atomicSwitchPointer({ activeLink, targetRelative }) {
@@ -543,10 +731,17 @@ async function atomicSwitchPointer({ activeLink, targetRelative }) {
 }
 
 function validateStageReceipt(receipt, expected) {
-  requireExactKeys(receipt, ["candidate", "id", "runtime", "schemaVersion", "stagedAt"], "Stage receipt");
-  if (receipt.schemaVersion !== STAGED_RELEASE_SCHEMA_VERSION || receipt.runtime !== "runtime") fail("Stage receipt schema is unsupported.");
+  requireExactKeys(receipt, ["candidate", "id", "manifest", "runtime", "schemaVersion", "stagedAt"], "Stage receipt");
+  if (receipt.schemaVersion !== STAGED_RELEASE_SCHEMA_VERSION || typeof receipt.id !== "string" || !/^[a-f0-9-]{36}$/.test(receipt.id) || Number.isNaN(Date.parse(receipt.stagedAt))) {
+    fail("Stage receipt schema is unsupported.");
+  }
   requireExactKeys(receipt.candidate, ["artifactName", "commit", "manifestSha256", "tarSha256", "tree"], "Stage receipt candidate");
   for (const key of Object.keys(expected)) if (receipt.candidate[key] !== expected[key]) fail("Stage receipt candidate differs from the approved artifact identity.");
+  requireExactKeys(receipt.manifest, ["path", "sha256"], "Stage receipt manifest");
+  if (receipt.manifest.path !== STAGED_MANIFEST_FILENAME || receipt.manifest.sha256 !== expected.manifestSha256) fail("Stage receipt manifest differs from the approved artifact identity.");
+  requireExactKeys(receipt.runtime, ["entries", "path", "sha256"], "Stage receipt runtime");
+  if (receipt.runtime.path !== "runtime" || !Number.isSafeInteger(receipt.runtime.entries) || receipt.runtime.entries < 1) fail("Stage receipt runtime is invalid.");
+  assertSha256(receipt.runtime.sha256, "Stage receipt runtime digest");
 }
 
 /**
@@ -556,37 +751,55 @@ function validateStageReceipt(receipt, expected) {
  */
 export async function activateStagedRelease({ managedRoot, activeLink, stageDirectory, backupReceiptPath, expected }) {
   const layout = await assertManagedRoot(managedRoot);
-  const active = await readActiveRelease(layout, activeLink);
-  await verifyBackupReceipt({ managedRoot, activeLink, receiptPath: backupReceiptPath });
-  const stage = path.resolve(stageDirectory);
-  if (!isPathInside(stage, layout.staging)) fail("Stage directory is outside managed staging.");
-  await assertRealDirectory(stage, "Stage directory");
-  const receiptPath = path.join(stage, "stage-receipt.json");
-  const receipt = parseStrictJsonBytes(await readFile(receiptPath), "Stage receipt");
-  validateStageReceipt(receipt, expected);
-  const runtime = path.join(stage, "runtime");
-  await assertRealDirectory(runtime, "Staged runtime");
-  const release = path.join(layout.releases, expected.commit);
-  await assertAbsent(release, "Candidate release destination");
-  await rename(runtime, release);
-  const targetRelative = path.relative(layout.root, release).split(path.sep).join("/");
-  try {
-    await atomicSwitchPointer({ activeLink: active.link, targetRelative });
-  } catch (error) {
-    await rename(release, runtime);
-    throw error;
-  }
-  return { previous: active.relative, active: targetRelative, release };
+  return withDeploymentLease(layout, async (lease) => {
+    const active = await readActiveRelease(layout, activeLink);
+    await verifyBackupReceipt({ managedRoot, activeLink, receiptPath: backupReceiptPath });
+    const stage = path.resolve(stageDirectory);
+    if (!isPathInside(stage, layout.staging) || !isPathInside(await realpath(stage), await realpath(layout.staging))) fail("Stage directory is outside managed staging.");
+    await assertExclusivePath(stage, "Stage directory", lease.uid, { directory: true });
+    const receiptPath = path.join(stage, "stage-receipt.json");
+    await assertExclusivePath(receiptPath, "Stage receipt", lease.uid, { regularFile: true });
+    const receipt = parseStrictJsonBytes(await readFile(receiptPath), "Stage receipt");
+    validateStageReceipt(receipt, expected);
+    const stagedManifestPath = path.join(stage, receipt.manifest.path);
+    await assertExclusivePath(stagedManifestPath, "Staged manifest", lease.uid, { regularFile: true });
+    const stagedManifestBytes = await readFile(stagedManifestPath);
+    if (sha256Bytes(stagedManifestBytes) !== receipt.manifest.sha256 || receipt.manifest.sha256 !== expected.manifestSha256) {
+      fail("Staged manifest differs from the approved artifact identity.");
+    }
+    const runtime = path.join(stage, receipt.runtime.path);
+    await assertControlledRuntimeTree(runtime, lease.uid);
+    const fingerprint = payloadFingerprint(await collectPayloadEntries(runtime));
+    if (fingerprint.entries !== receipt.runtime.entries || fingerprint.sha256 !== receipt.runtime.sha256) {
+      fail("Staged runtime differs from the receipt recorded during staging.");
+    }
+    await verifyManifest({ runtime, manifestPath: stagedManifestPath });
+    await sealRuntimeTree(runtime, lease.uid);
+    await assertDeploymentLease(lease);
+    const release = path.join(layout.releases, expected.commit);
+    await assertAbsent(release, "Candidate release destination");
+    await rename(runtime, release);
+    const targetRelative = path.relative(layout.root, release).split(path.sep).join("/");
+    try {
+      await atomicSwitchPointer({ activeLink: active.link, targetRelative });
+    } catch (error) {
+      await rename(release, runtime);
+      throw error;
+    }
+    return { previous: active.relative, active: targetRelative, release };
+  });
 }
 
 export async function rollbackCodeRelease({ managedRoot, activeLink, backupReceiptPath }) {
   const layout = await assertManagedRoot(managedRoot);
-  const receipt = await verifyBackupReceipt({ managedRoot, activeLink, receiptPath: backupReceiptPath, requireCurrentRelease: false });
-  const previous = path.resolve(layout.root, receipt.activeRelease.path);
-  if (!isPathInside(previous, layout.releases)) fail("Rollback target is outside managed releases.");
-  await assertRealDirectory(previous, "Rollback release target");
-  await atomicSwitchPointer({ activeLink: path.resolve(activeLink), targetRelative: receipt.activeRelease.path });
-  return { active: receipt.activeRelease.path, rolledBackAt: new Date().toISOString() };
+  return withDeploymentLease(layout, async () => {
+    const receipt = await verifyBackupReceipt({ managedRoot, activeLink, receiptPath: backupReceiptPath, requireCurrentRelease: false });
+    const previous = path.resolve(layout.root, receipt.activeRelease.path);
+    if (!isPathInside(previous, layout.releases)) fail("Rollback target is outside managed releases.");
+    await assertRealDirectory(previous, "Rollback release target");
+    await atomicSwitchPointer({ activeLink: path.resolve(activeLink), targetRelative: receipt.activeRelease.path });
+    return { active: receipt.activeRelease.path, rolledBackAt: new Date().toISOString() };
+  });
 }
 
 /** Verifies only a loopback health endpoint; public readiness remains an operational check. */

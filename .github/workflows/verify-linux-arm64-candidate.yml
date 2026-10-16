@@ -1,0 +1,99 @@
+name: Verify Linux ARM64 candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Immutable GitHub Actions run ID that produced the candidate artifact
+        required: true
+        type: string
+      candidate_artifact:
+        description: Exact artifact name from the specified run
+        required: true
+        type: string
+      candidate_commit:
+        description: Full lowercase Git commit SHA recorded in the candidate manifest
+        required: true
+        type: string
+      candidate_tree:
+        description: Full lowercase Git tree SHA recorded in the candidate manifest
+        required: true
+        type: string
+      candidate_tar_sha256:
+        description: Approved lowercase SHA-256 of the candidate TAR
+        required: true
+        type: string
+      candidate_manifest_sha256:
+        description: Approved lowercase SHA-256 of the candidate manifest
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify-candidate:
+    name: Verify explicit Linux ARM64 candidate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    env:
+      CI: "true"
+
+    steps:
+      - name: Check out the verifier revision selected for this run
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+          cache: pnpm
+
+      - name: Prove Linux ARM64 and GNU tar
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = aarch64
+          tar --version | grep -F 'GNU tar'
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the explicitly selected candidate evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.candidate_artifact }}
+          path: ${{ runner.temp }}/megadesk-arm64-candidate
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify the selected candidate without extraction
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          CANDIDATE_TREE: ${{ inputs.candidate_tree }}
+          CANDIDATE_TAR_SHA256: ${{ inputs.candidate_tar_sha256 }}
+          CANDIDATE_MANIFEST_SHA256: ${{ inputs.candidate_manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          PACKAGE_ROOT="$RUNNER_TEMP/megadesk-arm64-candidate"
+          TAR="$(find "$PACKAGE_ROOT" -type f -name "megadesk-runtime-${CANDIDATE_COMMIT}-linux-arm64.tar.gz" -print -quit)"
+          MANIFEST="$(find "$PACKAGE_ROOT" -type f -name "megadesk-runtime-${CANDIDATE_COMMIT}-linux-arm64.manifest.json" -print -quit)"
+          test -n "$TAR"
+          test -n "$MANIFEST"
+          pnpm release:linux-arm64-deploy verify \
+            --tar "$TAR" \
+            --manifest "$MANIFEST" \
+            --expected-artifact-name "megadesk-runtime-${CANDIDATE_COMMIT}-linux-arm64.tar.gz" \
+            --expected-tar-sha256 "$CANDIDATE_TAR_SHA256" \
+            --expected-manifest-sha256 "$CANDIDATE_MANIFEST_SHA256" \
+            --expected-commit "$CANDIDATE_COMMIT" \
+            --expected-tree "$CANDIDATE_TREE"

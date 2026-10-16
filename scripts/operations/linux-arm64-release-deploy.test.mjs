@@ -87,6 +87,27 @@ async function managedLayout() {
   };
 }
 
+async function stageSyntheticRuntime(layout, fixture) {
+  return stageVerifiedRelease({
+    managedRoot: layout.managedRoot,
+    tarball: fixture.tarball,
+    manifestPath: fixture.manifestPath,
+    expected: fixture.expected,
+    commandRunner: fakeGnuTar(fixture.manifest),
+    extractor: async ({ destination }) => {
+      const runtime = path.join(destination, "runtime");
+      await mkdir(runtime, { recursive: true });
+      await writeFile(path.join(runtime, "index.js"), "export default 1;\n");
+      return { runtime };
+    },
+  });
+}
+
+async function expectActiveReleaseUntouched(layout, fixture) {
+  await expect(readlink(layout.activeLink)).resolves.toBe("releases/old");
+  await expect(lstat(path.join(layout.managedRoot, "releases", fixture.expected.commit))).rejects.toMatchObject({ code: "ENOENT" });
+}
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -188,19 +209,7 @@ describe("linux ARM64 release deployment primitives", () => {
     const layout = await managedLayout();
     const backup = await createVerifiedBackup(layout);
     const fixture = await bundleFixture();
-    const staged = await stageVerifiedRelease({
-      managedRoot: layout.managedRoot,
-      tarball: fixture.tarball,
-      manifestPath: fixture.manifestPath,
-      expected: fixture.expected,
-      commandRunner: fakeGnuTar(fixture.manifest),
-      extractor: async ({ destination }) => {
-        const runtime = path.join(destination, "runtime");
-        await mkdir(runtime, { recursive: true });
-        await writeFile(path.join(runtime, "index.js"), "export default 1;\n");
-        return { runtime };
-      },
-    });
+    const staged = await stageSyntheticRuntime(layout, fixture);
     await expect(activateStagedRelease({
       managedRoot: layout.managedRoot,
       activeLink: layout.activeLink,
@@ -229,5 +238,79 @@ describe("linux ARM64 release deployment primitives", () => {
     await unlink(path.join(layout.managedRoot, "releases", "old", "index.js"));
     await expect(rollbackCodeRelease({ managedRoot: layout.managedRoot, activeLink: layout.activeLink, backupReceiptPath: backup.receiptPath }))
       .rejects.toThrow("Active release changed after backup creation");
+  });
+
+  symlinkTests("seals the staged runtime and rejects a runtime changed after staging without moving current", async () => {
+    const layout = await managedLayout();
+    const backup = await createVerifiedBackup(layout);
+    const fixture = await bundleFixture();
+    const staged = await stageSyntheticRuntime(layout, fixture);
+    const runtimeFile = path.join(staged.runtime, "index.js");
+    expect((await lstat(runtimeFile)).mode & 0o222).toBe(0);
+    await expect(writeFile(runtimeFile, "tampered\n")).rejects.toMatchObject({ code: "EACCES" });
+    await chmod(runtimeFile, 0o644);
+    await writeFile(runtimeFile, "tampered\n");
+
+    await expect(activateStagedRelease({
+      managedRoot: layout.managedRoot,
+      activeLink: layout.activeLink,
+      stageDirectory: staged.directory,
+      backupReceiptPath: backup.receiptPath,
+      expected: fixture.expected,
+    })).rejects.toThrow("Staged runtime differs from the receipt");
+    await expectActiveReleaseUntouched(layout, fixture);
+  });
+
+  symlinkTests("rejects a staged manifest or receipt modified after staging without moving current", async () => {
+    const layout = await managedLayout();
+    const backup = await createVerifiedBackup(layout);
+    const fixture = await bundleFixture();
+    const manifestStage = await stageSyntheticRuntime(layout, fixture);
+    const stagedManifest = path.join(manifestStage.directory, "stage-manifest.json");
+    await chmod(stagedManifest, 0o600);
+    await writeFile(stagedManifest, `${JSON.stringify({ ...fixture.manifest, payloadRoot: "other" })}\n`);
+
+    await expect(activateStagedRelease({
+      managedRoot: layout.managedRoot,
+      activeLink: layout.activeLink,
+      stageDirectory: manifestStage.directory,
+      backupReceiptPath: backup.receiptPath,
+      expected: fixture.expected,
+    })).rejects.toThrow("Staged manifest differs from the approved artifact identity");
+    await expectActiveReleaseUntouched(layout, fixture);
+
+    const receiptStage = await stageSyntheticRuntime(layout, fixture);
+    const receiptPath = path.join(receiptStage.directory, "stage-receipt.json");
+    await chmod(receiptPath, 0o600);
+    const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+    receipt.runtime.sha256 = "0".repeat(64);
+    await writeFile(receiptPath, `${JSON.stringify(receipt)}\n`);
+
+    await expect(activateStagedRelease({
+      managedRoot: layout.managedRoot,
+      activeLink: layout.activeLink,
+      stageDirectory: receiptStage.directory,
+      backupReceiptPath: backup.receiptPath,
+      expected: fixture.expected,
+    })).rejects.toThrow("Staged runtime differs from the receipt");
+    await expectActiveReleaseUntouched(layout, fixture);
+  });
+
+  symlinkTests("fails closed when a concurrent or abandoned deployment lease exists", async () => {
+    const layout = await managedLayout();
+    const backup = await createVerifiedBackup(layout);
+    const fixture = await bundleFixture();
+    const staged = await stageSyntheticRuntime(layout, fixture);
+    const lockDirectory = path.join(layout.managedRoot, ".megadesk-linux-deploy.lock");
+    await mkdir(lockDirectory, { mode: 0o700 });
+
+    await expect(activateStagedRelease({
+      managedRoot: layout.managedRoot,
+      activeLink: layout.activeLink,
+      stageDirectory: staged.directory,
+      backupReceiptPath: backup.receiptPath,
+      expected: fixture.expected,
+    })).rejects.toThrow("Deployment lease is unavailable");
+    await expectActiveReleaseUntouched(layout, fixture);
   });
 });

@@ -76,12 +76,6 @@ jobs:
     timeout-minutes: 20
     env:
       CI: "true"
-      CANDIDATE_RUN_ID: "38927166246"
-      CANDIDATE_ARTIFACT: megadesk-arm64-candidate-38927166246
-      CANDIDATE_COMMIT: eb6d1b0221854f87f8878afe44323ab0c7815699
-      CANDIDATE_TREE: 6b31e4a3724cb699a7cad44a2ee05094d50608fc
-      CANDIDATE_TAR_SHA256: 39e7db9495a9a642d3b76fd76992901385cbfd42b421b8e10b2e2dafcdddf51a
-      CANDIDATE_MANIFEST_SHA256: a8338d85254ba92da5f8f646e30f158f663ecd8113ef2f6356a9e01d9ae8dc8b
 
     steps:
       - name: Check out repository
@@ -112,31 +106,3 @@ jobs:
 
       - name: Test isolated staging, activation, and code rollback
         run: pnpm vitest run scripts/operations/linux-arm64-release-deploy.test.mjs --pool=forks --poolOptions.forks.singleFork=true
-
-      # The artifact is immutable CI evidence for this review only. It is not
-      # rebuilt, promoted, or used as a deployment source by this job.
-      - name: Download immutable ARM64 candidate evidence
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.CANDIDATE_ARTIFACT }}
-          path: ${{ runner.temp }}/megadesk-arm64-candidate
-          run-id: ${{ env.CANDIDATE_RUN_ID }}
-          github-token: ${{ github.token }}
-
-      - name: Verify immutable ARM64 candidate without extraction
-        shell: bash
-        run: |
-          set -euo pipefail
-          PACKAGE_ROOT="$RUNNER_TEMP/megadesk-arm64-candidate"
-          TAR="$(find "$PACKAGE_ROOT" -type f -name "megadesk-runtime-${CANDIDATE_COMMIT}-linux-arm64.tar.gz" -print -quit)"
-          MANIFEST="$(find "$PACKAGE_ROOT" -type f -name "megadesk-runtime-${CANDIDATE_COMMIT}-linux-arm64.manifest.json" -print -quit)"
-          test -n "$TAR"
-          test -n "$MANIFEST"
-          pnpm release:linux-arm64-deploy verify \
-            --tar "$TAR" \
-            --manifest "$MANIFEST" \
-            --expected-artifact-name "megadesk-runtime-${CANDIDATE_COMMIT}-linux-arm64.tar.gz" \
-            --expected-tar-sha256 "$CANDIDATE_TAR_SHA256" \
-            --expected-manifest-sha256 "$CANDIDATE_MANIFEST_SHA256" \
-            --expected-commit "$CANDIDATE_COMMIT" \
-            --expected-tree "$CANDIDATE_TREE"

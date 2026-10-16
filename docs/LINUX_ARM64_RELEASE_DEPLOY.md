@@ -14,6 +14,22 @@ Ele deve ser executado a partir de um checkout operacional aprovado por SHA
 completo; não se copia o script para dentro do artefato candidato nem se confia
 no `HEAD` de uma branch mutável.
 
+## Checks permanentes e verificação de uma candidata
+
+O check permanente de PR executa somente os contratos do tooling em Linux
+ARM64 com GNU tar. Ele não baixa um artefato de execução histórica, pois a
+retenção do GitHub Actions é finita e uma dependência assim tornaria PRs
+futuros indisponíveis quando o artefato expirasse.
+
+`Verify Linux ARM64 candidate` é um workflow manual separado. Ele exige
+explicitamente o `run_id`, nome do artefato, commit, tree e os dois hashes
+aprovados, baixa somente o artefato daquela execução e chama `verify` sem
+extração. A execução falha se a fonte não estiver mais disponível; ela nunca
+trata a ausência como sucesso. Os valores de entrada devem vir do registro de
+aprovação independente da janela, e não de uma branch ou de texto fornecido
+pelo host de destino. Esse workflow prova integridade para a identidade
+informada, não cria uma assinatura, trust root ou autorização de deploy.
+
 ## Limites de responsabilidade
 
 O procedimento separa três propriedades:
@@ -45,6 +61,24 @@ somente-leitura comprovar que ele não conflita com a instalação atual:
 
 `current` deve ser um symlink relativo, diretamente abaixo da raiz gerenciada.
 `releases`, `staging` e `backups` devem ser diretórios reais no mesmo filesystem.
+As operações mutáveis exigem Linux e uma conta dedicada de deploy não-root que
+seja dona da raiz gerenciada e de `releases`, `staging` e `backups`; nenhum
+deles pode ser gravável por grupo ou outros. O executor cria um lease por
+`mkdir` em `.megadesk-linux-deploy.lock`, falha se o lease já existe e não
+remove leases abandonados automaticamente. Assim, a recuperação de um lease
+abandonado é uma ação auditada, fora do executor. Todos os escritores do
+layout precisam participar desse mesmo protocolo; `root` ou processos que usam
+a conta de deploy fora do protocolo invalidam esta garantia e exigem que a
+ativação seja interrompida.
+
+O `stage` copia o manifesto já hash-validado para dentro do stage, registra o
+hash do manifesto e um fingerprint integral do runtime no receipt, e remove a
+permissão de escrita do runtime. `activate` adquire o lease, revalida receipt,
+manifest e runtime a partir dessa cópia e só então move o runtime e troca
+`current`. A troca do ponteiro continua atômica; o lease, a propriedade e as
+permissões impedem escritores não autorizados e coordenam escritores
+participantes. Isso não protege contra `root` ou contra um processo malicioso
+que já execute como a conta dedicada de deploy.
 O serviço ativo só pode ser reiniciado depois de o administrador comprovar que
 ele resolve o runtime por `current`; o repositório não contém evidência de que
 o processo do host Ubuntu usa systemd, PM2, Compose ou qualquer outro mecanismo.
@@ -186,5 +220,6 @@ Interromper antes de qualquer mutação se ocorrer qualquer uma destas situaçõ
 O tooling cobre integridade do bundle, staging, snapshots locais verificáveis e
 troca/rollback do ponteiro de código. Ele não autentica o artefato por assinatura,
 não descobre segredos, não prova a recuperabilidade de cópia externa, não elimina
-TOCTOU de escritores não coordenados e não valida Linux ARM64 nativo fora do CI
-que produziu a candidata. Esses gates permanecem operacionais.
+TOCTOU de `root` ou de escritores que não respeitem a conta e o lease dedicados,
+e não valida Linux ARM64 nativo fora do CI que produziu a candidata. Esses gates
+permanecem operacionais.
