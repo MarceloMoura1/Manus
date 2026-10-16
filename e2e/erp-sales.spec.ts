@@ -456,6 +456,19 @@ test("sales list keeps vertical table columns, compact KPIs and premium paginati
   await page.getByRole("button", { name: "Ações de venda VD-00126" }).click();
   await expect(page.getByRole("menuitem", { name: "Editar documento" })).toBeVisible();
 });
+
+test("sales makes the current page selection actionable and dismissible", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await prepare(page, { visualRows: true });
+  const firstRow = page.locator('table tbody [data-testid^="sale-row-"]:visible').first();
+  await firstRow.getByRole("checkbox").check();
+  const selection = page.getByTestId("sales-selection-summary");
+  await expect(selection).toContainText("1 documento selecionado nesta página.");
+  await expect(selection.getByRole("button", { name: "Exportar selecionados" })).toBeVisible();
+  await selection.getByRole("button", { name: "Limpar seleção" }).click();
+  await expect(selection).toHaveCount(0);
+  await expect(firstRow.getByRole("checkbox")).not.toBeChecked();
+});
 test("sales searches incrementally and reveals variants only on demand", async ({ page }) => {
   const counters = { customers: 0, catalog: 0 };
   await page.setViewportSize({ width: 1440, height: 1000 });

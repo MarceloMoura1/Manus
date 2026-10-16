@@ -123,6 +123,15 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain("salesPaginationItems(page, list.data.totalPages)");
   });
 
+  it("announces operation feedback and makes the existing page selection actionable", () => {
+    expect(source).toContain('data-testid="sales-feedback"');
+    expect(source).toContain('aria-live={pendingError || localError ? "assertive" : "polite"}');
+    expect(source).toContain("selectedOnPageCount");
+    expect(source).toContain('data-testid="sales-selection-summary"');
+    expect(source).toContain("Exportar selecionados");
+    expect(source).toContain("Limpar seleção");
+  });
+
   it("routes private sale document links to the authenticated API host", () => {
     expect(source).toContain("saleDocumentUrl(document.downloadUrl)");
     expect(source).toContain("?preview=1");

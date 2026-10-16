@@ -531,6 +531,7 @@ export function SalesPage({
   const entityLabel = kind === "quotes" ? "orçamento" : kind === "orders" ? "venda" : "documento";
   const entityLabelPlural = kind === "quotes" ? "orçamentos" : kind === "orders" ? "vendas" : "documentos";
   const emptyStateTitle = kind === "orders" ? "Nenhuma venda encontrada neste período." : `Nenhum ${entityLabel} encontrado neste período.`;
+  const selectedOnPageCount = list.data?.items.filter(order => selectedSaleIds.includes(order.publicId)).length ?? 0;
 
   return (
     <div
@@ -569,6 +570,9 @@ export function SalesPage({
       {(message || pendingError || localError) && (
         <div
           role={pendingError || localError ? "alert" : "status"}
+          aria-live={pendingError || localError ? "assertive" : "polite"}
+          aria-atomic="true"
+          data-testid="sales-feedback"
           className={cn(
             "flex items-start gap-3 rounded-xl px-4 py-3 text-sm font-medium",
             pendingError || localError ? "bg-rose-50 text-rose-900" : "bg-emerald-50 text-emerald-900"
@@ -782,6 +786,19 @@ export function SalesPage({
                   <div className="flex min-w-0 items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} large /><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-sm font-bold text-slate-900">{order.firstProductName ?? "Produto histórico"}</p><p className="mt-1 truncate text-xs font-medium text-slate-800">{order.customerName}</p></div><div className="flex shrink-0 flex-col items-end gap-1"><strong className="text-xs tabular-nums">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></div></div>
                   <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 pl-[92px]"><span className="min-w-0 truncate text-xs text-slate-500">{date.format(salesCommercialDate(order.commercialDate))} · {order.sellerName ?? "—"}</span><div className="flex flex-wrap justify-end gap-1">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
                 </article>)}
+              </div>
+            </div>
+          )}
+
+          {selectedOnPageCount > 0 && (
+            <div className="flex flex-col gap-3 border-t border-slate-100 bg-blue-50/60 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5" data-testid="sales-selection-summary" role="status" aria-live="polite">
+              <div className="flex min-w-0 items-start gap-2 text-sm text-slate-700">
+                <Check className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" aria-hidden="true" />
+                <span><strong className="font-semibold text-slate-950">{selectedOnPageCount} documento{selectedOnPageCount === 1 ? "" : "s"} selecionado{selectedOnPageCount === 1 ? "" : "s"} nesta página.</strong><span className="hidden text-slate-500 sm:inline"> A exportação usará somente esta seleção.</span></span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" size="sm" className="min-h-8" onClick={exportCurrentPage}><Share2 className="mr-1.5 h-3.5 w-3.5" />Exportar selecionados</Button>
+                <button type="button" className="rounded-sm px-2 py-1 text-xs font-semibold text-blue-800 transition-colors hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => setSelectedSaleIds([])}>Limpar seleção</button>
               </div>
             </div>
           )}
@@ -2019,7 +2036,7 @@ function SaleActionsMenu({ order, canWrite, onOpen, onPrint, onEdit, onDuplicate
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-600 shadow-sm transition-[background-color,border-color,color,box-shadow,transform] duration-150 ease-out hover:border-slate-300 hover:bg-slate-100 hover:text-slate-950 hover:shadow active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transform-none motion-reduce:transition-none" aria-label={`Ações de ${order.documentType === "quote" ? "orçamento" : "venda"} ${order.orderNumber}`} data-testid="sales-row-actions">
+        <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-600 shadow-sm transition-[background-color,border-color,color,box-shadow,transform] duration-150 ease-out hover:border-slate-300 hover:bg-slate-100 hover:text-slate-950 hover:shadow active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transform-none motion-reduce:transition-none" aria-label={`Ações de ${order.documentType === "quote" ? "orçamento" : "venda"} ${order.orderNumber}`} title={`Abrir ações de ${order.documentType === "quote" ? "orçamento" : "venda"} ${order.orderNumber}`} data-testid="sales-row-actions">
           <MoreHorizontal className="h-5 w-5" />
         </button>
       </DropdownMenuTrigger>
