@@ -222,7 +222,7 @@ describe("linux ARM64 release deployment primitives", () => {
       stageDirectory: staged.directory,
       backupReceiptPath: backup.receiptPath,
       expected: fixture.expected,
-    })).rejects.toThrow("Stage directory does not exist");
+    })).rejects.toThrow("Backup receipt does not belong to the current active release");
     await expect(readlink(layout.activeLink)).resolves.toBe(`releases/${fixture.expected.commit}`);
     await expect(rollbackCodeRelease({ managedRoot: layout.managedRoot, activeLink: layout.activeLink, backupReceiptPath: backup.receiptPath }))
       .resolves.toMatchObject({ active: "releases/old" });
