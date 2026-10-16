@@ -6,6 +6,7 @@ on:
       - release/updater-v2-bootstrap
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -63,7 +64,45 @@ jobs:
           server/canonical-migrations.test.ts
           scripts/operations/assemble-runtime-release.test.mjs
           scripts/operations/package-runtime-release.test.mjs
+          scripts/operations/linux-arm64-release-deploy.test.mjs
           --exclude server/modules/erp/reports/structure.test.ts
 
       - name: Build application
         run: pnpm run build
+
+  linux-arm64-deploy-tooling:
+    name: Linux ARM64 deployment-tooling contracts
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    env:
+      CI: "true"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+          cache: pnpm
+
+      - name: Prove Linux ARM64 and GNU tar
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = aarch64
+          tar --version | grep -F 'GNU tar'
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test isolated staging, activation, and code rollback
+        run: pnpm vitest run scripts/operations/linux-arm64-release-deploy.test.mjs --pool=forks --poolOptions.forks.singleFork=true
