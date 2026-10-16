@@ -112,9 +112,12 @@ describe("ERP Vendas B+C interface", () => {
   });
 
   it("offers one primary filter bar and server-side page sizes", () => {
+    expect(source).toContain('eyebrow="Comercial"');
+    expect(source).toContain("Encontre documentos");
     expect(source).toContain("Buscar por número ou cliente...");
     expect(source).toContain("Tipos de venda");
     expect(source).toContain("Filtros avançados");
+    expect(source).toContain('data-testid="sales-filter-toolbar"');
     expect(source).toContain("Itens por página");
     expect(source).toContain("[6, 10, 20, 50, 100]");
     expect(source).toContain("salesPaginationItems(page, list.data.totalPages)");
@@ -283,13 +286,14 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain('grid-cols-[minmax(0,1fr)_auto] items-center gap-2 pl-[92px]');
     expect(source).toContain("firstProductImage?.thumbnailPath");
     expect(source).toContain('text-sm font-bold text-slate-900');
-    expect(source).toContain('grid grid-cols-1 gap-2 rounded-xl border');
+    expect(source).toContain('grid grid-cols-1 gap-2.5 rounded-xl border');
     expect(source).toContain('sm:grid-cols-2 lg:grid-cols-12');
     expect(source).toContain('xl:grid-cols-12');
     expect(source).toContain('data-testid="sales-customer-filter-options"');
     expect(source).not.toContain('min-[980px]:grid-cols');
     expect(source).not.toContain('min-w-[min(18rem,calc(100vw-2rem))]');
     expect(source).toContain('data-testid="sales-metric-card"');
+    expect(source).toContain('grid gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200');
     expect(source).toContain('lg:grid-cols-4');
     expect(source).toContain('data-testid="sales-premium-pagination"');
     expect(source).toContain("from-slate-950 via-slate-900 to-slate-800");

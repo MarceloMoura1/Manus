@@ -540,14 +540,15 @@ export function SalesPage({
       <div className={selectedId ? "hidden" : "contents"} aria-hidden={selectedId ? true : undefined}>
       <ErpPageHeader
         title="Vendas"
+        eyebrow="Comercial"
         description="Gerencie pedidos e acompanhe suas vendas."
         actions={
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" variant="outline" className="min-h-9 border-blue-500 text-blue-700" disabled={!list.data?.items.length} onClick={exportCurrentPage} title="Exportar a página atual ou as vendas selecionadas em CSV"><Share2 className="mr-2 h-4 w-4" />Exportar</Button>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+            <Button type="button" variant="outline" className="min-h-10 flex-1 border-blue-500 text-blue-700 sm:flex-none" disabled={!list.data?.items.length} onClick={exportCurrentPage} title="Exportar a página atual ou as vendas selecionadas em CSV"><Share2 className="mr-2 h-4 w-4" />Exportar</Button>
           {canWrite && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button className="min-h-10 bg-blue-600 px-5 text-white shadow-sm hover:bg-blue-700">
+                <Button className="min-h-10 w-full flex-1 bg-blue-600 px-5 text-white shadow-sm hover:bg-blue-700 sm:w-auto sm:flex-none">
                   <Plus className="mr-2 h-4 w-4" /> Novo Pedido <ChevronDown className="ml-2 h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -585,20 +586,27 @@ export function SalesPage({
       <SalesMetrics data={metrics.data} loading={metrics.isLoading} periodLabel={metricPeriod.label} />
 
       <div className="min-w-0">
-        <section className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_8px_24px_-22px_rgba(15,23,42,0.45)]" aria-label="Lista comercial">
-          <nav className="flex gap-4 overflow-x-auto border-b border-slate-200 px-3 [scrollbar-width:thin] sm:gap-6 sm:px-5" aria-label="Tipos de venda">
+        <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_12px_28px_-26px_rgba(15,23,42,0.55)]" aria-label="Lista comercial">
+          <nav className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 py-2 [scrollbar-width:thin] sm:px-3" aria-label="Tipos de venda">
             {([ ["orders", "Vendas"], ["quotes", "Orçamentos"], ["all", "Todos"] ] as const).map(([value, label]) => (
-              <button key={value} type="button" aria-current={kind === value ? "page" : undefined} className={cn("shrink-0 whitespace-nowrap border-b-2 px-2 py-3 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 motion-reduce:transition-none sm:text-sm", kind === value ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-800")} onClick={() => { setKind(value); setStage("all"); setCommercialStatus("all"); setPage(1); }}>{label}</button>
+              <button key={value} type="button" aria-current={kind === value ? "page" : undefined} className={cn("shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-xs font-semibold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 motion-reduce:transition-none sm:text-sm", kind === value ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:bg-white/70 hover:text-slate-800")} onClick={() => { setKind(value); setStage("all"); setCommercialStatus("all"); setPage(1); }}>{label}</button>
             ))}
           </nav>
-          <div className="border-b border-slate-100 bg-slate-50/70 px-3 py-3 sm:px-5" data-testid="sales-filters">
-            <div className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200/80 bg-white p-2 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.7)] sm:grid-cols-2 lg:grid-cols-12">
+          <div className="border-b border-slate-100 bg-slate-50/70 px-3 py-4 sm:px-5" data-testid="sales-filters">
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-2.5">
+              <div>
+                <h2 className="text-sm font-bold tracking-tight text-slate-950">Encontre documentos</h2>
+                <p className="mt-0.5 text-xs text-slate-500">Busque por número, cliente, produto ou SKU.</p>
+              </div>
+              {activeFilterCount > 0 && <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800">{activeFilterCount} filtro{activeFilterCount === 1 ? "" : "s"} ativo{activeFilterCount === 1 ? "" : "s"}</span>}
+            </div>
+            <div className="grid grid-cols-1 gap-2.5 rounded-xl border border-slate-200/80 bg-white p-2.5 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.7)] sm:grid-cols-2 lg:grid-cols-12" data-testid="sales-filter-toolbar">
               <label className="relative min-w-0 sm:col-span-2 lg:col-span-4">
                 <span className="sr-only">Busca</span>
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
                 <Input
                   aria-label="Buscar por documento, cliente, produto ou SKU"
-                  className="h-9 border-slate-200 bg-slate-50/70 pl-8 text-xs shadow-none placeholder:text-slate-400 focus-visible:bg-white"
+                  className="h-10 border-slate-200 bg-slate-50/70 pl-8 text-sm shadow-none placeholder:text-slate-400 focus-visible:bg-white"
                   placeholder="Buscar por número ou cliente..."
                   value={search}
                   onChange={event => {
@@ -611,7 +619,7 @@ export function SalesPage({
                 <span className="sr-only">Período</span>
                 <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" />
                 <select
-                  className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2 text-xs font-medium text-slate-800 transition-colors focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2 text-xs font-medium text-slate-800 transition-colors focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                   value={from === month.from && to === month.to ? "month" : !from && !to ? "all" : "custom"}
                   onChange={event => { if (event.target.value === "month") { setFrom(month.from); setTo(month.to); } else if (event.target.value === "all") { setFrom(""); setTo(""); } else { setAdvancedFiltersOpen(true); } setPage(1); }}
                 >
@@ -622,7 +630,7 @@ export function SalesPage({
                 <span className="sr-only">Status</span>
                 <Filter className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" />
                 <select
-                  className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2 text-xs font-medium text-slate-800 transition-colors focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2 text-xs font-medium text-slate-800 transition-colors focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                   value={kind === "quotes" ? commercialStatus : stage}
                   onChange={event => {
                     if (kind === "quotes") setCommercialStatus(event.target.value as typeof commercialStatus);
@@ -637,18 +645,18 @@ export function SalesPage({
               <label className="relative min-w-0 lg:col-span-2">
                 <span className="sr-only">Vendedor</span>
                 <UserRound className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" />
-                <select className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2 text-xs font-medium text-slate-800 transition-colors focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={sellerUserId} onChange={event => { setSellerUserId(event.target.value); setPage(1); }}>
+                <select className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2 text-xs font-medium text-slate-800 transition-colors focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={sellerUserId} onChange={event => { setSellerUserId(event.target.value); setPage(1); }}>
                   <option value="all">Vendedor</option>{options.data?.sellers.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}
                 </select>
               </label>
-              <Button type="button" variant="outline" className="h-9 w-full min-w-[7.5rem] justify-between rounded-lg border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold shadow-none hover:bg-slate-100 lg:col-span-2" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
+              <Button type="button" variant="outline" className="h-10 w-full min-w-[7.5rem] justify-between rounded-lg border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold shadow-none hover:bg-slate-100 lg:col-span-2" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
                 <SlidersHorizontal className="mr-1 h-3.5 w-3.5" /> Filtros
                 {activeFilterCount > 0 && <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-800">{activeFilterCount}</span>}
               </Button>
             </div>
 
             {advancedFiltersOpen && (
-              <div className="mt-3 grid grid-cols-1 items-end gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-[0_12px_28px_-26px_rgba(15,23,42,0.8)] sm:grid-cols-2 xl:grid-cols-12" aria-label="Filtros avançados">
+              <div className="mt-3 grid grid-cols-1 items-end gap-2.5 rounded-xl border border-slate-200 bg-slate-50/80 p-3 shadow-[0_12px_28px_-26px_rgba(15,23,42,0.8)] sm:grid-cols-2 xl:grid-cols-12" aria-label="Filtros avançados">
                 <div className="relative min-w-0 xl:col-span-3">
                   <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">Cliente</span>
                   {filterCustomer ? (
@@ -1067,18 +1075,18 @@ function SalesMetrics({
     },
   ];
   return (
-    <section className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4" aria-label="Indicadores de vendas">
+    <section className="grid gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200 shadow-[0_10px_24px_-22px_rgba(15,23,42,0.5)] sm:grid-cols-2 lg:grid-cols-4" aria-label="Indicadores de vendas">
       {metrics.map(metric => (
-        <article key={metric.label} data-testid="sales-metric-card" className="flex min-h-[5.25rem] items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-[0_8px_20px_-20px_rgba(15,23,42,0.6)] transition-[border-color,box-shadow] duration-150 hover:border-slate-300 hover:shadow-[0_12px_24px_-20px_rgba(15,23,42,0.35)] focus-within:border-blue-300 focus-within:outline-none motion-reduce:transition-none">
-          <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-full", metric.label === "Ticket médio" ? "bg-emerald-50 text-emerald-600" : metric.label === "A receber" ? "bg-orange-50 text-orange-600" : "bg-blue-50 text-blue-600")}>
-            <metric.icon className="h-5 w-5" />
+        <article key={metric.label} data-testid="sales-metric-card" className="flex min-h-[6.25rem] items-center gap-3 bg-white px-4 py-4 transition-[background-color,box-shadow] duration-150 hover:bg-slate-50 focus-within:bg-blue-50/40 focus-within:outline-none motion-reduce:transition-none lg:px-5">
+          <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", metric.label === "Ticket médio" ? "bg-emerald-50 text-emerald-600" : metric.label === "A receber" ? "bg-orange-50 text-orange-600" : "bg-blue-50 text-blue-600")}>
+            <metric.icon className="h-4.5 w-4.5" />
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-medium text-slate-600">{metric.label}</p>
-            <p className="mt-0.5 truncate text-lg font-bold tracking-[-0.02em] text-slate-950 tabular-nums">
+            <p className="text-xs font-semibold text-slate-600">{metric.label}</p>
+            <p className="mt-1 truncate text-xl font-bold tracking-[-0.02em] text-slate-950 tabular-nums">
               {loading ? "Carregando…" : metric.value}
             </p>
-            <p className="sr-only">{metric.detail}</p>
+            <p className="mt-1 truncate text-[11px] text-slate-500" title={metric.detail}>{metric.detail}</p>
           </div>
         </article>
       ))}

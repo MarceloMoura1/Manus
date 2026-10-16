@@ -437,6 +437,8 @@ test("sales list keeps vertical table columns, compact KPIs and premium paginati
   await expect(page.getByRole("columnheader", { name: "Cliente" })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "Vendedor" })).toBeVisible();
   await expect(page.locator("table:visible colgroup col")).toHaveCount(9);
+  await expect(page.getByText("Encontre documentos", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("sales-filter-toolbar")).toBeVisible();
   expect(await salesRows.first().evaluate(element => element.tagName)).toBe("TR");
   const firstImage = salesRows.first().locator("img");
   await expect(firstImage).toBeVisible();
@@ -719,6 +721,9 @@ for (const viewport of [
       )
     ).toBe(true);
     if (viewport.width === 390) {
+      await expect(page.getByRole("button", { name: "Novo Pedido" })).toBeVisible();
+      const filters = page.getByTestId("sales-filter-toolbar");
+      expect(await filters.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       const firstMobileRow = page.locator('[data-testid^="sale-row-"]:visible').first();
       expect(await firstMobileRow.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       await capture(page, "sales-overview-narrow");
