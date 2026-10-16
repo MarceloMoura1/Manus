@@ -508,6 +508,13 @@ async function sealRuntimeTree(runtime, uid) {
   await chmod(runtime, root.mode & ~0o222);
 }
 
+async function makeSealedRuntimeMovable(runtime, uid) {
+  const info = await assertExclusivePath(runtime, "Staged runtime", uid, { directory: true });
+  // POSIX rename of a directory needs write permission on this source directory
+  // on the Linux runner. The lease remains held and every child stays sealed.
+  await chmod(runtime, info.mode | 0o200);
+}
+
 async function readActiveRelease(layout, activeLink) {
   const resolvedLink = path.resolve(activeLink);
   if (!isPathInside(resolvedLink, layout.root) || path.dirname(resolvedLink) !== layout.root) fail("Active release link must be directly inside the managed root.");
@@ -775,6 +782,8 @@ export async function activateStagedRelease({ managedRoot, activeLink, stageDire
     }
     await verifyManifest({ runtime, manifestPath: stagedManifestPath });
     await sealRuntimeTree(runtime, lease.uid);
+    await assertDeploymentLease(lease);
+    await makeSealedRuntimeMovable(runtime, lease.uid);
     await assertDeploymentLease(lease);
     const release = path.join(layout.releases, expected.commit);
     await assertAbsent(release, "Candidate release destination");

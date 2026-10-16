@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdtemp, mkdir, readFile, readlink, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, mkdir, readdir, readFile, readlink, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -108,8 +108,22 @@ async function expectActiveReleaseUntouched(layout, fixture) {
   await expect(lstat(path.join(layout.managedRoot, "releases", fixture.expected.commit))).rejects.toMatchObject({ code: "ENOENT" });
 }
 
+async function makeTreeRemovable(directory) {
+  const info = await lstat(directory);
+  if (info.isSymbolicLink()) return;
+  if (info.isDirectory()) {
+    for (const entry of await readdir(directory)) await makeTreeRemovable(path.join(directory, entry));
+    await chmod(directory, 0o700);
+    return;
+  }
+  if (info.isFile()) await chmod(directory, 0o600);
+}
+
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map(async (root) => {
+    await makeTreeRemovable(root);
+    await rm(root, { recursive: true, force: true });
+  }));
 });
 
 describe("linux ARM64 release deployment primitives", () => {
