@@ -436,6 +436,9 @@ test("sales list keeps vertical table columns, compact KPIs and premium paginati
   await expect(page.getByText("Mostrando 1–6 de 6 vendas")).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "Cliente" })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "Vendedor" })).toBeVisible();
+  await expect(page.locator("table:visible colgroup col")).toHaveCount(9);
+  await expect(page.getByText("Encontre documentos", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("sales-filter-toolbar")).toBeVisible();
   expect(await salesRows.first().evaluate(element => element.tagName)).toBe("TR");
   const firstImage = salesRows.first().locator("img");
   await expect(firstImage).toBeVisible();
@@ -452,6 +455,19 @@ test("sales list keeps vertical table columns, compact KPIs and premium paginati
   await capture(page, "sales-list-reference-width");
   await page.getByRole("button", { name: "Ações de venda VD-00126" }).click();
   await expect(page.getByRole("menuitem", { name: "Editar documento" })).toBeVisible();
+});
+
+test("sales makes the current page selection actionable and dismissible", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await prepare(page, { visualRows: true });
+  const firstRow = page.locator('table tbody [data-testid^="sale-row-"]:visible').first();
+  await firstRow.getByRole("checkbox").check();
+  const selection = page.getByTestId("sales-selection-summary");
+  await expect(selection).toContainText("1 documento selecionado nesta página.");
+  await expect(selection.getByRole("button", { name: "Exportar selecionados" })).toBeVisible();
+  await selection.getByRole("button", { name: "Limpar seleção" }).click();
+  await expect(selection).toHaveCount(0);
+  await expect(firstRow.getByRole("checkbox")).not.toBeChecked();
 });
 test("sales searches incrementally and reveals variants only on demand", async ({ page }) => {
   const counters = { customers: 0, catalog: 0 };
@@ -666,6 +682,7 @@ test("sales read-only omits writes", async ({ page }) => {
 });
 test("sales exposes empty state", async ({ page }) => {
   await prepare(page, { empty: true });
+  await expect(page.getByTestId("sales-list-state")).toBeVisible();
   await expect(
     page.getByText("Nenhuma venda encontrada neste período.")
   ).toBeVisible();
@@ -716,5 +733,12 @@ for (const viewport of [
           document.documentElement.clientWidth
       )
     ).toBe(true);
-    if (viewport.width === 390) await capture(page, "sales-overview-narrow");
+    if (viewport.width === 390) {
+      await expect(page.getByRole("button", { name: "Novo Pedido" })).toBeVisible();
+      const filters = page.getByTestId("sales-filter-toolbar");
+      expect(await filters.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      const firstMobileRow = page.locator('[data-testid^="sale-row-"]:visible').first();
+      expect(await firstMobileRow.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      await capture(page, "sales-overview-narrow");
+    }
   });
