@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: arm64-candidate-runtime-7f409c12cb5316949479fc018bd53785907689a6
+  group: arm64-candidate-runtime-eb6d1b0221854f87f8878afe44323ab0c7815699
   cancel-in-progress: false
 
 jobs:
@@ -16,8 +16,8 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     env:
-      EXPECTED_SHA: 7f409c12cb5316949479fc018bd53785907689a6
-      EXPECTED_TREE: 55d6dec9d6dbea353e2436e0504a15cccf65c0a1
+      EXPECTED_SHA: eb6d1b0221854f87f8878afe44323ab0c7815699
+      EXPECTED_TREE: 6b31e4a3724cb699a7cad44a2ee05094d50608fc
       EXPECTED_NODE: v22.23.2
       EXPECTED_PNPM: 10.18.0
       CI: "true"
@@ -33,7 +33,7 @@ jobs:
       - name: Check out the immutable candidate commit
         uses: actions/checkout@v4
         with:
-          ref: 7f409c12cb5316949479fc018bd53785907689a6
+          ref: eb6d1b0221854f87f8878afe44323ab0c7815699
           fetch-depth: 0
           persist-credentials: false
 
