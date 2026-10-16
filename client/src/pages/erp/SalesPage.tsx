@@ -541,7 +541,7 @@ export function SalesPage({
         title="Vendas"
         description="Gerencie pedidos e acompanhe suas vendas."
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <Button type="button" variant="outline" className="min-h-9 border-blue-500 text-blue-700" disabled={!list.data?.items.length} onClick={exportCurrentPage} title="Exportar a página atual ou as vendas selecionadas em CSV"><Share2 className="mr-2 h-4 w-4" />Exportar</Button>
           {canWrite && (
             <DropdownMenu>
@@ -585,14 +585,14 @@ export function SalesPage({
 
       <div className="min-w-0">
         <section className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_8px_24px_-22px_rgba(15,23,42,0.45)]" aria-label="Lista comercial">
-          <nav className="flex gap-4 border-b border-slate-200 px-3 sm:gap-6 sm:px-5" aria-label="Tipos de venda">
+          <nav className="flex gap-4 overflow-x-auto border-b border-slate-200 px-3 [scrollbar-width:thin] sm:gap-6 sm:px-5" aria-label="Tipos de venda">
             {([ ["orders", "Vendas"], ["quotes", "Orçamentos"], ["all", "Todos"] ] as const).map(([value, label]) => (
-              <button key={value} type="button" aria-current={kind === value ? "page" : undefined} className={cn("border-b-2 px-2 py-3 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 motion-reduce:transition-none sm:text-sm", kind === value ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-800")} onClick={() => { setKind(value); setStage("all"); setCommercialStatus("all"); setPage(1); }}>{label}</button>
+              <button key={value} type="button" aria-current={kind === value ? "page" : undefined} className={cn("shrink-0 whitespace-nowrap border-b-2 px-2 py-3 text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 motion-reduce:transition-none sm:text-sm", kind === value ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-800")} onClick={() => { setKind(value); setStage("all"); setCommercialStatus("all"); setPage(1); }}>{label}</button>
             ))}
           </nav>
           <div className="border-b border-slate-100 bg-slate-50/70 px-3 py-3 sm:px-5" data-testid="sales-filters">
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200/80 bg-white p-2 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.7)]">
-              <label className="relative min-w-0 flex-[2_1_18rem]">
+            <div className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200/80 bg-white p-2 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.7)] sm:grid-cols-2 lg:grid-cols-12">
+              <label className="relative min-w-0 sm:col-span-2 lg:col-span-4">
                 <span className="sr-only">Busca</span>
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
                 <Input
@@ -606,7 +606,7 @@ export function SalesPage({
                   }}
                 />
               </label>
-              <label className="relative min-w-[8.25rem] flex-1">
+              <label className="relative min-w-0 lg:col-span-2">
                 <span className="sr-only">Período</span>
                 <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" />
                 <select
@@ -617,7 +617,7 @@ export function SalesPage({
                   <option value="month">Este mês</option><option value="all">Todo o período</option><option value="custom">Personalizado</option>
                 </select>
               </label>
-              <label className="relative min-w-[8.25rem] flex-1">
+              <label className="relative min-w-0 lg:col-span-2">
                 <span className="sr-only">Status</span>
                 <Filter className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" />
                 <select
@@ -633,22 +633,22 @@ export function SalesPage({
                   {kind === "quotes" ? (["draft", "negotiation", "approved", "converted", "lost"] as const).map(value => <option key={value} value={value}>{commercialStatusLabels[value]}</option>) : stageOrder.map(value => <option key={value} value={value}>{stageLabels[value]}</option>)}
                 </select>
               </label>
-              <label className="relative min-w-[8.25rem] flex-1">
+              <label className="relative min-w-0 lg:col-span-2">
                 <span className="sr-only">Vendedor</span>
                 <UserRound className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" />
                 <select className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2 text-xs font-medium text-slate-800 transition-colors focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={sellerUserId} onChange={event => { setSellerUserId(event.target.value); setPage(1); }}>
                   <option value="all">Vendedor</option>{options.data?.sellers.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}
                 </select>
               </label>
-              <Button type="button" variant="outline" className="h-9 min-w-[7.5rem] flex-1 justify-between rounded-lg border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold shadow-none hover:bg-slate-100 sm:flex-none" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
+              <Button type="button" variant="outline" className="h-9 w-full min-w-[7.5rem] justify-between rounded-lg border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold shadow-none hover:bg-slate-100 lg:col-span-2" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
                 <SlidersHorizontal className="mr-1 h-3.5 w-3.5" /> Filtros
                 {activeFilterCount > 0 && <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-800">{activeFilterCount}</span>}
               </Button>
             </div>
 
             {advancedFiltersOpen && (
-              <div className="mt-3 grid grid-cols-1 items-end gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-[0_12px_28px_-26px_rgba(15,23,42,0.8)] sm:grid-cols-2 xl:grid-cols-5" aria-label="Filtros avançados">
-                <div className="relative min-w-0">
+              <div className="mt-3 grid grid-cols-1 items-end gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-[0_12px_28px_-26px_rgba(15,23,42,0.8)] sm:grid-cols-2 xl:grid-cols-12" aria-label="Filtros avançados">
+                <div className="relative min-w-0 xl:col-span-3">
                   <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">Cliente</span>
                   {filterCustomer ? (
                     <div className="mt-1 flex h-9 items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-xs text-blue-950">
@@ -672,20 +672,20 @@ export function SalesPage({
                     </>
                   )}
                 </div>
-                <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">Pagamento
+                <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 xl:col-span-2">Pagamento
                   <select className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 px-2.5 text-xs font-medium normal-case tracking-normal text-slate-800 focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={paymentStatus} onChange={event => { setPaymentStatus(event.target.value as typeof paymentStatus); setPage(1); }}>
                     <option value="all">Todos os pagamentos</option><option value="pending">Pendente</option><option value="partial">Pagamento parcial</option><option value="paid">Pago</option>
                   </select>
                 </label>
-                <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">Forma de pagamento
+                <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 xl:col-span-3">Forma de pagamento
                   <select className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 px-2.5 text-xs font-medium normal-case tracking-normal text-slate-800 focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={paymentMethod} onChange={event => { setPaymentMethod(event.target.value); setPage(1); }}>
                     <option value="all">Todas as formas</option>{options.data?.paymentMethods.map(value => <option key={value} value={value}>{value}</option>)}
                   </select>
                 </label>
-                <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">Período personalizado
+                <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 xl:col-span-2">Período personalizado
                   <span className="mt-1 grid grid-cols-2 gap-1"><Input className="h-9 border-slate-200 bg-slate-50/70 px-2 text-xs focus-visible:bg-white" type="date" aria-label="Data inicial" value={from} onChange={event => { setFrom(event.target.value); setPage(1); }} /><Input className="h-9 border-slate-200 bg-slate-50/70 px-2 text-xs focus-visible:bg-white" type="date" aria-label="Data final" value={to} onChange={event => { setTo(event.target.value); setPage(1); }} /></span>
                 </label>
-                <label className="flex h-9 self-end items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100"><input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" checked={includeArchived} onChange={event => { setIncludeArchived(event.target.checked); setPage(1); }} />Incluir arquivados</label>
+                <label className="flex h-9 self-end items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 xl:col-span-2"><input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" checked={includeArchived} onChange={event => { setIncludeArchived(event.target.checked); setPage(1); }} />Incluir arquivados</label>
               </div>
             )}
 
@@ -725,9 +725,20 @@ export function SalesPage({
             />
           ) : (
             <div className="min-w-0">
-              <div className="hidden overflow-x-auto md:block">
-                <table className="min-w-[1120px] w-full text-sm">
-                  <thead className="bg-slate-50 text-left text-xs text-slate-600">
+              <div className="hidden overflow-x-auto [scrollbar-gutter:stable] md:block">
+                <table className="min-w-[1160px] w-full text-sm">
+                  <colgroup>
+                    <col className="w-10" />
+                    <col className="w-[27%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-16" />
+                  </colgroup>
+                  <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold text-slate-600">
                     <tr>
                       <th className="px-2 py-2"><input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" aria-label="Selecionar documentos desta página" checked={list.data.items.every(order => selectedSaleIds.includes(order.publicId))} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...new Set([...current, ...list.data!.items.map(order => order.publicId)])] : current.filter(id => !list.data!.items.some(order => order.publicId === id)))} /></th>
                       <th className="px-2 py-2">{kind === "quotes" ? "Orçamento" : kind === "orders" ? "Venda" : "Documento"}</th><th className="px-2 py-2">Cliente</th><th className="px-2 py-2">Data</th><th className="px-2 py-2">Vendedor</th><th className="px-2 py-2 text-right">Total</th><th className="px-2 py-2">{kind === "quotes" ? "Situação" : "Pagamento"}</th><th className="px-2 py-2">{kind === "quotes" ? "Fluxo" : "Status"}</th><th className="px-2 py-2 text-center">Ações</th>
@@ -760,13 +771,13 @@ export function SalesPage({
           )}
 
           {list.data && (
-            <div className="m-3 flex flex-col gap-3 rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 px-3 py-3 text-xs text-slate-200 shadow-[0_18px_34px_-24px_rgba(15,23,42,0.9)] sm:m-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4" data-testid="sales-premium-pagination">
-              <span className="tabular-nums text-slate-300">
+            <div className="m-3 grid gap-3 rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 px-3 py-3 text-xs text-slate-200 shadow-[0_18px_34px_-24px_rgba(15,23,42,0.9)] sm:m-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-4" data-testid="sales-premium-pagination">
+              <span className="min-w-0 tabular-nums text-slate-300">
                 {list.data.total === 0
                   ? `Nenhum ${entityLabel}`
                   : `Mostrando ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, list.data.total)} de ${list.data.total} ${entityLabelPlural}`}
               </span>
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3 sm:justify-end">
                 <label className="flex items-center gap-2 text-xs font-semibold text-slate-200">
                   Itens por página
                   <select

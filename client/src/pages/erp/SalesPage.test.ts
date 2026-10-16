@@ -272,12 +272,14 @@ describe("ERP Vendas B+C interface", () => {
 
   it("keeps a vertical desktop table, anchored filters and the existing premium pagination", () => {
     expect(source).toContain('data-testid={`sale-row-${order.publicId}`}');
-    expect(source).toContain('className="min-w-[1120px] w-full text-sm"');
+    expect(source).toContain('className="min-w-[1160px] w-full text-sm"');
     expect(source).toContain('<th className="px-2 py-2">Cliente</th>');
     expect(source).toContain('<th className="px-2 py-2">Vendedor</th>');
     expect(source).toContain("firstProductImage?.thumbnailPath");
     expect(source).toContain('text-sm font-bold text-slate-900');
-    expect(source).toContain('flex flex-wrap items-center gap-2 rounded-xl border');
+    expect(source).toContain('grid grid-cols-1 gap-2 rounded-xl border');
+    expect(source).toContain('sm:grid-cols-2 lg:grid-cols-12');
+    expect(source).toContain('xl:grid-cols-12');
     expect(source).toContain('data-testid="sales-customer-filter-options"');
     expect(source).not.toContain('min-[980px]:grid-cols');
     expect(source).not.toContain('min-w-[min(18rem,calc(100vw-2rem))]');
@@ -285,6 +287,7 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain('lg:grid-cols-4');
     expect(source).toContain('data-testid="sales-premium-pagination"');
     expect(source).toContain("from-slate-950 via-slate-900 to-slate-800");
+    expect(source).toContain('sm:grid-cols-[minmax(0,1fr)_auto]');
     expect(source).toContain("salesPaginationItems(page, list.data.totalPages)");
     expect(source).toContain("activeFilterCount");
     expect(source).toContain("motion-reduce:transition-none");
