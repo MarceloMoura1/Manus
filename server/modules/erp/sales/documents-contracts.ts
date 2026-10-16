@@ -14,14 +14,24 @@ export const allowedSaleDocumentMimeTypes = allowedClientFileMimeTypes;
 export const saleDocumentTypes = [
   "invoice",
   "content_declaration",
+  "quote_pdf",
   "other",
 ] as const;
 
 export type SaleDocumentType = (typeof saleDocumentTypes)[number];
 
+// Generated quotes are a server-owned snapshot. They deliberately stay out of
+// the upload contract so a browser cannot present an arbitrary PDF as one.
+export const manuallyUploadedSaleDocumentTypes = [
+  "invoice",
+  "content_declaration",
+  "other",
+] as const;
+
 export const SALE_DOCUMENT_TYPE_LABELS: Record<SaleDocumentType, string> = {
   invoice: "Nota fiscal",
   content_declaration: "Declaração de conteúdo",
+  quote_pdf: "Orçamento em PDF",
   other: "Outros",
 };
 
@@ -32,7 +42,7 @@ export const saleDocumentListInput = z.object({
 export const saleDocumentUploadInput = z.object({
   salePublicId: z.string().uuid(),
   idempotencyKey: z.string().uuid(),
-  documentType: z.enum(saleDocumentTypes),
+  documentType: z.enum(manuallyUploadedSaleDocumentTypes),
   fileName: z.string().trim().min(1, "Nome do arquivo obrigatório.").max(255),
   description: z.string().trim().max(500).optional().nullable().transform(value => value || null),
   mimeType: z.string().trim().min(1).max(128),
@@ -49,12 +59,18 @@ export const saleDocumentDeleteInput = z.object({
 
 export const saleDocumentDownloadInput = saleDocumentDeleteInput;
 
+export const quotePdfGenerationInput = z.object({
+  salePublicId: z.string().uuid(),
+  idempotencyKey: z.string().uuid(),
+});
+
 export const customerSalesInput = z.object({
   crmClientId: z.string().trim().min(1).max(80),
 });
 
 export type SaleDocumentUploadInput = z.infer<typeof saleDocumentUploadInput>;
 export type SaleDocumentDeleteInput = z.infer<typeof saleDocumentDeleteInput>;
+export type QuotePdfGenerationInput = z.infer<typeof quotePdfGenerationInput>;
 
 export type SaleDocumentView = {
   publicId: string;

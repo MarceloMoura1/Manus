@@ -125,6 +125,31 @@ describe("sale documents service", () => {
     expect(storage.write).toHaveBeenCalledTimes(1);
   });
 
+  it("persists a server-generated quote only under the fixed quote PDF type", async () => {
+    const { service, repository, storage } = harness();
+    const generated = await service.storeGeneratedQuotePdf(admin, {
+      salePublicId,
+      idempotencyKey: "88888888-8888-4888-8888-888888888888",
+      fileName: "orcamento-O-1024.pdf",
+      description: "PDF gerado a partir do orçamento O-1024.",
+      bytes: Buffer.from("%PDF-1.4\n%EOF\n"),
+    });
+
+    expect(generated.documentType).toBe("quote_pdf");
+    expect(repository.reserveUpload).toHaveBeenCalledWith(tenant, salePublicId, expect.objectContaining({
+      documentType: "quote_pdf",
+      mimeType: "application/pdf",
+    }));
+    expect(storage.write).toHaveBeenCalledTimes(1);
+    await expect(service.storeGeneratedQuotePdf(viewer, {
+      salePublicId,
+      idempotencyKey: "77777777-7777-4777-8777-777777777777",
+      fileName: "orcamento-O-1024.pdf",
+      description: null,
+      bytes: Buffer.from("%PDF-1.4\n%EOF\n"),
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
   it("keeps a retryable reservation when finalization fails after the physical write", async () => {
     const { service, repository, storage } = harness();
     repository.finalizeUpload.mockRejectedValueOnce(new Error("synthetic finalization rollback"));

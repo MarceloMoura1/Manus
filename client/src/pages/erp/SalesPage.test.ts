@@ -60,6 +60,15 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain("downloadUrl");
   });
 
+  it("offers a server-generated PDF action only in a quote detail", () => {
+    expect(source).toContain('isQuote={order.documentType === "quote"}');
+    expect(source).toContain("documents.generateQuotePdf.useMutation");
+    expect(source).toContain("Gerar PDF");
+    expect(source).toContain('return generatedQuotePdf ? "PDF do orçamento gerado" : "Documento anexado";');
+    expect(source).toContain('const saleDocumentTypeLabels = {');
+    expect(source).not.toContain('quote_pdf: "Orçamento em PDF",');
+  });
+
   it("includes loading, empty, error, denied and responsive compositions", () => {
     expect(source).toContain("Carregando ${entityLabelPlural}");
     expect(source).toContain("Nenhum ${entityLabel} encontrado");

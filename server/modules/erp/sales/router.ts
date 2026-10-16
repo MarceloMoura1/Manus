@@ -23,10 +23,13 @@ import {
   saleDocumentDeleteInput,
   saleDocumentListInput,
   saleDocumentUploadInput,
+  quotePdfGenerationInput,
 } from "./documents-contracts";
 import { SaleDocumentService } from "./documents-service";
+import { QuotePdfService } from "./quote-pdf-service";
 const service = new SaleService();
 const documentService = new SaleDocumentService();
+const quotePdfService = new QuotePdfService();
 type Context = {
   tenantId: string;
   operationalUserId: string;
@@ -165,6 +168,13 @@ export const salesRouter = router({
       .mutation(({ ctx, input }) =>
         runSalesOperation("sales.documents.upload", () =>
           documentService.upload(identity(ctx), input)
+        )
+      ),
+    generateQuotePdf: salesProcedure
+      .input(quotePdfGenerationInput)
+      .mutation(({ ctx, input }) =>
+        runSalesOperation("sales.documents.generateQuotePdf", () =>
+          quotePdfService.generate(identity(ctx), input)
         )
       ),
     delete: salesProcedure

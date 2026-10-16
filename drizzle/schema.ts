@@ -3350,6 +3350,7 @@ export const erpSaleDocuments = mysqlTable(
     documentType: mysqlEnum("document_type", [
       "invoice",
       "content_declaration",
+      "quote_pdf",
       "other",
     ]).notNull(),
     uploadIdempotencyKey: varchar("upload_idempotency_key", { length: 36 }).notNull(),

@@ -1339,6 +1339,7 @@ function SaleDetailPanel({
           <SaleDocuments
             salePublicId={order.publicId}
             canWrite={canWrite && !order.cancelled}
+            isQuote={order.documentType === "quote"}
           />
         </div>
 
@@ -2087,7 +2088,7 @@ function fileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function SaleDocuments({ salePublicId, canWrite }: { salePublicId: string; canWrite: boolean }) {
+function SaleDocuments({ salePublicId, canWrite, isQuote }: { salePublicId: string; canWrite: boolean; isQuote: boolean }) {
   const utils = trpc.useUtils();
   const query = trpc.erp.sales.documents.list.useQuery({ salePublicId });
   const [open, setOpen] = React.useState(false);
@@ -2110,6 +2111,13 @@ function SaleDocuments({ salePublicId, canWrite }: { salePublicId: string; canWr
       await refresh();
     },
     onError: mutationError => setError(mutationError.message || "Não foi possível anexar o documento."),
+  });
+  const generateQuotePdf = trpc.erp.sales.documents.generateQuotePdf.useMutation({
+    onSuccess: async () => {
+      setError("");
+      await refresh();
+    },
+    onError: mutationError => setError(mutationError.message || "Não foi possível gerar o PDF do orçamento."),
   });
   const remove = trpc.erp.sales.documents.delete.useMutation({
     onSuccess: refresh,
@@ -2154,12 +2162,19 @@ function SaleDocuments({ salePublicId, canWrite }: { salePublicId: string; canWr
       base64,
     }).catch(() => undefined);
   };
+  const generate = () => {
+    setError("");
+    generateQuotePdf.mutate({ salePublicId, idempotencyKey: crypto.randomUUID() });
+  };
 
   return (
     <section aria-label="Documentos privados da venda">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900"><Paperclip className="h-4 w-4 text-slate-500" />Documentos</h3>
-        {canWrite && <Button type="button" size="sm" variant="outline" className="border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100" onClick={() => { setError(""); uploadAttemptRef.current = null; setOpen(true); }}><UploadCloud className="mr-1 h-3.5 w-3.5" />Anexar</Button>}
+        <div className="flex flex-wrap items-center gap-2">
+          {canWrite && isQuote && <Button type="button" size="sm" disabled={generateQuotePdf.isPending} className="bg-blue-700 text-white hover:bg-blue-800" onClick={generate}>{generateQuotePdf.isPending ? "Gerando PDF…" : "Gerar PDF"}</Button>}
+          {canWrite && <Button type="button" size="sm" variant="outline" className="border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100" onClick={() => { setError(""); uploadAttemptRef.current = null; setOpen(true); }}><UploadCloud className="mr-1 h-3.5 w-3.5" />Anexar</Button>}
+        </div>
       </div>
       <p className="mt-1 text-xs leading-5 text-slate-500">Arquivos privados vinculados ao pedido e exibidos no cadastro do cliente sem duplicação física.</p>
       {error && !open && <p role="alert" className="mt-2 rounded-lg bg-rose-50 p-2 text-xs text-rose-800">{error}</p>}
@@ -2236,7 +2251,11 @@ function eventLabel(
   if (eventType === "cancelled") return "Venda cancelada";
   if (eventType === "address_corrected") return "Endereço corrigido";
   if (eventType === "payment_registered") return "Recebimento registrado";
-  if (eventType === "document_added") return "Documento anexado";
+  if (eventType === "document_added") {
+    const generatedQuotePdf = typeof after === "object" && after !== null &&
+      (after as Record<string, unknown>).documentType === "quote_pdf";
+    return generatedQuotePdf ? "PDF do orçamento gerado" : "Documento anexado";
+  }
   if (eventType === "document_removed") return "Documento removido";
   if (eventType === "duplicated") return "Documento duplicado";
   if (eventType === "quote_status_changed") {

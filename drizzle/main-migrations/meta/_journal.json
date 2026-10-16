@@ -283,6 +283,13 @@
       "when": 1791766599704,
       "tag": "0039_sweet_firelord",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "5",
+      "when": 1792162607142,
+      "tag": "0040_whole_exiles",
+      "breakpoints": true
     }
   ]
 }

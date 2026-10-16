@@ -24,6 +24,11 @@ import { registerSaleDocumentRoutes } from "../modules/erp/sales/documents-http"
 import { startTicketAttachmentReconciler } from "../chamados-attachment-reconciler";
 import { createSupplierUploadIngressMiddleware } from "./media-ingress";
 import {
+  assertDisposableRuntimeConfig,
+  isDisposableRuntimeEnabled,
+  shouldStartTicketAttachmentReconciler,
+} from "./disposable-runtime";
+import {
   createFreezeAwareWebhookHandler,
   createWriteFreezeHttpMiddleware,
   getWriteFreezeCoordinator,
@@ -85,6 +90,8 @@ async function findAvailablePort(startPort = 3000): Promise<number> {
 }
 
 async function startServer() {
+  const disposableRuntime = isDisposableRuntimeEnabled();
+  if (disposableRuntime) assertDisposableRuntimeConfig();
   const app = express();
   const server = createServer(app);
   const releaseSha = process.env.MEGADESK_RELEASE_SHA?.trim() || null;
@@ -192,14 +199,14 @@ async function startServer() {
   }
 
   const preferredPort = parseInt(process.env.PORT ?? "3000");
-  const port = await findAvailablePort(preferredPort);
-  if (port !== preferredPort) {
+  const port = disposableRuntime ? preferredPort : await findAvailablePort(preferredPort);
+  if (!disposableRuntime && port !== preferredPort) {
     console.log(`Port ${preferredPort} busy, using ${port}`);
   }
 
   const listenHost = process.env.HOST?.trim();
   const onListening = () => {
-    startTicketAttachmentReconciler();
+    if (shouldStartTicketAttachmentReconciler()) startTicketAttachmentReconciler();
     const displayHost = listenHost || "localhost";
     console.log(`\nMegaDesk rodando em http://${displayHost}:${port}`);
     console.log(`Admin:  http://${displayHost}:${port}/admin\n`);
