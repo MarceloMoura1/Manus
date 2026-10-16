@@ -87,6 +87,18 @@ describe("sales router authorization and error boundary", () => {
     });
   });
 
+  it("applies the ERP gate before generating a quote PDF", async () => {
+    await expect(
+      salesRouter.createCaller(context("admin", ["clients"])).documents.generateQuotePdf({
+        salePublicId: "11111111-1111-4111-8111-111111111111",
+        idempotencyKey: "22222222-2222-4222-8222-222222222222",
+      })
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "Acesso ao módulo ERP indisponível.",
+    });
+  });
+
   it("returns a stable public error and logs only safe diagnostics", async () => {
     const diagnostic = Object.assign(
       new Error("password=super-secret; SELECT * FROM private_table"),

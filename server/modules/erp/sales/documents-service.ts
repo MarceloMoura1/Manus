@@ -15,6 +15,7 @@ import {
   canManageSaleDocuments,
   SALE_DOCUMENT_TYPE_LABELS,
   type SaleDocumentDeleteInput,
+  type SaleDocumentType,
   type SaleDocumentUploadInput,
   type SaleDocumentView,
 } from "./documents-contracts";
@@ -34,6 +35,16 @@ type Storage = {
   write(clientId: string, storageKey: string, bytes: Buffer): Promise<string>;
   read(clientId: string, storageKey: string): Promise<Buffer>;
   delete(clientId: string, storageKey: string): Promise<void>;
+};
+
+type PersistDocumentInput = {
+  salePublicId: string;
+  idempotencyKey: string;
+  documentType: SaleDocumentType;
+  fileName: string;
+  description: string | null;
+  mimeType: string;
+  bytes: Buffer;
 };
 
 const defaultStorage: Storage = {
@@ -99,10 +110,33 @@ export class SaleDocumentService {
   }
 
   async upload(identity: Identity, input: SaleDocumentUploadInput): Promise<SaleDocumentView> {
+    const bytes = decodeBase64(input.base64);
+    return this.persist(identity, {
+      salePublicId: input.salePublicId,
+      idempotencyKey: input.idempotencyKey,
+      documentType: input.documentType,
+      fileName: input.fileName,
+      description: input.description ?? null,
+      mimeType: input.mimeType,
+      bytes,
+    });
+  }
+
+  async storeGeneratedQuotePdf(
+    identity: Identity,
+    input: Pick<PersistDocumentInput, "salePublicId" | "idempotencyKey" | "fileName" | "description" | "bytes">
+  ): Promise<SaleDocumentView> {
+    return this.persist(identity, {
+      ...input,
+      documentType: "quote_pdf",
+      mimeType: "application/pdf",
+    });
+  }
+
+  private async persist(identity: Identity, input: PersistDocumentInput): Promise<SaleDocumentView> {
     this.assertManage(identity);
     const fileName = sanitizeFileName(input.fileName);
-    const bytes = decodeBase64(input.base64);
-    const inspected = await validateAndInspectFile(bytes, input.mimeType);
+    const inspected = await validateAndInspectFile(input.bytes, input.mimeType);
     const storageKey = randomUUID();
     const filePublicId = randomUUID();
     const documentPublicId = randomUUID();
@@ -112,7 +146,7 @@ export class SaleDocumentService {
       fileName,
       description: input.description ?? null,
       mimeType: inspected.mimeType,
-      sizeBytes: bytes.length,
+      sizeBytes: input.bytes.length,
       sha256: inspected.sha256,
     })).digest("hex");
     const reservation = await this.repository.reserveUpload(
@@ -125,7 +159,7 @@ export class SaleDocumentService {
         fileName,
         description: input.description ?? null,
         mimeType: inspected.mimeType,
-        sizeBytes: bytes.length,
+        sizeBytes: input.bytes.length,
         sha256: inspected.sha256,
         documentType: input.documentType,
         idempotencyKey: input.idempotencyKey,
@@ -171,7 +205,7 @@ export class SaleDocumentService {
         await this.storage.write(
           identity.clientId,
           reservation.document.storage_key,
-          bytes
+          input.bytes
         );
       } catch (writeError) {
         physicalState = await probePhysical();

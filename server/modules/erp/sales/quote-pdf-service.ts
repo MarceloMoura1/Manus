@@ -1,0 +1,96 @@
+import { getCompanySettings } from "../../../db-company";
+import type { OperationalRole } from "../contracts";
+import { ErpDomainError } from "../errors";
+import { canWriteSales } from "./contracts";
+import { SaleDocumentService } from "./documents-service";
+import { SaleRepository } from "./repository";
+import { renderQuotePdf } from "./quote-pdf";
+
+type Identity = {
+  clientId: string;
+  userId: string;
+  userName: string | null;
+  role: OperationalRole;
+};
+
+type QuoteRepository = Pick<SaleRepository, "detail">;
+type QuoteDocumentStore = Pick<SaleDocumentService, "storeGeneratedQuotePdf">;
+type CompanySettingsReader = typeof getCompanySettings;
+
+/**
+ * Creates an immutable, tenant-owned PDF snapshot for an existing quote.  It
+ * intentionally uses the persisted order details instead of any browser data.
+ */
+export class QuotePdfService {
+  constructor(
+    private readonly repository: QuoteRepository = new SaleRepository(),
+    private readonly documents: QuoteDocumentStore = new SaleDocumentService(),
+    private readonly companySettings: CompanySettingsReader = getCompanySettings
+  ) {}
+
+  private assertWrite(identity: Identity): void {
+    if (!canWriteSales(identity.role)) {
+      throw new ErpDomainError(
+        "FORBIDDEN",
+        "Seu perfil possui acesso somente leitura aos orçamentos de Vendas."
+      );
+    }
+  }
+
+  async generate(identity: Identity, input: { salePublicId: string; idempotencyKey: string }) {
+    this.assertWrite(identity);
+
+    // `detail` scopes both the quote and all of its snapshots by clientId.
+    const quote = await this.repository.detail(identity.clientId, input.salePublicId);
+    if (!quote || quote.documentType !== "quote") {
+      throw new ErpDomainError("NOT_FOUND", "Orçamento não encontrado.");
+    }
+    if (quote.archivedAt) {
+      throw new ErpDomainError(
+        "CONFLICT",
+        "Não é possível gerar um novo PDF para um orçamento arquivado."
+      );
+    }
+
+    const company = await this.companySettings(identity.clientId);
+    const bytes = renderQuotePdf({
+      company: {
+        name: company?.companyName ?? null,
+        email: company?.primaryEmail ?? null,
+        phone: company?.primaryPhone ?? null,
+        whatsapp: company?.primaryWhatsapp ?? null,
+        address: company?.address ?? null,
+      },
+      quote: {
+        number: quote.orderNumber,
+        issuedOn: quote.commercialDate,
+        customerName: quote.customerName,
+        commercialStatus: quote.commercialStatus,
+        paymentTerms: quote.paymentTerms,
+        notes: quote.notes,
+        items: quote.items.map(item => ({
+          description: item.productName,
+          sku: item.sku,
+          quantity: item.quantity,
+          unit: item.unit,
+          unitPriceCents: item.unitPriceCents,
+          discountCents: item.discountCents,
+          lineTotalCents: item.lineTotalCents,
+        })),
+        subtotalCents: quote.subtotalCents,
+        discountCents: quote.discountCents,
+        freightCents: quote.freightCents,
+        chargesCents: quote.chargesCents,
+        totalCents: quote.totalCents,
+      },
+    });
+
+    return this.documents.storeGeneratedQuotePdf(identity, {
+      salePublicId: input.salePublicId,
+      idempotencyKey: input.idempotencyKey,
+      fileName: `orcamento-${quote.orderNumber}.pdf`,
+      description: `PDF gerado a partir do orçamento ${quote.orderNumber}.`,
+      bytes,
+    });
+  }
+}
