@@ -79,7 +79,7 @@ commit ativo no host durante a janela.
    permissões do operador. A cópia não é confiável até o comando abaixo passar:
 
    ```bash
-   pnpm release:linux-arm64-deploy -- verify \
+   pnpm release:linux-arm64-deploy verify \
      --tar <entrada-nova>/megadesk-runtime-eb6d1b0221854f87f8878afe44323ab0c7815699-linux-arm64.tar.gz \
      --manifest <entrada-nova>/megadesk-runtime-eb6d1b0221854f87f8878afe44323ab0c7815699-linux-arm64.manifest.json \
      --expected-artifact-name megadesk-runtime-eb6d1b0221854f87f8878afe44323ab0c7815699-linux-arm64.tar.gz \
@@ -95,7 +95,7 @@ commit ativo no host durante a janela.
    o recibo não puder ser revalidado.
 
    ```bash
-   pnpm release:linux-arm64-deploy -- backup \
+   pnpm release:linux-arm64-deploy backup \
      --managed-root /opt/megadesk/app \
      --active-link /opt/megadesk/app/current \
      --configuration-root <raiz-configuracao-aprovada> \
@@ -113,7 +113,7 @@ commit ativo no host durante a janela.
    antes de registrar o mecanismo de restart e os health checks reais do host.
 
    ```bash
-   pnpm release:linux-arm64-deploy -- stage \
+   pnpm release:linux-arm64-deploy stage \
      --managed-root /opt/megadesk/app \
      --tar <entrada-nova>/megadesk-runtime-eb6d1b0221854f87f8878afe44323ab0c7815699-linux-arm64.tar.gz \
      --manifest <entrada-nova>/megadesk-runtime-eb6d1b0221854f87f8878afe44323ab0c7815699-linux-arm64.manifest.json \
@@ -123,7 +123,7 @@ commit ativo no host durante a janela.
      --expected-commit eb6d1b0221854f87f8878afe44323ab0c7815699 \
      --expected-tree 6b31e4a3724cb699a7cad44a2ee05094d50608fc
 
-   pnpm release:linux-arm64-deploy -- activate \
+   pnpm release:linux-arm64-deploy activate \
      --managed-root /opt/megadesk/app \
      --active-link /opt/megadesk/app/current \
      --stage <stage-passado-pelo-comando-anterior> \
@@ -140,7 +140,7 @@ commit ativo no host durante a janela.
    status quanto o SHA da candidata:
 
    ```bash
-   pnpm release:linux-arm64-deploy -- health \
+   pnpm release:linux-arm64-deploy health \
      --url http://127.0.0.1:<porta-aprovada>/healthz \
      --expected-commit eb6d1b0221854f87f8878afe44323ab0c7815699
    ```
@@ -151,7 +151,7 @@ commit ativo no host durante a janela.
    o ponteiro de código anterior e repetir os health checks:
 
    ```bash
-   pnpm release:linux-arm64-deploy -- rollback \
+   pnpm release:linux-arm64-deploy rollback \
      --managed-root /opt/megadesk/app \
      --active-link /opt/megadesk/app/current \
      --backup-receipt <recibo-backup-verificado>

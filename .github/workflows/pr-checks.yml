@@ -132,7 +132,7 @@ jobs:
           MANIFEST="$(find "$PACKAGE_ROOT" -type f -name "megadesk-runtime-${CANDIDATE_COMMIT}-linux-arm64.manifest.json" -print -quit)"
           test -n "$TAR"
           test -n "$MANIFEST"
-          pnpm release:linux-arm64-deploy -- verify \
+          pnpm release:linux-arm64-deploy verify \
             --tar "$TAR" \
             --manifest "$MANIFEST" \
             --expected-artifact-name "megadesk-runtime-${CANDIDATE_COMMIT}-linux-arm64.tar.gz" \
