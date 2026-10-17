@@ -113,8 +113,11 @@ describe("ERP Vendas B+C interface", () => {
 
   it("offers one primary filter bar and server-side page sizes", () => {
     expect(source).toContain('eyebrow="Comercial"');
-    expect(source).toContain("Encontre documentos");
+    expect(source).not.toContain("Encontre documentos");
+    expect(source).not.toContain("Busque por número, cliente, produto ou SKU.");
     expect(source).toContain("Buscar por número ou cliente...");
+    expect(source).toContain('<option value="all">Todos</option>');
+    expect(source).toContain("salesFilterPeriodLabel(from, to, month.from, month.to)");
     expect(source).toContain("Tipos de venda");
     expect(source).toContain("Filtros avançados");
     expect(source).toContain('data-testid="sales-filter-toolbar"');
@@ -123,13 +126,13 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain("salesPaginationItems(page, list.data.totalPages)");
   });
 
-  it("announces operation feedback and makes the existing page selection actionable", () => {
+  it("announces operation feedback and removes row selection without affecting row actions", () => {
     expect(source).toContain('data-testid="sales-feedback"');
     expect(source).toContain('aria-live={pendingError || localError ? "assertive" : "polite"}');
-    expect(source).toContain("selectedOnPageCount");
-    expect(source).toContain('data-testid="sales-selection-summary"');
-    expect(source).toContain("Exportar selecionados");
-    expect(source).toContain("Limpar seleção");
+    expect(source).not.toContain("selectedSaleIds");
+    expect(source).not.toContain("Selecionar documentos desta página");
+    expect(source).not.toContain('data-testid="sales-selection-summary"');
+    expect(source).toContain("SaleActionsMenu");
   });
 
   it("routes private sale document links to the authenticated API host", () => {
@@ -167,9 +170,10 @@ describe("ERP Vendas B+C interface", () => {
 
   it("renders solid portal menus, proportional sale-product media and complete commercial fields", () => {
     expect(source).toContain('className="z-[80] min-w-60 border-slate-200 bg-white shadow-xl"');
-    expect(source).toContain('featured ? "h-14 w-14"');
+    expect(source).toContain('featured ? "h-[4.5rem] w-[4.5rem]"');
+    expect(source).toContain('large ? "h-24 w-24"');
     expect(source).toContain('compact ? "h-9 w-9"');
-    expect(source).toContain("object-contain p-1");
+    expect(source).toContain('!emphasized && "bg-slate-100 p-1 ring-1 ring-slate-200"');
     expect(source).toContain("Data comercial");
     expect(source).toContain("Condições de pagamento");
     expect(source).toContain("Outros encargos");
@@ -288,13 +292,17 @@ describe("ERP Vendas B+C interface", () => {
   it("keeps a vertical desktop table, anchored filters and the existing premium pagination", () => {
     expect(source).toContain('data-testid={`sale-row-${order.publicId}`}');
     expect(source).toContain('className="min-w-[1160px] w-full text-sm"');
-    expect(source).toContain('<th scope="col" className="px-3 py-3">Cliente</th>');
-    expect(source).toContain('<th scope="col" className="px-3 py-3">Vendedor</th>');
+    expect(source).toContain('<SortableColumnHeader label="Cliente" sortKey="customer"');
+    expect(source).toContain('<SortableColumnHeader label="Vendedor" sortKey="seller"');
+    expect(source).toContain('<SortableColumnHeader label="Data" sortKey="commercialDate"');
+    expect(source).toContain('sortKey="orderNumber"');
+    expect(source).toContain('sortKey="status"');
+    expect(source).toContain('aria-sort={ariaSort}');
     expect(source).toContain("<colgroup>");
     expect(source).toContain('[&>tr>td]:px-3 [&>tr>td]:py-3.5');
-    expect(source).toContain('grid-cols-[minmax(0,1fr)_auto] items-center gap-2 pl-[92px]');
+    expect(source).not.toContain('pl-[92px]');
     expect(source).toContain("firstProductImage?.thumbnailPath");
-    expect(source).toContain('text-sm font-bold text-slate-900');
+    expect(source).toContain('text-base font-semibold leading-tight text-slate-950');
     expect(source).toContain('grid grid-cols-1 gap-2.5 rounded-xl border');
     expect(source).toContain('sm:grid-cols-2 lg:grid-cols-12');
     expect(source).toContain('xl:grid-cols-12');
@@ -310,5 +318,19 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain("salesPaginationItems(page, list.data.totalPages)");
     expect(source).toContain("activeFilterCount");
     expect(source).toContain("motion-reduce:transition-none");
+  });
+
+  it("sends sorting to the paginated list and resets only the current page", () => {
+    expect(source).toContain('useState<SalesSortState>({ key: "commercialDate", direction: "desc" })');
+    expect(source).toContain("sort: listSort.key");
+    expect(source).toContain("direction: listSort.direction");
+    expect(source).toContain("setListSort(current => nextSalesSort(current, key))");
+    expect(source).toContain("setPage(1)");
+  });
+
+  it("keeps advanced filter surfaces white with subtle focus states", () => {
+    expect(source).toContain('aria-label="Filtros avançados"');
+    expect(source).toContain('rounded-xl border border-slate-200 bg-white p-3');
+    expect(source).not.toContain('bg-slate-50/80 p-3');
   });
 });

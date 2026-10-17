@@ -2,6 +2,10 @@ import type { SalesAddress, SalesForm } from "./sales-form";
 
 export const SALES_LOOKUP_MIN_LENGTH = 2;
 
+export type SalesSortKey = "orderNumber" | "customer" | "commercialDate" | "seller" | "status";
+export type SalesSortDirection = "asc" | "desc";
+export type SalesSortState = { key: SalesSortKey; direction: SalesSortDirection };
+
 // MySQL DATE's supported range lets the existing bounded metrics query represent
 // an unbounded UI filter without changing its aggregation or SQL contract.
 const earliestSalesDate = "1000-01-01";
@@ -23,6 +27,28 @@ export function salesMetricPeriod(from: string, to: string, defaultFrom: string,
 function formatSalesDate(value: string) {
   const [year, month, day] = value.split("-");
   return `${day}/${month}/${year}`;
+}
+
+export function salesFilterPeriodLabel(
+  from: string,
+  to: string,
+  defaultFrom: string,
+  defaultTo: string
+) {
+  if (from === defaultFrom && to === defaultTo) return "Este mês";
+  if (!from && !to) return "Todo o período";
+  const shortDate = (value: string) => {
+    const [, month, day] = value.split("-");
+    return day && month ? `${day}/${month}` : "";
+  };
+  if (from && to) return `${shortDate(from)} a ${shortDate(to)}`;
+  if (from) return `Desde ${shortDate(from)}`;
+  return `Até ${shortDate(to)}`;
+}
+
+export function nextSalesSort(current: SalesSortState, key: SalesSortKey): SalesSortState {
+  if (current.key !== key) return { key, direction: "asc" };
+  return { key, direction: current.direction === "asc" ? "desc" : "asc" };
 }
 
 export function salesCsvCell(value: string | number) {

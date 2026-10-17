@@ -112,6 +112,8 @@ async function prepare(
     documentType?: "sale" | "quote";
     shippingAddress?: (typeof order)["shippingAddress"] | null;
     onSaleListRequest?: () => void;
+    listRequests?: string[];
+    totalPages?: number;
     visualRows?: boolean;
     paymentFlow?: boolean;
     exportNames?: Array<{ customerName: string; sellerName: string }>;
@@ -130,6 +132,8 @@ async function prepare(
     paymentFlow = false,
     exportNames,
     metricRequests,
+    listRequests,
+    totalPages = 1,
     multiItemDetail = false,
     stage = "separation",
     stockAvailable = "18.000",
@@ -198,8 +202,9 @@ async function prepare(
         }
         if (n.includes("erp.sales.documents.list")) return [];
         if (n.includes("erp.sales.list")) {
+          listRequests?.push(decodeURIComponent(route.request().url()));
           const items = empty ? [] : exportOrders ?? (visualRows ? visualOrders : [activeOrder]);
-          return { items, total: items.length, page: 1, pageSize: 6, totalPages: 1, canWrite: !readOnly };
+          return { items, total: totalPages > 1 ? items.length * totalPages : items.length, page: 1, pageSize: 6, totalPages, canWrite: !readOnly };
         }
         if (n.includes("erp.finance.settle") && paymentFlow) {
           extraPaidCents = 50_000;
@@ -436,13 +441,16 @@ test("sales list keeps vertical table columns, compact KPIs and premium paginati
   await expect(page.getByText("Mostrando 1–6 de 6 vendas")).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "Cliente" })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "Vendedor" })).toBeVisible();
-  await expect(page.locator("table:visible colgroup col")).toHaveCount(9);
-  await expect(page.getByText("Encontre documentos", { exact: true })).toBeVisible();
+  await expect(page.locator("table:visible colgroup col")).toHaveCount(8);
+  await expect(page.getByText("Encontre documentos", { exact: true })).toHaveCount(0);
+  const sellerFilter = page.getByRole("combobox", { name: "Vendedor", exact: true });
+  await expect(sellerFilter).toHaveValue("all");
+  await expect(sellerFilter.locator("option:checked")).toHaveText("Todos");
   await expect(page.getByTestId("sales-filter-toolbar")).toBeVisible();
   expect(await salesRows.first().evaluate(element => element.tagName)).toBe("TR");
   const firstImage = salesRows.first().locator("img");
   await expect(firstImage).toBeVisible();
-  expect(await firstImage.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0 && image.clientWidth >= 56)).toBe(true);
+  expect(await firstImage.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0 && image.clientWidth >= 72)).toBe(true);
   await expect(salesRows.first().getByText("Monitor 24 IPS")).toBeVisible();
   await expect(salesRows.getByText("Em andamento").first()).toBeVisible();
   const metrics = page.getByTestId("sales-metric-card");
@@ -457,17 +465,40 @@ test("sales list keeps vertical table columns, compact KPIs and premium paginati
   await expect(page.getByRole("menuitem", { name: "Editar documento" })).toBeVisible();
 });
 
-test("sales makes the current page selection actionable and dismissible", async ({ page }) => {
+test("sales removes bulk row selection while preserving individual actions", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 });
   await prepare(page, { visualRows: true });
   const firstRow = page.locator('table tbody [data-testid^="sale-row-"]:visible').first();
-  await firstRow.getByRole("checkbox").check();
-  const selection = page.getByTestId("sales-selection-summary");
-  await expect(selection).toContainText("1 documento selecionado nesta página.");
-  await expect(selection.getByRole("button", { name: "Exportar selecionados" })).toBeVisible();
-  await selection.getByRole("button", { name: "Limpar seleção" }).click();
-  await expect(selection).toHaveCount(0);
-  await expect(firstRow.getByRole("checkbox")).not.toBeChecked();
+  await expect(page.locator('table:visible input[type="checkbox"]')).toHaveCount(0);
+  await expect(firstRow.getByRole("button", { name: /Ações de venda/ })).toBeVisible();
+});
+
+test("sales sorts on the server in both directions while preserving filters and page size", async ({ page }) => {
+  const listRequests: string[] = [];
+  await prepare(page, { visualRows: true, totalPages: 2, listRequests });
+  await page.getByLabel("Buscar por documento, cliente, produto ou SKU").fill("Alfa");
+  await page.getByRole("combobox", { name: "Vendedor", exact: true }).selectOption("manager-1");
+  await page.getByLabel("Itens por página").selectOption("10");
+  await page.getByRole("button", { name: "Página 2" }).click();
+  await expect.poll(() => listRequests.some(url => url.includes('"page":2'))).toBe(true);
+
+  const saleHeader = page.getByRole("columnheader", { name: /Venda/ });
+  await saleHeader.getByRole("button").click();
+  await expect(saleHeader).toHaveAttribute("aria-sort", "ascending");
+  await expect.poll(() => listRequests.some(url =>
+    url.includes('"sort":"orderNumber"') &&
+    url.includes('"direction":"asc"') &&
+    url.includes('"search":"Alfa"') &&
+    url.includes('"sellerUserId":"manager-1"') &&
+    url.includes('"page":1') &&
+    url.includes('"pageSize":10')
+  )).toBe(true);
+
+  await saleHeader.getByRole("button").click();
+  await expect(saleHeader).toHaveAttribute("aria-sort", "descending");
+  await expect.poll(() => listRequests.some(url =>
+    url.includes('"sort":"orderNumber"') && url.includes('"direction":"desc"')
+  )).toBe(true);
 });
 test("sales searches incrementally and reveals variants only on demand", async ({ page }) => {
   const counters = { customers: 0, catalog: 0 };
@@ -740,5 +771,10 @@ for (const viewport of [
       const firstMobileRow = page.locator('[data-testid^="sale-row-"]:visible').first();
       expect(await firstMobileRow.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       await capture(page, "sales-overview-narrow");
+      await firstMobileRow.scrollIntoViewIfNeeded();
+      const mobileImage = firstMobileRow.locator("img");
+      await expect(mobileImage).toBeVisible();
+      expect(await mobileImage.evaluate((image: HTMLImageElement) => image.clientWidth >= 96)).toBe(true);
+      await capture(page, "sales-list-narrow-row", false);
     }
   });
