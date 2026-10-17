@@ -5,7 +5,10 @@ import path from "node:path";
 import { validateTestDatabaseUrl } from "../test-integration-gates";
 
 const DISPOSABLE_DATABASE_NAME = /^megadesk_test_[a-z0-9]+(?:_[a-z0-9]+)*$/;
+const RESTORE_DATABASE_NAME = /^megadesk_test_restore_[a-z0-9]+(?:_[a-z0-9]+)*$/;
 const LOCAL_LISTEN_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+const RESTORE_MEDIA_ROOT = "/opt/megadesk/storage";
+const RESTORE_MYSQL_HOST = "mysql-test";
 const PLATFORM_ENVIRONMENT_KEYS = [
   "APPDATA", "COMSPEC", "HOMEDRIVE", "HOMEPATH", "HOME", "LOCALAPPDATA",
   "NUMBER_OF_PROCESSORS", "OS", "Path", "PATH", "PATHEXT", "SystemRoot",
@@ -83,6 +86,51 @@ export function isDisposableRuntimeEnabled(environment: NodeJS.ProcessEnv = proc
   return environment.MEGADESK_DISPOSABLE_RUNTIME === "1";
 }
 
+/**
+ * This is deliberately narrower than the normal local disposable runtime.
+ * The restore harness runs in an internal Docker network, so its restored
+ * media root is non-empty and the process must listen on the container
+ * interface.  Every one of those exceptions is tied to this explicit mode.
+ */
+export function isRestoreHarnessRuntime(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.MEGADESK_RESTORE_HARNESS === "1";
+}
+
+function assertRestoreHarnessRuntimeConfig(environment: NodeJS.ProcessEnv): DisposableRuntimeConfig {
+  if (environment.NODE_ENV !== "development" || environment.RUN_DATABASE_INTEGRATION !== "1") {
+    throw configurationError("o harness de restauração exige development e RUN_DATABASE_INTEGRATION=1.");
+  }
+  if (!/^restore-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(environment.MEGADESK_RESTORE_ENVIRONMENT_ID ?? "")) {
+    throw configurationError("o harness de restauração exige um identificador descartável explícito.");
+  }
+  const databaseUrl = validateTestDatabaseUrl(environment.TEST_DATABASE_URL);
+  const parsedDatabase = new URL(databaseUrl);
+  if (parsedDatabase.hostname !== RESTORE_MYSQL_HOST || !RESTORE_DATABASE_NAME.test(parseDatabaseName(databaseUrl))) {
+    throw configurationError("o harness de restauração aceita somente mysql-test e megadesk_test_restore_*.");
+  }
+  if (environment.DATABASE_URL !== databaseUrl || environment.MAIN_DATABASE_URL) {
+    throw configurationError("o harness de restauração não aceita banco principal ou URL divergente.");
+  }
+  if (environment.HOST !== "0.0.0.0" || parseListenPort(environment.PORT) !== 3000) {
+    throw configurationError("o harness de restauração exige a porta interna 3000 em 0.0.0.0.");
+  }
+  const jwtSecret = environment.JWT_SECRET?.trim();
+  if (!jwtSecret || jwtSecret.length < 32) {
+    throw configurationError("o harness de restauração exige JWT efêmero.");
+  }
+  if (environment.MEGADESK_DISPOSABLE_MEDIA_ROOT !== RESTORE_MEDIA_ROOT || environment.MEGADESK_MEDIA_ROOT !== RESTORE_MEDIA_ROOT) {
+    throw configurationError("o harness de restauração exige a raiz de mídia montada e exclusiva.");
+  }
+  let mediaInfo: ReturnType<typeof lstatSync>;
+  try { mediaInfo = lstatSync(RESTORE_MEDIA_ROOT); } catch {
+    throw configurationError("a raiz de mídia restaurada deve existir antes da aplicação.");
+  }
+  if (!mediaInfo.isDirectory() || mediaInfo.isSymbolicLink() || realpathSync(RESTORE_MEDIA_ROOT) !== RESTORE_MEDIA_ROOT) {
+    throw configurationError("a raiz de mídia restaurada deve ser um diretório real, não um link.");
+  }
+  return Object.freeze({ databaseUrl, host: "0.0.0.0", mediaRoot: RESTORE_MEDIA_ROOT, port: 3000 });
+}
+
 /** Validates every invariant before the HTTP server is constructed; no database is opened. */
 export function assertDisposableRuntimeConfig(
   environment: NodeJS.ProcessEnv = process.env,
@@ -90,6 +138,7 @@ export function assertDisposableRuntimeConfig(
   if (!isDisposableRuntimeEnabled(environment)) {
     throw configurationError("MEGADESK_DISPOSABLE_RUNTIME deve ser exatamente 1.");
   }
+  if (isRestoreHarnessRuntime(environment)) return assertRestoreHarnessRuntimeConfig(environment);
   if (environment.NODE_ENV !== "development") {
     throw configurationError("NODE_ENV deve ser development.");
   }
