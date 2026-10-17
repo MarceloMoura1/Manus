@@ -35,6 +35,14 @@ describe("sale contracts", () => {
     expect(() => saleListInput.parse({ kind: "archived" })).toThrow();
   });
 
+  it("accepts the server-side sorts exposed by the sales table and rejects unknown columns", () => {
+    for (const sort of ["orderNumber", "customer", "commercialDate", "seller", "status"] as const) {
+      expect(saleListInput.parse({ sort, direction: "asc" })).toMatchObject({ sort, direction: "asc" });
+      expect(saleListInput.parse({ sort, direction: "desc" })).toMatchObject({ sort, direction: "desc" });
+    }
+    expect(() => saleListInput.parse({ sort: "product" })).toThrow();
+  });
+
   it("rounds quantities half-up without floating-point arithmetic", () => {
     expect(lineTotalCents("1.005", 101)).toBe(102);
     expect(lineTotalCents("0.001", 499)).toBe(0);

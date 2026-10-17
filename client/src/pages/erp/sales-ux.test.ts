@@ -10,6 +10,8 @@ import {
   salesCsv,
   salesCsvCell,
   salesMetricPeriod,
+  salesFilterPeriodLabel,
+  nextSalesSort,
   saleStockPresentation,
 } from "./sales-ux";
 
@@ -41,6 +43,29 @@ describe("sales UX state", () => {
       from: "1000-01-01", to: "2026-09-28", label: "Vendas até 28/09/2026",
     });
     expect(salesMetricPeriod(monthly.from, monthly.to, monthly.from, monthly.to).label).toBe("Vendas no mês");
+  });
+
+  it("shows the applied period in the compact Brazilian filter label", () => {
+    expect(salesFilterPeriodLabel("2026-10-01", "2026-10-31", "2026-10-01", "2026-10-31")).toBe("Este mês");
+    expect(salesFilterPeriodLabel("", "", "2026-10-01", "2026-10-31")).toBe("Todo o período");
+    expect(salesFilterPeriodLabel("2026-08-23", "2026-09-26", "2026-10-01", "2026-10-31")).toBe("23/08 a 26/09");
+    expect(salesFilterPeriodLabel("2026-08-23", "", "2026-10-01", "2026-10-31")).toBe("Desde 23/08");
+    expect(salesFilterPeriodLabel("", "2026-09-26", "2026-10-01", "2026-10-31")).toBe("Até 26/09");
+  });
+
+  it("starts a new server sort ascending and toggles only the active column", () => {
+    expect(nextSalesSort({ key: "commercialDate", direction: "desc" }, "customer")).toEqual({
+      key: "customer",
+      direction: "asc",
+    });
+    expect(nextSalesSort({ key: "customer", direction: "asc" }, "customer")).toEqual({
+      key: "customer",
+      direction: "desc",
+    });
+    expect(nextSalesSort({ key: "customer", direction: "desc" }, "seller")).toEqual({
+      key: "seller",
+      direction: "asc",
+    });
   });
 
   it("encodes CSV with BOM, quoted delimiters and formula-safe user fields", () => {
