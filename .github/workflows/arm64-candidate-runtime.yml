@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: arm64-candidate-runtime-417db3742056f8cedc005867bba765fdcd77c0a7
+  group: arm64-candidate-runtime-445ad635b8f584ad59de62ba2f3f8d5b9cc2b0d7
   cancel-in-progress: false
 
 jobs:
@@ -16,8 +16,8 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     env:
-      EXPECTED_SHA: 417db3742056f8cedc005867bba765fdcd77c0a7
-      EXPECTED_TREE: 9b94db6d46f47a92fb780aded06a5628418cd3f8
+      EXPECTED_SHA: 445ad635b8f584ad59de62ba2f3f8d5b9cc2b0d7
+      EXPECTED_TREE: f744cff2391ec3acf8e4ed11407d840dc3921953
       EXPECTED_NODE: v22.23.2
       EXPECTED_PNPM: 10.18.0
       CI: "true"
@@ -33,7 +33,7 @@ jobs:
       - name: Check out the immutable candidate commit
         uses: actions/checkout@v4
         with:
-          ref: 417db3742056f8cedc005867bba765fdcd77c0a7
+          ref: 445ad635b8f584ad59de62ba2f3f8d5b9cc2b0d7
           fetch-depth: 0
           persist-credentials: false
 
@@ -105,6 +105,9 @@ jobs:
             server/outbound-audio-normalization.test.ts \
             scripts/operations/assemble-runtime-release.test.mjs \
             scripts/operations/package-runtime-release.test.mjs \
+            scripts/operations/restore-compose-consistent-backup.test.mjs \
+            server/modules/erp/sales/restore-synthetic-probe.test.ts \
+            server/_core/disposable-runtime.test.ts \
             --exclude server/modules/erp/reports/structure.test.ts \
             | tee "${{ steps.paths.outputs.logs }}/vitest.log"
 
@@ -163,9 +166,12 @@ jobs:
         run: |
           set -euo pipefail
           test -f "$EXTRACTED_RUNTIME/dist/index.js"
+          test -f "$EXTRACTED_RUNTIME/dist/operations/restore-synthetic-probe.js"
           test -f "$EXTRACTED_RUNTIME/dist/public/index.html"
           test -d "$EXTRACTED_RUNTIME/dist/public/assets"
           test -d "$EXTRACTED_RUNTIME/node_modules"
+          grep -Fq 'MEGADESK_RESTORE_HARNESS' "$EXTRACTED_RUNTIME/dist/index.js"
+          grep -Fq 'MEGADESK_RESTORE_PROBE' "$EXTRACTED_RUNTIME/dist/operations/restore-synthetic-probe.js"
           SHARP_NODE="$(find -L "$EXTRACTED_RUNTIME/node_modules" -type f -name '*.node' -path '*sharp*' -print -quit)"
           test -n "$SHARP_NODE"
           readelf -h "$SHARP_NODE" | tee "${{ steps.paths.outputs.logs }}/sharp-elf-header.txt"
