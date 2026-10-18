@@ -40,6 +40,40 @@ const STAGE_SQL = `COALESCE(o.current_stage,CASE o.status
   WHEN 'fulfilled' THEN 'completed'
   ELSE 'confirmed' END)`;
 
+const STATUS_SORT_SQL = `(CASE
+  WHEN o.document_type='quote' THEN CASE o.commercial_status
+    WHEN 'draft' THEN 10 WHEN 'negotiation' THEN 20 WHEN 'approved' THEN 30
+    WHEN 'converted' THEN 40 WHEN 'active' THEN 50 WHEN 'completed' THEN 60
+    WHEN 'lost' THEN 70 WHEN 'cancelled' THEN 80 ELSE 90 END
+  WHEN o.cancelled_at IS NOT NULL OR o.status='cancelled' THEN 80
+  ELSE CASE ${STAGE_SQL}
+    WHEN 'created' THEN 10 WHEN 'confirmed' THEN 20 WHEN 'separation' THEN 30
+    WHEN 'shipped' THEN 40 WHEN 'received' THEN 50 WHEN 'completed' THEN 60
+    ELSE 90 END
+END)`;
+
+export function salesListOrderBy(sort: SaleListInput["sort"], direction: SaleListInput["direction"]) {
+  const dir = direction === "asc" ? "ASC" : "DESC";
+  const expressions: Record<SaleListInput["sort"], { values: string[]; nullable?: boolean }> = {
+    orderNumber: {
+      values: [
+        "LOWER(SUBSTRING_INDEX(o.order_number,'-',1))",
+        "CAST(SUBSTRING_INDEX(o.order_number,'-',-1) AS UNSIGNED)",
+        "o.order_number",
+      ],
+    },
+    customer: { values: ["NULLIF(LOWER(TRIM(o.customer_name_snapshot)),'')"], nullable: true },
+    commercialDate: { values: ["COALESCE(o.commercial_date,DATE(o.created_at))"] },
+    seller: { values: ["NULLIF(LOWER(TRIM(o.seller_name_snapshot)),'')"], nullable: true },
+    status: { values: [STATUS_SORT_SQL] },
+    createdAt: { values: ["o.created_at"] },
+    total: { values: ["o.total_cents"] },
+  };
+  const selected = expressions[sort];
+  const nullsLast = selected.nullable ? [`(${selected.values[0]} IS NULL) ASC`] : [];
+  return [...nullsLast, ...selected.values.map(value => `${value} ${dir}`), `o.id ${dir}`].join(",");
+}
+
 type OrderRow = RowDataPacket & {
   id: number;
   public_id: string;
@@ -559,11 +593,7 @@ export class SaleRepository {
        AND first_media.id=first_product.primary_media_id
        AND first_media.state='active'`;
     const sqlWhere = where.join(" AND ");
-    const sort = {
-      orderNumber: "o.order_number",
-      createdAt: "o.created_at",
-      total: "o.total_cents",
-    }[options.sort];
+    const orderBy = salesListOrderBy(options.sort, options.direction);
     const [count] = await this.db().execute<RowDataPacket[]>(
       `SELECT COUNT(*) total FROM erp_sale_orders o ${joins} WHERE ${sqlWhere}`,
       values
@@ -575,7 +605,7 @@ export class SaleRepository {
               first_media.media_id first_product_media_id
        FROM erp_sale_orders o ${joins}
        WHERE ${sqlWhere}
-       ORDER BY ${sort} ${options.direction === "asc" ? "ASC" : "DESC"},o.id DESC
+       ORDER BY ${orderBy}
        LIMIT ${limit} OFFSET ${offset}`,
       values
     );

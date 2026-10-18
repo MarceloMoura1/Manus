@@ -4,13 +4,16 @@ import type { AppRouter } from "../../../../server/routers";
 import {
   AlertCircle,
   Archive,
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   Box,
   CalendarDays,
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronsUpDown,
   CircleDollarSign,
   Clock3,
   CreditCard,
@@ -81,8 +84,12 @@ import {
   salesDraftProgress,
   salesPaginationItems,
   salesCsv,
+  salesFilterPeriodLabel,
   salesMetricPeriod,
+  nextSalesSort,
   saleStockPresentation,
+  type SalesSortKey,
+  type SalesSortState,
 } from "./sales-ux";
 
 const money = new Intl.NumberFormat("pt-BR", {
@@ -135,6 +142,40 @@ function Button({ className, variant = "default", ...props }: React.ComponentPro
 /** Radix highlights items on pointer hover; make that state as visible as keyboard focus. */
 function DropdownMenuItem({ className, ...props }: React.ComponentProps<typeof BaseDropdownMenuItem>) {
   return <BaseDropdownMenuItem {...props} className={cn("cursor-pointer transition-colors duration-150 data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-950 focus:bg-slate-100 focus:text-slate-950 active:bg-slate-200 motion-reduce:transition-none", className)} />;
+}
+
+function SortableColumnHeader({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  className,
+}: {
+  label: string;
+  sortKey: SalesSortKey;
+  sort: SalesSortState;
+  onSort: (key: SalesSortKey) => void;
+  className?: string;
+}) {
+  const active = sort.key === sortKey;
+  const ariaSort = active ? (sort.direction === "asc" ? "ascending" : "descending") : "none";
+  const directionLabel = active
+    ? sort.direction === "asc" ? "crescente" : "decrescente"
+    : "sem ordenação";
+  const Icon = active ? (sort.direction === "asc" ? ArrowUp : ArrowDown) : ChevronsUpDown;
+  return (
+    <th scope="col" aria-sort={ariaSort} className={cn("px-3 py-2", className)}>
+      <button
+        type="button"
+        className="group inline-flex min-h-8 items-center gap-1.5 rounded-md px-1.5 text-left font-semibold text-slate-600 transition-colors hover:bg-white hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none"
+        aria-label={`Ordenar por ${label}; ${directionLabel}`}
+        onClick={() => onSort(sortKey)}
+      >
+        <span>{label}</span>
+        <Icon className={cn("h-3.5 w-3.5", active ? "text-blue-700" : "text-slate-400 group-hover:text-slate-600")} aria-hidden="true" />
+      </button>
+    </th>
+  );
 }
 
 const stageLabels: Record<Stage, string> = {
@@ -203,7 +244,7 @@ export function SalesPage({
   const [to, setTo] = React.useState(month.to);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(6);
-  const [selectedSaleIds, setSelectedSaleIds] = React.useState<string[]>([]);
+  const [listSort, setListSort] = React.useState<SalesSortState>({ key: "commercialDate", direction: "desc" });
   const [selectedId, setSelectedId] = React.useState<string | null>(
     initialSelectedId ?? null
   );
@@ -248,8 +289,8 @@ export function SalesPage({
     includeArchived,
     from: from || undefined,
     to: to || undefined,
-    sort: "createdAt",
-    direction: "desc",
+    sort: listSort.key,
+    direction: listSort.direction,
     page,
     pageSize,
   });
@@ -499,8 +540,7 @@ export function SalesPage({
   const exportCurrentPage = () => {
     if (!list.data?.items.length) return;
     const columns = ["Documento", "Tipo", "Cliente", "Data", "Vendedor", "Total (BRL)", "Situação", "Etapa"];
-    const selectedOnPage = list.data.items.filter(order => selectedSaleIds.includes(order.publicId));
-    const exportItems = selectedOnPage.length ? selectedOnPage : list.data.items;
+    const exportItems = list.data.items;
     if (!exportItems.length) return;
     const rows = exportItems.map(order => [
       order.orderNumber, order.documentType === "quote" ? "Orçamento" : "Venda", order.customerName, date.format(salesCommercialDate(order.commercialDate)),
@@ -531,7 +571,12 @@ export function SalesPage({
   const entityLabel = kind === "quotes" ? "orçamento" : kind === "orders" ? "venda" : "documento";
   const entityLabelPlural = kind === "quotes" ? "orçamentos" : kind === "orders" ? "vendas" : "documentos";
   const emptyStateTitle = kind === "orders" ? "Nenhuma venda encontrada neste período." : `Nenhum ${entityLabel} encontrado neste período.`;
-  const selectedOnPageCount = list.data?.items.filter(order => selectedSaleIds.includes(order.publicId)).length ?? 0;
+  const periodFilterLabel = salesFilterPeriodLabel(from, to, month.from, month.to);
+  const selectedSellerName = options.data?.sellers.find(seller => seller.publicId === sellerUserId)?.name ?? "Todos";
+  const setSort = (key: SalesSortKey) => {
+    setListSort(current => nextSalesSort(current, key));
+    setPage(1);
+  };
 
   return (
     <div
@@ -545,7 +590,7 @@ export function SalesPage({
         description="Gerencie pedidos e acompanhe suas vendas."
         actions={
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
-            <Button type="button" variant="outline" className="min-h-10 flex-1 border-blue-500 text-blue-700 sm:flex-none" disabled={!list.data?.items.length} onClick={exportCurrentPage} title="Exportar a página atual ou as vendas selecionadas em CSV"><Share2 className="mr-2 h-4 w-4" />Exportar</Button>
+            <Button type="button" variant="outline" className="min-h-10 flex-1 border-blue-500 text-blue-700 sm:flex-none" disabled={!list.data?.items.length} onClick={exportCurrentPage} title="Exportar a página atual em CSV"><Share2 className="mr-2 h-4 w-4" />Exportar</Button>
           {canWrite && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -596,21 +641,14 @@ export function SalesPage({
               <button key={value} type="button" aria-current={kind === value ? "page" : undefined} className={cn("shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-xs font-semibold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 motion-reduce:transition-none sm:text-sm", kind === value ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:bg-white/70 hover:text-slate-800")} onClick={() => { setKind(value); setStage("all"); setCommercialStatus("all"); setPage(1); }}>{label}</button>
             ))}
           </nav>
-          <div className="border-b border-slate-100 bg-slate-50/70 px-3 py-4 sm:px-5" data-testid="sales-filters">
-            <div className="mb-3 flex flex-wrap items-start justify-between gap-2.5">
-              <div>
-                <h2 className="text-sm font-bold tracking-tight text-slate-950">Encontre documentos</h2>
-                <p className="mt-0.5 text-xs text-slate-500">Busque por número, cliente, produto ou SKU.</p>
-              </div>
-              {activeFilterCount > 0 && <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800">{activeFilterCount} filtro{activeFilterCount === 1 ? "" : "s"} ativo{activeFilterCount === 1 ? "" : "s"}</span>}
-            </div>
-            <div className="grid grid-cols-1 gap-2.5 rounded-xl border border-slate-200/80 bg-white p-2.5 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.7)] sm:grid-cols-2 lg:grid-cols-12" data-testid="sales-filter-toolbar">
+          <div className="border-b border-slate-100 bg-white px-3 py-3 sm:px-5" data-testid="sales-filters">
+            <div className="grid grid-cols-1 gap-2.5 rounded-xl border border-slate-200 bg-white p-2.5 sm:grid-cols-2 lg:grid-cols-12" data-testid="sales-filter-toolbar">
               <label className="relative min-w-0 sm:col-span-2 lg:col-span-4">
                 <span className="sr-only">Busca</span>
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
                 <Input
                   aria-label="Buscar por documento, cliente, produto ou SKU"
-                  className="h-10 border-slate-200 bg-slate-50/70 pl-8 text-sm shadow-none placeholder:text-slate-400 focus-visible:bg-white"
+                  className="h-12 border-slate-200 bg-white pl-8 text-sm shadow-none placeholder:text-slate-400"
                   placeholder="Buscar por número ou cliente..."
                   value={search}
                   onChange={event => {
@@ -619,22 +657,25 @@ export function SalesPage({
                   }}
                 />
               </label>
-              <label className="relative min-w-0 lg:col-span-2">
-                <span className="sr-only">Período</span>
-                <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" />
+              <label className="group relative min-w-0 rounded-lg border border-slate-200 bg-white pl-9 pr-2 transition-colors focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 lg:col-span-2">
+                <span className="block pt-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-slate-500">Período</span>
+                <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-700" />
                 <select
-                  className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2 text-xs font-medium text-slate-800 transition-colors focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  aria-label="Período"
+                  title={`Período - ${periodFilterLabel}`}
+                  className="h-6 w-full border-0 bg-transparent p-0 pr-1 text-xs font-semibold text-slate-900 outline-none"
                   value={from === month.from && to === month.to ? "month" : !from && !to ? "all" : "custom"}
                   onChange={event => { if (event.target.value === "month") { setFrom(month.from); setTo(month.to); } else if (event.target.value === "all") { setFrom(""); setTo(""); } else { setAdvancedFiltersOpen(true); } setPage(1); }}
                 >
-                  <option value="month">Este mês</option><option value="all">Todo o período</option><option value="custom">Personalizado</option>
+                  <option value="month">Este mês</option><option value="all">Todo o período</option><option value="custom">{periodFilterLabel}</option>
                 </select>
               </label>
-              <label className="relative min-w-0 lg:col-span-2">
-                <span className="sr-only">Status</span>
-                <Filter className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" />
+              <label className="group relative min-w-0 rounded-lg border border-slate-200 bg-white pl-9 pr-2 transition-colors focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 lg:col-span-2">
+                <span className="block pt-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-slate-500">Status</span>
+                <Filter className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-700" />
                 <select
-                  className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2 text-xs font-medium text-slate-800 transition-colors focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  aria-label="Status"
+                  className="h-6 w-full border-0 bg-transparent p-0 pr-1 text-xs font-semibold text-slate-900 outline-none"
                   value={kind === "quotes" ? commercialStatus : stage}
                   onChange={event => {
                     if (kind === "quotes") setCommercialStatus(event.target.value as typeof commercialStatus);
@@ -642,25 +683,25 @@ export function SalesPage({
                     setPage(1);
                   }}
                 >
-                  <option value="all">Status</option>
+                  <option value="all">Todos</option>
                   {kind === "quotes" ? (["draft", "negotiation", "approved", "converted", "lost"] as const).map(value => <option key={value} value={value}>{commercialStatusLabels[value]}</option>) : stageOrder.map(value => <option key={value} value={value}>{stageLabels[value]}</option>)}
                 </select>
               </label>
-              <label className="relative min-w-0 lg:col-span-2">
-                <span className="sr-only">Vendedor</span>
-                <UserRound className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" />
-                <select className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-2 text-xs font-medium text-slate-800 transition-colors focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={sellerUserId} onChange={event => { setSellerUserId(event.target.value); setPage(1); }}>
-                  <option value="all">Vendedor</option>{options.data?.sellers.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}
+              <label className="group relative min-w-0 rounded-lg border border-slate-200 bg-white pl-9 pr-2 transition-colors focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 lg:col-span-2">
+                <span className="block pt-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-slate-500">Vendedor</span>
+                <UserRound className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-700" />
+                <select aria-label="Vendedor" className="h-6 w-full border-0 bg-transparent p-0 pr-1 text-xs font-semibold text-slate-900 outline-none" value={sellerUserId} onChange={event => { setSellerUserId(event.target.value); setPage(1); }}>
+                  <option value="all">Todos</option>{options.data?.sellers.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}
                 </select>
               </label>
-              <Button type="button" variant="outline" className="h-10 w-full min-w-[7.5rem] justify-between rounded-lg border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold shadow-none hover:bg-slate-100 lg:col-span-2" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
+              <Button type="button" variant="outline" className="h-12 w-full min-w-[7.5rem] justify-between rounded-lg border-slate-200 bg-white px-2.5 text-xs font-semibold shadow-none hover:bg-slate-50 lg:col-span-2" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen(value => !value)}>
                 <SlidersHorizontal className="mr-1 h-3.5 w-3.5" /> Filtros
                 {activeFilterCount > 0 && <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-800">{activeFilterCount}</span>}
               </Button>
             </div>
 
             {advancedFiltersOpen && (
-              <div className="mt-3 grid grid-cols-1 items-end gap-2.5 rounded-xl border border-slate-200 bg-slate-50/80 p-3 shadow-[0_12px_28px_-26px_rgba(15,23,42,0.8)] sm:grid-cols-2 xl:grid-cols-12" aria-label="Filtros avançados">
+              <div className="mt-3 grid grid-cols-1 items-end gap-2.5 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-2 xl:grid-cols-12" aria-label="Filtros avançados">
                 <div className="relative min-w-0 xl:col-span-3">
                   <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">Cliente</span>
                   {filterCustomer ? (
@@ -671,7 +712,7 @@ export function SalesPage({
                   ) : (
                     <>
                       <Search className="pointer-events-none absolute bottom-2.5 left-2.5 h-3.5 w-3.5 text-slate-500" />
-                      <Input aria-label="Filtrar por cliente" className="mt-1 h-9 border-slate-200 bg-slate-50/70 pl-8 text-xs focus-visible:bg-white" placeholder="Buscar cliente" value={filterCustomerSearch} onChange={event => setFilterCustomerSearch(event.target.value)} />
+                      <Input aria-label="Filtrar por cliente" className="mt-1 h-9 border-slate-200 bg-white pl-8 text-xs" placeholder="Buscar cliente" value={filterCustomerSearch} onChange={event => setFilterCustomerSearch(event.target.value)} />
                       {filterCustomerLookupEnabled && (
                         <div className="absolute inset-x-0 top-[4.25rem] z-30 max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl [scrollbar-width:thin]" data-testid="sales-customer-filter-options">
                           {filterCustomers.isLoading ? <p className="p-3 text-sm text-slate-500">Buscando clientes…</p> : filterCustomers.isError ? <p className="p-3 text-sm text-rose-700">Não foi possível buscar clientes.</p> : filterCustomers.data?.items.length ? filterCustomers.data.items.map(customer => (
@@ -686,19 +727,19 @@ export function SalesPage({
                   )}
                 </div>
                 <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 xl:col-span-2">Pagamento
-                  <select className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 px-2.5 text-xs font-medium normal-case tracking-normal text-slate-800 focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={paymentStatus} onChange={event => { setPaymentStatus(event.target.value as typeof paymentStatus); setPage(1); }}>
+                  <select className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium normal-case tracking-normal text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={paymentStatus} onChange={event => { setPaymentStatus(event.target.value as typeof paymentStatus); setPage(1); }}>
                     <option value="all">Todos os pagamentos</option><option value="pending">Pendente</option><option value="partial">Pagamento parcial</option><option value="paid">Pago</option>
                   </select>
                 </label>
                 <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 xl:col-span-3">Forma de pagamento
-                  <select className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-slate-50/70 px-2.5 text-xs font-medium normal-case tracking-normal text-slate-800 focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={paymentMethod} onChange={event => { setPaymentMethod(event.target.value); setPage(1); }}>
+                  <select className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium normal-case tracking-normal text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={paymentMethod} onChange={event => { setPaymentMethod(event.target.value); setPage(1); }}>
                     <option value="all">Todas as formas</option>{options.data?.paymentMethods.map(value => <option key={value} value={value}>{value}</option>)}
                   </select>
                 </label>
                 <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 xl:col-span-2">Período personalizado
-                  <span className="mt-1 grid grid-cols-2 gap-1"><Input className="h-9 border-slate-200 bg-slate-50/70 px-2 text-xs focus-visible:bg-white" type="date" aria-label="Data inicial" value={from} onChange={event => { setFrom(event.target.value); setPage(1); }} /><Input className="h-9 border-slate-200 bg-slate-50/70 px-2 text-xs focus-visible:bg-white" type="date" aria-label="Data final" value={to} onChange={event => { setTo(event.target.value); setPage(1); }} /></span>
+                  <span className="mt-1 grid grid-cols-2 gap-1"><Input className="h-9 border-slate-200 bg-white px-2 text-xs" type="date" aria-label="Data inicial" value={from} onChange={event => { setFrom(event.target.value); setPage(1); }} /><Input className="h-9 border-slate-200 bg-white px-2 text-xs" type="date" aria-label="Data final" value={to} onChange={event => { setTo(event.target.value); setPage(1); }} /></span>
                 </label>
-                <label className="flex h-9 self-end items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 xl:col-span-2"><input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" checked={includeArchived} onChange={event => { setIncludeArchived(event.target.checked); setPage(1); }} />Incluir arquivados</label>
+                <label className="flex h-9 self-end items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 xl:col-span-2"><input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" checked={includeArchived} onChange={event => { setIncludeArchived(event.target.checked); setPage(1); }} />Incluir arquivados</label>
               </div>
             )}
 
@@ -711,8 +752,8 @@ export function SalesPage({
                 {filterCustomer && <span className="rounded-full bg-blue-50 px-2.5 py-1 text-blue-800">Cliente: {filterCustomer.customerName}</span>}
                 {paymentStatus !== "all" && <span className="rounded-full bg-slate-100 px-2.5 py-1">Pagamento: {paymentLabels[paymentStatus]}</span>}
                 {paymentMethod !== "all" && <span className="rounded-full bg-slate-100 px-2.5 py-1">Forma: {paymentMethod}</span>}
-                {sellerUserId !== "all" && <span className="rounded-full bg-slate-100 px-2.5 py-1">Vendedor selecionado</span>}
-                {(from !== month.from || to !== month.to) && <span className="rounded-full bg-slate-100 px-2.5 py-1">Período personalizado</span>}
+                {sellerUserId !== "all" && <span className="rounded-full bg-slate-100 px-2.5 py-1">Vendedor: {selectedSellerName}</span>}
+                {(from !== month.from || to !== month.to) && <span className="rounded-full bg-slate-100 px-2.5 py-1">Período: {periodFilterLabel}</span>}
                 {includeArchived && <span className="rounded-full bg-slate-100 px-2.5 py-1">Incluindo arquivados</span>}
                 <button type="button" className="rounded-sm font-semibold text-blue-700 transition-colors duration-150 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={clearFilters}>Limpar filtros</button>
               </div>
@@ -741,34 +782,31 @@ export function SalesPage({
               <div className="hidden overflow-x-auto [scrollbar-gutter:stable] md:block">
                 <table className="min-w-[1160px] w-full text-sm">
                   <colgroup>
-                    <col className="w-10" />
-                    <col className="w-[27%]" />
-                    <col className="w-[15%]" />
+                    <col className="w-[31%]" />
+                    <col className="w-[14%]" />
+                    <col className="w-[9%]" />
+                    <col className="w-[10%]" />
                     <col className="w-[10%]" />
                     <col className="w-[11%]" />
-                    <col className="w-[10%]" />
-                    <col className="w-[11%]" />
-                    <col className="w-[10%]" />
+                    <col className="w-[9%]" />
                     <col className="w-16" />
                   </colgroup>
                   <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold text-slate-600">
                     <tr>
-                      <th scope="col" className="px-3 py-3"><input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" aria-label="Selecionar documentos desta página" checked={list.data.items.every(order => selectedSaleIds.includes(order.publicId))} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...new Set([...current, ...list.data!.items.map(order => order.publicId)])] : current.filter(id => !list.data!.items.some(order => order.publicId === id)))} /></th>
-                      <th scope="col" className="px-3 py-3">{kind === "quotes" ? "Orçamento" : kind === "orders" ? "Venda" : "Documento"}</th>
-                      <th scope="col" className="px-3 py-3">Cliente</th>
-                      <th scope="col" className="whitespace-nowrap px-3 py-3">Data</th>
-                      <th scope="col" className="px-3 py-3">Vendedor</th>
+                      <SortableColumnHeader label={kind === "quotes" ? "Orçamento" : kind === "orders" ? "Venda" : "Documento"} sortKey="orderNumber" sort={listSort} onSort={setSort} />
+                      <SortableColumnHeader label="Cliente" sortKey="customer" sort={listSort} onSort={setSort} />
+                      <SortableColumnHeader label="Data" sortKey="commercialDate" sort={listSort} onSort={setSort} className="whitespace-nowrap" />
+                      <SortableColumnHeader label="Vendedor" sortKey="seller" sort={listSort} onSort={setSort} />
                       <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Total</th>
-                      <th scope="col" className="px-3 py-3">{kind === "quotes" ? "Situação" : "Pagamento"}</th>
-                      <th scope="col" className="px-3 py-3">{kind === "quotes" ? "Fluxo" : "Status"}</th>
+                      {kind === "quotes" ? <SortableColumnHeader label="Status" sortKey="status" sort={listSort} onSort={setSort} /> : <th scope="col" className="px-3 py-3">Pagamento</th>}
+                      {kind === "quotes" ? <th scope="col" className="px-3 py-3">Fluxo</th> : <SortableColumnHeader label="Status" sortKey="status" sort={listSort} onSort={setSort} />}
                       <th scope="col" className="px-3 py-3 text-center">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 [&>tr>td]:px-3 [&>tr>td]:py-3.5">
                     {list.data.items.map(order => (
                       <tr key={order.publicId} className="group align-middle transition-colors duration-150 hover:bg-blue-50/40 focus-within:bg-blue-50/40 motion-reduce:transition-none" data-testid={`sale-row-${order.publicId}`}>
-                        <td className="px-2 py-3"><input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" aria-label={`Selecionar ${order.documentType === "quote" ? "orçamento" : "venda"} ${order.orderNumber}`} checked={selectedSaleIds.includes(order.publicId)} onChange={event => setSelectedSaleIds(current => event.target.checked ? [...current, order.publicId] : current.filter(id => id !== order.publicId))} /></td>
-                        <td className="px-2 py-3"><div className="flex min-w-0 items-center gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} featured /><div className="min-w-0"><div className="flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-sm font-bold text-slate-900" title={order.firstProductName ?? "Produto histórico"}>{order.firstProductName ?? "Produto histórico"}</p><p className="mt-0.5 text-[11px] text-slate-500">{order.itemCount > 1 ? `+${order.itemCount - 1} produto${order.itemCount > 2 ? "s" : ""}` : "1 produto"}</p></div></div></td>
+                        <td><div className="flex min-w-0 items-center gap-4"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} featured /><div className="min-w-0"><p className="truncate text-base font-semibold leading-tight text-slate-950" title={order.firstProductName ?? "Produto histórico"}>{order.firstProductName ?? "Produto histórico"}</p><div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm text-xs font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 text-[11px] text-slate-500">{formatQuantity(order.totalQuantity)} un. · {order.itemCount} {order.itemCount === 1 ? "produto" : "produtos"}</p></div></div></td>
                         <td className="max-w-48 truncate px-2 py-3 font-medium text-slate-800" title={order.customerName}>{order.customerName}</td>
                         <td className="whitespace-nowrap px-2 py-3 tabular-nums text-slate-700">{date.format(salesCommercialDate(order.commercialDate))}</td>
                         <td className="max-w-40 truncate px-2 py-3 text-slate-700" title={order.sellerName ?? ""}>{order.sellerName ?? "—"}</td>
@@ -783,22 +821,9 @@ export function SalesPage({
               </div>
               <div className="divide-y divide-slate-100 md:hidden">
                 {list.data.items.map(order => <article key={order.publicId} className="p-4 sm:p-5" data-testid={`sale-row-${order.publicId}`}>
-                  <div className="flex min-w-0 items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} large /><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-sm font-bold text-slate-900">{order.firstProductName ?? "Produto histórico"}</p><p className="mt-1 truncate text-xs font-medium text-slate-800">{order.customerName}</p></div><div className="flex shrink-0 flex-col items-end gap-1"><strong className="text-xs tabular-nums">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></div></div>
-                  <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 pl-[92px]"><span className="min-w-0 truncate text-xs text-slate-500">{date.format(salesCommercialDate(order.commercialDate))} · {order.sellerName ?? "—"}</span><div className="flex flex-wrap justify-end gap-1">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
+                  <div className="flex min-w-0 items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} large /><div className="min-w-0 flex-1"><p className="truncate text-base font-semibold leading-tight text-slate-950">{order.firstProductName ?? "Produto histórico"}</p><div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm text-xs font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-xs font-medium text-slate-800">{order.customerName}</p><p className="mt-1 text-[11px] text-slate-500">{formatQuantity(order.totalQuantity)} un. · {order.itemCount} {order.itemCount === 1 ? "produto" : "produtos"}</p><div className="mt-2 flex items-center justify-between gap-2"><strong className="text-sm tabular-nums text-slate-950">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></div></div></div>
+                  <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2"><span className="min-w-0 truncate text-xs text-slate-500">{date.format(salesCommercialDate(order.commercialDate))} · {order.sellerName ?? "—"}</span><div className="flex flex-wrap justify-end gap-1">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
                 </article>)}
-              </div>
-            </div>
-          )}
-
-          {selectedOnPageCount > 0 && (
-            <div className="flex flex-col gap-3 border-t border-slate-100 bg-blue-50/60 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5" data-testid="sales-selection-summary" role="status" aria-live="polite">
-              <div className="flex min-w-0 items-start gap-2 text-sm text-slate-700">
-                <Check className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" aria-hidden="true" />
-                <span><strong className="font-semibold text-slate-950">{selectedOnPageCount} documento{selectedOnPageCount === 1 ? "" : "s"} selecionado{selectedOnPageCount === 1 ? "" : "s"} nesta página.</strong><span className="hidden text-slate-500 sm:inline"> A exportação usará somente esta seleção.</span></span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button type="button" size="sm" className="min-h-8" onClick={exportCurrentPage}><Share2 className="mr-1.5 h-3.5 w-3.5" />Exportar selecionados</Button>
-                <button type="button" className="rounded-sm px-2 py-1 text-xs font-semibold text-blue-800 transition-colors hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => setSelectedSaleIds([])}>Limpar seleção</button>
               </div>
             </div>
           )}
@@ -2076,11 +2101,12 @@ function CommercialBadge({ value }: { value: string }) {
 }
 
 function ProductThumb({ imagePath, name, compact = false, large = false, featured = false }: { imagePath?: string | null; name: string; compact?: boolean; large?: boolean; featured?: boolean }) {
-  const size = featured ? "h-14 w-14" : large ? "h-20 w-20" : compact ? "h-9 w-9" : "h-11 w-11";
+  const size = featured ? "h-[4.5rem] w-[4.5rem]" : large ? "h-24 w-24" : compact ? "h-9 w-9" : "h-11 w-11";
+  const emphasized = featured || large;
   return imagePath ? (
-    <img src={productMediaUrl(imagePath)} crossOrigin="use-credentials" alt={`Imagem de ${name}`} className={cn("shrink-0 rounded-xl bg-slate-100 object-contain p-1 ring-1 ring-slate-200", size)} />
+    <img src={productMediaUrl(imagePath)} crossOrigin="use-credentials" alt={`Imagem de ${name}`} className={cn("shrink-0 rounded-lg object-contain", !emphasized && "bg-slate-100 p-1 ring-1 ring-slate-200", size)} />
   ) : (
-    <span className={cn("flex shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 ring-1 ring-slate-200", size)} aria-label={`Sem imagem para ${name}`}><PackageOpen className={featured ? "h-9 w-9" : large ? "h-7 w-7" : "h-5 w-5"} /></span>
+    <span className={cn("flex shrink-0 items-center justify-center rounded-lg text-slate-500", emphasized ? "bg-slate-50" : "bg-slate-100 ring-1 ring-slate-200", size)} aria-label={`Sem imagem para ${name}`}><PackageOpen className={emphasized ? "h-8 w-8" : "h-5 w-5"} /></span>
   );
 }
 
