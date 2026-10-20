@@ -42,7 +42,7 @@ async function regularFile(filePath, label) {
 export async function recordOciLayout(root) {
   const indexBytes = await regularFile(path.join(root, "index.json"), "index.json");
   const index = parse(indexBytes, "indice OCI");
-  if (index.schemaVersion !== 2 || index.mediaType !== OCI_INDEX || !Array.isArray(index.manifests)) fail("index.json possui formato invalido");
+  if (index.schemaVersion !== 2 || (index.mediaType !== undefined && index.mediaType !== OCI_INDEX) || !Array.isArray(index.manifests)) fail("index.json possui formato invalido");
   const matches = index.manifests.filter(entry => entry?.platform?.os === "linux" && entry?.platform?.architecture === "arm64");
   if (matches.length !== 1) fail("indice OCI final deve conter exatamente um descritor linux/arm64");
   const descriptor = matches[0];

@@ -8,13 +8,13 @@ import { recordOciLayout } from "./record-sales-v5-e2e-oci-layout.mjs";
 
 const hash = bytes => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 
-async function fixture({ architecture = "arm64", mutateManifest = false } = {}) {
+async function fixture({ architecture = "arm64", mutateManifest = false, omitIndexMediaType = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "megadesk-oci-layout-"));
   const config = Buffer.from(JSON.stringify({ os: "linux", architecture }));
   const configDigest = hash(config);
   const manifest = Buffer.from(JSON.stringify({ schemaVersion: 2, mediaType: "application/vnd.oci.image.manifest.v1+json", config: { digest: configDigest } }));
   const manifestDigest = hash(manifest);
-  const index = Buffer.from(JSON.stringify({ schemaVersion: 2, mediaType: "application/vnd.oci.image.index.v1+json", manifests: [{ mediaType: "application/vnd.oci.image.manifest.v1+json", digest: mutateManifest ? `sha256:${"0".repeat(64)}` : manifestDigest, platform: { os: "linux", architecture } }] }));
+  const index = Buffer.from(JSON.stringify({ schemaVersion: 2, ...(omitIndexMediaType ? {} : { mediaType: "application/vnd.oci.image.index.v1+json" }), manifests: [{ mediaType: "application/vnd.oci.image.manifest.v1+json", digest: mutateManifest ? `sha256:${"0".repeat(64)}` : manifestDigest, platform: { os: "linux", architecture } }] }));
   for (const [value, bytes] of [[configDigest, config], [manifestDigest, manifest]]) {
     const target = path.join(root, "blobs", "sha256", value.slice("sha256:".length));
     await mkdir(path.dirname(target), { recursive: true });
@@ -36,6 +36,12 @@ describe("final ARM64 OCI image layout recording", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("accepts an OCI layout index without the optional mediaType", async () => {
+    const root = await fixture({ omitIndexMediaType: true });
+    try { assert.equal((await recordOciLayout(root)).platform, "linux/arm64"); }
+    finally { await rm(root, { recursive: true, force: true }); }
   });
 
   for (const [name, options] of [["wrong architecture", { architecture: "amd64" }], ["missing manifest blob", { mutateManifest: true }]]) {
