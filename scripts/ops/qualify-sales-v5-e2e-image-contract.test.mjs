@@ -8,7 +8,7 @@ const scriptsDirectory = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptsDirectory, "..", "..");
 
 async function text(relativePath) {
-  return readFile(path.join(root, relativePath), "utf8");
+  return (await readFile(path.join(root, relativePath), "utf8")).replaceAll("\r\n", "\n");
 }
 
 describe("Sales V5 E2E ARM64 image qualification contracts", () => {
@@ -123,5 +123,19 @@ describe("Sales V5 E2E ARM64 image qualification contracts", () => {
       assert.ok(workflow.includes(before));
       assert.throws(() => assertIsolation(workflow.replace(before, after)));
     }
+  });
+
+  it("uses the actual provenance evidence paths for the OCI binding gate", async () => {
+    const workflow = await text(".github/workflows/qualify-sales-v5-e2e-image-arm64.yml");
+    const provenance = JSON.parse(await text(".github/qualification-provenance/sales-v5-e2e-chromium-arm64.json"));
+    for (const evidence of [provenance.candidate.evidence.ociIndex, provenance.candidate.evidence.ociPlatformManifest]) {
+      assert.match(evidence.relativePath, /^\.github\/qualification-provenance\/evidence\/[a-zA-Z0-9._-]+\.json$/);
+      assert.ok((await readFile(path.join(root, evidence.relativePath))).length > 0);
+    }
+    assert.match(workflow, /p\.candidate\.evidence\.ociIndex\.relativePath/);
+    assert.match(workflow, /p\.candidate\.evidence\.ociPlatformManifest\.relativePath/);
+    assert.match(workflow, /--index "\$index"/);
+    assert.match(workflow, /--platform-manifest "\$platform_manifest"/);
+    assert.doesNotMatch(workflow, /evidence\/oci-(?:index|platform-manifest)\.json/);
   });
 });

@@ -129,9 +129,12 @@ jobs:
           context="$RUNNER_TEMP/megadesk-sales-v5-e2e-context"
           (
             cd "$context"
+            manifest=./.github/qualification-provenance/sales-v5-e2e-chromium-arm64.json
+            index="$(node -e 'const p=require(process.argv[1]); process.stdout.write(p.candidate.evidence.ociIndex.relativePath)' "$manifest")"
+            platform_manifest="$(node -e 'const p=require(process.argv[1]); process.stdout.write(p.candidate.evidence.ociPlatformManifest.relativePath)' "$manifest")"
             node "$GITHUB_WORKSPACE/scripts/ops/validate-sales-v5-e2e-oci.mjs" \
-              --index .github/qualification-provenance/evidence/oci-index.json \
-              --platform-manifest .github/qualification-provenance/evidence/oci-platform-manifest.json
+              --index "$index" \
+              --platform-manifest "$platform_manifest"
           ) | tee oci-binding.json
 
       - name: Prove actual ARM64 runner and Docker capability
