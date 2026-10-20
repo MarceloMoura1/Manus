@@ -74,7 +74,7 @@ ${dockerCopy("pnpm-workspace.yaml", "./")}
 ${dockerCopy("patches", "./patches")}
 RUN set -eux; \\
     pnpm install --frozen-lockfile; \\
-    test "$(node -p \\\"require('@playwright/test/package.json').version\\\")" = ${shell(validated.expected.playwrightVersion)}
+    test "$(node -p 'require("@playwright/test/package.json").version')" = ${shell(validated.expected.playwrightVersion)}
 
 WORKDIR /workspace
 USER 0:0
