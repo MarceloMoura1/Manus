@@ -46,6 +46,9 @@ jobs:
       - name: Verify fixed project and qualification inputs
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --quiet HEAD -- scripts/ops/generate-sales-v5-e2e-dockerfile.mjs
+          git ls-files --error-unmatch scripts/ops/generate-sales-v5-e2e-dockerfile.mjs >/dev/null
           test "$(git -C project rev-parse HEAD)" = "$PROJECT_COMMIT"
           test -z "$(git -C project status --porcelain --untracked-files=all)"
           for file in package.json pnpm-lock.yaml pnpm-workspace.yaml; do
@@ -53,7 +56,9 @@ jobs:
             git -C project ls-files --error-unmatch "$file" >/dev/null
           done
           diff -r --no-dereference .github/qualification-provenance project/.github/qualification-provenance
-          for file in generate-sales-v5-e2e-dockerfile.mjs prepare-sales-v5-e2e-image-context.mjs qualify-sales-v5-e2e-image.mjs validate-sales-v5-e2e-image-provenance.mjs validate-sales-v5-e2e-tar.mjs; do
+          # The generator belongs to the workflow commit, not the fixed project.
+          # Project inputs and all other security validators remain identical.
+          for file in prepare-sales-v5-e2e-image-context.mjs qualify-sales-v5-e2e-image.mjs validate-sales-v5-e2e-image-provenance.mjs validate-sales-v5-e2e-tar.mjs; do
             cmp "scripts/ops/$file" "project/scripts/ops/$file"
           done
 
