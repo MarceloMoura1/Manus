@@ -16,6 +16,7 @@ import {
   validateTrustPolicy,
 } from "./validate-sales-v5-e2e-image-provenance.mjs";
 import { generateDockerfile, renderDockerfile } from "./generate-sales-v5-e2e-dockerfile.mjs";
+import { spawnSync } from "node:child_process";
 
 const digest = character => `sha256:${character.repeat(64)}`;
 const sha256 = value => createHash("sha256").update(value).digest("hex");
@@ -223,6 +224,13 @@ describe("Sales V5 E2E ARM64 provenance", () => {
       const first = await generateDockerfile({ repoRoot: root, outputPath: outputA });
       const second = await generateDockerfile({ repoRoot: root, outputPath: outputB });
       assert.equal(first.dockerfile, second.dockerfile);
+      const versionLine = first.dockerfile.split("\n").find(line => line.includes("test \"$(node -p"));
+      assert.ok(versionLine, "generated Dockerfile must check the Playwright version");
+      const shellPath = process.platform === "win32" ? path.join(process.env.ProgramFiles || "C:\\Program Files", "Git", "bin", "sh.exe") : "sh";
+      const syntaxCheck = spawnSync(shellPath, ["-n"], { input: `${versionLine}\n`, encoding: "utf8" });
+      assert.equal(syntaxCheck.status, 0, syntaxCheck.error?.message || syntaxCheck.stderr);
+      const shellRun = spawnSync(shellPath, ["-c", `node() { printf '1.60.0\\n'; }\n${versionLine}`], { encoding: "utf8" });
+      assert.equal(shellRun.status, 0, shellRun.error?.message || shellRun.stderr);
       assert.equal(await readFile(outputA, "utf8"), renderDockerfile(validateProvenance(manifest, { requireApproved: true, trustPolicy })));
       assert.match(first.dockerfile, new RegExp(`FROM --platform=linux/arm64 ${manifest.candidate.sourceImage.repository}@${manifest.candidate.sourceImage.platformManifestDigest}`));
       assert.doesNotMatch(first.dockerfile, /ARG NODE_BASE_IMAGE|\$\{NODE_BASE_IMAGE\}/);
