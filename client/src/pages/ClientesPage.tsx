@@ -52,7 +52,11 @@ export type CrmClient = {
 };
 
 type ClientTab = "geral" | "chamados" | "conversas" | "timeline" | "financeiro" | "vendas" | "rastreamento" | "arquivos";
-type AdditionalContact = {
+export type AdditionalContact = {
+  name?: string;
+  role?: string;
+  email?: string;
+  [key: string]: unknown;
   phone: string;
   whatsapp: string;
   description?: string;
@@ -135,7 +139,7 @@ export type CrmClientFormData = {
   internalResponsible: string;
   tags: string;
   observations: string;
-  contacts: Array<{ phone: string; whatsapp: string; description?: string }>;
+  contacts: AdditionalContact[];
 };
 
 const EMPTY_FORM: CrmClientFormData = {
@@ -160,12 +164,16 @@ const EMPTY_FORM: CrmClientFormData = {
 
 const visualString = (value: unknown) => (typeof value === "string" ? value : "");
 
-function contactsForForm(value: unknown): CrmClientFormData["contacts"] {
+export function contactsForForm(value: unknown): AdditionalContact[] {
   if (typeof value !== "string" || !value.trim()) return [];
   try {
     const parsed = JSON.parse(value);
     return Array.isArray(parsed)
       ? parsed.map(contact => ({
+          ...contact,
+          name: visualString(contact?.name),
+          role: visualString(contact?.role),
+          email: visualString(contact?.email),
           phone: visualString(contact?.phone),
           whatsapp: visualString(contact?.whatsapp),
           description: visualString(contact?.description),
@@ -464,6 +472,7 @@ export function ClientFormModal({ onClose, onSaved, onUseExisting, onViewExistin
       tags: form.tags.trim(),
       observations: form.observations.trim(),
       contacts: form.contacts.map(contact => ({
+        ...contact,
         phone: contact.phone.trim(),
         whatsapp: contact.whatsapp.trim(),
         description: contact.description?.trim() || "",
@@ -713,7 +722,7 @@ export function ClientFormModal({ onClose, onSaved, onUseExisting, onViewExistin
                 {form.contacts.map((contact, idx) => (
                   <div key={idx} className="p-4 border border-slate-200 rounded-lg bg-slate-50">
                     <div className="flex items-start justify-between mb-3">
-                      <span className="text-sm font-medium text-slate-600">Contato {idx + 1}</span>
+                      <span className="text-sm font-medium text-slate-600">{contact.name ? `${contact.name}${contact.role ? ` (${contact.role})` : ""}` : `Contato ${idx + 1}`}</span>
                       <button type="button" onClick={() => removeContact(idx)} className="p-1 text-red-400 hover:bg-red-50 rounded transition-colors" title="Remover contato">
                         <X className="w-4 h-4" />
                       </button>

@@ -50,6 +50,7 @@ const ALL_MODULES = [
   "clientes",
   "configurar_bot",
   "assistente_ia",
+  "crm",
 ] as const;
 
 type ModuleName = (typeof ALL_MODULES)[number];

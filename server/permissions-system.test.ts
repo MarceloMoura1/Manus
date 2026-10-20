@@ -32,6 +32,10 @@ describe("Permissions System - Module Name Normalization", () => {
       expect(normalizeModuleNameToBackend("configurar_bot")).toBe("bot-config");
     });
 
+    it("should convert crm to crm (no change)", () => {
+      expect(normalizeModuleNameToBackend("crm")).toBe("crm");
+    });
+
     it("should convert assistente_ia to ai-assistant", () => {
       expect(normalizeModuleNameToBackend("assistente_ia")).toBe("ai-assistant");
     });
@@ -56,6 +60,10 @@ describe("Permissions System - Module Name Normalization", () => {
 
     it("should convert bot-config to configurar_bot", () => {
       expect(normalizeModuleNameToAdmin("bot-config")).toBe("configurar_bot");
+    });
+
+    it("should convert crm to crm (no change)", () => {
+      expect(normalizeModuleNameToAdmin("crm")).toBe("crm");
     });
 
     it("should convert ai-assistant to assistente_ia", () => {
