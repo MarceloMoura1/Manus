@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "scope": "Sales V5 E2E executor image for Linux ARM64",
+  "decision": "approved-inputs-only",
+  "limits": [
+    "The approval authorizes a reproducible CI qualification only.",
+    "It does not authorize registry publication, production deployment, database access, or use of production credentials.",
+    "The final OCI image digest must be recorded by a successful ARM64 CI run and is intentionally absent from source provenance."
+  ],
+  "reviewBasis": {
+    "nodeImage": "Docker Hub OCI index and platform-manifest bytes recorded beside this document",
+    "chromium": "Official Playwright v1.60.0 source mapping, recorded URL, acquired archive SHA-256, and structural file manifest",
+    "pnpm": "Official npm registry tarball URL and SHA-256 pinned in the policy",
+    "apt": "Official dated Debian snapshot pinned in the policy"
+  },
+  "reviewDate": "2026-10-20"
+}

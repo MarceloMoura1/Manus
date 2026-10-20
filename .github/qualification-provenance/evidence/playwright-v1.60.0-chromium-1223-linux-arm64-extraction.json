@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "archive": {
+    "format": "zip",
+    "sizeBytes": 194706293,
+    "sha256": "3f7fd102f646dad864a987de04782e238e98a3d38543a1c8be0129b96706a283"
+  },
+  "validator": "scripts/ops/validate-sales-v5-e2e-tar.mjs",
+  "checks": {
+    "entries": 472,
+    "regularFiles": 464,
+    "pathTraversal": "rejected",
+    "duplicateEntries": "rejected",
+    "unsafeLinksAndTypes": "rejected",
+    "crc32": "verified while deriving file hashes"
+  },
+  "targetPrefix": "chromium-1223",
+  "extractedFilesManifest": {
+    "relativePath": ".github/qualification-provenance/evidence/playwright-v1.60.0-chromium-1223-linux-arm64-extracted-files.txt",
+    "sizeBytes": 55970,
+    "sha256": "589ee31388e5340eb13bb1f0bc6bd6da64066bc233b49812935b202ef73e5290"
+  }
+}

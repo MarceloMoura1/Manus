@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "status": "approved",
+  "expected": {
+    "platform": { "os": "linux", "architecture": "arm64" },
+    "nodeVersion": "v22.23.2",
+    "pnpmVersion": "10.18.0",
+    "playwrightVersion": "1.60.0"
+  },
+  "candidate": {
+    "sourceImage": {
+      "repository": "node",
+      "indexDigest": "sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9",
+      "platformManifestDigest": "sha256:f71fb9ca71b1b47d4d1a009af78147ed6cdc74f9c7cfc36cbde78ff985169051",
+      "configDigest": "sha256:51b9818dc6f8956f76859097b197aaf762d8639491354ad43ec35b505c87b9cc",
+      "platform": { "os": "linux", "architecture": "arm64" }
+    },
+    "playwright": {
+      "packageVersion": "1.60.0",
+      "chromiumRevision": "1223",
+      "browserVersion": "148.0.7778.96"
+    },
+    "buildInputs": {
+      "aptSnapshot": "https://snapshot.debian.org/archive/debian/20261001T000000Z/",
+      "pnpmTarball": {
+        "url": "https://registry.npmjs.org/pnpm/-/pnpm-10.18.0.tgz",
+        "sha256": "3967a3efe2909df305fec4b833a304dfca17c380b6bb77672f4dac4f2cdd3788"
+      }
+    },
+    "archive": {
+      "url": "https://cdn.playwright.dev/dbazure/download/playwright/builds/chromium/1223/chromium-linux-arm64.zip",
+      "relativePath": "third_party/e2e-chromium/playwright-v1.60.0-chromium-1223-linux-arm64.zip",
+      "sha256": "3f7fd102f646dad864a987de04782e238e98a3d38543a1c8be0129b96706a283",
+      "sizeBytes": 194706293,
+      "format": "zip",
+      "extractedFilesManifest": {
+        "relativePath": ".github/qualification-provenance/evidence/playwright-v1.60.0-chromium-1223-linux-arm64-extracted-files.txt",
+        "sha256": "589ee31388e5340eb13bb1f0bc6bd6da64066bc233b49812935b202ef73e5290",
+        "sizeBytes": 55970
+      }
+    },
+    "evidence": {
+      "acquisition": {
+        "relativePath": ".github/qualification-provenance/evidence/playwright-v1.60.0-chromium-1223-linux-arm64-acquisition.json",
+        "sha256": "a98307c6d6c6f8f0fadcffdc349bd484545c0b42a36bb170bc4876bfee7dd32f",
+        "sizeBytes": 827
+      },
+      "extraction": {
+        "relativePath": ".github/qualification-provenance/evidence/playwright-v1.60.0-chromium-1223-linux-arm64-extraction.json",
+        "sha256": "e253baeefc1f11a52f22cdc4479bed769ac7fe9d0593eabb6f523cbd83dcd99a",
+        "sizeBytes": 763
+      },
+      "approval": {
+        "relativePath": ".github/qualification-provenance/evidence/sales-v5-e2e-image-provenance-approval.json",
+        "sha256": "f87b6c3a51232ce84f15dbf1fd85b33039e2217d328b260a7b361a0a63b85969",
+        "sizeBytes": 897
+      },
+      "ociIndex": {
+        "relativePath": ".github/qualification-provenance/evidence/node-22.23.2-bookworm-slim-index.json",
+        "sha256": "48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9",
+        "sizeBytes": 5218
+      },
+      "ociPlatformManifest": {
+        "relativePath": ".github/qualification-provenance/evidence/node-22.23.2-bookworm-slim-linux-arm64-manifest.json",
+        "sha256": "f71fb9ca71b1b47d4d1a009af78147ed6cdc74f9c7cfc36cbde78ff985169051",
+        "sizeBytes": 1931
+      }
+    },
+    "finalImage": null
+  }
+}
