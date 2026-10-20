@@ -25,6 +25,15 @@ describe("Sales V5 E2E ARM64 image qualification contracts", () => {
     assert.match(generator, /path\.join\(repoRoot, POLICY_RELATIVE_PATH\)/);
   });
 
+  it("bootstraps APT TLS with the pinned Node trust store and fails on index errors", async () => {
+    const generator = await text("scripts/ops/generate-sales-v5-e2e-dockerfile.mjs");
+    assert.ok(generator.indexOf('test "$(node --version)"') < generator.indexOf('require("node:tls").rootCertificates'));
+    assert.ok(generator.indexOf('require("node:tls").rootCertificates') < generator.indexOf("apt-get -o Acquire::Check-Valid-Until=false"));
+    assert.match(generator, /if \(!c\.length\) throw new Error/);
+    assert.match(generator, /APT::Update::Error-Mode=any/);
+    assert.doesNotMatch(generator, /Verify-Peer\s*[=:]\s*false|allow-unauthenticated|trusted=yes/i);
+  });
+
   it("keeps the future workflow manual, minimally privileged, pinned, and non-publishing", async () => {
     const workflow = await text(".github/workflows/qualify-sales-v5-e2e-image-arm64.yml");
     assert.ok(workflow.includes("workflow_dispatch:"));
@@ -91,6 +100,9 @@ describe("Sales V5 E2E ARM64 image qualification contracts", () => {
     assert.equal((workflow.match(/uses:\s*actions\/checkout@11bd71901bbe5b1630ceea73d27597364c9af683/g) || []).length, 2);
     assert.doesNotMatch(workflow, /^\s*ref:\s*(?:main|refs\/heads\/|v\d)/m);
     assert.match(workflow, /git -C project rev-parse HEAD\)" = "\$PROJECT_COMMIT"/);
+    assert.match(workflow, /git rev-parse HEAD\)" = "\$GITHUB_SHA"/);
+    assert.match(workflow, /git diff --quiet HEAD -- scripts\/ops\/generate-sales-v5-e2e-dockerfile\.mjs/);
+    assert.match(workflow, /git ls-files --error-unmatch scripts\/ops\/generate-sales-v5-e2e-dockerfile\.mjs/);
     assert.match(workflow, /git -C project status --porcelain --untracked-files=all/);
     assert.match(workflow, /diff -r --no-dereference \.github\/qualification-provenance project\/\.github\/qualification-provenance/);
     assert.match(workflow, /cmp "scripts\/ops\/\$file" "project\/scripts\/ops\/\$file"/);
