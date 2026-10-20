@@ -158,7 +158,14 @@ export type CrmClientInput = {
   internalResponsible?: string;
   tags?: string;
   observations?: string;
-  contacts?: Array<{ phone: string; whatsapp: string; description?: string }>;
+  contacts?: Array<{
+    name?: string;
+    role?: string;
+    email?: string;
+    phone: string;
+    whatsapp: string;
+    description?: string;
+  } & Record<string, unknown>>;
 };
 
 /**
@@ -346,11 +353,12 @@ export async function addCrmTimeline(
     type: string;
     description: string;
     author?: string;
-  }
+  },
+  executor: SqlExecutor = getPool()
 ) {
-  const pool = getPool();
+
   const id = randomUUID();
-  await pool.execute(
+  await executor.execute(
     `INSERT INTO megadesk_crm_timeline (timeline_id, crm_client_id, client_id, entry_type, description, author, created_at)
      VALUES (?, ?, ?, ?, ?, ?, NOW())`,
     [id, crmClientId, clientId, entry.type, entry.description, entry.author ?? "Sistema"]
