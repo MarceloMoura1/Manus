@@ -3,6 +3,7 @@ import {
   normalizarParaContains,
   resolveField,
   evaluateConditions,
+  evaluateConditionsDetailed,
   type RuleCondition,
 } from "./conditions";
 
@@ -125,6 +126,47 @@ describe("CRM Automations Condition Engine (Deskcomm-compatible)", () => {
           context
         )
       ).toBe(false);
+    });
+  });
+
+  describe("evaluateConditionsDetailed", () => {
+    const context = {
+      origin: "site",
+      dealValue: 5000,
+      tags: ["lead-quente"],
+    };
+
+    it("evaluates matching and non-matching conditions with per-condition details", () => {
+      const conditions: RuleCondition[] = [
+        { field: "origin", op: "eq", value: "site" },
+        { field: "dealValue", op: "eq", value: "9999" },
+      ];
+
+      const result = evaluateConditionsDetailed(conditions, context);
+      expect(result.allMatched).toBe(false);
+      expect(result.evaluations).toHaveLength(2);
+
+      expect(result.evaluations[0]).toEqual({
+        field: "origin",
+        op: "eq",
+        expectedValue: "site",
+        actualValue: "site",
+        matched: true,
+      });
+
+      expect(result.evaluations[1]).toEqual({
+        field: "dealValue",
+        op: "eq",
+        expectedValue: "9999",
+        actualValue: 5000,
+        matched: false,
+      });
+    });
+
+    it("returns allMatched = true when conditions list is empty", () => {
+      const result = evaluateConditionsDetailed([], context);
+      expect(result.allMatched).toBe(true);
+      expect(result.evaluations).toEqual([]);
     });
   });
 });

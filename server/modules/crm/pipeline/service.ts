@@ -11,7 +11,11 @@ import * as repository from "./repository";
 
 export async function listPipelines(clientId: string): Promise<{ pipelines: PipelineView[] }> {
   try {
-    const pipelines = await repository.listPipelines(clientId);
+    let pipelines = await repository.listPipelines(clientId);
+    if (!pipelines || pipelines.length === 0) {
+      const defaultPipeline = await repository.ensureDefaultPipeline(clientId);
+      pipelines = [defaultPipeline];
+    }
     return { pipelines };
   } catch (error) {
     if (error instanceof TRPCError) throw error;
