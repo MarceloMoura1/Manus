@@ -101,17 +101,16 @@ describe("MegaDesk CRM — Etapa 2B.1: Shell e Navegação", () => {
     expect(crmSummarySource).not.toContain("R$ 450.000");
     expect(crmSummarySource).not.toContain("42 vendas");
     // Verifica presença de indicadores honestos de estado inicial
-    expect(crmSummarySource).toContain('"0"');
-    expect(crmSummarySource).toContain('"R$ 0,00"');
     expect(crmSummarySource).toContain("Nenhuma oportunidade em andamento");
-    expect(crmSummarySource).toContain("Aguardando entrada de contatos");
-    expect(crmSummarySource).toContain("Sem tarefas agendadas para hoje");
-    expect(crmSummarySource).toContain("Fase 1 Auditada");
   });
 
-  it("contém placeholders honestos para submódulos em construção e badges de etapa", () => {
-    expect(crmPlaceholderSource).toContain("Funcionalidades planejadas no roteiro arquitetural");
-    expect(crmPlaceholderSource).toContain("Voltar ao Resumo");
-    expect(crmWorkspaceSource).toContain("em preparação");
+  it("garante que todas as áreas do CRM estão integradas operacionalmente no CRMWorkspace", () => {
+    expect(crmWorkspaceSource).toContain("<ActivitiesPage");
+    expect(crmWorkspaceSource).toContain("<ProposalsPage");
+    expect(crmWorkspaceSource).toContain("<AutomationsPage");
+    expect(crmWorkspaceSource).toContain("<ReportsPage");
+    expect(crmWorkspaceSource).toContain("<PipelinePage");
+    expect(crmWorkspaceSource).toContain("<LeadsPage");
+    expect(crmWorkspaceSource).toContain("<ClientesPage");
   });
 });

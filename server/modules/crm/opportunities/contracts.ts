@@ -220,6 +220,22 @@ export const activityUpdateInput = z.object({
 
 export type ActivityUpdateInput = z.infer<typeof activityUpdateInput>;
 
+export const activityDeleteInput = z.object({
+  activityPublicId: activityPublicIdSchema,
+});
+
+export type ActivityDeleteInput = z.infer<typeof activityDeleteInput>;
+
+export const activityListInput = z.object({
+  opportunityPublicId: z.string().uuid().optional(),
+  crmClientId: z.string().optional(),
+  status: z.string().optional(),
+  type: activityTypeSchema.optional(),
+  search: z.string().trim().optional(),
+});
+
+export type ActivityListInput = z.infer<typeof activityListInput>;
+
 export type OpportunityView = {
   publicId: string;
   pipelinePublicId: string;
@@ -247,7 +263,9 @@ export type OpportunityView = {
 export type ActivityView = {
   publicId: string;
   opportunityPublicId: string | null;
+  opportunityTitle?: string | null;
   crmClientId: string | null;
+  clientName?: string | null;
   type: ActivityType;
   title: string;
   description: string | null;

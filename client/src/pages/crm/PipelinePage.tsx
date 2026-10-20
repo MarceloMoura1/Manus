@@ -36,12 +36,14 @@ import {
   Users,
   FileText,
   AlertCircle,
+  AlertTriangle,
   ChevronRight,
   Sparkles,
   ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { RiskRadar } from "./RiskRadar";
 import {
   Dialog,
   DialogContent,
@@ -87,6 +89,7 @@ export function PipelinePage({
 
   // View mode: Kanban vs Table
   const [viewMode, setViewMode] = useState<"kanban" | "table">("kanban");
+  const [showRiskRadar, setShowRiskRadar] = useState(false);
 
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
@@ -95,6 +98,9 @@ export function PipelinePage({
   const [responsibleFilter, setResponsibleFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+
+  const radarQuery = trpc.crm.opportunities.radar.useQuery(undefined, { refetchOnWindowFocus: false });
+  const totalAtRisk = radarQuery.data?.totalAtRisk || 0;
 
   // Modals state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -461,9 +467,31 @@ export function PipelinePage({
           <Button
             size="sm"
             variant="outline"
+            onClick={() => setShowRiskRadar(v => !v)}
+            className={`h-9 gap-1.5 text-xs font-medium border ${
+              showRiskRadar
+                ? "bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/60 dark:text-amber-200 dark:border-amber-700"
+                : totalAtRisk > 0
+                ? "text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                : "text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800"
+            }`}
+          >
+            <AlertTriangle className={`h-3.5 w-3.5 ${totalAtRisk > 0 ? "text-amber-600 dark:text-amber-400" : ""}`} />
+            Radar de Risco
+            {totalAtRisk > 0 && (
+              <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-white">
+                {totalAtRisk}
+              </span>
+            )}
+          </Button>
+
+          <Button
+            size="sm"
+            variant="outline"
             onClick={() => {
               opportunitiesQuery.refetch();
               metricsQuery.refetch();
+              radarQuery.refetch();
             }}
             disabled={opportunitiesQuery.isRefetching}
             className="h-9 gap-1.5 text-xs"
@@ -537,6 +565,26 @@ export function PipelinePage({
           </div>
         </div>
       </div>
+
+      {/* Radar de Oportunidades e Atividades em Risco */}
+      {showRiskRadar && (
+        <div className="mb-2">
+          <RiskRadar
+            onNavigate={onNavigate}
+            onClientNavigate={onClientNavigate}
+            whatsappConnected={whatsappConnected}
+            canStartConversation={canStartConversation}
+            onQuickTask={(oppPublicId) => {
+              const found = opportunitiesQuery.data?.opportunities.find(o => o.publicId === oppPublicId);
+              if (found) {
+                setSelectedOpportunity(found);
+                setDetailTab("activities");
+                setIsDetailOpen(true);
+              }
+            }}
+          />
+        </div>
+      )}
 
       {/* Filters Bar */}
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">

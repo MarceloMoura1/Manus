@@ -66,9 +66,15 @@ export function hasCrmCustomerCommercialAccess(
   if (!context.operationalPermissions || !Array.isArray(context.operationalPermissions)) {
     return false;
   }
-  return context.operationalPermissions.some(
-    permission => permission === "crm" || permission === "clients" || permission === "erp"
-  );
+  if (context.operationalPermissions.includes("crm")) {
+    return true;
+  }
+  if (context.operationalUserRole === "admin" || context.operationalUserRole === "manager") {
+    return context.operationalPermissions.some(
+      permission => permission === "clients" || permission === "erp"
+    );
+  }
+  return false;
 }
 
 export function requireCrmCustomerCommercialAccess(context: CrmAccessContext): string {

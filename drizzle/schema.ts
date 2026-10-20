@@ -1615,7 +1615,124 @@ export const megadeskCrmOpportunityHistory = mysqlTable(
   ]
 );
 
+export const megadeskCrmAutomationRules = mysqlTable(
+  "megadesk_crm_automation_rules",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    name: varchar({ length: 150 }).notNull(),
+    description: text(),
+    triggerType: varchar("trigger_type", { length: 50 }).notNull(),
+    conditions: json().notNull(),
+    actions: json().notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    executionCount: int("execution_count").default(0).notNull(),
+    lastExecutedAt: timestamp("last_executed_at", { mode: "string" }),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mcar_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_mcar_tenant_id").on(table.clientId, table.id),
+    index("idx_mcar_tenant_trigger").on(table.clientId, table.triggerType, table.isActive),
+    foreignKey({
+      name: "fk_mcar_tenant",
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId as AnyMySqlColumn],
+    }).onDelete("restrict"),
+  ]
+);
 
+export const megadeskCrmAutomationRuns = mysqlTable(
+  "megadesk_crm_automation_runs",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    ruleId: bigint("rule_id", { mode: "number" }),
+    ruleName: varchar("rule_name", { length: 150 }).default("").notNull(),
+    eventType: varchar("event_type", { length: 50 }).notNull(),
+    status: mysqlEnum("status", ["success", "failed", "partial", "skipped"]).notNull(),
+    triggerPayload: json("trigger_payload"),
+    results: json().notNull(),
+    errorMessage: text("error_message"),
+    durationMs: int("duration_ms").default(0).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mcarun_tenant_public").on(table.clientId, table.publicId),
+    index("idx_mcarun_tenant_rule").on(table.clientId, table.ruleId, table.createdAt),
+    index("idx_mcarun_tenant_status").on(table.clientId, table.status, table.createdAt),
+    foreignKey({
+      name: "fk_mcarun_tenant",
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId as AnyMySqlColumn],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const megadeskCrmWebhookSources = mysqlTable(
+  "megadesk_crm_webhook_sources",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    name: varchar({ length: 120 }).notNull(),
+    token: varchar({ length: 64 }).notNull(),
+    defaultStageId: bigint("default_stage_id", { mode: "number" }),
+    fieldMappings: json("field_mappings"),
+    isActive: boolean("is_active").default(true).notNull(),
+    totalReceived: int("total_received").default(0).notNull(),
+    lastReceivedAt: timestamp("last_received_at", { mode: "string" }),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mcws_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_mcws_tenant_token").on(table.clientId, table.token),
+    foreignKey({
+      name: "fk_mcws_tenant",
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId as AnyMySqlColumn],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const megadeskCrmAiSettings = mysqlTable(
+  "megadesk_crm_ai_settings",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    isEnabled: boolean("is_enabled").default(true).notNull(),
+    systemPrompt: text("system_prompt"),
+    qualificationCriteria: text("qualification_criteria"),
+    autoSuggestNextAction: boolean("auto_suggest_next_action").default(true).notNull(),
+    modelName: varchar("model_name", { length: 50 }).default("gemini-1.5-flash").notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mcai_tenant").on(table.clientId),
+    uniqueIndex("uq_mcai_tenant_public").on(table.clientId, table.publicId),
+    foreignKey({
+      name: "fk_mcai_tenant",
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId as AnyMySqlColumn],
+    }).onDelete("restrict"),
+  ]
+);
 
 export const megaadminCredentials = mysqlTable(
   "megaadmin_credentials",

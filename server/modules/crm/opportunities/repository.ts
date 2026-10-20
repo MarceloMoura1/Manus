@@ -881,7 +881,13 @@ export async function createActivity(
 
 export async function listActivities(
   clientId: string,
-  filter: { opportunityPublicId?: string; crmClientId?: string; status?: string }
+  filter: {
+    opportunityPublicId?: string;
+    crmClientId?: string;
+    status?: string;
+    type?: string;
+    search?: string;
+  }
 ): Promise<ActivityView[]> {
   const pool = getPool();
   const whereClauses = ["a.client_id = ?"];
@@ -902,11 +908,24 @@ export async function listActivities(
     params.push(filter.status);
   }
 
+  if (filter.type) {
+    whereClauses.push("a.type = ?");
+    params.push(filter.type);
+  }
+
+  if (filter.search && filter.search.trim().length > 0) {
+    const s = `%${filter.search.trim()}%`;
+    whereClauses.push("(a.title LIKE ? OR a.description LIKE ? OR c.company_name LIKE ? OR o.title LIKE ?)");
+    params.push(s, s, s, s);
+  }
+
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT
        a.public_id,
        o.public_id AS opportunity_public_id,
+       o.title AS opportunity_title,
        a.crm_client_id,
+       c.company_name AS client_name,
        a.type,
        a.title,
        a.description,
@@ -919,15 +938,20 @@ export async function listActivities(
        a.updated_at
      FROM megadesk_crm_activities a
      LEFT JOIN megadesk_crm_opportunities o ON o.client_id = a.client_id AND o.id = a.opportunity_id
+     LEFT JOIN megadesk_crm_clients c ON c.client_id = a.client_id AND c.crm_client_id = a.crm_client_id
      WHERE ${whereClauses.join(" AND ")}
-     ORDER BY a.created_at DESC`,
+     ORDER BY 
+       CASE WHEN a.status = 'pending' THEN 0 ELSE 1 END,
+       CASE WHEN a.due_at IS NOT NULL THEN a.due_at ELSE a.created_at END ASC`,
     params
   );
 
   return rows.map(r => ({
     publicId: r.public_id,
     opportunityPublicId: r.opportunity_public_id ?? null,
+    opportunityTitle: r.opportunity_title ?? null,
     crmClientId: r.crm_client_id ?? null,
+    clientName: r.client_name ?? null,
     type: r.type,
     title: r.title,
     description: r.description ?? null,
@@ -1026,4 +1050,21 @@ export async function updateActivity(
     createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
     updatedAt: r.updated_at instanceof Date ? r.updated_at.toISOString() : String(r.updated_at),
   };
+}
+
+export async function deleteActivity(
+  clientId: string,
+  activityPublicId: string
+): Promise<{ success: boolean }> {
+  const pool = getPool();
+  const [result] = await pool.execute<ResultSetHeader>(
+    `DELETE FROM megadesk_crm_activities WHERE client_id = ? AND public_id = ?`,
+    [clientId, activityPublicId]
+  );
+
+  if (result.affectedRows === 0) {
+    throw new Error("Atividade não encontrada.");
+  }
+
+  return { success: true };
 }

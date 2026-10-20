@@ -297,6 +297,13 @@
       "when": 1792466090833,
       "tag": "0041_orange_jamie_braddock",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "5",
+      "when": 1792516634813,
+      "tag": "0042_burly_avengers",
+      "breakpoints": true
     }
   ]
 }

@@ -24,6 +24,9 @@ import { clientFilesRouter } from "./modules/crm/client-files/files-router";
 import { leadsRouter } from "./modules/crm/leads/router";
 import { pipelinesRouter } from "./modules/crm/pipeline/router";
 import { opportunitiesRouter } from "./modules/crm/opportunities/router";
+import { proposalsRouter } from "./modules/crm/proposals/router";
+import { automationsRouter } from "./modules/crm/automations/router";
+import { reportsRouter } from "./modules/crm/reports/router";
 
 import {
   requireCrmCustomerCommercialAccess,
@@ -144,6 +147,9 @@ export const crmRouter = router({
   leads: leadsRouter,
   pipelines: pipelinesRouter,
   opportunities: opportunitiesRouter,
+  proposals: proposalsRouter,
+  automations: automationsRouter,
+  reports: reportsRouter,
   findDuplicate: megadeskProcedure
     .input(z.object({ cpfCnpj: z.string().max(20).optional().default(""), phone: z.string().max(40).optional().default("") }).strict())
     .query(async ({ input, ctx }) => {
