@@ -3,7 +3,10 @@ import type { ModuleTopbarItem } from "@/components/ModuleTopbar";
 import { ClientesPage } from "../ClientesPage";
 import type { CrmWhatsAppIntent } from "../../../../shared/crm";
 import { CrmSummaryPage } from "./CrmSummaryPage";
-import { CrmPlaceholderPage } from "./CrmPlaceholderPage";
+import { ActivitiesPage } from "./ActivitiesPage";
+import { ProposalsPage } from "./ProposalsPage";
+import { AutomationsPage } from "./AutomationsPage";
+import { ReportsPage } from "./ReportsPage";
 import { LeadsPage } from "./LeadsPage";
 import { PipelinePage } from "./PipelinePage";
 import {
@@ -118,78 +121,32 @@ export function CRMWorkspace({
 
     case "activities":
       content = (
-        <CrmPlaceholderPage
-          title="Atividades e Tarefas Comerciais"
-          stageBadge="Etapa 2B.5 em preparação"
-          description="Organização de follow-ups, tarefas, compromissos e histórico de contato com compradores."
-          icon={CalendarCheck}
-          onBackToSummary={() => onNavigate("summary")}
-          highlights={[
-            "Agendamento de ligações, reuniões, follow-ups e visitas",
-            "Lembretes e notificações de atividades próximas ou atrasadas",
-            "Associação direta a oportunidades e clientes",
-            "Histórico unificado de interações comerciais por operador",
-            "Timeline cronológica automática integrada ao WhatsApp",
-          ]}
+        <ActivitiesPage
+          onNavigate={onNavigate}
+          onClientNavigate={onClientNavigate}
+          whatsappConnected={whatsappConnected}
+          canStartConversation={canStartConversation}
         />
       );
       break;
 
     case "proposals":
       content = (
-        <CrmPlaceholderPage
-          title="Propostas Comerciais"
-          stageBadge="Etapa 2B.6 em preparação"
-          description="Elaboração e acompanhamento de propostas integradas ao catálogo de produtos e vendas."
-          icon={FileText}
-          onBackToSummary={() => onNavigate("summary")}
-          highlights={[
-            "Elaboração de propostas com itens do catálogo de produtos",
-            "Envio rápido de PDF / resumo da proposta via WhatsApp",
-            "Conversão automática de proposta aprovada em pedido de venda",
-            "Acompanhamento de status (rascunho, enviada, aceita, recusada)",
-            "Desacoplamento gracioso para clientes que utilizam apenas CRM",
-          ]}
+        <ProposalsPage
+          onNavigate={onNavigate}
+          onClientNavigate={onClientNavigate}
+          whatsappConnected={whatsappConnected}
+          canStartConversation={canStartConversation}
         />
       );
       break;
 
     case "automations":
-      content = (
-        <CrmPlaceholderPage
-          title="Automações e IA Comercial"
-          stageBadge="Etapa 2B.7 em preparação"
-          description="Automação de processos comerciais e assistência inteligente com Gemini."
-          icon={Sparkles}
-          onBackToSummary={() => onNavigate("summary")}
-          highlights={[
-            "Gatilhos automáticos ao mover oportunidade de estágio",
-            "Sugestão inteligente de Próxima Melhor Ação (Next Best Action)",
-            "Qualificação e extração de dados de conversas com IA (Gemini)",
-            "Geração automática de notas e resumos de atendimento",
-            "Controle rigoroso de limites de tokens e cotas por tenant",
-          ]}
-        />
-      );
+      content = <AutomationsPage />;
       break;
 
     case "reports":
-      content = (
-        <CrmPlaceholderPage
-          title="Relatórios e Indicadores Comerciais"
-          stageBadge="Etapa 2B.7 em preparação"
-          description="Métricas de conversão, produtividade comercial e projeções de receita."
-          icon={BarChart3}
-          onBackToSummary={() => onNavigate("summary")}
-          highlights={[
-            "Taxa de conversão por estágio do funil comercial",
-            "Ticket médio por vendedor e por canal de aquisição",
-            "Tempo médio de ciclo de venda (duração da oportunidade)",
-            "Relatório de motivos mais comuns de perda de negócios",
-            "Exportação em CSV/PDF para reuniões de alinhamento comercial",
-          ]}
-        />
-      );
+      content = <ReportsPage />;
       break;
 
     default:

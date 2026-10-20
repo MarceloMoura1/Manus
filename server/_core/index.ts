@@ -21,6 +21,7 @@ import { registerTicketAttachmentRoutes } from "../chamados-attachments";
 import { registerSupplierFileRoutes } from "../modules/erp/suppliers/files-router";
 import { registerClientFileRoutes } from "../modules/crm/client-files/files-router";
 import { registerSaleDocumentRoutes } from "../modules/erp/sales/documents-http";
+import { registerCrmWebhookIngressRoutes } from "../modules/crm/automations/webhook-ingress";
 import { startTicketAttachmentReconciler } from "../chamados-attachment-reconciler";
 import { createSupplierUploadIngressMiddleware } from "./media-ingress";
 import {
@@ -134,6 +135,7 @@ async function startServer() {
   registerSupplierFileRoutes(app);
   registerClientFileRoutes(app);
   registerSaleDocumentRoutes(app);
+  registerCrmWebhookIngressRoutes(app);
 
   // ─── Webhooks ─────────────────────────────────────────────────────────────
   // Meta WhatsApp Business API

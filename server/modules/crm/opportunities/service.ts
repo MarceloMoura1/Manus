@@ -217,7 +217,13 @@ export async function createActivity(
 
 export async function listActivities(
   clientId: string,
-  filter: { opportunityPublicId?: string; crmClientId?: string; status?: string }
+  filter: {
+    opportunityPublicId?: string;
+    crmClientId?: string;
+    status?: string;
+    type?: string;
+    search?: string;
+  }
 ): Promise<{ activities: ActivityView[] }> {
   try {
     const activities = await repository.listActivities(clientId, filter);
@@ -252,6 +258,29 @@ export async function updateActivity(
     throw new TRPCError({
       code: "INTERNAL_SERVER_ERROR",
       message: "Não foi possível atualizar a atividade.",
+    });
+  }
+}
+
+export async function deleteActivity(
+  clientId: string,
+  activityPublicId: string
+): Promise<{ success: boolean }> {
+  try {
+    return await repository.deleteActivity(clientId, activityPublicId);
+  } catch (error: any) {
+    if (error instanceof TRPCError) throw error;
+    const msg = error.message || "";
+    if (msg.includes("não encontrada")) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: msg,
+      });
+    }
+    console.error("[CRM Opportunities] Erro ao excluir atividade:", error);
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Não foi possível excluir a atividade.",
     });
   }
 }
