@@ -22,9 +22,18 @@ export type LeadStatus = (typeof leadStatusValues)[number];
 export const leadContactItemSchema = z.object({
   name: z.string().trim().max(180).optional().default(""),
   role: z.string().trim().max(80).optional().default(""),
-  phone: z.string().trim().max(40).optional().default(""),
-  whatsapp: z.string().trim().max(40).optional().default(""),
-  email: z.union([z.literal(""), z.string().email().max(255)]).optional().default(""),
+  phone: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(40).optional().default("")
+  ),
+  whatsapp: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(40).optional().default("")
+  ),
+  email: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.union([z.literal(""), z.string().email("E-mail inválido.").max(255)]).optional().default("")
+  ),
   description: z.string().trim().max(255).optional().default(""),
 });
 
@@ -46,15 +55,39 @@ export type LeadListInput = z.infer<typeof leadListInputSchema>;
 export const leadCreateInputSchema = z.object({
   companyName: z.string().trim().min(1, "Nome ou Razão Social é obrigatório.").max(255),
   customerType: z.enum(CUSTOMER_TYPES).default("company"),
-  responsibleName: z.string().trim().max(180).optional().default(""),
-  cpfCnpj: z.string().trim().max(20).optional().default(""),
-  phone: z.string().trim().max(40).optional().default(""),
-  whatsapp: z.string().trim().max(40).optional().default(""),
-  email: z.union([z.literal(""), z.string().email("E-mail inválido.").max(255)]).optional().default(""),
+  responsibleName: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(180).optional().default("")
+  ),
+  cpfCnpj: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(20).optional().default("")
+  ),
+  phone: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(40).optional().default("")
+  ),
+  whatsapp: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(40).optional().default("")
+  ),
+  email: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.union([z.literal(""), z.string().email("E-mail inválido.").max(255)]).optional().default("")
+  ),
   origin: z.enum(leadOriginValues).default("outro"),
-  internalResponsible: z.string().trim().max(180).optional().default(""),
-  tags: z.string().trim().max(500).optional().default(""),
-  observations: z.string().trim().max(5000).optional().default(""),
+  internalResponsible: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(180).optional().default("")
+  ),
+  tags: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(500).optional().default("")
+  ),
+  observations: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(5000).optional().default("")
+  ),
   contacts: z.array(leadContactItemSchema).optional().default([]),
 });
 
@@ -64,15 +97,39 @@ export const leadUpdateInputSchema = z.object({
   crmClientId: z.string().trim().min(1, "Identificador do lead é obrigatório.").max(80),
   companyName: z.string().trim().min(1, "Nome ou Razão Social é obrigatório.").max(255).optional(),
   customerType: z.enum(CUSTOMER_TYPES).optional(),
-  responsibleName: z.string().trim().max(180).optional(),
-  cpfCnpj: z.string().trim().max(20).optional(),
-  phone: z.string().trim().max(40).optional(),
-  whatsapp: z.string().trim().max(40).optional(),
-  email: z.union([z.literal(""), z.string().email("E-mail inválido.").max(255)]).optional(),
+  responsibleName: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(180).optional()
+  ),
+  cpfCnpj: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(20).optional()
+  ),
+  phone: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(40).optional()
+  ),
+  whatsapp: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(40).optional()
+  ),
+  email: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.union([z.literal(""), z.string().email("E-mail inválido.").max(255)]).optional()
+  ),
   origin: z.enum(leadOriginValues).optional(),
-  internalResponsible: z.string().trim().max(180).optional(),
-  tags: z.string().trim().max(500).optional(),
-  observations: z.string().trim().max(5000).optional(),
+  internalResponsible: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(180).optional()
+  ),
+  tags: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(500).optional()
+  ),
+  observations: z.preprocess(
+    val => (val === undefined || val === null ? "" : typeof val === "string" ? val.trim() : val),
+    z.string().max(5000).optional()
+  ),
   contacts: z.array(leadContactItemSchema).optional(),
 });
 
@@ -81,7 +138,10 @@ export type LeadUpdateInput = z.infer<typeof leadUpdateInputSchema>;
 export const leadConvertInputSchema = z.object({
   crmClientId: z.string().trim().min(1, "Identificador do lead é obrigatório.").max(80),
   customerType: z.enum(CUSTOMER_TYPES).optional(),
-  cpfCnpj: z.string().trim().max(20).optional(),
+  cpfCnpj: z.preprocess(
+    val => (val === undefined || val === null ? undefined : typeof val === "string" ? val.trim() : val),
+    z.string().max(20).optional()
+  ),
   companyName: z.string().trim().min(1).max(255).optional(),
   responsibleName: z.string().trim().max(180).optional(),
   notes: z.string().trim().max(500).optional(),

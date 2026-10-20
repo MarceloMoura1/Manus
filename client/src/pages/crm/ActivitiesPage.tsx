@@ -285,7 +285,13 @@ export function ActivitiesPage({
       return;
     }
 
-    const isoDueAt = formDueAt ? new Date(formDueAt).toISOString() : null;
+    let isoDueAt: string | null = null;
+    if (formDueAt && formDueAt.trim()) {
+      const d = new Date(formDueAt.trim());
+      if (!isNaN(d.getTime())) {
+        isoDueAt = d.toISOString();
+      }
+    }
 
     if (editingActivity) {
       updateMutation.mutate({
@@ -302,8 +308,8 @@ export function ActivitiesPage({
         type: formType,
         dueAt: isoDueAt,
         assignedTo: formAssignedTo.trim(),
-        crmClientId: formCrmClientId || null,
-        opportunityPublicId: formOpportunityPublicId || null,
+        crmClientId: formCrmClientId.trim() || null,
+        opportunityPublicId: formOpportunityPublicId.trim() || null,
       });
     }
   };

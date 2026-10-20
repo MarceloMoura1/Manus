@@ -264,7 +264,7 @@ export function PipelinePage({
   const resetCreateForm = () => {
     setFormTitle("");
     setFormValue("");
-    setFormStageId(activePipeline?.stages?.[0]?.publicId || "");
+    setFormStageId(activePipeline?.stages?.[0]?.publicId || stages?.[0]?.publicId || "");
     setFormCrmClientId("");
     setFormConvertLead(false);
     setFormInternalResponsible("");
@@ -274,7 +274,8 @@ export function PipelinePage({
 
   const handleOpenCreateModal = (defaultStageId?: string, defaultClientId?: string) => {
     resetCreateForm();
-    if (defaultStageId) setFormStageId(defaultStageId);
+    const fallbackStage = defaultStageId || activePipeline?.stages?.[0]?.publicId || stages?.[0]?.publicId || "";
+    setFormStageId(fallbackStage);
     if (defaultClientId) setFormCrmClientId(defaultClientId);
     setIsCreateOpen(true);
   };
@@ -285,20 +286,21 @@ export function PipelinePage({
       toast.error("Informe o título da oportunidade.");
       return;
     }
-    if (!effectivePipelineId || !formStageId) {
+    const resolvedStageId = formStageId || activePipeline?.stages?.[0]?.publicId || stages?.[0]?.publicId || "";
+    if (!effectivePipelineId || !resolvedStageId) {
       toast.error("Selecione o estágio do funil.");
       return;
     }
 
     createOpportunityMutation.mutate({
       pipelinePublicId: effectivePipelineId,
-      stagePublicId: formStageId,
-      crmClientId: formCrmClientId || null,
+      stagePublicId: resolvedStageId,
+      crmClientId: formCrmClientId.trim() || null,
       convertLead: formConvertLead,
       title: formTitle.trim(),
       valueCents: parseBrlToCents(formValue),
       currency: "BRL",
-      expectedCloseDate: formExpectedCloseDate || null,
+      expectedCloseDate: formExpectedCloseDate.trim() || null,
       internalResponsible: formResponsible.trim(),
       observations: formObservations.trim() || null,
     });

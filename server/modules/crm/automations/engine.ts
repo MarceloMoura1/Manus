@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getPool } from "../../../db";
 import type { RowDataPacket, ResultSetHeader } from "mysql2";
-import { evaluateConditions, type RuleCondition } from "./conditions";
+import { evaluateConditions, evaluateConditionsDetailed, type RuleCondition, type ConditionEvaluationDetail } from "./conditions";
 import { generateAIResponse } from "../../../_core/gemini";
 import { addCrmTimeline } from "../../../db-crm";
 
@@ -15,6 +15,9 @@ export interface ActionResult {
 export interface AutomationExecutionResult {
   runPublicId: string;
   status: "success" | "failed" | "partial" | "skipped";
+  conditionsMet: boolean;
+  conditionEvaluations: ConditionEvaluationDetail[];
+  actionsToTrigger: Array<{ type: string; config?: Record<string, any> }>;
   results: ActionResult[];
   durationMs: number;
   errorMessage?: string;
@@ -67,19 +70,51 @@ export async function executeAutomationRule(
       : rule.actions || [];
 
   // Evaluate conditions
-  const conditionsMet = evaluateConditions(conditions, event.payload);
+  const { allMatched: conditionsMet, evaluations } = evaluateConditionsDetailed(conditions, event.payload);
   if (!conditionsMet) {
+    const durationMs = Date.now() - startTime;
+    const skipResults: ActionResult[] = [
+      {
+        actionType: "conditions_check",
+        status: "skipped",
+        detail: {
+          reason: "Condições não atendidas para o evento.",
+          evaluations,
+        },
+      },
+    ];
+
+    try {
+      await pool.execute(
+        `INSERT INTO megadesk_crm_automation_runs
+         (public_id, client_id, rule_id, rule_name, event_type, status, trigger_payload, results, error_message, duration_ms, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          runPublicId,
+          clientId,
+          rule.id,
+          rule.name,
+          event.eventType,
+          "skipped",
+          JSON.stringify(event.payload),
+          JSON.stringify(skipResults),
+          "Condições não atendidas.",
+          durationMs,
+        ]
+      );
+    } catch (logErr) {
+      console.error("[CRM Automations] Erro ao gravar execução pulada:", logErr);
+    }
+
     return {
       runPublicId,
       status: "skipped",
-      results: [
-        {
-          actionType: "conditions_check",
-          status: "skipped",
-          detail: { reason: "Condições não atendidas para o evento." },
-        },
-      ],
-      durationMs: Date.now() - startTime,
+      conditionsMet: false,
+      conditionEvaluations: evaluations,
+      actionsToTrigger: actions,
+      results: skipResults,
+      durationMs,
+      errorMessage: "Condições não atendidas para o payload informado.",
     };
   }
 
@@ -490,6 +525,9 @@ export async function executeAutomationRule(
   return {
     runPublicId,
     status: overallStatus,
+    conditionsMet: true,
+    conditionEvaluations: evaluations,
+    actionsToTrigger: actions,
     results,
     durationMs,
   };

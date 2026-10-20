@@ -55,7 +55,7 @@ export function buildOpportunityWhereClauses(
   filter: {
     pipelinePublicId?: string;
     stagePublicId?: string;
-    crmClientId?: string;
+    crmClientId?: string | null;
     status?: string;
     internalResponsible?: string;
     dateFrom?: string;
@@ -328,7 +328,7 @@ export async function createOpportunity(
     let linkedClientName: string | null = null;
     if (input.crmClientId && input.crmClientId.trim()) {
       const [clientRows] = await connection.query<RowDataPacket[]>(
-        `SELECT id, crm_client_id, status, company_name FROM megadesk_crm_clients
+        `SELECT crm_client_id, status, company_name FROM megadesk_crm_clients
          WHERE client_id = ? AND crm_client_id = ? FOR UPDATE`,
         [clientId, input.crmClientId.trim()]
       );
@@ -833,15 +833,18 @@ export async function createActivity(
     opportunityId = Number(oppRows[0].id);
   }
 
-  if (input.crmClientId) {
+  if (input.crmClientId && input.crmClientId.trim()) {
     const [clientRows] = await pool.query<RowDataPacket[]>(
-      `SELECT id FROM megadesk_crm_clients WHERE client_id = ? AND crm_client_id = ? LIMIT 1`,
-      [clientId, input.crmClientId]
+      `SELECT crm_client_id FROM megadesk_crm_clients WHERE client_id = ? AND crm_client_id = ? LIMIT 1`,
+      [clientId, input.crmClientId.trim()]
     );
     if (!clientRows || clientRows.length === 0) {
       throw new Error("Cliente informado não encontrado.");
     }
   }
+
+  const parsedDueAt = input.dueAt && input.dueAt.trim() ? new Date(input.dueAt.trim()) : null;
+  const validDueAt = parsedDueAt && !isNaN(parsedDueAt.getTime()) ? parsedDueAt : null;
 
   const publicId = randomUUID();
   await pool.execute(
@@ -856,7 +859,7 @@ export async function createActivity(
       input.type,
       input.title.trim(),
       input.description?.trim() || null,
-      input.dueAt || null,
+      validDueAt,
       input.assignedTo?.trim() || "",
       actor,
     ]
@@ -983,7 +986,9 @@ export async function updateActivity(
   }
   if (input.dueAt !== undefined) {
     updates.push("due_at = ?");
-    params.push(input.dueAt || null);
+    const parsedDueAt = input.dueAt && input.dueAt.trim() ? new Date(input.dueAt.trim()) : null;
+    const validDueAt = parsedDueAt && !isNaN(parsedDueAt.getTime()) ? parsedDueAt : null;
+    params.push(validDueAt);
   }
   if (input.status !== undefined) {
     updates.push("status = ?");

@@ -64,3 +64,33 @@ export function evaluateConditions(
   if (!conditions || conditions.length === 0) return true;
   return conditions.every((c) => matches(c, context));
 }
+
+export interface ConditionEvaluationDetail {
+  field: string;
+  op: ConditionOp;
+  expectedValue: string;
+  actualValue: unknown;
+  matched: boolean;
+}
+
+export function evaluateConditionsDetailed(
+  conditions: RuleCondition[],
+  context: Record<string, unknown>
+): { allMatched: boolean; evaluations: ConditionEvaluationDetail[] } {
+  if (!conditions || conditions.length === 0) {
+    return { allMatched: true, evaluations: [] };
+  }
+  const evaluations: ConditionEvaluationDetail[] = conditions.map((c) => {
+    const actual = resolveField(context, c.field);
+    const matched = matches(c, context);
+    return {
+      field: c.field,
+      op: c.op,
+      expectedValue: c.value,
+      actualValue: actual,
+      matched,
+    };
+  });
+  const allMatched = evaluations.every((e) => e.matched);
+  return { allMatched, evaluations };
+}

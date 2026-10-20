@@ -165,8 +165,10 @@ export async function createLead(
 
   const normalizedPhone = normalizeStoredPhone(input.phone, true);
   const normalizedWhatsapp = normalizeStoredPhone(input.whatsapp, false) ?? "";
-  const normalizedEmail = input.email ? normalizeEmail(input.email) : null;
-  const normalizedDoc = input.cpfCnpj ? normalizeDigits(input.cpfCnpj) : null;
+  const rawEmail = input.email && input.email.trim() ? normalizeEmail(input.email) : null;
+  const normalizedEmail = rawEmail && rawEmail.length > 0 ? rawEmail : null;
+  const rawDoc = input.cpfCnpj ? normalizeDigits(input.cpfCnpj) : null;
+  const normalizedDoc = rawDoc && rawDoc.length > 0 ? rawDoc : null;
 
   try {
     await connection.beginTransaction();
@@ -243,7 +245,8 @@ export async function updateLead(
 
   if (input.cpfCnpj !== undefined) {
     updates.push("cpf_cnpj = ?");
-    params.push(input.cpfCnpj ? normalizeDigits(input.cpfCnpj) : null);
+    const rawDoc = input.cpfCnpj ? normalizeDigits(input.cpfCnpj) : null;
+    params.push(rawDoc && rawDoc.length > 0 ? rawDoc : null);
   }
 
   if (input.phone !== undefined) {
@@ -258,7 +261,8 @@ export async function updateLead(
 
   if (input.email !== undefined) {
     updates.push("email = ?");
-    params.push(input.email ? normalizeEmail(input.email) : null);
+    const rawEmail = input.email && input.email.trim() ? normalizeEmail(input.email) : null;
+    params.push(rawEmail && rawEmail.length > 0 ? rawEmail : null);
   }
 
   if (input.origin !== undefined) {
@@ -346,9 +350,12 @@ export async function convertLeadToClient(
       params.push(input.responsibleName.trim());
     }
 
-    if (input.cpfCnpj !== undefined && input.cpfCnpj.trim()) {
-      updates.push("cpf_cnpj = ?");
-      params.push(normalizeDigits(input.cpfCnpj));
+    if (input.cpfCnpj !== undefined) {
+      const rawDoc = input.cpfCnpj ? normalizeDigits(input.cpfCnpj) : null;
+      if (rawDoc && rawDoc.length > 0) {
+        updates.push("cpf_cnpj = ?");
+        params.push(rawDoc);
+      }
     }
 
     params.push(clientId, input.crmClientId);

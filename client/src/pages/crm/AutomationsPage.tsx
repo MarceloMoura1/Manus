@@ -66,6 +66,7 @@ export function AutomationsPage() {
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [testModalOpen, setTestModalOpen] = useState(false);
   const [testRule, setTestRule] = useState<any | null>(null);
+  const [testResult, setTestResult] = useState<any | null>(null);
   const [testPayload, setTestPayload] = useState(
     JSON.stringify(
       {
@@ -142,10 +143,15 @@ export function AutomationsPage() {
   });
 
   const testRuleMutation = trpc.crm.automations.testRule.useMutation({
-    onSuccess: (res) => {
-      toast.success(`Teste executado: status ${res.status}`);
-      setTestModalOpen(false);
+    onSuccess: (res: any) => {
+      setTestResult(res);
+      if (res.conditionsMet) {
+        toast.success("Teste executado: condições atendidas e ações processadas!");
+      } else {
+        toast.info("Teste executado: condições rejeitadas (execução gravada como 'skipped').");
+      }
       utils.crm.automations.listRuns.invalidate();
+      utils.crm.automations.listRules.invalidate();
     },
     onError: (err) => toast.error(err.message || "Falha no teste da regra."),
   });
@@ -447,6 +453,7 @@ export function AutomationsPage() {
                           size="sm"
                           onClick={() => {
                             setTestRule(rule);
+                            setTestResult(null);
                             setTestModalOpen(true);
                           }}
                           className="h-7 px-2 text-xs gap-1 text-indigo-600 border-indigo-200 hover:bg-indigo-50"
@@ -977,45 +984,244 @@ export function AutomationsPage() {
       </Dialog>
 
       {/* Modal: Testar Regra */}
-      <Dialog open={testModalOpen} onOpenChange={setTestModalOpen}>
-        <DialogContent className="max-w-lg">
+      <Dialog
+        open={testModalOpen}
+        onOpenChange={(open) => {
+          setTestModalOpen(open);
+          if (!open) setTestResult(null);
+        }}
+      >
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Testar Regra: {testRule?.name}</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Play className="w-4 h-4 text-indigo-600" />
+              <span>Simulador de Automação: {testRule?.name}</span>
+            </DialogTitle>
             <DialogDescription>
-              Envie um payload de teste para validar condições e execução das ações com rastreamento completo.
+              Dispare um evento simulado para avaliar critérios de disparo, conferir condições e auditar o histórico em megadesk_crm_automation_runs.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3 py-3 text-xs">
-            <label className="block font-semibold">Payload do Evento (JSON)</label>
-            <textarea
-              rows={8}
-              value={testPayload}
-              onChange={(e) => setTestPayload(e.target.value)}
-              className="w-full p-2.5 font-mono text-xs border rounded-lg bg-slate-50 dark:bg-slate-900"
-            />
-          </div>
+          {!testResult ? (
+            <div className="space-y-4 py-3 text-xs">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">Gatilho Avaliado:</span>
+                  <Badge variant="outline" className="font-mono text-[11px]">{testRule?.triggerType}</Badge>
+                </div>
+                <div>
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">Condições Registradas ({testRule?.conditions?.length || 0}):</span>
+                  {testRule?.conditions && testRule.conditions.length > 0 ? (
+                    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-600 dark:text-slate-400">
+                      {testRule.conditions.map((c: any, idx: number) => (
+                        <li key={idx}>
+                          <span className="font-mono">{c.field}</span> <span className="text-indigo-600 font-semibold">{c.op}</span> "{c.value}"
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span className="ml-1 text-slate-500 italic">Nenhuma condição (disparo incondicional).</span>
+                  )}
+                </div>
+              </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setTestModalOpen(false)}>
-              Fechar
-            </Button>
-            <Button
-              disabled={testRuleMutation.isPending}
-              onClick={() => {
-                try {
-                  const parsed = JSON.parse(testPayload);
-                  testRuleMutation.mutate({ publicId: testRule.publicId, mockPayload: parsed });
-                } catch {
-                  toast.error("JSON inválido.");
-                }
-              }}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white"
-            >
-              {testRuleMutation.isPending && <RefreshCw className="w-4 h-4 animate-spin mr-1" />}
-              Executar Teste
-            </Button>
-          </DialogFooter>
+              <div>
+                <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                  Payload do Evento Mock (JSON):
+                </label>
+                <textarea
+                  rows={8}
+                  value={testPayload}
+                  onChange={(e) => setTestPayload(e.target.value)}
+                  className="w-full p-2.5 font-mono text-xs border rounded-lg bg-white dark:bg-slate-950 dark:border-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+
+              <DialogFooter className="pt-2">
+                <Button variant="outline" onClick={() => setTestModalOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button
+                  disabled={testRuleMutation.isPending}
+                  onClick={() => {
+                    try {
+                      const parsed = JSON.parse(testPayload);
+                      testRuleMutation.mutate({ publicId: testRule.publicId, mockPayload: parsed });
+                    } catch {
+                      toast.error("JSON inválido no payload de teste.");
+                    }
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5"
+                >
+                  {testRuleMutation.isPending ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      Processando...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3.5 h-3.5" />
+                      Executar Simulação
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            /* Result Panel */
+            <div className="space-y-4 py-3 text-xs">
+              {/* Verdict Banner */}
+              <div
+                className={`p-4 rounded-xl border flex items-start gap-3 ${
+                  testResult.conditionsMet
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-900 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300"
+                    : "bg-amber-50 border-amber-200 text-amber-900 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-300"
+                }`}
+              >
+                {testResult.conditionsMet ? (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                )}
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-sm">
+                      {testResult.conditionsMet
+                        ? "Condições Atendidas com Sucesso"
+                        : "Condições Rejeitadas"}
+                    </h4>
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] font-mono ${
+                        testResult.conditionsMet
+                          ? "border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-900 dark:text-emerald-200"
+                          : "border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-700 dark:bg-amber-900 dark:text-amber-200"
+                      }`}
+                    >
+                      Status: {testResult.status}
+                    </Badge>
+                  </div>
+                  <p className="text-xs opacity-90">
+                    {testResult.conditionsMet
+                      ? "O evento fornecido atende a todos os filtros da regra. As ações configuradas foram processadas."
+                      : "O evento não satisfez todos os filtros. A execução foi registrada com status 'skipped' sem acionar ações de produção."}
+                  </p>
+                  <div className="pt-1.5 flex flex-wrap items-center gap-4 text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                    <span>Run ID: {testResult.runPublicId}</span>
+                    <span>Duração: {testResult.durationMs}ms</span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-sans font-semibold">✓ Gravado em megadesk_crm_automation_runs</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Conditions Breakdown */}
+              <div className="border rounded-xl p-3 bg-white dark:bg-slate-900 dark:border-slate-800 space-y-2">
+                <h5 className="font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
+                  <span>Avaliação Detalhada das Condições ({testResult.conditionEvaluations?.length || 0})</span>
+                  <span className="text-[11px] font-normal text-slate-500">Operador: AND</span>
+                </h5>
+                {testResult.conditionEvaluations && testResult.conditionEvaluations.length > 0 ? (
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {testResult.conditionEvaluations.map((c: any, idx: number) => (
+                      <div key={idx} className="py-2 flex items-center justify-between gap-2">
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                            <span className="font-semibold text-slate-900 dark:text-white">{c.field}</span>
+                            <span className="text-indigo-600 font-bold">{c.op}</span>
+                            <span className="text-slate-600 dark:text-slate-400">"{c.expectedValue}"</span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Valor recebido no evento: <span className="font-mono text-slate-700 dark:text-slate-300 font-semibold">{c.actualValue !== undefined && c.actualValue !== null ? String(c.actualValue) : "(indefinido/nulo)"}</span>
+                          </div>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={`flex-shrink-0 text-[10px] gap-1 ${
+                            c.matched
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40"
+                              : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40"
+                          }`}
+                        >
+                          {c.matched ? <CheckCircle2 className="w-3 h-3 text-emerald-600" /> : <XCircle className="w-3 h-3 text-rose-600" />}
+                          {c.matched ? "Satisfeita" : "Não Atendida"}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 italic py-1">Regra sem condições adicionais (disparo incondicional para o gatilho).</p>
+                )}
+              </div>
+
+              {/* Actions Executed or Simulated */}
+              <div className="border rounded-xl p-3 bg-white dark:bg-slate-900 dark:border-slate-800 space-y-2">
+                <h5 className="font-bold text-slate-800 dark:text-slate-200">
+                  Ações da Regra ({testResult.actionsToTrigger?.length || testResult.results?.length || 0})
+                </h5>
+                <div className="space-y-2">
+                  {(testResult.actionsToTrigger || []).map((act: any, idx: number) => {
+                    const resultMatch = testResult.results?.find((r: any) => r.actionType === act.type) || testResult.results?.[idx];
+                    const actConf = ACTION_LABELS[act.type] || { label: act.type, icon: "⚡" };
+                    return (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between p-2.5 rounded-lg border border-slate-100 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-950/50 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">{actConf.icon}</span>
+                          <div>
+                            <span className="font-semibold text-slate-900 dark:text-white">{actConf.label}</span>
+                            {act.config && Object.keys(act.config).length > 0 && (
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1">
+                                {JSON.stringify(act.config)}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] ${
+                            !testResult.conditionsMet
+                              ? "border-slate-200 text-slate-500 bg-slate-100 dark:border-slate-800 dark:bg-slate-900"
+                              : resultMatch?.status === "success"
+                              ? "border-emerald-200 text-emerald-700 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/40"
+                              : resultMatch?.status === "skipped"
+                              ? "border-amber-200 text-amber-700 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40"
+                              : "border-rose-200 text-rose-700 bg-rose-50 dark:border-rose-800 dark:bg-rose-950/40"
+                          }`}
+                        >
+                          {!testResult.conditionsMet
+                            ? "Não Acionada (Condições Rejeitadas)"
+                            : resultMatch?.status === "success"
+                            ? "Processada com Sucesso"
+                            : resultMatch?.status === "skipped"
+                            ? "Pulada (Critério de Ação)"
+                            : "Falhou"}
+                        </Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <DialogFooter className="pt-2 flex items-center justify-between">
+                <Button variant="outline" onClick={() => setTestResult(null)} className="gap-1">
+                  <RotateCw className="w-3.5 h-3.5" />
+                  Testar Outro Payload
+                </Button>
+                <Button
+                  onClick={() => {
+                    setTestModalOpen(false);
+                    setTestResult(null);
+                  }}
+                  className="bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-100 dark:text-slate-900"
+                >
+                  Fechar
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

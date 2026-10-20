@@ -45,10 +45,16 @@ export const opportunityLossReasonSchema = z
   .max(255, "Motivo de perda não pode exceder 255 caracteres.");
 
 export const opportunityExpectedCloseDateSchema = z
+  .union([
+    z.literal(""),
+    z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data deve estar no formato AAAA-MM-DD."),
+  ])
+  .nullish();
+
+export const optionalCrmClientIdSchema = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Data deve estar no formato AAAA-MM-DD.")
-  .optional()
-  .nullable();
+  .max(80, "Identificador do cliente inválido.")
+  .nullish();
 
 export const activityTypeValues = [
   "task",
@@ -71,13 +77,13 @@ export const activityStatusSchema = z.enum(activityStatusValues);
 export const opportunityCreateInput = z.object({
   pipelinePublicId: pipelinePublicIdSchema,
   stagePublicId: stagePublicIdSchema,
-  crmClientId: crmClientIdSchema.optional().nullable(),
+  crmClientId: optionalCrmClientIdSchema,
   title: opportunityTitleSchema,
   valueCents: opportunityValueCentsSchema.optional().default(0),
   currency: opportunityCurrencySchema.optional().default("BRL"),
   expectedCloseDate: opportunityExpectedCloseDateSchema,
   internalResponsible: z.string().trim().max(180).optional().default(""),
-  observations: z.string().trim().max(5000).optional().nullable(),
+  observations: z.string().max(5000).nullish(),
   convertLead: z.boolean().optional().default(false),
 });
 
@@ -86,7 +92,7 @@ export type OpportunityCreateInput = z.infer<typeof opportunityCreateInput>;
 export const opportunityListInput = z.object({
   pipelinePublicId: pipelinePublicIdSchema.optional(),
   stagePublicId: stagePublicIdSchema.optional(),
-  crmClientId: crmClientIdSchema.optional(),
+  crmClientId: optionalCrmClientIdSchema,
   status: z.enum(["open", "won", "lost", "all"]).optional().default("all"),
   internalResponsible: z.string().trim().optional(),
   search: z.string().trim().optional(),
@@ -101,7 +107,7 @@ export type OpportunityListInput = z.infer<typeof opportunityListInput>;
 export const opportunityMetricsFilterInput = z.object({
   pipelinePublicId: pipelinePublicIdSchema.optional(),
   stagePublicId: stagePublicIdSchema.optional(),
-  crmClientId: crmClientIdSchema.optional(),
+  crmClientId: optionalCrmClientIdSchema,
   internalResponsible: z.string().trim().optional(),
   search: z.string().trim().optional(),
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data deve estar no formato AAAA-MM-DD.").optional(),
@@ -114,7 +120,7 @@ export const opportunityUpdateInput = z
   .object({
     opportunityPublicId: opportunityPublicIdSchema,
     stagePublicId: stagePublicIdSchema.optional(),
-    crmClientId: crmClientIdSchema.optional().nullable(),
+    crmClientId: optionalCrmClientIdSchema,
     title: opportunityTitleSchema.optional(),
     valueCents: opportunityValueCentsSchema.optional(),
     currency: opportunityCurrencySchema.optional(),
@@ -122,7 +128,7 @@ export const opportunityUpdateInput = z
     status: opportunityStatusSchema.optional(),
     lossReason: opportunityLossReasonSchema.optional().nullable(),
     internalResponsible: z.string().trim().max(180).optional(),
-    observations: z.string().trim().max(5000).optional().nullable(),
+    observations: z.string().max(5000).nullish(),
   })
   .refine(
     data => {
@@ -190,12 +196,12 @@ export type OpportunityStageTransitionInput = z.infer<
 
 export const activityCreateInput = z
   .object({
-    opportunityPublicId: opportunityPublicIdSchema.optional().nullable(),
-    crmClientId: crmClientIdSchema.optional().nullable(),
+    opportunityPublicId: opportunityPublicIdSchema.nullish(),
+    crmClientId: optionalCrmClientIdSchema,
     type: activityTypeSchema,
     title: z.string().trim().min(1, "Título da atividade é obrigatório.").max(255),
-    description: z.string().trim().max(5000).optional().nullable(),
-    dueAt: z.string().optional().nullable(),
+    description: z.string().max(5000).nullish(),
+    dueAt: z.string().nullish(),
     assignedTo: z.string().trim().max(180).optional().default(""),
   })
   .refine(
@@ -211,9 +217,9 @@ export type ActivityCreateInput = z.infer<typeof activityCreateInput>;
 export const activityUpdateInput = z.object({
   activityPublicId: activityPublicIdSchema,
   title: z.string().trim().min(1).max(255).optional(),
-  description: z.string().trim().max(5000).optional().nullable(),
-  dueAt: z.string().optional().nullable(),
-  completedAt: z.string().optional().nullable(),
+  description: z.string().max(5000).nullish(),
+  dueAt: z.string().nullish(),
+  completedAt: z.string().nullish(),
   status: activityStatusSchema.optional(),
   assignedTo: z.string().trim().max(180).optional(),
 });
