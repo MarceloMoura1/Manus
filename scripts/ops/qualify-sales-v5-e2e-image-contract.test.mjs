@@ -101,8 +101,12 @@ describe("Sales V5 E2E ARM64 image qualification contracts", () => {
     assert.doesNotMatch(workflow, /^\s*ref:\s*(?:main|refs\/heads\/|v\d)/m);
     assert.match(workflow, /git -C project rev-parse HEAD\)" = "\$PROJECT_COMMIT"/);
     assert.match(workflow, /git rev-parse HEAD\)" = "\$GITHUB_SHA"/);
-    assert.match(workflow, /git diff --quiet HEAD -- scripts\/ops\/generate-sales-v5-e2e-dockerfile\.mjs/);
-    assert.match(workflow, /git ls-files --error-unmatch scripts\/ops\/generate-sales-v5-e2e-dockerfile\.mjs/);
+    assert.match(workflow, /for file in generate-sales-v5-e2e-dockerfile\.mjs prepare-sales-v5-e2e-image-context\.mjs validate-sales-v5-e2e-tar\.mjs; do/);
+    assert.match(workflow, /git diff --quiet HEAD -- "scripts\/ops\/\$file"/);
+    assert.match(workflow, /git ls-files --error-unmatch "scripts\/ops\/\$file"/);
+    assert.match(workflow, /scripts\/ops\/validate-sales-v5-e2e-tar\.test\.mjs/);
+    const contextBuilder = await text("scripts/ops/prepare-sales-v5-e2e-image-context.mjs");
+    assert.match(contextBuilder, /copyStrict\(path\.join\(WORKFLOW_ROOT, VALIDATOR_PATH\), path\.join\(temporary, VALIDATOR_PATH\)\)/);
     assert.match(workflow, /git -C project status --porcelain --untracked-files=all/);
     assert.match(workflow, /diff -r --no-dereference \.github\/qualification-provenance project\/\.github\/qualification-provenance/);
     assert.match(workflow, /cmp "scripts\/ops\/\$file" "project\/scripts\/ops\/\$file"/);

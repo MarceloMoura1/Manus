@@ -47,8 +47,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          git diff --quiet HEAD -- scripts/ops/generate-sales-v5-e2e-dockerfile.mjs
-          git ls-files --error-unmatch scripts/ops/generate-sales-v5-e2e-dockerfile.mjs >/dev/null
+          for file in generate-sales-v5-e2e-dockerfile.mjs prepare-sales-v5-e2e-image-context.mjs validate-sales-v5-e2e-tar.mjs; do
+            git diff --quiet HEAD -- "scripts/ops/$file"
+            git ls-files --error-unmatch "scripts/ops/$file" >/dev/null
+          done
           test "$(git -C project rev-parse HEAD)" = "$PROJECT_COMMIT"
           test -z "$(git -C project status --porcelain --untracked-files=all)"
           for file in package.json pnpm-lock.yaml pnpm-workspace.yaml; do
@@ -56,9 +58,9 @@ jobs:
             git -C project ls-files --error-unmatch "$file" >/dev/null
           done
           diff -r --no-dereference .github/qualification-provenance project/.github/qualification-provenance
-          # The generator belongs to the workflow commit, not the fixed project.
-          # Project inputs and all other security validators remain identical.
-          for file in prepare-sales-v5-e2e-image-context.mjs qualify-sales-v5-e2e-image.mjs validate-sales-v5-e2e-image-provenance.mjs validate-sales-v5-e2e-tar.mjs; do
+          # The recipe, context builder and archive validator belong to the
+          # workflow commit; the other security validators remain identical.
+          for file in qualify-sales-v5-e2e-image.mjs validate-sales-v5-e2e-image-provenance.mjs; do
             cmp "scripts/ops/$file" "project/scripts/ops/$file"
           done
 
@@ -84,6 +86,7 @@ jobs:
           node --test
           scripts/ops/validate-sales-v5-e2e-image-inputs.test.mjs
           scripts/ops/validate-sales-v5-e2e-image-provenance.test.mjs
+          scripts/ops/validate-sales-v5-e2e-tar.test.mjs
           scripts/ops/qualify-sales-v5-e2e-image-contract.test.mjs
           scripts/ops/qualify-sales-v5-e2e-image.test.mjs
 
