@@ -144,7 +144,11 @@ jobs:
           test "$(uname -m)" = aarch64
           docker version
           docker info --format 'OSType={{.OSType}} Architecture={{.Architecture}}'
-          test "$(docker info --format '{{.OSType}}/{{.Architecture}}')" = linux/arm64
+          test "$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')" = linux/arm64
+          case "$(docker info --format '{{.OSType}}/{{.Architecture}}')" in
+            linux/arm64|linux/aarch64) ;;
+            *) echo 'Docker daemon is not Linux ARM64' >&2; exit 1 ;;
+          esac
 
       - name: Build candidate-only executor image
         env:

@@ -53,7 +53,10 @@ describe("Sales V5 E2E ARM64 image qualification contracts", () => {
     assert.ok(workflow.includes("validate-sales-v5-e2e-oci.mjs"));
     assert.doesNotMatch(workflow, /node_base_image|apt_snapshot|pnpm_tarball|--build-arg|NODE_BASE_IMAGE/);
     assert.ok(workflow.includes("test \"$(uname -m)\" = aarch64"));
-    assert.ok(workflow.includes("test \"$(docker info --format '{{.OSType}}/{{.Architecture}}')\" = linux/arm64"));
+    assert.ok(workflow.includes("test \"$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')\" = linux/arm64"));
+    assert.ok(workflow.includes("case \"$(docker info --format '{{.OSType}}/{{.Architecture}}')\" in"));
+    assert.ok(workflow.includes("linux/arm64|linux/aarch64) ;;"));
+    assert.ok(workflow.includes("*) echo 'Docker daemon is not Linux ARM64' >&2; exit 1 ;;"));
     assert.ok(workflow.includes("--network none --read-only --cap-drop ALL"));
     assert.ok(workflow.includes("--security-opt no-new-privileges:true"));
     assert.ok(workflow.includes('base_platform="$(docker image inspect "$source_reference" --format \'{{.Os}}/{{.Architecture}}\')"'));
