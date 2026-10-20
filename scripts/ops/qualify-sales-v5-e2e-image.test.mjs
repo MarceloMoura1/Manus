@@ -94,6 +94,15 @@ describe("Sales V5 E2E ARM64 image qualification probe", () => {
     assert.deepEqual(result.sharp, { bytes: 4, width: 2, height: 3 });
   });
 
+  it("launches the verified full Chromium executable rather than headless shell", async () => {
+    const browser = healthyBrowser();
+    const launch = browser.launch;
+    let options;
+    browser.launch = async value => { options = value; return launch(); };
+    await qualifySalesV5E2EImage(healthyOverrides({ chromiumApi: browser }));
+    assert.deepEqual(options, { headless: true, executablePath: executable });
+  });
+
   it("rejects a missing browser executable or an incorrect browser path", async () => {
     await assert.rejects(
       qualifySalesV5E2EImage(healthyOverrides({ chromiumApi: { ...healthyBrowser(), executablePath: () => "" } })),

@@ -80,6 +80,7 @@ describe("Sales V5 E2E ARM64 image qualification contracts", () => {
     assert.match(workflow, /printf '%s  %s\\n' "\$expected_sha" "\$archive" \| sha256sum --check --status/);
     assert.match(workflow, /docker buildx build --pull=false --platform linux\/arm64 --output "type=oci,dest=\$oci_archive"/);
     assert.match(workflow, /record-sales-v5-e2e-oci-layout\.mjs/);
+    assert.match(workflow, /test "\$tested_id" = "\$exported_id"/);
   });
 
   it("excludes operator environment files and dependency output from the Docker context", async () => {
@@ -101,8 +102,12 @@ describe("Sales V5 E2E ARM64 image qualification contracts", () => {
     assert.doesNotMatch(workflow, /^\s*ref:\s*(?:main|refs\/heads\/|v\d)/m);
     assert.match(workflow, /git -C project rev-parse HEAD\)" = "\$PROJECT_COMMIT"/);
     assert.match(workflow, /git rev-parse HEAD\)" = "\$GITHUB_SHA"/);
-    assert.match(workflow, /git diff --quiet HEAD -- scripts\/ops\/generate-sales-v5-e2e-dockerfile\.mjs/);
-    assert.match(workflow, /git ls-files --error-unmatch scripts\/ops\/generate-sales-v5-e2e-dockerfile\.mjs/);
+    assert.match(workflow, /for file in generate-sales-v5-e2e-dockerfile\.mjs prepare-sales-v5-e2e-image-context\.mjs validate-sales-v5-e2e-tar\.mjs qualify-sales-v5-e2e-image\.mjs; do/);
+    assert.match(workflow, /git diff --quiet HEAD -- "scripts\/ops\/\$file"/);
+    assert.match(workflow, /git ls-files --error-unmatch "scripts\/ops\/\$file"/);
+    assert.match(workflow, /scripts\/ops\/validate-sales-v5-e2e-tar\.test\.mjs/);
+    const contextBuilder = await text("scripts/ops/prepare-sales-v5-e2e-image-context.mjs");
+    assert.match(contextBuilder, /copyStrict\(path\.join\(WORKFLOW_ROOT, VALIDATOR_PATH\), path\.join\(temporary, VALIDATOR_PATH\)\)/);
     assert.match(workflow, /git -C project status --porcelain --untracked-files=all/);
     assert.match(workflow, /diff -r --no-dereference \.github\/qualification-provenance project\/\.github\/qualification-provenance/);
     assert.match(workflow, /cmp "scripts\/ops\/\$file" "project\/scripts\/ops\/\$file"/);
@@ -110,6 +115,7 @@ describe("Sales V5 E2E ARM64 image qualification contracts", () => {
     assert.match(workflow, /cd project\n\s+test "\$\(git rev-parse HEAD\)" = "\$PROJECT_COMMIT"/);
     assert.match(workflow, /git ls-files --others --ignored --exclude-standard -- patches \.github\/qualification-provenance scripts\/ops/);
     assert.match(workflow, /src="\$GITHUB_WORKSPACE\/project",dst=\/workspace,readonly/);
+    assert.match(workflow, /src="\$GITHUB_WORKSPACE\/scripts\/ops\/qualify-sales-v5-e2e-image\.mjs",dst=\/workspace\/scripts\/ops\/qualify-sales-v5-e2e-image\.mjs,readonly/);
     assert.ok(workflow.indexOf("Verify fixed project and qualification inputs") < workflow.indexOf("Validate approved Chromium provenance before Docker"));
     assert.ok(workflow.indexOf("Validate approved Chromium provenance before Docker") < workflow.indexOf("Install frozen checkout dependencies after provenance approval"));
     assert.ok(workflow.indexOf("Install frozen checkout dependencies after provenance approval") < workflow.indexOf("Freeze and verify the sole Docker build context"));

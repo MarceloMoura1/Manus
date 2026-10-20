@@ -1,12 +1,14 @@
 import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { POLICY_RELATIVE_PATH, PROVENANCE_RELATIVE_PATH, loadAndValidateProvenance } from "./validate-sales-v5-e2e-image-provenance.mjs";
 import { renderDockerfile } from "./generate-sales-v5-e2e-dockerfile.mjs";
 
 const INTEGRITY_FILE = "qualification-context.json";
-const STATIC_PATHS = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "patches", "scripts/ops/validate-sales-v5-e2e-tar.mjs"];
+const STATIC_PATHS = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "patches"];
+const VALIDATOR_PATH = "scripts/ops/validate-sales-v5-e2e-tar.mjs";
+const WORKFLOW_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 function fail(message) {
   throw new Error(`Contexto de qualificacao invalido: ${message}`);
@@ -136,6 +138,9 @@ export async function prepareQualificationContext({ repoRoot = process.cwd(), ou
       if (!inside(root, source)) fail(`caminho fora da raiz: ${relativePath}`);
       await copyStrict(source, path.join(temporary, relativePath));
     }
+    // The workflow checkout supplies the reviewed validator; project inputs
+    // remain pinned to the separate immutable project commit.
+    await copyStrict(path.join(WORKFLOW_ROOT, VALIDATOR_PATH), path.join(temporary, VALIDATOR_PATH));
     await copyStrict(externalArchive, path.join(temporary, validated.candidate.archive.relativePath));
     // Render only from copied-and-revalidated evidence. This prevents a source
     // tree change after the first validation from changing Docker build inputs.

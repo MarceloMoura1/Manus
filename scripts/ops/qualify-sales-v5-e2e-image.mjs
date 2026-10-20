@@ -89,7 +89,9 @@ async function assertBrowserPath({ env, lstatFn, realpathFn, accessFn, sha256Fil
 async function assertChromium({ executable, commandFn, chromiumApi, browserVersion }) {
   const ldd = await commandFn("ldd", [executable]);
   if (/not found/i.test(`${ldd.stdout}\n${ldd.stderr}`)) fail("Chromium possui biblioteca Linux ausente");
-  const browser = await chromiumApi.launch({ headless: true });
+  // The approved archive contains full Chromium, not chromium-headless-shell.
+  // Explicitly run the executable whose revision and bytes were checked above.
+  const browser = await chromiumApi.launch({ headless: true, executablePath: executable });
   try {
     const page = await browser.newPage();
     await page.goto("data:text/html,<title>megadesk-e2e-arm64</title>");

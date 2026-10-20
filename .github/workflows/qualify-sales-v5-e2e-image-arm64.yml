@@ -47,8 +47,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          git diff --quiet HEAD -- scripts/ops/generate-sales-v5-e2e-dockerfile.mjs
-          git ls-files --error-unmatch scripts/ops/generate-sales-v5-e2e-dockerfile.mjs >/dev/null
+          for file in generate-sales-v5-e2e-dockerfile.mjs prepare-sales-v5-e2e-image-context.mjs validate-sales-v5-e2e-tar.mjs qualify-sales-v5-e2e-image.mjs; do
+            git diff --quiet HEAD -- "scripts/ops/$file"
+            git ls-files --error-unmatch "scripts/ops/$file" >/dev/null
+          done
           test "$(git -C project rev-parse HEAD)" = "$PROJECT_COMMIT"
           test -z "$(git -C project status --porcelain --untracked-files=all)"
           for file in package.json pnpm-lock.yaml pnpm-workspace.yaml; do
@@ -56,9 +58,9 @@ jobs:
             git -C project ls-files --error-unmatch "$file" >/dev/null
           done
           diff -r --no-dereference .github/qualification-provenance project/.github/qualification-provenance
-          # The generator belongs to the workflow commit, not the fixed project.
-          # Project inputs and all other security validators remain identical.
-          for file in prepare-sales-v5-e2e-image-context.mjs qualify-sales-v5-e2e-image.mjs validate-sales-v5-e2e-image-provenance.mjs validate-sales-v5-e2e-tar.mjs; do
+          # The recipe, context builder and archive validator belong to the
+          # workflow commit; the other security validators remain identical.
+          for file in validate-sales-v5-e2e-image-provenance.mjs; do
             cmp "scripts/ops/$file" "project/scripts/ops/$file"
           done
 
@@ -84,6 +86,8 @@ jobs:
           node --test
           scripts/ops/validate-sales-v5-e2e-image-inputs.test.mjs
           scripts/ops/validate-sales-v5-e2e-image-provenance.test.mjs
+          scripts/ops/validate-sales-v5-e2e-tar.test.mjs
+          scripts/ops/record-sales-v5-e2e-oci-layout.test.mjs
           scripts/ops/qualify-sales-v5-e2e-image-contract.test.mjs
           scripts/ops/qualify-sales-v5-e2e-image.test.mjs
 
@@ -188,6 +192,7 @@ jobs:
             --security-opt no-new-privileges:true \
             --tmpfs /tmp:rw,noexec,nosuid,size=512m \
             --mount type=bind,src="$GITHUB_WORKSPACE/project",dst=/workspace,readonly \
+            --mount type=bind,src="$GITHUB_WORKSPACE/scripts/ops/qualify-sales-v5-e2e-image.mjs",dst=/workspace/scripts/ops/qualify-sales-v5-e2e-image.mjs,readonly \
             --workdir /workspace \
             --env HOME=/tmp \
             --env PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
@@ -206,6 +211,9 @@ jobs:
           mkdir "$oci_root"
           tar -xf "$oci_archive" -C "$oci_root"
           node scripts/ops/record-sales-v5-e2e-oci-layout.mjs --root "$oci_root" --output qualification-final-oci.json
+          tested_id="$(docker image inspect "megadesk-sales-v5-e2e-qualification:${{ github.run_id }}" --format '{{.Id}}')"
+          exported_id="$(node -e 'const p=require("./qualification-final-oci.json"); process.stdout.write(p.configDigest)')"
+          test "$tested_id" = "$exported_id"
 
       - name: Retain non-secret qualification evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

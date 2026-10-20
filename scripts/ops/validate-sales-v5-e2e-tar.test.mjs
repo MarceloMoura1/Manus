@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { deflateRawSync, gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
-import { extractedManifestFromZip, validateTarBytes, validateZipBytes, verifyExtractedTree } from "./validate-sales-v5-e2e-tar.mjs";
+import { extractedManifestFromZip, parseExtractedManifest, validateTarBytes, validateZipBytes, verifyExtractedTree } from "./validate-sales-v5-e2e-tar.mjs";
 
 function crc32(bytes) {
   let value = 0xffffffff;
@@ -150,5 +150,14 @@ describe("Chromium archive structural validation", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("accepts the approved manifest's hash-sorted lines while rejecting duplicates and reordered lines", async () => {
+    const text = await readFile(new URL("../../.github/qualification-provenance/evidence/playwright-v1.60.0-chromium-1223-linux-arm64-extracted-files.txt", import.meta.url), "utf8");
+    const entries = parseExtractedManifest(text);
+    assert.ok(entries.size > 2);
+    const lines = text.trimEnd().split("\n");
+    assert.throws(() => parseExtractedManifest(`${lines[1]}\n${lines[0]}\n`), /ordem canonica/);
+    assert.throws(() => parseExtractedManifest(`${lines[0]}\n${lines[0]}\n`), /caminhos unicos/);
   });
 });
