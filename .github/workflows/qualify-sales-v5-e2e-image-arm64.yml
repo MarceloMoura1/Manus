@@ -1,0 +1,181 @@
+name: Qualify Sales V5 E2E executor image (ARM64)
+
+on:
+  workflow_dispatch:
+
+# This workflow deliberately cannot publish a container image. A future
+# registry decision must be reviewed separately before packages:write or any
+# registry credential is introduced.
+permissions:
+  # `checkout` needs a short-lived, read-only repository token. It is not
+  # persisted to the workspace or made available to the container.
+  contents: read
+
+concurrency:
+  group: qualify-sales-v5-e2e-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    name: Build and qualify Linux ARM64 E2E image
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    env:
+      EXPECTED_NODE: v22.23.2
+      EXPECTED_PNPM: 10.18.0
+      EXPECTED_PLAYWRIGHT: 1.60.0
+      CI: "true"
+    steps:
+      # Refs below were resolved directly against their official signed release
+      # tags. Never replace these immutable commit SHAs with mutable tags.
+      - name: Check out the candidate without persisting credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install the required Node.js runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.23.2
+          check-latest: false
+
+      - name: Install the required pnpm release
+        uses: pnpm/action-setup@9fd676a19091d4595eefd76e4bd31c97133911f1 # v4.2.0
+        with:
+          version: 10.18.0
+
+      - name: Assert workflow tool versions
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = "$EXPECTED_NODE"
+          test "$(pnpm --version)" = "$EXPECTED_PNPM"
+
+      - name: Validate static qualification recipe contracts
+        run: >-
+          node --test
+          scripts/ops/validate-sales-v5-e2e-image-inputs.test.mjs
+          scripts/ops/validate-sales-v5-e2e-image-provenance.test.mjs
+          scripts/ops/qualify-sales-v5-e2e-image-contract.test.mjs
+          scripts/ops/qualify-sales-v5-e2e-image.test.mjs
+
+      # Any pending or inconsistent provenance exits before archive download,
+      # pnpm or Docker. The downloaded archive is checked separately against
+      # the approved size and SHA-256 before it enters the frozen context.
+      - name: Validate approved Chromium provenance before Docker
+        run: |
+          set -euo pipefail
+          node scripts/ops/validate-sales-v5-e2e-image-provenance.mjs \
+            --require-approved \
+            --verify-evidence \
+            --allow-external-archive \
+            | tee qualification-provenance.json
+
+      - name: Acquire exactly the approved Chromium archive before Docker
+        run: |
+          set -euo pipefail
+          manifest=.github/qualification-provenance/sales-v5-e2e-chromium-arm64.json
+          archive="$RUNNER_TEMP/approved-chromium-linux-arm64.zip"
+          source_url="$(node -e \"const p=require(process.argv[1]); process.stdout.write(p.candidate.archive.url)\" \"$manifest\")"
+          expected_sha="$(node -e \"const p=require(process.argv[1]); process.stdout.write(p.candidate.archive.sha256)\" \"$manifest\")"
+          expected_size="$(node -e \"const p=require(process.argv[1]); process.stdout.write(String(p.candidate.archive.sizeBytes))\" \"$manifest\")"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 2 --output "$archive" "$source_url"
+          test "$(stat -c %s "$archive")" = "$expected_size"
+          printf '%s  %s\n' "$expected_sha" "$archive" | sha256sum --check --status
+
+      - name: Install frozen checkout dependencies after provenance approval
+        run: pnpm install --frozen-lockfile
+
+      - name: Freeze and verify the sole Docker build context from approved provenance
+        run: |
+          set -euo pipefail
+          context="$RUNNER_TEMP/megadesk-sales-v5-e2e-context"
+          node scripts/ops/prepare-sales-v5-e2e-image-context.mjs --output "$context" --archive-source "$RUNNER_TEMP/approved-chromium-linux-arm64.zip" \
+            | tee qualification-context.json
+          node scripts/ops/prepare-sales-v5-e2e-image-context.mjs --verify "$context"
+
+      - name: Verify approved OCI index to ARM64 manifest to config binding
+        run: |
+          set -euo pipefail
+          context="$RUNNER_TEMP/megadesk-sales-v5-e2e-context"
+          (
+            cd "$context"
+            node "$GITHUB_WORKSPACE/scripts/ops/validate-sales-v5-e2e-oci.mjs" \
+              --index .github/qualification-provenance/evidence/oci-index.json \
+              --platform-manifest .github/qualification-provenance/evidence/oci-platform-manifest.json
+          ) | tee oci-binding.json
+
+      - name: Prove actual ARM64 runner and Docker capability
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = aarch64
+          docker version
+          docker info --format 'OSType={{.OSType}} Architecture={{.Architecture}}'
+          test "$(docker info --format '{{.OSType}}/{{.Architecture}}')" = linux/arm64
+
+      - name: Build candidate-only executor image
+        env:
+          LOCAL_IMAGE: megadesk-sales-v5-e2e-qualification:${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          context="$RUNNER_TEMP/megadesk-sales-v5-e2e-context"
+          node scripts/ops/prepare-sales-v5-e2e-image-context.mjs --verify "$context"
+          docker build --pull=false --platform linux/arm64 \
+            --tag "$LOCAL_IMAGE" \
+            --file "$context/Dockerfile.e2e-arm64" "$context"
+          source_reference="$(node -e \"const p=require(process.argv[1]); console.log(p.candidate.sourceImage.repository+'@'+p.candidate.sourceImage.platformManifestDigest)\" "$context/.github/qualification-provenance/sales-v5-e2e-chromium-arm64.json")"
+          base_platform="$(docker image inspect "$source_reference" --format '{{.Os}}/{{.Architecture}}')"
+          test "$base_platform" = linux/arm64
+          docker image inspect "$source_reference" \
+            --format 'baseId={{.Id}} baseOs={{.Os}} baseArchitecture={{.Architecture}} baseRepoDigests={{json .RepoDigests}} approvedSourceReference='"$source_reference" \
+            | tee base-image-inspect.txt
+          final_platform="$(docker image inspect "$LOCAL_IMAGE" --format '{{.Os}}/{{.Architecture}}')"
+          test "$final_platform" = linux/arm64
+          final_id="$(docker image inspect "$LOCAL_IMAGE" --format '{{.Id}}')"
+          printf '%s\n' "$final_id" | grep -Eq '^sha256:[a-f0-9]{64}$'
+          docker image inspect "$LOCAL_IMAGE" \
+            --format 'finalId={{.Id}} finalOs={{.Os}} finalArchitecture={{.Architecture}} finalRepoDigests={{json .RepoDigests}}' \
+            | tee image-inspect.txt
+
+      - name: Prove the image under the runner filesystem restrictions
+        env:
+          LOCAL_IMAGE: megadesk-sales-v5-e2e-qualification:${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --tmpfs /tmp:rw,noexec,nosuid,size=512m \
+            --mount type=bind,src="$GITHUB_WORKSPACE",dst=/workspace,readonly \
+            --workdir /workspace \
+            --env HOME=/tmp \
+            --env PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+            "$LOCAL_IMAGE" \
+            node scripts/ops/qualify-sales-v5-e2e-image.mjs \
+            | tee qualification-report.json
+
+      - name: Export a deterministic OCI image layout after the successful probe
+        run: |
+          set -euo pipefail
+          oci_archive="$RUNNER_TEMP/megadesk-sales-v5-e2e.oci.tar"
+          oci_root="$RUNNER_TEMP/megadesk-sales-v5-e2e.oci"
+          docker buildx build --pull=false --platform linux/arm64 --output "type=oci,dest=$oci_archive" \
+            --file "$RUNNER_TEMP/megadesk-sales-v5-e2e-context/Dockerfile.e2e-arm64" \
+            "$RUNNER_TEMP/megadesk-sales-v5-e2e-context"
+          mkdir "$oci_root"
+          tar -xf "$oci_archive" -C "$oci_root"
+          node scripts/ops/record-sales-v5-e2e-oci-layout.mjs --root "$oci_root" --output qualification-final-oci.json
+
+      - name: Retain non-secret qualification evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sales-v5-e2e-image-arm64-qualification-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            qualification-provenance.json
+            qualification-context.json
+            oci-binding.json
+            base-image-inspect.txt
+            image-inspect.txt
+            qualification-final-oci.json
+            qualification-report.json

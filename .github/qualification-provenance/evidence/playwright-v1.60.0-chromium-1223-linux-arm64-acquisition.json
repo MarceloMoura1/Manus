@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "url": "https://cdn.playwright.dev/dbazure/download/playwright/builds/chromium/1223/chromium-linux-arm64.zip",
+    "project": "microsoft/playwright",
+    "tag": "v1.60.0",
+    "tagCommit": "87bb9ddbd78f329df18c2b24847bc9409240cd07"
+  },
+  "selection": {
+    "playwrightVersion": "1.60.0",
+    "chromiumRevision": "1223",
+    "chromiumVersion": "148.0.7778.96",
+    "platform": "linux/arm64"
+  },
+  "observedArchive": {
+    "format": "zip",
+    "sizeBytes": 194706293,
+    "sha256": "3f7fd102f646dad864a987de04782e238e98a3d38543a1c8be0129b96706a283"
+  },
+  "verification": {
+    "date": "2026-10-20",
+    "method": "downloaded once from the recorded HTTPS URL and calculated SHA-256 over the acquired bytes",
+    "note": "ETag and HTTP status are not used as integrity evidence."
+  }
+}
