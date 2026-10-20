@@ -1,0 +1,9 @@
+# syntax=docker/dockerfile:1.7
+# This is deliberately a non-buildable sentinel, not an E2E image recipe.
+# The only buildable Dockerfile is generated in CI after an approved,
+# evidence-backed provenance manifest is validated. Keeping this file free of
+# ARG before FROM prevents a direct build from resolving an arbitrary registry
+# image while provenance is pending.
+FROM scratch
+LABEL org.megadesk.e2e-image-provenance="pending"
+RUN ["/bin/false"]

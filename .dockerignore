@@ -1,0 +1,19 @@
+# The qualification image needs only the frozen dependency inputs. Keeping the
+# context this narrow avoids transmitting node_modules, build output, local
+# evidence, and any operator-only environment files to Docker.
+**
+!Dockerfile.e2e-arm64
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!patches/
+!patches/**
+!.github/
+!.github/qualification-provenance/
+!.github/qualification-provenance/**
+!third_party/
+!third_party/e2e-chromium/
+!third_party/e2e-chromium/**
+!scripts/
+!scripts/ops/
+!scripts/ops/validate-sales-v5-e2e-tar.mjs
