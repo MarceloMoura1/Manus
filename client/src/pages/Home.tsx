@@ -4093,6 +4093,14 @@ function Shell() {
     if (window.location.pathname === "/erp/fiscal") return "erp-fiscal";
     if (window.location.pathname === "/erp/relatorios") return "erp-reports";
     if (window.location.pathname === "/erp") return "erp-summary";
+    if (window.location.pathname === "/crm/clientes") return "crm-clients";
+    if (window.location.pathname === "/crm/funil") return "crm-pipeline";
+    if (window.location.pathname === "/crm/leads") return "crm-leads";
+    if (window.location.pathname === "/crm/atividades") return "crm-activities";
+    if (window.location.pathname === "/crm/propostas" || (window.location.pathname === "/crm" && new URLSearchParams(window.location.search).get("tab") === "proposals")) return "crm-proposals";
+    if (window.location.pathname === "/crm/automacoes") return "crm-automations";
+    if (window.location.pathname === "/crm/relatorios") return "crm-reports";
+    if (window.location.pathname === "/crm") return "crm-summary";
     const stored = localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY);
     return stored === "active-attendance" ? "conversations" : (stored as RouteId) || "home";
   });
@@ -4106,7 +4114,9 @@ function Shell() {
   const [activeCrmClientId, setActiveCrmClientId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("crmClientId"));
   const [activeSalePublicId, setActiveSalePublicId] = useState<string | null>(() => {
     const route = readSalesRoute(window.location.pathname);
-    return route.salePublicId ?? new URLSearchParams(window.location.search).get("salePublicId");
+    const tabParam = new URLSearchParams(window.location.search).get("tab");
+    const isCrmProposals = window.location.pathname === "/crm/propostas" || (window.location.pathname === "/crm" && tabParam === "proposals");
+    return route.salePublicId ?? (isCrmProposals ? new URLSearchParams(window.location.search).get("salePublicId") : null);
   });
   const [attendanceIntent, setAttendanceIntent] = useState(() => {
     const restoreLegacyAttendance = localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY) === "active-attendance";
@@ -4146,10 +4156,26 @@ function Shell() {
               ? "/erp/compras"
             : targetRoute === "erp-summary"
               ? "/erp"
+            : targetRoute === "crm-clients"
+              ? `/crm/clientes${options?.crmClientId ? `?crmClientId=${encodeURIComponent(options.crmClientId)}` : ""}`
+            : targetRoute === "crm-pipeline"
+              ? "/crm/funil"
+            : targetRoute === "crm-leads"
+              ? "/crm/leads"
+            : targetRoute === "crm-activities"
+              ? "/crm/atividades"
+            : targetRoute === "crm-proposals"
+              ? `/crm/propostas${options?.salePublicId ? `?salePublicId=${encodeURIComponent(options.salePublicId)}` : ""}`
+            : targetRoute === "crm-automations"
+              ? "/crm/automacoes"
+            : targetRoute === "crm-reports"
+              ? "/crm/relatorios"
+            : targetRoute === "crm-summary"
+              ? "/crm"
               : "/";
     window.history[options?.replace ? "replaceState" : "pushState"](null, "", path);
-    setActiveCrmClientId(targetRoute === "erp-clients" ? options?.crmClientId ?? null : null);
-    setActiveSalePublicId(targetRoute === "erp-sales" ? options?.salePublicId ?? null : null);
+    setActiveCrmClientId(targetRoute === "erp-clients" || targetRoute === "crm-clients" ? options?.crmClientId ?? null : null);
+    setActiveSalePublicId(targetRoute === "erp-sales" || targetRoute === "crm-proposals" ? options?.salePublicId ?? null : null);
     setActive(targetRoute);
     if (window.innerWidth < 1024) {
       setSidebarOpen(false);
@@ -4527,8 +4553,8 @@ function Shell() {
           />}
           {active === "tickets" && <TicketsPage onOpenMobileMenu={() => setSidebarOpen(true)} />}
           {active === "tracking" && <TrackingPage />}
-           {active.startsWith("crm-") && <CRMWorkspace section={crmSection} onNavigate={navigateToCrmSection} canAccessClients={canAccessCrmClients(session)} initialCrmClientId={activeCrmClientId ?? undefined} onClientNavigate={handleClientNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDeleteClients={session.userRole === "admin"} />}
-           {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessSales={canAccessSales} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("erp-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("erp-sales", { salePublicId })} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
+           {active.startsWith("crm-") && <CRMWorkspace section={crmSection} onNavigate={navigateToCrmSection} canAccessClients={canAccessCrmClients(session)} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToSale={salePublicId => navigateToRoute("crm-proposals", { salePublicId })} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDeleteClients={session.userRole === "admin"} />}
+           {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessSales={canAccessSales} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("erp-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("erp-sales", { salePublicId })} onNavigateToProposals={() => navigateToRoute("crm-proposals")} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
            {active === "settings" && <SettingsPageComponent layout={shellLayout.settingsPageLayout} />}
           {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
           {active === "bot-config" && <BotConfigPage />}

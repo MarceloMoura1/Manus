@@ -50,7 +50,10 @@ export const SALES_PUBLIC_ERROR_MESSAGE =
 export function hasSalesModuleAccess(ctx: {
   operationalPermissions?: string[];
 }) {
-  return ctx.operationalPermissions?.includes("erp") === true;
+  return (
+    ctx.operationalPermissions?.includes("erp") === true ||
+    ctx.operationalPermissions?.includes("crm") === true
+  );
 }
 
 function safeDiagnosticValue(value: unknown): string | number | null {
