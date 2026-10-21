@@ -90,6 +90,8 @@ type OrderRow = RowDataPacket & {
   current_stage: SaleStage | null;
   notes: string | null;
   expected_date: string | null;
+  document_custom_name?: string | null;
+  service_metadata?: unknown;
   shipping_address_snapshot: string | null;
   billing_address_snapshot: string | null;
   subtotal_cents: number;
@@ -1098,9 +1100,9 @@ export class SaleRepository {
           `INSERT INTO erp_sale_orders
            (public_id,client_id,order_number,document_type,commercial_status,commercial_date,
             crm_client_id,customer_name_snapshot,seller_user_id,seller_name_snapshot,status,current_stage,
-            notes,payment_terms_snapshot,payment_method_snapshot,expected_date,shipping_address_snapshot,
-            billing_address_snapshot,subtotal_cents,discount_cents,freight_cents,charges_cents,total_cents,created_by)
-           VALUES(?,?,?,?,?,?, ?,?,?,?,'draft','created', ?,?,?,?,?,?,0,0,0,0,0,?)`,
+            notes,payment_terms_snapshot,payment_method_snapshot,expected_date,document_custom_name,service_metadata,
+            shipping_address_snapshot,billing_address_snapshot,subtotal_cents,discount_cents,freight_cents,charges_cents,total_cents,created_by)
+           VALUES(?,?,?,?,?,?, ?,?,?,?,'draft','created', ?,?,?,?,?,?,?,?,0,0,0,0,0,?)`,
           [
             target,
             clientId,
@@ -1116,6 +1118,8 @@ export class SaleRepository {
             input.paymentTerms,
             input.paymentMethod,
             input.expectedDate,
+            input.documentCustomName ?? null,
+            input.serviceMetadata ? json(input.serviceMetadata) : null,
             json(shippingAddress),
             json(billingAddress),
             actor.userId,
@@ -1191,7 +1195,8 @@ export class SaleRepository {
       await connection.execute(
         `UPDATE erp_sale_orders SET crm_client_id=?,customer_name_snapshot=?,seller_user_id=?,seller_name_snapshot=?,
          commercial_date=?,notes=?,payment_terms_snapshot=?,payment_method_snapshot=?,
-         expected_date=?,shipping_address_snapshot=?,billing_address_snapshot=?,subtotal_cents=?,discount_cents=?,
+         expected_date=?,document_custom_name=COALESCE(?,document_custom_name),service_metadata=COALESCE(?,service_metadata),
+         shipping_address_snapshot=?,billing_address_snapshot=?,subtotal_cents=?,discount_cents=?,
          freight_cents=?,charges_cents=?,total_cents=?
          WHERE client_id=? AND id=?`,
         [
@@ -1204,6 +1209,8 @@ export class SaleRepository {
           input.paymentTerms,
           input.paymentMethod,
           input.expectedDate,
+          input.documentCustomName ?? null,
+          input.serviceMetadata ? json(input.serviceMetadata) : null,
           json(shippingAddress),
           json(billingAddress),
           totals.subtotalCents,
@@ -2172,6 +2179,8 @@ function publicOrder(row: OrderRow) {
     cancelled: row.status === "cancelled",
     notes: row.notes,
     expectedDate: row.expected_date ? dateOnly(row.expected_date) : null,
+    documentCustomName: row.document_custom_name ?? null,
+    serviceMetadata: typeof row.service_metadata === "string" ? parseJson(row.service_metadata) : (row.service_metadata ?? null),
     shippingAddress: parseJson<AddressSnapshot>(row.shipping_address_snapshot),
     billingAddress: parseJson<AddressSnapshot>(row.billing_address_snapshot),
     subtotalCents: Number(row.subtotal_cents),

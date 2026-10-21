@@ -68,6 +68,8 @@ export class QuotePdfService {
         commercialStatus: quote.commercialStatus,
         paymentTerms: quote.paymentTerms,
         notes: quote.notes,
+        documentCustomName: (quote as any).documentCustomName ?? null,
+        serviceMetadata: (quote as any).serviceMetadata ?? null,
         items: quote.items.map(item => ({
           description: item.productName,
           sku: item.sku,
@@ -85,10 +87,18 @@ export class QuotePdfService {
       },
     });
 
+    const rawCustomName = (quote as any).documentCustomName?.trim();
+    const sanitizedCustom = rawCustomName
+      ? rawCustomName.replace(/\.pdf$/i, "").replace(/[^\w\s\-\.]/gi, "_").trim()
+      : null;
+    const fileName = sanitizedCustom
+      ? `${sanitizedCustom}.pdf`
+      : `orcamento-${quote.orderNumber}.pdf`;
+
     return this.documents.storeGeneratedQuotePdf(identity, {
       salePublicId: input.salePublicId,
       idempotencyKey: input.idempotencyKey,
-      fileName: `orcamento-${quote.orderNumber}.pdf`,
+      fileName,
       description: `PDF gerado a partir do orçamento ${quote.orderNumber}.`,
       bytes,
     });

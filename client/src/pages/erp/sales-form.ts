@@ -34,6 +34,8 @@ export type SalesForm = {
   paymentTerms: string;
   paymentMethod: string;
   expectedDate: string;
+  documentCustomName?: string | null;
+  serviceMetadata?: Record<string, any> | null;
   shippingAddress?: SalesAddress | null;
   billingAddress?: SalesAddress | null;
   orderDiscountCents?: number;
@@ -53,6 +55,8 @@ type SaleDetailForForm = {
   paymentTerms?: string | null;
   paymentMethod?: string | null;
   expectedDate: string | null;
+  documentCustomName?: string | null;
+  serviceMetadata?: unknown;
   shippingAddress?: SalesAddress | null;
   billingAddress?: SalesAddress | null;
   discountCents?: number;
@@ -81,6 +85,8 @@ export const blankSalesForm = (documentType: "quote" | "sale" = "sale"): SalesFo
   paymentTerms: "",
   paymentMethod: "",
   expectedDate: "",
+  documentCustomName: "",
+  serviceMetadata: null,
   shippingAddress: blankSalesAddress(),
   billingAddress: blankSalesAddress(),
   orderDiscountCents: 0,
@@ -150,6 +156,8 @@ export function salesFormFromDetail(detail: SaleDetailForForm): SalesForm {
     paymentTerms: detail.paymentTerms ?? "",
     paymentMethod: detail.paymentMethod ?? "",
     expectedDate: detail.expectedDate ?? "",
+    documentCustomName: (detail as any).documentCustomName ?? "",
+    serviceMetadata: typeof detail.serviceMetadata === "object" && detail.serviceMetadata !== null ? (detail.serviceMetadata as Record<string, any>) : null,
     shippingAddress: detail.shippingAddress ?? blankSalesAddress(),
     billingAddress: detail.billingAddress ?? blankSalesAddress(),
     orderDiscountCents: Math.max(
@@ -177,6 +185,8 @@ export function salesDraftFromForm(form: SalesForm) {
     paymentTerms: form.paymentTerms || undefined,
     paymentMethod: form.paymentMethod || undefined,
     expectedDate: form.expectedDate || undefined,
+    documentCustomName: form.documentCustomName?.trim() || undefined,
+    serviceMetadata: form.serviceMetadata ?? undefined,
     shippingAddress: form.shippingAddress ?? undefined,
     billingAddress: form.billingAddress ?? undefined,
     orderDiscountCents: form.orderDiscountCents ?? 0,

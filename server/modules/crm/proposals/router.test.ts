@@ -11,6 +11,23 @@ const mocks = vi.hoisted(() => ({
   generatePdf: vi.fn(),
   documentsList: vi.fn(),
   catalog: vi.fn(),
+  listTemplates: vi.fn(),
+  createTemplate: vi.fn(),
+  deleteTemplate: vi.fn(),
+  updateMetadata: vi.fn(),
+  previewQuoteHtml: vi.fn(),
+  sendQuoteWhatsApp: vi.fn(),
+}));
+
+vi.mock("./quote-templates", () => ({
+  QuoteTemplatesService: vi.fn().mockImplementation(() => ({
+    listTemplates: mocks.listTemplates,
+    createTemplate: mocks.createTemplate,
+    deleteTemplate: mocks.deleteTemplate,
+    updateMetadata: mocks.updateMetadata,
+    previewQuoteHtml: mocks.previewQuoteHtml,
+    sendQuoteWhatsApp: mocks.sendQuoteWhatsApp,
+  })),
 }));
 
 vi.mock("../../erp/sales/service", () => ({
@@ -177,5 +194,98 @@ describe("CRM Proposals tRPC Router", () => {
       })
     );
     expect(res.success).toBe(true);
+  });
+
+  it("lista templates de orçamento filtrados pelo tenant", async () => {
+    mocks.listTemplates.mockResolvedValueOnce([
+      {
+        publicId: "tpl-1",
+        name: "Modelo Oficina",
+        niche: "automotive",
+        isDefault: true,
+      },
+    ]);
+
+    const caller = proposalsRouter.createCaller(createCrmContext());
+    const res = await caller.listTemplates();
+
+    expect(mocks.listTemplates).toHaveBeenCalledWith(
+      expect.objectContaining({ clientId: "tenant-crm-1" })
+    );
+    expect(res).toHaveLength(1);
+    expect(res[0].name).toBe("Modelo Oficina");
+  });
+
+  it("cria novo template nomeado com escopo no tenant", async () => {
+    mocks.createTemplate.mockResolvedValueOnce({
+      success: true,
+      publicId: "tpl-novo-1",
+    });
+
+    const caller = proposalsRouter.createCaller(createCrmContext());
+    const res = await caller.createTemplate({
+      name: "Template Venda Balcão",
+      niche: "general",
+      isDefault: true,
+    });
+
+    expect(mocks.createTemplate).toHaveBeenCalledWith(
+      expect.objectContaining({ clientId: "tenant-crm-1" }),
+      expect.objectContaining({
+        name: "Template Venda Balcão",
+        niche: "general",
+        isDefault: true,
+      })
+    );
+    expect(res.success).toBe(true);
+    expect(res.publicId).toBe("tpl-novo-1");
+  });
+
+  it("gera prévia HTML do orçamento compilando template e paginação", async () => {
+    const salePublicId = "11111111-1111-4111-8111-111111111111";
+    mocks.previewQuoteHtml.mockResolvedValueOnce({
+      pages: [{ pageNumber: 1, html: "<div>A4 Page 1</div>" }],
+      totalPages: 1,
+      documentCustomName: "Orcamento_Carlos_21-10",
+      templateName: "Padrão",
+      hasServiceMetadata: true,
+      itemsCount: 3,
+    });
+
+    const caller = proposalsRouter.createCaller(createCrmContext());
+    const res = await caller.previewQuoteHtml({ salePublicId });
+
+    expect(mocks.previewQuoteHtml).toHaveBeenCalledWith(
+      expect.objectContaining({ clientId: "tenant-crm-1" }),
+      { salePublicId }
+    );
+    expect(res.totalPages).toBe(1);
+    expect(res.documentCustomName).toBe("Orcamento_Carlos_21-10");
+  });
+
+  it("dispara orçamento via WhatsApp com documento anexado", async () => {
+    const publicId = "11111111-1111-4111-8111-111111111111";
+    mocks.sendQuoteWhatsApp.mockResolvedValueOnce({
+      success: true,
+      messageId: "EVO-MSG-1",
+      fileName: "Orcamento_Teste.pdf",
+      recipientPhone: "+55 11 98888-7777",
+    });
+
+    const caller = proposalsRouter.createCaller(createCrmContext());
+    const res = await caller.sendQuoteWhatsApp({
+      publicId,
+      phone: "11988887777",
+    });
+
+    expect(mocks.sendQuoteWhatsApp).toHaveBeenCalledWith(
+      expect.objectContaining({ clientId: "tenant-crm-1" }),
+      expect.objectContaining({
+        publicId,
+        phone: "11988887777",
+      })
+    );
+    expect(res.success).toBe(true);
+    expect(res.messageId).toBe("EVO-MSG-1");
   });
 });

@@ -30,6 +30,16 @@ export type QuotePdfInput = {
     commercialStatus: string;
     paymentTerms?: string | null;
     notes?: string | null;
+    documentCustomName?: string | null;
+    serviceMetadata?: {
+      brandModel?: string | null;
+      plate?: string | null;
+      year?: string | null;
+      color?: string | null;
+      km?: string | null;
+      entryDate?: string | null;
+      exitDate?: string | null;
+    } | null;
     items: QuotePdfItem[];
     subtotalCents: number;
     discountCents: number;
@@ -241,7 +251,17 @@ function buildPdf(pages: string[]): Buffer {
 export function renderQuotePdf(input: QuotePdfInput): Buffer {
   assertInput(input);
   const groups: QuotePdfItem[][] = [];
-  for (let offset = 0; offset < input.quote.items.length; offset += ITEMS_PER_PAGE) groups.push(input.quote.items.slice(offset, offset + ITEMS_PER_PAGE));
+  if (input.quote.items.length <= 9) {
+    groups.push(input.quote.items);
+  } else {
+    // Pagination rule: if > 9 items, break Page 1 (items 1 to 9) and Page 2 (subsequent items + totals)
+    groups.push(input.quote.items.slice(0, 9));
+    const remaining = input.quote.items.slice(9);
+    const SUBSEQUENT_PAGE_SIZE = 14;
+    for (let offset = 0; offset < remaining.length; offset += SUBSEQUENT_PAGE_SIZE) {
+      groups.push(remaining.slice(offset, offset + SUBSEQUENT_PAGE_SIZE));
+    }
+  }
   const pages = groups.map((items, index) => {
     const commands = header(input, index + 1, groups.length);
     const table = itemTable(items, PAGE_HEIGHT - 190);

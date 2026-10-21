@@ -3501,6 +3501,8 @@ export const erpSaleOrders = mysqlTable(
     }),
     notes: text(),
     expectedDate: date("expected_date", { mode: "string" }),
+    documentCustomName: varchar("document_custom_name", { length: 255 }),
+    serviceMetadata: json("service_metadata"),
     subtotalCents: bigint("subtotal_cents", { mode: "number" })
       .default(0)
       .notNull(),
@@ -4471,3 +4473,33 @@ export const erpFiscalOperations = mysqlTable(
     }),
   ]
 );
+
+export const megadeskCrmQuoteTemplates = mysqlTable(
+  "megadesk_crm_quote_templates",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    name: varchar("name", { length: 150 }).notNull(),
+    niche: varchar("niche", { length: 50 }).default("automotive"),
+    backgroundImageUrl: text("background_image_url"),
+    layoutConfig: json("layout_config"),
+    isDefault: boolean("is_default").default(false).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    index("idx_crm_quote_templates_tenant_public").on(
+      table.clientId,
+      table.publicId
+    ),
+  ]
+);
+
+export type MegadeskCrmQuoteTemplate = typeof megadeskCrmQuoteTemplates.$inferSelect;
+export type MegadeskCrmQuoteTemplateInsert = typeof megadeskCrmQuoteTemplates.$inferInsert;
