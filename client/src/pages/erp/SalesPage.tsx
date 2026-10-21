@@ -92,6 +92,7 @@ import {
   type SalesSortKey,
   type SalesSortState,
 } from "./sales-ux";
+import { QuoteActionCenter } from "@/components/crm/QuoteActionCenter";
 
 const money = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -1428,8 +1429,19 @@ function SaleDetailPanel({
         </section>
 
         <section className="rounded-xl border border-slate-200 p-3 dark:border-slate-800 dark:bg-slate-900" data-testid="sales-detail-workflow">
-          <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100"><Edit3 className="h-4 w-4 text-slate-500 dark:text-slate-400" />{isQuote ? "Fluxo comercial" : "Etapa da venda"}</h3>{!isQuote && <span className="text-xs text-slate-500 dark:text-slate-400">A baixa de estoque ocorre somente no envio.</span>}</div>
-          {isQuote ? <div className="mt-2 flex flex-wrap items-center gap-2"><CommercialBadge value={order.commercialStatus} /><span className="text-xs leading-5 text-slate-600 dark:text-slate-400">Rascunho → negociação → aprovação → conversão. A conversão preserva a identidade do pedido, sem pagamentos nem baixa de estoque.</span></div> : <SaleTimeline stage={order.currentStage as Stage} cancelled={order.cancelled} />}
+          {isQuote ? (
+            <div className="mt-2 space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <CommercialBadge value={order.commercialStatus} />
+                <span className="text-xs leading-5 text-slate-600 dark:text-slate-400">
+                  Rascunho → negociação → aprovação → conversão. A conversão preserva a identidade do pedido, sem pagamentos nem baixa de estoque.
+                </span>
+              </div>
+              <QuoteActionCenter order={order} canWrite={canWrite} onRefresh={() => void utils.erp.sales.detail.invalidate({ publicId: order.publicId })} />
+            </div>
+          ) : (
+            <SaleTimeline stage={order.currentStage as Stage} cancelled={order.cancelled} />
+          )}
           {canWrite && !order.archivedAt && (
             <div className="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-3 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800" data-testid="sales-detail-actions">
               <div className="flex flex-wrap items-center gap-2">
@@ -1816,6 +1828,38 @@ function SaleFormDialog({
                     <MoneyOrQuantity money label="Frete" value={form.freightCents ?? 0} onChange={value => setForm(current => current ? { ...current, freightCents: value } : current)} />
                     <MoneyOrQuantity money label="Outros encargos" value={form.chargesCents ?? 0} onChange={value => setForm(current => current ? { ...current, chargesCents: value } : current)} />
                   </div>
+                  {form.documentType === "quote" && (
+                    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+                      <p className="text-xs font-semibold text-blue-700 dark:text-blue-400">Nicho Automotivo & Serviços</p>
+                      <h4 className="mt-0.5 text-sm font-bold text-slate-950 dark:text-slate-100">Dados do Veículo / Objeto (Opcional)</h4>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Marca / Modelo
+                          <Input className="mt-1 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" placeholder="Ex: Toyota Corolla XEi" value={(form.serviceMetadata as any)?.brandModel ?? ""} onChange={e => setForm(c => c ? { ...c, serviceMetadata: { ...(c.serviceMetadata || {}), brandModel: e.target.value } } : c)} />
+                        </label>
+                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Placa
+                          <Input className="mt-1 text-xs uppercase dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" placeholder="Ex: ABC-1234" value={(form.serviceMetadata as any)?.plate ?? ""} onChange={e => setForm(c => c ? { ...c, serviceMetadata: { ...(c.serviceMetadata || {}), plate: e.target.value.toUpperCase() } } : c)} />
+                        </label>
+                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Ano
+                          <Input className="mt-1 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" placeholder="Ex: 2022" value={(form.serviceMetadata as any)?.year ?? ""} onChange={e => setForm(c => c ? { ...c, serviceMetadata: { ...(c.serviceMetadata || {}), year: e.target.value } } : c)} />
+                        </label>
+                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Cor
+                          <Input className="mt-1 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" placeholder="Ex: Prata" value={(form.serviceMetadata as any)?.color ?? ""} onChange={e => setForm(c => c ? { ...c, serviceMetadata: { ...(c.serviceMetadata || {}), color: e.target.value } } : c)} />
+                        </label>
+                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">KM
+                          <Input className="mt-1 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" placeholder="Ex: 45.000" value={(form.serviceMetadata as any)?.km ?? ""} onChange={e => setForm(c => c ? { ...c, serviceMetadata: { ...(c.serviceMetadata || {}), km: e.target.value } } : c)} />
+                        </label>
+                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Data de Entrada
+                          <Input className="mt-1 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" type="date" value={(form.serviceMetadata as any)?.entryDate ?? ""} onChange={e => setForm(c => c ? { ...c, serviceMetadata: { ...(c.serviceMetadata || {}), entryDate: e.target.value } } : c)} />
+                        </label>
+                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Previsão de Saída
+                          <Input className="mt-1 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" type="date" value={(form.serviceMetadata as any)?.exitDate ?? ""} onChange={e => setForm(c => c ? { ...c, serviceMetadata: { ...(c.serviceMetadata || {}), exitDate: e.target.value } } : c)} />
+                        </label>
+                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Nome do Arquivo PDF
+                          <Input className="mt-1 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" placeholder="Ex: Orçamento - Cliente - Data" value={form.documentCustomName ?? ""} onChange={e => setForm(c => c ? { ...c, documentCustomName: e.target.value } : c)} />
+                        </label>
+                      </div>
+                    </div>
+                  )}
                   <label className="mt-4 block text-xs font-semibold text-slate-700 dark:text-slate-300">Observações<textarea className="mt-1 min-h-24 w-full rounded-md border border-input bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" value={form.notes} onChange={event => setForm(current => current ? { ...current, notes: event.target.value } : current)} /></label>
                 </section>
               </div>

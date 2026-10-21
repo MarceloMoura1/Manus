@@ -94,6 +94,8 @@ export const saleDraftInput = z
     paymentTerms: z.string().trim().max(500).optional().transform(value => value || null),
     paymentMethod: z.string().trim().max(80).optional().transform(value => value || null),
     expectedDate: z.string().date().optional().transform(value => value || null),
+    documentCustomName: z.string().trim().max(255).nullish().transform(value => value || null),
+    serviceMetadata: z.record(z.string(), z.unknown()).nullish().transform(value => value ?? null),
     shippingAddress: saleAddressSchema.nullish().transform(value => value ?? null),
     billingAddress: saleAddressSchema.nullish().transform(value => value ?? null),
     orderDiscountCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).default(0),
