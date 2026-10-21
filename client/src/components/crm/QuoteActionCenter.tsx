@@ -426,79 +426,78 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
 
       {/* ─── BLOCO 5: CONFIGURAÇÃO DO DOCUMENTO (Nome & Modelo Visual) ─────────────────── */}
       <div
-        className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+        className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"
         data-testid="quote-config-block"
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Coluna 1: Nome do Arquivo PDF */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <label className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
+          {/* Coluna 1 - Nome do Arquivo PDF */}
+          <div className="flex flex-col">
+            <div className="flex items-center justify-between h-6 mb-2">
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
                 <FileText className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                 <span>Nome do Arquivo PDF</span>
               </label>
               <button
                 type="button"
                 onClick={() => setCustomName(defaultSuggestedName)}
-                className="flex items-center gap-1 text-[11px] font-medium text-blue-600 transition-colors hover:text-blue-800 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+                className="text-xs text-indigo-600 hover:text-indigo-700 flex items-center gap-1 font-medium transition-colors dark:text-indigo-400 dark:hover:text-indigo-300"
                 title="Sugerir nome comercial automático"
               >
-                <Sparkles className="h-3 w-3" />
+                <Sparkles className="h-3.5 w-3.5" />
                 <span>Sugerir</span>
               </button>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
+            <div className="flex items-center gap-2 h-10">
+              <div className="relative flex-1 h-10">
                 <Input
                   value={customName}
                   onChange={(e) => setCustomName(e.target.value)}
                   placeholder="Ex: Orçamento - João Silva - 21-10"
-                  className="h-9 pr-12 text-xs font-medium rounded-lg border-slate-300 bg-white shadow-sm focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                  className="w-full h-10 px-3 pr-11 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 focus:ring-2 focus:ring-indigo-500"
                 />
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[11px] font-semibold text-slate-400">
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 font-mono text-xs font-semibold text-slate-400">
                   .pdf
                 </span>
               </div>
               <Button
                 type="button"
-                size="sm"
                 disabled={updateMetaMutation.isPending}
                 onClick={handleSaveMetadata}
-                className="h-9 shrink-0 gap-1 rounded-lg bg-slate-900 px-3.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
+                className="h-10 px-4 rounded-lg bg-slate-900 text-white hover:bg-slate-800 text-sm font-medium flex items-center gap-1.5 shrink-0 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200 shadow-sm"
               >
                 {updateMetaMutation.isPending ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                  <Check className="h-4 w-4 text-emerald-400" />
                 )}
                 <span>Salvar</span>
               </Button>
             </div>
           </div>
 
-          {/* Coluna 2: Modelo Visual (Folha Oficial) */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <label className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+          {/* Coluna 2 - Modelo Visual (Folha Oficial) */}
+          <div className="flex flex-col">
+            <div className="flex items-center justify-between h-6 mb-2">
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
                 <LayoutTemplate className="h-4 w-4 text-violet-600 dark:text-violet-400" />
                 <span>Modelo Visual (Folha Oficial)</span>
               </label>
               {selectedTemplate && (
-                <span className="inline-flex items-center rounded-md bg-violet-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-violet-700 ring-1 ring-inset ring-violet-700/10 dark:bg-violet-950/60 dark:text-violet-300">
+                <span className="inline-flex items-center rounded-md bg-violet-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-violet-700 ring-1 ring-inset ring-violet-700/10 dark:bg-violet-950/60 dark:text-violet-300">
                   {selectedTemplate.niche === "automotive"
-                    ? "Automotivo"
+                    ? "AUTOMOTIVO"
                     : selectedTemplate.niche === "services"
-                      ? "Serviços"
-                      : "Geral"}
+                      ? "SERVIÇOS"
+                      : "GERAL"}
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
+            <div className="flex items-center gap-2 h-10">
+              <div className="relative flex-1 h-10">
                 <select
                   value={selectedTemplateId}
                   onChange={(e) => setSelectedTemplateId(e.target.value)}
-                  className="h-9 w-full appearance-none rounded-lg border border-slate-300 bg-white px-3 pr-8 text-xs font-medium text-slate-800 shadow-sm transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                  className="w-full h-10 px-3 pr-8 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 appearance-none focus:outline-none focus:ring-2 focus:ring-violet-500 text-slate-800 dark:text-slate-200"
                   data-testid="quote-template-selector"
                 >
                   <option value="">Modelo Padrão MegaDesk</option>
@@ -508,17 +507,16 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               </div>
               <Button
                 type="button"
-                size="sm"
                 variant="outline"
                 onClick={() => setNewTemplateModalOpen(true)}
-                className="h-9 shrink-0 gap-1 rounded-lg border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                className="h-10 px-3.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-sm font-medium text-slate-700 dark:border-slate-700 dark:text-slate-200 flex items-center gap-1.5 shrink-0 bg-white dark:bg-slate-900 dark:hover:bg-slate-800"
               >
-                <Plus className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-                <span>Novo Modelo</span>
+                <Plus className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <span>+ Novo Modelo</span>
               </Button>
             </div>
           </div>

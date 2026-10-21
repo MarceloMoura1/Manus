@@ -10,6 +10,8 @@ import {
   ArrowRightCircle,
   ArrowUp,
   Box,
+  Building2,
+  Calendar,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -17,6 +19,7 @@ import {
   ChevronRight,
   ChevronsUpDown,
   CircleDollarSign,
+  Clock,
   Clock3,
   CreditCard,
   Copy,
@@ -25,6 +28,7 @@ import {
   Eye,
   FileClock,
   FileDown,
+  FileText,
   Filter,
   MapPin,
   LoaderCircle,
@@ -43,6 +47,7 @@ import {
   ShoppingCart,
   Trash2,
   Truck,
+  User,
   UserRound,
   UploadCloud,
   WalletCards,
@@ -1381,33 +1386,31 @@ function SaleDetailPanel({
   const canCorrectAddress = ["confirmed", "separation"].includes(order.currentStage);
   const progress = order.totalCents > 0 ? Math.min(100, Math.round((order.paidCents / order.totalCents) * 100)) : 0;
   const deliveryAddress = formatSalesDeliveryAddress(order.shippingAddress);
-  const detailFacts: Array<{ label: string; value: string; detail?: string }> = [
-    { label: "Vendedor(a)", value: order.sellerName ?? "Histórico indisponível" },
-    { label: "Data comercial", value: date.format(salesCommercialDate(order.commercialDate)) },
-    { label: "Previsão de entrega", value: order.expectedDate ? date.format(new Date(`${order.expectedDate}T12:00:00`)) : "Não informada" },
-  ];
   return (
-    <aside className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_14px_30px_-26px_rgba(15,23,42,0.65)] dark:border-slate-800 dark:bg-slate-900" aria-label="Detalhes da venda selecionada">
-      {/* ─── BLOCO 1: DADOS DO CLIENTE & GERAIS (Topo) ─── */}
-      <header className="border-b border-slate-200 bg-slate-50/70 px-4 py-3 sm:px-5 dark:border-slate-800 dark:bg-slate-800/60" data-testid="quote-client-header">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-base font-bold text-blue-700 shadow-sm dark:bg-blue-950/60 dark:text-blue-300">
-              {order.customerName ? order.customerName.charAt(0).toUpperCase() : <UserRound className="h-5 w-5" />}
-            </div>
+    <aside className="space-y-3" aria-label="Detalhes da venda selecionada">
+      {/* ─── BLOCO 1: CARD ÚNICO DO CLIENTE & FATOS COMERCIAIS (Topo - Padrão Chamados) ─── */}
+      <header className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900" data-testid="quote-client-header">
+        {/* Linha 1: Identificação Principal em Grid / Flexbox Alinhado */}
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          {/* Coluna 1 (Cliente): Avatar + Nome + Badges */}
+          <div className="flex min-w-0 items-center gap-3.5">
+            <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-blue-700 shadow-sm ring-4 ring-blue-50/50 dark:bg-blue-950/60 dark:text-blue-300 dark:ring-blue-900/20">
+              <Building2 className="h-6 w-6" />
+            </span>
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">Cliente</p>
+              <div className="mt-0.5 flex flex-wrap items-center gap-2">
                 {onClientNavigate && order.crmClientId ? (
                   <button
                     type="button"
-                    className="truncate text-base font-bold text-slate-950 transition-colors hover:text-blue-700 hover:underline dark:text-slate-100 dark:hover:text-blue-400"
+                    className="truncate text-lg font-bold text-slate-900 transition-colors hover:text-blue-700 hover:underline dark:text-slate-100 dark:hover:text-blue-400"
                     title={order.customerName}
                     onClick={() => onClientNavigate(order.crmClientId)}
                   >
                     {order.customerName}
                   </button>
                 ) : (
-                  <h2 className="truncate text-base font-bold text-slate-950 dark:text-slate-100" title={order.customerName}>
+                  <h2 className="truncate text-lg font-bold text-slate-900 dark:text-slate-100" title={order.customerName}>
                     {order.customerName}
                   </h2>
                 )}
@@ -1416,60 +1419,130 @@ function SaleDetailPanel({
                 </span>
                 <DocumentTypeBadge documentType={order.documentType} />
               </div>
-              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-slate-400">
-                <span>
-                  <strong className="text-slate-500 dark:text-slate-400">CPF/CNPJ:</strong>{" "}
-                  <span className="font-mono text-slate-800 dark:text-slate-200">{formattedDocument}</span>
-                </span>
-                {formattedPhone && (
-                  <span className="flex items-center gap-1">
-                    <Phone className="h-3 w-3 text-slate-400" />
-                    <span className="font-mono text-slate-800 dark:text-slate-200">{formattedPhone}</span>
-                  </span>
-                )}
-              </div>
-              {isQuote && (
-                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-600 dark:text-slate-400">
-                  <span className="flex min-w-0 items-center gap-1">
-                    <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden="true" />
-                    <span className="truncate" title={deliveryAddress}>
-                      <strong className="text-slate-500 dark:text-slate-400">Entrega:</strong>{" "}
-                      <span className="text-slate-800 dark:text-slate-200">{deliveryAddress}</span>
-                    </span>
-                  </span>
-                  {canWrite && canCorrectAddress && !order.cancelled && (
-                    <button
-                      type="button"
-                      className="shrink-0 text-[11px] font-medium text-blue-700 hover:underline dark:text-blue-400"
-                      onClick={() => onCorrectAddress(order)}
-                    >
-                      Corrigir endereço
-                    </button>
-                  )}
-                </div>
-              )}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-right">
-            <div>
-              <div className="flex items-center justify-end gap-2">
-                <span className="text-sm font-bold text-slate-900 dark:text-slate-100">{isQuote ? "Orçamento" : "Venda"} {order.orderNumber}</span>
-                {isQuote ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} /></>}
+
+          {/* Coluna 2 (Documento) & Coluna 3 (Contato) */}
+          <div className="flex flex-wrap items-center gap-4 sm:gap-6 border-t border-slate-100 pt-3 lg:border-l lg:border-t-0 lg:py-1 lg:pl-6 dark:border-slate-800">
+            {/* Coluna 2 (Documento): Ícone sutil (FileText), label "CPF / CNPJ" */}
+            <div className="flex min-w-0 items-center gap-2.5">
+              <FileText className="h-4 w-4 shrink-0 text-slate-400" />
+              <div className="min-w-0">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">CPF / CNPJ</p>
+                <p className="mt-0.5 font-mono text-sm font-semibold text-slate-800 dark:text-slate-200">
+                  {formattedDocument}
+                </p>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">Criada em {dateTime.format(new Date(order.createdAt))}</p>
             </div>
+
+            {/* Coluna 3 (Contato): Ícone Phone, label "TELEFONE" */}
+            <div className="flex min-w-0 items-center gap-2.5">
+              <Phone className="h-4 w-4 shrink-0 text-slate-400" />
+              <div className="min-w-0">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Telefone</p>
+                <p className="mt-0.5 font-mono text-sm font-semibold text-slate-800 dark:text-slate-200">
+                  {formattedPhone || "Não informado"}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Coluna 4 (Status & Número no Canto Direito) */}
+          <div className="flex flex-col items-start lg:items-end justify-center border-t border-slate-100 pt-3 lg:border-l lg:border-t-0 lg:py-1 lg:pl-6 dark:border-slate-800 shrink-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-base font-bold text-slate-900 dark:text-slate-100">
+                {isQuote ? "Orçamento" : "Venda"} {order.orderNumber}
+              </span>
+              {isQuote ? (
+                <CommercialBadge value={order.commercialStatus} />
+              ) : (
+                <>
+                  <PaymentBadge value={order.paymentStatus} />
+                  <StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} />
+                </>
+              )}
+            </div>
+            <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+              Criada em {dateTime.format(new Date(order.createdAt))}
+            </p>
           </div>
         </div>
 
-        {/* Fatos Comerciais: Vendedor(a), Data Comercial, Previsão de Entrega */}
-        <div className="mt-3 grid overflow-hidden rounded-lg border border-slate-200 divide-y divide-slate-200 bg-white sm:grid-cols-3 sm:divide-x sm:divide-y-0 dark:border-slate-800 dark:divide-slate-800 dark:bg-slate-900" data-testid="sales-detail-facts">
-          {detailFacts.map(fact => (
-            <div key={fact.label} className="flex min-h-16 min-w-0 flex-col justify-center px-3 py-1.5">
-              <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{fact.label}</span>
-              <strong className="mt-0.5 block truncate text-sm text-slate-900 dark:text-slate-100" title={fact.value}>{fact.value}</strong>
-              {fact.detail && <span className="block truncate text-[10px] text-slate-400 dark:text-slate-500" title={fact.detail}>{fact.detail}</span>}
+        {/* Divisor interno horizontal suave */}
+        <div className="my-4 h-px w-full bg-slate-100 dark:bg-slate-800" />
+
+        {/* Linha 2 (Fatos Comerciais & Endereço em Grid de 4 Colunas Equilibradas) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 divide-y divide-slate-100 sm:divide-x sm:divide-y-0 dark:divide-slate-800" data-testid="sales-detail-facts">
+          {/* Coluna A (Vendedor) */}
+          <div className="flex min-w-0 items-center gap-3 pt-2 sm:pt-0 sm:px-2">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              <User className="h-4 w-4" />
             </div>
-          ))}
+            <div className="min-w-0 flex-1">
+              <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Vendedor(a)
+              </span>
+              <p className="mt-0.5 truncate text-sm font-semibold text-slate-900 dark:text-slate-100" title={order.sellerName ?? "Histórico indisponível"}>
+                {order.sellerName ?? "Histórico indisponível"}
+              </p>
+            </div>
+          </div>
+
+          {/* Coluna B (Data Comercial) */}
+          <div className="flex min-w-0 items-center gap-3 pt-2 sm:pt-0 sm:px-2">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              <Calendar className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Data comercial
+              </span>
+              <p className="mt-0.5 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {date.format(salesCommercialDate(order.commercialDate))}
+              </p>
+            </div>
+          </div>
+
+          {/* Coluna C (Previsão de Entrega) */}
+          <div className="flex min-w-0 items-center gap-3 pt-2 sm:pt-0 sm:px-2">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              <Clock className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Previsão de entrega
+              </span>
+              <p className="mt-0.5 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {order.expectedDate ? date.format(new Date(`${order.expectedDate}T12:00:00`)) : "Não informada"}
+              </p>
+            </div>
+          </div>
+
+          {/* Coluna D (Endereço de Entrega) */}
+          <div className="flex min-w-0 items-center gap-3 pt-2 sm:pt-0 sm:px-2">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
+              <MapPin className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Local da entrega
+                </span>
+                {canWrite && canCorrectAddress && !order.cancelled && (
+                  <button
+                    type="button"
+                    className="shrink-0 text-[10px] font-semibold text-blue-700 hover:underline dark:text-blue-400"
+                    onClick={() => onCorrectAddress(order)}
+                  >
+                    Editar
+                  </button>
+                )}
+              </div>
+              <p className="mt-0.5 truncate text-xs font-semibold text-slate-800 dark:text-slate-200" title={deliveryAddress}>
+                {deliveryAddress}
+              </p>
+            </div>
+          </div>
         </div>
 
         {order.cancelled && (
