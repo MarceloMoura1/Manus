@@ -42,7 +42,7 @@ export type LeadContactItem = z.infer<typeof leadContactItemSchema>;
 export const leadListInputSchema = z.object({
   search: z.string().trim().optional(),
   origin: z.enum(leadOriginValues).optional(),
-  status: z.enum(leadStatusValues).optional().default("lead"),
+  status: z.union([z.enum(leadStatusValues), z.literal("all")]).optional().default("lead"),
   internalResponsible: z.string().trim().optional(),
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inicial inválida (AAAA-MM-DD).").optional(),
   dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data final inválida (AAAA-MM-DD).").optional(),

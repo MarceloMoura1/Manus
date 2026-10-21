@@ -43,7 +43,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import type { LeadView, LeadOrigin, LeadContactItem } from "../../../../server/modules/crm/leads/contracts";
+import type { LeadView, LeadOrigin, LeadStatus, LeadContactItem } from "../../../../server/modules/crm/leads/contracts";
 
 interface LeadsPageProps {
   onNavigate?: (section: any) => void;
@@ -94,6 +94,7 @@ export function LeadsPage({
   // Filtros
   const [searchTerm, setSearchTerm] = useState("");
   const [originFilter, setOriginFilter] = useState<LeadOrigin | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<LeadStatus | "all">("lead");
   const [responsibleFilter, setResponsibleFilter] = useState("");
   const [page, setPage] = useState(1);
   const pageSize = 15;
@@ -130,10 +131,13 @@ export function LeadsPage({
   const leadsQuery = trpc.crm.leads.list.useQuery({
     search: searchTerm || undefined,
     origin: originFilter !== "all" ? originFilter : undefined,
+    status: statusFilter,
     internalResponsible: responsibleFilter || undefined,
     page,
     pageSize,
   });
+
+  const leadsSummaryQuery = trpc.crm.leads.summary.useQuery();
 
   const timelineQuery = trpc.crm.leads.timeline.useQuery(
     { crmClientId: selectedLead?.crmClientId || "" },
@@ -142,11 +146,22 @@ export function LeadsPage({
 
   // Mutações tRPC
   const createMutation = trpc.crm.leads.create.useMutation({
-    onSuccess: () => {
-      toast.success("Lead cadastrado com sucesso!");
+    onSuccess: (data) => {
       setIsCreateOpen(false);
       resetForm();
+      setSearchTerm("");
+      setOriginFilter("all");
+      setResponsibleFilter("");
+      setStatusFilter(data?.status === "ativo" ? "all" : "lead");
+      setPage(1);
       utils.crm.leads.list.invalidate();
+      utils.crm.leads.summary.invalidate();
+      utils.crm.list.invalidate();
+      if (data?.deduplicated) {
+        toast.info("Contato já existente localizado: dados complementares vinculados ao cadastro com sucesso!");
+      } else {
+        toast.success("Lead cadastrado com sucesso!");
+      }
     },
     onError: (err) => {
       toast.error(err.message || "Erro ao cadastrar lead.");
@@ -158,6 +173,7 @@ export function LeadsPage({
       toast.success("Lead atualizado com sucesso!");
       setIsEditOpen(false);
       utils.crm.leads.list.invalidate();
+      utils.crm.leads.summary.invalidate();
       if (selectedLead) {
         utils.crm.leads.getById.invalidate({ crmClientId: selectedLead.crmClientId });
       }
@@ -173,6 +189,7 @@ export function LeadsPage({
       setIsConvertOpen(false);
       setIsDetailOpen(false);
       utils.crm.leads.list.invalidate();
+      utils.crm.leads.summary.invalidate();
       utils.crm.list.invalidate();
     },
     onError: (err) => {
@@ -345,7 +362,8 @@ export function LeadsPage({
               Leads & Prospecção B2B
             </h1>
             <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-300">
-              {totalLeads} {totalLeads === 1 ? "lead ativo" : "leads ativos"}
+              {leadsSummaryQuery.data?.activeLeads ?? totalLeads}{" "}
+              {(leadsSummaryQuery.data?.activeLeads ?? totalLeads) === 1 ? "lead ativo" : "leads ativos"}
             </span>
           </div>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
@@ -357,10 +375,13 @@ export function LeadsPage({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => leadsQuery.refetch()}
+            onClick={() => {
+              leadsQuery.refetch();
+              leadsSummaryQuery.refetch();
+            }}
             className="border-slate-200 text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800"
           >
-            <RefreshCw className={`mr-2 h-4 w-4 ${leadsQuery.isFetching ? "animate-spin" : ""}`} />
+            <RefreshCw className={`mr-2 h-4 w-4 ${leadsQuery.isFetching || leadsSummaryQuery.isFetching ? "animate-spin" : ""}`} />
             Atualizar
           </Button>
 
@@ -392,6 +413,21 @@ export function LeadsPage({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value as any);
+              setPage(1);
+            }}
+            className="rounded-xl border border-slate-200 bg-slate-50 py-2 px-3 text-xs font-medium text-slate-700 focus:outline-none dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300"
+          >
+            <option value="lead">Status: Leads</option>
+            <option value="ativo">Status: Clientes Ativos</option>
+            <option value="inativo">Status: Inativos</option>
+            <option value="cancelado">Status: Cancelados</option>
+            <option value="all">Status: Todos</option>
+          </select>
+
           <select
             value={originFilter}
             onChange={(e) => {
@@ -862,11 +898,16 @@ export function LeadsPage({
                 disabled={createMutation.isPending || updateMutation.isPending}
                 className="bg-blue-600 text-white hover:bg-blue-700"
               >
-                {createMutation.isPending || updateMutation.isPending
-                  ? "Salvando..."
-                  : isEditOpen
-                  ? "Salvar Alterações"
-                  : "Criar Lead"}
+                {createMutation.isPending || updateMutation.isPending ? (
+                  <span className="flex items-center gap-1.5">
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    Salvando...
+                  </span>
+                ) : isEditOpen ? (
+                  "Salvar Alterações"
+                ) : (
+                  "Criar Lead"
+                )}
               </Button>
             </DialogFooter>
           </form>

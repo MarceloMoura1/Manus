@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { isValidCpf, isValidCnpj } from "../../../../shared/br-documents";
+import { normalizeContactPhone } from "../../../../shared/contact-phone";
 import { findDuplicateCrmClient } from "../../../db-crm";
 import * as repo from "./repository";
 import type {
@@ -29,6 +30,10 @@ export async function listLeads(
   return repo.listLeads(clientId, input);
 }
 
+export async function getLeadsSummary(clientId: string) {
+  return repo.getLeadsSummary(clientId);
+}
+
 export async function getLeadById(
   clientId: string,
   crmClientId: string
@@ -47,20 +52,17 @@ export async function createLead(
 ) {
   validateDocument(input.customerType, input.cpfCnpj);
 
-  // Check duplicate document or phone
-  if (input.cpfCnpj || input.phone) {
-    const duplicate = await findDuplicateCrmClient(clientId, {
-      cpfCnpj: input.cpfCnpj,
-      phone: input.phone,
-    });
-    if (duplicate) {
-      const field = duplicate.cpfCnpj && input.cpfCnpj && duplicate.cpfCnpj === input.cpfCnpj.replace(/\D/g, "")
-        ? "documento"
-        : "telefone";
-      throw new TRPCError({
-        code: "CONFLICT",
-        message: `Já existe um cadastro (${duplicate.companyName}) com este ${field}.`,
-      });
+  if (input.phone) {
+    const p = normalizeContactPhone(input.phone);
+    if (p.status === "invalid") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: p.reason });
+    }
+  }
+
+  if (input.whatsapp) {
+    const w = normalizeContactPhone(input.whatsapp);
+    if (w.status === "invalid") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: w.reason });
     }
   }
 
