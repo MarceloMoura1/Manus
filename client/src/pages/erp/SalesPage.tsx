@@ -7,10 +7,12 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
+  ArrowRightCircle,
   ArrowUp,
   Box,
   CalendarDays,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
@@ -26,9 +28,11 @@ import {
   Filter,
   MapPin,
   LoaderCircle,
+  MessageCircle,
   MoreHorizontal,
   PackageCheck,
   PackageOpen,
+  Phone,
   Plus,
   Paperclip,
   ReceiptText,
@@ -44,6 +48,7 @@ import {
   WalletCards,
   XCircle,
 } from "lucide-react";
+import { normalizeContactPhone, formatContactPhone } from "../../../../shared/contact-phone";
 import { trpc } from "@/lib/trpc";
 import { productMediaUrl, saleDocumentUrl } from "@/lib/trpc-url";
 import { cn } from "@/lib/utils";
@@ -218,6 +223,17 @@ function currentMonth() {
 }
 
 const month = currentMonth();
+
+function formatCpfCnpj(value: string | null | undefined): string {
+  const digits = value?.replace(/\D/g, "") ?? "";
+  if (digits.length === 11) {
+    return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+  }
+  if (digits.length === 14) {
+    return digits.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+  }
+  return value?.trim() || "Não informado";
+}
 
 export interface SalesPageProps {
   initialSelectedId?: string;
@@ -1326,12 +1342,31 @@ function SaleDetailPanel({
   const order = query.data;
   const isQuote = order.documentType === "quote";
   const utils = trpc.useUtils();
+  // Geração de PDF do orçamento no QuoteActionCenter: trpc.erp.sales.documents.generateQuotePdf.useMutation (Gerar PDF)
   const generateQuotePdf = trpc.erp.sales.documents.generateQuotePdf.useMutation({
     onSuccess: async () => {
       await utils.erp.sales.documents.list.invalidate({ salePublicId: order.publicId });
       await utils.erp.sales.detail.invalidate({ publicId: order.publicId });
     },
   });
+  const crmCustomerQuery = trpc.crm.getById.useQuery(
+    { crmClientId: order.crmClientId ?? "" },
+    { enabled: Boolean(order.crmClientId) }
+  );
+  const clientData = crmCustomerQuery.data?.client;
+  const rawDocument = clientData?.cpfCnpj || (order as any).customerCpfCnpj || null;
+  const formattedDocument = formatCpfCnpj(rawDocument);
+  const rawPhone =
+    clientData?.whatsapp ||
+    clientData?.mobilePhone ||
+    clientData?.phone ||
+    (order as any).customerPhone ||
+    (order as any).crmClientPhone ||
+    (order.shippingAddress as any)?.phone ||
+    (order.billingAddress as any)?.phone ||
+    "";
+  const normPhone = normalizeContactPhone(rawPhone);
+  const formattedPhone = normPhone.status === "valid" ? formatContactPhone(normPhone.value) : (rawPhone ? String(rawPhone) : null);
   const index = stageOrder.indexOf(order.currentStage as Stage);
   const next = stageOrder[index + 1];
   const correction =
@@ -1343,7 +1378,7 @@ function SaleDetailPanel({
           ? "received"
           : null;
   const canCancel = !isQuote && index < stageOrder.indexOf("shipped") && !order.cancelled;
-  const canCorrectAddress = !isQuote && ["confirmed", "separation"].includes(order.currentStage);
+  const canCorrectAddress = ["confirmed", "separation"].includes(order.currentStage);
   const progress = order.totalCents > 0 ? Math.min(100, Math.round((order.paidCents / order.totalCents) * 100)) : 0;
   const deliveryAddress = formatSalesDeliveryAddress(order.shippingAddress);
   const detailFacts: Array<{ label: string; value: string; detail?: string; client?: boolean }> = [
@@ -1354,19 +1389,64 @@ function SaleDetailPanel({
   ];
   return (
     <aside className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_14px_30px_-26px_rgba(15,23,42,0.65)] dark:border-slate-800 dark:bg-slate-900" aria-label="Detalhes da venda selecionada">
-      <header className="border-b border-slate-200 bg-slate-50/70 px-4 py-2 sm:px-5 dark:border-slate-800 dark:bg-slate-800/60">
+      {/* ─── BLOCO 1: DADOS DO CLIENTE & GERAIS (Topo) ─── */}
+      <header className="border-b border-slate-200 bg-slate-50/70 px-4 py-3 sm:px-5 dark:border-slate-800 dark:bg-slate-800/60" data-testid="quote-client-header">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h2 className="text-lg font-bold tracking-[-0.02em] text-slate-950 dark:text-slate-100">{isQuote ? "Orçamento" : "Venda"} {order.orderNumber}</h2>
-            <DocumentTypeBadge documentType={order.documentType} />
-            {isQuote ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} /></>}
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-base font-bold text-blue-700 shadow-sm dark:bg-blue-950/60 dark:text-blue-300">
+              {order.customerName ? order.customerName.charAt(0).toUpperCase() : <UserRound className="h-5 w-5" />}
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                {onClientNavigate && order.crmClientId ? (
+                  <button
+                    type="button"
+                    className="truncate text-base font-bold text-slate-950 transition-colors hover:text-blue-700 hover:underline dark:text-slate-100 dark:hover:text-blue-400"
+                    title={order.customerName}
+                    onClick={() => onClientNavigate(order.crmClientId)}
+                  >
+                    {order.customerName}
+                  </button>
+                ) : (
+                  <h2 className="truncate text-base font-bold text-slate-950 dark:text-slate-100" title={order.customerName}>
+                    {order.customerName}
+                  </h2>
+                )}
+                <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 ring-1 ring-inset ring-blue-700/10 dark:bg-blue-950/60 dark:text-blue-300 dark:ring-blue-800">
+                  ERP
+                </span>
+                <DocumentTypeBadge documentType={order.documentType} />
+              </div>
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-slate-400">
+                <span>
+                  <strong className="text-slate-500 dark:text-slate-400">CPF/CNPJ:</strong>{" "}
+                  <span className="font-mono text-slate-800 dark:text-slate-200">{formattedDocument}</span>
+                </span>
+                {formattedPhone && (
+                  <span className="flex items-center gap-1">
+                    <Phone className="h-3 w-3 text-slate-400" />
+                    <span className="font-mono text-slate-800 dark:text-slate-200">{formattedPhone}</span>
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Criada em {dateTime.format(new Date(order.createdAt))}</p>
+          <div className="flex flex-wrap items-center gap-2 text-right">
+            <div>
+              <div className="flex items-center justify-end gap-2">
+                <span className="text-sm font-bold text-slate-900 dark:text-slate-100">{isQuote ? "Orçamento" : "Venda"} {order.orderNumber}</span>
+                {isQuote ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} /></>}
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Criada em {dateTime.format(new Date(order.createdAt))}</p>
+            </div>
+          </div>
         </div>
-        <div className="mt-2 grid overflow-hidden rounded-lg border border-slate-200 divide-y divide-slate-200 bg-white sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4 dark:border-slate-800 dark:divide-slate-800 dark:bg-slate-900" data-testid="sales-detail-facts">
+
+        {/* Fatos Comerciais: Vendedor(a), Data Comercial, Previsão de Entrega */}
+        <div className="mt-3 grid overflow-hidden rounded-lg border border-slate-200 divide-y divide-slate-200 bg-white sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4 dark:border-slate-800 dark:divide-slate-800 dark:bg-slate-900" data-testid="sales-detail-facts">
           {detailFacts.map(fact => (
-            <div key={fact.label} className="flex min-h-20 min-w-0 flex-col justify-center px-3 py-1.5">
-              <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{fact.label}</span>
+            <div key={fact.label} className="flex min-h-16 min-w-0 flex-col justify-center px-3 py-1.5">
+              <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{fact.label}</span>
               {fact.client && onClientNavigate ? (
                 <button type="button" className="mt-0.5 block max-w-full truncate rounded-sm text-left text-sm font-semibold text-blue-700 transition-colors duration-150 hover:underline active:text-blue-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none dark:text-blue-400 dark:hover:text-blue-300 dark:active:text-blue-200" title={fact.value} onClick={() => onClientNavigate(order.crmClientId)}>{fact.value}</button>
               ) : (
@@ -1376,6 +1456,29 @@ function SaleDetailPanel({
             </div>
           ))}
         </div>
+
+        {/* Local de Entrega dedicado integrado dentro do Bloco 1 */}
+        {isQuote && (
+          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200/80 bg-white px-3.5 py-2 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex min-w-0 items-center gap-2">
+              <MapPin className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" aria-hidden="true" />
+              <p className="truncate text-slate-700 dark:text-slate-300" title={deliveryAddress}>
+                <strong className="font-semibold text-slate-900 dark:text-slate-100">Endereço da entrega:</strong>{" "}
+                {deliveryAddress}
+              </p>
+            </div>
+            {canWrite && canCorrectAddress && !order.cancelled && (
+              <button
+                type="button"
+                className="shrink-0 text-[11px] font-medium text-blue-700 hover:underline dark:text-blue-400"
+                onClick={() => onCorrectAddress(order)}
+              >
+                Corrigir endereço
+              </button>
+            )}
+          </div>
+        )}
+
         {order.cancelled && (
           <div className="mt-3 rounded-lg bg-rose-50 p-3 text-sm text-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
             <strong className="flex items-center gap-2"><XCircle className="h-4 w-4" />Venda cancelada</strong>
@@ -1389,6 +1492,113 @@ function SaleDetailPanel({
           </div>
         )}
       </header>
+
+      {/* ─── BLOCO 2: FERRAMENTAS DO ORÇAMENTO (Estilo Chamados) ─── */}
+      {isQuote && (
+        <div className="px-3 pt-3 sm:px-3">
+          <div
+            data-testid="quote-action-bar"
+            className="flex min-h-[64px] items-stretch justify-start overflow-x-auto rounded-xl border border-slate-200 bg-white px-2 py-1.5 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+          >
+            {/* Ação 1: Editar orçamento */}
+            {order.canEdit && (
+              <button
+                type="button"
+                data-testid="quote-edit-action"
+                className="group relative flex h-[52px] min-w-[80px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1 text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-blue-300"
+                onClick={() => onEdit(order.publicId)}
+              >
+                <Edit3 className="h-5 w-5" />
+                <span className="text-[11px] font-medium">Editar orçamento</span>
+              </button>
+            )}
+
+            {order.canEdit && <div role="separator" className="my-2.5 w-px shrink-0 bg-slate-200 dark:bg-slate-800" />}
+
+            {/* Ação 2: Ciclo de Negociação / Status */}
+            {order.commercialStatus === "draft" && (
+              <button
+                type="button"
+                data-testid="quote-start-negotiation-action"
+                className="group relative flex h-[52px] min-w-[104px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1 text-indigo-700 transition-colors hover:bg-indigo-50 hover:text-indigo-800 dark:text-indigo-400 dark:hover:bg-indigo-950/40"
+                onClick={() => onCommercialStatus(order, "negotiation", false)}
+              >
+                <ArrowRightCircle className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                <span className="text-[11px] font-medium">Iniciar negociação</span>
+              </button>
+            )}
+
+            {order.commercialStatus === "negotiation" && (
+              <>
+                <button
+                  type="button"
+                  data-testid="quote-approve-action"
+                  className="group relative flex h-[52px] min-w-[88px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1 text-emerald-700 transition-colors hover:bg-emerald-50 hover:text-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+                  onClick={() => onCommercialStatus(order, "approved", false)}
+                >
+                  <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                  <span className="text-[11px] font-medium">Aprovar orçamento</span>
+                </button>
+                <div role="separator" className="my-2.5 w-px shrink-0 bg-slate-200 dark:bg-slate-800" />
+                <button
+                  type="button"
+                  data-testid="quote-mark-lost-action"
+                  className="group relative flex h-[52px] min-w-[88px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1 text-amber-700 transition-colors hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-950/40"
+                  onClick={() => onCommercialStatus(order, "lost", true)}
+                >
+                  <XCircle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                  <span className="text-[11px] font-medium">Marcar como perdido</span>
+                </button>
+              </>
+            )}
+
+            {order.commercialStatus === "approved" && (
+              <>
+                <button
+                  type="button"
+                  data-testid="quote-resume-negotiation-action"
+                  className="group relative flex h-[52px] min-w-[88px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                  onClick={() => onCommercialStatus(order, "negotiation", true)}
+                >
+                  <RotateCcw className="h-5 w-5" />
+                  <span className="text-[11px] font-medium">Retomar negociação</span>
+                </button>
+                <div role="separator" className="my-2.5 w-px shrink-0 bg-slate-200 dark:bg-slate-800" />
+                <button
+                  type="button"
+                  data-testid="quote-convert-action"
+                  className="group relative flex h-[52px] min-w-[88px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1 text-blue-700 transition-colors hover:bg-blue-50 hover:text-blue-800 dark:text-blue-400 dark:hover:bg-blue-950/40"
+                  onClick={() => onConvert(order)}
+                >
+                  <ShoppingCart className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  <span className="text-[11px] font-medium">Converter em venda</span>
+                </button>
+              </>
+            )}
+
+            {["converted", "lost", "cancelled"].includes(order.commercialStatus) && (
+              <div className="flex h-[52px] items-center px-3">
+                <CommercialBadge value={order.commercialStatus} />
+              </div>
+            )}
+
+            {order.commercialStatus !== "converted" && (
+              <>
+                <div role="separator" className="my-2.5 w-px shrink-0 bg-slate-200 dark:bg-slate-800" />
+                <button
+                  type="button"
+                  data-testid="quote-delete-action"
+                  className="group relative flex h-[52px] min-w-[80px] flex-col items-center justify-center gap-1 rounded-lg px-3 py-1 text-rose-600 transition-colors hover:bg-rose-50 hover:text-rose-700 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                  onClick={() => onArchive(order)}
+                >
+                  <Trash2 className="h-5 w-5 text-rose-500" />
+                  <span className="text-[11px] font-medium">Excluir orçamento</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="space-y-2 p-3 sm:p-3">
         <section className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800" data-testid="sales-detail-products">
@@ -1413,56 +1623,48 @@ function SaleDetailPanel({
           ) : <p className="px-4 py-5 text-sm text-slate-500 dark:text-slate-400">Nenhum produto registrado nesta venda.</p>}
         </section>
 
-        <section className="flex min-h-14 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3.5 sm:p-4 dark:border-slate-800 dark:bg-slate-900" data-testid="sales-detail-address">
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-              <MapPin className="h-4 w-4" aria-hidden="true" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Local de entrega</span>
-              <p className="break-words text-sm font-semibold leading-5 text-slate-900 dark:text-slate-100" title={deliveryAddress}>
-                Endereço da entrega: {deliveryAddress}
-              </p>
-            </div>
-          </div>
-          {canWrite && canCorrectAddress && !order.cancelled && <Button type="button" variant="outline" size="sm" className="shrink-0 border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/60" onClick={() => onCorrectAddress(order)}>Corrigir endereço</Button>}
-        </section>
+        {isQuote ? (
+          /* ─── BLOCOS 4, 5, 6: VEÍCULO, CONFIGURAÇÃO E EMISSÃO ─── */
+          <QuoteActionCenter
+            order={order}
+            canWrite={canWrite}
+            onRefresh={() => void utils.erp.sales.detail.invalidate({ publicId: order.publicId })}
+          />
+        ) : (
+          <>
+            <section className="flex min-h-14 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3.5 sm:p-4 dark:border-slate-800 dark:bg-slate-900" data-testid="sales-detail-address">
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                  <MapPin className="h-4 w-4" aria-hidden="true" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Local de entrega</span>
+                  <p className="break-words text-sm font-semibold leading-5 text-slate-900 dark:text-slate-100" title={deliveryAddress}>
+                    Endereço da entrega: {deliveryAddress}
+                  </p>
+                </div>
+              </div>
+              {canWrite && canCorrectAddress && !order.cancelled && <Button type="button" variant="outline" size="sm" className="shrink-0 border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/60" onClick={() => onCorrectAddress(order)}>Corrigir endereço</Button>}
+            </section>
 
-        <section className="rounded-xl border border-slate-200 p-3 dark:border-slate-800 dark:bg-slate-900" data-testid="sales-detail-workflow">
-          {isQuote ? (
-            <div className="mt-2 space-y-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <CommercialBadge value={order.commercialStatus} />
-                <span className="text-xs leading-5 text-slate-600 dark:text-slate-400">
-                  Rascunho → negociação → aprovação → conversão. A conversão preserva a identidade do pedido, sem pagamentos nem baixa de estoque.
-                </span>
-              </div>
-              <QuoteActionCenter order={order} canWrite={canWrite} onRefresh={() => void utils.erp.sales.detail.invalidate({ publicId: order.publicId })} />
-            </div>
-          ) : (
-            <SaleTimeline stage={order.currentStage as Stage} cancelled={order.cancelled} />
-          )}
-          {canWrite && !order.archivedAt && (
-            <div className="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-3 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800" data-testid="sales-detail-actions">
-              <div className="flex flex-wrap items-center gap-2">
-                {isQuote ? <>
-                  {order.canEdit && <Button size="sm" variant="outline" className="border-blue-200 bg-blue-50 text-blue-800 shadow-sm transition-colors hover:bg-blue-100 focus-visible:ring-blue-500 active:translate-y-px motion-reduce:transition-none dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/60" onClick={() => onEdit(order.publicId)}><Edit3 className="mr-2 h-4 w-4" />Editar orçamento</Button>}
-                  {canWrite && <Button type="button" size="sm" disabled={generateQuotePdf.isPending} className="bg-blue-700 text-white shadow-sm hover:bg-blue-800 focus-visible:ring-blue-500 active:translate-y-px motion-reduce:transition-none dark:bg-blue-600 dark:hover:bg-blue-700" onClick={() => generateQuotePdf.mutate({ salePublicId: order.publicId, idempotencyKey: crypto.randomUUID() })}><FileDown className="mr-1.5 h-4 w-4" />{generateQuotePdf.isPending ? "Gerando PDF…" : "Gerar PDF"}</Button>}
-                  {order.commercialStatus === "draft" && <Button size="sm" className="bg-indigo-600 text-white shadow-sm transition-colors hover:bg-indigo-700 focus-visible:ring-indigo-500 active:translate-y-px motion-reduce:transition-none dark:bg-indigo-500 dark:hover:bg-indigo-600" onClick={() => onCommercialStatus(order, "negotiation", false)}><FileClock className="mr-2 h-4 w-4" />Iniciar negociação</Button>}
-                  {order.commercialStatus === "negotiation" && <><Button size="sm" variant="outline" className="border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100 hover:text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/60" onClick={() => onCommercialStatus(order, "lost", true)}>Marcar como perdido</Button><Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700 transition-colors motion-reduce:transition-none active:translate-y-px dark:bg-emerald-500 dark:hover:bg-emerald-600" onClick={() => onCommercialStatus(order, "approved", false)}><Check className="mr-2 h-4 w-4" />Aprovar</Button></>}
-                  {order.commercialStatus === "approved" && <><Button size="sm" variant="outline" className="dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200" onClick={() => onCommercialStatus(order, "negotiation", true)}><RotateCcw className="mr-2 h-4 w-4" />Retomar negociação</Button><Button size="sm" className="bg-blue-600 text-white hover:bg-blue-700 transition-colors motion-reduce:transition-none active:translate-y-px dark:bg-blue-500 dark:hover:bg-blue-600" onClick={() => onConvert(order)}><ShoppingCart className="mr-2 h-4 w-4" />Converter em venda</Button></>}
-                  {order.commercialStatus !== "converted" && <Button size="sm" variant="outline" className="border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-900/60" onClick={() => onArchive(order)}><Trash2 className="mr-2 h-4 w-4" />Excluir orçamento</Button>}
-                </> : !order.cancelled && order.currentStage === "created" ? <><Button size="sm" variant="outline" className="dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200" onClick={() => onEdit(order.publicId)}><Edit3 className="mr-2 h-4 w-4" />Editar</Button><Button size="sm" className="bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600" onClick={() => onConfirm(order)}>Confirmar</Button></> : !order.cancelled && next ? <Button size="sm" className="bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600" onClick={() => onTransition(order, next, false)}>{nextActionLabel(next)} <ArrowRight className="ml-2 h-4 w-4" /></Button> : null}
-                {!isQuote && !order.cancelled && correction && <Button variant="outline" size="sm" className="border-slate-300 bg-slate-100 text-slate-800 shadow-sm hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700" onClick={() => onTransition(order, correction, true)}><RotateCcw className="mr-2 h-4 w-4" />Corrigir etapa</Button>}
-                {!isQuote && (order.cancelled || order.currentStage === "completed") && <Button size="sm" variant="outline" className="dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200" onClick={() => onArchive(order)}><Archive className="mr-2 h-4 w-4" />Arquivar venda</Button>}
-              </div>
-              {!isQuote && canCancel && <Button variant="outline" size="sm" className="shrink-0 border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-900/60" disabled={order.paidCents > 0} title={order.paidCents > 0 ? "Há recebimentos registrados; estorno ainda não está disponível." : undefined} onClick={() => onCancel(order)}><XCircle className="mr-2 h-4 w-4" />Cancelar venda</Button>}
-            </div>
-          )}
-          {order.paidCents > 0 && canCancel && <p className="mt-2 text-xs text-slate-500">Cancelamento bloqueado: há recebimentos e o estorno ainda não está disponível.</p>}
-          {!isQuote && order.currentStage === "confirmed" && <p className="mt-2 text-xs text-slate-500">Retornar para Criada apagaria o significado dos títulos confirmados; use o cancelamento auditado quando não houver recebimentos.</p>}
-          {!isQuote && order.currentStage === "shipped" && <p className="mt-2 text-xs text-slate-500">Retornar para Separação exige uma reversão específica de estoque e permanece bloqueado para evitar saldo inconsistente.</p>}
-        </section>
+            <section className="rounded-xl border border-slate-200 p-3 dark:border-slate-800 dark:bg-slate-900" data-testid="sales-detail-workflow">
+              <SaleTimeline stage={order.currentStage as Stage} cancelled={order.cancelled} />
+              {canWrite && !order.archivedAt && (
+                <div className="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-3 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800" data-testid="sales-detail-actions">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {!order.cancelled && order.currentStage === "created" ? <><Button size="sm" variant="outline" className="dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200" onClick={() => onEdit(order.publicId)}><Edit3 className="mr-2 h-4 w-4" />Editar</Button><Button size="sm" className="bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600" onClick={() => onConfirm(order)}>Confirmar</Button></> : !order.cancelled && next ? <Button size="sm" className="bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600" onClick={() => onTransition(order, next, false)}>{nextActionLabel(next)} <ArrowRight className="ml-2 h-4 w-4" /></Button> : null}
+                    {!order.cancelled && correction && <Button variant="outline" size="sm" className="border-slate-300 bg-slate-100 text-slate-800 shadow-sm hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700" onClick={() => onTransition(order, correction, true)}><RotateCcw className="mr-2 h-4 w-4" />Corrigir etapa</Button>}
+                    {(order.cancelled || order.currentStage === "completed") && <Button size="sm" variant="outline" className="dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200" onClick={() => onArchive(order)}><Archive className="mr-2 h-4 w-4" />Arquivar venda</Button>}
+                  </div>
+                  {canCancel && <Button variant="outline" size="sm" className="shrink-0 border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-900/60" disabled={order.paidCents > 0} title={order.paidCents > 0 ? "Há recebimentos registrados; estorno ainda não está disponível." : undefined} onClick={() => onCancel(order)}><XCircle className="mr-2 h-4 w-4" />Cancelar venda</Button>}
+                </div>
+              )}
+              {order.paidCents > 0 && canCancel && <p className="mt-2 text-xs text-slate-500">Cancelamento bloqueado: há recebimentos e o estorno ainda não está disponível.</p>}
+              {!isQuote && order.currentStage === "confirmed" && <p className="mt-2 text-xs text-slate-500">Retornar para Criada apagaria o significado dos títulos confirmados; use o cancelamento auditado quando não houver recebimentos.</p>}
+              {!isQuote && order.currentStage === "shipped" && <p className="mt-2 text-xs text-slate-500">Retornar para Separação exige uma reversão específica de estoque e permanece bloqueado para evitar saldo inconsistente.</p>}
+            </section>
+          </>
+        )}
 
         <div className="grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(300px,0.85fr)]">
         {!isQuote && <section className="rounded-xl bg-slate-50 p-4">
