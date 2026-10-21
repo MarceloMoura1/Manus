@@ -1,8 +1,11 @@
+import type { Express, Request, Response } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, megadeskProcedure } from "../../../_core/trpc";
+import { resolveOperationalSessionReadOnly } from "../../../_core/megadesk-session";
 import { requireCrmOpportunityAccess } from "../../../crm-access";
+import { readCrmClientFile } from "../client-files/files-storage";
 import { SaleService } from "../../erp/sales/service";
 import { QuotePdfService } from "../../erp/sales/quote-pdf-service";
 import { SaleDocumentService } from "../../erp/sales/documents-service";
@@ -17,7 +20,7 @@ import { QuoteTemplatesService } from "./quote-templates";
 const saleService = new SaleService();
 const quotePdfService = new QuotePdfService();
 const documentService = new SaleDocumentService();
-const quoteTemplatesService = new QuoteTemplatesService(saleService, quotePdfService);
+const quoteTemplatesService = new QuoteTemplatesService(saleService, quotePdfService, documentService);
 
 function resolveIdentity(ctx: {
   tenantId?: string;
@@ -382,6 +385,7 @@ export const proposalsRouter = router({
         publicId: z.string().uuid(),
         phone: z.string().trim().optional(),
         customMessage: z.string().trim().optional(),
+        templatePublicId: z.string().trim().optional(),
         idempotencyKey: z.string().uuid().default(() => randomUUID()),
       })
     )
@@ -399,3 +403,35 @@ export const proposalsRouter = router({
       }
     }),
 });
+
+export function createTemplateImageDownloadHandler(
+  sessionResolver: typeof resolveOperationalSessionReadOnly = resolveOperationalSessionReadOnly
+) {
+  return async (req: Request, res: Response): Promise<void> => {
+    const session = await sessionResolver(req);
+    if (!session) {
+      res.status(401).end();
+      return;
+    }
+    const publicId = req.params.publicId;
+    if (!publicId) {
+      res.status(400).end();
+      return;
+    }
+    try {
+      const bytes = await readCrmClientFile(session.tenantId, publicId);
+      const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+      const mime = isJpeg ? "image/jpeg" : "image/png";
+      res.setHeader("Content-Type", mime);
+      res.setHeader("Cache-Control", "private, max-age=86400");
+      res.status(200).send(bytes);
+    } catch {
+      res.status(404).end();
+    }
+  };
+}
+
+export function registerProposalTemplateRoutes(app: Express): void {
+  app.get("/api/crm/proposals/templates/:publicId/image", createTemplateImageDownloadHandler());
+}
+

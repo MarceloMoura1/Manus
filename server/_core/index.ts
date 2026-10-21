@@ -20,6 +20,7 @@ import { registerUserPersonalizationRoutes } from "../user-personalization";
 import { registerTicketAttachmentRoutes } from "../chamados-attachments";
 import { registerSupplierFileRoutes } from "../modules/erp/suppliers/files-router";
 import { registerClientFileRoutes } from "../modules/crm/client-files/files-router";
+import { registerProposalTemplateRoutes } from "../modules/crm/proposals/router";
 import { registerSaleDocumentRoutes } from "../modules/erp/sales/documents-http";
 import { registerCrmWebhookIngressRoutes } from "../modules/crm/automations/webhook-ingress";
 import { startTicketAttachmentReconciler } from "../chamados-attachment-reconciler";
@@ -134,6 +135,7 @@ async function startServer() {
   registerTicketAttachmentRoutes(app);
   registerSupplierFileRoutes(app);
   registerClientFileRoutes(app);
+  registerProposalTemplateRoutes(app);
   registerSaleDocumentRoutes(app);
   registerCrmWebhookIngressRoutes(app);
 

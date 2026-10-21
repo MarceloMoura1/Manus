@@ -621,7 +621,10 @@ export class SaleRepository {
     lock = false
   ) {
     const [orders] = await connection.execute<OrderRow[]>(
-      `SELECT o.* FROM erp_sale_orders o
+      `SELECT o.*, c.phone AS customer_phone, c.mobile_phone AS customer_mobile_phone, c.whatsapp AS customer_whatsapp
+       FROM erp_sale_orders o
+       LEFT JOIN megadesk_crm_clients c
+         ON c.client_id = o.client_id AND c.crm_client_id = o.crm_client_id
        WHERE o.client_id=? AND o.public_id=? LIMIT 1${lock ? " FOR UPDATE" : ""}`,
       [clientId, publicId]
     );
@@ -2181,6 +2184,8 @@ function publicOrder(row: OrderRow) {
     expectedDate: row.expected_date ? dateOnly(row.expected_date) : null,
     documentCustomName: row.document_custom_name ?? null,
     serviceMetadata: typeof row.service_metadata === "string" ? parseJson(row.service_metadata) : (row.service_metadata ?? null),
+    customerPhone: (row as any).customer_whatsapp || (row as any).customer_mobile_phone || (row as any).customer_phone || null,
+    crmClientPhone: (row as any).customer_whatsapp || (row as any).customer_mobile_phone || (row as any).customer_phone || null,
     shippingAddress: parseJson<AddressSnapshot>(row.shipping_address_snapshot),
     billingAddress: parseJson<AddressSnapshot>(row.billing_address_snapshot),
     subtotalCents: Number(row.subtotal_cents),

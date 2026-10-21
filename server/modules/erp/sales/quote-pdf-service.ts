@@ -38,6 +38,11 @@ export class QuotePdfService {
   }
 
   async generate(identity: Identity, input: { salePublicId: string; idempotencyKey: string }) {
+    const { document } = await this.generateWithBuffer(identity, input);
+    return document;
+  }
+
+  async generateWithBuffer(identity: Identity, input: { salePublicId: string; idempotencyKey: string }) {
     this.assertWrite(identity);
 
     // `detail` scopes both the quote and all of its snapshots by clientId.
@@ -95,12 +100,14 @@ export class QuotePdfService {
       ? `${sanitizedCustom}.pdf`
       : `orcamento-${quote.orderNumber}.pdf`;
 
-    return this.documents.storeGeneratedQuotePdf(identity, {
+    const document = await this.documents.storeGeneratedQuotePdf(identity, {
       salePublicId: input.salePublicId,
       idempotencyKey: input.idempotencyKey,
       fileName,
       description: `PDF gerado a partir do orçamento ${quote.orderNumber}.`,
       bytes,
     });
+
+    return { document, bytes };
   }
 }

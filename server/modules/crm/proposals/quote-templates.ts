@@ -4,10 +4,11 @@ import { TRPCError } from "@trpc/server";
 import { getPool } from "../../../db";
 import { getCompanySettings } from "../../../db-company";
 import { addCrmTimeline } from "../../../db-crm";
-import { writeCrmClientFileAtomic, readCrmClientFile } from "../client-files/files-storage";
+import { writeCrmClientFileAtomic, readCrmClientFile, removeCrmClientFilePhysical } from "../client-files/files-storage";
 import { normalizeContactPhone, formatContactPhone } from "../../../../shared/contact-phone";
 import { SaleService } from "../../erp/sales/service";
 import { QuotePdfService } from "../../erp/sales/quote-pdf-service";
+import { SaleDocumentService } from "../../erp/sales/documents-service";
 import type { OperationalRole } from "../../erp/contracts";
 
 export type Identity = {
@@ -85,7 +86,8 @@ function formatDate(dateStr: string | null | undefined): string {
 export class QuoteTemplatesService {
   constructor(
     private readonly saleService = new SaleService(),
-    private readonly quotePdfService = new QuotePdfService()
+    private readonly quotePdfService = new QuotePdfService(),
+    private readonly documentService = new SaleDocumentService()
   ) {}
 
   /**
@@ -123,14 +125,45 @@ export class QuoteTemplatesService {
     const pool = getPool();
     const publicId = randomUUID();
     let backgroundImageUrl = input.backgroundImageUrl?.trim() || null;
+    let layoutConfig = input.layoutConfig ? { ...input.layoutConfig } : {};
 
     if (input.fileBase64) {
-      const mime = input.mimeType || "image/png";
-      const cleanBase64 = input.fileBase64.replace(/^data:[^,]+;base64,/i, "");
+      const match = input.fileBase64.match(/^data:([^;]+);base64,/i);
+      const detectedMime = match ? match[1].toLowerCase() : null;
+      const mime = (input.mimeType || detectedMime || "image/png").toLowerCase();
+      const normalizedMime = mime === "image/jpg" ? "image/jpeg" : mime;
+      if (!["image/png", "image/jpeg"].includes(normalizedMime)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Formato de imagem inválido. Use apenas PNG ou JPEG.",
+        });
+      }
+
+      const cleanBase64 = input.fileBase64.replace(/^data:[^,]+;base64,/i, "").trim();
       const bytes = Buffer.from(cleanBase64, "base64");
+      if (bytes.length === 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Arquivo de imagem vazio ou corrompido.",
+        });
+      }
+      if (bytes.length > 5 * 1024 * 1024) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Imagem excede o limite máximo permitido de 5MB.",
+        });
+      }
+
       // Physical storage partition scoped to tenant
       await writeCrmClientFileAtomic(identity.clientId, publicId, bytes);
-      backgroundImageUrl = `data:${mime};base64,${cleanBase64}`;
+      // Clean path to store in MySQL TEXT column (prevents data truncation errors)
+      backgroundImageUrl = `/api/crm/proposals/templates/${publicId}/image`;
+      layoutConfig = {
+        ...layoutConfig,
+        mimeType: normalizedMime,
+        fileSize: bytes.length,
+        uploadedAt: new Date().toISOString(),
+      };
     }
 
     if (input.isDefault) {
@@ -150,7 +183,7 @@ export class QuoteTemplatesService {
         input.name.trim(),
         input.niche || "automotive",
         backgroundImageUrl,
-        input.layoutConfig ? JSON.stringify(input.layoutConfig) : null,
+        Object.keys(layoutConfig).length > 0 ? JSON.stringify(layoutConfig) : null,
         input.isDefault ? 1 : 0,
       ]
     );
@@ -171,6 +204,9 @@ export class QuoteTemplatesService {
     if (res.affectedRows === 0) {
       throw new TRPCError({ code: "NOT_FOUND", message: "Template não encontrado." });
     }
+
+    // Clean up physical file if it exists
+    await Promise.resolve(removeCrmClientFilePhysical(identity.clientId, publicId)).catch(() => undefined);
 
     return { success: true };
   }
@@ -284,8 +320,19 @@ export class QuoteTemplatesService {
     const defaultDocName = `Orçamento - ${quote.customerName} - ${formatDate(quote.commercialDate)}`;
     const documentCustomName = (quote as any).documentCustomName?.trim() || defaultDocName;
 
-    const bgCss = template?.backgroundImageUrl
-      ? `background-image: url('${template.backgroundImageUrl}'); background-size: cover; background-position: center; background-repeat: no-repeat;`
+    let bgUrl = template?.backgroundImageUrl || null;
+    if (template) {
+      try {
+        const fileBytes = await readCrmClientFile(identity.clientId, template.publicId);
+        const mime = (template.layoutConfig as any)?.mimeType || "image/png";
+        bgUrl = `data:${mime};base64,${fileBytes.toString("base64")}`;
+      } catch {
+        // Fallback to stored backgroundImageUrl if file is not on disk
+      }
+    }
+
+    const bgCss = bgUrl
+      ? `background-image: url('${bgUrl}'); background-size: cover; background-position: center; background-repeat: no-repeat;`
       : `background: #ffffff;`;
 
     // Render Page 1
@@ -565,12 +612,12 @@ export class QuoteTemplatesService {
     if (!rawPhone) {
       // Lookup canonical phone from CRM client
       const [clientRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT phone, mobile_phone FROM megadesk_crm_clients
+        `SELECT phone, mobile_phone, whatsapp FROM megadesk_crm_clients
          WHERE client_id = ? AND crm_client_id = ? LIMIT 1`,
         [identity.clientId, quote.crmClientId]
       );
       if (clientRows[0]) {
-        rawPhone = clientRows[0].mobile_phone || clientRows[0].phone || "";
+        rawPhone = clientRows[0].whatsapp || clientRows[0].mobile_phone || clientRows[0].phone || "";
       }
     }
 
@@ -587,15 +634,72 @@ export class QuoteTemplatesService {
 
     const formattedRecipient = formatContactPhone(phoneNorm.value);
 
-    // Generate the PDF snapshot
-    const idempotencyKey = input.idempotencyKey || randomUUID();
-    const document = await this.quotePdfService.generate(identity, {
-      salePublicId: input.publicId,
-      idempotencyKey,
-    });
+    // Verify if PDF physically exists in storage for this quote
+    let pdfBytes: Buffer | null = null;
+    let fileName = "";
 
-    // Read the stored PDF bytes
-    const pdfBytes = await readCrmClientFile(identity.clientId, document.filePublicId);
+    try {
+      const existingDocs = await this.documentService.list(identity, input.publicId);
+      const activeQuotePdf = existingDocs.find(
+        d => d.documentType === "quote_pdf" && d.state === "active"
+      );
+
+      if (activeQuotePdf) {
+        const downloaded = await this.documentService.getForDownload(
+          identity,
+          input.publicId,
+          activeQuotePdf.publicId
+        );
+        if (downloaded.bytes && downloaded.bytes.length > 0) {
+          pdfBytes = downloaded.bytes;
+          fileName = downloaded.fileName;
+        }
+      }
+    } catch (docErr) {
+      console.warn("[QuoteTemplatesService] Verificação de documento existente falhou, gerando JIT:", docErr);
+    }
+
+    // SE NÃO EXISTIR FISICAMENTE: gerar imediatamente JIT e persistir
+    if (!pdfBytes) {
+      const idempotencyKey = input.idempotencyKey || randomUUID();
+      if (typeof (this.quotePdfService as any).generateWithBuffer === "function") {
+        const generated = await (this.quotePdfService as any).generateWithBuffer(identity, {
+          salePublicId: input.publicId,
+          idempotencyKey,
+        });
+        if (generated?.bytes) {
+          pdfBytes = generated.bytes;
+          fileName = generated.document?.fileName || "";
+        }
+      }
+      if (!pdfBytes) {
+        const generated = await this.quotePdfService.generate(identity, {
+          salePublicId: input.publicId,
+          idempotencyKey,
+        });
+        fileName = generated.fileName;
+        try {
+          const downloaded = await this.documentService.getForDownload(
+            identity,
+            input.publicId,
+            generated.publicId
+          );
+          pdfBytes = downloaded.bytes;
+        } catch {
+          pdfBytes = await readCrmClientFile(
+            identity.clientId,
+            (generated as any).filePublicId || generated.publicId
+          );
+        }
+      }
+    }
+
+    if (!pdfBytes || pdfBytes.length === 0) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Não foi possível gerar ou carregar o arquivo físico do orçamento para disparo.",
+      });
+    }
 
     // Resolve Evolution API client and session
     const [{ evoSendAttachment }, { instanceNameFor }] = await Promise.all([
@@ -616,7 +720,7 @@ export class QuoteTemplatesService {
         kind: "document",
         dataUrl: pdfBytes.toString("base64"),
         mimeType: "application/pdf",
-        fileName: document.fileName,
+        fileName,
         caption: messageCaption,
       });
       messageId = response.key.id;
@@ -635,7 +739,7 @@ export class QuoteTemplatesService {
       identity.clientId,
       {
         type: "quote_sent_whatsapp",
-        description: `Orçamento ${quote.orderNumber} enviado via WhatsApp para ${formattedRecipient} (${document.fileName}).`,
+        description: `Orçamento ${quote.orderNumber} enviado via WhatsApp para ${formattedRecipient} (${fileName}).`,
         author: identity.userName || "Operador CRM",
       }
     );
@@ -643,7 +747,7 @@ export class QuoteTemplatesService {
     return {
       success: true,
       messageId,
-      fileName: document.fileName,
+      fileName,
       recipientPhone: formattedRecipient,
     };
   }
