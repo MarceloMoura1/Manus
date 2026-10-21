@@ -60,12 +60,12 @@ export class QuotePdfService {
     const company = await this.companySettings(identity.clientId);
 
     // Look for active quote template (by input.templatePublicId or default template for tenant)
-    let templateData: { name: string; backgroundBytes?: Buffer | null; hasBackground: boolean } | null = null;
+    let templateData: { name: string; niche?: string; backgroundBytes?: Buffer | null; hasBackground: boolean } | null = null;
     try {
       const { getPool } = await import("../../../db");
       const pool = getPool();
       const [tplRows] = await pool.execute<any[]>(
-        `SELECT public_id, name, background_image_url FROM megadesk_crm_quote_templates
+        `SELECT public_id, name, niche, background_image_url FROM megadesk_crm_quote_templates
          WHERE client_id = ? ${input.templatePublicId ? "AND public_id = ?" : "ORDER BY is_default DESC, created_at DESC"} LIMIT 1`,
         input.templatePublicId ? [identity.clientId, input.templatePublicId] : [identity.clientId]
       );
@@ -80,6 +80,7 @@ export class QuotePdfService {
         }
         templateData = {
           name: String(tplRows[0].name),
+          niche: tplRows[0].niche ? String(tplRows[0].niche) : undefined,
           backgroundBytes,
           hasBackground: Boolean(backgroundBytes),
         };

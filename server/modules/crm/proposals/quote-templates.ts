@@ -10,6 +10,7 @@ import { SaleService } from "../../erp/sales/service";
 import { QuotePdfService } from "../../erp/sales/quote-pdf-service";
 import { SaleDocumentService } from "../../erp/sales/documents-service";
 import type { OperationalRole } from "../../erp/contracts";
+import { renderAutomotiveQuotePages } from "./quote-automotive-html";
 
 export type Identity = {
   clientId: string;
@@ -319,6 +320,63 @@ export class QuoteTemplatesService {
     const serviceMeta = (quote as any).serviceMetadata as QuoteServiceMetadata | null;
     const defaultDocName = `Orçamento - ${quote.customerName} - ${formatDate(quote.commercialDate)}`;
     const documentCustomName = (quote as any).documentCustomName?.trim() || defaultDocName;
+
+    const isAutomotive =
+      template?.niche === "automotive" ||
+      template?.name?.toLowerCase().includes("garage") ||
+      template?.name?.toLowerCase().includes("oficina") ||
+      Boolean(serviceMeta?.brandModel || serviceMeta?.plate);
+
+    if (isAutomotive) {
+      const automotivePages = renderAutomotiveQuotePages({
+        company: {
+          companyName: company?.companyName || "Oficina Automotiva",
+          primaryEmail: company?.primaryEmail,
+          primaryPhone: company?.primaryPhone,
+          primaryWhatsapp: company?.primaryWhatsapp,
+          address: company?.address,
+          logoUrl: (company as any)?.logoUrl || null,
+        },
+        quote: {
+          publicId: quote.publicId,
+          orderNumber: quote.orderNumber,
+          commercialDate: quote.commercialDate,
+          customerName: quote.customerName,
+          customerPhone: (quote as any).customerPhone || null,
+          customerAddress: (quote as any).customerAddress || null,
+          customerAddressNumber: (quote as any).customerAddressNumber || null,
+          paymentTerms: quote.paymentTerms,
+          notes: quote.notes,
+          subtotalCents: quote.subtotalCents,
+          discountCents: quote.discountCents,
+          freightCents: quote.freightCents,
+          chargesCents: quote.chargesCents,
+          totalCents: quote.totalCents,
+          serviceMetadata: serviceMeta,
+        },
+        items: items.map(item => ({
+          productName: item.productName || (item as any).description,
+          description: (item as any).description || item.productName,
+          sku: item.sku,
+          quantity: item.quantity,
+          unit: item.unit,
+          unitPriceCents: item.unitPriceCents,
+          discountCents: item.discountCents,
+          lineTotalCents: item.lineTotalCents,
+        })),
+      });
+
+      return {
+        pages: automotivePages,
+        totalPages: automotivePages.length,
+        documentCustomName,
+        templateName: template?.name || "Automotivo Padrão",
+        hasServiceMetadata: Boolean(
+          serviceMeta?.brandModel || serviceMeta?.plate || serviceMeta?.year || serviceMeta?.km
+        ),
+        itemsCount: items.length,
+      };
+    }
 
     let bgUrl = template?.backgroundImageUrl || null;
     if (template) {

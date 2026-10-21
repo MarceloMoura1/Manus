@@ -213,7 +213,7 @@ describe("QuoteTemplatesService", () => {
       expect(preview.pages[0].html).toContain("Honda Civic EXL");
       expect(preview.pages[0].html).toContain("BRA2E19");
       expect(preview.pages[0].html).toContain("Peça automotiva 5");
-      expect(preview.pages[0].html).toContain("TOTAL:");
+      expect(preview.pages[0].html).toContain("TOTAL GERAL");
     });
 
     it("divide automaticamente em Página 1 (itens 1 a 9) e Página 2 (itens subsequentes + totais) se > 9 itens", async () => {
@@ -509,12 +509,13 @@ describe("QuoteTemplatesService", () => {
       // Charset UTF-8 explícito
       expect(html).toContain('<meta charset="UTF-8">');
 
-      // Folha A4 milimétrica com classe letterhead-overlay
-      expect(html).toContain("letterhead-overlay");
+      // Folha A4 vetorial nativa sem dependência de imagem rasterizada
+      expect(html).toContain("native-automotive-sheet");
+      expect(html).toContain("a4-sheet");
       expect(html).toContain("210mm");
       expect(html).toContain("297mm");
 
-      // Campos mapeados no overlay
+      // Campos mapeados no grid semântico
       expect(html).toContain("ORC-042");
       expect(html).toContain("Oficina Low Garage Cliente");
       expect(html).toContain("Nissan 350Z Drift");
@@ -522,19 +523,13 @@ describe("QuoteTemplatesService", () => {
       expect(html).toContain("85000 km");
       expect(html).toContain("Troca Pastilhas Cerâmica Brembo");
       expect(html).toContain("R$ 700,00");
+      expect(html).toContain("DADOS DO CLIENTE");
+      expect(html).toContain("DADOS DO VEÍCULO / OBJETO");
+      expect(html).toContain("TOTAL GERAL");
 
-      // Validação das coordenadas milimétricas corrigidas
-      // Tabela deve iniciar em top: 136mm
-      expect(html).toContain("top: 136mm");
-      expect(html).toContain("10.77mm");
-
-      // Linha 2 deve conter o endereço do cliente e não modelo de veículo
-      expect(html).toContain("top: 83.5mm; left: 45mm;");
-      expect(html).toContain("Av. Automotiva");
-
-      // Linha 3 deve conter Marca/Modelo e Placa
-      expect(html).toContain("top: 90.5mm; left: 56mm;");
-      expect(html).toContain("Nissan 350Z Drift");
+      // Não utiliza coordenadas de sobreposição frágil sobre imagem de fundo JPG
+      expect(html).not.toContain("letterhead-overlay");
+      expect(html).not.toContain("top: 136mm");
 
       // NÃO deve conter títulos corporativos genéricos ou cabeçalhos de tabela azuis
       expect(html).not.toContain("MEGADESK COMERCIAL");
