@@ -318,8 +318,18 @@ export function publicConversationMediaMetadata(value: unknown, messageId: unkno
   }
   const mimeType = isSafeConversationMediaMime(value.mimeType) ? value.mimeType.toLowerCase() : undefined;
   const fileName = safeConversationMediaFileName(value.fileName);
-  if (typeof value.mediaData === "string" || typeof value.base64 === "string" || typeof value.dataUrl === "string") {
-    return { ...(mimeType ? { mimeType } : {}), ...(fileName ? { fileName } : {}), mediaReference: { storage: "private", messageId: id } };
+  const directUrl = typeof value.url === "string" ? value.url : typeof value.mediaUrl === "string" ? value.mediaUrl : typeof value.media_url === "string" ? value.media_url : null;
+  if (directUrl || typeof value.mediaData === "string" || typeof value.base64 === "string" || typeof value.dataUrl === "string") {
+    return {
+      ...(mimeType ? { mimeType } : {}),
+      ...(fileName ? { fileName } : {}),
+      ...(directUrl ? { mediaUrl: directUrl, url: directUrl, mediaData: directUrl } : {}),
+      mediaReference: {
+        storage: directUrl ? "quote_document" : "private",
+        messageId: id,
+        ...(directUrl ? { url: directUrl, mediaUrl: directUrl } : {}),
+      },
+    };
   }
   return null;
 }

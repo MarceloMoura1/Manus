@@ -1558,7 +1558,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                   if (msg.kind === 'activity') {
                     return <ConversationActivityEvent key={msg.id ?? `activity-${idx}`} event={msg} />;
                   }
-                  const isAgent = msg.sender === 'agent' || msg.from === 'agent';
+                  const isAgent = msg.sender === 'agent' || msg.from === 'agent' || msg.direction === 'outbound' || msg.sender === 'operator' || msg.from === 'operator';
                   const msgText = msg.text || msg.message || '';
                   const msgTime = formatConversationTime(msg.timestamp);
                   const msgType = msg.type || 'text';

@@ -5,15 +5,28 @@ import {
   createBrowserConversationMediaDeps,
 } from "@/lib/conversation-media-resource";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { FileText } from "lucide-react";
 
 type Props = { conversationId: string; message: any; fallback: React.ReactNode };
 
 export function ConversationMedia({ conversationId, message, fallback }: Props) {
-  const [url, setUrl] = React.useState<string | null>(message.mediaData ?? null);
+  const directUrl =
+    (typeof message.mediaUrl === "string" && message.mediaUrl) ||
+    (typeof message.media_url === "string" && message.media_url) ||
+    (typeof message.url === "string" && message.url) ||
+    (typeof message.mediaData === "string" && message.mediaData) ||
+    (typeof message.mediaReference?.url === "string" && message.mediaReference.url) ||
+    (typeof message.mediaReference?.mediaUrl === "string" && message.mediaReference.mediaUrl) ||
+    (typeof message.mediaReference?.media_url === "string" && message.mediaReference.media_url) ||
+    (typeof message.mediaReference?.mediaData === "string" && message.mediaReference.mediaData) ||
+    null;
+
+  const [url, setUrl] = React.useState<string | null>(directUrl);
   const [previewOpen, setPreviewOpen] = React.useState(false);
+
   React.useEffect(() => {
-    if (message.mediaData) {
-      setUrl(message.mediaData);
+    if (directUrl) {
+      setUrl(directUrl);
       return;
     }
 
@@ -32,7 +45,8 @@ export function ConversationMedia({ conversationId, message, fallback }: Props) 
     );
     void resource.resolve(conversationId, messageId);
     return () => resource.dispose();
-  }, [conversationId, message.mediaData, message.mediaReference?.messageId]);
+  }, [conversationId, directUrl, message.mediaReference?.messageId]);
+
   if (!url) return <>{fallback}</>;
   if (message.type === "image" || message.type === "sticker") {
     const alt = message.fileName || "Imagem da conversa";
@@ -50,5 +64,16 @@ export function ConversationMedia({ conversationId, message, fallback }: Props) 
   }
   if (message.type === "audio") return <audio controls preload="metadata" src={url} className="max-w-full" />;
   if (message.type === "video") return <video controls preload="metadata" src={url} className="max-h-80 rounded-xl" />;
-  return <a href={url} download={message.fileName || "documento"} className="underline">{message.fileName || "Documento"}</a>;
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      download={message.fileName || "documento.pdf"}
+      className="inline-flex items-center gap-2 rounded-lg bg-black/10 dark:bg-white/10 px-3 py-2 text-sm font-semibold underline decoration-current/40 hover:bg-black/20 dark:hover:bg-white/20 hover:decoration-current transition"
+    >
+      <FileText className="w-4 h-4 flex-shrink-0" />
+      <span className="truncate max-w-[220px]">{message.fileName || "Baixar documento"}</span>
+    </a>
+  );
 }
