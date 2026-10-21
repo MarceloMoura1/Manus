@@ -4079,11 +4079,15 @@ function NotificationsPage() {
 function Shell() {
   const { theme, toggleTheme } = useTheme();
   const [active, setActive] = useState<RouteId>(() => {
-    if (window.location.pathname === "/clientes") {
-      window.history.replaceState(null, "", `/erp/clientes${window.location.search}${window.location.hash}`);
-      return "erp-clients";
+    if (window.location.pathname === "/clientes" || window.location.pathname === "/erp/clientes") {
+      // Legacy redirect: `/erp/clientes${window.location.search}${window.location.hash}`
+      window.history.replaceState(null, "", `/crm/clientes${window.location.search}${window.location.hash}`);
+      return "crm-clients";
     }
-    if (window.location.pathname === "/erp/clientes") return "erp-clients";
+    if (window.location.pathname === "/erp/orcamentos") {
+      window.history.replaceState(null, "", `/crm/propostas${window.location.search}${window.location.hash}`);
+      return "crm-proposals";
+    }
     if (window.location.pathname === "/erp/produtos") return "erp-products";
     if (window.location.pathname === "/erp/estoque") return "erp-stock";
     if (window.location.pathname === "/erp/fornecedores") return "erp-suppliers";
@@ -4131,10 +4135,11 @@ function Shell() {
   }, []);
   const navigateToRoute = React.useCallback((route: RouteId, options?: { replace?: boolean; crmClientId?: string; salePublicId?: string }) => {
     const isLegacyAttendanceRoute = route === "active-attendance";
-    const targetRoute: RouteId = isLegacyAttendanceRoute ? "conversations" : route;
+    const isLegacyClientsRoute = route === "erp-clients";
+    const targetRoute: RouteId = isLegacyAttendanceRoute ? "conversations" : isLegacyClientsRoute ? "crm-clients" : route;
     if (isLegacyAttendanceRoute) setAttendanceIntent(current => queueAttendanceLaunchIntent(current));
-    const path = targetRoute === "erp-clients"
-      ? `/erp/clientes${options?.crmClientId ? `?crmClientId=${encodeURIComponent(options.crmClientId)}` : ""}`
+    const path = targetRoute === "crm-clients"
+      ? `/crm/clientes${options?.crmClientId ? `?crmClientId=${encodeURIComponent(options.crmClientId)}` : ""}`
       : targetRoute === "erp-products"
         ? "/erp/produtos"
         : targetRoute === "erp-stock"
@@ -4156,8 +4161,6 @@ function Shell() {
               ? "/erp/compras"
             : targetRoute === "erp-summary"
               ? "/erp"
-            : targetRoute === "crm-clients"
-              ? `/crm/clientes${options?.crmClientId ? `?crmClientId=${encodeURIComponent(options.crmClientId)}` : ""}`
             : targetRoute === "crm-pipeline"
               ? "/crm/funil"
             : targetRoute === "crm-leads"
@@ -4174,7 +4177,7 @@ function Shell() {
               ? "/crm"
               : "/";
     window.history[options?.replace ? "replaceState" : "pushState"](null, "", path);
-    setActiveCrmClientId(targetRoute === "erp-clients" || targetRoute === "crm-clients" ? options?.crmClientId ?? null : null);
+    setActiveCrmClientId(targetRoute === "crm-clients" ? options?.crmClientId ?? null : null);
     setActiveSalePublicId(targetRoute === "erp-sales" || targetRoute === "crm-proposals" ? options?.salePublicId ?? null : null);
     setActive(targetRoute);
     if (window.innerWidth < 1024) {
@@ -4226,9 +4229,14 @@ function Shell() {
   useEffect(() => {
     const restoreFromHistory = (event: PopStateEvent) => {
       let path = window.location.pathname;
-      if (path === "/clientes") {
-        window.history.replaceState(null, "", `/erp/clientes${window.location.search}${window.location.hash}`);
-        path = "/erp/clientes";
+      if (path === "/clientes" || path === "/erp/clientes") {
+        // Legacy redirect: `/erp/clientes${window.location.search}${window.location.hash}`
+        window.history.replaceState(null, "", `/crm/clientes${window.location.search}${window.location.hash}`);
+        path = "/crm/clientes";
+      }
+      if (path === "/erp/orcamentos") {
+        window.history.replaceState(null, "", `/crm/propostas${window.location.search}${window.location.hash}`);
+        path = "/crm/propostas";
       }
       setActiveCrmClientId(path === "/erp/clientes" || path === "/crm/clientes" ? new URLSearchParams(window.location.search).get("crmClientId") : null);
       const salesRoute = readSalesRoute(path);
@@ -4338,7 +4346,7 @@ function Shell() {
   const erpSection = (active === "erp-clients" ? "clients" : active === "erp-products" ? "products" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : active === "erp-purchases" ? "purchases" : active === "erp-sales" ? "sales" : active === "erp-finance" ? "finance" : active === "erp-fiscal" ? "fiscal" : active === "erp-reports" ? "reports" : "summary") as ErpSection;
   const navigateToErpSection = (section: ErpSection) => navigateToRoute(section === "clients" ? "erp-clients" : section === "products" ? "erp-products" : section === "stock" ? "erp-stock" : section === "suppliers" ? "erp-suppliers" : section === "purchases" ? "erp-purchases" : section === "sales" ? "erp-sales" : section === "finance" ? "erp-finance" : section === "fiscal" ? "erp-fiscal" : section === "reports" ? "erp-reports" : "erp-summary");
   const erpTopbarItems = getErpTopbarItems({
-    canAccessClients,
+    canAccessClients: false,
     canAccessSales,
     canAccessFinance: session.userRole !== "agent",
     canAccessFiscal: session.userRole !== "agent",
@@ -4553,8 +4561,8 @@ function Shell() {
           />}
           {active === "tickets" && <TicketsPage onOpenMobileMenu={() => setSidebarOpen(true)} />}
           {active === "tracking" && <TrackingPage />}
-           {active.startsWith("crm-") && <CRMWorkspace section={crmSection} onNavigate={navigateToCrmSection} canAccessClients={canAccessCrmClients(session)} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToSale={salePublicId => navigateToRoute("crm-proposals", { salePublicId })} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDeleteClients={session.userRole === "admin"} />}
-           {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessSales={canAccessSales} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("erp-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("erp-sales", { salePublicId })} onNavigateToProposals={() => navigateToRoute("crm-proposals")} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
+           {active.startsWith("crm-") && <CRMWorkspace section={crmSection} onNavigate={navigateToCrmSection} canAccessClients={canAccessCrmClients(session)} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("crm-proposals", { salePublicId })} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDeleteClients={session.userRole === "admin"} />}
+           {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessSales={canAccessSales} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("erp-sales", { salePublicId })} onNavigateToProposals={() => navigateToRoute("crm-proposals")} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
            {active === "settings" && <SettingsPageComponent layout={shellLayout.settingsPageLayout} />}
           {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
           {active === "bot-config" && <BotConfigPage />}

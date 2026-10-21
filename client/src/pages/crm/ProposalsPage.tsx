@@ -5,6 +5,7 @@ import type { CrmWhatsAppIntent } from "../../../../shared/crm";
 export interface ProposalsPageProps {
   onNavigate?: (section: any) => void;
   onClientNavigate?: (intent: CrmWhatsAppIntent) => void;
+  onNavigateToClient?: (crmClientId: string) => void;
   whatsappConnected?: boolean;
   canStartConversation?: boolean;
   initialSelectedId?: string;
@@ -14,6 +15,7 @@ export interface ProposalsPageProps {
 export function ProposalsPage({
   onNavigate,
   onClientNavigate,
+  onNavigateToClient,
   whatsappConnected,
   canStartConversation,
   initialSelectedId,
@@ -21,6 +23,15 @@ export function ProposalsPage({
 }: ProposalsPageProps) {
   const handleClientNavigate = React.useCallback(
     (crmClientId: string) => {
+      if (onNavigateToClient) {
+        onNavigateToClient(crmClientId);
+        return;
+      }
+      if (onNavigate) {
+        window.history.pushState(null, "", `/crm/clientes?crmClientId=${encodeURIComponent(crmClientId)}`);
+        onNavigate("clients");
+        return;
+      }
       if (onClientNavigate) {
         onClientNavigate({
           crmClientId,
@@ -29,7 +40,7 @@ export function ProposalsPage({
         });
       }
     },
-    [onClientNavigate]
+    [onNavigateToClient, onNavigate, onClientNavigate]
   );
 
   return (

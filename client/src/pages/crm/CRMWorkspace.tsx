@@ -55,6 +55,7 @@ export function CRMWorkspace({
   initialCrmClientId,
   initialSalePublicId,
   onClientNavigate,
+  onNavigateToClient,
   onNavigateToSale,
   whatsappConnected,
   canStartConversation,
@@ -66,6 +67,7 @@ export function CRMWorkspace({
   initialCrmClientId?: string;
   initialSalePublicId?: string;
   onClientNavigate: (intent: CrmWhatsAppIntent) => void;
+  onNavigateToClient?: (crmClientId: string) => void;
   onNavigateToSale?: (salePublicId?: string) => void;
   whatsappConnected: boolean;
   canStartConversation: boolean;
@@ -139,6 +141,7 @@ export function CRMWorkspace({
         <ProposalsPage
           onNavigate={onNavigate}
           onClientNavigate={onClientNavigate}
+          onNavigateToClient={onNavigateToClient}
           whatsappConnected={whatsappConnected}
           canStartConversation={canStartConversation}
           initialSelectedId={initialSalePublicId}
