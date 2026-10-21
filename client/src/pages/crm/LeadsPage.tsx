@@ -265,13 +265,15 @@ export function LeadsPage({
       toast.error("Nome ou Razão Social é obrigatório.");
       return;
     }
+    const phoneValue = formPhone.trim() || formWhatsapp.trim();
+    const whatsappValue = formWhatsapp.trim() || formPhone.trim();
     createMutation.mutate({
       companyName: formCompany.trim(),
       customerType: formCustomerType,
       responsibleName: formResponsible.trim(),
       cpfCnpj: formCpfCnpj.trim(),
-      phone: formPhone.trim(),
-      whatsapp: formWhatsapp.trim(),
+      phone: phoneValue,
+      whatsapp: whatsappValue,
       email: formEmail.trim(),
       origin: formOrigin,
       internalResponsible: formInternalResponsible.trim(),
@@ -287,14 +289,16 @@ export function LeadsPage({
       toast.error("Nome ou Razão Social é obrigatório.");
       return;
     }
+    const phoneValue = formPhone.trim() || formWhatsapp.trim();
+    const whatsappValue = formWhatsapp.trim() || formPhone.trim();
     updateMutation.mutate({
       crmClientId: selectedLead.crmClientId,
       companyName: formCompany.trim(),
       customerType: formCustomerType,
       responsibleName: formResponsible.trim(),
       cpfCnpj: formCpfCnpj.trim(),
-      phone: formPhone.trim(),
-      whatsapp: formWhatsapp.trim(),
+      phone: phoneValue,
+      whatsapp: whatsappValue,
       email: formEmail.trim(),
       origin: formOrigin,
       internalResponsible: formInternalResponsible.trim(),
