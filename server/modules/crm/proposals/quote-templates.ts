@@ -447,50 +447,50 @@ export class QuoteTemplatesService {
 
       ${pageNumber === 1 ? `
       <!-- DADOS DO CLIENTE & VEÍCULO (textos puros alinhados sobre as linhas pontilhadas) -->
-      <!-- Nome -->
+      <!-- Linha 1: Nome -->
       <div style="position: absolute; top: 76.5mm; left: 38mm; width: 94mm; height: 5mm; display: flex; align-items: center; font-size: 11px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
         ${customerName}
       </div>
-      <!-- Fone -->
+      <!-- Linha 1: Fone -->
       <div style="position: absolute; top: 76.5mm; left: 146mm; width: 50mm; height: 5mm; display: flex; align-items: center; font-size: 11px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-        ${escapeHtml(quote.customerPhone || companyPhone || "")}
+        ${escapeHtml(quote.customerPhone || "")}
       </div>
-      <!-- Endereço -->
+      <!-- Linha 2: Endereço -->
       <div style="position: absolute; top: 83.5mm; left: 45mm; width: 126mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 500; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-        ${escapeHtml(quote.customerAddress || companyAddress || "")}
+        ${escapeHtml(quote.customerAddress || "")}
       </div>
-      <!-- Endereço N° / Compl -->
+      <!-- Linha 2: N° -->
       <div style="position: absolute; top: 83.5mm; left: 178mm; width: 18mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 500; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-        ${escapeHtml(quote.customerAddressNumber || "S/N")}
+        ${escapeHtml(quote.customerAddressNumber || "")}
       </div>
 
-      <!-- Marca / Modelo -->
+      <!-- Linha 3: Marca / Modelo -->
       <div style="position: absolute; top: 90.5mm; left: 56mm; width: 75mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-        ${escapeHtml(serviceMeta?.brandModel || "—")}
+        ${escapeHtml(serviceMeta?.brandModel || (serviceMeta as any)?.model || "—")}
       </div>
-      <!-- Placa -->
+      <!-- Linha 3: Placa -->
       <div style="position: absolute; top: 90.5mm; left: 146mm; width: 32mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 700; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
         ${escapeHtml(serviceMeta?.plate || "—")}
       </div>
-      <!-- Ano -->
+      <!-- Linha 3: Ano -->
       <div style="position: absolute; top: 90.5mm; left: 185mm; width: 14mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
         ${escapeHtml(serviceMeta?.year || "—")}
       </div>
 
-      <!-- Cor -->
+      <!-- Linha 4: Cor -->
       <div style="position: absolute; top: 97.5mm; left: 34mm; width: 95mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 500; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
         ${escapeHtml(serviceMeta?.color || "—")}
       </div>
-      <!-- KM -->
+      <!-- Linha 4: KM -->
       <div style="position: absolute; top: 97.5mm; left: 139mm; width: 45mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
         ${escapeHtml(serviceMeta?.km ? `${serviceMeta.km} km` : "—")}
       </div>
 
-      <!-- Data Entrada -->
+      <!-- Linha 5: Data Entrada -->
       <div style="position: absolute; top: 104.5mm; left: 53mm; width: 48mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
         ${formatDate(serviceMeta?.entryDate || quote.commercialDate)}
       </div>
-      <!-- Data Saída / Previsão -->
+      <!-- Linha 5: Data Saída / Previsão -->
       <div style="position: absolute; top: 104.5mm; left: 153mm; width: 42mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
         ${formatDate(serviceMeta?.exitDate || null)}
       </div>
@@ -503,21 +503,22 @@ export class QuoteTemplatesService {
       `}
 
       <!-- TABELA DE 9 LINHAS (DESCRIÇÃO DOS SERVIÇOS / PEÇAS) -->
-      <div style="position: absolute; top: 125.5mm; left: 14mm; width: 182mm; height: 105.7mm; box-sizing: border-box; display: flex; flex-direction: column;">
+      <!-- Inicia exatamente abaixo da tarja preta de cabeçalho em top: 136mm com linhas de 10.77mm -->
+      <div style="position: absolute; top: 136mm; left: 14mm; width: 182mm; height: 97mm; box-sizing: border-box; display: flex; flex-direction: column;">
         ${Array.from({ length: 9 }).map((_, idx) => {
           const item = items[idx];
           if (!item) {
-            return `<div style="height: 11.74mm; width: 100%; box-sizing: border-box;"></div>`;
+            return `<div style="height: 10.77mm; width: 100%; box-sizing: border-box;"></div>`;
           }
           const desc = escapeHtml(item.productName || item.description || "");
           const qtyStr = item.quantity ? ` (${escapeHtml(String(item.quantity))} ${escapeHtml(item.unit || "un")})` : "";
           const valStr = money(item.lineTotalCents || (item.unitPriceCents * (item.quantity || 1)));
           return `
-          <div style="height: 11.74mm; width: 100%; box-sizing: border-box; display: flex; align-items: center;">
-            <div style="width: 142mm; padding-left: 3mm; padding-right: 4mm; font-size: 11px; font-weight: 500; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+          <div style="height: 10.77mm; width: 100%; box-sizing: border-box; display: flex; align-items: center;">
+            <div style="width: 142mm; padding-left: 2mm; padding-right: 2mm; font-size: 10px; font-weight: 500; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1;">
               ${desc}${qtyStr}
             </div>
-            <div style="width: 40mm; padding-right: 4mm; text-align: right; font-size: 11px; font-weight: 700; color: #0f172a; white-space: nowrap;">
+            <div style="width: 40mm; padding-right: 3mm; text-align: right; font-size: 10.5px; font-weight: 700; color: #0f172a; white-space: nowrap; line-height: 1;">
               ${valStr}
             </div>
           </div>`;
@@ -919,7 +920,13 @@ export class QuoteTemplatesService {
       const messageRecordId = `msg-${randomUUID()}`;
       const now = new Date();
       const timeLabel = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      const pdfUrl = `/api/erp/sales/${quote.publicId}/pdf`;
       const mediaReference = {
+        messageId: messageRecordId,
+        url: pdfUrl,
+        mediaUrl: pdfUrl,
+        media_url: pdfUrl,
+        mediaData: pdfUrl,
         fileName,
         mimeType: "application/pdf",
         byteSize: pdfBytes.length,
@@ -963,10 +970,15 @@ export class QuoteTemplatesService {
         externalMessageId: messageId || null,
         from: "agent",
         direction: "outbound",
+        sender: "operator",
         type: "document",
         text: messageCaption,
         fileName,
         mimeType: "application/pdf",
+        url: pdfUrl,
+        mediaUrl: pdfUrl,
+        media_url: pdfUrl,
+        mediaData: pdfUrl,
         mediaReference,
         time: timeLabel,
         timestamp: now.toISOString(),
@@ -992,10 +1004,16 @@ export class QuoteTemplatesService {
             type: "document",
             fileName,
             mimeType: "application/pdf",
+            url: pdfUrl,
+            mediaUrl: pdfUrl,
+            media_url: pdfUrl,
+            mediaData: pdfUrl,
             mediaReference,
             timestamp: now.toISOString(),
             time: timeLabel,
             from: "agent",
+            sender: "operator",
+            direction: "outbound",
             status: "sent",
           },
         };

@@ -32,6 +32,9 @@ export type QuotePdfInput = {
     number: string;
     issuedOn: string;
     customerName: string;
+    customerPhone?: string | null;
+    customerAddress?: string | null;
+    customerAddressNumber?: string | null;
     commercialStatus: string;
     paymentTerms?: string | null;
     notes?: string | null;
@@ -262,41 +265,45 @@ function letterheadOverlayPage(input: QuotePdfInput, items: QuotePdfItem[], page
 
   if (page === 1) {
     // 3. Customer & Vehicle data on dotted lines
-    // Nome
+    // Linha 1: Nome (top: 76.5mm -> y: 625, x: 108)
     commands.push(text(108, 625, 9, normalizeText(input.quote.customerName, "Cliente", 55)));
-    // Fone
-    commands.push(text(414, 625, 9, normalizeText(input.company.phone || input.company.whatsapp, "", 22)));
-    // Endereço
-    commands.push(text(128, 605, 8, normalizeText(input.company.address, "", 60)));
-    // Marca / Modelo
+    // Linha 1: Fone (top: 76.5mm -> y: 625, x: 414)
+    commands.push(text(414, 625, 9, normalizeText(input.quote.customerPhone, "—", 22)));
+    // Linha 2: Endereço (top: 83.5mm -> y: 605, x: 128)
+    commands.push(text(128, 605, 8, normalizeText(input.quote.customerAddress, "—", 60)));
+    // Linha 2: N° (top: 83.5mm -> y: 605, x: 505)
+    if (input.quote.customerAddressNumber) {
+      commands.push(text(505, 605, 8, normalizeText(input.quote.customerAddressNumber, "", 8)));
+    }
+    // Linha 3: Marca / Modelo (top: 90.5mm -> y: 585, x: 159)
     commands.push(text(159, 585, 8.5, normalizeText(meta?.brandModel, "—", 35)));
-    // Placa
+    // Linha 3: Placa (top: 90.5mm -> y: 585, x: 414)
     commands.push(text(414, 585, 9, normalizeText(meta?.plate, "—", 12)));
-    // Ano
+    // Linha 3: Ano (top: 90.5mm -> y: 585, x: 524)
     commands.push(text(524, 585, 8.5, normalizeText(meta?.year, "—", 6)));
-    // Cor
+    // Linha 4: Cor (top: 97.5mm -> y: 565, x: 96)
     commands.push(text(96, 565, 8.5, normalizeText(meta?.color, "—", 30)));
-    // KM
+    // Linha 4: KM (top: 97.5mm -> y: 565, x: 394)
     commands.push(text(394, 565, 8.5, normalizeText(meta?.km ? `${meta.km} km` : "—", "—", 15)));
-    // Data Entrada
+    // Linha 5: Data Entrada (top: 104.5mm -> y: 545, x: 150)
     commands.push(text(150, 545, 8.5, normalizeText(meta?.entryDate || input.quote.issuedOn, "—", 15)));
-    // Data Saída
+    // Linha 5: Data Saída (top: 104.5mm -> y: 545, x: 434)
     commands.push(text(434, 545, 8.5, normalizeText(meta?.exitDate, "—", 15)));
   } else {
     commands.push(text(108, 625, 9, `Cliente: ${normalizeText(input.quote.customerName, "Cliente", 40)} · Pág ${page}/${totalPages}`));
   }
 
   // 4. 9-Row Items Table (DESCRIÇÃO DOS SERVIÇOS / PEÇAS)
-  // top 125.5mm = y 486. Each row 11.74mm = 33.28 pt.
-  const rowStartY = 486;
-  const rowHeight = 33.28;
+  // Inicia exatamente abaixo da tarja preta de cabeçalho em top: 136mm (y: 456.5) com cada linha de 10.77mm (30.53 pt)
+  const rowStartY = 456.5;
+  const rowHeight = 30.53;
   for (let i = 0; i < 9; i++) {
     const item = items[i];
     if (!item) continue;
-    const y = rowStartY - i * rowHeight - 18;
+    const y = rowStartY - i * rowHeight - 16;
     const qtyUnit = item.quantity ? ` (${item.quantity} ${item.unit || "un"})` : "";
     const desc = normalizeText(`${item.description}${qtyUnit}`, "", 65);
-    commands.push(text(48, y, 8.5, desc, "0.12 0.16 0.23"));
+    commands.push(text(48, y, 8, desc, "0.12 0.16 0.23"));
     commands.push(text(500, y, 8.5, money(item.lineTotalCents), "0.08 0.12 0.20"));
   }
 

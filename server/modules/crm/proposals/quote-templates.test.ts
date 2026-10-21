@@ -523,9 +523,79 @@ describe("QuoteTemplatesService", () => {
       expect(html).toContain("Troca Pastilhas Cerâmica Brembo");
       expect(html).toContain("R$ 700,00");
 
+      // Validação das coordenadas milimétricas corrigidas
+      // Tabela deve iniciar em top: 136mm
+      expect(html).toContain("top: 136mm");
+      expect(html).toContain("10.77mm");
+
+      // Linha 2 deve conter o endereço do cliente e não modelo de veículo
+      expect(html).toContain("top: 83.5mm; left: 45mm;");
+      expect(html).toContain("Av. Automotiva");
+
+      // Linha 3 deve conter Marca/Modelo e Placa
+      expect(html).toContain("top: 90.5mm; left: 56mm;");
+      expect(html).toContain("Nissan 350Z Drift");
+
       // NÃO deve conter títulos corporativos genéricos ou cabeçalhos de tabela azuis
       expect(html).not.toContain("MEGADESK COMERCIAL");
       expect(html).not.toContain("background: #1e3a8a");
+    });
+
+    it("garante que sendQuoteWhatsApp persiste rota resolúvel de PDF (/api/erp/sales/:publicId/pdf) e outbound no chat", async () => {
+      mockSaleService.detail.mockResolvedValueOnce({
+        publicId: "sale-media-check",
+        crmClientId: "crm-client-99",
+        documentType: "quote",
+        orderNumber: "ORC-999",
+        customerName: "Carlos Alinhamento",
+        totalCents: 120000,
+      });
+
+      mockQuotePdfService.generate.mockResolvedValueOnce({
+        filePublicId: "doc-media-check",
+        fileName: "Orcamento_Carlos.pdf",
+      });
+
+      dbMocks.readCrmClientFile.mockResolvedValueOnce(Buffer.from("PDF-BYTES-MEDIA"));
+      dbMocks.evoSendAttachment.mockResolvedValueOnce({
+        key: { id: "EVO-MEDIA-MSG-99" },
+      });
+
+      const execCalls: any[] = [];
+      dbMocks.execute.mockImplementation(async (sql: string, params: any[]) => {
+        execCalls.push({ sql, params });
+        if (sql.includes("SELECT conversation_id")) {
+          return [[{ conversation_id: "conv-carlos", messages_json: "[]" }]];
+        }
+        if (sql.includes("SELECT messages_json")) {
+          return [[{ messages_json: "[]" }]];
+        }
+        return [{ affectedRows: 1 }];
+      });
+
+      await service.sendQuoteWhatsApp(identity, {
+        publicId: "sale-media-check",
+        phone: "11999991111",
+      });
+
+      const insertCall = execCalls.find((c) =>
+        c.sql.includes("INSERT INTO megadesk_domain_conversations_messages")
+      );
+      expect(insertCall).toBeDefined();
+      const mediaRefObj = JSON.parse(insertCall.params[6]);
+      expect(mediaRefObj.url).toBe("/api/erp/sales/sale-media-check/pdf");
+      expect(mediaRefObj.mediaUrl).toBe("/api/erp/sales/sale-media-check/pdf");
+      expect(mediaRefObj.mimeType).toBe("application/pdf");
+
+      const updateCall = execCalls.find((c) =>
+        c.sql.includes("UPDATE megadesk_domain_conversations")
+      );
+      expect(updateCall).toBeDefined();
+      const messagesJson = JSON.parse(updateCall.params[0]);
+      expect(messagesJson[0].url).toBe("/api/erp/sales/sale-media-check/pdf");
+      expect(messagesJson[0].from).toBe("agent");
+      expect(messagesJson[0].sender).toBe("operator");
+      expect(messagesJson[0].direction).toBe("outbound");
     });
   });
 });
