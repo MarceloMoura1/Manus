@@ -72,6 +72,15 @@ describe("quote PDF service", () => {
     expect(result).toMatchObject({ publicId: "doc-a", salePublicId });
   });
 
+  it("strips diacritics from the custom file name instead of emitting underscores", async () => {
+    const { service, documents } = harness(quote({ documentCustomName: "Orçamento - FaYers Company - 21-10-2026" }));
+
+    await service.generate(admin, { salePublicId, idempotencyKey });
+
+    expect(documents.storeGeneratedQuotePdf.mock.calls[0][1].fileName)
+      .toBe("Orcamento - FaYers Company - 21-10-2026.pdf");
+  });
+
   it("blocks a read-only role before resolving or storing a quote", async () => {
     const { service, repository, documents, companySettings } = harness();
 

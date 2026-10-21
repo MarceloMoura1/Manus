@@ -988,6 +988,13 @@ export function ConversasPage() {
                       message={message}
                       fallback={<span>{message.text}</span>}
                     />
+                    {message.type === "document" &&
+                      message.text &&
+                      !/^\[documento\]$/i.test(message.text) && (
+                        <p className="mt-2 whitespace-pre-wrap break-words text-sm">
+                          {message.text}
+                        </p>
+                      )}
                     {!incoming && message.agentName && (
                       <p className="mt-1 text-[10px] opacity-70">
                         {message.agentName}

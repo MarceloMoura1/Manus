@@ -35,6 +35,46 @@ import { normalizeContactPhone, formatContactPhone } from "../../../../shared/co
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
+const A4_WIDTH_PX = 794; // 210mm @ 96dpi
+const A4_HEIGHT_PX = 1123; // 297mm @ 96dpi
+
+/** Fits the fixed 210x297mm sheet inside the available width via proportional scale. */
+function A4SheetFit({ html }: { html: string }) {
+  const hostRef = React.useRef<HTMLDivElement | null>(null);
+  const [scale, setScale] = React.useState(1);
+
+  React.useLayoutEffect(() => {
+    const node = hostRef.current;
+    if (!node) return;
+    const update = () => {
+      const available = node.clientWidth;
+      if (available > 0) setScale(Math.min(1, available / A4_WIDTH_PX));
+    };
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div
+      ref={hostRef}
+      className="flex w-full items-start justify-center overflow-x-hidden"
+    >
+      <div
+        style={{ width: A4_WIDTH_PX * scale, height: A4_HEIGHT_PX * scale, maxWidth: "100%" }}
+        className="shrink-0 rounded-sm border border-slate-300 bg-white shadow-2xl overflow-hidden"
+      >
+        <div
+          style={{ width: A4_WIDTH_PX, transform: `scale(${scale})`, transformOrigin: "top left" }}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export interface QuoteActionCenterProps {
   order: any;
   canWrite: boolean;
@@ -521,7 +561,7 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
 
       {/* ─── MODAL "VER PRÉVIA" (A4 LIVE PREVIEW) ──────────────────────────── */}
       <Dialog open={previewModalOpen} onOpenChange={setPreviewModalOpen}>
-        <DialogContent className="flex h-[92vh] max-w-4xl flex-col gap-0 p-0 overflow-hidden bg-slate-100 dark:bg-slate-950">
+        <DialogContent className="flex h-[92vh] w-full max-w-4xl sm:max-w-4xl flex-col gap-0 p-0 overflow-hidden bg-slate-100 dark:bg-slate-950">
           <DialogHeader className="flex flex-row items-center justify-between border-b border-slate-200 bg-white px-5 py-3 dark:border-slate-800 dark:bg-slate-900">
             <div>
               <DialogTitle className="text-base font-bold text-slate-900 dark:text-slate-100">
@@ -562,7 +602,7 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
           </DialogHeader>
 
           {/* Sheet Canvas Scroll Area */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex justify-center [scrollbar-width:thin]">
+          <div className="flex flex-1 items-start justify-center overflow-y-auto overflow-x-hidden p-3 sm:p-6 [scrollbar-width:thin]">
             {previewQuery.isLoading ? (
               <div className="flex flex-col items-center justify-center py-20 text-slate-500">
                 <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
@@ -583,12 +623,7 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
                 </Button>
               </div>
             ) : previewQuery.data?.pages?.[previewPageIndex] ? (
-              <div
-                className="w-full max-w-[210mm] shadow-2xl rounded-sm overflow-hidden border border-slate-300 bg-white"
-                dangerouslySetInnerHTML={{
-                  __html: previewQuery.data.pages[previewPageIndex].html,
-                }}
-              />
+              <A4SheetFit html={previewQuery.data.pages[previewPageIndex].html} />
             ) : null}
           </div>
 
