@@ -30,6 +30,7 @@ vi.mock("../client-files/files-storage", () => ({
   writeCrmClientFileAtomic: dbMocks.writeCrmClientFileAtomic,
   readCrmClientFile: dbMocks.readCrmClientFile,
   deleteCrmClientFilePhysical: vi.fn(),
+  removeCrmClientFilePhysical: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../../evolution/client", () => ({
@@ -53,6 +54,7 @@ describe("QuoteTemplatesService", () => {
   let service: QuoteTemplatesService;
   let mockSaleService: any;
   let mockQuotePdfService: any;
+  let mockDocumentService: any;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -61,8 +63,13 @@ describe("QuoteTemplatesService", () => {
     };
     mockQuotePdfService = {
       generate: vi.fn(),
+      generateWithBuffer: vi.fn(),
     };
-    service = new QuoteTemplatesService(mockSaleService, mockQuotePdfService);
+    mockDocumentService = {
+      list: vi.fn().mockResolvedValue([]),
+      getForDownload: vi.fn(),
+    };
+    service = new QuoteTemplatesService(mockSaleService, mockQuotePdfService, mockDocumentService);
   });
 
   describe("listTemplates (Multitenant Isolation)", () => {
@@ -121,6 +128,18 @@ describe("QuoteTemplatesService", () => {
       );
       expect(result.success).toBe(true);
       expect(result.publicId).toBeDefined();
+    });
+
+    it("rejeita upload de formato de imagem não suportado (ex: pdf)", async () => {
+      await expect(
+        service.createTemplate(identity, {
+          name: "Template Inválido",
+          fileBase64: "data:application/pdf;base64,JVBERi0xLjQK",
+          mimeType: "application/pdf",
+        })
+      ).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+      });
     });
   });
 
@@ -297,6 +316,45 @@ describe("QuoteTemplatesService", () => {
         messageId: "EVO-MSG-12345",
         fileName: "Orcamento_Ana_Paula_Freios.pdf",
       });
+    });
+
+    it("reutiliza documento físico existente no storage sem reprocessar", async () => {
+      mockSaleService.detail.mockResolvedValueOnce({
+        publicId: "sale-existing-pdf",
+        crmClientId: "crm-client-50",
+        documentType: "quote",
+        orderNumber: "ORC-500",
+        customerName: "Carlos Drum",
+        totalCents: 50000,
+      });
+
+      mockDocumentService.list.mockResolvedValueOnce([
+        {
+          publicId: "doc-active-1",
+          documentType: "quote_pdf",
+          state: "active",
+          fileName: "Orcamento-ORC-500.pdf",
+        },
+      ]);
+
+      mockDocumentService.getForDownload.mockResolvedValueOnce({
+        bytes: Buffer.from("EXISTING-PDF-BYTES"),
+        fileName: "Orcamento-ORC-500.pdf",
+      });
+
+      dbMocks.evoSendAttachment.mockResolvedValueOnce({
+        key: { id: "EVO-REUSED-1" },
+        message: {},
+      });
+
+      const result = await service.sendQuoteWhatsApp(identity, {
+        publicId: "sale-existing-pdf",
+        phone: "11977778888",
+      });
+
+      expect(mockQuotePdfService.generateWithBuffer).not.toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      expect(result.messageId).toBe("EVO-REUSED-1");
     });
 
     it("rejeita envio se número informado for inválido", async () => {

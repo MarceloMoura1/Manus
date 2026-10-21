@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { normalizeContactPhone, formatContactPhone } from "../../../../shared/contact-phone";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 export interface QuoteActionCenterProps {
@@ -84,6 +85,7 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
   const [newTemplateName, setNewTemplateName] = React.useState("");
   const [newTemplateNiche, setNewTemplateNiche] = React.useState<"automotive" | "services" | "general">("automotive");
   const [newTemplateFileBase64, setNewTemplateFileBase64] = React.useState<string | null>(null);
+  const [newTemplateMimeType, setNewTemplateMimeType] = React.useState<string | null>(null);
   const [newTemplateIsDefault, setNewTemplateIsDefault] = React.useState(false);
 
   // Set default selected template when loaded
@@ -104,22 +106,38 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
 
   const createTemplateMutation = trpc.crm.proposals.createTemplate.useMutation({
     onSuccess: async (res) => {
+      toast.success("Modelo de orçamento cadastrado com sucesso!");
+      await utils.crm.proposals.listTemplates.invalidate();
       await templatesQuery.refetch();
       setSelectedTemplateId(res.publicId);
       setNewTemplateModalOpen(false);
       setNewTemplateName("");
       setNewTemplateFileBase64(null);
+      setNewTemplateMimeType(null);
       setNewTemplateIsDefault(false);
+    },
+    onError: (err) => {
+      toast.error(`Falha ao cadastrar modelo: ${err.message}`);
     },
   });
 
   const generatePdfMutation = trpc.erp.sales.documents.generateQuotePdf.useMutation({
     onSuccess: async () => {
+      toast.success("PDF do orçamento gerado com sucesso!");
       await utils.erp.sales.documents.list.invalidate({ salePublicId: order.publicId });
       await utils.erp.sales.detail.invalidate({ publicId: order.publicId });
       onRefresh?.();
     },
+    onError: (err) => {
+      toast.error(`Erro ao gerar PDF: ${err.message}`);
+    },
   });
+
+  // Client query to prefill WhatsApp phone if missing from order snapshot
+  const clientQuery = trpc.crm.getById.useQuery(
+    { crmClientId: order.crmClientId },
+    { enabled: Boolean(order.crmClientId && isQuote) }
+  );
 
   // Preview Modal state
   const [previewModalOpen, setPreviewModalOpen] = React.useState(false);
@@ -140,10 +158,21 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
   const [whatsappCustomMessage, setWhatsappCustomMessage] = React.useState("");
   const [whatsappFeedback, setWhatsappFeedback] = React.useState<string | null>(null);
 
-  // When opening whatsapp modal, prefill phone
+  // When opening whatsapp modal, prefill canonical phone
   const openWhatsAppModal = () => {
-    const raw = order.customerPhone || order.shippingAddress?.phone || "";
-    setWhatsappPhone(raw);
+    const raw =
+      order.customerPhone ||
+      order.crmClientPhone ||
+      clientQuery.data?.client?.whatsapp ||
+      clientQuery.data?.client?.mobilePhone ||
+      clientQuery.data?.client?.phone ||
+      order.shippingAddress?.phone ||
+      order.billingAddress?.phone ||
+      "";
+
+    const norm = normalizeContactPhone(raw);
+    const displayPhone = norm.status === "valid" ? formatContactPhone(norm.value) : raw;
+    setWhatsappPhone(displayPhone);
     setWhatsappCustomMessage(
       `Olá, ${order.customerName}! Segue em anexo o orçamento comercial ${order.orderNumber} no valor de R$ ${(order.totalCents / 100).toFixed(2).replace(".", ",")}. Ficamos à disposição!`
     );
@@ -153,6 +182,7 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
 
   const sendWhatsAppMutation = trpc.crm.proposals.sendQuoteWhatsApp.useMutation({
     onSuccess: (data) => {
+      toast.success(`Orçamento enviado para ${data.recipientPhone}!`);
       setWhatsappFeedback(`Orçamento enviado com sucesso para ${data.recipientPhone}!`);
       setTimeout(() => {
         setWhatsappModalOpen(false);
@@ -162,6 +192,7 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
       onRefresh?.();
     },
     onError: (err) => {
+      toast.error(`Erro no disparo WhatsApp: ${err.message}`);
       setWhatsappFeedback(`Erro: ${err.message}`);
     },
   });
@@ -185,10 +216,19 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
     setIsEditingName(false);
   };
 
-  // Handle template file upload
+  // Handle template file upload with MIME sanitization and size check
   const handleTemplateFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!["image/png", "image/jpeg"].includes(file.type)) {
+      toast.error("Formato inválido. Selecione apenas imagens PNG ou JPEG.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Imagem excede o limite máximo permitido de 5MB.");
+      return;
+    }
+    setNewTemplateMimeType(file.type);
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === "string") {
@@ -558,16 +598,14 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
             <div className="flex items-center gap-2">
               <Button
                 type="button"
-                variant="outline"
-                size="sm"
                 onClick={() => setPreviewModalOpen(false)}
+                className="bg-slate-700 hover:bg-slate-600 text-white border border-slate-600 rounded-lg px-4 py-2 text-xs shadow-none transition"
               >
                 Fechar
               </Button>
               <Button
                 type="button"
-                size="sm"
-                className="bg-emerald-600 text-white hover:bg-emerald-700"
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-5 py-2 text-xs shadow-sm transition"
                 onClick={() => {
                   setPreviewModalOpen(false);
                   openWhatsAppModal();
@@ -653,26 +691,25 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
             </div>
           </div>
 
-          <DialogFooter className="flex justify-end gap-2">
+          <DialogFooter className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-6 py-3.5 dark:border-slate-800 dark:bg-slate-900/60">
             <Button
               type="button"
-              variant="outline"
-              size="sm"
               disabled={sendWhatsAppMutation.isPending}
               onClick={() => setWhatsappModalOpen(false)}
+              className="bg-slate-700 hover:bg-slate-600 text-white border border-slate-600 rounded-lg px-4 py-2 text-xs shadow-none transition"
             >
               Cancelar
             </Button>
             <Button
               type="button"
-              size="sm"
               disabled={validatedPhone.status !== "valid" || sendWhatsAppMutation.isPending}
-              className="bg-emerald-600 text-white hover:bg-emerald-700"
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-5 py-2 text-xs shadow-sm transition disabled:opacity-50"
               onClick={() =>
                 sendWhatsAppMutation.mutate({
                   publicId: order.publicId,
                   phone: validatedPhone.status === "valid" ? validatedPhone.value : undefined,
                   customMessage: whatsappCustomMessage,
+                  templatePublicId: selectedTemplateId || undefined,
                 })
               }
             >
@@ -780,30 +817,37 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
             </div>
           </div>
 
-          <DialogFooter className="flex justify-end gap-2">
+          <DialogFooter className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-6 py-3.5 dark:border-slate-800 dark:bg-slate-900/60">
             <Button
               type="button"
-              variant="outline"
-              size="sm"
               disabled={createTemplateMutation.isPending}
               onClick={() => setNewTemplateModalOpen(false)}
+              className="bg-slate-700 hover:bg-slate-600 text-white border border-slate-600 rounded-lg px-4 py-2 text-xs shadow-none transition"
             >
               Cancelar
             </Button>
             <Button
               type="button"
-              size="sm"
               disabled={!newTemplateName.trim() || createTemplateMutation.isPending}
               onClick={() =>
                 createTemplateMutation.mutate({
                   name: newTemplateName.trim(),
                   niche: newTemplateNiche,
                   fileBase64: newTemplateFileBase64,
+                  mimeType: newTemplateMimeType || undefined,
                   isDefault: newTemplateIsDefault,
                 })
               }
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-5 py-2 text-xs shadow-sm transition disabled:opacity-50"
             >
-              {createTemplateMutation.isPending ? "Cadastrando…" : "Cadastrar Modelo"}
+              {createTemplateMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Cadastrando…
+                </>
+              ) : (
+                "Cadastrar Modelo"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
