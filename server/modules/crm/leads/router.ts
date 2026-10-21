@@ -21,6 +21,12 @@ export const leadsRouter = router({
       return service.listLeads(tenantId, input);
     }),
 
+  summary: megadeskProcedure
+    .query(async ({ ctx }) => {
+      const tenantId = requireCrmLeadAccess(ctx);
+      return service.getLeadsSummary(tenantId);
+    }),
+
   getById: megadeskProcedure
     .input(z.object({ crmClientId: z.string().min(1) }).strict())
     .query(async ({ input, ctx }) => {

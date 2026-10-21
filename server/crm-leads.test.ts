@@ -145,41 +145,46 @@ describe("MegaDesk CRM — Etapa 2B.3: Regras de Negócio e Serviço de Leads", 
     );
 
     expect(result.crmClientId).toBe("crm-lead-novo");
-    expect(dbCrm.findDuplicateCrmClient).toHaveBeenCalledWith(tenantId, {
-      cpfCnpj: "",
-      phone: "11999998888",
-    });
-    expect(repo.createLead).toHaveBeenCalled();
+    expect(repo.createLead).toHaveBeenCalledWith(
+      tenantId,
+      expect.objectContaining({ companyName: "Nova Empresa", phone: "11999998888" }),
+      actor
+    );
   });
 
-  it("bloqueia criação de lead se houver duplicidade cadastral", async () => {
-    vi.mocked(dbCrm.findDuplicateCrmClient).mockResolvedValue({
+  it("reutiliza cadastro existente e delega deduplicação ao repositório quando telefone já existe", async () => {
+    vi.mocked(repo.createLead).mockResolvedValue({
       crmClientId: "crm-existente",
-      companyName: "Empresa Já Cadastrada",
-      cpfCnpj: null,
-      phone: "11999998888",
+      deduplicated: true,
+      status: "lead",
     });
 
-    await expect(
-      service.createLead(
-        tenantId,
-        {
-          companyName: "Tentativa Duplicada",
-          customerType: "company",
-          phone: "11999998888",
-          origin: "site",
-          responsibleName: "",
-          cpfCnpj: "",
-          whatsapp: "",
-          email: "",
-          internalResponsible: "",
-          tags: "",
-          observations: "",
-          contacts: [],
-        },
-        actor
-      )
-    ).rejects.toThrowError("Já existe um cadastro (Empresa Já Cadastrada) com este telefone.");
+    const result = await service.createLead(
+      tenantId,
+      {
+        companyName: "Tentativa Duplicada",
+        customerType: "company",
+        phone: "11999998888",
+        origin: "site",
+        responsibleName: "",
+        cpfCnpj: "",
+        whatsapp: "",
+        email: "",
+        internalResponsible: "",
+        tags: "",
+        observations: "",
+        contacts: [],
+      },
+      actor
+    );
+
+    expect(result.crmClientId).toBe("crm-existente");
+    expect(result.deduplicated).toBe(true);
+    expect(repo.createLead).toHaveBeenCalledWith(
+      tenantId,
+      expect.objectContaining({ phone: "11999998888" }),
+      actor
+    );
   });
 
   it("rejeita CNPJ matematicamente inválido para leads pessoa jurídica", async () => {
