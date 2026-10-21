@@ -274,6 +274,7 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
               generatePdfMutation.mutate({
                 salePublicId: order.publicId,
                 idempotencyKey: crypto.randomUUID(),
+                templatePublicId: selectedTemplateId || undefined,
               })
             }
             data-testid="quote-generate-pdf-btn"
@@ -596,6 +597,18 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
               Arquivo: <strong>{previewQuery.data?.documentCustomName || customName}.pdf</strong>
             </span>
             <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="text-xs border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                onClick={() => {
+                  window.open(`/api/erp/sales/${order.publicId}/pdf`, "_blank");
+                }}
+              >
+                <FileDown className="mr-1.5 h-3.5 w-3.5" />
+                Baixar PDF
+              </Button>
               <Button
                 type="button"
                 onClick={() => setPreviewModalOpen(false)}

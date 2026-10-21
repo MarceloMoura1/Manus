@@ -23,6 +23,11 @@ export type QuotePdfItem = {
 
 export type QuotePdfInput = {
   company: QuotePdfCompany;
+  template?: {
+    name?: string | null;
+    backgroundBytes?: Buffer | null;
+    hasBackground?: boolean;
+  } | null;
   quote: {
     number: string;
     issuedOn: string;
@@ -57,13 +62,23 @@ function normalizeText(value: unknown, fallback = "—", limit = 160): string {
 }
 
 function pdfText(value: string): string {
-  // The built-in PDF Helvetica font supports WinAnsi-like single-byte text. Keep
-  // the stream single-byte and replace characters outside that range rather than
-  // producing malformed PDF syntax from customer-controlled text.
-  return value
+  // Convert common Portuguese accented characters to ISO-8859-1 (WinAnsi) code points
+  const winAnsi = value
+    .replace(/á/g, "\xE1").replace(/Á/g, "\xC1")
+    .replace(/é/g, "\xE9").replace(/É/g, "\xC9")
+    .replace(/í/g, "\xED").replace(/Í/g, "\xCD")
+    .replace(/ó/g, "\xF3").replace(/Ó/g, "\xD3")
+    .replace(/ú/g, "\xFA").replace(/Ú/g, "\xDA")
+    .replace(/ã/g, "\xE3").replace(/Ã/g, "\xC3")
+    .replace(/õ/g, "\xF5").replace(/Õ/g, "\xD5")
+    .replace(/â/g, "\xE2").replace(/Â/g, "\xC2")
+    .replace(/ê/g, "\xEA").replace(/Ê/g, "\xCA")
+    .replace(/ô/g, "\xF4").replace(/Ô/g, "\xD4")
+    .replace(/ç/g, "\xE7").replace(/Ç/g, "\xC7")
     .replace(/[\u0000-\u001F\u007F]/g, " ")
     .replace(/[^\u0020-\u00FF]/g, "?")
     .replace(/([\\()])/g, "\\$1");
+  return winAnsi;
 }
 
 function money(cents: number): string {
@@ -219,15 +234,117 @@ function footer(input: QuotePdfInput): string[] {
   ];
 }
 
-function buildPdf(pages: string[]): Buffer {
-  const pageReferences = pages.map((_, index) => ({ page: 4 + index * 2, contents: 5 + index * 2 }));
+function getJpegDimensions(buf: Buffer): { width: number; height: number } {
+  let offset = 2;
+  while (offset < buf.length - 8) {
+    if (buf[offset] !== 0xff) break;
+    const marker = buf[offset + 1];
+    if (marker === 0xc0 || marker === 0xc2) {
+      const height = buf.readUInt16BE(offset + 5);
+      const width = buf.readUInt16BE(offset + 7);
+      return { width, height };
+    }
+    const len = buf.readUInt16BE(offset + 2);
+    offset += 2 + len;
+  }
+  return { width: 1792, height: 2400 };
+}
+
+function letterheadOverlayPage(input: QuotePdfInput, items: QuotePdfItem[], page: number, totalPages: number): string[] {
+  const commands: string[] = [];
+  const meta = input.quote.serviceMetadata;
+
+  // 1. Order Number: top right box
+  commands.push(text(485, 816, 12, input.quote.number, "0.86 0.15 0.15"));
+
+  // 2. Checkbox ORÇAMENTO marcado
+  commands.push(text(91, 668, 12, "X", "0.10 0.15 0.23"));
+
+  if (page === 1) {
+    // 3. Customer & Vehicle data on dotted lines
+    // Nome
+    commands.push(text(108, 625, 9, normalizeText(input.quote.customerName, "Cliente", 55)));
+    // Fone
+    commands.push(text(414, 625, 9, normalizeText(input.company.phone || input.company.whatsapp, "", 22)));
+    // Endereço
+    commands.push(text(128, 605, 8, normalizeText(input.company.address, "", 60)));
+    // Marca / Modelo
+    commands.push(text(159, 585, 8.5, normalizeText(meta?.brandModel, "—", 35)));
+    // Placa
+    commands.push(text(414, 585, 9, normalizeText(meta?.plate, "—", 12)));
+    // Ano
+    commands.push(text(524, 585, 8.5, normalizeText(meta?.year, "—", 6)));
+    // Cor
+    commands.push(text(96, 565, 8.5, normalizeText(meta?.color, "—", 30)));
+    // KM
+    commands.push(text(394, 565, 8.5, normalizeText(meta?.km ? `${meta.km} km` : "—", "—", 15)));
+    // Data Entrada
+    commands.push(text(150, 545, 8.5, normalizeText(meta?.entryDate || input.quote.issuedOn, "—", 15)));
+    // Data Saída
+    commands.push(text(434, 545, 8.5, normalizeText(meta?.exitDate, "—", 15)));
+  } else {
+    commands.push(text(108, 625, 9, `Cliente: ${normalizeText(input.quote.customerName, "Cliente", 40)} · Pág ${page}/${totalPages}`));
+  }
+
+  // 4. 9-Row Items Table (DESCRIÇÃO DOS SERVIÇOS / PEÇAS)
+  // top 125.5mm = y 486. Each row 11.74mm = 33.28 pt.
+  const rowStartY = 486;
+  const rowHeight = 33.28;
+  for (let i = 0; i < 9; i++) {
+    const item = items[i];
+    if (!item) continue;
+    const y = rowStartY - i * rowHeight - 18;
+    const qtyUnit = item.quantity ? ` (${item.quantity} ${item.unit || "un"})` : "";
+    const desc = normalizeText(`${item.description}${qtyUnit}`, "", 65);
+    commands.push(text(48, y, 8.5, desc, "0.12 0.16 0.23"));
+    commands.push(text(500, y, 8.5, money(item.lineTotalCents), "0.08 0.12 0.20"));
+  }
+
+  // 5. Totais do rodapé
+  if (page === totalPages) {
+    commands.push(text(495, 168, 8.5, money(input.quote.subtotalCents), "0.08 0.12 0.20"));
+    commands.push(text(495, 148, 8.5, money(input.quote.chargesCents), "0.08 0.12 0.20"));
+    commands.push(text(495, 129, 8.5, money(input.quote.freightCents), "0.08 0.12 0.20"));
+    commands.push(text(488, 100, 10.5, money(input.quote.totalCents), "1 1 1"));
+
+    // Condições Comerciais e Observações
+    commands.push(text(48, 168, 7.5, "Condições: " + normalizeText(input.quote.paymentTerms, "A combinar", 65), "0.20 0.25 0.35"));
+    if (input.quote.notes) {
+      commands.push(text(48, 150, 7.5, "Obs: " + normalizeText(input.quote.notes, "", 65), "0.20 0.25 0.35"));
+    }
+  }
+
+  return commands;
+}
+
+function buildPdf(pages: string[], backgroundImage?: Buffer | null): Buffer {
+  const hasBg = Boolean(backgroundImage && backgroundImage.length > 0);
+  const baseObj = hasBg ? 5 : 4;
+  const pageReferences = pages.map((_, index) => ({ page: baseObj + index * 2, contents: baseObj + 1 + index * 2 }));
   const objects = new Map<number, Buffer>();
   objects.set(1, Buffer.from("<< /Type /Catalog /Pages 2 0 R >>", "latin1"));
   objects.set(2, Buffer.from(`<< /Type /Pages /Kids [${pageReferences.map(ref => `${ref.page} 0 R`).join(" ")}] /Count ${pageReferences.length} >>`, "latin1"));
-  objects.set(3, Buffer.from("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", "latin1"));
+  objects.set(3, Buffer.from("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>", "latin1"));
+
+  if (hasBg && backgroundImage) {
+    const { width, height } = getJpegDimensions(backgroundImage);
+    objects.set(4, Buffer.concat([
+      Buffer.from(`<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${backgroundImage.length} >>\nstream\n`, "latin1"),
+      backgroundImage,
+      Buffer.from("\nendstream", "latin1"),
+    ]));
+  }
+
+  const resourcesStr = hasBg
+    ? "<< /Font << /F1 3 0 R >> /XObject << /BgImg 4 0 R >> >>"
+    : "<< /Font << /F1 3 0 R >> >>";
+
   pageReferences.forEach((reference, index) => {
-    objects.set(reference.page, Buffer.from(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${reference.contents} 0 R >>`, "latin1"));
-    const stream = Buffer.from(pages[index], "latin1");
+    objects.set(reference.page, Buffer.from(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] /Resources ${resourcesStr} /Contents ${reference.contents} 0 R >>`, "latin1"));
+    const pageStreamContent = hasBg
+      ? `q ${PAGE_WIDTH} 0 0 ${PAGE_HEIGHT} 0 0 cm /BgImg Do Q\n${pages[index]}`
+      : pages[index];
+    const stream = Buffer.from(pageStreamContent, "latin1");
     objects.set(reference.contents, Buffer.concat([
       Buffer.from(`<< /Length ${stream.length} >>\nstream\n`, "latin1"),
       stream,
@@ -250,6 +367,7 @@ function buildPdf(pages: string[]): Buffer {
 /** Produces a self-contained, immutable PDF snapshot without fetching external assets. */
 export function renderQuotePdf(input: QuotePdfInput): Buffer {
   assertInput(input);
+  const isLetterhead = Boolean(input.template?.hasBackground && input.template?.backgroundBytes);
   const groups: QuotePdfItem[][] = [];
   if (input.quote.items.length <= 9) {
     groups.push(input.quote.items);
@@ -262,12 +380,18 @@ export function renderQuotePdf(input: QuotePdfInput): Buffer {
       groups.push(remaining.slice(offset, offset + SUBSEQUENT_PAGE_SIZE));
     }
   }
+
   const pages = groups.map((items, index) => {
+    if (isLetterhead) {
+      return letterheadOverlayPage(input, items, index + 1, groups.length).join("\n");
+    }
     const commands = header(input, index + 1, groups.length);
     const table = itemTable(items, PAGE_HEIGHT - 190);
+    commands.push(...table.commands);
     if (index === groups.length - 1) commands.push(...summary(input, Math.max(175, table.endY - 8)));
     commands.push(...footer(input));
     return commands.join("\n");
   });
-  return buildPdf(pages);
+
+  return buildPdf(pages, isLetterhead ? input.template?.backgroundBytes : null);
 }

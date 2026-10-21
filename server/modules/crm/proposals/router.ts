@@ -229,6 +229,7 @@ export const proposalsRouter = router({
       z.object({
         publicId: z.string().uuid(),
         idempotencyKey: z.string().uuid().default(() => randomUUID()),
+        templatePublicId: z.string().uuid().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -237,6 +238,7 @@ export const proposalsRouter = router({
         const document = await quotePdfService.generate(identity, {
           salePublicId: input.publicId,
           idempotencyKey: input.idempotencyKey,
+          templatePublicId: input.templatePublicId,
         });
         return { success: true, document };
       } catch (err: any) {
