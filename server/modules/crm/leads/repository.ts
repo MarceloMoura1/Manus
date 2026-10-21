@@ -247,7 +247,7 @@ export async function listLeads(
   const whereSql = whereClauses.join(" AND ");
 
   // Total count
-  const [countRows] = await pool.execute(
+  const [countRows] = await pool.query(
     `SELECT COUNT(*) AS total FROM megadesk_crm_clients WHERE ${whereSql}`,
     params
   ) as any[];
@@ -259,15 +259,15 @@ export async function listLeads(
   const offset = (page - 1) * pageSize;
   const totalPages = Math.ceil(total / pageSize) || 1;
 
-  const [rows] = await pool.execute(
+  const [rows] = await pool.query(
     `SELECT crm_client_id, client_id, customer_type, company_name, responsible_name,
             cpf_cnpj, phone, whatsapp, email, status, origin, internal_responsible,
             tags, observations, contacts_json, created_at, updated_at
      FROM megadesk_crm_clients
      WHERE ${whereSql}
      ORDER BY updated_at DESC, created_at DESC
-     LIMIT ? OFFSET ?`,
-    [...params, pageSize, offset]
+     LIMIT ${Number(pageSize)} OFFSET ${Number(offset)}`,
+    params
   ) as any[];
 
   const leads = (rows as any[]).map(mapRowToLeadView);
@@ -335,8 +335,10 @@ export async function createLead(
   input: LeadCreateInput,
   actor: string
 ): Promise<{ crmClientId: string; deduplicated?: boolean; status?: string }> {
-  const normalizedPhone = normalizeStoredPhone(input.phone, true);
-  const normalizedWhatsapp = normalizeStoredPhone(input.whatsapp, false) ?? "";
+  const rawPhone = input.phone?.trim() ? input.phone : (input.whatsapp?.trim() ? input.whatsapp : undefined);
+  const rawWhatsapp = input.whatsapp?.trim() ? input.whatsapp : (input.phone?.trim() ? input.phone : undefined);
+  const normalizedPhone = normalizeStoredPhone(rawPhone, true);
+  const normalizedWhatsapp = normalizeStoredPhone(rawWhatsapp, false) ?? "";
   const rawEmail = input.email && input.email.trim() ? normalizeEmail(input.email) : null;
   const normalizedEmail = rawEmail && rawEmail.length > 0 ? rawEmail : null;
   const rawDoc = input.cpfCnpj ? normalizeDigits(input.cpfCnpj) : null;
@@ -386,14 +388,14 @@ export async function createLead(
         updateParams.push(normalizedDoc);
       }
 
-      if (!existing.phone && normalizedPhone) {
+      if (!existing.phone && (normalizedPhone || normalizedWhatsapp)) {
         updates.push("phone = ?");
-        updateParams.push(normalizedPhone);
+        updateParams.push(normalizedPhone || normalizedWhatsapp);
       }
 
-      if ((!existing.whatsapp || existing.whatsapp === "") && normalizedWhatsapp) {
+      if ((!existing.whatsapp || existing.whatsapp === "") && (normalizedWhatsapp || normalizedPhone)) {
         updates.push("whatsapp = ?");
-        updateParams.push(normalizedWhatsapp);
+        updateParams.push(normalizedWhatsapp || normalizedPhone);
       }
 
       if (!existing.email && normalizedEmail) {
