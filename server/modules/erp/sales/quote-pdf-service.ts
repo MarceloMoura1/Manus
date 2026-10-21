@@ -37,12 +37,12 @@ export class QuotePdfService {
     }
   }
 
-  async generate(identity: Identity, input: { salePublicId: string; idempotencyKey: string }) {
+  async generate(identity: Identity, input: { salePublicId: string; idempotencyKey: string; templatePublicId?: string }) {
     const { document } = await this.generateWithBuffer(identity, input);
     return document;
   }
 
-  async generateWithBuffer(identity: Identity, input: { salePublicId: string; idempotencyKey: string }) {
+  async generateWithBuffer(identity: Identity, input: { salePublicId: string; idempotencyKey: string; templatePublicId?: string }) {
     this.assertWrite(identity);
 
     // `detail` scopes both the quote and all of its snapshots by clientId.
@@ -58,6 +58,36 @@ export class QuotePdfService {
     }
 
     const company = await this.companySettings(identity.clientId);
+
+    // Look for active quote template (by input.templatePublicId or default template for tenant)
+    let templateData: { name: string; backgroundBytes?: Buffer | null; hasBackground: boolean } | null = null;
+    try {
+      const { getPool } = await import("../../../db");
+      const pool = getPool();
+      const [tplRows] = await pool.execute<any[]>(
+        `SELECT public_id, name, background_image_url FROM megadesk_crm_quote_templates
+         WHERE client_id = ? ${input.templatePublicId ? "AND public_id = ?" : "ORDER BY is_default DESC, created_at DESC"} LIMIT 1`,
+        input.templatePublicId ? [identity.clientId, input.templatePublicId] : [identity.clientId]
+      );
+      if (tplRows && tplRows[0]) {
+        const templatePublicId = String(tplRows[0].public_id);
+        let backgroundBytes: Buffer | null = null;
+        try {
+          const { readCrmClientFile } = await import("../../crm/client-files/files-storage");
+          backgroundBytes = await readCrmClientFile(identity.clientId, templatePublicId);
+        } catch {
+          // file not on disk or template has no file
+        }
+        templateData = {
+          name: String(tplRows[0].name),
+          backgroundBytes,
+          hasBackground: Boolean(backgroundBytes),
+        };
+      }
+    } catch {
+      // In mock/test environments without CRM quote templates table, fallback cleanly
+    }
+
     const bytes = renderQuotePdf({
       company: {
         name: company?.companyName ?? null,
@@ -66,6 +96,7 @@ export class QuotePdfService {
         whatsapp: company?.primaryWhatsapp ?? null,
         address: company?.address ?? null,
       },
+      template: templateData,
       quote: {
         number: quote.orderNumber,
         issuedOn: quote.commercialDate,

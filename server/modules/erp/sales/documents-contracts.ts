@@ -62,6 +62,7 @@ export const saleDocumentDownloadInput = saleDocumentDeleteInput;
 export const quotePdfGenerationInput = z.object({
   salePublicId: z.string().uuid(),
   idempotencyKey: z.string().uuid(),
+  templatePublicId: z.string().uuid().optional(),
 });
 
 export const customerSalesInput = z.object({

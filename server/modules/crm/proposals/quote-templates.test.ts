@@ -376,5 +376,156 @@ describe("QuoteTemplatesService", () => {
         code: "BAD_REQUEST",
       });
     });
+
+    it("persiste mensagem outbound em megadesk_domain_conversations_messages com media_reference e status sent", async () => {
+      mockSaleService.detail.mockResolvedValueOnce({
+        publicId: "sale-chat-1",
+        crmClientId: "crm-client-77",
+        documentType: "quote",
+        orderNumber: "ORC-777",
+        customerName: "Lucas Mendes",
+        totalCents: 75000,
+      });
+
+      mockQuotePdfService.generate.mockResolvedValueOnce({
+        filePublicId: "doc-chat-uuid",
+        fileName: "Orcamento_Lucas.pdf",
+      });
+
+      dbMocks.readCrmClientFile.mockResolvedValueOnce(Buffer.from("PDF-CHAT-BYTES"));
+      dbMocks.evoSendAttachment.mockResolvedValueOnce({
+        key: { id: "EVO-CHAT-MSG-77" },
+        message: {},
+      });
+
+      const dbExecCalls: any[] = [];
+      dbMocks.execute.mockImplementation(async (sql: string, params: any[]) => {
+        dbExecCalls.push({ sql, params });
+        if (sql.includes("SELECT conversation_id")) {
+          return [[{ conversation_id: "conv-lucas-1", messages_json: "[]" }]];
+        }
+        if (sql.includes("SELECT messages_json")) {
+          return [[{ messages_json: "[]" }]];
+        }
+        return [{ affectedRows: 1 }];
+      });
+
+      const result = await service.sendQuoteWhatsApp(identity, {
+        publicId: "sale-chat-1",
+        phone: "11999998888",
+        customMessage: "Segue proposta comercial em anexo",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.messageId).toBe("EVO-CHAT-MSG-77");
+
+      // Verificar insert em megadesk_domain_conversations_messages
+      const insertMessageCall = dbExecCalls.find((c) =>
+        c.sql.includes("INSERT INTO megadesk_domain_conversations_messages")
+      );
+      expect(insertMessageCall).toBeDefined();
+      expect(insertMessageCall.sql).toContain("'outbound'");
+      expect(insertMessageCall.sql).toContain("'document'");
+      expect(insertMessageCall.sql).toContain("'operator'");
+      expect(insertMessageCall.params).toContain("conv-lucas-1");
+      expect(insertMessageCall.params).toContain(identity.clientId);
+      expect(insertMessageCall.params[6]).toContain("Orcamento_Lucas.pdf"); // media_reference
+
+      // Verificar update na conversa
+      const updateConvCall = dbExecCalls.find((c) =>
+        c.sql.includes("UPDATE megadesk_domain_conversations")
+      );
+      expect(updateConvCall).toBeDefined();
+    });
+  });
+
+  describe("Folha Timbrada Milimétrica (Low Garage)", () => {
+    it("renderiza overlay transparente quando template possui backgroundImageUrl, sem cabeçalhos genéricos e com charset UTF-8", async () => {
+      mockSaleService.detail.mockResolvedValueOnce({
+        publicId: "sale-low-garage",
+        documentType: "quote",
+        orderNumber: "ORC-042",
+        customerName: "Oficina Low Garage Cliente",
+        customerPhone: "(11) 98765-4321",
+        customerAddress: "Av. Automotiva",
+        customerAddressNumber: "100",
+        commercialDate: "2026-10-21",
+        commercialStatus: "draft",
+        subtotalCents: 50000,
+        chargesCents: 15000,
+        freightCents: 5000,
+        discountCents: 0,
+        totalCents: 70000,
+        paymentTerms: "30 dias no boleto",
+        notes: "Entregar peças limpas",
+        serviceMetadata: {
+          brandModel: "Nissan 350Z Drift",
+          plate: "DFT-3500",
+          year: "2008",
+          color: "Cinza",
+          km: "85000",
+          entryDate: "2026-10-20",
+          exitDate: "2026-10-25",
+        },
+        items: [
+          {
+            publicId: "item-1",
+            productName: "Troca Pastilhas Cerâmica Brembo",
+            quantity: "1.000",
+            unit: "serv",
+            unitPriceCents: 50000,
+            lineTotalCents: 50000,
+          },
+        ],
+      });
+
+      dbMocks.getCompanySettings.mockResolvedValueOnce({
+        companyName: "Low Garage",
+        address: "Rua do Galpão 50",
+      });
+
+      // Retorna template configurado com imagem de fundo
+      dbMocks.execute.mockResolvedValueOnce([
+        [
+          {
+            public_id: "tpl-low-garage",
+            name: "Low Garage Folha Timbrada",
+            niche: "automotive",
+            background_image_url: "https://bucket/low-garage.jpg",
+            layout_config: JSON.stringify({ mimeType: "image/jpeg" }),
+            is_default: 1,
+            created_at: "2026-10-21",
+            updated_at: "2026-10-21",
+          },
+        ],
+      ]);
+      dbMocks.readCrmClientFile.mockResolvedValueOnce(Buffer.from("FAKE-JPEG-BYTES"));
+
+      const preview = await service.previewQuoteHtml(identity, { salePublicId: "sale-low-garage" });
+
+      expect(preview.pages).toHaveLength(1);
+      const html = preview.pages[0].html;
+
+      // Charset UTF-8 explícito
+      expect(html).toContain('<meta charset="UTF-8">');
+
+      // Folha A4 milimétrica com classe letterhead-overlay
+      expect(html).toContain("letterhead-overlay");
+      expect(html).toContain("210mm");
+      expect(html).toContain("297mm");
+
+      // Campos mapeados no overlay
+      expect(html).toContain("ORC-042");
+      expect(html).toContain("Oficina Low Garage Cliente");
+      expect(html).toContain("Nissan 350Z Drift");
+      expect(html).toContain("DFT-3500");
+      expect(html).toContain("85000 km");
+      expect(html).toContain("Troca Pastilhas Cerâmica Brembo");
+      expect(html).toContain("R$ 700,00");
+
+      // NÃO deve conter títulos corporativos genéricos ou cabeçalhos de tabela azuis
+      expect(html).not.toContain("MEGADESK COMERCIAL");
+      expect(html).not.toContain("background: #1e3a8a");
+    });
   });
 });

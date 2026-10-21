@@ -335,6 +335,8 @@ export class QuoteTemplatesService {
       ? `background-image: url('${bgUrl}'); background-size: cover; background-position: center; background-repeat: no-repeat;`
       : `background: #ffffff;`;
 
+    const hasBackground = Boolean(bgUrl);
+
     // Render Page 1
     const page1Html = this.renderPageHtml({
       pageNumber: 1,
@@ -347,6 +349,8 @@ export class QuoteTemplatesService {
       serviceMeta,
       showTotals: !hasPaginationBreak,
       bgCss,
+      bgUrl,
+      hasBackground,
       templateName: template?.name || "Padrão MegaDesk",
     });
 
@@ -363,6 +367,8 @@ export class QuoteTemplatesService {
           serviceMeta: null,
           showTotals: true,
           bgCss,
+          bgUrl,
+          hasBackground,
           templateName: template?.name || "Padrão MegaDesk",
         })
       : null;
@@ -395,9 +401,24 @@ export class QuoteTemplatesService {
     serviceMeta: QuoteServiceMetadata | null;
     showTotals: boolean;
     bgCss: string;
+    bgUrl?: string | null;
+    hasBackground?: boolean;
     templateName: string;
   }): string {
-    const { pageNumber, totalPages, company, quote, items, startingIndex, showServiceMetadata, serviceMeta, showTotals, bgCss } = params;
+    const {
+      pageNumber,
+      totalPages,
+      company,
+      quote,
+      items,
+      startingIndex,
+      showServiceMetadata,
+      serviceMeta,
+      showTotals,
+      bgCss,
+      bgUrl,
+      hasBackground,
+    } = params;
 
     const companyName = escapeHtml(company?.companyName || "MegaDesk Comercial");
     const companyEmail = escapeHtml(company?.primaryEmail || "");
@@ -408,6 +429,130 @@ export class QuoteTemplatesService {
     const orderNumber = escapeHtml(quote.orderNumber);
     const issuedOn = formatDate(quote.commercialDate);
 
+    // ─── TEMPLATE TRANSPARENTE: FOLHA TIMBRADA MILIMÉTRICA A4 (LOW GARAGE) ───
+    if (hasBackground && bgUrl) {
+      return `
+    <div class="a4-sheet letterhead-overlay" style="position: relative; width: 210mm; min-height: 297mm; height: 297mm; max-height: 297mm; box-sizing: border-box; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #0f172a; background-image: url('${escapeHtml(bgUrl)}'); background-size: 100% 100%; background-position: center; background-repeat: no-repeat;">
+      <meta charset="UTF-8">
+
+      <!-- NÚMERO DO ORÇAMENTO (topo direito) -->
+      <div style="position: absolute; top: 8mm; right: 14mm; width: 48mm; height: 12mm; display: flex; align-items: center; justify-content: flex-end; font-size: 14px; font-weight: 800; color: #dc2626; letter-spacing: 0.05em;">
+        ${orderNumber}
+      </div>
+
+      <!-- Checkbox ORÇAMENTO marcado -->
+      <div style="position: absolute; top: 60.8mm; left: 32mm; font-size: 13px; font-weight: 900; color: #0f172a;">
+        X
+      </div>
+
+      ${pageNumber === 1 ? `
+      <!-- DADOS DO CLIENTE & VEÍCULO (textos puros alinhados sobre as linhas pontilhadas) -->
+      <!-- Nome -->
+      <div style="position: absolute; top: 76.5mm; left: 38mm; width: 94mm; height: 5mm; display: flex; align-items: center; font-size: 11px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+        ${customerName}
+      </div>
+      <!-- Fone -->
+      <div style="position: absolute; top: 76.5mm; left: 146mm; width: 50mm; height: 5mm; display: flex; align-items: center; font-size: 11px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+        ${escapeHtml(quote.customerPhone || companyPhone || "")}
+      </div>
+      <!-- Endereço -->
+      <div style="position: absolute; top: 83.5mm; left: 45mm; width: 126mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 500; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+        ${escapeHtml(quote.customerAddress || companyAddress || "")}
+      </div>
+      <!-- Endereço N° / Compl -->
+      <div style="position: absolute; top: 83.5mm; left: 178mm; width: 18mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 500; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+        ${escapeHtml(quote.customerAddressNumber || "S/N")}
+      </div>
+
+      <!-- Marca / Modelo -->
+      <div style="position: absolute; top: 90.5mm; left: 56mm; width: 75mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+        ${escapeHtml(serviceMeta?.brandModel || "—")}
+      </div>
+      <!-- Placa -->
+      <div style="position: absolute; top: 90.5mm; left: 146mm; width: 32mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 700; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+        ${escapeHtml(serviceMeta?.plate || "—")}
+      </div>
+      <!-- Ano -->
+      <div style="position: absolute; top: 90.5mm; left: 185mm; width: 14mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+        ${escapeHtml(serviceMeta?.year || "—")}
+      </div>
+
+      <!-- Cor -->
+      <div style="position: absolute; top: 97.5mm; left: 34mm; width: 95mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 500; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+        ${escapeHtml(serviceMeta?.color || "—")}
+      </div>
+      <!-- KM -->
+      <div style="position: absolute; top: 97.5mm; left: 139mm; width: 45mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+        ${escapeHtml(serviceMeta?.km ? `${serviceMeta.km} km` : "—")}
+      </div>
+
+      <!-- Data Entrada -->
+      <div style="position: absolute; top: 104.5mm; left: 53mm; width: 48mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+        ${formatDate(serviceMeta?.entryDate || quote.commercialDate)}
+      </div>
+      <!-- Data Saída / Previsão -->
+      <div style="position: absolute; top: 104.5mm; left: 153mm; width: 42mm; height: 5mm; display: flex; align-items: center; font-size: 10px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+        ${formatDate(serviceMeta?.exitDate || null)}
+      </div>
+      ` : `
+      <!-- Cabeçalho compacto página 2 -->
+      <div style="position: absolute; top: 76.5mm; left: 38mm; width: 158mm; height: 5mm; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 600; color: #0f172a;">
+        <span>Cliente: <strong>${customerName}</strong></span>
+        <span>Orçamento ${orderNumber} · Página ${pageNumber} de ${totalPages}</span>
+      </div>
+      `}
+
+      <!-- TABELA DE 9 LINHAS (DESCRIÇÃO DOS SERVIÇOS / PEÇAS) -->
+      <div style="position: absolute; top: 125.5mm; left: 14mm; width: 182mm; height: 105.7mm; box-sizing: border-box; display: flex; flex-direction: column;">
+        ${Array.from({ length: 9 }).map((_, idx) => {
+          const item = items[idx];
+          if (!item) {
+            return `<div style="height: 11.74mm; width: 100%; box-sizing: border-box;"></div>`;
+          }
+          const desc = escapeHtml(item.productName || item.description || "");
+          const qtyStr = item.quantity ? ` (${escapeHtml(String(item.quantity))} ${escapeHtml(item.unit || "un")})` : "";
+          const valStr = money(item.lineTotalCents || (item.unitPriceCents * (item.quantity || 1)));
+          return `
+          <div style="height: 11.74mm; width: 100%; box-sizing: border-box; display: flex; align-items: center;">
+            <div style="width: 142mm; padding-left: 3mm; padding-right: 4mm; font-size: 11px; font-weight: 500; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+              ${desc}${qtyStr}
+            </div>
+            <div style="width: 40mm; padding-right: 4mm; text-align: right; font-size: 11px; font-weight: 700; color: #0f172a; white-space: nowrap;">
+              ${valStr}
+            </div>
+          </div>`;
+        }).join("")}
+      </div>
+
+      ${showTotals ? `
+      <!-- TOTAIS DO RODAPÉ (caixas no canto inferior direito) -->
+      <!-- Peças / Materiais -->
+      <div style="position: absolute; top: 237.5mm; left: 152mm; width: 42mm; height: 6mm; display: flex; align-items: center; justify-content: flex-end; font-size: 11px; font-weight: 700; color: #0f172a;">
+        ${money(quote.subtotalCents)}
+      </div>
+      <!-- Mão de Obra -->
+      <div style="position: absolute; top: 244.5mm; left: 152mm; width: 42mm; height: 6mm; display: flex; align-items: center; justify-content: flex-end; font-size: 11px; font-weight: 700; color: #0f172a;">
+        ${money(quote.chargesCents || 0)}
+      </div>
+      <!-- Serviços de Terceiros -->
+      <div style="position: absolute; top: 251.5mm; left: 152mm; width: 42mm; height: 6mm; display: flex; align-items: center; justify-content: flex-end; font-size: 11px; font-weight: 700; color: #0f172a;">
+        ${money(quote.freightCents || 0)}
+      </div>
+      <!-- TOTAL (caixa vermelha com texto branco) -->
+      <div style="position: absolute; top: 261.5mm; left: 148mm; width: 46mm; height: 8mm; display: flex; align-items: center; justify-content: flex-end; font-size: 13px; font-weight: 800; color: #ffffff;">
+        ${money(quote.totalCents)}
+      </div>
+
+      <!-- CONDIÇÕES & OBSERVAÇÕES (rodapé esquerdo) -->
+      <div style="position: absolute; top: 237mm; left: 16mm; width: 130mm; height: 32mm; font-size: 9.5px; color: #334155; line-height: 1.4; overflow: hidden;">
+        <div><strong>Condições:</strong> ${escapeHtml(quote.paymentTerms || "À vista / A combinar")}</div>
+        ${quote.notes ? `<div style="margin-top: 3px;"><strong>Obs:</strong> ${escapeHtml(quote.notes)}</div>` : ""}
+      </div>
+      ` : ""}
+    </div>`;
+    }
+
+    // ─── FALLBACK: LAYOUT CORPORATIVO PADRÃO (SEM IMAGEM DE FUNDO) ────────────
     // Vehicle/Service drawer badges
     let vehicleBlock = "";
     if (showServiceMetadata && serviceMeta) {
@@ -519,6 +664,7 @@ export class QuoteTemplatesService {
 
     return `
     <div class="a4-sheet" style="position: relative; width: 210mm; min-height: 297mm; padding: 18mm 16mm; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #0f172a; ${bgCss}">
+      <meta charset="UTF-8">
       <!-- Header -->
       <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1e3a8a; padding-bottom: 12px;">
         <div>
@@ -586,7 +732,8 @@ export class QuoteTemplatesService {
 
   /**
    * Dispatches the generated quote PDF directly via Evolution API WhatsApp integration,
-   * validates phone with shared/contact-phone.ts, and records event in CRM timeline.
+   * validates phone with shared/contact-phone.ts, records message in conversation chat,
+   * and records event in CRM timeline.
    */
   async sendQuoteWhatsApp(
     identity: Identity,
@@ -610,14 +757,14 @@ export class QuoteTemplatesService {
     const pool = getPool();
     let rawPhone = input.phone?.trim() || "";
     if (!rawPhone) {
-      // Lookup canonical phone from CRM client
+      // Lookup canonical phone from CRM client (excluding nonexistent columns like mobile_phone)
       const [clientRows] = await pool.execute<RowDataPacket[]>(
-        `SELECT phone, mobile_phone, whatsapp FROM megadesk_crm_clients
+        `SELECT phone, whatsapp FROM megadesk_crm_clients
          WHERE client_id = ? AND crm_client_id = ? LIMIT 1`,
         [identity.clientId, quote.crmClientId]
       );
       if (clientRows[0]) {
-        rawPhone = clientRows[0].whatsapp || clientRows[0].mobile_phone || clientRows[0].phone || "";
+        rawPhone = clientRows[0].whatsapp || clientRows[0].phone || "";
       }
     }
 
@@ -723,7 +870,7 @@ export class QuoteTemplatesService {
         fileName,
         caption: messageCaption,
       });
-      messageId = response.key.id;
+      messageId = response?.key?.id;
     } catch (evoError: any) {
       console.warn("[QuoteTemplatesService] Falha na Evolution API:", evoError?.message);
       // In local dev/mock or when instance is not connected, record error clearly
@@ -731,6 +878,146 @@ export class QuoteTemplatesService {
         code: "BAD_REQUEST",
         message: `Falha ao disparar WhatsApp via Evolution: ${evoError?.message || "Instância desconectada ou indisponível"}`,
       });
+    }
+
+    // ─── PERSISTÊNCIA DA MENSAGEM NO CHAT (ATENDIMENTO) ────────────────────────
+    try {
+      // Localizar ou criar a conversa ativa correspondente ao telefone em megadesk_domain_conversations
+      const searchRes = await pool.execute<RowDataPacket[]>(
+        `SELECT conversation_id, messages_json FROM megadesk_domain_conversations
+         WHERE client_id = ? AND (phone = ? OR phone = ? OR phone LIKE ?)
+         ORDER BY CASE WHEN status = 'open' THEN 1 WHEN status = 'bot' THEN 2 ELSE 3 END, updated_at DESC LIMIT 1`,
+        [identity.clientId, phoneNorm.value, formattedRecipient, `%${phoneNorm.value.slice(-8)}`]
+      );
+      const convRows = Array.isArray(searchRes) && Array.isArray(searchRes[0]) ? searchRes[0] : [];
+
+      let conversationId: string;
+      let isNewConversation = false;
+
+      if (convRows.length > 0) {
+        conversationId = String(convRows[0].conversation_id);
+      } else {
+        conversationId = `conv-${randomUUID()}`;
+        isNewConversation = true;
+        const timeLabel = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        await pool.execute(
+          `INSERT INTO megadesk_domain_conversations
+           (conversation_id, client_id, crm_client_id, customer_name, phone, company, status, last_message, time_label, messages_json, opened_at)
+           VALUES (?, ?, ?, ?, ?, '', 'open', ?, ?, '[]', NOW())`,
+          [
+            conversationId,
+            identity.clientId,
+            quote.crmClientId,
+            quote.customerName || "Cliente",
+            phoneNorm.value,
+            messageCaption.substring(0, 255),
+            timeLabel,
+          ]
+        );
+      }
+
+      const messageRecordId = `msg-${randomUUID()}`;
+      const now = new Date();
+      const timeLabel = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      const mediaReference = {
+        fileName,
+        mimeType: "application/pdf",
+        byteSize: pdfBytes.length,
+        caption: messageCaption,
+        storage: "quote_document",
+        publicId: quote.publicId,
+      };
+
+      // Inserir o registro em megadesk_domain_conversations_messages
+      await pool.execute(
+        `INSERT INTO megadesk_domain_conversations_messages
+         (message_id, conversation_id, client_id, external_message_id, provider, integration_id,
+          direction, message_type, sender_user_id, sender_name_snapshot, media_reference,
+          sender, message, timestamp, status)
+         VALUES (?, ?, ?, ?, 'evolution', '', 'outbound', 'document', ?, ?, ?, 'operator', ?, ?, 'sent')`,
+        [
+          messageRecordId,
+          conversationId,
+          identity.clientId,
+          messageId || null,
+          identity.userId,
+          identity.userName || "Operador",
+          JSON.stringify(mediaReference),
+          messageCaption,
+          now,
+        ]
+      );
+
+      // Atualizar megadesk_domain_conversations com a mensagem em messages_json e last_message
+      const currRes = await pool.execute<RowDataPacket[]>(
+        `SELECT messages_json FROM megadesk_domain_conversations WHERE conversation_id = ? AND client_id = ? LIMIT 1`,
+        [conversationId, identity.clientId]
+      );
+      const currConv = Array.isArray(currRes) && Array.isArray(currRes[0]) ? currRes[0] : [];
+      let messagesList: any[] = [];
+      if (currConv[0]?.messages_json) {
+        try { messagesList = JSON.parse(currConv[0].messages_json); } catch { messagesList = []; }
+      }
+      messagesList.push({
+        id: messageRecordId,
+        externalMessageId: messageId || null,
+        from: "agent",
+        direction: "outbound",
+        type: "document",
+        text: messageCaption,
+        fileName,
+        mimeType: "application/pdf",
+        mediaReference,
+        time: timeLabel,
+        timestamp: now.toISOString(),
+        status: "sent",
+      });
+      await pool.execute(
+        `UPDATE megadesk_domain_conversations
+         SET messages_json = ?, last_message = ?, last_message_from = 'operator', updated_at = NOW()
+         WHERE conversation_id = ? AND client_id = ?`,
+        [JSON.stringify(messagesList), messageCaption.substring(0, 255), conversationId, identity.clientId]
+      );
+
+      // Emitir o evento via WebSocket (/api/ws/whatsapp) para atualizar timeline em tempo real
+      try {
+        const { emitOperationalTenantEvent } = await import("../../whatsapp/socket/whatsapp.socket");
+        const eventPayload = {
+          conversationId,
+          clientId: identity.clientId,
+          message: {
+            id: messageRecordId,
+            externalMessageId: messageId || null,
+            text: messageCaption,
+            type: "document",
+            fileName,
+            mimeType: "application/pdf",
+            mediaReference,
+            timestamp: now.toISOString(),
+            time: timeLabel,
+            from: "agent",
+            status: "sent",
+          },
+        };
+        emitOperationalTenantEvent(identity.clientId, "conversation:message", eventPayload);
+        emitOperationalTenantEvent(identity.clientId, "wa:new_message", eventPayload);
+        if (isNewConversation) {
+          emitOperationalTenantEvent(identity.clientId, "conversation:new", {
+            clientId: identity.clientId,
+            conversation: {
+              id: conversationId,
+              name: quote.customerName,
+              phone: phoneNorm.value,
+              status: "open",
+              lastMessage: messageCaption.substring(0, 255),
+            },
+          });
+        }
+      } catch (wsErr) {
+        console.warn("[QuoteTemplatesService] Falha ao emitir evento WebSocket de conversa:", wsErr);
+      }
+    } catch (chatPersistError) {
+      console.warn("[QuoteTemplatesService] Falha ao sincronizar mensagem na conversa do Atendimento:", chatPersistError);
     }
 
     // Register event in CRM timeline
@@ -752,3 +1039,4 @@ export class QuoteTemplatesService {
     };
   }
 }
+
