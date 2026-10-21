@@ -10,7 +10,9 @@ import {
   Eye,
   FileDown,
   FileText,
+  LayoutTemplate,
   Loader2,
+  MessageCircle,
   Plus,
   RefreshCw,
   Send,
@@ -253,6 +255,7 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
       documentCustomName: customName.trim() || defaultSuggestedName,
       serviceMetadata: meta,
     });
+    toast.success("Configuração do documento salva com sucesso!");
     setIsEditingName(false);
   };
 
@@ -282,6 +285,7 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
 
   const hasVehicleData = Boolean(brandModel || plate || year || km);
   const validatedPhone = normalizeContactPhone(whatsappPhone);
+  const selectedTemplate = templatesQuery.data?.find((t) => t.publicId === selectedTemplateId);
 
   return (
     <div className="space-y-3" data-testid="crm-quote-action-center">
@@ -420,155 +424,164 @@ export function QuoteActionCenter({ order, canWrite, onRefresh }: QuoteActionCen
         )}
       </div>
 
-      {/* ─── BLOCO 5: NOME DO ARQUIVO & MODELO VISUAL ───────────────────────── */}
-      <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 text-xs sm:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] dark:border-slate-800 dark:bg-slate-800/40" data-testid="quote-config-block">
-        {/* Document Custom Name */}
-        <div className="flex flex-col justify-center">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Nome do Arquivo PDF
-            </span>
-            {!isEditingName ? (
+      {/* ─── BLOCO 5: CONFIGURAÇÃO DO DOCUMENTO (Nome & Modelo Visual) ─────────────────── */}
+      <div
+        className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+        data-testid="quote-config-block"
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Coluna 1: Nome do Arquivo PDF */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                <FileText className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <span>Nome do Arquivo PDF</span>
+              </label>
               <button
                 type="button"
-                className="text-[11px] font-medium text-blue-700 hover:underline dark:text-blue-400"
-                onClick={() => setIsEditingName(true)}
+                onClick={() => setCustomName(defaultSuggestedName)}
+                className="flex items-center gap-1 text-[11px] font-medium text-blue-600 transition-colors hover:text-blue-800 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+                title="Sugerir nome comercial automático"
               >
-                Editar
+                <Sparkles className="h-3 w-3" />
+                <span>Sugerir</span>
               </button>
-            ) : (
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  className="text-[10px] text-slate-500 hover:text-slate-800 dark:text-slate-400"
-                  onClick={() => setCustomName(defaultSuggestedName)}
-                >
-                  Sugerir
-                </button>
-                <button
-                  type="button"
-                  className="text-[10px] font-semibold text-emerald-700 hover:underline dark:text-emerald-400"
-                  onClick={handleSaveMetadata}
-                >
-                  Salvar
-                </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Input
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder="Ex: Orçamento - João Silva - 21-10"
+                  className="h-9 pr-12 text-xs font-medium rounded-lg border-slate-300 bg-white shadow-sm focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[11px] font-semibold text-slate-400">
+                  .pdf
+                </span>
               </div>
-            )}
-          </div>
-          {isEditingName ? (
-            <div className="mt-1 flex items-center gap-1.5">
-              <Input
-                value={customName}
-                onChange={(e) => setCustomName(e.target.value)}
-                placeholder="Ex: Orçamento - João Silva - 21-10"
-                className="h-8 text-xs"
-              />
               <Button
                 type="button"
                 size="sm"
-                variant="ghost"
-                className="h-8 px-2"
-                onClick={() => setIsEditingName(false)}
+                disabled={updateMetaMutation.isPending}
+                onClick={handleSaveMetadata}
+                className="h-9 shrink-0 gap-1 rounded-lg bg-slate-900 px-3.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
               >
-                <X className="h-3.5 w-3.5" />
+                {updateMetaMutation.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                )}
+                <span>Salvar</span>
               </Button>
             </div>
-          ) : (
-            <span className="mt-1 truncate text-xs font-medium text-slate-800 dark:text-slate-200" title={customName}>
-              {customName}.pdf
-            </span>
-          )}
-        </div>
-
-        {/* Template Selector Dropdown */}
-        <div className="flex flex-col justify-center">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Modelo Visual (Template)
-            </span>
-            <button
-              type="button"
-              className="flex items-center gap-1 text-[11px] font-medium text-blue-700 hover:underline dark:text-blue-400"
-              onClick={() => setNewTemplateModalOpen(true)}
-            >
-              <Plus className="h-3 w-3" />
-              Novo Modelo
-            </button>
           </div>
-          <div className="mt-1 flex items-center gap-1.5">
-            <select
-              value={selectedTemplateId}
-              onChange={(e) => setSelectedTemplateId(e.target.value)}
-              className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-              data-testid="quote-template-selector"
-            >
-              <option value="">Modelo Padrão MegaDesk</option>
-              {templatesQuery.data?.map((tpl) => (
-                <option key={tpl.publicId} value={tpl.publicId}>
-                  {tpl.name} {tpl.isDefault ? "★ (Padrão)" : ""} ({tpl.niche})
-                </option>
-              ))}
-            </select>
+
+          {/* Coluna 2: Modelo Visual (Folha Oficial) */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                <LayoutTemplate className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                <span>Modelo Visual (Folha Oficial)</span>
+              </label>
+              {selectedTemplate && (
+                <span className="inline-flex items-center rounded-md bg-violet-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-violet-700 ring-1 ring-inset ring-violet-700/10 dark:bg-violet-950/60 dark:text-violet-300">
+                  {selectedTemplate.niche === "automotive"
+                    ? "Automotivo"
+                    : selectedTemplate.niche === "services"
+                      ? "Serviços"
+                      : "Geral"}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <select
+                  value={selectedTemplateId}
+                  onChange={(e) => setSelectedTemplateId(e.target.value)}
+                  className="h-9 w-full appearance-none rounded-lg border border-slate-300 bg-white px-3 pr-8 text-xs font-medium text-slate-800 shadow-sm transition-colors focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                  data-testid="quote-template-selector"
+                >
+                  <option value="">Modelo Padrão MegaDesk</option>
+                  {templatesQuery.data?.map((tpl) => (
+                    <option key={tpl.publicId} value={tpl.publicId}>
+                      {tpl.name} {tpl.isDefault ? "★ (Padrão)" : ""} [{tpl.niche}]
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setNewTemplateModalOpen(true)}
+                className="h-9 shrink-0 gap-1 rounded-lg border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                <Plus className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                <span>Novo Modelo</span>
+              </Button>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ─── BLOCO 6: AÇÕES DE EMISSÃO & DISPARO (Ações Primárias) ──────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900" data-testid="quote-emission-bar">
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Live Preview Button */}
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-            onClick={() => {
-              setPreviewPageIndex(0);
-              setPreviewModalOpen(true);
-            }}
-            data-testid="quote-preview-btn"
-          >
-            <Eye className="mr-1.5 h-4 w-4 text-violet-600 dark:text-violet-400" />
-            Ver Prévia
-          </Button>
+      {/* ─── BLOCO 6: AÇÕES DE EMISSÃO & DISPARO (Ações Primárias Centralizadas) ──────────── */}
+      <div
+        className="flex flex-wrap items-center justify-center gap-3 w-full rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+        data-testid="quote-emission-bar"
+      >
+        {/* 1. Ver Prévia */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-9 rounded-lg border-slate-300 bg-white px-4 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          onClick={() => {
+            setPreviewPageIndex(0);
+            setPreviewModalOpen(true);
+          }}
+          data-testid="quote-preview-btn"
+        >
+          <Eye className="mr-1.5 h-4 w-4 text-violet-600 dark:text-violet-400" />
+          Ver Prévia
+        </Button>
 
-          {/* Generate PDF Button */}
-          {canWrite && (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={generatePdfMutation.isPending}
-              className="border-blue-300 bg-blue-50 text-blue-800 shadow-sm hover:bg-blue-100 hover:text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300"
-              onClick={() =>
-                generatePdfMutation.mutate({
-                  salePublicId: order.publicId,
-                  idempotencyKey: crypto.randomUUID(),
-                  templatePublicId: selectedTemplateId || undefined,
-                })
-              }
-              data-testid="quote-generate-pdf-btn"
-            >
-              {generatePdfMutation.isPending ? (
-                <Loader2 className="mr-1.5 h-4 w-4 animate-spin text-blue-600" />
-              ) : (
-                <FileDown className="mr-1.5 h-4 w-4 text-blue-600 dark:text-blue-400" />
-              )}
-              {generatePdfMutation.isPending ? "Gerando PDF…" : "Gerar PDF"}
-            </Button>
-          )}
-        </div>
-
-        {/* Enviar WhatsApp Button */}
+        {/* 2. Gerar PDF */}
         {canWrite && (
           <Button
             type="button"
             size="sm"
-            className="bg-emerald-600 px-4 font-semibold text-white shadow-sm hover:bg-emerald-700 focus-visible:ring-emerald-500 active:translate-y-px motion-reduce:transition-none dark:bg-emerald-600 dark:hover:bg-emerald-700"
+            variant="outline"
+            disabled={generatePdfMutation.isPending}
+            className="h-9 rounded-lg border-blue-300 bg-blue-50 px-4 text-xs font-medium text-blue-800 shadow-sm hover:bg-blue-100 hover:text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300"
+            onClick={() =>
+              generatePdfMutation.mutate({
+                salePublicId: order.publicId,
+                idempotencyKey: crypto.randomUUID(),
+                templatePublicId: selectedTemplateId || undefined,
+              })
+            }
+            data-testid="quote-generate-pdf-btn"
+          >
+            {generatePdfMutation.isPending ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin text-blue-600" />
+            ) : (
+              <FileDown className="mr-1.5 h-4 w-4 text-blue-600 dark:text-blue-400" />
+            )}
+            {generatePdfMutation.isPending ? "Gerando PDF…" : "Gerar PDF"}
+          </Button>
+        )}
+
+        {/* 3. Enviar ao WhatsApp */}
+        {canWrite && (
+          <Button
+            type="button"
+            size="sm"
+            className="h-9 rounded-lg bg-emerald-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 focus-visible:ring-emerald-500 active:translate-y-px motion-reduce:transition-none dark:bg-emerald-600 dark:hover:bg-emerald-700"
             onClick={openWhatsAppModal}
             data-testid="quote-send-whatsapp-btn"
           >
-            <Share2 className="mr-1.5 h-4 w-4" />
+            <MessageCircle className="mr-1.5 h-4 w-4" />
             Enviar ao WhatsApp
           </Button>
         )}
