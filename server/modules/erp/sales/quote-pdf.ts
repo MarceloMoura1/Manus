@@ -1,3 +1,18 @@
+import {
+  A4,
+  QUOTE_GEOMETRY,
+  QUOTE_COLUMNS,
+  HEADER_BARS,
+  HEADER_BAR_SLANT_MM,
+  wrapDescription,
+  rowHeightMm,
+  itemKindLabel,
+  formatQuantity,
+  paginateQuoteRows,
+  totalsTopMm,
+  type QuotePage,
+} from "./quote-layout";
+
 const PAGE_WIDTH = 595;
 const PAGE_HEIGHT = 842;
 const PAGE_MARGIN = 44;
@@ -25,6 +40,7 @@ export type QuotePdfInput = {
   company: QuotePdfCompany;
   template?: {
     name?: string | null;
+    niche?: "automotive" | "services" | "general" | string | null;
     backgroundBytes?: Buffer | null;
     hasBackground?: boolean;
   } | null;
@@ -126,6 +142,43 @@ function fillRect(x: number, y: number, width: number, height: number, color: st
 
 function strokeLine(x1: number, y1: number, x2: number, y2: number, color = "0.86 0.89 0.93"): string {
   return `${color} RG 0.6 w ${x1} ${y1} m ${x2} ${y2} l S`;
+}
+
+function mmToPt(mm: number): number {
+  return mm * 2.83465;
+}
+
+function yFromTopMm(topMm: number, heightMm: number): number {
+  return PAGE_HEIGHT - (topMm + heightMm) * 2.83465;
+}
+
+function yBaselineFromTopMm(topMm: number, fontSize: number): number {
+  return PAGE_HEIGHT - (topMm * 2.83465) - (fontSize * 0.78);
+}
+
+function fillPolygon(points: Array<[number, number]>, color: string): string {
+  if (points.length < 3) return "";
+  const [first, ...rest] = points;
+  const path = [`${first[0].toFixed(2)} ${first[1].toFixed(2)} m`, ...rest.map(p => `${p[0].toFixed(2)} ${p[1].toFixed(2)} l`), "h", "f"].join(" ");
+  return `${color} rg ${path}`;
+}
+
+function strokeRect(x: number, y: number, width: number, height: number, color = "0.89 0.89 0.91", lineWidth = 0.6): string {
+  return `${color} RG ${lineWidth} w ${x} ${y} ${width} ${height} re S`;
+}
+
+function textWidth(value: string, size: number): number {
+  return value.length * size * 0.52;
+}
+
+function rightText(rightX: number, y: number, size: number, value: string, color = "0.10 0.15 0.23"): string {
+  const x = rightX - textWidth(value, size);
+  return text(Math.round(x), y, size, value, color);
+}
+
+function centerText(centerX: number, y: number, size: number, value: string, color = "0.10 0.15 0.23"): string {
+  const x = centerX - (textWidth(value, size) / 2);
+  return text(Math.round(x), y, size, value, color);
 }
 
 function quoteStatusLabel(value: string): string {
@@ -371,9 +424,240 @@ function buildPdf(pages: string[], backgroundImage?: Buffer | null): Buffer {
   return Buffer.concat(chunks);
 }
 
+export function isAutomotiveQuote(input: QuotePdfInput): boolean {
+  if (input.template?.niche === "automotive") return true;
+  if (input.template?.name?.toLowerCase().includes("garage")) return true;
+  if (input.template?.name?.toLowerCase().includes("oficina")) return true;
+  if (input.template?.name?.toLowerCase().includes("automotivo")) return true;
+  if (Boolean(input.quote.serviceMetadata?.brandModel || input.quote.serviceMetadata?.plate || input.quote.serviceMetadata?.year || input.quote.serviceMetadata?.km)) return true;
+  return false;
+}
+
+function automotiveQuotePages(input: QuotePdfInput): string[] {
+  const pagesData = paginateQuoteRows(input.quote.items, item => item.description || "");
+  const totalPages = pagesData.length;
+  const meta = input.quote.serviceMetadata;
+
+  const padX = mmToPt(10);
+  const contentWidth = mmToPt(190);
+
+  return pagesData.map((pageData, pageIndex) => {
+    const pageNumber = pageIndex + 1;
+    const isFirstPage = pageNumber === 1;
+    const isLastPage = pageNumber === totalPages;
+    const commands: string[] = [];
+
+    // 1. Header
+    if (isFirstPage) {
+      // Dark Header Body (top: 10mm, height: 34mm)
+      commands.push(fillRect(padX, yFromTopMm(10, 34), contentWidth, mmToPt(34), "0.09 0.09 0.11"));
+
+      // Slanted Geometric Bars
+      const yBottom = PAGE_HEIGHT - mmToPt(44);
+      const yTop = PAGE_HEIGHT - mmToPt(10);
+      const slantPt = mmToPt(HEADER_BAR_SLANT_MM);
+      for (const bar of HEADER_BARS) {
+        const xLeftBottom = padX + mmToPt(bar.xMm);
+        const xRightBottom = xLeftBottom + mmToPt(bar.widthMm);
+        const xLeftTop = xLeftBottom + slantPt;
+        const xRightTop = xRightBottom + slantPt;
+        const barColor = bar.color === "#dc2626" ? "0.86 0.15 0.15" : "0.32 0.32 0.36";
+        commands.push(fillPolygon([[xLeftBottom, yBottom], [xRightBottom, yBottom], [xRightTop, yTop], [xLeftTop, yTop]], barColor));
+      }
+
+      // Red Stripe at bottom of header (top: 44mm, height: 2mm)
+      commands.push(fillRect(padX, yFromTopMm(44, 2), contentWidth, mmToPt(2), "0.86 0.15 0.15"));
+
+      // Monogram Badge
+      commands.push(fillRect(padX + mmToPt(4), yFromTopMm(14, 12), mmToPt(12), mmToPt(12), "0.86 0.15 0.15"));
+      commands.push(centerText(padX + mmToPt(10), yBaselineFromTopMm(22.5, 11), 11, "LG", "1 1 1"));
+
+      // Company Info
+      const companyName = normalizeText(input.company.name, "OFICINA AUTOMOTIVA", 40);
+      commands.push(text(padX + mmToPt(19), yBaselineFromTopMm(20, 13), 13, companyName, "1 1 1"));
+
+      const compAddr = normalizeText(input.company.address, "", 55);
+      const compPhone = normalizeText(input.company.whatsapp || input.company.phone, "", 22);
+      const compLine = [compAddr, compPhone ? `Tel: ${compPhone}` : ""].filter(Boolean).join(" · ");
+      if (compLine) {
+        commands.push(text(padX + mmToPt(19), yBaselineFromTopMm(27, 7.5), 7.5, compLine, "0.63 0.63 0.67"));
+      }
+
+      // Title Badge, Order Number & Emission Date (Right side)
+      commands.push(rightText(padX + contentWidth - mmToPt(4), yBaselineFromTopMm(19, 7.5), 7.5, "ORÇAMENTO / ORDEM DE SERVIÇO", "0.98 0.65 0.65"));
+      commands.push(rightText(padX + contentWidth - mmToPt(4), yBaselineFromTopMm(28, 14), 14, `#${input.quote.number}`, "1 1 1"));
+      commands.push(rightText(padX + contentWidth - mmToPt(4), yBaselineFromTopMm(36, 7.5), 7.5, `Emissão: ${normalizeText(input.quote.issuedOn, "—", 15)}`, "0.83 0.83 0.85"));
+    } else {
+      // Compact Header for Page 2+ (top: 10mm, height: 16mm)
+      commands.push(fillRect(padX, yFromTopMm(10, 16), contentWidth, mmToPt(16), "0.09 0.09 0.11"));
+      commands.push(fillRect(padX, yFromTopMm(10, 16), mmToPt(3), mmToPt(16), "0.86 0.15 0.15"));
+      const compSummary = `${normalizeText(input.company.name, "Oficina")} · Cliente: ${normalizeText(input.quote.customerName, "Cliente", 35)}`;
+      commands.push(text(padX + mmToPt(6), yBaselineFromTopMm(20, 9), 9, compSummary, "1 1 1"));
+      commands.push(rightText(padX + contentWidth - mmToPt(4), yBaselineFromTopMm(20, 8.5), 8.5, `Orçamento #${input.quote.number} · Pág ${pageNumber}/${totalPages}`, "0.83 0.83 0.85"));
+    }
+
+    // 2. Customer & Vehicle Grid (Page 1 Only)
+    if (isFirstPage) {
+      const colWidth = mmToPt(93.5);
+      const col1X = padX;
+      const col2X = padX + mmToPt(96.5);
+      const gridTopMm = 48;
+      const gridHeightMm = 40;
+
+      // Col 1: Customer
+      commands.push(fillRect(col1X, yFromTopMm(gridTopMm, gridHeightMm), colWidth, mmToPt(gridHeightMm), "0.98 0.98 0.98"));
+      commands.push(strokeRect(col1X, yFromTopMm(gridTopMm, gridHeightMm), colWidth, mmToPt(gridHeightMm), "0.89 0.89 0.91"));
+      commands.push(fillRect(col1X, yFromTopMm(gridTopMm, gridHeightMm), mmToPt(2), mmToPt(gridHeightMm), "0.09 0.09 0.11"));
+      commands.push(text(col1X + mmToPt(4), yBaselineFromTopMm(54, 7), 7, "DADOS DO CLIENTE", "0.44 0.44 0.48"));
+      commands.push(text(col1X + mmToPt(4), yBaselineFromTopMm(61, 9.5), 9.5, normalizeText(input.quote.customerName, "Cliente", 38), "0.04 0.04 0.04"));
+      commands.push(text(col1X + mmToPt(4), yBaselineFromTopMm(68, 7.5), 7.5, `Telefone: ${normalizeText(input.quote.customerPhone, "—", 22)}`, "0.15 0.15 0.16"));
+      const addr = normalizeText(input.quote.customerAddress, "—", 36);
+      const num = input.quote.customerAddressNumber ? ` N° ${normalizeText(input.quote.customerAddressNumber, "", 8)}` : "";
+      commands.push(text(col1X + mmToPt(4), yBaselineFromTopMm(75, 7.5), 7.5, `Endereço: ${addr}${num}`, "0.25 0.25 0.27"));
+
+      // Col 2: Vehicle
+      commands.push(fillRect(col2X, yFromTopMm(gridTopMm, gridHeightMm), colWidth, mmToPt(gridHeightMm), "0.98 0.98 0.98"));
+      commands.push(strokeRect(col2X, yFromTopMm(gridTopMm, gridHeightMm), colWidth, mmToPt(gridHeightMm), "0.89 0.89 0.91"));
+      commands.push(fillRect(col2X, yFromTopMm(gridTopMm, gridHeightMm), mmToPt(2), mmToPt(gridHeightMm), "0.86 0.15 0.15"));
+      commands.push(text(col2X + mmToPt(4), yBaselineFromTopMm(54, 7), 7, "DADOS DO VEÍCULO / OBJETO", "0.86 0.15 0.15"));
+
+      if (meta?.plate) {
+        commands.push(fillRect(col2X + colWidth - mmToPt(26), yFromTopMm(50, 6), mmToPt(22), mmToPt(6), "0.09 0.09 0.11"));
+        commands.push(centerText(col2X + colWidth - mmToPt(15), yBaselineFromTopMm(54.2, 6.8), 6.8, normalizeText(meta.plate, "", 10), "1 1 1"));
+      }
+
+      commands.push(text(col2X + mmToPt(4), yBaselineFromTopMm(61, 9.5), 9.5, normalizeText(meta?.brandModel, "Veículo não especificado", 38), "0.04 0.04 0.04"));
+      const specs = [
+        meta?.year ? `Ano: ${meta.year}` : "",
+        meta?.color ? `Cor: ${meta.color}` : "",
+        meta?.km ? `${meta.km} km` : "",
+      ].filter(Boolean).join(" · ") || "—";
+      commands.push(text(col2X + mmToPt(4), yBaselineFromTopMm(68, 7.5), 7.5, specs, "0.15 0.15 0.16"));
+
+      const dates = `Entrada: ${normalizeText(meta?.entryDate || input.quote.issuedOn, "—", 12)} · Saída: ${normalizeText(meta?.exitDate, "—", 12)}`;
+      commands.push(text(col2X + mmToPt(4), yBaselineFromTopMm(75, 7.5), 7.5, dates, "0.25 0.25 0.27"));
+    }
+
+    // 3. Items Table
+    const tableTopMm = isFirstPage ? 92 : 30;
+    // Table Header (8mm)
+    commands.push(fillRect(padX, yFromTopMm(tableTopMm, 8), contentWidth, mmToPt(8), "0.09 0.09 0.11"));
+
+    const c0 = padX;
+    const c1 = c0 + mmToPt(10);
+    const c2 = c1 + mmToPt(78);
+    const c3 = c2 + mmToPt(16);
+    const c4 = c3 + mmToPt(22);
+    const c5 = c4 + mmToPt(32);
+    const c6 = c5 + mmToPt(32);
+
+    commands.push(centerText(c0 + mmToPt(5), yBaselineFromTopMm(tableTopMm + 5.5, 7), 7, "#", "1 1 1"));
+    commands.push(text(c1 + mmToPt(2), yBaselineFromTopMm(tableTopMm + 5.5, 7), 7, "DESCRIÇÃO DOS SERVIÇOS / PEÇAS", "1 1 1"));
+    commands.push(centerText(c2 + mmToPt(8), yBaselineFromTopMm(tableTopMm + 5.5, 7), 7, "QTD", "1 1 1"));
+    commands.push(centerText(c3 + mmToPt(11), yBaselineFromTopMm(tableTopMm + 5.5, 7), 7, "TIPO", "1 1 1"));
+    commands.push(rightText(c4 + mmToPt(30), yBaselineFromTopMm(tableTopMm + 5.5, 7), 7, "UNITÁRIO", "1 1 1"));
+    commands.push(rightText(c5 + mmToPt(30), yBaselineFromTopMm(tableTopMm + 5.5, 7), 7, "TOTAL", "1 1 1"));
+
+    let rowCursorMm = tableTopMm + 8;
+    pageData.items.forEach((item, idx) => {
+      const itemNumber = pageData.startIndex + idx + 1;
+      const descLines = wrapDescription(item.description || "Item", 38);
+      const rowH = rowHeightMm(descLines.length);
+
+      const rowBg = idx % 2 === 1 ? "0.96 0.96 0.96" : "1 1 1";
+      commands.push(fillRect(padX, yFromTopMm(rowCursorMm, rowH), contentWidth, mmToPt(rowH), rowBg));
+      commands.push(strokeLine(padX, yFromTopMm(rowCursorMm, rowH), padX + contentWidth, yFromTopMm(rowCursorMm, rowH), "0.91 0.91 0.93"));
+
+      commands.push(centerText(c0 + mmToPt(5), yBaselineFromTopMm(rowCursorMm + 5.5, 7.5), 7.5, String(itemNumber), "0.44 0.44 0.48"));
+
+      descLines.forEach((line, lIdx) => {
+        commands.push(text(c1 + mmToPt(2), yBaselineFromTopMm(rowCursorMm + 5.5 + lIdx * 4, 7.5), 7.5, line, "0.04 0.04 0.04"));
+      });
+
+      const qtyStr = `${formatQuantity(item.quantity)} ${normalizeText(item.unit, "un", 6)}`;
+      commands.push(centerText(c2 + mmToPt(8), yBaselineFromTopMm(rowCursorMm + 5.5, 7.5), 7.5, qtyStr, "0.15 0.15 0.16"));
+
+      const kind = itemKindLabel(item.unit);
+      const kindBg = kind === "Serviço" ? "0.88 0.95 1.00" : "0.93 0.93 0.95";
+      const kindColor = kind === "Serviço" ? "0.01 0.41 0.63" : "0.25 0.25 0.27";
+      commands.push(fillRect(c3 + mmToPt(2), yFromTopMm(rowCursorMm + 1.8, 4.8), mmToPt(18), mmToPt(4.8), kindBg));
+      commands.push(centerText(c3 + mmToPt(11), yBaselineFromTopMm(rowCursorMm + 5.2, 6.5), 6.5, kind, kindColor));
+
+      commands.push(rightText(c4 + mmToPt(30), yBaselineFromTopMm(rowCursorMm + 5.5, 7.5), 7.5, money(item.unitPriceCents), "0.15 0.15 0.16"));
+      commands.push(rightText(c5 + mmToPt(30), yBaselineFromTopMm(rowCursorMm + 5.5, 7.5), 7.5, money(item.lineTotalCents), "0.04 0.04 0.04"));
+
+      rowCursorMm += rowH;
+    });
+
+    // 4. Financial Footer & Signature Block (Last Page Only)
+    if (isLastPage) {
+      const totalsTop = totalsTopMm();
+      const leftColWidth = mmToPt(105);
+      const rightColX = padX + mmToPt(108);
+      const rightColWidth = mmToPt(82);
+
+      // Conditions Box (top: totalsTop, height: 20mm)
+      commands.push(fillRect(padX, yFromTopMm(totalsTop, 20), leftColWidth, mmToPt(20), "0.98 0.98 0.98"));
+      commands.push(strokeRect(padX, yFromTopMm(totalsTop, 20), leftColWidth, mmToPt(20), "0.89 0.89 0.91"));
+      commands.push(text(padX + mmToPt(3), yBaselineFromTopMm(totalsTop + 6, 7.5), 7.5, `Condições de Pagamento: ${normalizeText(input.quote.paymentTerms, "À vista / A combinar", 45)}`, "0.15 0.15 0.16"));
+      if (input.quote.notes) {
+        commands.push(text(padX + mmToPt(3), yBaselineFromTopMm(totalsTop + 13, 7), 7, `Obs: ${normalizeText(input.quote.notes, "", 50)}`, "0.32 0.32 0.36"));
+      }
+
+      // Authorization Box (top: totalsTop + 23mm, height: 39mm)
+      const authTop = totalsTop + 23;
+      commands.push(strokeRect(padX, yFromTopMm(authTop, 39), leftColWidth, mmToPt(39), "0.80 0.83 0.88"));
+      commands.push(text(padX + mmToPt(3), yBaselineFromTopMm(authTop + 6, 6.8), 6.8, "Autorizo a execução dos serviços e o fornecimento das peças descritas", "0.32 0.32 0.36"));
+      commands.push(text(padX + mmToPt(3), yBaselineFromTopMm(authTop + 11, 6.8), 6.8, "neste orçamento, de acordo com as condições acima estipuladas.", "0.32 0.32 0.36"));
+
+      commands.push(strokeLine(padX + mmToPt(5), yFromTopMm(authTop + 30, 0), padX + mmToPt(65), yFromTopMm(authTop + 30, 0), "0.09 0.09 0.11"));
+      commands.push(centerText(padX + mmToPt(35), yBaselineFromTopMm(authTop + 34, 7), 7, "Assinatura do Cliente", "0.04 0.04 0.04"));
+      commands.push(strokeLine(padX + mmToPt(72), yFromTopMm(authTop + 30, 0), padX + mmToPt(100), yFromTopMm(authTop + 30, 0), "0.09 0.09 0.11"));
+      commands.push(centerText(padX + mmToPt(86), yBaselineFromTopMm(authTop + 34, 7), 7, "Data: ___/___/____", "0.32 0.32 0.36"));
+
+      // Right Column: Totals (height: 62mm)
+      commands.push(fillRect(rightColX, yFromTopMm(totalsTop, 62), rightColWidth, mmToPt(62), "0.98 0.98 0.98"));
+      commands.push(strokeRect(rightColX, yFromTopMm(totalsTop, 62), rightColWidth, mmToPt(62), "0.89 0.89 0.91"));
+
+      commands.push(text(rightColX + mmToPt(4), yBaselineFromTopMm(totalsTop + 8, 7.5), 7.5, "Total Peças / Materiais:", "0.32 0.32 0.36"));
+      commands.push(rightText(rightColX + rightColWidth - mmToPt(4), yBaselineFromTopMm(totalsTop + 8, 7.5), 7.5, money(input.quote.subtotalCents), "0.04 0.04 0.04"));
+
+      commands.push(text(rightColX + mmToPt(4), yBaselineFromTopMm(totalsTop + 16, 7.5), 7.5, "Total Mão de Obra:", "0.32 0.32 0.36"));
+      commands.push(rightText(rightColX + rightColWidth - mmToPt(4), yBaselineFromTopMm(totalsTop + 16, 7.5), 7.5, money(input.quote.chargesCents), "0.04 0.04 0.04"));
+
+      commands.push(text(rightColX + mmToPt(4), yBaselineFromTopMm(totalsTop + 24, 7.5), 7.5, "Serviços Terceiros / Frete:", "0.32 0.32 0.36"));
+      commands.push(rightText(rightColX + rightColWidth - mmToPt(4), yBaselineFromTopMm(totalsTop + 24, 7.5), 7.5, money(input.quote.freightCents), "0.04 0.04 0.04"));
+
+      if (input.quote.discountCents > 0) {
+        commands.push(text(rightColX + mmToPt(4), yBaselineFromTopMm(totalsTop + 32, 7.5), 7.5, "Desconto Aplicado:", "0.09 0.64 0.29"));
+        commands.push(rightText(rightColX + rightColWidth - mmToPt(4), yBaselineFromTopMm(totalsTop + 32, 7.5), 7.5, `-${money(input.quote.discountCents)}`, "0.09 0.64 0.29"));
+      }
+
+      // Red TOTAL GERAL Bar
+      const redBarTop = totalsTop + 50;
+      commands.push(fillRect(rightColX, yFromTopMm(redBarTop, 12), rightColWidth, mmToPt(12), "0.86 0.15 0.15"));
+      commands.push(text(rightColX + mmToPt(4), yBaselineFromTopMm(redBarTop + 7.5, 9), 9, "TOTAL GERAL", "1 1 1"));
+      commands.push(rightText(rightColX + rightColWidth - mmToPt(4), yBaselineFromTopMm(redBarTop + 8, 13), 13, money(input.quote.totalCents), "1 1 1"));
+    }
+
+    // 5. Discreet Footer (Every Page)
+    commands.push(strokeLine(padX, yFromTopMm(288, 0), padX + contentWidth, yFromTopMm(288, 0), "0.91 0.91 0.93"));
+    commands.push(text(padX, yBaselineFromTopMm(293, 7), 7, "Obrigado pela preferência! • Documento emitido via MegaDesk", "0.63 0.63 0.67"));
+    commands.push(rightText(padX + contentWidth, yBaselineFromTopMm(293, 7), 7, `Página ${pageNumber} de ${totalPages}`, "0.63 0.63 0.67"));
+
+    return commands.join("\n");
+  });
+}
+
 /** Produces a self-contained, immutable PDF snapshot without fetching external assets. */
 export function renderQuotePdf(input: QuotePdfInput): Buffer {
   assertInput(input);
+
+  if (isAutomotiveQuote(input)) {
+    const pages = automotiveQuotePages(input);
+    return buildPdf(pages, null);
+  }
+
   const isLetterhead = Boolean(input.template?.hasBackground && input.template?.backgroundBytes);
   const groups: QuotePdfItem[][] = [];
   if (input.quote.items.length <= 9) {
