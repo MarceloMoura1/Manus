@@ -128,7 +128,13 @@ export class QuotePdfService {
 
     const rawCustomName = (quote as any).documentCustomName?.trim();
     const sanitizedCustom = rawCustomName
-      ? rawCustomName.replace(/\.pdf$/i, "").replace(/[^\w\s\-\.]/gi, "_").trim()
+      ? rawCustomName
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/\.pdf$/i, "")
+          .replace(/[^\w\s\-\.]/gi, "_")
+          .replace(/\s+/g, " ")
+          .trim()
       : null;
     const fileName = sanitizedCustom
       ? `${sanitizedCustom}.pdf`

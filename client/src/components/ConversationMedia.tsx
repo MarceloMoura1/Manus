@@ -64,13 +64,34 @@ export function ConversationMedia({ conversationId, message, fallback }: Props) 
   }
   if (message.type === "audio") return <audio controls preload="metadata" src={url} className="max-w-full" />;
   if (message.type === "video") return <video controls preload="metadata" src={url} className="max-h-80 rounded-xl" />;
+  const openDocument = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    if (!url) return;
+    if (url.startsWith("data:")) {
+      // Browsers block top-level navigation to data: URLs; convert to a blob URL first.
+      const popup = window.open("", "_blank");
+      void fetch(url)
+        .then(response => response.blob())
+        .then(blob => {
+          const blobUrl = URL.createObjectURL(blob);
+          if (popup) popup.location.href = blobUrl;
+          else window.open(blobUrl, "_blank");
+          window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+        })
+        .catch(() => popup?.close());
+      return;
+    }
+    // Same-origin URLs (e.g. /api/erp/sales/:id/pdf) carry the session cookie automatically.
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
   return (
     <a
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      download={message.fileName || "documento.pdf"}
-      className="inline-flex items-center gap-2 rounded-lg bg-black/10 dark:bg-white/10 px-3 py-2 text-sm font-semibold underline decoration-current/40 hover:bg-black/20 dark:hover:bg-white/20 hover:decoration-current transition"
+      onClick={openDocument}
+      className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-black/10 dark:bg-white/10 px-3 py-2 text-sm font-semibold underline decoration-current/40 hover:bg-black/20 dark:hover:bg-white/20 hover:decoration-current transition"
     >
       <FileText className="w-4 h-4 flex-shrink-0" />
       <span className="truncate max-w-[220px]">{message.fileName || "Baixar documento"}</span>
