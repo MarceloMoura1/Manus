@@ -53,7 +53,9 @@ export function CRMWorkspace({
   onNavigate,
   canAccessClients,
   initialCrmClientId,
+  initialSalePublicId,
   onClientNavigate,
+  onNavigateToSale,
   whatsappConnected,
   canStartConversation,
   canPermanentlyDeleteClients,
@@ -62,7 +64,9 @@ export function CRMWorkspace({
   onNavigate: (section: CrmSection) => void;
   canAccessClients: boolean;
   initialCrmClientId?: string;
+  initialSalePublicId?: string;
   onClientNavigate: (intent: CrmWhatsAppIntent) => void;
+  onNavigateToSale?: (salePublicId?: string) => void;
   whatsappConnected: boolean;
   canStartConversation: boolean;
   canPermanentlyDeleteClients: boolean;
@@ -137,6 +141,8 @@ export function CRMWorkspace({
           onClientNavigate={onClientNavigate}
           whatsappConnected={whatsappConnected}
           canStartConversation={canStartConversation}
+          initialSelectedId={initialSalePublicId}
+          onSaleNavigate={onNavigateToSale}
         />
       );
       break;

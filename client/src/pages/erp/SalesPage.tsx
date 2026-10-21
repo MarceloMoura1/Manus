@@ -217,18 +217,32 @@ function currentMonth() {
 
 const month = currentMonth();
 
+export interface SalesPageProps {
+  initialSelectedId?: string;
+  onSaleNavigate?: (salePublicId?: string) => void;
+  onClientNavigate?: (crmClientId: string) => void;
+  mode?: "all" | "sales" | "quotes";
+  title?: string;
+  eyebrow?: string;
+  description?: string;
+  onNavigateToProposals?: () => void;
+}
+
 export function SalesPage({
   initialSelectedId,
   onSaleNavigate,
   onClientNavigate,
-}: {
-  initialSelectedId?: string;
-  onSaleNavigate?: (salePublicId?: string) => void;
-  onClientNavigate?: (crmClientId: string) => void;
-} = {}) {
+  mode = "sales",
+  title,
+  eyebrow,
+  description,
+  onNavigateToProposals,
+}: SalesPageProps = {}) {
   const utils = trpc.useUtils();
   const [search, setSearch] = React.useState("");
-  const [kind, setKind] = React.useState<"all" | "quotes" | "orders">("orders");
+  const [kind, setKind] = React.useState<"all" | "quotes" | "orders">(
+    mode === "quotes" ? "quotes" : "orders"
+  );
   const [stage, setStage] = React.useState<"all" | Stage>("all");
   const [commercialStatus, setCommercialStatus] = React.useState<"all" | "draft" | "negotiation" | "approved" | "converted" | "lost">("all");
   const [paymentStatus, setPaymentStatus] = React.useState<
@@ -570,7 +584,7 @@ export function SalesPage({
   }) + (commercialStatus === "all" ? 0 : 1) + (includeArchived ? 1 : 0);
   const entityLabel = kind === "quotes" ? "orçamento" : kind === "orders" ? "venda" : "documento";
   const entityLabelPlural = kind === "quotes" ? "orçamentos" : kind === "orders" ? "vendas" : "documentos";
-  const emptyStateTitle = kind === "orders" ? "Nenhuma venda encontrada neste período." : `Nenhum ${entityLabel} encontrado neste período.`;
+  const emptyStateTitle = mode === "quotes" ? "Nenhuma proposta comercial encontrada neste período." : kind === "orders" ? "Nenhuma venda encontrada neste período." : `Nenhum ${entityLabel} encontrado neste período.`;
   const periodFilterLabel = salesFilterPeriodLabel(from, to, month.from, month.to);
   const selectedSellerName = options.data?.sellers.find(seller => seller.publicId === sellerUserId)?.name ?? "Todos";
   const setSort = (key: SalesSortKey) => {
@@ -584,33 +598,63 @@ export function SalesPage({
       data-testid="erp-sales-page"
     >
       <div className={selectedId ? "hidden" : "contents"} aria-hidden={selectedId ? true : undefined}>
-      <ErpPageHeader
-        title="Vendas"
-        eyebrow="Comercial"
-        description="Gerencie pedidos e acompanhe suas vendas."
-        actions={
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
-            <Button type="button" variant="outline" className="min-h-10 flex-1 border-blue-500 text-blue-700 sm:flex-none" disabled={!list.data?.items.length} onClick={exportCurrentPage} title="Exportar a página atual em CSV"><Share2 className="mr-2 h-4 w-4" />Exportar</Button>
-          {canWrite && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button className="min-h-10 w-full flex-1 bg-blue-600 px-5 text-white shadow-sm hover:bg-blue-700 sm:w-auto sm:flex-none">
-                  <Plus className="mr-2 h-4 w-4" /> Novo Pedido <ChevronDown className="ml-2 h-4 w-4" />
+      {mode === "quotes" ? (
+        <ErpPageHeader
+          title={title ?? "Propostas Comerciais"}
+          eyebrow={eyebrow ?? "CRM Comercial"}
+          description={description ?? "Elabore orçamentos com catálogo de produtos, gerencie status comercial e converta em pedidos de venda."}
+          actions={
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+              <Button type="button" variant="outline" className="min-h-10 flex-1 border-blue-500 text-blue-700 sm:flex-none" disabled={!list.data?.items.length} onClick={exportCurrentPage} title="Exportar a página atual em CSV"><Share2 className="mr-2 h-4 w-4" />Exportar</Button>
+              {canWrite && (
+                <Button
+                  className="min-h-10 w-full flex-1 bg-indigo-600 px-5 text-white shadow-sm hover:bg-indigo-700 sm:w-auto sm:flex-none"
+                  onClick={() => startDocument("quote")}
+                >
+                  <Plus className="mr-2 h-4 w-4" /> Nova Proposta
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="z-[80] min-w-56 border-slate-200 bg-white shadow-xl">
-                <DropdownMenuItem className="cursor-pointer transition-colors hover:bg-blue-50 focus:bg-blue-50 focus:text-blue-800" onSelect={() => startDocument("sale")}>
-                  <ShoppingCart /> Nova venda/Pedido
-                </DropdownMenuItem>
-                <DropdownMenuItem className="cursor-pointer transition-colors hover:bg-violet-50 focus:bg-violet-50 focus:text-violet-800" onSelect={() => startDocument("quote")}>
-                  <FileClock /> Novo orçamento
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-          </div>
-        }
-      />
+              )}
+            </div>
+          }
+        />
+      ) : (
+        <ErpPageHeader
+          title="Vendas"
+          eyebrow="Comercial"
+          description="Gerencie pedidos e acompanhe suas vendas."
+          actions={
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+              <Button type="button" variant="outline" className="min-h-10 flex-1 border-blue-500 text-blue-700 sm:flex-none" disabled={!list.data?.items.length} onClick={exportCurrentPage} title="Exportar a página atual em CSV"><Share2 className="mr-2 h-4 w-4" />Exportar</Button>
+            {canWrite && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button className="min-h-10 w-full flex-1 bg-blue-600 px-5 text-white shadow-sm hover:bg-blue-700 sm:w-auto sm:flex-none">
+                    <Plus className="mr-2 h-4 w-4" /> Novo Pedido <ChevronDown className="ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="z-[80] min-w-56 border-slate-200 bg-white shadow-xl">
+                  <DropdownMenuItem className="cursor-pointer transition-colors hover:bg-blue-50 focus:bg-blue-50 focus:text-blue-800" onSelect={() => startDocument("sale")}>
+                    <ShoppingCart /> Nova venda/Pedido
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="cursor-pointer transition-colors hover:bg-violet-50 focus:bg-violet-50 focus:text-violet-800"
+                    onSelect={() => {
+                      if (onNavigateToProposals) {
+                        onNavigateToProposals();
+                      } else {
+                        startDocument("quote");
+                      }
+                    }}
+                  >
+                    <FileClock /> Novo orçamento
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            </div>
+          }
+        />
+      )}
 
       {(message || pendingError || localError) && (
         <div
@@ -636,11 +680,48 @@ export function SalesPage({
 
       <div className="min-w-0">
         <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_12px_28px_-26px_rgba(15,23,42,0.55)]" aria-label="Lista comercial">
-          <nav className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 py-2 [scrollbar-width:thin] sm:px-3" aria-label="Tipos de venda">
-            {([ ["orders", "Vendas"], ["quotes", "Orçamentos"], ["all", "Todos"] ] as const).map(([value, label]) => (
-              <button key={value} type="button" aria-current={kind === value ? "page" : undefined} className={cn("shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-xs font-semibold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 motion-reduce:transition-none sm:text-sm", kind === value ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:bg-white/70 hover:text-slate-800")} onClick={() => { setKind(value); setStage("all"); setCommercialStatus("all"); setPage(1); }}>{label}</button>
-            ))}
-          </nav>
+          {mode === "quotes" ? (
+            <nav className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 py-2 [scrollbar-width:thin] sm:px-3" aria-label="Status das propostas">
+              {([
+                ["all", "Todas as Propostas"],
+                ["draft", "Rascunhos"],
+                ["negotiation", "Em Negociação"],
+                ["approved", "Aprovadas"],
+                ["converted", "Convertidas em Venda"],
+                ["lost", "Perdidas / Recusadas"],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-current={commercialStatus === value ? "page" : undefined}
+                  className={cn(
+                    "shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-xs font-semibold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500 motion-reduce:transition-none sm:text-sm",
+                    commercialStatus === value
+                      ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200"
+                      : "text-slate-500 hover:bg-white/70 hover:text-slate-800"
+                  )}
+                  onClick={() => {
+                    setCommercialStatus(value as typeof commercialStatus);
+                    setPage(1);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </nav>
+          ) : (
+            <nav className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 py-2 [scrollbar-width:thin] sm:px-3" aria-label="Tipos de venda">
+              {([ ["orders", "Vendas"], ["quotes", "Orçamentos"], ["all", "Todos"] ] as const).map(([value, label]) => (
+                <button key={value} type="button" aria-current={kind === value ? "page" : undefined} className={cn("shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-xs font-semibold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 motion-reduce:transition-none sm:text-sm", kind === value ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:bg-white/70 hover:text-slate-800")} onClick={() => {
+                  if (value === "quotes" && onNavigateToProposals) {
+                    onNavigateToProposals();
+                    return;
+                  }
+                  setKind(value); setStage("all"); setCommercialStatus("all"); setPage(1);
+                }}>{label}</button>
+              ))}
+            </nav>
+          )}
           <div className="border-b border-slate-100 bg-white px-3 py-3 sm:px-5" data-testid="sales-filters">
             <div className="grid grid-cols-1 gap-2.5 rounded-xl border border-slate-200 bg-white p-2.5 sm:grid-cols-2 lg:grid-cols-12" data-testid="sales-filter-toolbar">
               <label className="relative min-w-0 sm:col-span-2 lg:col-span-4">
@@ -873,7 +954,7 @@ export function SalesPage({
       {selectedId && (
         <section className="min-w-0 space-y-4" aria-label="Detalhe da venda" data-testid="sales-detail-screen">
           <Button type="button" variant="ghost" className="-ml-2 text-slate-700" onClick={closeSale}>
-            <ArrowLeft className="mr-2 h-4 w-4" /> Voltar para vendas
+            <ArrowLeft className="mr-2 h-4 w-4" /> {mode === "quotes" ? "Voltar para propostas" : "Voltar para vendas"}
           </Button>
           <SaleDetailPanel
           query={detail}
