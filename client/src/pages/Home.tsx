@@ -12,6 +12,9 @@ import { SettingsPage as SettingsPageComponent } from "./SettingsPage";
 import { AdminSettingsPage } from "./AdminSettingsPage";
 import { BotConfigPage } from "./BotConfigPage";
 import { ERPWorkspace, getErpTopbarItems, type ErpSection } from "./erp/ERPWorkspace";
+import { CRMWorkspace, getCrmTopbarItems, type CrmSection } from "./crm/CRMWorkspace";
+import { Users } from "lucide-react";
+import { buildSalesPath, readSalesRoute } from "./erp/sales-navigation";
 import { NotificationsModernPage } from "./NotificationsModernPage";
 import type { CrmWhatsAppIntent } from "../../../shared/crm";
 import { normalizeContactPhone } from "../../../shared/contact-phone";
@@ -177,6 +180,13 @@ type MegaDeskSession = {
   refreshedAt?: number; // timestamp em ms da última renovação
 };
 
+export function canAccessCrmClients(session: MegaDeskSession): boolean {
+  if (session.permissions.includes("crm")) {
+    return true;
+  }
+  return canAccessErpClients(session);
+}
+
 function canAccessErpClients(session: MegaDeskSession): boolean {
   return (session.userRole === "admin" || session.userRole === "manager")
     && session.permissions.some(permission => permission === "clients" || permission === "erp");
@@ -188,7 +198,7 @@ const SESSION_DURATION_LONG = 30 * 24 * 60 * 60 * 1000; // 30 dias ("lembrar meu
 const REFRESH_THRESHOLD = 5 * 60 * 1000; // Renovar 5 minutos antes de expirar
 const REFRESH_INTERVAL = 10 * 60 * 1000; // Verificar renovação a cada 10 minutos
 
-export type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-clients" | "erp-products" | "erp-stock" | "erp-suppliers" | "erp-purchases" | "erp-sales" | "erp-finance" | "erp-fiscal" | "erp-reports" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "whatsapp-config" | "admin-settings";
+export type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-clients" | "erp-products" | "erp-services" | "erp-stock" | "erp-suppliers" | "erp-purchases" | "erp-sales" | "erp-finance" | "erp-fiscal" | "erp-reports" | "crm-summary" | "crm-pipeline" | "crm-leads" | "crm-clients" | "crm-activities" | "crm-proposals" | "crm-automations" | "crm-reports" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "whatsapp-config" | "admin-settings";
 
 export function getShellWorkspaceLayout(active: RouteId) {
   if (active === "conversations") {
@@ -234,7 +244,7 @@ export function ShellTopbarBoundary({ active, mode, children }: ShellTopbarBound
   if (active === "tickets" || mode === "none") return null;
 
   return (
-    <div className={mode === "mobile-only" ? "lg:hidden" : undefined} data-testid="module-topbar-shell">
+    <div className={`w-full ${mode === "mobile-only" ? "lg:hidden" : ""}`} data-testid="module-topbar-shell">
       {children}
     </div>
   );
@@ -1548,7 +1558,7 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                   if (msg.kind === 'activity') {
                     return <ConversationActivityEvent key={msg.id ?? `activity-${idx}`} event={msg} />;
                   }
-                  const isAgent = msg.sender === 'agent' || msg.from === 'agent';
+                  const isAgent = msg.sender === 'agent' || msg.from === 'agent' || msg.direction === 'outbound' || msg.sender === 'operator' || msg.from === 'operator';
                   const msgText = msg.text || msg.message || '';
                   const msgTime = formatConversationTime(msg.timestamp);
                   const msgType = msg.type || 'text';
@@ -1582,7 +1592,10 @@ export function ConversationsPage({ attendanceLaunch, attendancePhone, onAttenda
                     }
                     if (msgType === 'document') {
                       return (
-                        <ConversationMedia conversationId={selectedConv.id} message={msg} fallback={<div className="flex items-center gap-2"><FileText className="w-4 h-4 flex-shrink-0" /><span className="text-sm">Documento indisponível</span></div>} />
+                        <div className="space-y-2">
+                          <ConversationMedia conversationId={selectedConv.id} message={msg} fallback={<div className="flex items-center gap-2"><FileText className="w-4 h-4 flex-shrink-0" /><span className="text-sm">Documento indisponível</span></div>} />
+                          {msgText && !/^\[documento\]$/i.test(msgText) && <p className="whitespace-pre-wrap break-words text-sm">{msgText}</p>}
+                        </div>
                       );
                     }
                     if (msgType === 'sticker') {
@@ -4069,20 +4082,33 @@ function NotificationsPage() {
 function Shell() {
   const { theme, toggleTheme } = useTheme();
   const [active, setActive] = useState<RouteId>(() => {
-    if (window.location.pathname === "/clientes") {
-      window.history.replaceState(null, "", `/erp/clientes${window.location.search}${window.location.hash}`);
-      return "erp-clients";
+    if (window.location.pathname === "/clientes" || window.location.pathname === "/erp/clientes") {
+      // Legacy redirect: `/erp/clientes${window.location.search}${window.location.hash}`
+      window.history.replaceState(null, "", `/crm/clientes${window.location.search}${window.location.hash}`);
+      return "crm-clients";
     }
-    if (window.location.pathname === "/erp/clientes") return "erp-clients";
+    if (window.location.pathname === "/erp/orcamentos") {
+      window.history.replaceState(null, "", `/crm/propostas${window.location.search}${window.location.hash}`);
+      return "crm-proposals";
+    }
     if (window.location.pathname === "/erp/produtos") return "erp-products";
+    if (window.location.pathname === "/erp/servicos") return "erp-services";
     if (window.location.pathname === "/erp/estoque") return "erp-stock";
     if (window.location.pathname === "/erp/fornecedores") return "erp-suppliers";
     if (window.location.pathname === "/erp/compras") return "erp-purchases";
-    if (window.location.pathname === "/erp/vendas") return "erp-sales";
+    if (readSalesRoute(window.location.pathname).matches) return "erp-sales";
     if (window.location.pathname === "/erp/financeiro") return "erp-finance";
     if (window.location.pathname === "/erp/fiscal") return "erp-fiscal";
     if (window.location.pathname === "/erp/relatorios") return "erp-reports";
     if (window.location.pathname === "/erp") return "erp-summary";
+    if (window.location.pathname === "/crm/clientes") return "crm-clients";
+    if (window.location.pathname === "/crm/funil") return "crm-pipeline";
+    if (window.location.pathname === "/crm/leads") return "crm-leads";
+    if (window.location.pathname === "/crm/atividades") return "crm-activities";
+    if (window.location.pathname === "/crm/propostas" || (window.location.pathname === "/crm" && new URLSearchParams(window.location.search).get("tab") === "proposals")) return "crm-proposals";
+    if (window.location.pathname === "/crm/automacoes") return "crm-automations";
+    if (window.location.pathname === "/crm/relatorios") return "crm-reports";
+    if (window.location.pathname === "/crm") return "crm-summary";
     const stored = localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY);
     return stored === "active-attendance" ? "conversations" : (stored as RouteId) || "home";
   });
@@ -4094,6 +4120,12 @@ function Shell() {
   const mainContentRef = React.useRef<HTMLElement>(null);
   const [indicadores, setIndicadores] = useState<any>(null);
   const [activeCrmClientId, setActiveCrmClientId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("crmClientId"));
+  const [activeSalePublicId, setActiveSalePublicId] = useState<string | null>(() => {
+    const route = readSalesRoute(window.location.pathname);
+    const tabParam = new URLSearchParams(window.location.search).get("tab");
+    const isCrmProposals = window.location.pathname === "/crm/propostas" || (window.location.pathname === "/crm" && tabParam === "proposals");
+    return route.salePublicId ?? (isCrmProposals ? new URLSearchParams(window.location.search).get("salePublicId") : null);
+  });
   const [attendanceIntent, setAttendanceIntent] = useState(() => {
     const restoreLegacyAttendance = localStorage.getItem(MEGADESK_ACTIVE_PAGE_KEY) === "active-attendance";
     return createAttendanceLaunchIntent(
@@ -4105,20 +4137,26 @@ function Shell() {
     setSidebarOpen(false);
     if (restoreFocus) window.setTimeout(() => sidebarTriggerRef.current?.focus(), 0);
   }, []);
-  const navigateToRoute = React.useCallback((route: RouteId, options?: { replace?: boolean; crmClientId?: string }) => {
+  const navigateToRoute = React.useCallback((route: RouteId, options?: { replace?: boolean; crmClientId?: string; salePublicId?: string }) => {
     const isLegacyAttendanceRoute = route === "active-attendance";
-    const targetRoute: RouteId = isLegacyAttendanceRoute ? "conversations" : route;
+    const isLegacyClientsRoute = route === "erp-clients";
+    const targetRoute: RouteId = isLegacyAttendanceRoute ? "conversations" : isLegacyClientsRoute ? "crm-clients" : route;
     if (isLegacyAttendanceRoute) setAttendanceIntent(current => queueAttendanceLaunchIntent(current));
-    const path = targetRoute === "erp-clients"
-      ? `/erp/clientes${options?.crmClientId ? `?crmClientId=${encodeURIComponent(options.crmClientId)}` : ""}`
+    const path = targetRoute === "crm-clients"
+      ? `/crm/clientes${options?.crmClientId ? `?crmClientId=${encodeURIComponent(options.crmClientId)}` : ""}`
       : targetRoute === "erp-products"
         ? "/erp/produtos"
+        : targetRoute === "erp-services"
+          ? "/erp/servicos"
         : targetRoute === "erp-stock"
           ? "/erp/estoque"
           : targetRoute === "erp-suppliers"
               ? "/erp/fornecedores"
             : targetRoute === "erp-sales"
-              ? "/erp/vendas"
+              ? buildSalesPath(
+                  options?.salePublicId,
+                  readSalesRoute(window.location.pathname).matches ? window.location.search : ""
+                )
             : targetRoute === "erp-finance"
               ? "/erp/financeiro"
             : targetRoute === "erp-fiscal"
@@ -4129,9 +4167,24 @@ function Shell() {
               ? "/erp/compras"
             : targetRoute === "erp-summary"
               ? "/erp"
+            : targetRoute === "crm-pipeline"
+              ? "/crm/funil"
+            : targetRoute === "crm-leads"
+              ? "/crm/leads"
+            : targetRoute === "crm-activities"
+              ? "/crm/atividades"
+            : targetRoute === "crm-proposals"
+              ? `/crm/propostas${options?.salePublicId ? `?salePublicId=${encodeURIComponent(options.salePublicId)}` : ""}`
+            : targetRoute === "crm-automations"
+              ? "/crm/automacoes"
+            : targetRoute === "crm-reports"
+              ? "/crm/relatorios"
+            : targetRoute === "crm-summary"
+              ? "/crm"
               : "/";
     window.history[options?.replace ? "replaceState" : "pushState"](null, "", path);
-    setActiveCrmClientId(targetRoute === "erp-clients" ? options?.crmClientId ?? null : null);
+    setActiveCrmClientId(targetRoute === "crm-clients" ? options?.crmClientId ?? null : null);
+    setActiveSalePublicId(targetRoute === "erp-sales" || targetRoute === "crm-proposals" ? options?.salePublicId ?? null : null);
     setActive(targetRoute);
     if (window.innerWidth < 1024) {
       setSidebarOpen(false);
@@ -4182,12 +4235,19 @@ function Shell() {
   useEffect(() => {
     const restoreFromHistory = (event: PopStateEvent) => {
       let path = window.location.pathname;
-      if (path === "/clientes") {
-        window.history.replaceState(null, "", `/erp/clientes${window.location.search}${window.location.hash}`);
-        path = "/erp/clientes";
+      if (path === "/clientes" || path === "/erp/clientes") {
+        // Legacy redirect: `/erp/clientes${window.location.search}${window.location.hash}`
+        window.history.replaceState(null, "", `/crm/clientes${window.location.search}${window.location.hash}`);
+        path = "/crm/clientes";
       }
-      setActiveCrmClientId(path === "/erp/clientes" ? new URLSearchParams(window.location.search).get("crmClientId") : null);
-        setActive(path === "/erp/clientes" ? "erp-clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp/compras" ? "erp-purchases" : path === "/erp/vendas" ? "erp-sales" : path === "/erp/financeiro" ? "erp-finance" : path === "/erp/fiscal" ? "erp-fiscal" : path === "/erp/relatorios" ? "erp-reports" : path === "/erp" ? "erp-summary" : event.state?.megadeskRoute === "conversations" ? "conversations" : "home");
+      if (path === "/erp/orcamentos") {
+        window.history.replaceState(null, "", `/crm/propostas${window.location.search}${window.location.hash}`);
+        path = "/crm/propostas";
+      }
+      setActiveCrmClientId(path === "/erp/clientes" || path === "/crm/clientes" ? new URLSearchParams(window.location.search).get("crmClientId") : null);
+      const salesRoute = readSalesRoute(path);
+      setActiveSalePublicId(salesRoute.matches ? salesRoute.salePublicId : null);
+        setActive(path === "/erp/clientes" ? "erp-clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/servicos" ? "erp-services" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp/compras" ? "erp-purchases" : salesRoute.matches ? "erp-sales" : path === "/erp/financeiro" ? "erp-finance" : path === "/erp/fiscal" ? "erp-fiscal" : path === "/erp/relatorios" ? "erp-reports" : path === "/erp" ? "erp-summary" : path === "/crm/clientes" ? "crm-clients" : path === "/crm/funil" ? "crm-pipeline" : path === "/crm/leads" ? "crm-leads" : path === "/crm/atividades" ? "crm-activities" : path === "/crm/propostas" ? "crm-proposals" : path === "/crm/automacoes" ? "crm-automations" : path === "/crm/relatorios" ? "crm-reports" : path === "/crm" ? "crm-summary" : event.state?.megadeskRoute === "conversations" ? "conversations" : "home");
       window.setTimeout(() => mainContentRef.current?.focus(), 0);
     };
     window.addEventListener("popstate", restoreFromHistory);
@@ -4197,6 +4257,18 @@ function Shell() {
   useEffect(() => {
     if (session && active === "erp-clients" && !canAccessErpClients(session)) {
       navigateToRoute("erp-summary", { replace: true });
+    }
+  }, [active, navigateToRoute, session]);
+
+  useEffect(() => {
+    if (session && active.startsWith("crm-") && !session.permissions.includes("crm")) {
+      navigateToRoute("home", { replace: true });
+    }
+  }, [active, navigateToRoute, session]);
+
+  useEffect(() => {
+    if (session && active === "crm-clients" && !canAccessCrmClients(session)) {
+      navigateToRoute("crm-summary", { replace: true });
     }
   }, [active, navigateToRoute, session]);
 
@@ -4250,6 +4322,7 @@ function Shell() {
     { id: "conversations" as RouteId, label: "Atendimento", icon: MessageCircle },
     { id: "tickets" as RouteId, label: "Chamados", icon: ClipboardList },
     { id: "tracking" as RouteId, label: "Rastreamento", icon: MapPin },
+    { id: "crm-summary" as RouteId, label: "CRM", icon: Users },
     { id: "erp-summary" as RouteId, label: "ERP", icon: PackageSearch },
     { id: "whatsapp-config" as RouteId, label: "WhatsApp", icon: Smartphone },
     { id: "settings" as RouteId, label: "Configurações", icon: Cog },
@@ -4267,6 +4340,7 @@ function Shell() {
     // Itens sempre visíveis
     if (alwaysVisibleItems.includes(item.id)) return true;
     // Itens que dependem de permissões: active-attendance, conversations, tickets, tracking, erp, bot-config, ai-assistant
+    if (item.id.startsWith("crm-")) return session.permissions.includes("crm");
     return item.id.startsWith("erp-") ? session.permissions.includes("erp") : session.permissions.includes(item.id);
   });
 
@@ -4274,15 +4348,23 @@ function Shell() {
   const mainNavItems = filteredNavItems.filter(item => !["settings", "admin-settings", "bot-config", "ai-assistant", "help", "notifications"].includes(item.id));
   const settingsNavItems = filteredNavItems.filter(item => ["settings", "admin-settings", "bot-config", "ai-assistant", "help", "notifications", "whatsapp-config"].includes(item.id));
   const canAccessClients = canAccessErpClients(session);
-  const erpSection = (active === "erp-clients" ? "clients" : active === "erp-products" ? "products" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : active === "erp-purchases" ? "purchases" : active === "erp-sales" ? "sales" : active === "erp-finance" ? "finance" : active === "erp-fiscal" ? "fiscal" : active === "erp-reports" ? "reports" : "summary") as ErpSection;
-  const navigateToErpSection = (section: ErpSection) => navigateToRoute(section === "clients" ? "erp-clients" : section === "products" ? "erp-products" : section === "stock" ? "erp-stock" : section === "suppliers" ? "erp-suppliers" : section === "purchases" ? "erp-purchases" : section === "sales" ? "erp-sales" : section === "finance" ? "erp-finance" : section === "fiscal" ? "erp-fiscal" : section === "reports" ? "erp-reports" : "erp-summary");
+  const canAccessSales = session.permissions.includes("erp");
+  const erpSection = (active === "erp-clients" ? "clients" : active === "erp-products" ? "products" : active === "erp-services" ? "services" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : active === "erp-purchases" ? "purchases" : active === "erp-sales" ? "sales" : active === "erp-finance" ? "finance" : active === "erp-fiscal" ? "fiscal" : active === "erp-reports" ? "reports" : "summary") as ErpSection;
+  const navigateToErpSection = (section: ErpSection) => navigateToRoute(section === "clients" ? "erp-clients" : section === "products" ? "erp-products" : section === "services" ? "erp-services" : section === "stock" ? "erp-stock" : section === "suppliers" ? "erp-suppliers" : section === "purchases" ? "erp-purchases" : section === "sales" ? "erp-sales" : section === "finance" ? "erp-finance" : section === "fiscal" ? "erp-fiscal" : section === "reports" ? "erp-reports" : "erp-summary");
   const erpTopbarItems = getErpTopbarItems({
-    canAccessClients,
+    canAccessClients: false,
+    canAccessSales,
     canAccessFinance: session.userRole !== "agent",
     canAccessFiscal: session.userRole !== "agent",
     canAccessReports: session.userRole !== "agent",
     onNavigate: navigateToErpSection,
   });
+    const crmSection = (active === "crm-pipeline" ? "pipeline" : active === "crm-leads" ? "leads" : active === "crm-clients" ? "clients" : active === "crm-activities" ? "activities" : active === "crm-proposals" ? "proposals" : active === "crm-automations" ? "automations" : active === "crm-reports" ? "reports" : "summary") as CrmSection;
+  const navigateToCrmSection = (section: CrmSection) => navigateToRoute(section === "pipeline" ? "crm-pipeline" : section === "leads" ? "crm-leads" : section === "clients" ? "crm-clients" : section === "activities" ? "crm-activities" : section === "proposals" ? "crm-proposals" : section === "automations" ? "crm-automations" : section === "reports" ? "crm-reports" : "crm-summary");
+  const crmTopbarItems = getCrmTopbarItems({
+    onNavigate: navigateToCrmSection,
+  });
+
   const shellLayout = getShellWorkspaceLayout(active);
 
   return (
@@ -4461,19 +4543,19 @@ function Shell() {
       </div>
 
       {/* Main Content */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div className={cn("flex min-w-0 flex-1 flex-col overflow-hidden", active.startsWith("erp-") && "bg-slate-950")}>
         <ShellTopbarBoundary active={active} mode={shellLayout.moduleTopbar}>
             <ModuleTopbar
-            ariaLabel={active.startsWith("erp-") ? "Módulos do ERP" : "Ações da página"}
-            activeItemId={active.startsWith("erp-") ? erpSection : undefined}
-            items={active.startsWith("erp-") ? erpTopbarItems : []}
-            leading={<button ref={sidebarTriggerRef} type="button" onClick={() => setSidebarOpen(true)} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-700 hover:bg-slate-100 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
-            actions={<button type="button" onClick={() => window.dispatchEvent(new Event("megadesk-open-assistant"))} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500" title="Abrir assistente IA" aria-label="Abrir assistente IA"><Sparkles className="h-5 w-5" /></button>}
+            ariaLabel={active.startsWith("erp-") ? "Módulos do ERP" : active.startsWith("crm-") ? "Módulos do CRM" : "Ações da página"}
+            activeItemId={active.startsWith("erp-") ? erpSection : active.startsWith("crm-") ? crmSection : undefined}
+            items={active.startsWith("erp-") ? erpTopbarItems : active.startsWith("crm-") ? crmTopbarItems : []}
+            leading={<button ref={sidebarTriggerRef} type="button" onClick={() => setSidebarOpen(true)} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
+            actions={<button type="button" onClick={() => window.dispatchEvent(new Event("megadesk-open-assistant"))} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-600 dark:text-slate-300 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-950 dark:hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500" title="Abrir assistente IA" aria-label="Abrir assistente IA"><Sparkles className="h-5 w-5" /></button>}
             />
         </ShellTopbarBoundary>
 
         {/* Content */}
-        <main ref={mainContentRef} tabIndex={-1} className={`flex min-h-0 min-w-0 flex-1 flex-col ${shellLayout.mainContentClassName}`}>
+        <main ref={mainContentRef} tabIndex={-1} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", shellLayout.mainContentClassName, active.startsWith("erp-") && "bg-slate-950 text-slate-100")}>
           <ErrorBoundary key={active}>
           {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} />}
           {active === "conversations" && <ConversationsPage
@@ -4485,7 +4567,8 @@ function Shell() {
           />}
           {active === "tickets" && <TicketsPage onOpenMobileMenu={() => setSidebarOpen(true)} />}
           {active === "tracking" && <TrackingPage />}
-           {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} onClientNavigate={handleClientNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
+           {active.startsWith("crm-") && <CRMWorkspace section={crmSection} onNavigate={navigateToCrmSection} canAccessClients={canAccessCrmClients(session)} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("crm-proposals", { salePublicId })} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDeleteClients={session.userRole === "admin"} />}
+           {active.startsWith("erp-") && <ERPWorkspace section={erpSection} onNavigate={navigateToErpSection} canAccessClients={canAccessClients} canAccessSales={canAccessSales} canAccessFinance={session.userRole !== "agent"} canAccessFiscal={session.userRole !== "agent"} canAccessReports={session.userRole !== "agent"} canPermanentlyDeleteClients={session.userRole === "admin"} initialCrmClientId={activeCrmClientId ?? undefined} initialSalePublicId={activeSalePublicId ?? undefined} onClientNavigate={handleClientNavigate} onNavigateToClient={crmClientId => navigateToRoute("crm-clients", { crmClientId })} onNavigateToSale={salePublicId => navigateToRoute("erp-sales", { salePublicId })} onNavigateToProposals={() => navigateToRoute("crm-proposals")} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} />}
            {active === "settings" && <SettingsPageComponent layout={shellLayout.settingsPageLayout} />}
           {active === "admin-settings" && (session.role === "admin" || session.userRole === "admin") && <AdminSettingsPage clientId={session.clientId} />}
           {active === "bot-config" && <BotConfigPage />}

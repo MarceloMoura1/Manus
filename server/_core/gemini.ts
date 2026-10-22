@@ -23,7 +23,8 @@ export async function generateAIResponse(
   systemPrompt?: string
 ): Promise<string> {
   const client = getGeminiClient();
-  const model = client.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const defaultModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+  const model = client.getGenerativeModel({ model: defaultModel });
 
   // Construir histórico de conversa
   const history = messages.map((msg) => ({
@@ -38,7 +39,10 @@ export async function generateAIResponse(
 
   const chat = model.startChat({
     history: history.slice(0, -1), // Histórico sem a última mensagem
-    systemInstruction,
+    systemInstruction: {
+      role: "system",
+      parts: [{ text: systemInstruction }],
+    },
   });
 
   const lastMessage = messages[messages.length - 1];

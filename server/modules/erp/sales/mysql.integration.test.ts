@@ -9,22 +9,38 @@ import {
   getTestDatabaseUrl,
   isTestDatabaseEnabled,
 } from "../../../test-integration-gates";
+import { FinanceRepository } from "../finance/repository";
+import { FinanceService } from "../finance/service";
 import { ErpRepository } from "../repository";
 import { ErpService } from "../service";
 import { SaleRepository } from "./repository";
 import { SaleService, type SaleEventPublisher } from "./service";
-import { fulfillInput, lineTotalCents, saleDraftInput } from "./contracts";
+import {
+  fulfillInput,
+  lineTotalCents,
+  saleConfirmationInput,
+  saleDraftInput,
+  saleTransitionInput,
+} from "./contracts";
 
 const physical = describe.runIf(isTestDatabaseEnabled()),
   adminA = {
     clientId: "sale-a",
     userId: "admin-a",
+    userName: "Admin A",
     role: "admin" as const,
   },
   viewerA = { ...adminA, userId: "viewer-a", role: "viewer" as const },
+  managerA = {
+    ...adminA,
+    userId: "manager-a",
+    userName: "Manager A",
+    role: "manager" as const,
+  },
   adminB = {
     clientId: "sale-b",
     userId: "admin-b",
+    userName: "Admin B",
     role: "admin" as const,
   };
 const silent: SaleEventPublisher = { publish: () => undefined };
@@ -32,19 +48,28 @@ let serial = 0;
 async function clean() {
   const db = getPool();
   for (const sql of [
+    "DELETE FROM erp_financial_ledger WHERE client_id IN (?,?)",
+    "DELETE FROM erp_financial_settlements WHERE client_id IN (?,?)",
+    "DELETE FROM erp_financial_entries WHERE client_id IN (?,?)",
+    "DELETE FROM erp_sale_order_events WHERE client_id IN (?,?)",
     "DELETE ri FROM erp_sale_order_fulfillment_items ri INNER JOIN erp_sale_order_fulfillments r ON r.id=ri.fulfillment_id WHERE r.client_id IN (?,?)",
     "DELETE FROM erp_sale_order_fulfillments WHERE client_id IN (?,?)",
     "DELETE h FROM erp_sale_order_history h INNER JOIN erp_sale_orders o ON o.id=h.sale_order_id WHERE o.client_id IN (?,?)",
     "DELETE i FROM erp_sale_order_items i INNER JOIN erp_sale_orders o ON o.id=i.sale_order_id WHERE o.client_id IN (?,?)",
     "DELETE FROM erp_sale_orders WHERE client_id IN (?,?)",
+    "DELETE FROM erp_sale_document_sequences WHERE client_id IN (?,?)",
     "DELETE FROM erp_sale_order_sequences WHERE client_id IN (?,?)",
+    "DELETE FROM erp_purchase_order_sequences WHERE client_id IN (?,?)",
     "DELETE FROM erp_stock_movements WHERE client_id IN (?,?)",
     "DELETE FROM erp_stock_balances WHERE client_id IN (?,?)",
     "DELETE FROM erp_product_audit_logs WHERE client_id IN (?,?)",
     "DELETE b FROM erp_inventory_item_balances b INNER JOIN erp_inventory_items i ON i.client_id=b.client_id AND i.id=b.inventory_item_id WHERE i.client_id IN (?,?)",
     "DELETE FROM erp_inventory_items WHERE client_id IN (?,?)",
     "DELETE FROM erp_products WHERE client_id IN (?,?)",
+    "DELETE FROM erp_financial_categories WHERE client_id IN (?,?)",
+    "DELETE FROM erp_financial_accounts WHERE client_id IN (?,?)",
     "DELETE FROM megadesk_crm_clients WHERE client_id IN (?,?)",
+    "DELETE FROM megadesk_domain_client_users WHERE client_id IN (?,?)",
   ])
     await db.execute(sql, [adminA.clientId, adminB.clientId]);
 }
@@ -74,14 +99,64 @@ async function fixture(identity = adminA) {
     reason: "Saldo para matriz de vendas",
     idempotencyKey: crypto.randomUUID(),
   });
-  return { customer, product };
+  const category = await new FinanceService(
+    new FinanceRepository(),
+    { publish: () => undefined }
+  ).createCategory(identity, {
+    name: `Receita matriz de vendas ${serial}`,
+    direction: "receivable",
+  });
+  return { customer, product, categoryPublicId: category.publicId };
 }
-const draft = (crmClientId: string, productPublicId: string) => ({
-  crmClientId,
-  notes: "Pedido fÃ­sico",
-  expectedDate: null,
-  items: [{ productPublicId, quantity: "1.005", unitPriceCents: 101 }],
-});
+const draft = (
+  crmClientId: string,
+  productPublicId: string,
+  overrides: Record<string, unknown> = {}
+) =>
+  saleDraftInput.parse({
+    crmClientId,
+    notes: "Pedido fÃ­sico",
+    items: [{ productPublicId, quantity: "1.005", unitPriceCents: 101 }],
+    ...overrides,
+  });
+async function confirmSale(
+  service: SaleService,
+  identity: typeof adminA,
+  order: { publicId: string; totalCents: number },
+  categoryPublicId: string
+) {
+  return service.confirm(
+    identity,
+    saleConfirmationInput.parse({
+      publicId: order.publicId,
+      idempotencyKey: crypto.randomUUID(),
+      paymentMethod: "Boleto bancário",
+      categoryPublicId,
+      financialAccountPublicId: null,
+      installments: [
+        {
+          dueDate: "2030-01-10",
+          amountCents: order.totalCents,
+        },
+      ],
+    })
+  );
+}
+async function prepareShipment(
+  service: SaleService,
+  identity: typeof adminA,
+  publicId: string,
+  idempotencyKey = crypto.randomUUID()
+) {
+  return service.transition(
+    identity,
+    saleTransitionInput.parse({
+      publicId,
+      toStage: "separation",
+      idempotencyKey,
+    })
+  );
+}
 async function count(sql: string, args: unknown[] = []) {
   const [rows] = await getPool().execute<RowDataPacket[]>(sql, args);
   return Number(rows[0]?.total ?? 0);
@@ -102,7 +177,7 @@ physical("ERP sales MySQL behavior matrix", () => {
       await count(
         "SELECT COUNT(*) total FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name LIKE 'erp_sale_%'"
       )
-    ).toBe(6);
+    ).toBe(9);
   });
   it("02 creates draft with server totals and snapshots", async () => {
     const f = await fixture(),
@@ -122,15 +197,17 @@ physical("ERP sales MySQL behavior matrix", () => {
     });
     expect(order).not.toHaveProperty("clientId");
   });
-  it("03 edits only draft and approves", async () => {
+  it("03 edits a draft and adjusts an unpaid confirmed sale", async () => {
     const f = await fixture(),
       s = new SaleService(new SaleRepository(), silent),
       order = await s.create(
         adminA,
         draft(f.customer.crmClientId, f.product.publicId)
       );
-    await s.update(adminA, order.publicId, {
-      ...draft(f.customer.crmClientId, f.product.publicId),
+    const updated = await s.update(adminA, order.publicId, draft(
+      f.customer.crmClientId,
+      f.product.publicId,
+      {
       items: [
         {
           productPublicId: f.product.publicId,
@@ -138,16 +215,32 @@ physical("ERP sales MySQL behavior matrix", () => {
           unitPriceCents: 100,
         },
       ],
-    });
-    const confirmed = await s.confirm(adminA, order.publicId);
+      }
+    ));
+    const confirmed = await confirmSale(
+      s,
+      adminA,
+      updated,
+      f.categoryPublicId
+    );
     expect(confirmed?.status).toBe("confirmed");
-    await expect(
-      s.update(
-        adminA,
-        order.publicId,
-        draft(f.customer.crmClientId, f.product.publicId)
-      )
-    ).rejects.toMatchObject({ code: "CONFLICT" });
+    const adjusted = await s.update(
+      adminA,
+      order.publicId,
+      draft(f.customer.crmClientId, f.product.publicId)
+    );
+    expect(adjusted).toMatchObject({
+      status: "confirmed",
+      totalCents: 102,
+      financialAdjustment: {
+        previousTotalCents: 200,
+        newTotalCents: 102,
+        paidCents: 0,
+      },
+    });
+    expect(adjusted.installments).toEqual([
+      expect.objectContaining({ amountCents: 102, status: "open" }),
+    ]);
   });
   it("04 cancels draft and confirmed but not fulfilled", async () => {
     const f = await fixture(),
@@ -167,13 +260,17 @@ physical("ERP sales MySQL behavior matrix", () => {
         adminA,
         draft(f.customer.crmClientId, f.product.publicId)
       );
-    await s.confirm(adminA, order.publicId);
+    await confirmSale(s, adminA, order, f.categoryPublicId);
+    await prepareShipment(s, adminA, order.publicId);
     const fulfilled = await s.fulfill(
       adminA,
       order.publicId,
       crypto.randomUUID()
     );
-    expect(fulfilled.status).toBe("fulfilled");
+    expect(fulfilled).toMatchObject({
+      status: "confirmed",
+      currentStage: "shipped",
+    });
     expect(
       await count(
         "SELECT COUNT(*) total FROM erp_stock_movements WHERE client_id=? AND type='sale_out'",
@@ -200,7 +297,8 @@ physical("ERP sales MySQL behavior matrix", () => {
         adminA,
         draft(f.customer.crmClientId, f.product.publicId)
       );
-    await s.confirm(adminA, order.publicId);
+    await confirmSale(s, adminA, order, f.categoryPublicId);
+    await prepareShipment(s, adminA, order.publicId);
     const key = crypto.randomUUID();
     await s.fulfill(adminA, order.publicId, key);
     const before = events.length,
@@ -229,8 +327,10 @@ physical("ERP sales MySQL behavior matrix", () => {
     await expect(s.detail(adminB, oa.publicId)).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
-    await s.confirm(adminA, oa.publicId);
-    await s.confirm(adminB, ob.publicId);
+    await confirmSale(s, adminA, oa, a.categoryPublicId);
+    await confirmSale(s, adminB, ob, b.categoryPublicId);
+    await prepareShipment(s, adminA, oa.publicId);
+    await prepareShipment(s, adminB, ob.publicId);
     const key = crypto.randomUUID();
     await s.fulfill(adminA, oa.publicId, key);
     await s.fulfill(adminB, ob.publicId, key);
@@ -289,7 +389,8 @@ physical("ERP sales MySQL behavior matrix", () => {
         adminA,
         draft(f.customer.crmClientId, f.product.publicId)
       );
-    await p.confirm(adminA, order.publicId);
+    await confirmSale(p, adminA, order, f.categoryPublicId);
+    await prepareShipment(p, adminA, order.publicId);
     await p.fulfill(adminA, order.publicId, crypto.randomUUID());
     const [rows] = await getPool().execute<RowDataPacket[]>(
       "SELECT public_id FROM erp_stock_movements WHERE client_id=? AND type='sale_out'",
@@ -312,7 +413,8 @@ physical("ERP sales MySQL behavior matrix", () => {
       service.create(adminA, draft(f.customer.crmClientId, f.product.publicId)),
     ]);
     expect(new Set(created.map(order => order.orderNumber)).size).toBe(2);
-    await service.confirm(adminA, created[0].publicId);
+    await confirmSale(service, adminA, created[0], f.categoryPublicId);
+    await prepareShipment(service, adminA, created[0].publicId);
     const outcomes = await Promise.allSettled([
       service.fulfill(adminA, created[0].publicId, crypto.randomUUID()),
       service.fulfill(adminA, created[0].publicId, crypto.randomUUID()),
@@ -368,7 +470,8 @@ physical("ERP sales MySQL behavior matrix", () => {
       ...draft(f.customer.crmClientId, f.product.publicId),
       notes: "Atualizado",
     });
-    await service.confirm(adminA, order.publicId);
+    await confirmSale(service, adminA, order, f.categoryPublicId);
+    await prepareShipment(service, adminA, order.publicId);
     await service.fulfill(adminA, order.publicId, crypto.randomUUID());
     const cancelled = await service.create(
       adminA,
@@ -383,7 +486,8 @@ physical("ERP sales MySQL behavior matrix", () => {
       "created",
       "updated",
       "confirmed",
-      "fulfilled",
+      "stage_changed",
+      "shipped",
       "created",
       "cancelled",
     ]);
@@ -427,10 +531,10 @@ physical("ERP sales MySQL behavior matrix", () => {
       reason: "Saldo para rollback de vendas",
       idempotencyKey: crypto.randomUUID(),
     });
-    const order = await service.create(adminA, {
-      crmClientId: f.customer.crmClientId,
-      notes: null,
-      expectedDate: null,
+    const order = await service.create(adminA, draft(
+      f.customer.crmClientId,
+      f.product.publicId,
+      {
       items: [
         {
           productPublicId: f.product.publicId,
@@ -443,8 +547,10 @@ physical("ERP sales MySQL behavior matrix", () => {
           unitPriceCents: 200,
         },
       ],
-    });
-    await service.confirm(adminA, order.publicId);
+      }
+    ));
+    await confirmSale(service, adminA, order, f.categoryPublicId);
+    await prepareShipment(service, adminA, order.publicId);
     const key = crypto.randomUUID();
     const [items] = await getPool().execute<RowDataPacket[]>(
       "SELECT i.public_id,i.product_id FROM erp_sale_order_items i INNER JOIN erp_sale_orders o ON o.id=i.sale_order_id WHERE o.client_id=? AND o.public_id=? ORDER BY i.id",
@@ -498,16 +604,16 @@ physical("ERP sales MySQL behavior matrix", () => {
   it("16 rejects duplicate products and persists half-up server totals", async () => {
     const f = await fixture(), s = new SaleService(new SaleRepository(), silent);
     const duplicate = { crmClientId:f.customer.crmClientId, items:[{ productPublicId:f.product.publicId,quantity:"1",unitPriceCents:1 },{ productPublicId:f.product.publicId,quantity:"1",unitPriceCents:1 }] };
-    expect(() => saleDraftInput.parse(duplicate)).toThrow("Inventory item duplicado");
+    expect(() => saleDraftInput.parse(duplicate)).toThrow("Item de estoque duplicado no pedido.");
     expect(lineTotalCents("0.500", 1)).toBe(1);
-    const order = await s.create(adminA, { ...draft(f.customer.crmClientId, f.product.publicId), items: [{ productPublicId: f.product.publicId, quantity: "0.500", unitPriceCents: 1 }] });
+    const order = await s.create(adminA, draft(f.customer.crmClientId, f.product.publicId, { items: [{ productPublicId: f.product.publicId, quantity: "0.500", unitPriceCents: 1 }] }));
     expect(order.totalCents).toBe(1);
   });
   it("17 keeps purchase and sale annual sequences independent", async () => {
     const f = await fixture(), s = new SaleService(new SaleRepository(), silent);
     await getPool().execute("INSERT INTO erp_purchase_order_sequences(client_id,year,next_number) VALUES(?,?,?) ON DUPLICATE KEY UPDATE next_number=VALUES(next_number)", [adminA.clientId, new Date().getUTCFullYear(), 42]);
     const order = await s.create(adminA, draft(f.customer.crmClientId, f.product.publicId));
-    expect(order.orderNumber).toMatch(/-000001$/);
+    expect(order.orderNumber).toBe("V-1");
     const [rows] = await getPool().execute<RowDataPacket[]>("SELECT next_number FROM erp_purchase_order_sequences WHERE client_id=?", [adminA.clientId]);
     expect(Number(rows[0].next_number)).toBe(42);
   });
@@ -516,17 +622,30 @@ physical("ERP sales MySQL behavior matrix", () => {
     const draftOrder = await s.create(adminA, draft(f.customer.crmClientId, f.product.publicId));
     await expect(s.fulfill(adminA, draftOrder.publicId, crypto.randomUUID())).rejects.toMatchObject({ code: "CONFLICT" });
     const cancelled = await s.cancel(adminA, draftOrder.publicId, "Matriz cancelada");
-    await expect(s.confirm(adminA, cancelled.publicId)).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      confirmSale(s, adminA, cancelled, f.categoryPublicId)
+    ).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(s.cancel(adminA, cancelled.publicId, "Outra tentativa")).rejects.toMatchObject({ code: "CONFLICT" });
     const fulfilledDraft = await s.create(adminA, draft(f.customer.crmClientId, f.product.publicId));
-    await s.confirm(adminA, fulfilledDraft.publicId); await s.fulfill(adminA, fulfilledDraft.publicId, crypto.randomUUID());
+    await confirmSale(s, adminA, fulfilledDraft, f.categoryPublicId);
+    await prepareShipment(s, adminA, fulfilledDraft.publicId);
+    await s.fulfill(adminA, fulfilledDraft.publicId, crypto.randomUUID());
     await expect(s.cancel(adminA, fulfilledDraft.publicId, "Tarde demais")).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(s.update(adminA, fulfilledDraft.publicId, draft(f.customer.crmClientId, f.product.publicId))).rejects.toMatchObject({ code: "CONFLICT" });
   });
   it("19 rolls back before the ledger when stock validation fails", async () => {
     const f = await fixture(), s = new SaleService(new SaleRepository(), silent), events: string[] = [], observed = new SaleService(new SaleRepository(), { publish: (_c, e) => events.push(e) });
-    const order = await s.create(adminA, { ...draft(f.customer.crmClientId, f.product.publicId), items: [{ productPublicId: f.product.publicId, quantity: "11", unitPriceCents: 1 }] });
-    await s.confirm(adminA, order.publicId); const before = events.length;
+    const order = await s.create(adminA, draft(f.customer.crmClientId, f.product.publicId, { items: [{ productPublicId: f.product.publicId, quantity: "10", unitPriceCents: 1 }] }));
+    await confirmSale(s, adminA, order, f.categoryPublicId);
+    await prepareShipment(s, adminA, order.publicId);
+    await new ErpService(new ErpRepository()).moveStock(adminA, {
+      productPublicId: f.product.publicId,
+      type: "manual_out",
+      quantity: "1.000",
+      reason: "Consumo concorrente sintético antes do envio",
+      idempotencyKey: crypto.randomUUID(),
+    });
+    const before = events.length;
     await expect(observed.fulfill(adminA, order.publicId, crypto.randomUUID())).rejects.toMatchObject({ code: "INSUFFICIENT_STOCK" });
     expect(events).toHaveLength(before);
     expect(await count("SELECT COUNT(*) total FROM erp_sale_order_fulfillments WHERE client_id=?", [adminA.clientId])).toBe(0);
@@ -537,27 +656,44 @@ physical("ERP sales MySQL behavior matrix", () => {
     const f = await fixture(), s = new SaleService(new SaleRepository(), silent);
     expect(() => saleDraftInput.parse({ crmClientId:f.customer.crmClientId,items:[{productPublicId:f.product.publicId,quantity:"1",unitPriceCents:1}] })).not.toThrow();
     const a = await s.create(adminA, draft(f.customer.crmClientId, f.product.publicId)), b = await s.create(adminA, draft(f.customer.crmClientId, f.product.publicId));
-    await s.confirm(adminA, a.publicId); await s.confirm(adminA, b.publicId);
+    await confirmSale(s, adminA, a, f.categoryPublicId);
+    await confirmSale(s, adminA, b, f.categoryPublicId);
+    await prepareShipment(s, adminA, a.publicId);
+    await prepareShipment(s, adminA, b.publicId);
     expect(() => fulfillInput.parse({ publicId: a.publicId, idempotencyKey: "" })).toThrow();
     const key = crypto.randomUUID(); await s.fulfill(adminA, a.publicId, key);
     await expect(s.fulfill(adminA, b.publicId, key)).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
   });
   it("21 lets only one order consume the last available stock", async () => {
     const f = await fixture(), s = new SaleService(new SaleRepository(), silent);
-    const command = { ...draft(f.customer.crmClientId, f.product.publicId), items: [{ productPublicId: f.product.publicId, quantity: "10", unitPriceCents: 1 }] };
-    const [a,b] = await Promise.all([s.create(adminA, command), s.create(adminA, command)]); await Promise.all([s.confirm(adminA,a.publicId),s.confirm(adminA,b.publicId)]);
+    const command = draft(f.customer.crmClientId, f.product.publicId, { items: [{ productPublicId: f.product.publicId, quantity: "10", unitPriceCents: 1 }] });
+    const [a,b] = await Promise.all([s.create(adminA, command), s.create(adminA, command)]);
+    await confirmSale(s, adminA, a, f.categoryPublicId);
+    await confirmSale(s, adminA, b, f.categoryPublicId);
+    await Promise.all([
+      prepareShipment(s, adminA, a.publicId),
+      prepareShipment(s, adminA, b.publicId),
+    ]);
     const outcomes = await Promise.allSettled([s.fulfill(adminA,a.publicId,crypto.randomUUID()),s.fulfill(adminA,b.publicId,crypto.randomUUID())]);
     expect(outcomes.filter(x => x.status === "fulfilled")).toHaveLength(1);
     expect(outcomes.filter(x => x.status === "rejected")).toHaveLength(1);
+    expect(outcomes.find(x => x.status === "rejected")).toMatchObject({
+      reason: { code: "INSUFFICIENT_STOCK" },
+    });
     expect(await count("SELECT COUNT(*) total FROM erp_stock_movements WHERE client_id=? AND type='sale_out'", [adminA.clientId])).toBe(1);
   });
   it("22 isolates detail and mutations and exercises customer, period and ordering filters", async () => {
     const a = await fixture(adminA), b = await fixture(adminB), s = new SaleService(new SaleRepository(), silent);
     const first = await s.create(adminA, draft(a.customer.crmClientId, a.product.publicId));
     await expect(s.detail(adminB, first.publicId)).rejects.toMatchObject({ code: "NOT_FOUND" });
-    await expect(s.confirm(adminB, first.publicId)).rejects.toMatchObject({ code: "NOT_FOUND" });
-    await s.create(adminA, { ...draft(a.customer.crmClientId, a.product.publicId), items: [{ productPublicId: a.product.publicId, quantity: "2", unitPriceCents: 200 }] });
-    const day = new Date().toISOString().slice(0,10);
+    await expect(
+      confirmSale(s, adminB, first, b.categoryPublicId)
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await s.create(adminA, draft(a.customer.crmClientId, a.product.publicId, { items: [{ productPublicId: a.product.publicId, quantity: "2", unitPriceCents: 200 }] }));
+    const [databaseDates] = await getPool().execute<RowDataPacket[]>(
+      "SELECT DATE_FORMAT(CURRENT_DATE, '%Y-%m-%d') day"
+    );
+    const day = String(databaseDates[0].day);
     for (const sort of ["orderNumber","createdAt","total"] as const) {
       const result = await s.list(adminA,{ search:a.customer.companyName,status:"draft",from:day,to:day,sort,direction:"desc",page:1,pageSize:1 });
       expect(result.total).toBe(2); expect(result.items).toHaveLength(1); expect(result.totalPages).toBe(2);
@@ -566,7 +702,8 @@ physical("ERP sales MySQL behavior matrix", () => {
   });
   it("23 rolls back ledger and fulfillment when the final status update fails before commit", async () => {
     const f = await fixture(), s = new SaleService(new SaleRepository(), silent);
-    const order = await s.create(adminA,draft(f.customer.crmClientId,f.product.publicId)); await s.confirm(adminA,order.publicId);
+    const order = await s.create(adminA,draft(f.customer.crmClientId,f.product.publicId));
+    await confirmSale(s, adminA, order, f.categoryPublicId);
     const connection = await getPool().getConnection();
     try {
       await connection.beginTransaction();
@@ -625,5 +762,169 @@ physical("ERP sales MySQL behavior matrix", () => {
       );
     }
     expect((await s.detail(adminA, order.publicId)).items[0].productPublicId).toBe(a.product.publicId);
+  });
+  it("25 completes concurrent transitions for different orders and idempotency keys", async () => {
+    const f = await fixture(), s = new SaleService(new SaleRepository(), silent);
+    const [a,b] = await Promise.all([
+      s.create(adminA, draft(f.customer.crmClientId, f.product.publicId)),
+      s.create(adminA, draft(f.customer.crmClientId, f.product.publicId)),
+    ]);
+    await confirmSale(s, adminA, a, f.categoryPublicId);
+    await confirmSale(s, adminA, b, f.categoryPublicId);
+    const keys = [crypto.randomUUID(), crypto.randomUUID()];
+    const transitioned = await Promise.all([
+      prepareShipment(s, adminA, a.publicId, keys[0]),
+      prepareShipment(s, adminA, b.publicId, keys[1]),
+    ]);
+    expect(transitioned.map(order => order.currentStage)).toEqual(["separation", "separation"]);
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_sale_order_events WHERE client_id=? AND idempotency_key IN (?,?)",
+      [adminA.clientId, ...keys]
+    )).toBe(2);
+  });
+  it("26 replays concurrent transitions for one order and idempotency key exactly once", async () => {
+    const f = await fixture(), s = new SaleService(new SaleRepository(), silent);
+    const order = await s.create(adminA, draft(f.customer.crmClientId, f.product.publicId));
+    await confirmSale(s, adminA, order, f.categoryPublicId);
+    const key = crypto.randomUUID();
+    const results = await Promise.all([
+      prepareShipment(s, adminA, order.publicId, key),
+      prepareShipment(s, adminA, order.publicId, key),
+    ]);
+    expect(results.map(result => result.replay).sort()).toEqual([false, true]);
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_sale_order_events WHERE client_id=? AND idempotency_key=?",
+      [adminA.clientId, key]
+    )).toBe(1);
+  });
+  it("27 rejects concurrent cross-order key reuse without duplicate effects", async () => {
+    const f = await fixture(), s = new SaleService(new SaleRepository(), silent);
+    const [a,b] = await Promise.all([
+      s.create(adminA, draft(f.customer.crmClientId, f.product.publicId)),
+      s.create(adminA, draft(f.customer.crmClientId, f.product.publicId)),
+    ]);
+    await confirmSale(s, adminA, a, f.categoryPublicId);
+    await confirmSale(s, adminA, b, f.categoryPublicId);
+    const key = crypto.randomUUID();
+    const outcomes = await Promise.allSettled([
+      prepareShipment(s, adminA, a.publicId, key),
+      prepareShipment(s, adminA, b.publicId, key),
+    ]);
+    expect(outcomes.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    const rejection = outcomes.find(result => result.status === "rejected");
+    expect(rejection).toMatchObject({ reason: { code: "IDEMPOTENCY_CONFLICT" } });
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_sale_order_events WHERE client_id=? AND idempotency_key=?",
+      [adminA.clientId, key]
+    )).toBe(1);
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_sale_orders WHERE client_id=? AND current_stage='separation' AND public_id IN (?,?)",
+      [adminA.clientId, a.publicId, b.publicId]
+    )).toBe(1);
+  });
+
+  it("28 preserves an absent legacy seller unless reassignment is explicit", async () => {
+    const f = await fixture();
+    const service = new SaleService(new SaleRepository(), silent);
+    const input = draft(f.customer.crmClientId, f.product.publicId);
+    const created = await service.create(adminA, input);
+    expect(created).toMatchObject({
+      sellerUserId: adminA.userId,
+      sellerName: adminA.userName,
+    });
+
+    await getPool().execute(
+      "UPDATE erp_sale_orders SET seller_user_id=NULL,seller_name_snapshot='Vendedor legado' WHERE client_id=? AND public_id=?",
+      [adminA.clientId, created.publicId]
+    );
+    const preserved = await service.update(managerA, created.publicId, {
+      ...input,
+      notes: "Apenas observação alterada",
+    });
+    expect(preserved).toMatchObject({
+      sellerUserId: null,
+      sellerName: "Vendedor legado",
+      notes: "Apenas observação alterada",
+    });
+
+    const explicitSellerId = `seller-explicit-${++serial}`;
+    await getPool().execute(
+      `INSERT INTO megadesk_domain_client_users
+       (user_id,client_id,name,email,role,status,permissions_json)
+       VALUES(?,?,?,?,'manager','active','["erp"]')`,
+      [explicitSellerId, adminA.clientId, "Vendedor explícito", `${explicitSellerId}@example.invalid`]
+    );
+    const reassigned = await service.update(managerA, created.publicId, {
+      ...input,
+      sellerUserId: explicitSellerId,
+      notes: "Vendedor alterado intencionalmente",
+    });
+    expect(reassigned).toMatchObject({
+      sellerUserId: explicitSellerId,
+      sellerName: "Vendedor explícito",
+    });
+  });
+
+  it("29 lets a quote record a stock shortage but keeps real sales blocked and quote removal auditable", async () => {
+    const f = await fixture();
+    const service = new SaleService(new SaleRepository(), silent);
+    await getPool().execute(
+      `UPDATE erp_inventory_item_balances b
+       INNER JOIN erp_inventory_items i ON i.id=b.inventory_item_id AND i.client_id=b.client_id
+       INNER JOIN erp_products p ON p.id=i.product_id AND p.client_id=i.client_id
+       SET b.quantity='0.000'
+       WHERE b.client_id=? AND p.public_id=?`,
+      [adminA.clientId, f.product.publicId]
+    );
+
+    const quote = await service.create(
+      adminA,
+      draft(f.customer.crmClientId, f.product.publicId, { documentType: "quote" })
+    );
+    expect(quote).toMatchObject({ documentType: "quote", commercialStatus: "draft" });
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_stock_movements WHERE client_id=? AND reference_type='sale' AND reference_id=?",
+      [adminA.clientId, quote.publicId]
+    )).toBe(0);
+
+    await service.commercialTransition(adminA, {
+      publicId: quote.publicId,
+      toStatus: "negotiation",
+      reason: null,
+    });
+    await service.commercialTransition(adminA, {
+      publicId: quote.publicId,
+      toStatus: "approved",
+      reason: null,
+    });
+    await expect(
+      service.convertQuote(adminA, quote.publicId, crypto.randomUUID())
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_STOCK" });
+    const unchangedQuote = await service.detail(adminA, quote.publicId);
+    expect(unchangedQuote).toMatchObject({
+      id: quote.id,
+      publicId: quote.publicId,
+      documentType: "quote",
+      commercialStatus: "approved",
+    });
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_sale_orders WHERE client_id=? AND id=?",
+      [adminA.clientId, quote.id]
+    )).toBe(1);
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_stock_movements WHERE client_id=? AND reference_type='sale' AND reference_id=?",
+      [adminA.clientId, quote.publicId]
+    )).toBe(0);
+
+    await expect(
+      service.create(adminA, draft(f.customer.crmClientId, f.product.publicId))
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_STOCK" });
+
+    const archived = await service.archive(adminA, quote.publicId, "Orçamento descartado no ensaio");
+    expect(archived.archivedAt).not.toBeNull();
+    expect(await count(
+      "SELECT COUNT(*) total FROM erp_sale_order_events WHERE client_id=? AND sale_order_id=? AND event_type='archived'",
+      [adminA.clientId, quote.id]
+    )).toBe(1);
   });
 });

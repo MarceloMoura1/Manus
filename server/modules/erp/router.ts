@@ -25,6 +25,7 @@ import { fiscalRouter } from "./fiscal/router";
 import { reportsRouter } from "./reports/router";
 import { productAuditRouter } from "./product-audit/router";
 import { inventoryRouter } from "./inventory/router";
+import { servicesRouter } from "./services/router";
 
 const service = new ErpService();
 type ErpContext = {
@@ -60,6 +61,7 @@ export const erpRouter = router({
   fiscal: fiscalRouter,
   reports: reportsRouter,
   inventory: inventoryRouter,
+  services: servicesRouter,
   products: router({
     list: megadeskProcedure.input(productListInput).query(({ input, ctx }) => runErp(() => service.listProducts(identity(ctx), input))),
     detail: megadeskProcedure.input(z.object({ publicId: productPublicId })).query(({ input, ctx }) => runErp(() => service.getProduct(identity(ctx), input.publicId))),
@@ -68,6 +70,10 @@ export const erpRouter = router({
     create: megadeskProcedure.input(productInput).mutation(({ input, ctx }) => runErp(() => service.createProduct(identity(ctx), input))),
     update: megadeskProcedure.input(productInput.extend({ publicId: productPublicId })).mutation(({ input, ctx }) => { const { publicId, ...command } = input; return runErp(() => service.updateProduct(identity(ctx), publicId, command)); }),
     setActive: megadeskProcedure.input(z.object({ publicId: productPublicId, active: z.boolean() })).mutation(({ input, ctx }) => runErp(() => service.setProductActive(identity(ctx), input.publicId, input.active))),
+    checkDependencies: megadeskProcedure.input(z.object({ publicId: productPublicId })).query(({ input, ctx }) => runErp(() => service.checkProductDependencies(identity(ctx), input.publicId))),
+    delete: megadeskProcedure.input(z.object({ publicId: productPublicId, force: z.boolean().optional().default(false), hardDelete: z.boolean().optional().default(false) })).mutation(({ input, ctx }) => runErp(() => service.deleteProduct(identity(ctx), input.publicId, input.force, input.hardDelete))),
+    deleteProduct: megadeskProcedure.input(z.object({ publicId: productPublicId, force: z.boolean().optional().default(false), hardDelete: z.boolean().optional().default(false) })).mutation(({ input, ctx }) => runErp(() => service.deleteProduct(identity(ctx), input.publicId, input.force, input.hardDelete))),
+    purgeProduct: megadeskProcedure.input(z.object({ publicId: productPublicId })).mutation(({ input, ctx }) => runErp(() => service.deleteProduct(identity(ctx), input.publicId, true, true))),
     history: productAuditRouter,
   }),
   stock: router({

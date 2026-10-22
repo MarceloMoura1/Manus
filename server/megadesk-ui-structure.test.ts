@@ -31,7 +31,7 @@ describe("MegaDesk UI structure", () => {
     expect(erpSource).toContain('label:"Fornecedores"');
     expect(purchasesSource).toContain("trpc.erp.purchases.list.useQuery");
     expect(erpSource).toContain('label:"Compras"');
-    expect(erpSource).toContain('{id:"sales" as const,label:"Vendas"}');
+    expect(erpSource).toContain('{id:"sales" as const,label:"Vendas",hidden:!canAccessSales}');
     expect(erpSource).toContain('label:"Financeiro"');
     expect(erpSource).toContain('label:"Fiscal"');
     expect(erpSource).toContain('label:"Relatórios"');

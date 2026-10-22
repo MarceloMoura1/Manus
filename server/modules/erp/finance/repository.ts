@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { getPool } from "../../../db";
 import { ErpDomainError } from "../errors";
@@ -89,6 +89,26 @@ export class FinanceRepository {
          WHERE client_id=? AND id=?`,
         [accounts[0].id,completed?"settled":"open",completed,completed,userId,clientId,entryRow.id]
       );
+      if(entryRow.source_type==="sales_order"&&entryRow.source_public_id){
+        const [orders]=await c.execute<RowDataPacket[]>(
+          "SELECT id,current_stage,status FROM erp_sale_orders WHERE client_id=? AND public_id=? LIMIT 1",
+          [clientId,entryRow.source_public_id]
+        );
+        if(orders[0]){
+          const [users]=await c.execute<RowDataPacket[]>(
+            "SELECT COALESCE(name,email) display_name FROM megadesk_domain_client_users WHERE client_id=? AND user_id=? LIMIT 1",
+            [clientId,userId]
+          );
+          const stage=String(orders[0].current_stage??(orders[0].status==="fulfilled"?"completed":orders[0].status==="draft"?"created":"confirmed"));
+          const after={financialEntryPublicId:publicId,settlementPublicId,amountCents:amount,paidCents:paid+amount,pendingCents:total-paid-amount};
+          await c.execute(
+            `INSERT INTO erp_sale_order_events
+             (public_id,client_id,sale_order_id,event_type,from_stage,to_stage,after_json,idempotency_key,payload_hash,changed_by,changed_by_name_snapshot)
+             VALUES(?,?,?,'payment_registered',?,?,?,?,?,?,?)`,
+            [randomUUID(),clientId,orders[0].id,stage,stage,JSON.stringify(after),`${key}:sale`,createHash("sha256").update(JSON.stringify(after)).digest("hex"),userId,String(users[0]?.display_name??"Usuário indisponível")]
+          );
+        }
+      }
       if(entryRow.source_type==="purchase_order"&&entryRow.source_public_id){
         const [orders]=await c.execute<RowDataPacket[]>(
           "SELECT id,purchase_request_id,purchase_quote_id,order_number FROM erp_purchase_orders WHERE client_id=? AND public_id=? LIMIT 1",

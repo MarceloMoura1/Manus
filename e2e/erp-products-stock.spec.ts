@@ -5,6 +5,8 @@ import {
   type Page,
   type Route,
 } from "@playwright/test";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
 const session = {
   clientId: "erp-e2e",
@@ -34,6 +36,42 @@ const product = {
   updatedAt: "2026-01-01T00:00:00.000Z",
   hasImage: false,
 };
+const productVariants = [
+  {
+    publicId: "44444444-4444-4444-8444-444444444439",
+    productPublicId: product.publicId,
+    productName: product.name,
+    sku: "PROD-001-39",
+    barcode: null,
+    name: "Tamanho 39",
+    costPriceCents: 1000,
+    salePriceCents: 1500,
+    effectivePriceCents: 1500,
+    inventoryItemPublicId: "55555555-5555-4555-8555-555555555539",
+    quantity: "5.000",
+    active: true,
+    attributes: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
+  {
+    publicId: "44444444-4444-4444-8444-444444444440",
+    productPublicId: product.publicId,
+    productName: product.name,
+    sku: "PROD-001-40",
+    barcode: null,
+    name: "Tamanho 40",
+    costPriceCents: 1000,
+    salePriceCents: 1500,
+    effectivePriceCents: 1500,
+    inventoryItemPublicId: "55555555-5555-4555-8555-555555555540",
+    quantity: "8.000",
+    active: true,
+    attributes: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
+];
 const movement = {
   publicId: "22222222-2222-4222-8222-222222222222",
   productPublicId: product.publicId,
@@ -123,8 +161,15 @@ async function clickExposedDrawerOverlay(overlay: Locator, drawer: Locator) {
 }
 async function prepare(
   page: Page,
-  options: { empty?: boolean; readOnly?: boolean; hasImage?: boolean } = {}
+  options: {
+    empty?: boolean;
+    readOnly?: boolean;
+    hasImage?: boolean;
+    exactVariants?: boolean;
+    onStockMove?: (requestBody: string) => void;
+  } = {}
 ) {
+  let firstVariantQuantity = productVariants[0].quantity;
   page.on("pageerror", error =>
     console.log(`ERP_PAGE_ERROR: ${error.message}`)
   );
@@ -167,6 +212,22 @@ async function prepare(
           totalPages: options.empty ? 0 : 1,
           canWrite: !options.readOnly,
         };
+      if (procedure.includes("erp.products.detail"))
+        return {
+          ...product,
+          categoryPublicId: null,
+          brandPublicId: null,
+          categoryRelational: null,
+          brand: null,
+          variants: options.exactVariants
+            ? productVariants.map((variant, index) =>
+                index === 0
+                  ? { ...variant, quantity: firstVariantQuantity }
+                  : variant
+              )
+            : [],
+          preferredSupplier: null,
+        };
       if (procedure.includes("erp.stock.list"))
         return {
           items: options.empty ? [] : [movement],
@@ -191,7 +252,11 @@ async function prepare(
       if (procedure.includes("erp.products.update"))
         return { ...product, name: "Produto editado" };
       if (procedure.includes("erp.products.setActive")) return { ok: true };
-      if (procedure.includes("erp.stock.move")) return movement;
+      if (procedure.includes("erp.stock.move")) {
+        options.onStockMove?.(route.request().postData() ?? "");
+        if (options.exactVariants) firstVariantQuantity = "10.000";
+        return movement;
+      }
       return null;
     };
     const procedures = decodeURIComponent(new URL(url).pathname)
@@ -226,6 +291,14 @@ async function prepare(
     await trigger.click();
   }
   await expect(page.getByTestId("erp-workspace")).toBeVisible();
+}
+
+async function capture(page: Page, name: string) {
+  const root = process.env.PRODUCTS_STOCK_SCREENSHOT_DIR;
+  if (!root) return;
+  const path = `${root}/${name}.png`;
+  mkdirSync(dirname(path), { recursive: true });
+  await page.screenshot({ path, fullPage: true });
 }
 
 test.describe("ERP products and stock", () => {
@@ -291,13 +364,12 @@ test.describe("ERP products and stock", () => {
     await page.getByRole("button",{name:"Editar"}).click();dialog=page.getByRole("dialog");page.once("dialog",confirmation=>void confirmation.accept());await dialog.getByRole("button",{name:"Remover"}).click();await dialog.getByRole("button",{name:"Salvar",exact:true}).click();
     await expect.poll(()=>deletes).toBe(1);await expect(page.getByTestId("product-image-placeholder").first()).toBeVisible();await expect(page.getByRole("img",{name:`Foto de ${product.name}`})).toHaveCount(0);
   });
-  test("revokes ObjectURLs on replacement and dialog teardown while preserving fields on upload failure",async({page})=>{
+  test("revokes ObjectURLs and reports an image warning after the product update succeeds",async({page})=>{
     await page.addInitScript(()=>{const created:string[]=[];const revoked:string[]=[];let index=0;URL.createObjectURL=()=>{const value=`blob:synthetic-${++index}`;created.push(value);return value};URL.revokeObjectURL=value=>revoked.push(String(value));Object.assign(window,{__mediaUrls:{created,revoked}});});
     await page.route("**/api/products/*/image",route=>route.fulfill({status:400,contentType:"application/json",body:JSON.stringify({error:"Imagem inválida."})}));
     await prepare(page,{hasImage:true});await erpModules(page).getByRole("button",{name:"Produtos",exact:true}).click();await page.getByRole("button",{name:"Editar"}).click();const dialog=page.getByRole("dialog");
     const input=dialog.locator('input[type="file"]');await input.setInputFiles({name:"one.png",mimeType:"image/png",buffer:Buffer.from("one")});await input.setInputFiles({name:"two.png",mimeType:"image/png",buffer:Buffer.from("two")});
-    expect(await page.evaluate(()=>(window as any).__mediaUrls.revoked.length)).toBeGreaterThanOrEqual(1);await dialog.getByRole("button",{name:"Salvar",exact:true}).click();await expect(page.getByText("Imagem inválida.")).toBeVisible();await expect(dialog.getByLabel("Nome")).toHaveValue(product.name);
-    await page.keyboard.press("Escape");await expect(dialog).toBeHidden();expect(await page.evaluate(()=>(window as any).__mediaUrls.revoked.length)).toBeGreaterThanOrEqual(2);
+    expect(await page.evaluate(()=>(window as any).__mediaUrls.revoked.length)).toBeGreaterThanOrEqual(1);await dialog.getByRole("button",{name:"Salvar",exact:true}).click();await expect(page.getByRole("status")).toContainText("Produto atualizado com sucesso! Aviso de foto: Imagem inválida.");await expect(dialog).toBeHidden();expect(await page.evaluate(()=>(window as any).__mediaUrls.revoked.length)).toBeGreaterThanOrEqual(2);await expect(page.getByText(product.name,{exact:true}).first()).toBeVisible();
   });
   test("registers a controlled stock movement with explicit confirmation", async ({
     page,
@@ -311,10 +383,62 @@ test.describe("ERP products and stock", () => {
       .selectOption(product.publicId);
     await page.getByLabel("Quantidade").fill("2");
     await page.getByLabel("Motivo").fill("Entrada controlada");
-    await page.getByRole("button", { name: "Confirmar movimentação" }).click();
+    await page.getByRole("button", { name: "Registrar movimentação" }).click();
     await expect(
       page.getByText("Movimentação registrada com sucesso.")
     ).toBeVisible();
+  });
+  test("shows and adjusts only the selected variant stock, preserving it after reopening", async ({
+    page,
+  }) => {
+    const stockRequests: string[] = [];
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await prepare(page, {
+      exactVariants: true,
+      onStockMove: requestBody => stockRequests.push(requestBody),
+    });
+    await erpModules(page)
+      .getByRole("button", { name: "Produtos", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Detalhes" }).click();
+    await page.getByRole("tab", { name: "Variantes (2)" }).click();
+
+    const size39 = page.getByTestId(`variant-stock-${productVariants[0].publicId}`);
+    const size40 = page.getByTestId(`variant-stock-${productVariants[1].publicId}`);
+    await expect(size39).toHaveText("5,000");
+    await expect(size40).toHaveText("8,000");
+    await capture(page, "product-variants-independent-stock");
+
+    await page
+      .getByTestId(`adjust-variant-stock-btn-${productVariants[0].publicId}`)
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: "Ajustar estoque da variante",
+    });
+    await expect(dialog).toContainText("Tamanho 39 · saldo atual 5,000");
+    await expect(dialog).toContainText(
+      "os saldos das demais variantes não são alterados"
+    );
+    await dialog.getByLabel("Novo saldo").fill("10");
+    await dialog.getByRole("button", { name: "Salvar saldo" }).click();
+
+    await expect(size39).toHaveText("10,000");
+    await expect(size40).toHaveText("8,000");
+    expect(stockRequests).toHaveLength(1);
+    expect(stockRequests[0]).toContain(productVariants[0].inventoryItemPublicId);
+    expect(stockRequests[0]).toContain('"type":"adjustment_in"');
+    expect(stockRequests[0]).toContain('"quantity":"5.000"');
+    await capture(page, "product-variant-stock-adjusted");
+
+    await page.getByRole("button", { name: "Voltar ao catálogo" }).click();
+    await page.getByRole("button", { name: "Detalhes" }).click();
+    await page.getByRole("tab", { name: "Variantes (2)" }).click();
+    await expect(
+      page.getByTestId(`variant-stock-${productVariants[0].publicId}`)
+    ).toHaveText("10,000");
+    await expect(
+      page.getByTestId(`variant-stock-${productVariants[1].publicId}`)
+    ).toHaveText("8,000");
   });
   test("is responsive at 390x844 and removes read-only actions from the DOM", async ({
     page,

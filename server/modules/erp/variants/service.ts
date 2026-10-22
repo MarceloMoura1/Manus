@@ -82,6 +82,8 @@ export function variantPublic(
     salePriceCents,
     productSalePriceCents,
     effectivePriceCents,
+    inventoryItemPublicId: row.inventory_item_public_id ?? null,
+    quantity: String(row.quantity ?? "0.000"),
     combinationHash: row.combination_hash,
     active: row.active === 1,
     attributes: attributes.map((a) => ({

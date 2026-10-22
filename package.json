@@ -6,9 +6,13 @@
   "scripts": {
     "dev": "tsx watch server/_core/index.ts",
     "dev:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-local.ps1",
+    "dev:disposable-test": "tsx scripts/start-disposable-test-runtime.mjs",
     "local:env:create": "node scripts/create-local-environment.mjs",
     "local:admin": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-local-admin.ps1",
     "build": "vite build && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "release:assemble-runtime": "node scripts/operations/assemble-runtime-release.mjs",
+    "release:package-runtime": "node scripts/operations/package-runtime-release.mjs",
+    "release:linux-arm64-deploy": "node scripts/operations/linux-arm64-release-deploy.mjs",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc --noEmit",
     "format": "prettier --write .",

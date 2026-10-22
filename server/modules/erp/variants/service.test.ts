@@ -173,7 +173,12 @@ describe("VariantService Domain Rules", () => {
     });
 
     it("VARIANT_DETAIL: returns variant with effective price and resolved attributes", async () => {
-      const current = mockVariant({ sale_price_cents: null, product_sale_price_cents: 5000 });
+      const current = mockVariant({
+        sale_price_cents: null,
+        product_sale_price_cents: 5000,
+        inventory_item_public_id: "inventory-size-39",
+        quantity: "5.000",
+      });
       variantRepo.find.mockResolvedValue(current);
       variantRepo.getAttributesForVariant.mockResolvedValue([
         mockAttributeRow({ type_name: "Cor", value_name: "Preto" }),
@@ -184,11 +189,13 @@ describe("VariantService Domain Rules", () => {
       expect(result.attributes).toHaveLength(1);
       expect(result.attributes[0].typeName).toBe("Cor");
       expect(result.attributes[0].valueName).toBe("Preto");
+      expect(result.inventoryItemPublicId).toBe("inventory-size-39");
+      expect(result.quantity).toBe("5.000");
     });
 
     it("VARIANT_LIST: returns paginated list with attributes mapped", async () => {
-      const v1 = mockVariant({ id: 1, public_id: "var-1" });
-      const v2 = mockVariant({ id: 2, public_id: "var-2" });
+      const v1 = mockVariant({ id: 1, public_id: "var-1", quantity: "5.000" });
+      const v2 = mockVariant({ id: 2, public_id: "var-2", quantity: "8.000" });
       const attributesMap = new Map([
         [1, [mockAttributeRow({ variant_id: 1, type_name: "Cor" })]],
         [2, [mockAttributeRow({ variant_id: 2, type_name: "Tamanho" })]],
@@ -204,6 +211,7 @@ describe("VariantService Domain Rules", () => {
       expect(result.items[0].attributes).toHaveLength(1);
       expect(result.items[0].attributes[0].typeName).toBe("Cor");
       expect(result.items[1].attributes[0].typeName).toBe("Tamanho");
+      expect(result.items.map(item => item.quantity)).toEqual(["5.000", "8.000"]);
     });
   });
 

@@ -158,7 +158,14 @@ export type CrmClientInput = {
   internalResponsible?: string;
   tags?: string;
   observations?: string;
-  contacts?: Array<{ phone: string; whatsapp: string; description?: string }>;
+  contacts?: Array<{
+    name?: string;
+    role?: string;
+    email?: string;
+    phone: string;
+    whatsapp: string;
+    description?: string;
+  } & Record<string, unknown>>;
 };
 
 /**
@@ -218,9 +225,59 @@ export async function getCrmClientById(crmClientId: string, clientId: string) {
 
 /**
  * Cria um novo cliente CRM.
+ * Centraliza a deduplicação na entidade canônica megadesk_crm_clients:
+ * antes de QUALQUER INSERT nessa tabela, faz o lookup por telefone canônico/email e REAPROVEITA o registro se já existir.
  */
 export async function createCrmClient(clientId: string, input: CrmClientInput) {
   const db = getDb();
+
+  // Sincronizar phone e whatsapp se apenas um foi fornecido
+  const rawPhone = input.phone?.trim() ? input.phone : (input.whatsapp?.trim() ? input.whatsapp : undefined);
+  const rawWhatsapp = input.whatsapp?.trim() ? input.whatsapp : (input.phone?.trim() ? input.phone : undefined);
+  const normalizedPhone = normalizeStoredPhone(rawPhone, true);
+  const normalizedWhatsapp = normalizeStoredPhone(rawWhatsapp, false) ?? "";
+  const rawEmail = input.email && input.email.trim() ? normalizeEmail(input.email) : null;
+  const normalizedEmail = rawEmail && rawEmail.length > 0 ? rawEmail : null;
+  const rawDoc = input.cpfCnpj ? normalizeDigits(input.cpfCnpj) : null;
+  const normalizedDoc = rawDoc && rawDoc.length > 0 ? rawDoc : null;
+
+  // 1. Checagem de duplicidade / deduplicação estrita na entidade canônica megadesk_crm_clients
+  const duplicate = await findDuplicateCrmClient(clientId, {
+    cpfCnpj: normalizedDoc ?? undefined,
+    phone: normalizedPhone ?? undefined,
+    whatsapp: normalizedWhatsapp || undefined,
+    email: normalizedEmail ?? undefined,
+    contacts: input.contacts,
+  });
+
+  if (duplicate) {
+    // REAPROVEITAR o registro existente e complementar campos faltantes
+    const updateData: Partial<typeof megadeskCrmClients.$inferInsert> = {
+      updatedAt: new Date().toISOString() as any,
+    };
+    if (!duplicate.phone && normalizedPhone) updateData.phone = normalizedPhone;
+    if ((!duplicate.whatsapp || duplicate.whatsapp === "") && normalizedWhatsapp) updateData.whatsapp = normalizedWhatsapp;
+    if (!duplicate.cpfCnpj && normalizedDoc) updateData.cpfCnpj = normalizedDoc;
+    if (!duplicate.email && normalizedEmail) updateData.email = normalizedEmail;
+    if (input.address && !duplicate.phone) updateData.address = input.address;
+    if (input.city) updateData.city = input.city;
+    if (input.state) updateData.state = input.state;
+    if (input.cep) updateData.cep = input.cep;
+
+    if (Object.keys(updateData).length > 1) {
+      await db
+        .update(megadeskCrmClients)
+        .set(updateData)
+        .where(
+          and(
+            eq(megadeskCrmClients.crmClientId, duplicate.crmClientId),
+            eq(megadeskCrmClients.clientId, clientId)
+          )
+        );
+    }
+    return { crmClientId: duplicate.crmClientId, deduplicated: true };
+  }
+
   const crmClientId = `crm-${randomUUID()}`;
   await db.insert(megadeskCrmClients).values({
     crmClientId,
@@ -228,10 +285,10 @@ export async function createCrmClient(clientId: string, input: CrmClientInput) {
     customerType: input.customerType,
     companyName: input.companyName,
     responsibleName: input.responsibleName ?? "",
-    cpfCnpj: input.cpfCnpj ? normalizeDigits(input.cpfCnpj) : null,
-    phone: normalizeStoredPhone(input.phone, true),
-    whatsapp: normalizeStoredPhone(input.whatsapp, false) ?? "",
-    email: input.email ? normalizeEmail(input.email) : null,
+    cpfCnpj: normalizedDoc,
+    phone: normalizedPhone,
+    whatsapp: normalizedWhatsapp,
+    email: normalizedEmail,
     address: input.address ?? "",
     city: input.city ?? "",
     state: input.state ?? "",
@@ -243,7 +300,7 @@ export async function createCrmClient(clientId: string, input: CrmClientInput) {
     observations: input.observations ?? "",
     contactsJson: input.contacts ? JSON.stringify(input.contacts) : "",
   });
-  return { crmClientId };
+  return { crmClientId, deduplicated: false };
 }
 
 /**
@@ -291,23 +348,133 @@ export async function updateCrmClient(
     );
 }
 
-export async function findDuplicateCrmClient(clientId: string, input: { cpfCnpj?: string; phone?: string }, excludeCrmClientId?: string) {
-  const document = input.cpfCnpj ? normalizeDigits(input.cpfCnpj) : "";
-  const normalizedPhone = normalizeStoredPhone(input.phone, true) ?? "";
-  if (!document && !normalizedPhone) return null;
+export async function findDuplicateCrmClient(
+  clientId: string,
+  input: {
+    cpfCnpj?: string;
+    phone?: string;
+    whatsapp?: string;
+    email?: string;
+    contacts?: Array<{ phone?: string; whatsapp?: string; email?: string }>;
+  },
+  excludeCrmClientId?: string
+): Promise<{
+  crmClientId: string;
+  companyName: string;
+  cpfCnpj: string | null;
+  phone: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  matchedField?: "cpfCnpj" | "phone" | "whatsapp" | "email";
+} | null> {
   const clauses: string[] = [];
   const values: unknown[] = [clientId];
-  if (document) { clauses.push("cpf_cnpj = ?"); values.push(document); }
-  if (normalizedPhone) { clauses.push("phone = ?"); values.push(normalizedPhone); }
-  if (excludeCrmClientId) { values.push(excludeCrmClientId); }
-  const [rows] = await getPool().execute(
-    `SELECT crm_client_id AS crmClientId, company_name AS companyName, cpf_cnpj AS cpfCnpj, phone
+
+  // 1. CPF/CNPJ
+  const document = input.cpfCnpj ? normalizeDigits(input.cpfCnpj) : "";
+  if (document && document.length >= 8) {
+    clauses.push("cpf_cnpj = ?");
+    values.push(document);
+  }
+
+  // 2. Telefone e WhatsApp com variantes canônicas de dígitos
+  const phoneVariantsSet = new Set<string>();
+  const collectVariants = (val: string | null | undefined) => {
+    if (!val) return;
+    const norm = normalizeContactPhone(val);
+    if (norm.status === "valid") {
+      const vars = contactPhoneStorageDigitsVariants(norm.value);
+      vars.forEach(v => phoneVariantsSet.add(v));
+    }
+  };
+
+  collectVariants(input.phone);
+  collectVariants(input.whatsapp);
+  if (Array.isArray(input.contacts)) {
+    for (const c of input.contacts) {
+      collectVariants(c.phone);
+      collectVariants(c.whatsapp);
+    }
+  }
+
+  const phoneVariants = Array.from(phoneVariantsSet);
+  if (phoneVariants.length > 0) {
+    const placeholders = phoneVariants.map(() => "?").join(", ");
+    clauses.push(
+      `(phone IS NOT NULL AND phone IN (${placeholders}))`,
+      `(whatsapp IS NOT NULL AND whatsapp <> '' AND whatsapp IN (${placeholders}))`
+    );
+    values.push(...phoneVariants, ...phoneVariants);
+
+    for (const pv of phoneVariants) {
+      if (pv.length >= 8) {
+        clauses.push(`(contacts_json IS NOT NULL AND contacts_json LIKE ?)`);
+        values.push(`%${pv}%`);
+      }
+    }
+  }
+
+  // 3. E-mail
+  const emailSet = new Set<string>();
+  if (input.email && input.email.trim()) {
+    emailSet.add(input.email.trim().toLowerCase());
+  }
+  if (Array.isArray(input.contacts)) {
+    for (const c of input.contacts) {
+      if (c.email && c.email.trim()) {
+        emailSet.add(c.email.trim().toLowerCase());
+      }
+    }
+  }
+  const emails = Array.from(emailSet);
+  if (emails.length > 0) {
+    const placeholders = emails.map(() => "?").join(", ");
+    clauses.push(`(email IS NOT NULL AND LOWER(email) IN (${placeholders}))`);
+    values.push(...emails);
+
+    for (const em of emails) {
+      clauses.push(`(contacts_json IS NOT NULL AND LOWER(contacts_json) LIKE ?)`);
+      values.push(`%${em}%`);
+    }
+  }
+
+  if (clauses.length === 0) return null;
+
+  if (excludeCrmClientId) {
+    values.push(excludeCrmClientId);
+  }
+
+  const pool = getPool();
+  const [rows] = await pool.query(
+    `SELECT crm_client_id AS crmClientId, company_name AS companyName,
+            cpf_cnpj AS cpfCnpj, phone, whatsapp, email
      FROM megadesk_crm_clients
      WHERE client_id = ? AND (${clauses.join(" OR ")})${excludeCrmClientId ? " AND crm_client_id <> ?" : ""}
-     ORDER BY company_name, crm_client_id LIMIT 1`,
+     ORDER BY updated_at DESC, created_at DESC LIMIT 1`,
     values,
   ) as any[];
-  return rows[0] as { crmClientId: string; companyName: string; cpfCnpj: string | null; phone: string | null } | undefined ?? null;
+
+  if (!rows || rows.length === 0) return null;
+  const match = rows[0];
+
+  let matchedField: "cpfCnpj" | "phone" | "whatsapp" | "email" = "phone";
+  if (document && match.cpfCnpj === document) {
+    matchedField = "cpfCnpj";
+  } else if (emails.length > 0 && match.email && emails.includes(match.email.toLowerCase())) {
+    matchedField = "email";
+  } else if (input.whatsapp && match.whatsapp) {
+    matchedField = "whatsapp";
+  }
+
+  return {
+    crmClientId: match.crmClientId,
+    companyName: match.companyName,
+    cpfCnpj: match.cpfCnpj ?? null,
+    phone: match.phone ?? null,
+    whatsapp: match.whatsapp ?? null,
+    email: match.email ?? null,
+    matchedField,
+  };
 }
 
 function normalizeStoredPhone(value: string | undefined, nullable: boolean): string | null {
@@ -346,11 +513,12 @@ export async function addCrmTimeline(
     type: string;
     description: string;
     author?: string;
-  }
+  },
+  executor: SqlExecutor = getPool()
 ) {
-  const pool = getPool();
+
   const id = randomUUID();
-  await pool.execute(
+  await executor.execute(
     `INSERT INTO megadesk_crm_timeline (timeline_id, crm_client_id, client_id, entry_type, description, author, created_at)
      VALUES (?, ?, ?, ?, ?, ?, NOW())`,
     [id, crmClientId, clientId, entry.type, entry.description, entry.author ?? "Sistema"]

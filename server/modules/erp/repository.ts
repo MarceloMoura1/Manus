@@ -221,6 +221,90 @@ export class ErpRepository {
     return result.affectedRows > 0;
   }
 
+  async purgeProduct(clientId: string, publicId: string): Promise<boolean> {
+    const connection = await this.database().getConnection();
+    try {
+      await connection.beginTransaction();
+      const product = await this.findProduct(clientId, publicId, connection, true);
+      if (!product) {
+        await connection.rollback();
+        return false;
+      }
+      const productId = product.id;
+
+      await connection.execute("SET FOREIGN_KEY_CHECKS = 0");
+      try {
+        await connection.execute("UPDATE erp_products SET primary_media_id=NULL WHERE client_id=? AND id=?", [clientId, productId]);
+        await connection.execute("DELETE FROM erp_product_media WHERE client_id=? AND product_id=?", [clientId, productId]);
+        await connection.execute("DELETE FROM erp_product_variants WHERE client_id=? AND product_id=?", [clientId, productId]);
+        await connection.execute("DELETE FROM erp_inventory_items WHERE client_id=? AND product_id=?", [clientId, productId]);
+        await connection.execute("DELETE FROM erp_product_suppliers WHERE client_id=? AND product_id=?", [clientId, productId]);
+        await connection.execute("DELETE FROM erp_product_audit_logs WHERE client_id=? AND product_id=?", [clientId, productId]);
+        await connection.execute("DELETE FROM erp_product_fiscal_profiles WHERE product_id=?", [productId]);
+        await connection.execute("DELETE FROM erp_stock_balances WHERE client_id=? AND product_id=?", [clientId, productId]);
+        await connection.execute("DELETE FROM erp_products WHERE client_id=? AND id=?", [clientId, productId]);
+      } finally {
+        await connection.execute("SET FOREIGN_KEY_CHECKS = 1");
+      }
+      await connection.commit();
+      return true;
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async checkProductDependencies(clientId: string, publicId: string) {
+    const product = await this.findProduct(clientId, publicId);
+    if (!product) return null;
+
+    let salesCount = 0;
+    try {
+      const [rows] = await this.database().execute<RowDataPacket[]>(
+        `SELECT COUNT(*) total FROM erp_sale_order_items i
+         INNER JOIN erp_sale_orders o ON o.id=i.sale_order_id
+         WHERE o.client_id=? AND i.product_id=?`,
+        [clientId, product.id]
+      );
+      salesCount += Number(rows[0]?.total ?? 0);
+    } catch {
+      // ignore table if missing
+    }
+
+    try {
+      const [purchaseRows] = await this.database().execute<RowDataPacket[]>(
+        `SELECT COUNT(*) total FROM erp_purchase_order_items poi
+         INNER JOIN erp_purchase_orders po ON po.id=poi.purchase_order_id
+         WHERE po.client_id=? AND poi.product_id=?`,
+        [clientId, product.id]
+      );
+      salesCount += Number(purchaseRows[0]?.total ?? 0);
+    } catch {
+      // ignore table if missing
+    }
+
+    let stockCount = 0;
+    try {
+      const [stockRows] = await this.database().execute<RowDataPacket[]>(
+        `SELECT COALESCE(SUM(quantity), 0) total FROM erp_stock_balances
+         WHERE client_id=? AND product_id=?`,
+        [clientId, product.id]
+      );
+      stockCount = Math.max(0, Math.round(Number(stockRows[0]?.total ?? 0)));
+    } catch {
+      // ignore
+    }
+
+    const hasDependencies = salesCount > 0 || stockCount > 0;
+    return {
+      hasDependencies,
+      salesCount,
+      stockCount,
+    };
+  }
+
   async listMovements(clientId: string, filters: { productPublicId?: string; type?: string; search: string; from?: string; to?: string; page: number; pageSize: number }) {
     const limit = Math.max(1, Math.min(100, Math.trunc(filters.pageSize)));
     const offset = Math.max(0, (Math.max(1, Math.trunc(filters.page)) - 1) * limit);

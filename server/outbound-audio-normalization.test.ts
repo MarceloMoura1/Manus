@@ -13,6 +13,7 @@ import {
   OutboundAudioNormalizationError,
   OutboundAudioNormalizationLimiter,
   normalizeOutboundAudio,
+  outboundAudioRuntimeExecutable,
   outboundAudioFfmpegArgs,
   validatePackagedAudioExecutable,
   type AudioNormalizerExecFile,
@@ -42,6 +43,11 @@ function failingExec(error: Error & { code?: string | number; killed?: boolean; 
 }
 
 describe("outbound audio normalization", () => {
+  it("selects Linux system tools before attempting to resolve Windows static packages", () => {
+    expect(outboundAudioRuntimeExecutable("ffmpeg", "linux")).toBe("/usr/bin/ffmpeg");
+    expect(outboundAudioRuntimeExecutable("ffprobe", "linux")).toBe("/usr/bin/ffprobe");
+  });
+
   it("resolves both runtime tools to deterministic absolute executable files", async () => {
     const executables = [OUTBOUND_AUDIO_FFMPEG_EXECUTABLE, OUTBOUND_AUDIO_FFPROBE_EXECUTABLE];
     for (const executable of executables) {

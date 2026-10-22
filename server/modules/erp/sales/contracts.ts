@@ -5,6 +5,7 @@ import {
   quantityMillis,
   type OperationalRole,
 } from "../contracts";
+
 export const saleStatuses = [
   "draft",
   "confirmed",
@@ -12,101 +13,368 @@ export const saleStatuses = [
   "cancelled",
 ] as const;
 export type SaleStatus = (typeof saleStatuses)[number];
+
+export const saleStages = [
+  "created",
+  "confirmed",
+  "separation",
+  "shipped",
+  "received",
+  "completed",
+] as const;
+export type SaleStage = (typeof saleStages)[number];
+
+export const salePaymentStatuses = ["pending", "partial", "paid"] as const;
+export type SalePaymentStatus = (typeof salePaymentStatuses)[number];
+
+export const saleDocumentTypes = ["quote", "sale"] as const;
+export type SaleDocumentType = (typeof saleDocumentTypes)[number];
+
+export const saleCommercialStatuses = [
+  "draft",
+  "negotiation",
+  "approved",
+  "converted",
+  "active",
+  "completed",
+  "lost",
+  "cancelled",
+] as const;
+export type SaleCommercialStatus = (typeof saleCommercialStatuses)[number];
+
 export type SaleOperation =
   | "created"
   | "updated"
   | "confirmed"
   | "cancelled"
-  | "fulfilled";
+  | "stage_changed"
+  | "shipped"
+  | "payment_changed"
+  | "address_corrected"
+  | "duplicated"
+  | "quote_status_changed"
+  | "quote_converted"
+  | "archived";
+
 const quantity = z
   .string()
   .trim()
   .regex(/^\d{1,15}(?:\.\d{1,3})?$/)
-  .refine(v => quantityMillis(v) > 0n, "Quantidade deve ser maior que zero.");
+  .refine(value => quantityMillis(value) > 0n, "Quantidade deve ser maior que zero.");
+
+export const saleAddressSchema = z.object({
+  recipientName: z.string().trim().max(180).default(""),
+  postalCode: z.string().trim().max(10).default(""),
+  street: z.string().trim().max(255).default(""),
+  number: z.string().trim().max(30).default(""),
+  complement: z.string().trim().max(120).default(""),
+  district: z.string().trim().max(120).default(""),
+  city: z.string().trim().max(120).default(""),
+  state: z.string().trim().max(2).default(""),
+});
+export type SaleAddress = z.infer<typeof saleAddressSchema>;
+
 const item = z.object({
   productPublicId: z.string().uuid(),
   inventoryItemPublicId: z.string().uuid().nullish(),
   quantity,
   unitPriceCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  discountCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).default(0),
 });
+
 export const saleDraftInput = z
   .object({
+    documentType: z.enum(saleDocumentTypes).default("sale"),
     crmClientId: z.string().trim().min(1).max(80),
-    notes: z
-      .string()
-      .trim()
-      .max(4_000)
-      .optional()
-      .transform(v => v || null),
-    expectedDate: z
-      .string()
-      .date()
-      .optional()
-      .transform(v => v || null),
+    // Omission has update semantics: keep the persisted seller.  A concrete
+    // identifier is the only way to request an intentional reassignment.
+    sellerUserId: z.string().trim().min(1).max(80).optional(),
+    commercialDate: z.string().date().optional().transform(value => value || null),
+    notes: z.string().trim().max(4_000).optional().transform(value => value || null),
+    paymentTerms: z.string().trim().max(500).optional().transform(value => value || null),
+    paymentMethod: z.string().trim().max(80).optional().transform(value => value || null),
+    expectedDate: z.string().date().optional().transform(value => value || null),
+    documentCustomName: z.string().trim().max(255).nullish().transform(value => value || null),
+    serviceMetadata: z.record(z.string(), z.unknown()).nullish().transform(value => value ?? null),
+    shippingAddress: saleAddressSchema.nullish().transform(value => value ?? null),
+    billingAddress: saleAddressSchema.nullish().transform(value => value ?? null),
+    orderDiscountCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).default(0),
+    freightCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).default(0),
+    chargesCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).default(0),
     items: z.array(item).min(1).max(100),
   })
-  .superRefine((v, c) => {
+  .superRefine((value, context) => {
     const seen = new Set<string>();
-    v.items.forEach((x, i) => {
-      const identity = `${x.productPublicId}:${x.inventoryItemPublicId ?? "product-only"}`;
-      if (seen.has(identity))
-        c.addIssue({
+    value.items.forEach((entry, index) => {
+      const identity = `${entry.productPublicId}:${entry.inventoryItemPublicId ?? "product-only"}`;
+      if (seen.has(identity)) {
+        context.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["items", i, "inventoryItemPublicId"],
-          message: "Inventory item duplicado no pedido.",
+          path: ["items", index, "inventoryItemPublicId"],
+          message: "Item de estoque duplicado no pedido.",
         });
+      }
       seen.add(identity);
+      const gross = lineTotalCents(entry.quantity, entry.unitPriceCents);
+      if (entry.discountCents > gross) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["items", index, "discountCents"],
+          message: "O desconto do item não pode superar seu valor bruto.",
+        });
+      }
     });
+    try {
+      calculateSaleTotals(
+        value.items,
+        value.orderDiscountCents,
+        value.freightCents,
+        value.chargesCents
+      );
+    } catch (error) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["orderDiscountCents"],
+        message: error instanceof Error ? error.message : "Totais inválidos.",
+      });
+    }
   });
+
 export const saleListInput = z.object({
   search: z.string().trim().max(180).default(""),
-  status: z.enum(saleStatuses).optional(),
+  kind: z.enum(["all", "quotes", "orders"]).default("all"),
+  crmClientId: z.string().trim().min(1).max(80).optional(),
+  status: z.union([z.string(), z.array(z.string())]).optional(),
+  statuses: z.array(z.string()).optional(),
+  stage: z.union([z.string(), z.array(z.string())]).optional(),
+  stages: z.array(z.string()).optional(),
+  commercialStatus: z.union([z.string(), z.array(z.string())]).optional(),
+  commercialStatuses: z.array(z.string()).optional(),
+  paymentStatus: z.union([z.string(), z.array(z.string())]).optional(),
+  paymentStatuses: z.array(z.string()).optional(),
+  paymentMethod: z.union([z.string().trim().max(80), z.array(z.string())]).optional(),
+  paymentMethods: z.array(z.string()).optional(),
+  sellerUserId: z.union([z.string().trim().max(80), z.array(z.string())]).optional(),
+  sellerUserIds: z.array(z.string()).optional(),
+  includeArchived: z.boolean().default(false),
   from: z.string().date().optional(),
   to: z.string().date().optional(),
-  sort: z.enum(["orderNumber", "createdAt", "total"]).default("createdAt"),
+  sort: z.enum([
+    "orderNumber",
+    "customer",
+    "commercialDate",
+    "seller",
+    "status",
+    "createdAt",
+    "total",
+  ]).default("createdAt"),
   direction: z.enum(["asc", "desc"]).default("desc"),
   page: z.number().int().min(1).default(1),
   pageSize: z.number().int().min(1).max(100).default(20),
 });
+
+export const saleSearchInput = z.object({
+  search: z.string().trim().max(180).default(""),
+  page: z.number().int().min(1).default(1),
+  pageSize: z.number().int().min(1).max(50).default(20),
+});
+
+export const saleConfirmationInput = z.object({
+  publicId: z.string().uuid(),
+  idempotencyKey: z.string().uuid(),
+  paymentMethod: z.string().trim().min(2).max(80),
+  categoryPublicId: z.string().uuid(),
+  financialAccountPublicId: z.string().uuid().nullish(),
+  receivedCents: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),
+  installments: z
+    .array(
+      z.object({
+        dueDate: z.string().date(),
+        amountCents: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+      })
+    )
+    .min(1)
+    .max(120),
+});
+
+export const saleTransitionInput = z.object({
+  publicId: z.string().uuid(),
+  toStage: z.enum(saleStages),
+  idempotencyKey: z.string().uuid(),
+  reason: z.string().trim().max(500).optional().transform(value => value || null),
+});
+
+export const saleAddressCorrectionInput = z.object({
+  publicId: z.string().uuid(),
+  shippingAddress: saleAddressSchema,
+  billingAddress: saleAddressSchema,
+  reason: z.string().trim().min(3).max(500),
+});
+
 export const cancellationInput = z.object({
   publicId: z.string().uuid(),
   reason: z.string().trim().min(3).max(500),
 });
+
 export const fulfillInput = z.object({
   publicId: z.string().uuid(),
   idempotencyKey: z.string().uuid(),
 });
+
+export const saleDuplicateInput = z.object({
+  publicId: z.string().uuid(),
+  idempotencyKey: z.string().uuid(),
+});
+
+export const quoteConversionInput = z.object({
+  publicId: z.string().uuid(),
+  idempotencyKey: z.string().uuid(),
+});
+
+export const saleCommercialTransitionInput = z.object({
+  publicId: z.string().uuid(),
+  toStatus: z.enum(["negotiation", "approved", "lost"]),
+  reason: z.string().trim().max(500).optional().transform(value => value || null),
+});
+
+export const saleArchiveInput = z.object({
+  publicId: z.string().uuid(),
+  reason: z.string().trim().min(3).max(500),
+});
+
 export type SaleDraftInput = z.infer<typeof saleDraftInput>;
 export type SaleListInput = z.infer<typeof saleListInput>;
-export function lineTotalCents(q: string, c: number): number {
-  const total = (quantityMillis(q) * BigInt(c) + 500n) / 1_000n;
-  if (total > BigInt(Number.MAX_SAFE_INTEGER))
-    throw new Error("Total monetÃ¡rio excede o limite seguro.");
+export type SaleConfirmationInput = z.infer<typeof saleConfirmationInput>;
+export type SaleTransitionInput = z.infer<typeof saleTransitionInput>;
+export type SaleAddressCorrectionInput = z.infer<typeof saleAddressCorrectionInput>;
+export type SaleDuplicateInput = z.infer<typeof saleDuplicateInput>;
+export type QuoteConversionInput = z.infer<typeof quoteConversionInput>;
+export type SaleCommercialTransitionInput = z.infer<typeof saleCommercialTransitionInput>;
+
+export function lineTotalCents(quantityValue: string, unitPriceCents: number): number {
+  const total = (quantityMillis(quantityValue) * BigInt(unitPriceCents) + 500n) / 1_000n;
+  if (total > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("Total monetário excede o limite seguro.");
+  }
   return Number(total);
 }
-export function normalizeSaleDraft(
-  v: SaleDraftInput
-): SaleDraftInput {
+
+export function calculateSaleTotals(
+  items: ReadonlyArray<{
+    quantity: string;
+    unitPriceCents: number;
+    discountCents?: number;
+  }>,
+  orderDiscountCents = 0,
+  freightCents = 0,
+  chargesCents = 0
+) {
+  let subtotalCents = 0n;
+  let itemDiscountCents = 0n;
+  for (const entry of items) {
+    const gross = lineTotalCents(entry.quantity, entry.unitPriceCents);
+    const discount = entry.discountCents ?? 0;
+    if (discount > gross) throw new Error("O desconto do item não pode superar seu valor bruto.");
+    subtotalCents += BigInt(gross);
+    itemDiscountCents += BigInt(discount);
+  }
+  const netProductsCents = subtotalCents - itemDiscountCents;
+  const orderDiscount = BigInt(orderDiscountCents);
+  const freight = BigInt(freightCents);
+  const charges = BigInt(chargesCents);
+  if (orderDiscount > netProductsCents) {
+    throw new Error("O desconto da venda não pode superar o valor dos produtos.");
+  }
+  const totalCents = netProductsCents - orderDiscount + freight + charges;
+  const safeLimit = BigInt(Number.MAX_SAFE_INTEGER);
+  if (
+    subtotalCents > safeLimit ||
+    itemDiscountCents > safeLimit ||
+    netProductsCents > safeLimit ||
+    totalCents > safeLimit
+  ) {
+    throw new Error("Total monetário excede o limite seguro.");
+  }
   return {
-    ...v,
-    notes: v.notes?.trim() || null,
-    items: v.items.map(x => ({
-      ...x,
-      quantity: millisQuantity(quantityMillis(x.quantity)),
+    subtotalCents: Number(subtotalCents),
+    itemDiscountCents: Number(itemDiscountCents),
+    orderDiscountCents,
+    freightCents,
+    chargesCents,
+    totalCents: Number(totalCents),
+  };
+}
+
+export function normalizeSaleDraft(value: SaleDraftInput): SaleDraftInput {
+  return {
+    ...value,
+    notes: value.notes?.trim() || null,
+    items: value.items.map(entry => ({
+      ...entry,
+      quantity: millisQuantity(quantityMillis(entry.quantity)),
     })),
   };
 }
-const transitions: Record<SaleStatus, readonly SaleStatus[]> = {
-  draft: ["confirmed", "cancelled"],
-  confirmed: ["fulfilled", "cancelled"],
-  fulfilled: [],
-  cancelled: [],
+
+export function saleCommercialTransitionKind(
+  from: SaleCommercialStatus,
+  to: "negotiation" | "approved" | "lost"
+) {
+  if (from === "draft" && to === "negotiation") return "forward" as const;
+  if (from === "negotiation" && (to === "approved" || to === "lost")) {
+    return "forward" as const;
+  }
+  if (from === "approved" && to === "negotiation") return "correction" as const;
+  return "blocked" as const;
+}
+
+export function commercialCode(type: SaleDocumentType, sequence: number) {
+  if (!Number.isSafeInteger(sequence) || sequence < 1) {
+    throw new Error("Sequência comercial inválida.");
+  }
+  return `${type === "quote" ? "O" : "V"}-${sequence}`;
+}
+
+const forwardStage: Partial<Record<SaleStage, SaleStage>> = {
+  created: "confirmed",
+  confirmed: "separation",
+  separation: "shipped",
+  shipped: "received",
+  received: "completed",
 };
-export const canTransitionSale = (
-  from: SaleStatus,
-  to: SaleStatus
-) => transitions[from].includes(to);
+
+const correctionStage: Partial<Record<SaleStage, readonly SaleStage[]>> = {
+  separation: ["confirmed"],
+  received: ["shipped"],
+  completed: ["received"],
+};
+
+export function saleTransitionKind(from: SaleStage, to: SaleStage) {
+  if (forwardStage[from] === to) return "forward" as const;
+  if (correctionStage[from]?.includes(to)) return "correction" as const;
+  return "blocked" as const;
+}
+
+export const isStockExitTransition = (from: SaleStage, to: SaleStage) =>
+  from === "separation" && to === "shipped";
+
+export const canCancelSaleAtStage = (stage: SaleStage) =>
+  saleStages.indexOf(stage) < saleStages.indexOf("shipped");
+
+export function legacySaleStage(status: SaleStatus): SaleStage {
+  if (status === "draft") return "created";
+  if (status === "fulfilled") return "completed";
+  return "confirmed";
+}
+
+export function derivePaymentStatus(totalCents: number, paidCents: number): SalePaymentStatus {
+  if (paidCents <= 0) return "pending";
+  if (paidCents >= totalCents) return "paid";
+  return "partial";
+}
+
 export const canWriteSales = (role: OperationalRole) => canWriteErp(role);
+
 export const saleEvent = (
   publicId: string,
   operation: SaleOperation,

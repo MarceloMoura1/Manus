@@ -262,6 +262,69 @@
       "when": 1790786929102,
       "tag": "0036_spicy_zeigeist",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "5",
+      "when": 1791258271434,
+      "tag": "0037_spicy_wilson_fisk",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "5",
+      "when": 1791263011437,
+      "tag": "0038_quick_lenny_balinger",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "5",
+      "when": 1791766599704,
+      "tag": "0039_sweet_firelord",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "5",
+      "when": 1792162607142,
+      "tag": "0040_whole_exiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "5",
+      "when": 1792466090833,
+      "tag": "0041_orange_jamie_braddock",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "5",
+      "when": 1792516634813,
+      "tag": "0042_burly_avengers",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "5",
+      "when": 1792561494749,
+      "tag": "0043_nappy_silver_surfer",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "5",
+      "when": 1792628946434,
+      "tag": "0044_melted_marvel_boy",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "5",
+      "when": 1792642983926,
+      "tag": "0045_flat_abomination",
+      "breakpoints": true
     }
   ]
 }

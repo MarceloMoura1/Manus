@@ -75,7 +75,7 @@ export type ClientFileView = {
   mimeType: string;
   sizeBytes: number;
   sha256: string;
-  state: "active" | "pending_delete" | "deleted";
+  state: "pending_upload" | "active" | "pending_delete" | "deleted";
   createdBy: string;
   createdByName: string;
   createdAt: string;

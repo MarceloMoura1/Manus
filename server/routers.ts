@@ -46,6 +46,7 @@ import { ConversationReplyResolutionError, resolveConversationReplyReference } f
 import { sanitizeMegaAdminUser } from "./megaadmin-response-sanitization";
 import { emitOperationalTenantEventAsync } from "./modules/whatsapp/socket/whatsapp.socket";
 import { classifyAssistantFailure } from "./assistant-error";
+import { hermesRouter } from "./modules/admin/hermes";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -287,18 +288,19 @@ function getReleasedClientOrThrow(clientId: string, requiredModule?: string) {
 
 // Módulos configuráveis da MegaDesk (controlados pelo MegaAdmin por usuário)
 // home, settings, notifications são SEMPRE ativos — não aparecem como permissão configurável
-const CONFIGURABLE_MODULES = [
+export const CONFIGURABLE_MODULES = [
   "active-attendance",
   "conversations",
   "tickets",
   "tracking",
   "clients",
   "erp",
+  "crm",
   "bot-config",
   "ai-assistant",
 ] as const;
 
-function rolePermissions(role: MegaClient["users"][number]["role"]) {
+export function rolePermissions(role: MegaClient["users"][number]["role"]) {
   // home, settings e notifications são sempre ativos para qualquer usuário
   const base = ["home", "settings", "notifications"];
   const all = [...base, ...CONFIGURABLE_MODULES];
@@ -312,7 +314,7 @@ function rolePermissions(role: MegaClient["users"][number]["role"]) {
 }
 
 // Resolve permissões finais do usuário, respeitando customizações e módulos do cliente
-function resolveUserPermissions(user: MegaClient["users"][number], clientModules?: string[]) {
+export function resolveUserPermissions(user: MegaClient["users"][number], clientModules?: string[]) {
   const base = ["home", "settings", "notifications"];
   
   // CORREÇÃO: Se o usuário tem permissões customizadas, usar APENAS as customizadas
@@ -358,7 +360,7 @@ function resolveUserPermissions(user: MegaClient["users"][number], clientModules
   return Array.from(new Set(finalPerms));
 }
 
-function assertClientUserPermission(client: MegaClient, permission: string, userEmail?: string) {
+export function assertClientUserPermission(client: MegaClient, permission: string, userEmail?: string) {
   const activeUsers = client.users.map((user) => ({ ...user, permissions: resolveUserPermissions(user, client.modules) })).filter((user) => user.status === "active");
   const user = userEmail ? activeUsers.find((item) => item.email === userEmail) : activeUsers.find((item) => item.permissions.includes(permission));
   if (!user) {
@@ -408,6 +410,9 @@ export const appRouter = router({
   notifications: notificationsRouter,
   whatsappModule: whatsappModuleRouter,
   conversas: conversasRouter,
+  admin: router({
+    hermes: hermesRouter,
+  }),
   auth: router({
     me: publicProcedure.query(({ ctx }) => ({ user: ctx.user })),
     logout: publicProcedure.mutation(({ ctx }) => {

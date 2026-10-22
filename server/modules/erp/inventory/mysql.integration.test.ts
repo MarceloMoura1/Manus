@@ -36,8 +36,8 @@ import {
 const physical = describe.runIf(isTestDatabaseEnabled());
 const tenantA = "stock-v3-a";
 const tenantB = "stock-v3-b";
-const adminA = { clientId: tenantA, userId: "stock-v3-admin-a", role: "admin" as const };
-const adminB = { clientId: tenantB, userId: "stock-v3-admin-b", role: "admin" as const };
+const adminA = { clientId: tenantA, userId: "stock-v3-admin-a", name: "Operador Estoque V3", role: "admin" as const };
+const adminB = { clientId: tenantB, userId: "stock-v3-admin-b", name: "Outro Operador Estoque V3", role: "admin" as const };
 
 type Fixture = {
   products: Array<{ id: number; publicId: string }>;
@@ -452,8 +452,8 @@ physical("variant-aware inventory 0031 disposable rehearsal", () => {
     const salePublicId = randomUUID();
     const saleId = await insert(
       `INSERT INTO erp_sale_orders
-        (public_id,client_id,order_number,crm_client_id,customer_name_snapshot,status,subtotal_cents,total_cents,confirmed_by,confirmed_at,created_by)
-       VALUES(?,?,?,?,?,'confirmed',2000,2000,?,NOW(),?)`,
+        (public_id,client_id,order_number,crm_client_id,customer_name_snapshot,status,current_stage,subtotal_cents,total_cents,confirmed_by,confirmed_at,created_by)
+        VALUES(?,?,?,?,?,'confirmed','separation',2000,2000,?,NOW(),?)`,
       [salePublicId, tenantA, "SO-V3-000001", crmClientId, "Cliente V3", adminA.userId, adminA.userId]
     );
     await pool.execute(
@@ -464,8 +464,8 @@ physical("variant-aware inventory 0031 disposable rehearsal", () => {
     );
     const saleKey = randomUUID();
     const saleRepository = new SaleRepository(pool);
-    expect((await saleRepository.fulfill(tenantA, adminA.userId, salePublicId, saleKey)).replay).toBe(false);
-    expect((await saleRepository.fulfill(tenantA, adminA.userId, salePublicId, saleKey)).replay).toBe(true);
+    expect((await saleRepository.fulfill(tenantA, adminA, salePublicId, saleKey)).replay).toBe(false);
+    expect((await saleRepository.fulfill(tenantA, adminA, salePublicId, saleKey)).replay).toBe(true);
     const aggregateBeforeVariantSale = await scalar(
       "SELECT quantity FROM erp_stock_balances WHERE client_id=? AND product_id=?",
       [tenantA, fixture.products[4].id]
@@ -481,8 +481,8 @@ physical("variant-aware inventory 0031 disposable rehearsal", () => {
     const multiItemSalePublicId = randomUUID();
     const multiItemSaleId = await insert(
       `INSERT INTO erp_sale_orders
-        (public_id,client_id,order_number,crm_client_id,customer_name_snapshot,status,subtotal_cents,total_cents,confirmed_by,confirmed_at,created_by)
-       VALUES(?,?,?,?,?,'confirmed',2000,2000,?,NOW(),?)`,
+        (public_id,client_id,order_number,crm_client_id,customer_name_snapshot,status,current_stage,subtotal_cents,total_cents,confirmed_by,confirmed_at,created_by)
+        VALUES(?,?,?,?,?,'confirmed','separation',2000,2000,?,NOW(),?)`,
       [multiItemSalePublicId, tenantA, "SO-V3-000002", crmClientId, "Cliente V3", adminA.userId, adminA.userId]
     );
     await pool.execute(
@@ -496,7 +496,7 @@ physical("variant-aware inventory 0031 disposable rehearsal", () => {
         randomUUID(), multiItemSaleId, fixture.products[4].id, singleLegacy.id, "Produto V3 5", "STOCK-V3-5-LEGACY",
       ]
     );
-    await saleRepository.fulfill(tenantA, adminA.userId, multiItemSalePublicId, randomUUID());
+    await saleRepository.fulfill(tenantA, adminA, multiItemSalePublicId, randomUUID());
     expect(await scalar(
       "SELECT quantity FROM erp_stock_balances WHERE client_id=? AND product_id=?",
       [tenantA, fixture.products[4].id]

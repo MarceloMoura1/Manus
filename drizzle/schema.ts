@@ -1306,7 +1306,7 @@ export const megadeskCrmClientFiles = mysqlTable(
     sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
     sha256: varchar({ length: 64 }).notNull(),
     storageKey: varchar("storage_key", { length: 255 }).notNull(),
-    state: mysqlEnum("state", ["active", "pending_delete", "deleted"]).default("active").notNull(),
+    state: mysqlEnum("state", ["active", "pending_delete", "deleted", "pending_upload"]).default("active").notNull(),
     createdBy: varchar("created_by", { length: 80 }).notNull(),
     createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
     deletedBy: varchar("deleted_by", { length: 80 }),
@@ -1315,6 +1315,7 @@ export const megadeskCrmClientFiles = mysqlTable(
   },
   (table): MySqlTableExtraConfigValue[] => [
     uniqueIndex("uq_mccf_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_mccf_tenant_id").on(table.clientId, table.id),
     uniqueIndex("uq_mccf_storage_key").on(table.storageKey),
     index("idx_mccf_lookup").on(table.clientId, table.crmClientId, table.state, table.createdAt),
     index("idx_mccf_pending_delete").on(table.state, table.pendingDeleteAt),
@@ -1330,6 +1331,405 @@ export const megadeskCrmClientFiles = mysqlTable(
         megadeskCrmClients.clientId as AnyMySqlColumn,
         megadeskCrmClients.crmClientId as AnyMySqlColumn,
       ],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const megadeskCrmPipelines = mysqlTable(
+  "megadesk_crm_pipelines",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    name: varchar({ length: 120 }).notNull(),
+    isDefault: boolean("is_default").default(false).notNull(),
+    defaultMarker: tinyint("default_marker")
+      .generatedAlwaysAs(
+        sql`CASE WHEN ${sql.identifier("is_default")} = 1 THEN 1 ELSE NULL END`
+      ),
+    displayOrder: int("display_order").default(0).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mcp_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_mcp_tenant_id").on(table.clientId, table.id),
+    uniqueIndex("uq_mcp_tenant_default").on(table.clientId, table.defaultMarker),
+    index("idx_mcp_tenant_order").on(table.clientId, table.displayOrder),
+    index("idx_mcp_tenant_active").on(table.clientId, table.isActive),
+    foreignKey({
+      name: "fk_mcp_tenant",
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId as AnyMySqlColumn],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const megadeskCrmStages = mysqlTable(
+  "megadesk_crm_stages",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    pipelineId: bigint("pipeline_id", { mode: "number" }).notNull(),
+    name: varchar({ length: 120 }).notNull(),
+    displayOrder: int("display_order").default(0).notNull(),
+    probabilityPct: int("probability_pct").default(0).notNull(),
+    color: varchar({ length: 20 }).default("#6366F1").notNull(),
+    slaDays: int("sla_days"),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mcs_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_mcs_tenant_id").on(table.clientId, table.id),
+    uniqueIndex("uq_mcs_tenant_pipeline_stage").on(
+      table.clientId,
+      table.pipelineId,
+      table.id
+    ),
+    index("idx_mcs_tenant_pipeline_order").on(
+      table.clientId,
+      table.pipelineId,
+      table.displayOrder
+    ),
+    check(
+      "ck_mcs_probability_pct",
+      sql`${table.probabilityPct} >= 0 AND ${table.probabilityPct} <= 100`
+    ),
+    foreignKey({
+      name: "fk_mcs_tenant",
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId as AnyMySqlColumn],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_mcs_pipeline",
+      columns: [table.clientId, table.pipelineId],
+      foreignColumns: [megadeskCrmPipelines.clientId, megadeskCrmPipelines.id],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const megadeskCrmOpportunities = mysqlTable(
+  "megadesk_crm_opportunities",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    pipelineId: bigint("pipeline_id", { mode: "number" }).notNull(),
+    stageId: bigint("stage_id", { mode: "number" }).notNull(),
+    crmClientId: varchar("crm_client_id", { length: 80 }),
+    title: varchar({ length: 255 }).notNull(),
+    valueCents: bigint("value_cents", { mode: "number" }).default(0).notNull(),
+    currency: varchar({ length: 3 }).default("BRL").notNull(),
+    expectedCloseDate: date("expected_close_date", { mode: "string" }),
+    status: mysqlEnum(["open", "won", "lost"]).default("open").notNull(),
+    lossReason: varchar("loss_reason", { length: 255 }),
+    internalResponsible: varchar("internal_responsible", { length: 180 })
+      .default("")
+      .notNull(),
+    observations: text(),
+    wonAt: timestamp("won_at", { mode: "string" }),
+    lostAt: timestamp("lost_at", { mode: "string" }),
+    closedAt: timestamp("closed_at", { mode: "string" }),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mco_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_mco_tenant_id").on(table.clientId, table.id),
+    index("idx_mco_tenant_pipeline_stage").on(
+      table.clientId,
+      table.pipelineId,
+      table.stageId
+    ),
+    index("idx_mco_tenant_status").on(
+      table.clientId,
+      table.status,
+      table.createdAt
+    ),
+    index("idx_mco_tenant_customer").on(table.clientId, table.crmClientId),
+    index("idx_mco_tenant_responsible").on(
+      table.clientId,
+      table.internalResponsible
+    ),
+    check("ck_mco_value_cents", sql`${table.valueCents} >= 0`),
+    foreignKey({
+      name: "fk_mco_tenant",
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId as AnyMySqlColumn],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_mco_pipeline",
+      columns: [table.clientId, table.pipelineId],
+      foreignColumns: [megadeskCrmPipelines.clientId, megadeskCrmPipelines.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_mco_stage",
+      columns: [table.clientId, table.pipelineId, table.stageId],
+      foreignColumns: [
+        megadeskCrmStages.clientId,
+        megadeskCrmStages.pipelineId,
+        megadeskCrmStages.id,
+      ],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_mco_crm_client",
+      columns: [table.clientId, table.crmClientId],
+      foreignColumns: [
+        megadeskCrmClients.clientId as AnyMySqlColumn,
+        megadeskCrmClients.crmClientId as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const megadeskCrmActivities = mysqlTable(
+  "megadesk_crm_activities",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    opportunityId: bigint("opportunity_id", { mode: "number" }),
+    crmClientId: varchar("crm_client_id", { length: 80 }),
+    type: mysqlEnum("type", [
+      "task",
+      "call",
+      "meeting",
+      "followup",
+      "note",
+    ]).notNull(),
+    title: varchar({ length: 255 }).notNull(),
+    description: text(),
+    dueAt: timestamp("due_at", { mode: "string" }),
+    completedAt: timestamp("completed_at", { mode: "string" }),
+    status: mysqlEnum("status", [
+      "pending",
+      "completed",
+      "cancelled",
+    ])
+      .default("pending")
+      .notNull(),
+    assignedTo: varchar("assigned_to", { length: 180 }).default("").notNull(),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mca_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_mca_tenant_id").on(table.clientId, table.id),
+    index("idx_mca_tenant_opportunity").on(table.clientId, table.opportunityId),
+    index("idx_mca_tenant_crm_client").on(table.clientId, table.crmClientId),
+    index("idx_mca_tenant_status_due").on(
+      table.clientId,
+      table.status,
+      table.dueAt
+    ),
+    index("idx_mca_tenant_assigned").on(table.clientId, table.assignedTo),
+    check(
+      "ck_mca_entity_link",
+      sql`${table.opportunityId} IS NOT NULL OR ${table.crmClientId} IS NOT NULL`
+    ),
+    foreignKey({
+      name: "fk_mca_tenant",
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId as AnyMySqlColumn],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_mca_opportunity",
+      columns: [table.clientId, table.opportunityId],
+      foreignColumns: [
+        megadeskCrmOpportunities.clientId,
+        megadeskCrmOpportunities.id,
+      ],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_mca_crm_client",
+      columns: [table.clientId, table.crmClientId],
+      foreignColumns: [
+        megadeskCrmClients.clientId as AnyMySqlColumn,
+        megadeskCrmClients.crmClientId as AnyMySqlColumn,
+      ],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const megadeskCrmOpportunityHistory = mysqlTable(
+  "megadesk_crm_opportunity_history",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    opportunityId: bigint("opportunity_id", { mode: "number" }).notNull(),
+    fromStageId: bigint("from_stage_id", { mode: "number" }),
+    toStageId: bigint("to_stage_id", { mode: "number" }).notNull(),
+    fromValueCents: bigint("from_value_cents", { mode: "number" }),
+    toValueCents: bigint("to_value_cents", { mode: "number" }).notNull(),
+    author: varchar({ length: 180 }).notNull(),
+    notes: text(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mcoh_tenant_public").on(table.clientId, table.publicId),
+    index("idx_mcoh_tenant_opp_date").on(
+      table.clientId,
+      table.opportunityId,
+      table.createdAt
+    ),
+    foreignKey({
+      name: "fk_mcoh_tenant",
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId as AnyMySqlColumn],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_mcoh_opportunity",
+      columns: [table.clientId, table.opportunityId],
+      foreignColumns: [
+        megadeskCrmOpportunities.clientId,
+        megadeskCrmOpportunities.id,
+      ],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_mcoh_from_stage",
+      columns: [table.clientId, table.fromStageId],
+      foreignColumns: [megadeskCrmStages.clientId, megadeskCrmStages.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_mcoh_to_stage",
+      columns: [table.clientId, table.toStageId],
+      foreignColumns: [megadeskCrmStages.clientId, megadeskCrmStages.id],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const megadeskCrmAutomationRules = mysqlTable(
+  "megadesk_crm_automation_rules",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    name: varchar({ length: 150 }).notNull(),
+    description: text(),
+    triggerType: varchar("trigger_type", { length: 50 }).notNull(),
+    conditions: json().notNull(),
+    actions: json().notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    executionCount: int("execution_count").default(0).notNull(),
+    lastExecutedAt: timestamp("last_executed_at", { mode: "string" }),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mcar_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_mcar_tenant_id").on(table.clientId, table.id),
+    index("idx_mcar_tenant_trigger").on(table.clientId, table.triggerType, table.isActive),
+    foreignKey({
+      name: "fk_mcar_tenant",
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId as AnyMySqlColumn],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const megadeskCrmAutomationRuns = mysqlTable(
+  "megadesk_crm_automation_runs",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    ruleId: bigint("rule_id", { mode: "number" }),
+    ruleName: varchar("rule_name", { length: 150 }).default("").notNull(),
+    eventType: varchar("event_type", { length: 50 }).notNull(),
+    status: mysqlEnum("status", ["success", "failed", "partial", "skipped"]).notNull(),
+    triggerPayload: json("trigger_payload"),
+    results: json().notNull(),
+    errorMessage: text("error_message"),
+    durationMs: int("duration_ms").default(0).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mcarun_tenant_public").on(table.clientId, table.publicId),
+    index("idx_mcarun_tenant_rule").on(table.clientId, table.ruleId, table.createdAt),
+    index("idx_mcarun_tenant_status").on(table.clientId, table.status, table.createdAt),
+    foreignKey({
+      name: "fk_mcarun_tenant",
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId as AnyMySqlColumn],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const megadeskCrmWebhookSources = mysqlTable(
+  "megadesk_crm_webhook_sources",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    name: varchar({ length: 120 }).notNull(),
+    token: varchar({ length: 64 }).notNull(),
+    defaultStageId: bigint("default_stage_id", { mode: "number" }),
+    fieldMappings: json("field_mappings"),
+    isActive: boolean("is_active").default(true).notNull(),
+    totalReceived: int("total_received").default(0).notNull(),
+    lastReceivedAt: timestamp("last_received_at", { mode: "string" }),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mcws_tenant_public").on(table.clientId, table.publicId),
+    uniqueIndex("uq_mcws_tenant_token").on(table.clientId, table.token),
+    foreignKey({
+      name: "fk_mcws_tenant",
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId as AnyMySqlColumn],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const megadeskCrmAiSettings = mysqlTable(
+  "megadesk_crm_ai_settings",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    isEnabled: boolean("is_enabled").default(true).notNull(),
+    systemPrompt: text("system_prompt"),
+    qualificationCriteria: text("qualification_criteria"),
+    autoSuggestNextAction: boolean("auto_suggest_next_action").default(true).notNull(),
+    modelName: varchar("model_name", { length: 50 }).default("gemini-1.5-flash").notNull(),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_mcai_tenant").on(table.clientId),
+    uniqueIndex("uq_mcai_tenant_public").on(table.clientId, table.publicId),
+    foreignKey({
+      name: "fk_mcai_tenant",
+      columns: [table.clientId],
+      foreignColumns: [megadeskDomainClients.clientId as AnyMySqlColumn],
     }).onDelete("restrict"),
   ]
 );
@@ -3016,6 +3416,22 @@ export const erpSaleOrderSequences = mysqlTable(
   ]
 );
 
+export const erpSaleDocumentSequences = mysqlTable(
+  "erp_sale_document_sequences",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    documentType: mysqlEnum("document_type", ["quote", "sale"]).notNull(),
+    nextNumber: int("next_number").default(1).notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_sale_document_sequence").on(
+      table.clientId,
+      table.documentType
+    ),
+  ]
+);
+
 export const erpSaleOrders = mysqlTable(
   "erp_sale_orders",
   {
@@ -3023,6 +3439,22 @@ export const erpSaleOrders = mysqlTable(
     publicId: varchar("public_id", { length: 36 }).notNull(),
     clientId: varchar("client_id", { length: 80 }).notNull(),
     orderNumber: varchar("order_number", { length: 32 }).notNull(),
+    documentType: mysqlEnum("document_type", ["quote", "sale"])
+      .default("sale")
+      .notNull(),
+    commercialStatus: mysqlEnum("commercial_status", [
+      "draft",
+      "negotiation",
+      "approved",
+      "converted",
+      "active",
+      "completed",
+      "lost",
+      "cancelled",
+    ])
+      .default("active")
+      .notNull(),
+    commercialDate: date("commercial_date", { mode: "string" }),
     crmClientId: varchar("crm_client_id", { length: 80 }).notNull(),
     customerNameSnapshot: varchar("customer_name_snapshot", {
       length: 255,
@@ -3030,8 +3462,47 @@ export const erpSaleOrders = mysqlTable(
     status: mysqlEnum(["draft", "confirmed", "fulfilled", "cancelled"])
       .default("draft")
       .notNull(),
+    currentStage: mysqlEnum("current_stage", [
+      "created",
+      "confirmed",
+      "separation",
+      "shipped",
+      "received",
+      "completed",
+    ]),
+    sellerNameSnapshot: varchar("seller_name_snapshot", { length: 180 }),
+    sellerUserId: varchar("seller_user_id", { length: 80 }),
+    shippingAddressSnapshot: text("shipping_address_snapshot"),
+    billingAddressSnapshot: text("billing_address_snapshot"),
+    discountCents: bigint("discount_cents", { mode: "number" })
+      .default(0)
+      .notNull(),
+    freightCents: bigint("freight_cents", { mode: "number" })
+      .default(0)
+      .notNull(),
+    chargesCents: bigint("charges_cents", { mode: "number" })
+      .default(0)
+      .notNull(),
+    paymentMethodSnapshot: varchar("payment_method_snapshot", { length: 80 }),
+    paymentTermsSnapshot: varchar("payment_terms_snapshot", { length: 500 }),
+    confirmationIdempotencyKey: varchar("confirmation_idempotency_key", {
+      length: 100,
+    }),
+    confirmationPayloadHash: varchar("confirmation_payload_hash", {
+      length: 64,
+    }),
+    sourceQuoteId: bigint("source_quote_id", { mode: "number" }),
+    conversionIdempotencyKey: varchar("conversion_idempotency_key", {
+      length: 100,
+    }),
+    duplicateSourceId: bigint("duplicate_source_id", { mode: "number" }),
+    duplicationIdempotencyKey: varchar("duplication_idempotency_key", {
+      length: 100,
+    }),
     notes: text(),
     expectedDate: date("expected_date", { mode: "string" }),
+    documentCustomName: varchar("document_custom_name", { length: 255 }),
+    serviceMetadata: json("service_metadata"),
     subtotalCents: bigint("subtotal_cents", { mode: "number" })
       .default(0)
       .notNull(),
@@ -3043,6 +3514,8 @@ export const erpSaleOrders = mysqlTable(
     cancelledBy: varchar("cancelled_by", { length: 80 }),
     cancelledAt: timestamp("cancelled_at", { mode: "string" }),
     cancellationReason: varchar("cancellation_reason", { length: 500 }),
+    archivedBy: varchar("archived_by", { length: 80 }),
+    archivedAt: timestamp("archived_at", { mode: "string" }),
     createdBy: varchar("created_by", { length: 80 }).notNull(),
     createdAt: timestamp("created_at", { mode: "string" })
       .defaultNow()
@@ -3061,6 +3534,23 @@ export const erpSaleOrders = mysqlTable(
       table.clientId,
       table.orderNumber
     ),
+    uniqueIndex("uq_erp_sale_orders_tenant_id").on(table.clientId, table.id),
+    uniqueIndex("uq_erp_sale_orders_tenant_confirmation_key").on(
+      table.clientId,
+      table.confirmationIdempotencyKey
+    ),
+    uniqueIndex("uq_erp_sale_orders_tenant_source_quote").on(
+      table.clientId,
+      table.sourceQuoteId
+    ),
+    uniqueIndex("uq_erp_sale_orders_tenant_conversion_key").on(
+      table.clientId,
+      table.conversionIdempotencyKey
+    ),
+    uniqueIndex("uq_erp_sale_orders_tenant_duplication_key").on(
+      table.clientId,
+      table.duplicationIdempotencyKey
+    ),
     index("idx_erp_sale_orders_tenant_status_date").on(
       table.clientId,
       table.status,
@@ -3069,6 +3559,17 @@ export const erpSaleOrders = mysqlTable(
     index("idx_erp_sale_orders_tenant_customer").on(
       table.clientId,
       table.crmClientId
+    ),
+    index("idx_erp_sale_orders_tenant_stage_date").on(
+      table.clientId,
+      table.currentStage,
+      table.createdAt
+    ),
+    index("idx_erp_sale_orders_tenant_document_status").on(
+      table.clientId,
+      table.documentType,
+      table.commercialStatus,
+      table.commercialDate
     ),
     foreignKey({
       name: "fk_erp_so_customer",
@@ -3096,6 +3597,9 @@ export const erpSaleOrderItems = mysqlTable(
     skuSnapshot: varchar("sku_snapshot", { length: 80 }).notNull(),
     quantity: decimal({ precision: 18, scale: 3 }).notNull(),
     unitPriceCents: bigint("unit_price_cents", { mode: "number" }).notNull(),
+    discountCents: bigint("discount_cents", { mode: "number" })
+      .default(0)
+      .notNull(),
     lineTotalCents: bigint("line_total_cents", { mode: "number" }).notNull(),
     createdAt: timestamp("created_at", { mode: "string" })
       .defaultNow()
@@ -3161,6 +3665,141 @@ export const erpSaleOrderHistory = mysqlTable(
       columns: [table.saleOrderId],
       foreignColumns: [erpSaleOrders.id],
     }),
+  ]
+);
+
+export const erpSaleOrderEvents = mysqlTable(
+  "erp_sale_order_events",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    saleOrderId: bigint("sale_order_id", { mode: "number" }).notNull(),
+    eventType: mysqlEnum("event_type", [
+      "created",
+      "updated",
+      "confirmed",
+      "stage_transition",
+      "cancelled",
+      "address_corrected",
+      "payment_registered",
+      "document_added",
+      "document_removed",
+      "duplicated",
+      "quote_status_changed",
+      "quote_converted",
+      "archived",
+      "financial_adjusted",
+    ]).notNull(),
+    fromStage: mysqlEnum("from_stage", [
+      "created",
+      "confirmed",
+      "separation",
+      "shipped",
+      "received",
+      "completed",
+    ]),
+    toStage: mysqlEnum("to_stage", [
+      "created",
+      "confirmed",
+      "separation",
+      "shipped",
+      "received",
+      "completed",
+    ]),
+    reason: varchar({ length: 500 }),
+    beforeJson: text("before_json"),
+    afterJson: text("after_json"),
+    idempotencyKey: varchar("idempotency_key", { length: 100 }),
+    payloadHash: varchar("payload_hash", { length: 64 }),
+    changedBy: varchar("changed_by", { length: 80 }).notNull(),
+    changedByNameSnapshot: varchar("changed_by_name_snapshot", { length: 180 }),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  table => [
+    uniqueIndex("uq_erp_sale_events_tenant_public").on(
+      table.clientId,
+      table.publicId
+    ),
+    uniqueIndex("uq_erp_sale_events_tenant_key").on(
+      table.clientId,
+      table.idempotencyKey
+    ),
+    index("idx_erp_sale_events_order_date").on(
+      table.clientId,
+      table.saleOrderId,
+      table.createdAt
+    ),
+    foreignKey({
+      name: "fk_erp_sale_events_order",
+      columns: [table.clientId, table.saleOrderId],
+      foreignColumns: [erpSaleOrders.clientId, erpSaleOrders.id],
+    }).onDelete("restrict"),
+  ]
+);
+
+export const erpSaleDocuments = mysqlTable(
+  "erp_sale_documents",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    saleOrderId: bigint("sale_order_id", { mode: "number" }).notNull(),
+    clientFileId: bigint("client_file_id", { mode: "number" }).notNull(),
+    documentType: mysqlEnum("document_type", [
+      "invoice",
+      "content_declaration",
+      "quote_pdf",
+      "other",
+    ]).notNull(),
+    uploadIdempotencyKey: varchar("upload_idempotency_key", { length: 36 }).notNull(),
+    uploadPayloadHash: varchar("upload_payload_hash", { length: 64 }).notNull(),
+    state: mysqlEnum("state", ["active", "pending_delete", "deleted", "pending_upload"])
+      .default("active")
+      .notNull(),
+    createdBy: varchar("created_by", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    deletedBy: varchar("deleted_by", { length: 80 }),
+    pendingDeleteAt: timestamp("pending_delete_at", { mode: "string" }),
+    deletedAt: timestamp("deleted_at", { mode: "string" }),
+  },
+  table => [
+    uniqueIndex("uq_erp_sale_documents_tenant_public").on(
+      table.clientId,
+      table.publicId
+    ),
+    uniqueIndex("uq_erp_sale_documents_file").on(table.clientFileId),
+    uniqueIndex("uq_erp_sale_documents_tenant_upload_key").on(
+      table.clientId,
+      table.uploadIdempotencyKey
+    ),
+    index("idx_erp_sale_documents_order_state_date").on(
+      table.clientId,
+      table.saleOrderId,
+      table.state,
+      table.createdAt
+    ),
+    index("idx_erp_sale_documents_pending_delete").on(
+      table.state,
+      table.pendingDeleteAt
+    ),
+    foreignKey({
+      name: "fk_erp_sale_document_order",
+      columns: [table.clientId, table.saleOrderId],
+      foreignColumns: [erpSaleOrders.clientId, erpSaleOrders.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "fk_erp_sale_document_client_file",
+      columns: [table.clientId, table.clientFileId],
+      foreignColumns: [
+        megadeskCrmClientFiles.clientId,
+        megadeskCrmClientFiles.id,
+      ],
+    }).onDelete("restrict"),
   ]
 );
 
@@ -3834,3 +4473,92 @@ export const erpFiscalOperations = mysqlTable(
     }),
   ]
 );
+
+export const megadeskCrmQuoteTemplates = mysqlTable(
+  "megadesk_crm_quote_templates",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    publicId: varchar("public_id", { length: 36 }).notNull(),
+    name: varchar("name", { length: 150 }).notNull(),
+    niche: varchar("niche", { length: 50 }).default("automotive"),
+    backgroundImageUrl: text("background_image_url"),
+    layoutConfig: json("layout_config"),
+    isDefault: boolean("is_default").default(false).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    index("idx_crm_quote_templates_tenant_public").on(
+      table.clientId,
+      table.publicId
+    ),
+  ]
+);
+
+export type MegadeskCrmQuoteTemplate = typeof megadeskCrmQuoteTemplates.$inferSelect;
+export type MegadeskCrmQuoteTemplateInsert = typeof megadeskCrmQuoteTemplates.$inferInsert;
+
+export const megadeskErpServices = mysqlTable(
+  "megadesk_erp_services",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    code: varchar("code", { length: 50 }),
+    category: varchar("category", { length: 100 }),
+    price: decimal("price", { precision: 12, scale: 2 }).notNull(),
+    estimatedCost: decimal("estimated_cost", { precision: 12, scale: 2 })
+      .default("0.00")
+      .notNull(),
+    estimatedMinutes: int("estimated_minutes"),
+    description: text("description"),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    index("idx_megadesk_erp_services_tenant").on(table.clientId),
+    index("idx_megadesk_erp_services_tenant_name").on(table.clientId, table.name),
+    index("idx_megadesk_erp_services_tenant_category").on(table.clientId, table.category),
+    index("idx_megadesk_erp_services_tenant_active").on(table.clientId, table.isActive),
+    index("idx_megadesk_erp_services_tenant_code").on(table.clientId, table.code),
+  ]
+);
+
+export type MegadeskErpService = typeof megadeskErpServices.$inferSelect;
+export type MegadeskErpServiceInsert = typeof megadeskErpServices.$inferInsert;
+
+export const megadeskAdminHermesMessages = mysqlTable(
+  "megadesk_admin_hermes_messages",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    adminUserId: varchar("admin_user_id", { length: 100 }).notNull(),
+    role: varchar("role", { length: 20 }).notNull(),
+    content: text("content").notNull(),
+    metadataJson: json("metadata_json"),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  table => [
+    index("idx_admin_hermes_messages_user_created").on(
+      table.adminUserId,
+      table.createdAt
+    ),
+  ]
+);
+
+export type MegadeskAdminHermesMessage = typeof megadeskAdminHermesMessages.$inferSelect;
+export type MegadeskAdminHermesMessageInsert = typeof megadeskAdminHermesMessages.$inferInsert;
+

@@ -22,7 +22,7 @@ describe("central Clients restoration structure", () => {
     expect(workspace.indexOf('label:"Resumo"')).toBeLessThan(workspace.indexOf('label:"Clientes"'));
     expect(workspace.indexOf('label:"Clientes"')).toBeLessThan(workspace.indexOf('label:"Produtos"'));
     expect(workspace).toContain("<ClientesPage initialSelectedId={initialCrmClientId}");
-    expect(home).toContain('activeItemId={active.startsWith("erp-") ? erpSection : undefined}');
+    expect(home).toContain('activeItemId={active.startsWith("erp-") ? erpSection : active.startsWith("crm-") ? crmSection : undefined}');
     expect(moduleTopbar).toContain('aria-current={isActive ? "page" : undefined}');
     expect(home).toContain('route === "clients" ? "erp-clients"');
     expect(home).toContain('window.addEventListener("popstate"');
@@ -36,7 +36,7 @@ describe("central Clients restoration structure", () => {
     expect(clients).not.toContain("bg-red-50/40");
     expect(clients).toContain('deletePhrase !== "EXCLUIR"');
     expect(clients).not.toContain('window.confirm("Excluir');
-    expect(router).toContain("requireCrmAdmin(ctx)");
+    expect(router).toContain("requireCrmCustomerAdminAccess(ctx)");
     expect(attendance).toContain("session?.permissions?.includes('clients')");
     expect(attendance).toContain("{ route: 'erp-clients', crmClientId: customerData.crmClientId }");
   });
@@ -44,7 +44,8 @@ describe("central Clients restoration structure", () => {
   it("does not accept a public tenant in any CRM input", () => {
     expect(router).not.toContain("clientId: z.");
     expect(router).not.toContain("input.clientId");
-    expect(router).toContain("ctx.tenantId");
+    const access = source("server/crm-access.ts");
+    expect(access).toContain("context.tenantId");
     expect(router).toContain("customerId = ?");
     expect(router).not.toContain("customerId IS NULL OR customerId = ''");
     expect(router).not.toContain("customerName LIKE ? OR company LIKE ?");

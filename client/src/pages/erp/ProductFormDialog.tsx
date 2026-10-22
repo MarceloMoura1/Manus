@@ -8,7 +8,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { ImageIcon, Trash2, Upload } from "lucide-react";
+import {
+  ImageIcon,
+  Trash2,
+  TrendingUp,
+  Upload,
+} from "lucide-react";
 import { sanitizeErrorMessage as baseSanitizeErrorMessage } from "./ProductDetailPanel";
 
 export function sanitizeErrorMessage(message?: string | null): string {
@@ -132,19 +137,23 @@ function FormField({
   value,
   onChange,
   required,
+  className,
 }: {
   id: string;
   label: string;
   value: string;
   onChange: (val: string) => void;
   required?: boolean;
+  className?: string;
 }) {
   return (
-    <label htmlFor={id} className="text-sm font-medium text-slate-700">
+    <label htmlFor={id} className={`block text-xs font-semibold text-slate-700 dark:text-slate-300 ${className ?? ""}`}>
       {label}
+      {required && <span className="ml-1 text-rose-500">*</span>}
       <Input
         id={id}
-        className="mt-1"
+        data-testid={id}
+        className="mt-1 h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-blue-500 text-xs"
         value={value}
         onChange={e => onChange(e.target.value)}
         required={required}
@@ -194,11 +203,8 @@ export function ProductFormContent({
   onOpenNewCategory,
   onOpenNewBrand,
 }: ProductFormContentProps) {
-  // Detecta se o produto tem categoria textual legada sem relação formal
   const hasLegacyCategory = Boolean(form.category && !form.categoryPublicId);
 
-  // Garante que se a categoria ou marca selecionada não estiver na lista carregada,
-  // ela ainda seja renderizada como opção para evitar seleção fantasma
   const isSelectedCategoryInList = form.categoryPublicId
     ? categories.some(c => c.publicId === form.categoryPublicId)
     : true;
@@ -206,41 +212,48 @@ export function ProductFormContent({
     ? brands.some(b => b.publicId === form.brandPublicId)
     : true;
 
+  // Cálculo da Margem em tempo real
+  const parsePrice = (val: string): number => {
+    if (!val || typeof val !== "string") return 0;
+    const num = Number(val.trim().replace(/\./g, "").replace(",", "."));
+    return Number.isFinite(num) && num >= 0 ? num : 0;
+  };
+  const costNum = parsePrice(form.cost);
+  const saleNum = parsePrice(form.sale);
+  const profitNum = saleNum - costNum;
+  const marginPercentNum = costNum > 0 ? ((profitNum / costNum) * 100).toFixed(1) : (saleNum > 0 ? "100.0" : "0.0");
+
   return (
-    <form onSubmit={onSubmit} className="grid gap-4 sm:grid-cols-2">
+    <form onSubmit={onSubmit} className="flex flex-col justify-between gap-2.5 text-xs">
       {/* Indicador de Modo (Editar vs Novo) para acessibilidade e testes */}
       <div className="sr-only" aria-live="polite">
         <h2>{form.publicId ? "Editar produto" : "Novo produto"}</h2>
       </div>
 
-      {/* Foto Principal */}
-      <div className="sm:col-span-2">
-        <span className="text-sm font-medium text-slate-700">
-          Foto principal
-        </span>
-        <div className="mt-2 flex items-center gap-4 rounded-xl border border-slate-200 p-3">
-          {photoPreview && !removePhoto ? (
-            <img
-              src={photoPreview}
-              alt="Prévia da foto do produto"
-              className="h-24 w-24 rounded-lg object-cover"
-            />
-          ) : (
-            <div className="flex h-24 w-24 items-center justify-center rounded-lg bg-slate-100">
-              <ImageIcon className="h-8 w-8 text-slate-400" />
-            </div>
-          )}
-          <div className="flex flex-wrap gap-2">
+      {/* Linha 1 (Topo): Preview da foto compacto ao lado de Nome, SKU e Código de Barras */}
+      <div className="flex items-start gap-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50 p-2.5">
+        {/* Foto compacta w-20 h-20 */}
+        <div className="flex flex-col items-center shrink-0">
+          <div className="relative flex h-20 w-20 items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden shadow-xs">
+            {photoPreview && !removePhoto ? (
+              <img
+                src={photoPreview}
+                alt="Prévia da foto do produto"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <ImageIcon className="h-7 w-7 text-slate-400" />
+            )}
+          </div>
+          <div className="mt-1 flex items-center gap-1">
             <label
               aria-disabled={pending}
-              className={`inline-flex items-center rounded-md border border-slate-200 px-3 py-2 text-sm font-medium ${
-                pending
-                  ? "cursor-not-allowed opacity-50"
-                  : "cursor-pointer hover:bg-slate-50"
+              className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 shadow-xs ${
+                pending ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700"
               }`}
             >
-              <Upload className="mr-2 h-4 w-4" />
-              {photoPreview ? "Substituir" : "Selecionar"}
+              <Upload className="mr-1 h-3 w-3 text-blue-500" />
+              {photoPreview && !removePhoto ? "Trocar" : "Foto"}
               <input
                 className="sr-only"
                 type="file"
@@ -253,305 +266,293 @@ export function ProductFormContent({
                 }}
               />
             </label>
-            {photoPreview && onPhotoRemove && (
-              <Button
+            {photoPreview && !removePhoto && onPhotoRemove && (
+              <button
                 type="button"
-                variant="outline"
                 disabled={pending}
                 onClick={onPhotoRemove}
+                title="Remover foto"
+                className="rounded p-0.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40"
               >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Remover
-              </Button>
+                <Trash2 className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Nome, SKU e Código de Barras */}
+        <div className="flex-1 space-y-1.5">
+          <FormField
+            id="product-name-input"
+            label="Nome do produto"
+            value={form.name}
+            onChange={name => setForm({ ...form, name })}
+            required
+          />
+
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            <FormField
+              id="product-sku-input"
+              label="SKU"
+              value={form.sku}
+              onChange={sku => setForm({ ...form, sku })}
+              required
+            />
+
+            <FormField
+              id="product-barcode-input"
+              label="Código de barras (EAN/GTIN)"
+              value={form.barcode}
+              onChange={barcode => setForm({ ...form, barcode })}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Linha 2 (Meio 1): Grid de 4 colunas com Categoria, Marca, Unidade e Estoque Mínimo */}
+      <div className="grid gap-2.5 sm:grid-cols-4 rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50 p-2.5">
+        {/* Categoria */}
+        <div>
+          <div className="flex items-center justify-between">
+            <label htmlFor="product-category-select" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Categoria
+            </label>
+            {onOpenNewCategory && (
+              <button
+                type="button"
+                onClick={onOpenNewCategory}
+                disabled={pending}
+                className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                data-testid="btn-new-category"
+              >
+                + Nova categoria
+              </button>
+            )}
+          </div>
+          <select
+            id="product-category-select"
+            data-testid="product-category-select"
+            aria-label="Categoria"
+            aria-describedby={
+              hasLegacyCategory
+                ? "legacy-category-notice"
+                : categoriesError
+                ? "category-error-hint"
+                : undefined
+            }
+            disabled={pending || categoriesLoading || Boolean(categoriesError)}
+            className="mt-1 h-8 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 text-xs text-slate-900 dark:text-slate-100 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+            value={form.categoryPublicId || ""}
+            onChange={e => {
+              const val = e.target.value;
+              if (val === "__NONE__") {
+                setForm({ ...form, categoryPublicId: null, category: "" });
+              } else if (!val) {
+                if (hasLegacyCategory) {
+                  setForm({ ...form, categoryPublicId: null });
+                } else {
+                  setForm({ ...form, categoryPublicId: null, category: "" });
+                }
+              } else {
+                const cat = categories.find(c => c.publicId === val);
+                setForm({
+                  ...form,
+                  categoryPublicId: val,
+                  category: cat ? cat.name : form.category,
+                });
+              }
+            }}
+          >
+            {categoriesLoading ? (
+              <option value="" disabled>Carregando categorias...</option>
+            ) : hasLegacyCategory ? (
+              <>
+                <option value="">Manter categoria legada: &quot;{form.category}&quot;</option>
+                <option value="__NONE__">Sem categoria</option>
+              </>
+            ) : (
+              <option value="">Sem categoria</option>
+            )}
+            {categories.map(cat => (
+              <option key={cat.publicId} value={cat.publicId}>
+                {formatCategoryOptionLabel(cat)}
+              </option>
+            ))}
+            {!isSelectedCategoryInList && form.categoryPublicId && (
+              <option value={form.categoryPublicId}>{form.category || "Categoria selecionada"}</option>
+            )}
+          </select>
+          {hasLegacyCategory && (
+            <p id="legacy-category-notice" data-testid="legacy-category-notice" className="mt-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+              Categoria legada atual: &quot;{form.category}&quot;.
+            </p>
+          )}
+          {categoriesError && (
+            <p id="category-error-hint" data-testid="categories-error-message" className="mt-0.5 text-[10px] text-red-600 dark:text-red-400">
+              Não foi possível carregar as categorias. {sanitizeErrorMessage(categoriesError)}
+            </p>
+          )}
+        </div>
+
+        {/* Marca */}
+        <div>
+          <div className="flex items-center justify-between">
+            <label htmlFor="product-brand-select" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Marca
+            </label>
+            {onOpenNewBrand && (
+              <button
+                type="button"
+                onClick={onOpenNewBrand}
+                disabled={pending}
+                className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                data-testid="btn-new-brand"
+              >
+                + Nova marca
+              </button>
+            )}
+          </div>
+          <select
+            id="product-brand-select"
+            data-testid="product-brand-select"
+            aria-label="Marca"
+            aria-describedby={brandsError ? "brand-error-hint" : undefined}
+            disabled={pending || brandsLoading || Boolean(brandsError)}
+            className="mt-1 h-8 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 text-xs text-slate-900 dark:text-slate-100 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+            value={form.brandPublicId || ""}
+            onChange={e => {
+              const val = e.target.value;
+              setForm({ ...form, brandPublicId: val || null });
+            }}
+          >
+            {brandsLoading ? (
+              <option value="" disabled>Carregando marcas...</option>
+            ) : (
+              <option value="">Sem marca</option>
+            )}
+            {brands.map(brand => (
+              <option key={brand.publicId} value={brand.publicId}>
+                {brand.name}
+              </option>
+            ))}
+            {!isSelectedBrandInList && form.brandPublicId && (
+              <option value={form.brandPublicId}>Marca selecionada</option>
+            )}
+          </select>
+          {brandsError && (
+            <p id="brand-error-hint" data-testid="brands-error-message" className="mt-0.5 text-[10px] text-red-600 dark:text-red-400">
+              Não foi possível carregar as marcas. {sanitizeErrorMessage(brandsError)}
+            </p>
+          )}
+        </div>
+
+        {/* Unidade */}
+        <div>
+          <label htmlFor="product-unit-select" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+            Unidade
+          </label>
+          <select
+            id="product-unit-select"
+            data-testid="product-unit-select"
+            className="mt-1 h-8 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 text-xs text-slate-900 dark:text-slate-100 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            value={form.unit}
+            onChange={e => setForm({ ...form, unit: e.target.value as ProductForm["unit"] })}
+          >
+            <option value="unit">Unidade (UN)</option>
+            <option value="kg">Quilograma (KG)</option>
+            <option value="liter">Litro (L)</option>
+            <option value="meter">Metro (M)</option>
+          </select>
+        </div>
+
+        {/* Estoque Mínimo */}
+        <div>
+          <FormField
+            id="product-minimum-stock-input"
+            label="Estoque mínimo"
+            value={form.minimumStock}
+            onChange={minimumStock => setForm({ ...form, minimumStock })}
+          />
+        </div>
+      </div>
+
+      {/* Linha 3 (Meio 2): Grid de 3 colunas com Preço de Custo, Preço de Venda e Margem */}
+      <div className="grid gap-2.5 sm:grid-cols-3 rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50 p-2.5">
+        <FormField
+          id="product-cost-input"
+          label="Preço de custo (R$)"
+          value={form.cost}
+          onChange={cost => setForm({ ...form, cost })}
+        />
+
+        <FormField
+          id="product-sale-input"
+          label="Preço de venda (R$)"
+          value={form.sale}
+          onChange={sale => setForm({ ...form, sale })}
+        />
+
+        {/* Margem calculada */}
+        <div className="flex flex-col justify-between rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 px-3 py-1">
+          <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1">
+            <TrendingUp className="h-3 w-3" /> Margem calculada
+          </span>
+          <div className="flex items-baseline justify-between gap-1">
+            <span className={`text-sm font-extrabold ${profitNum >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+              {costNum > 0 || saleNum > 0 ? `${marginPercentNum}%` : "0,0%"}
+            </span>
+            {(costNum > 0 || saleNum > 0) && (
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate">
+                Lucro: {profitNum.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+              </span>
             )}
           </div>
         </div>
       </div>
 
-      {/* Nome */}
-      <FormField
-        id="product-name-input"
-        label="Nome"
-        value={form.name}
-        onChange={name => setForm({ ...form, name })}
-        required
-      />
-
-      {/* SKU */}
-      <FormField
-        id="product-sku-input"
-        label="SKU"
-        value={form.sku}
-        onChange={sku => setForm({ ...form, sku })}
-        required
-      />
-
-      {/* Código de barras (preserva zeros à esquerda e formato textual estrito) */}
-      <FormField
-        id="product-barcode-input"
-        label="Código de barras"
-        value={form.barcode}
-        onChange={barcode => setForm({ ...form, barcode })}
-      />
-
-      {/* Unidade */}
-      <label
-        htmlFor="product-unit-select"
-        className="text-sm font-medium text-slate-700"
-      >
-        Unidade
-        <select
-          id="product-unit-select"
-          data-testid="product-unit-select"
-          className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-sm text-slate-900 shadow-sm"
-          value={form.unit}
-          onChange={e =>
-            setForm({ ...form, unit: e.target.value as ProductForm["unit"] })
-          }
-        >
-          <option value="unit">Unidade</option>
-          <option value="kg">Quilograma</option>
-          <option value="liter">Litro</option>
-          <option value="meter">Metro</option>
-        </select>
-      </label>
-
-      {/* Seletor Relacional de Categoria */}
-      <div className="sm:col-span-1">
-        <div className="flex items-center justify-between">
-          <label
-            htmlFor="product-category-select"
-            className="text-sm font-medium text-slate-700"
-          >
-            Categoria
-          </label>
-          {onOpenNewCategory && (
-            <button
-              type="button"
-              onClick={onOpenNewCategory}
-              disabled={pending}
-              className="text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline disabled:opacity-50"
-              data-testid="btn-new-category"
-            >
-              + Nova categoria
-            </button>
-          )}
-        </div>
-        <select
-          id="product-category-select"
-          data-testid="product-category-select"
-          aria-label="Categoria"
-          aria-describedby={
-            hasLegacyCategory
-              ? "legacy-category-notice"
-              : categoriesError
-              ? "category-error-hint"
-              : undefined
-          }
-          disabled={pending || categoriesLoading || Boolean(categoriesError)}
-          className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-          value={form.categoryPublicId || ""}
-          onChange={e => {
-            const val = e.target.value;
-            if (val === "__NONE__") {
-              setForm({ ...form, categoryPublicId: null, category: "" });
-            } else if (!val) {
-              if (hasLegacyCategory) {
-                setForm({ ...form, categoryPublicId: null });
-              } else {
-                setForm({ ...form, categoryPublicId: null, category: "" });
-              }
-            } else {
-              const cat = categories.find(c => c.publicId === val);
-              setForm({
-                ...form,
-                categoryPublicId: val,
-                category: cat ? cat.name : form.category,
-              });
-            }
-          }}
-        >
-          {categoriesLoading ? (
-            <option value="" disabled>
-              Carregando categorias...
-            </option>
-          ) : hasLegacyCategory ? (
-            <>
-              <option value="">
-                Manter categoria legada: &quot;{form.category}&quot;
-              </option>
-              <option value="__NONE__">Sem categoria</option>
-            </>
-          ) : (
-            <option value="">Sem categoria</option>
-          )}
-
-          {categories.map(cat => (
-            <option key={cat.publicId} value={cat.publicId}>
-              {formatCategoryOptionLabel(cat)}
-            </option>
-          ))}
-
-          {!isSelectedCategoryInList && form.categoryPublicId && (
-            <option value={form.categoryPublicId}>
-              {form.category || "Categoria selecionada"}
-            </option>
-          )}
-        </select>
-
-        {hasLegacyCategory && (
-          <p
-            id="legacy-category-notice"
-            data-testid="legacy-category-notice"
-            className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800"
-          >
-            Categoria legada atual: &quot;{form.category}&quot;. Selecione uma categoria relacional para atualizar ou mantenha para preservar.
-          </p>
-        )}
-
-        {categoriesError && (
-          <p
-            id="category-error-hint"
-            data-testid="categories-error-message"
-            className="mt-1 text-xs text-red-600"
-          >
-            Não foi possível carregar as categorias. {sanitizeErrorMessage(categoriesError)}
-          </p>
-        )}
-      </div>
-
-      {/* Seletor Relacional de Marca */}
-      <div className="sm:col-span-1">
-        <div className="flex items-center justify-between">
-          <label
-            htmlFor="product-brand-select"
-            className="text-sm font-medium text-slate-700"
-          >
-            Marca
-          </label>
-          {onOpenNewBrand && (
-            <button
-              type="button"
-              onClick={onOpenNewBrand}
-              disabled={pending}
-              className="text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline disabled:opacity-50"
-              data-testid="btn-new-brand"
-            >
-              + Nova marca
-            </button>
-          )}
-        </div>
-        <select
-          id="product-brand-select"
-          data-testid="product-brand-select"
-          aria-label="Marca"
-          aria-describedby={brandsError ? "brand-error-hint" : undefined}
-          disabled={pending || brandsLoading || Boolean(brandsError)}
-          className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-          value={form.brandPublicId || ""}
-          onChange={e => {
-            const val = e.target.value;
-            setForm({
-              ...form,
-              brandPublicId: val || null,
-            });
-          }}
-        >
-          {brandsLoading ? (
-            <option value="" disabled>
-              Carregando marcas...
-            </option>
-          ) : (
-            <option value="">Sem marca</option>
-          )}
-
-          {brands.map(brand => (
-            <option key={brand.publicId} value={brand.publicId}>
-              {brand.name}
-            </option>
-          ))}
-
-          {!isSelectedBrandInList && form.brandPublicId && (
-            <option value={form.brandPublicId}>Marca selecionada</option>
-          )}
-        </select>
-
-        {brandsError && (
-          <p
-            id="brand-error-hint"
-            data-testid="brands-error-message"
-            className="mt-1 text-xs text-red-600"
-          >
-            Não foi possível carregar as marcas. {sanitizeErrorMessage(brandsError)}
-          </p>
-        )}
-      </div>
-
-      {/* Preço de Custo */}
-      <FormField
-        id="product-cost-input"
-        label="Preço de custo"
-        value={form.cost}
-        onChange={cost => setForm({ ...form, cost })}
-      />
-
-      {/* Preço de Venda */}
-      <FormField
-        id="product-sale-input"
-        label="Preço de venda"
-        value={form.sale}
-        onChange={sale => setForm({ ...form, sale })}
-      />
-
-      {/* Estoque Mínimo */}
-      <FormField
-        id="product-minimum-stock-input"
-        label="Estoque mínimo"
-        value={form.minimumStock}
-        onChange={minimumStock => setForm({ ...form, minimumStock })}
-      />
-
-      {/* Descrição */}
-      <label
-        htmlFor="product-description-input"
-        className="text-sm font-medium text-slate-700 sm:col-span-2"
-      >
-        Descrição
+      {/* Linha 4 (Base): Descrição compacta com rows={2} */}
+      <div className="rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50 p-2.5">
+        <label htmlFor="product-description-input" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+          Descrição do produto
+        </label>
         <textarea
           id="product-description-input"
-          className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          data-testid="product-description-input"
+          rows={2}
+          className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+          placeholder="Informações técnicas, composição, garantias..."
           value={form.description}
           onChange={e => setForm({ ...form, description: e.target.value })}
         />
-      </label>
+      </div>
 
       {/* Erros sanitizados de submissão */}
       {errorMessage && (
-        <p
-          role="alert"
-          className="text-sm text-red-600 sm:col-span-2"
-          data-testid="product-form-error"
-        >
+        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 dark:bg-rose-950/40 dark:border-rose-900/60 p-2 text-xs text-rose-700 dark:text-rose-300" data-testid="product-form-error">
           {sanitizeErrorMessage(errorMessage)}
-        </p>
+        </div>
       )}
 
-      {/* Botões de Ação */}
-      <div className="flex justify-end gap-2 sm:col-span-2">
+      {/* Rodapé com botões Cancelar e Salvar fixos na base */}
+      <div className="flex items-center justify-end gap-3 border-t border-slate-200 dark:border-slate-800 pt-2.5">
         <Button
           type="button"
           variant="outline"
+          size="sm"
           onClick={onCancel}
           disabled={pending}
+          className="dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs"
         >
           Cancelar
         </Button>
         <Button
           type="submit"
+          size="sm"
           disabled={pending}
           data-testid="submit-product-form"
+          className="bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-[0_0_15px_rgba(37,99,235,0.35)] px-5 text-xs"
         >
-          {pending ? "Salvando…" : "Salvar"}
+          {pending ? "Salvando…" : "Salvar produto"}
         </Button>
       </div>
     </form>
@@ -583,11 +584,14 @@ export function ProductFormDialogView({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto bg-white sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>
+      <DialogContent className="max-w-4xl max-h-[92vh] flex flex-col p-6 overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 rounded-2xl shadow-2xl">
+        <DialogHeader className="border-b border-slate-100 dark:border-slate-800 pb-2">
+          <DialogTitle className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">
             {form.publicId ? "Editar produto" : "Novo produto"}
           </DialogTitle>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Preencha os dados do produto abaixo de forma rápida e compacta.
+          </p>
         </DialogHeader>
         <ProductFormContent
           form={form}
@@ -665,12 +669,12 @@ export function CategoryCreateModal({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="bg-white sm:max-w-md" data-testid="category-create-dialog">
+      <DialogContent className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 sm:max-w-md rounded-2xl shadow-xl" data-testid="category-create-dialog">
         <DialogHeader>
-          <DialogTitle>Nova Categoria</DialogTitle>
+          <DialogTitle className="text-lg font-bold">Nova Categoria</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <label htmlFor="new-category-name" className="block text-sm font-medium text-slate-700">
+          <label htmlFor="new-category-name" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
             Nome da categoria
             <Input
               id="new-category-name"
@@ -678,21 +682,21 @@ export function CategoryCreateModal({
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder="Ex: Calçados Esportivos"
-              className="mt-1"
+              className="mt-1 h-9 rounded-lg border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs"
               required
               minLength={2}
               maxLength={120}
               autoFocus
             />
           </label>
-          <label htmlFor="new-category-parent" className="block text-sm font-medium text-slate-700">
+          <label htmlFor="new-category-parent" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
             Categoria pai (opcional)
             <select
               id="new-category-parent"
               data-testid="new-category-parent-select"
               value={parentPublicId}
               onChange={e => setParentPublicId(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-sm text-slate-900 shadow-sm"
+              className="mt-1 h-9 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 text-xs text-slate-900 dark:text-slate-100 shadow-xs"
             >
               <option value="">Nenhuma (categoria raiz)</option>
               {categories.map(cat => (
@@ -703,16 +707,17 @@ export function CategoryCreateModal({
             </select>
           </label>
           {error && (
-            <p role="alert" className="text-sm text-red-600" data-testid="category-create-error">
+            <p role="alert" className="text-xs text-rose-600 dark:text-rose-400" data-testid="category-create-error">
               {sanitizeErrorMessage(error)}
             </p>
           )}
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
             <Button
               type="button"
               variant="outline"
               onClick={() => handleOpenChange(false)}
               disabled={createCategory.isPending}
+              className="dark:border-slate-700 dark:bg-slate-800"
             >
               Cancelar
             </Button>
@@ -720,6 +725,7 @@ export function CategoryCreateModal({
               type="submit"
               disabled={createCategory.isPending || name.trim().length < 2}
               data-testid="submit-new-category"
+              className="bg-blue-600 hover:bg-blue-500 text-white font-semibold"
             >
               {createCategory.isPending ? "Criando…" : "Salvar categoria"}
             </Button>
@@ -776,12 +782,12 @@ export function BrandCreateModal({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="bg-white sm:max-w-md" data-testid="brand-create-dialog">
+      <DialogContent className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 sm:max-w-md rounded-2xl shadow-xl" data-testid="brand-create-dialog">
         <DialogHeader>
-          <DialogTitle>Nova Marca</DialogTitle>
+          <DialogTitle className="text-lg font-bold">Nova Marca</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <label htmlFor="new-brand-name" className="block text-sm font-medium text-slate-700">
+          <label htmlFor="new-brand-name" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
             Nome da marca
             <Input
               id="new-brand-name"
@@ -789,7 +795,7 @@ export function BrandCreateModal({
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder="Ex: Nike, Logitech"
-              className="mt-1"
+              className="mt-1 h-9 rounded-lg border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs"
               required
               minLength={2}
               maxLength={120}
@@ -797,16 +803,17 @@ export function BrandCreateModal({
             />
           </label>
           {error && (
-            <p role="alert" className="text-sm text-red-600" data-testid="brand-create-error">
+            <p role="alert" className="text-xs text-rose-600 dark:text-rose-400" data-testid="brand-create-error">
               {sanitizeErrorMessage(error)}
             </p>
           )}
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
             <Button
               type="button"
               variant="outline"
               onClick={() => handleOpenChange(false)}
               disabled={createBrand.isPending}
+              className="dark:border-slate-700 dark:bg-slate-800"
             >
               Cancelar
             </Button>
@@ -814,6 +821,7 @@ export function BrandCreateModal({
               type="submit"
               disabled={createBrand.isPending || name.trim().length < 2}
               data-testid="submit-new-brand"
+              className="bg-blue-600 hover:bg-blue-500 text-white font-semibold"
             >
               {createBrand.isPending ? "Criando…" : "Salvar marca"}
             </Button>
@@ -866,7 +874,6 @@ export function ProductFormDialog({
   const [categoryModalOpen, setCategoryModalOpen] = React.useState(false);
   const [brandModalOpen, setBrandModalOpen] = React.useState(false);
 
-  // Busca lista de categorias e marcas reais pelo tRPC
   const categoriesQuery = trpc.erp.categories.list.useQuery(
     { pageSize: 100 },
     { staleTime: 30_000, enabled: open && !categoriesOverride }

@@ -1,0 +1,1 @@
+ALTER TABLE `erp_sale_documents` MODIFY COLUMN `document_type` enum('invoice','content_declaration','quote_pdf','other') NOT NULL;

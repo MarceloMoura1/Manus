@@ -23,7 +23,7 @@ describe("CRM client lifecycle contract", () => {
     expect(lifecycle).toContain("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
     expect(lifecycle).toContain("operator_user_id");
     expect(lifecycle).not.toContain("userEmail");
-    expect(router).toContain("ctx.tenantId");
+    expect(source("server/crm-access.ts")).toContain("context.tenantId");
     expect(router).not.toContain("input.tenantId");
   });
 
@@ -32,9 +32,10 @@ describe("CRM client lifecycle contract", () => {
   });
 
   it("restricts transitions to managers/admins and permanent deletion to admins", () => {
-    expect(router).toContain('const CRM_ROLES = new Set(["admin", "manager"])');
-    expect(router).toContain('ctx.operationalUserRole !== "admin"');
-    expect(router).toContain("requireCrmAdmin(ctx)");
+    const access = source("server/crm-access.ts");
+    expect(access).toContain('const CRM_ROLES = new Set(["admin", "manager"])');
+    expect(access).toContain('context.operationalUserRole !== "admin"');
+    expect(router).toContain("requireCrmCustomerAdminAccess(ctx)");
   });
 
   it("excludes non-active clients from new links and exposes lifecycle controls through the header menu", () => {

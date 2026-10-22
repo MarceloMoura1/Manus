@@ -21,14 +21,18 @@ import { isValidCpf, isValidCnpj } from "../shared/br-documents";
 import { normalizeContactPhone } from "../shared/contact-phone";
 import { changeCrmClientLifecycle, permanentlyDeleteCrmClient, CrmLifecycleError } from "./crm-client-lifecycle";
 import { clientFilesRouter } from "./modules/crm/client-files/files-router";
+import { leadsRouter } from "./modules/crm/leads/router";
+import { pipelinesRouter } from "./modules/crm/pipeline/router";
+import { opportunitiesRouter } from "./modules/crm/opportunities/router";
+import { proposalsRouter } from "./modules/crm/proposals/router";
+import { automationsRouter } from "./modules/crm/automations/router";
+import { reportsRouter } from "./modules/crm/reports/router";
 
-const CRM_ROLES = new Set(["admin", "manager"]);
-
-function requireCrmAdmin(ctx: { operationalUserRole?: string }) {
-  if (ctx.operationalUserRole !== "admin") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Somente administradores podem excluir clientes definitivamente." });
-  }
-}
+import {
+  requireCrmCustomerCommercialAccess,
+  requireCrmCustomerLifecycleAccess,
+  requireCrmCustomerAdminAccess,
+} from "./crm-access";
 
 function safeLifecycleError(error: unknown): never {
   if (error instanceof TRPCError) throw error;
@@ -37,20 +41,6 @@ function safeLifecycleError(error: unknown): never {
     throw new TRPCError({ code, message: error.message });
   }
   throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Não foi possível concluir a ação. Tente novamente." });
-}
-
-function requireCrmAccess(ctx: {
-  tenantId: string;
-  operationalUserRole?: string;
-  operationalPermissions?: string[];
-}) {
-  if (!ctx.operationalUserRole || !CRM_ROLES.has(ctx.operationalUserRole)) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Acesso a Clientes indisponível." });
-  }
-  if (ctx.operationalPermissions && !ctx.operationalPermissions.some(permission => permission === "clients" || permission === "erp")) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Acesso a Clientes indisponível." });
-  }
-  return ctx.tenantId;
 }
 
 function publicCrmClient(client: Record<string, unknown>) {
@@ -69,6 +59,16 @@ function timelineActor(ctx: { userName?: string; userEmail?: string }): string {
   return ctx.userName?.trim() || ctx.userEmail?.trim() || "Sistema";
 }
 
+
+const crmContactItemInputSchema = z.object({
+  name: z.string().optional().default(""),
+  role: z.string().optional().default(""),
+  email: z.string().optional().default(""),
+  phone: z.string().optional().default(""),
+  whatsapp: z.string().optional().default(""),
+  description: z.string().optional().default(""),
+}).passthrough();
+
 const crmClientInputSchema = z.object({
   customerType: z.enum(CUSTOMER_TYPES),
   companyName: z.string().trim().min(1, "Nome do cliente é obrigatório").max(255),
@@ -86,11 +86,11 @@ const crmClientInputSchema = z.object({
   internalResponsible: z.string().optional().default(""),
   tags: z.string().optional().default(""),
   observations: z.string().optional().default(""),
-  contacts: z.array(z.object({
+  contacts: z.array(crmContactItemInputSchema).optional().default([]), /*
     phone: z.string(),
     whatsapp: z.string(),
     description: z.string().optional(),
-  })).optional().default([]),
+  */
 }).strict();
 
 const crmClientUpdateInputSchema = z.object({
@@ -110,11 +110,11 @@ const crmClientUpdateInputSchema = z.object({
   internalResponsible: z.string().optional(),
   tags: z.string().optional(),
   observations: z.string().optional(),
-  contacts: z.array(z.object({
+  contacts: z.array(crmContactItemInputSchema).optional(), /*
     phone: z.string(),
     whatsapp: z.string(),
     description: z.string().optional(),
-  })).optional(),
+  */
 }).strict();
 
 function validateCustomerDocument(data: z.infer<typeof crmClientInputSchema>) {
@@ -144,10 +144,16 @@ function safeCrmWriteError(error: unknown): never {
 
 export const crmRouter = router({
   files: clientFilesRouter,
+  leads: leadsRouter,
+  pipelines: pipelinesRouter,
+  opportunities: opportunitiesRouter,
+  proposals: proposalsRouter,
+  automations: automationsRouter,
+  reports: reportsRouter,
   findDuplicate: megadeskProcedure
     .input(z.object({ cpfCnpj: z.string().max(20).optional().default(""), phone: z.string().max(40).optional().default("") }).strict())
     .query(async ({ input, ctx }) => {
-      const tenantId = requireCrmAccess(ctx);
+      const tenantId = requireCrmCustomerCommercialAccess(ctx);
       const duplicate = await findDuplicateCrmClient(tenantId, input);
       return duplicate ? {
         crmClientId: duplicate.crmClientId,
@@ -162,7 +168,7 @@ export const crmRouter = router({
       lifecycle: z.enum(["active", "inactive", "archived", "all"]).optional().default("active"),
     }).strict())
     .query(async ({ input, ctx }) => {
-      const tenantId = requireCrmAccess(ctx);
+      const tenantId = requireCrmCustomerCommercialAccess(ctx);
       const clients = await listCrmClients(tenantId, input.search, input.lifecycle);
       return { clients: clients.map((client) => publicCrmClient(client as unknown as Record<string, unknown>)) };
     }),
@@ -170,7 +176,7 @@ export const crmRouter = router({
   exportCsv: megadeskProcedure
     .input(z.void())
     .query(async ({ ctx }) => {
-      const tenantId = requireCrmAccess(ctx);
+      const tenantId = requireCrmCustomerCommercialAccess(ctx);
       const clients = await listCrmClients(tenantId);
       return {
         rows: clients.map((client) => ({
@@ -199,7 +205,7 @@ export const crmRouter = router({
       crmClientId: z.string().min(1),
     }).strict())
     .query(async ({ input, ctx }) => {
-      const tenantId = requireCrmAccess(ctx);
+      const tenantId = requireCrmCustomerCommercialAccess(ctx);
       const client = crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
       return { client: publicCrmClient(client as unknown as Record<string, unknown>) };
     }),
@@ -210,7 +216,7 @@ export const crmRouter = router({
       data: crmClientInputSchema,
     }).strict())
     .mutation(async ({ input, ctx }) => {
-      const tenantId = requireCrmAccess(ctx);
+      const tenantId = requireCrmCustomerCommercialAccess(ctx);
       try {
         const result = await createCrmClient(tenantId, validateCustomerDocument(input.data));
         return { success: true, crmClientId: result.crmClientId };
@@ -224,7 +230,7 @@ export const crmRouter = router({
       data: crmClientUpdateInputSchema,
     }).strict())
     .mutation(async ({ input, ctx }) => {
-      const tenantId = requireCrmAccess(ctx);
+      const tenantId = requireCrmCustomerCommercialAccess(ctx);
       const existing = crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
       if (existing.lifecycleState === "archived") throw new TRPCError({ code: "BAD_REQUEST", message: "Restaure o cliente antes de editar o cadastro." });
       const merged = { ...existing, ...input.data };
@@ -266,7 +272,7 @@ export const crmRouter = router({
       expectedVersion: z.number().int().positive(),
     }).strict())
     .mutation(async ({ input, ctx }) => {
-      const tenantId = requireCrmAccess(ctx);
+      const tenantId = requireCrmCustomerLifecycleAccess(ctx);
       try {
         return await changeCrmClientLifecycle({ ...input, tenantId, operatorUserId: ctx.operationalUserId, operatorRole: ctx.operationalUserRole });
       } catch (error) { safeLifecycleError(error); }
@@ -275,8 +281,7 @@ export const crmRouter = router({
   deletePermanently: megadeskProcedure
     .input(z.object({ crmClientId: z.string().min(1).max(80), expectedVersion: z.number().int().positive() }).strict())
     .mutation(async ({ input, ctx }) => {
-      const tenantId = requireCrmAccess(ctx);
-      requireCrmAdmin(ctx);
+      const tenantId = requireCrmCustomerAdminAccess(ctx);
       try {
         return await permanentlyDeleteCrmClient({ ...input, tenantId, operatorUserId: ctx.operationalUserId, operatorRole: ctx.operationalUserRole });
       } catch (error) { safeLifecycleError(error); }
@@ -288,7 +293,7 @@ export const crmRouter = router({
       crmClientId: z.string().min(1),
     }).strict())
     .query(async ({ input, ctx }) => {
-      const tenantId = requireCrmAccess(ctx);
+      const tenantId = requireCrmCustomerCommercialAccess(ctx);
       const pool = getPool();
       crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
 
@@ -322,7 +327,7 @@ export const crmRouter = router({
       crmClientId: z.string().min(1),
     }).strict())
     .query(async ({ input, ctx }) => {
-      const tenantId = requireCrmAccess(ctx);
+      const tenantId = requireCrmCustomerCommercialAccess(ctx);
       const pool = getPool();
       crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
       const [directRows] = await pool.execute(
@@ -355,7 +360,7 @@ export const crmRouter = router({
       crmClientId: z.string().min(1),
     }).strict())
     .query(async ({ input, ctx }) => {
-      const tenantId = requireCrmAccess(ctx);
+      const tenantId = requireCrmCustomerCommercialAccess(ctx);
       crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
       const [entries, lifecycleEntries] = await Promise.all([
         listCrmTimeline(input.crmClientId, tenantId),
@@ -375,7 +380,7 @@ export const crmRouter = router({
       type: z.enum(["note", "call", "meeting", "email", "edit", "status_change", "other"]).optional().default("note"),
     }).strict())
     .mutation(async ({ input, ctx }) => {
-      const tenantId = requireCrmAccess(ctx);
+      const tenantId = requireCrmCustomerCommercialAccess(ctx);
       const client = crmClientOrNotFound(await getCrmClientById(input.crmClientId, tenantId));
       if (client.lifecycleState === "archived") throw new TRPCError({ code: "BAD_REQUEST", message: "Restaure o cliente antes de adicionar registros." });
       await addCrmTimeline(input.crmClientId, tenantId, {
@@ -407,7 +412,7 @@ export const crmRouter = router({
       }).strict()).max(500, "Máximo de 500 registros por importação"),
     }).strict())
     .mutation(async ({ input, ctx }) => {
-      const tenantId = requireCrmAccess(ctx);
+      const tenantId = requireCrmCustomerCommercialAccess(ctx);
       let imported = 0;
       let errors = 0;
       const errorMessages: string[] = [];

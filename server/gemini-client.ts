@@ -8,7 +8,7 @@ import { getPool } from "./db";
 import { nanoid } from "nanoid";
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -36,16 +36,27 @@ interface GeminiContent {
 interface GeminiRequest {
   contents: GeminiContent[];
   tools?: any[];
-  systemInstruction?: { parts: [{ text: string }] };
+  systemInstruction?: { parts: Array<{ text: string }> } | string;
   generationConfig?: { temperature?: number; maxOutputTokens?: number };
 }
 
 async function callGeminiAPI(apiKey: string, body: GeminiRequest): Promise<any> {
+  const normalizedBody = {
+    ...body,
+    ...(body.systemInstruction
+      ? {
+          systemInstruction:
+            typeof body.systemInstruction === "string"
+              ? { parts: [{ text: body.systemInstruction }] }
+              : body.systemInstruction,
+        }
+      : {}),
+  };
   const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(normalizedBody),
   });
   const data = await response.json() as any;
   if (!response.ok) {

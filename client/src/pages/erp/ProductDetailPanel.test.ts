@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   ProductDetailView,
+  variantStockAdjustment,
   type ProductDetail,
   type ProductSupplierItem,
   type ProductAuditItem,
@@ -44,6 +45,8 @@ const baseProduct: ProductDetail = {
       costPriceCents: 4500,
       salePriceCents: 9990,
       effectivePriceCents: 9990,
+      inventoryItemPublicId: "inventory-var-101",
+      quantity: "5.000",
       active: true,
       attributes: [
         {
@@ -68,6 +71,8 @@ const baseProduct: ProductDetail = {
       costPriceCents: 0,
       salePriceCents: 10990,
       effectivePriceCents: 10990,
+      inventoryItemPublicId: "inventory-var-102",
+      quantity: "8.000",
       active: false,
       attributes: [
         {
@@ -341,6 +346,41 @@ describe("ProductDetailPanel — P1-A9 Premium UI Integration", () => {
     expect(markup).toContain("MOU-ERG-WHT");
     expect(markup).toContain("Branco Neve");
     expect(markup).toContain("Cor: Branco");
+    expect(markup).toContain("5,000");
+    expect(markup).toContain("8,000");
+  });
+
+  it("9b. calcula o movimento somente da variante ajustada sem agregar as demais", () => {
+    expect(variantStockAdjustment("5.000", "10,000")).toEqual({
+      type: "adjustment_in",
+      quantity: "5.000",
+      unchanged: false,
+    });
+    expect(variantStockAdjustment("8.000", "8.000")).toEqual({
+      type: "adjustment_in",
+      quantity: "0.000",
+      unchanged: true,
+    });
+    expect(variantStockAdjustment("10.000", "4.500")).toEqual({
+      type: "adjustment_out",
+      quantity: "5.500",
+      unchanged: false,
+    });
+  });
+
+  it("9c. exposes an explicit stock action for each independently backed variant", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ProductDetailView, {
+        product: baseProduct,
+        currentTab: "variants",
+        canWrite: true,
+        onAdjustVariantStock: () => {},
+      })
+    );
+
+    expect(markup.match(/Ajustar estoque/g)).toHaveLength(2);
+    expect(markup).toContain("adjust-variant-stock-btn-var-pub-uuid-101");
+    expect(markup).toContain("adjust-variant-stock-btn-var-pub-uuid-102");
   });
 
   // -------------------------------------------------------------------------

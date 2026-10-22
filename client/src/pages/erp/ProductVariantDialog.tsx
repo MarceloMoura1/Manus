@@ -79,6 +79,8 @@ export type ProductVariantItem = {
   costPriceCents: number;
   salePriceCents?: number | null;
   effectivePriceCents?: number;
+  inventoryItemPublicId?: string | null;
+  quantity?: string;
   active: boolean;
   attributes?: Array<{
     typePublicId: string;
