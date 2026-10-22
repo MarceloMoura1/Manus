@@ -46,6 +46,29 @@ export function salesFilterPeriodLabel(
   return `Até ${shortDate(to)}`;
 }
 
+export function formatMultiSelectFilterLabel(
+  prefix: string,
+  selected: string[],
+  optionMap: Map<string, string> | Record<string, string>,
+  allLabel = "Todos"
+): string {
+  if (!selected || selected.length === 0) {
+    return `${prefix}: ${allLabel}`;
+  }
+  const getLabel = (val: string) => {
+    if (optionMap instanceof Map) return optionMap.get(val) || val;
+    return optionMap[val] || val;
+  };
+  const names = selected.map(getLabel);
+  if (names.length === 1) {
+    return `${prefix}: ${names[0]}`;
+  }
+  if (names.length === 2) {
+    return `${prefix}: ${names[0]}, ${names[1]}`;
+  }
+  return `${prefix}: ${names[0]}, ${names[1]} (+${names.length - 2})`;
+}
+
 export function nextSalesSort(current: SalesSortState, key: SalesSortKey): SalesSortState {
   if (current.key !== key) return { key, direction: "asc" };
   return { key, direction: current.direction === "asc" ? "desc" : "asc" };
@@ -234,22 +257,27 @@ export function salesConfirmationRequirements(input: {
 
 export function activeSalesFilterCount(input: {
   search: string;
-  stage: string;
-  paymentStatus: string;
-  paymentMethod: string;
-  sellerUserId: string;
+  stage?: string | string[];
+  paymentStatus?: string | string[];
+  paymentMethod?: string | string[];
+  sellerUserId?: string | string[];
   customerId?: string;
   from: string;
   to: string;
   defaultFrom: string;
   defaultTo: string;
 }) {
+  const isSelected = (val?: string | string[]) => {
+    if (!val) return false;
+    if (Array.isArray(val)) return val.length > 0 && !val.includes("all");
+    return val !== "all";
+  };
   return [
     Boolean(input.search.trim()),
-    input.stage !== "all",
-    input.paymentStatus !== "all",
-    input.paymentMethod !== "all",
-    input.sellerUserId !== "all",
+    isSelected(input.stage),
+    isSelected(input.paymentStatus),
+    isSelected(input.paymentMethod),
+    isSelected(input.sellerUserId),
     Boolean(input.customerId),
     input.from !== input.defaultFrom || input.to !== input.defaultTo,
   ].filter(Boolean).length;

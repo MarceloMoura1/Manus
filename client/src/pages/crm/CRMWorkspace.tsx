@@ -46,7 +46,7 @@ export function getCrmTopbarItems({
       label: "Automações e IA",
       icon: SlidersHorizontal,
       badge: (
-        <span className="ml-1 inline-flex items-center rounded border border-purple-500/30 bg-purple-500/20 px-1 text-[10px] font-bold text-purple-400">
+        <span className="ml-1 inline-flex items-center rounded border border-blue-500/30 bg-blue-500/20 px-1 text-[10px] font-bold text-blue-400">
           IA
         </span>
       ),

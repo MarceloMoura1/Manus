@@ -2,6 +2,7 @@ import React from "react";
 import { io } from "socket.io-client";
 import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/conversationDateTime";
+import type { ModuleTopbarItem } from "@/components/ModuleTopbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -37,7 +38,14 @@ import { FiscalPage } from "./FiscalPage";
 import { ReportsPage } from "./ReportsPage";
 import { StockPage } from "./StockPage";
 import { ServicesPage } from "./ServicesPage";
-import type { ModuleTopbarItem } from "@/components/ModuleTopbar";
+import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ErpPageHeader } from "@/components/erp/ErpPageHeader";
 import { Pagination } from "@/components/erp/Pagination";
 import { ErpEmptyState } from "@/components/erp/ErpEmptyState";
@@ -220,6 +228,45 @@ function Products() {
   const create = trpc.erp.products.create.useMutation();
   const update = trpc.erp.products.update.useMutation();
   const status = trpc.erp.products.setActive.useMutation({ onSuccess: async () => { setMessage("Status atualizado com sucesso."); await utils.erp.invalidate(); } });
+  const [deleteTarget, setDeleteTarget] = React.useState<{
+    publicId: string;
+    name: string;
+    salesCount: number;
+    stockCount: number;
+    hasDependencies: boolean;
+  } | null>(null);
+  const deleteMutation = trpc.erp.products.delete.useMutation({
+    onSuccess: async () => {
+      setDeleteTarget(null);
+      toast.success("Produto excluído com sucesso.");
+      await utils.erp.products.list.invalidate();
+      await utils.erp.summary.invalidate();
+      void query.refetch();
+    },
+    onError: (err) => {
+      toast.error(err.message || "Não foi possível excluir o produto.");
+    },
+  });
+  const handleDeleteProduct = async (prod: { publicId: string; name: string }) => {
+    try {
+      const deps = await utils.client.erp.products.checkDependencies.query({ publicId: prod.publicId });
+      setDeleteTarget({
+        publicId: prod.publicId,
+        name: prod.name,
+        salesCount: deps.salesCount,
+        stockCount: deps.stockCount,
+        hasDependencies: deps.hasDependencies,
+      });
+    } catch {
+      setDeleteTarget({
+        publicId: prod.publicId,
+        name: prod.name,
+        salesCount: 0,
+        stockCount: 0,
+        hasDependencies: false,
+      });
+    }
+  };
   const submittingRef = React.useRef(false);
   const pending=create.isPending||update.isPending||mediaPending;
   const clearPhoto=()=>{if(photoPreview?.startsWith("blob:"))URL.revokeObjectURL(photoPreview);setPhoto(null);setPhotoPreview(null);setRemovePhoto(false)};
@@ -483,6 +530,9 @@ function Products() {
                         <>
                           <Button size="sm" variant="outline" onClick={()=>edit(product)}>Editar</Button>
                           <Button size="sm" variant="outline" onClick={()=>status.mutate({publicId:product.publicId,active:!product.active})} disabled={status.isPending}>{product.active?"Inativar":"Ativar"}</Button>
+                          <Button size="sm" variant="outline" className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 border-rose-200 dark:border-rose-900/40" title="Excluir produto" onClick={() => void handleDeleteProduct(product)} disabled={deleteMutation.isPending}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </>
                       )}
                     </div>
@@ -517,6 +567,9 @@ function Products() {
                   <>
                     <Button size="sm" variant="outline" onClick={()=>edit(product)}>Editar</Button>
                     <Button size="sm" variant="outline" onClick={()=>status.mutate({publicId:product.publicId,active:!product.active})}>{product.active?"Inativar":"Ativar"}</Button>
+                    <Button size="sm" variant="outline" className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 border-rose-200 dark:border-rose-900/40" title="Excluir produto" onClick={() => void handleDeleteProduct(product)} disabled={deleteMutation.isPending}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </>
                 )}
               </div>
@@ -555,6 +608,49 @@ function Products() {
         }
       }}
     />
+    <Dialog open={Boolean(deleteTarget)} onOpenChange={open => !open && setDeleteTarget(null)}>
+      <DialogContent className="sm:max-w-md dark:bg-slate-900 dark:border-slate-800">
+        <DialogHeader>
+          <DialogTitle className="text-slate-900 dark:text-slate-100 flex items-center gap-2 text-rose-600 dark:text-rose-400">
+            <AlertCircle className="h-5 w-5" /> Excluir produto
+          </DialogTitle>
+        </DialogHeader>
+        <div className="py-3 text-sm text-slate-600 dark:text-slate-300">
+          {deleteTarget?.hasDependencies ? (
+            <p>
+              Atenção: Este produto possui{" "}
+              <strong className="text-rose-600 dark:text-rose-400">
+                {deleteTarget.salesCount > 0 && `${deleteTarget.salesCount} item(ns) em vendas/orçamentos`}
+                {deleteTarget.salesCount > 0 && deleteTarget.stockCount > 0 && " ou "}
+                {deleteTarget.stockCount > 0 && `${deleteTarget.stockCount} em saldo em estoque`}
+              </strong>
+              . Deseja realmente excluir este produto da listagem?
+            </p>
+          ) : (
+            <p>
+              Deseja realmente excluir o produto <strong className="text-slate-900 dark:text-white">"{deleteTarget?.name}"</strong> da listagem?
+            </p>
+          )}
+        </div>
+        <DialogFooter className="flex gap-2 sm:justify-end">
+          <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleteMutation.isPending}>
+            Cancelar
+          </Button>
+          <Button
+            variant="destructive"
+            className="bg-rose-600 hover:bg-rose-700 text-white"
+            onClick={() => {
+              if (deleteTarget) {
+                deleteMutation.mutate({ publicId: deleteTarget.publicId, force: true });
+              }
+            }}
+            disabled={deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? "Excluindo…" : "Confirmar Exclusão"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>;
 }
 

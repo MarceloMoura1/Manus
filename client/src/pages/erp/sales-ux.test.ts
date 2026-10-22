@@ -11,6 +11,7 @@ import {
   salesCsvCell,
   salesMetricPeriod,
   salesFilterPeriodLabel,
+  formatMultiSelectFilterLabel,
   nextSalesSort,
   saleStockPresentation,
 } from "./sales-ux";
@@ -51,6 +52,15 @@ describe("sales UX state", () => {
     expect(salesFilterPeriodLabel("2026-08-23", "2026-09-26", "2026-10-01", "2026-10-31")).toBe("23/08 a 26/09");
     expect(salesFilterPeriodLabel("2026-08-23", "", "2026-10-01", "2026-10-31")).toBe("Desde 23/08");
     expect(salesFilterPeriodLabel("", "2026-09-26", "2026-10-01", "2026-10-31")).toBe("Até 26/09");
+  });
+
+  it("formats explicit multi-select filter labels correctly", () => {
+    const map = { opt1: "Em negociação", opt2: "Aprovado", opt3: "Recusado", opt4: "Expirado" };
+    expect(formatMultiSelectFilterLabel("Status", [], map)).toBe("Status: Todos");
+    expect(formatMultiSelectFilterLabel("Status", ["opt1"], map)).toBe("Status: Em negociação");
+    expect(formatMultiSelectFilterLabel("Status", ["opt1", "opt2"], map)).toBe("Status: Em negociação, Aprovado");
+    expect(formatMultiSelectFilterLabel("Status", ["opt1", "opt2", "opt3"], map)).toBe("Status: Em negociação, Aprovado (+1)");
+    expect(formatMultiSelectFilterLabel("Status", ["opt1", "opt2", "opt3", "opt4"], map)).toBe("Status: Em negociação, Aprovado (+2)");
   });
 
   it("starts a new server sort ascending and toggles only the active column", () => {
