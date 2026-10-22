@@ -137,6 +137,7 @@ type ItemRow = RowDataPacket & {
   discount_cents: number;
   line_total_cents: number;
   unit?: string;
+  barcode?: string | null;
   current_available?: string | null;
   stock_exited?: number;
   media_id?: string | null;
@@ -638,7 +639,7 @@ export class SaleRepository {
       [clientId, order.id, publicId]
     );
     const [items] = await connection.execute<ItemRow[]>(
-      `SELECT i.*,p.public_id product_public_id,p.unit,
+      `SELECT i.*,p.public_id product_public_id,p.unit,p.barcode,
               ii.public_id inventory_item_public_id,
               CASE WHEN ii.id IS NULL THEN NULL ELSE COALESCE(ib.quantity,'0.000') END current_available,
               EXISTS(
@@ -728,28 +729,36 @@ export class SaleRepository {
     const currentStage = order.current_stage ?? legacySaleStage(order.status);
     return {
       ...publicOrder({ ...order, paid_cents: paidCents, title_count: entries.length }),
-      items: items.map(entry => ({
-        publicId: entry.public_id,
-        productPublicId: entry.product_public_id,
-        inventoryItemPublicId: entry.inventory_item_public_id ?? null,
-        productName: entry.product_name_snapshot,
-        variantName: entry.variant_attributes || entry.variant_name || null,
-        sku: entry.sku_snapshot,
-        unit: entry.unit ?? "unit",
-        quantity: entry.quantity,
-        unitPriceCents: Number(entry.unit_price_cents),
-        discountCents: Number(entry.discount_cents),
-        lineTotalCents: Number(entry.line_total_cents),
-        currentAvailable: entry.current_available ?? null,
-        stockExitRecorded: Boolean(entry.stock_exited),
-        canonicalImage: entry.media_id
-          ? {
-              mediaId: entry.media_id,
-              path: `/api/products/${entry.product_public_id}/image`,
-              thumbnailPath: `/api/products/${entry.product_public_id}/image?variant=thumbnail`,
-            }
-          : null,
-      })),
+      items: items.map(entry => {
+        const isService = Boolean(
+          (entry.barcode && String(entry.barcode).startsWith("SRV:")) ||
+          (entry.sku_snapshot && String(entry.sku_snapshot).startsWith("SRV-")) ||
+          (entry.variant_name && String(entry.variant_name).toLowerCase().startsWith("serviço"))
+        );
+        return {
+          publicId: entry.public_id,
+          productPublicId: entry.product_public_id,
+          inventoryItemPublicId: entry.inventory_item_public_id ?? null,
+          productName: entry.product_name_snapshot,
+          variantName: entry.variant_attributes || entry.variant_name || null,
+          sku: entry.sku_snapshot,
+          unit: isService ? "serviço" : (entry.unit ?? "unit"),
+          quantity: entry.quantity,
+          unitPriceCents: Number(entry.unit_price_cents),
+          discountCents: Number(entry.discount_cents),
+          lineTotalCents: Number(entry.line_total_cents),
+          currentAvailable: entry.current_available ?? null,
+          stockExitRecorded: Boolean(entry.stock_exited),
+          itemType: isService ? ("service" as const) : ("product" as const),
+          canonicalImage: entry.media_id
+            ? {
+                mediaId: entry.media_id,
+                path: `/api/products/${entry.product_public_id}/image`,
+                thumbnailPath: `/api/products/${entry.product_public_id}/image?variant=thumbnail`,
+              }
+            : null,
+        };
+      }),
       installments,
       financialHistoryAvailable: entries.length > 0,
       historyComplete: events.length > 0,

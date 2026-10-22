@@ -26,8 +26,15 @@ export type SalesFormItem = {
 
 const SERVICE_UNITS = new Set(["serv", "srv", "servico", "serviço", "svc", "h", "hr", "hora", "horas", "mo", "diaria", "diária"]);
 
-export function isSalesItemService(item: { unit?: string | null; itemType?: string | null }): boolean {
+export function isSalesItemService(item: {
+  unit?: string | null;
+  itemType?: string | null;
+  sku?: string | null;
+  variantName?: string | null;
+}): boolean {
   if (item.itemType === "service") return true;
+  if (item.sku && (item.sku.startsWith("SRV-") || item.sku.startsWith("SRV:"))) return true;
+  if (item.variantName && item.variantName.toLowerCase().startsWith("serviço")) return true;
   return SERVICE_UNITS.has(String(item.unit ?? "").trim().toLowerCase());
 }
 
@@ -176,11 +183,16 @@ export function salesFormFromDetail(detail: SaleDetailForForm): SalesForm {
     ),
     freightCents: detail.freightCents ?? 0,
     chargesCents: detail.chargesCents ?? 0,
-    items: detail.items.map(item => ({
-      ...item,
-      inventoryItemPublicId: item.inventoryItemPublicId ?? null,
-      discountCents: item.discountCents ?? 0,
-    })),
+    items: detail.items.map(item => {
+      const isService = isSalesItemService(item);
+      return {
+        ...item,
+        inventoryItemPublicId: item.inventoryItemPublicId ?? null,
+        discountCents: item.discountCents ?? 0,
+        itemType: isService ? "service" : (item.itemType ?? "product"),
+        unit: isService ? (item.unit && item.unit !== "unit" ? item.unit : "serviço") : item.unit,
+      };
+    }),
   };
 }
 

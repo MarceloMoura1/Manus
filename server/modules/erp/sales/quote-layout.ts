@@ -101,8 +101,9 @@ export function rowHeightMm(lineCount: number): number {
 
 const SERVICE_UNITS = new Set(["serv", "srv", "servico", "serviço", "svc", "h", "hr", "hora", "horas", "mo", "diaria", "diária"]);
 
-/** Items carry no explicit kind; hour/service units are labelled "Serviço", everything else "Peça". */
-export function itemKindLabel(unit: string | null | undefined): "Serviço" | "Peça" {
+/** Items carry no explicit kind; hour/service units or SRV skus are labelled "Serviço", everything else "Peça". */
+export function itemKindLabel(unit: string | null | undefined, sku?: string | null | undefined): "Serviço" | "Peça" {
+  if (sku && (sku.startsWith("SRV-") || sku.startsWith("SRV:"))) return "Serviço";
   return SERVICE_UNITS.has(String(unit ?? "").trim().toLowerCase()) ? "Serviço" : "Peça";
 }
 

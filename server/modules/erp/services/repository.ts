@@ -261,9 +261,15 @@ export class ServiceRepository {
       productSku = String(existingProducts[0].sku);
       await this.database().execute(
         `UPDATE erp_products
-         SET name = ?, sale_price_cents = ?, cost_price_cents = ?, unit = 'serviço', active = 1
+         SET name = ?, sale_price_cents = ?, cost_price_cents = ?, barcode = ?, unit = 'unit', active = 1
          WHERE client_id = ? AND id = ?`,
-        [service.name, priceCents, costCents, clientId, productId]
+        [service.name, priceCents, costCents, serviceBarcode, clientId, productId]
+      );
+      await this.database().execute(
+        `INSERT INTO erp_stock_balances (client_id, product_id, quantity, version)
+         VALUES (?, ?, '999999.000', 0)
+         ON DUPLICATE KEY UPDATE quantity = '999999.000'`,
+        [clientId, productId]
       );
     } else {
       productPublicId = randomUUID();
@@ -271,12 +277,12 @@ export class ServiceRepository {
       const [insertProd] = await this.database().execute<ResultSetHeader>(
         `INSERT INTO erp_products
          (public_id, client_id, name, sku, barcode, unit, cost_price_cents, sale_price_cents, minimum_stock, active, created_by)
-         VALUES (?, ?, ?, ?, ?, 'serviço', ?, ?, '0.000', 1, ?)`,
+         VALUES (?, ?, ?, ?, ?, 'unit', ?, ?, '0.000', 1, ?)`,
         [productPublicId, clientId, service.name, productSku, serviceBarcode, costCents, priceCents, userId]
       );
       productId = insertProd.insertId;
       await this.database().execute(
-        `INSERT IGNORE INTO erp_stock_balances (client_id, product_id, quantity, version)
+        `INSERT INTO erp_stock_balances (client_id, product_id, quantity, version)
          VALUES (?, ?, '999999.000', 0)
          ON DUPLICATE KEY UPDATE quantity = '999999.000'`,
         [clientId, productId]
@@ -307,7 +313,7 @@ export class ServiceRepository {
     }
 
     await this.database().execute(
-      `INSERT IGNORE INTO erp_inventory_item_balances (client_id, inventory_item_id, quantity, version)
+      `INSERT INTO erp_inventory_item_balances (client_id, inventory_item_id, quantity, version)
        VALUES (?, ?, '999999.000', 0)
        ON DUPLICATE KEY UPDATE quantity = '999999.000'`,
       [clientId, inventoryItemId]
