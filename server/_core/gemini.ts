@@ -23,7 +23,7 @@ export async function generateAIResponse(
   systemPrompt?: string
 ): Promise<string> {
   const client = getGeminiClient();
-  const defaultModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+  const defaultModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
   const model = client.getGenerativeModel({ model: defaultModel });
 
   // Construir histórico de conversa
