@@ -14,6 +14,7 @@ import { FinancePage } from "./FinancePage";
 import { FiscalPage } from "./FiscalPage";
 import { ReportsPage } from "./ReportsPage";
 import { StockPage } from "./StockPage";
+import { ServicesPage } from "./ServicesPage";
 import type { ModuleTopbarItem } from "@/components/ModuleTopbar";
 import { ErpPageHeader } from "@/components/erp/ErpPageHeader";
 import { Pagination } from "@/components/erp/Pagination";
@@ -27,7 +28,7 @@ import {
   prepareProductCommand,
 } from "./ProductFormDialog";
 
-export type ErpSection = "summary" | "clients" | "products" | "stock" | "suppliers" | "purchases" | "sales" | "finance" | "fiscal" | "reports";
+export type ErpSection = "summary" | "clients" | "products" | "services" | "stock" | "suppliers" | "purchases" | "sales" | "finance" | "fiscal" | "reports";
 const planned = ["Integrações"];
 
 export function getErpTopbarItems({
@@ -49,6 +50,7 @@ export function getErpTopbarItems({
     {id:"summary" as const,label:"Resumo"},
     {id:"clients" as const,label:"Clientes",hidden:!canAccessClients},
     {id:"products" as const,label:"Produtos"},
+    {id:"services" as const,label:"Serviços"},
     {id:"stock" as const,label:"Estoque"},
     {id:"suppliers" as const,label:"Fornecedores"},
     {id:"purchases" as const,label:"Compras"},
@@ -82,6 +84,7 @@ function useErpRealtime() {
     const refreshSuppliers = () => { refresh(); };
     socket.on("connect", refresh);
     socket.on("erp:product.changed", refresh);
+    socket.on("erp:service.changed", refresh);
     socket.on("erp:stock.changed", refresh);
     socket.on("erp:supplier.changed", refreshSuppliers);
     socket.on("erp:purchase.changed", refresh);
@@ -98,6 +101,7 @@ function useErpRealtime() {
       window.clearTimeout(refreshTimer);
       socket.off("connect", refresh);
       socket.off("erp:product.changed", refresh);
+      socket.off("erp:service.changed", refresh);
       socket.off("erp:stock.changed", refresh);
       socket.off("erp:supplier.changed", refreshSuppliers);
       socket.off("erp:purchase.changed", refresh);
@@ -122,7 +126,7 @@ function StateMessage({ title, retry }: { title: string; retry?: () => void }) {
 export function ERPWorkspace({ section, onNavigate, canAccessClients, canAccessSales, canAccessFinance, canAccessFiscal, canAccessReports, canPermanentlyDeleteClients, initialCrmClientId, initialSalePublicId, onClientNavigate, onNavigateToClient, onNavigateToSale, onNavigateToProposals, whatsappConnected, canStartConversation }: { section: ErpSection; onNavigate: (section: ErpSection) => void; canAccessClients: boolean; canAccessSales: boolean; canAccessFinance: boolean; canAccessFiscal: boolean; canAccessReports: boolean; canPermanentlyDeleteClients: boolean; initialCrmClientId?: string; initialSalePublicId?: string; onClientNavigate: (intent: CrmWhatsAppIntent) => void; onNavigateToClient: (crmClientId: string) => void; onNavigateToSale: (salePublicId?: string) => void; onNavigateToProposals?: () => void; whatsappConnected: boolean; canStartConversation: boolean }) {
   useErpRealtime();
   const denied = <div role="alert" className="rounded-2xl border border-slate-200 bg-white p-8 text-center"><h1 className="text-xl font-bold text-slate-900">Acesso indisponível</h1><p className="mt-2 text-sm text-slate-600">Este módulo não está disponível para o seu perfil.</p></div>;
-  const content = section === "summary" ? <Summary onNavigate={onNavigate}/> : section === "clients" ? canAccessClients ? <ClientesPage initialSelectedId={initialCrmClientId} onNavigate={onClientNavigate} onSaleNavigate={salePublicId => onNavigateToSale(salePublicId)} canAccessSales={canAccessSales} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDelete={canPermanentlyDeleteClients}/> : denied : section === "products" ? <Products/> : section === "suppliers" ? <SuppliersPage onNavigate={onNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} onClientNavigate={onClientNavigate}/> : section === "purchases" ? <PurchasesPage onNavigate={onNavigate}/> : section === "sales" ? canAccessSales ? <SalesPage initialSelectedId={initialSalePublicId} onSaleNavigate={onNavigateToSale} onClientNavigate={onNavigateToClient} onNavigateToProposals={onNavigateToProposals}/> : denied : section === "finance" ? canAccessFinance ? <FinancePage/> : denied : section === "fiscal" ? canAccessFiscal ? <FiscalPage/> : denied : section === "reports" ? canAccessReports ? <ReportsPage/> : denied : <StockPage/>;
+  const content = section === "summary" ? <Summary onNavigate={onNavigate}/> : section === "clients" ? canAccessClients ? <ClientesPage initialSelectedId={initialCrmClientId} onNavigate={onClientNavigate} onSaleNavigate={salePublicId => onNavigateToSale(salePublicId)} canAccessSales={canAccessSales} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDelete={canPermanentlyDeleteClients}/> : denied : section === "products" ? <Products/> : section === "services" ? <ServicesPage/> : section === "suppliers" ? <SuppliersPage onNavigate={onNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} onClientNavigate={onClientNavigate}/> : section === "purchases" ? <PurchasesPage onNavigate={onNavigate}/> : section === "sales" ? canAccessSales ? <SalesPage initialSelectedId={initialSalePublicId} onSaleNavigate={onNavigateToSale} onClientNavigate={onNavigateToClient} onNavigateToProposals={onNavigateToProposals}/> : denied : section === "finance" ? canAccessFinance ? <FinancePage/> : denied : section === "fiscal" ? canAccessFiscal ? <FiscalPage/> : denied : section === "reports" ? canAccessReports ? <ReportsPage/> : denied : <StockPage/>;
   return <div className="min-w-0 max-w-full" data-testid="erp-workspace">{content}</div>;
 }
 

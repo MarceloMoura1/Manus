@@ -4503,3 +4503,39 @@ export const megadeskCrmQuoteTemplates = mysqlTable(
 
 export type MegadeskCrmQuoteTemplate = typeof megadeskCrmQuoteTemplates.$inferSelect;
 export type MegadeskCrmQuoteTemplateInsert = typeof megadeskCrmQuoteTemplates.$inferInsert;
+
+export const megadeskErpServices = mysqlTable(
+  "megadesk_erp_services",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    clientId: varchar("client_id", { length: 80 }).notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    code: varchar("code", { length: 50 }),
+    category: varchar("category", { length: 100 }),
+    price: decimal("price", { precision: 12, scale: 2 }).notNull(),
+    estimatedCost: decimal("estimated_cost", { precision: 12, scale: 2 })
+      .default("0.00")
+      .notNull(),
+    estimatedMinutes: int("estimated_minutes"),
+    description: text("description"),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { mode: "string" })
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    index("idx_megadesk_erp_services_tenant").on(table.clientId),
+    index("idx_megadesk_erp_services_tenant_name").on(table.clientId, table.name),
+    index("idx_megadesk_erp_services_tenant_category").on(table.clientId, table.category),
+    index("idx_megadesk_erp_services_tenant_active").on(table.clientId, table.isActive),
+    index("idx_megadesk_erp_services_tenant_code").on(table.clientId, table.code),
+  ]
+);
+
+export type MegadeskErpService = typeof megadeskErpServices.$inferSelect;
+export type MegadeskErpServiceInsert = typeof megadeskErpServices.$inferInsert;
+

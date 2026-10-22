@@ -198,7 +198,7 @@ const SESSION_DURATION_LONG = 30 * 24 * 60 * 60 * 1000; // 30 dias ("lembrar meu
 const REFRESH_THRESHOLD = 5 * 60 * 1000; // Renovar 5 minutos antes de expirar
 const REFRESH_INTERVAL = 10 * 60 * 1000; // Verificar renovação a cada 10 minutos
 
-export type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-clients" | "erp-products" | "erp-stock" | "erp-suppliers" | "erp-purchases" | "erp-sales" | "erp-finance" | "erp-fiscal" | "erp-reports" | "crm-summary" | "crm-pipeline" | "crm-leads" | "crm-clients" | "crm-activities" | "crm-proposals" | "crm-automations" | "crm-reports" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "whatsapp-config" | "admin-settings";
+export type RouteId = "home" | "active-attendance" | "conversations" | "tickets" | "tracking" | "erp-summary" | "erp-clients" | "erp-products" | "erp-services" | "erp-stock" | "erp-suppliers" | "erp-purchases" | "erp-sales" | "erp-finance" | "erp-fiscal" | "erp-reports" | "crm-summary" | "crm-pipeline" | "crm-leads" | "crm-clients" | "crm-activities" | "crm-proposals" | "crm-automations" | "crm-reports" | "settings" | "bot-config" | "ai-assistant" | "notifications" | "whatsapp-config" | "admin-settings";
 
 export function getShellWorkspaceLayout(active: RouteId) {
   if (active === "conversations") {
@@ -4092,6 +4092,7 @@ function Shell() {
       return "crm-proposals";
     }
     if (window.location.pathname === "/erp/produtos") return "erp-products";
+    if (window.location.pathname === "/erp/servicos") return "erp-services";
     if (window.location.pathname === "/erp/estoque") return "erp-stock";
     if (window.location.pathname === "/erp/fornecedores") return "erp-suppliers";
     if (window.location.pathname === "/erp/compras") return "erp-purchases";
@@ -4145,6 +4146,8 @@ function Shell() {
       ? `/crm/clientes${options?.crmClientId ? `?crmClientId=${encodeURIComponent(options.crmClientId)}` : ""}`
       : targetRoute === "erp-products"
         ? "/erp/produtos"
+        : targetRoute === "erp-services"
+          ? "/erp/servicos"
         : targetRoute === "erp-stock"
           ? "/erp/estoque"
           : targetRoute === "erp-suppliers"
@@ -4244,7 +4247,7 @@ function Shell() {
       setActiveCrmClientId(path === "/erp/clientes" || path === "/crm/clientes" ? new URLSearchParams(window.location.search).get("crmClientId") : null);
       const salesRoute = readSalesRoute(path);
       setActiveSalePublicId(salesRoute.matches ? salesRoute.salePublicId : null);
-        setActive(path === "/erp/clientes" ? "erp-clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp/compras" ? "erp-purchases" : salesRoute.matches ? "erp-sales" : path === "/erp/financeiro" ? "erp-finance" : path === "/erp/fiscal" ? "erp-fiscal" : path === "/erp/relatorios" ? "erp-reports" : path === "/erp" ? "erp-summary" : path === "/crm/clientes" ? "crm-clients" : path === "/crm/funil" ? "crm-pipeline" : path === "/crm/leads" ? "crm-leads" : path === "/crm/atividades" ? "crm-activities" : path === "/crm/propostas" ? "crm-proposals" : path === "/crm/automacoes" ? "crm-automations" : path === "/crm/relatorios" ? "crm-reports" : path === "/crm" ? "crm-summary" : event.state?.megadeskRoute === "conversations" ? "conversations" : "home");
+        setActive(path === "/erp/clientes" ? "erp-clients" : path === "/erp/produtos" ? "erp-products" : path === "/erp/servicos" ? "erp-services" : path === "/erp/estoque" ? "erp-stock" : path === "/erp/fornecedores" ? "erp-suppliers" : path === "/erp/compras" ? "erp-purchases" : salesRoute.matches ? "erp-sales" : path === "/erp/financeiro" ? "erp-finance" : path === "/erp/fiscal" ? "erp-fiscal" : path === "/erp/relatorios" ? "erp-reports" : path === "/erp" ? "erp-summary" : path === "/crm/clientes" ? "crm-clients" : path === "/crm/funil" ? "crm-pipeline" : path === "/crm/leads" ? "crm-leads" : path === "/crm/atividades" ? "crm-activities" : path === "/crm/propostas" ? "crm-proposals" : path === "/crm/automacoes" ? "crm-automations" : path === "/crm/relatorios" ? "crm-reports" : path === "/crm" ? "crm-summary" : event.state?.megadeskRoute === "conversations" ? "conversations" : "home");
       window.setTimeout(() => mainContentRef.current?.focus(), 0);
     };
     window.addEventListener("popstate", restoreFromHistory);
@@ -4346,8 +4349,8 @@ function Shell() {
   const settingsNavItems = filteredNavItems.filter(item => ["settings", "admin-settings", "bot-config", "ai-assistant", "help", "notifications", "whatsapp-config"].includes(item.id));
   const canAccessClients = canAccessErpClients(session);
   const canAccessSales = session.permissions.includes("erp");
-  const erpSection = (active === "erp-clients" ? "clients" : active === "erp-products" ? "products" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : active === "erp-purchases" ? "purchases" : active === "erp-sales" ? "sales" : active === "erp-finance" ? "finance" : active === "erp-fiscal" ? "fiscal" : active === "erp-reports" ? "reports" : "summary") as ErpSection;
-  const navigateToErpSection = (section: ErpSection) => navigateToRoute(section === "clients" ? "erp-clients" : section === "products" ? "erp-products" : section === "stock" ? "erp-stock" : section === "suppliers" ? "erp-suppliers" : section === "purchases" ? "erp-purchases" : section === "sales" ? "erp-sales" : section === "finance" ? "erp-finance" : section === "fiscal" ? "erp-fiscal" : section === "reports" ? "erp-reports" : "erp-summary");
+  const erpSection = (active === "erp-clients" ? "clients" : active === "erp-products" ? "products" : active === "erp-services" ? "services" : active === "erp-stock" ? "stock" : active === "erp-suppliers" ? "suppliers" : active === "erp-purchases" ? "purchases" : active === "erp-sales" ? "sales" : active === "erp-finance" ? "finance" : active === "erp-fiscal" ? "fiscal" : active === "erp-reports" ? "reports" : "summary") as ErpSection;
+  const navigateToErpSection = (section: ErpSection) => navigateToRoute(section === "clients" ? "erp-clients" : section === "products" ? "erp-products" : section === "services" ? "erp-services" : section === "stock" ? "erp-stock" : section === "suppliers" ? "erp-suppliers" : section === "purchases" ? "erp-purchases" : section === "sales" ? "erp-sales" : section === "finance" ? "erp-finance" : section === "fiscal" ? "erp-fiscal" : section === "reports" ? "erp-reports" : "erp-summary");
   const erpTopbarItems = getErpTopbarItems({
     canAccessClients: false,
     canAccessSales,
