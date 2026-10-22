@@ -34,6 +34,7 @@ import {
   LoaderCircle,
   MessageCircle,
   MoreHorizontal,
+  Package,
   PackageCheck,
   PackageOpen,
   Phone,
@@ -51,6 +52,7 @@ import {
   UserRound,
   UploadCloud,
   WalletCards,
+  Wrench,
   XCircle,
 } from "lucide-react";
 import { normalizeContactPhone, formatContactPhone } from "../../../../shared/contact-phone";
@@ -77,6 +79,7 @@ import {
   blankSalesForm,
   calculateSalesFormTotals,
   hasDuplicateSalesItemIdentity,
+  isSalesItemService,
   salesStockIssues,
   salesDraftFromForm,
   salesFormFromDetail,
@@ -126,8 +129,10 @@ type RouterOutputs = inferRouterOutputs<AppRouter>;
 type SaleDetail = RouterOutputs["erp"]["sales"]["detail"];
 type CustomerResults = RouterOutputs["erp"]["sales"]["customers"];
 type CatalogResults = RouterOutputs["erp"]["sales"]["catalog"];
+type ServicesResults = RouterOutputs["erp"]["services"]["list"];
 type CustomerOption = CustomerResults["items"][number];
 type CatalogOption = CatalogResults["items"][number];
+type ServiceOption = ServicesResults["items"][number];
 type SaleListItem = RouterOutputs["erp"]["sales"]["list"]["items"][number];
 type DetailQueryState = {
   data?: SaleDetail;
@@ -342,6 +347,10 @@ export function SalesPage({
   );
   const catalog = trpc.erp.sales.catalog.useQuery(
     { search: debouncedCatalogSearch, page: catalogPage, pageSize: 12 },
+    { enabled: catalogLookupEnabled }
+  );
+  const servicesCatalog = trpc.erp.services.list.useQuery(
+    { query: debouncedCatalogSearch, activeOnly: true, pageSize: 8 },
     { enabled: catalogLookupEnabled }
   );
   const filterCustomers = trpc.erp.sales.customers.useQuery(
@@ -1042,6 +1051,7 @@ export function SalesPage({
         setCatalogPage={setCatalogPage}
         customers={customers}
         catalog={catalog}
+        servicesCatalog={servicesCatalog}
         customerLookupEnabled={customerLookupEnabled}
         catalogLookupEnabled={catalogLookupEnabled}
         sellers={options.data?.sellers ?? []}
@@ -1270,25 +1280,47 @@ function ExpandedProducts({
             </tr>
           </thead>
           <tbody>
-            {detail.data.items.map(item => (
-              <tr key={item.publicId} className="border-t border-slate-100">
-                <td className="px-3 py-2.5">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <ProductThumb imagePath={item.canonicalImage?.thumbnailPath} name={item.productName} />
-                    <div className="min-w-0">
-                      <strong className="block truncate text-slate-900">{item.productName}</strong>
-                      {item.variantName && <span className="block truncate text-xs text-slate-500">{item.variantName}</span>}
+            {detail.data.items.map(item => {
+              const isService = isSalesItemService(item);
+              return (
+                <tr key={item.publicId} className="border-t border-slate-100">
+                  <td className="px-3 py-2.5">
+                    <div className="flex min-w-0 items-center gap-3">
+                      {isService ? (
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300">
+                          <Wrench className="h-4 w-4" />
+                        </span>
+                      ) : (
+                        <ProductThumb imagePath={item.canonicalImage?.thumbnailPath} name={item.productName} />
+                      )}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <strong className="block truncate text-slate-900">{item.productName}</strong>
+                          {isService ? (
+                            <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800">
+                              Serviço
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
+                              Peça
+                            </span>
+                          )}
+                        </div>
+                        {item.variantName && <span className="block truncate text-xs text-slate-500">{item.variantName}</span>}
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td className="px-3 py-2.5 text-slate-600">{item.sku}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{formatQuantity(item.quantity)}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{money.format(item.unitPriceCents / 100)}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{money.format(item.discountCents / 100)}</td>
-                <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{money.format(item.lineTotalCents / 100)}</td>
-                <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{saleStockPresentation({ currentAvailable: item.currentAvailable, stockExitRecorded: item.stockExitRecorded, currentStage }).availability}</td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-3 py-2.5 text-slate-600">{item.sku}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{formatQuantity(item.quantity)}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{money.format(item.unitPriceCents / 100)}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{money.format(item.discountCents / 100)}</td>
+                  <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{money.format(item.lineTotalCents / 100)}</td>
+                  <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">
+                    {isService ? "Isento (Serviço)" : saleStockPresentation({ currentAvailable: item.currentAvailable, stockExitRecorded: item.stockExitRecorded, currentStage }).availability}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -1679,22 +1711,44 @@ function SaleDetailPanel({
       <div className="space-y-2 p-3 sm:p-3">
         <section className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800" data-testid="sales-detail-products">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2 dark:border-slate-800 dark:bg-slate-800/60">
-            <h3 className="flex items-center gap-2 text-sm font-bold text-slate-950 dark:text-slate-100"><PackageOpen className="h-4 w-4 text-blue-600 dark:text-blue-400" />Produtos vendidos <span className="font-medium text-slate-500 dark:text-slate-400">({order.items.length})</span></h3>
-            <div className="flex items-center gap-4 text-xs text-slate-600 dark:text-slate-400"><span>Subtotal <strong className="ml-1 text-slate-950 tabular-nums dark:text-slate-100">{money.format(order.subtotalCents / 100)}</strong></span><span>Total <strong className="ml-1 text-base text-slate-950 tabular-nums dark:text-slate-100">{money.format(order.totalCents / 100)}</strong></span></div>
+            <h3 className="flex items-center gap-2 text-sm font-bold text-slate-950 dark:text-slate-100"><PackageOpen className="h-4 w-4 text-blue-600 dark:text-blue-400" />{isQuote ? "Itens do orçamento" : "Produtos vendidos"} <span className="font-medium text-slate-500 dark:text-slate-400">({order.items.length})</span></h3>
+            <div className="flex items-center gap-4 text-xs text-slate-600 dark:text-slate-400">{isQuote && <span className="hidden md:inline text-slate-500">Peças <strong className="text-slate-800 tabular-nums dark:text-slate-200">{money.format(order.items.filter(i => !isSalesItemService(i)).reduce((s, i) => s + i.lineTotalCents, 0) / 100)}</strong> · Mão de Obra <strong className="text-slate-800 tabular-nums dark:text-slate-200">{money.format((order.items.filter(i => isSalesItemService(i)).reduce((s, i) => s + i.lineTotalCents, 0) + (order.chargesCents || 0)) / 100)}</strong></span>}<span>Subtotal <strong className="ml-1 text-slate-950 tabular-nums dark:text-slate-100">{money.format(order.subtotalCents / 100)}</strong></span><span>Total <strong className="ml-1 text-base text-slate-950 tabular-nums dark:text-slate-100">{money.format(order.totalCents / 100)}</strong></span></div>
           </div>
           {order.items.length ? (
             <div className="divide-y divide-slate-100 bg-white dark:divide-slate-800 dark:bg-slate-900">
-              {order.items.map(item => (
-                <div key={item.publicId} className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 px-4 py-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]" data-testid="sales-detail-product-row">
-                  <ProductThumb imagePath={item.canonicalImage?.thumbnailPath} name={item.productName} large />
-                  <div className="min-w-0">
-                    <strong className="block truncate text-sm text-slate-950 dark:text-slate-100" title={item.productName}>{item.productName}</strong>
-                    <span className="block truncate text-xs text-slate-500 dark:text-slate-400" title={[item.variantName, item.sku].filter(Boolean).join(" · ")}>{[item.variantName, item.sku].filter(Boolean).join(" · ") || "Produto histórico"}</span>
-                    <span className="mt-0.5 block text-xs text-slate-600 dark:text-slate-400"><strong className="font-semibold text-slate-800 tabular-nums dark:text-slate-200">{formatQuantity(item.quantity)}</strong> × {money.format(item.unitPriceCents / 100)}{item.discountCents > 0 ? ` · desconto ${money.format(item.discountCents / 100)}` : ""}</span>
+              {order.items.map(item => {
+                const isService = isSalesItemService(item);
+                return (
+                  <div key={item.publicId} className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 px-4 py-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]" data-testid="sales-detail-product-row">
+                    {isService ? (
+                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300">
+                        <Wrench className="h-6 w-6" />
+                      </span>
+                    ) : (
+                      <ProductThumb imagePath={item.canonicalImage?.thumbnailPath} name={item.productName} large />
+                    )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <strong className="block truncate text-sm text-slate-950 dark:text-slate-100" title={item.productName}>{item.productName}</strong>
+                        {isService ? (
+                          <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800 dark:bg-blue-950/80 dark:text-blue-300">
+                            Serviço
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                            Peça
+                          </span>
+                        )}
+                      </div>
+                      <span className="block truncate text-xs text-slate-500 dark:text-slate-400" title={[item.variantName, item.sku].filter(Boolean).join(" · ")}>
+                        {isService ? (item.variantName || "Mão de Obra · Sem baixa de estoque") : ([item.variantName, item.sku].filter(Boolean).join(" · ") || "Produto histórico")}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-slate-600 dark:text-slate-400"><strong className="font-semibold text-slate-800 tabular-nums dark:text-slate-200">{formatQuantity(item.quantity)}</strong> × {money.format(item.unitPriceCents / 100)}{item.discountCents > 0 ? ` · desconto ${money.format(item.discountCents / 100)}` : ""}</span>
+                    </div>
+                    <div className="col-start-2 text-left sm:col-start-auto sm:text-right"><span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Total do item</span><strong className="text-sm text-slate-950 tabular-nums dark:text-slate-100">{money.format(item.lineTotalCents / 100)}</strong></div>
                   </div>
-                  <div className="col-start-2 text-left sm:col-start-auto sm:text-right"><span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Total do item</span><strong className="text-sm text-slate-950 tabular-nums dark:text-slate-100">{money.format(item.lineTotalCents / 100)}</strong></div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : <p className="px-4 py-5 text-sm text-slate-500 dark:text-slate-400">Nenhum produto registrado nesta venda.</p>}
         </section>
@@ -1946,6 +2000,7 @@ function SaleFormDialog({
   setCatalogPage,
   customers,
   catalog,
+  servicesCatalog,
   customerLookupEnabled,
   catalogLookupEnabled,
   sellers,
@@ -1970,6 +2025,7 @@ function SaleFormDialog({
   setCatalogPage: React.Dispatch<React.SetStateAction<number>>;
   customers: { data?: CustomerResults; isLoading: boolean; isError: boolean };
   catalog: { data?: CatalogResults; isLoading: boolean; isError: boolean };
+  servicesCatalog: { data?: ServicesResults; isLoading: boolean; isError: boolean };
   customerLookupEnabled: boolean;
   catalogLookupEnabled: boolean;
   sellers: Array<{ publicId: string; name: string }>;
@@ -1983,6 +2039,8 @@ function SaleFormDialog({
   onSubmit: (event: React.FormEvent) => void;
 }) {
   if (!form) return null;
+  const resolveServiceMutation = trpc.erp.services.resolveForSale.useMutation();
+  const [resolvingServiceId, setResolvingServiceId] = React.useState<number | null>(null);
   const totals = calculateSalesFormTotals(form);
   const stockIssues = salesStockIssues(form.items);
   const progress = salesDraftProgress(form);
@@ -2008,9 +2066,36 @@ function SaleFormDialog({
       quantity: "1.000",
       unitPriceCents: product.salePriceCents,
       discountCents: 0,
+      itemType: "product",
     }] } : current);
     setCatalogSearch("");
     setExpandedCatalogProductId(null);
+  };
+  const addServiceItem = async (service: ServiceOption) => {
+    try {
+      setResolvingServiceId(service.id);
+      const resolved = await resolveServiceMutation.mutateAsync({ serviceId: service.id });
+      setForm(current => current ? { ...current, items: [...current.items, {
+        productPublicId: resolved.productPublicId,
+        inventoryItemPublicId: resolved.inventoryItemPublicId,
+        productName: resolved.name,
+        variantName: service.category ? `Serviço · ${service.category}` : "Serviço",
+        sku: resolved.sku,
+        unit: "serviço",
+        imagePath: null,
+        availableQuantity: null,
+        quantity: "1.000",
+        unitPriceCents: resolved.priceCents,
+        discountCents: 0,
+        itemType: "service",
+      }] } : current);
+      setCatalogSearch("");
+      setExpandedCatalogProductId(null);
+    } catch (err) {
+      console.error("Falha ao resolver serviço para venda", err);
+    } finally {
+      setResolvingServiceId(null);
+    }
   };
   const groups = (catalog.data?.items ?? []).reduce<Array<{ productPublicId: string; name: string; imagePath?: string | null; options: CatalogOption[] }>>((result, item) => {
     const current = result.find(group => group.productPublicId === item.productPublicId);
@@ -2057,30 +2142,188 @@ function SaleFormDialog({
                 </section>
 
                 <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5 dark:border-slate-800 dark:bg-slate-900/60" aria-labelledby="sale-products-heading">
-                  <div><p className="text-xs font-semibold text-blue-700 dark:text-blue-400">2. Itens</p><h3 id="sale-products-heading" className="mt-1 font-bold text-slate-950 dark:text-slate-100">Produtos e variações</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Pesquise o produto; as variações aparecem somente quando você abrir o resultado.</p></div>
-                  <label className="relative mt-4 block"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-slate-400" /><Input autoComplete="off" className="pl-9 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" aria-label="Buscar produto para a venda" placeholder="Nome, SKU, código ou variação" value={catalogSearch} onChange={event => { setCatalogSearch(event.target.value); setExpandedCatalogProductId(null); }} /></label>
+                  <div><p className="text-xs font-semibold text-blue-700 dark:text-blue-400">2. Itens</p><h3 id="sale-products-heading" className="mt-1 font-bold text-slate-950 dark:text-slate-100">Produtos, peças e serviços</h3><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Pesquise produtos físicos ou serviços/mão de obra; as variações aparecem somente quando você abrir o resultado.</p></div>
+                  <label className="relative mt-4 block"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-slate-400" /><Input autoComplete="off" className="pl-9 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" aria-label="Buscar produto para a venda" placeholder="Nome, SKU, código, serviço ou variação" value={catalogSearch} onChange={event => { setCatalogSearch(event.target.value); setExpandedCatalogProductId(null); }} /></label>
                   <div className="mt-2 rounded-lg border border-slate-200 dark:border-slate-700">
-                    {!catalogLookupEnabled ? <p className="p-4 text-sm text-slate-500 dark:text-slate-400">Digite ao menos {SALES_LOOKUP_MIN_LENGTH} caracteres para pesquisar o catálogo.</p> : catalog.isLoading ? <p role="status" className="p-4 text-sm text-slate-500 dark:text-slate-400">Buscando produtos…</p> : catalog.isError ? <p role="alert" className="p-4 text-sm text-rose-700 dark:text-rose-400">Não foi possível buscar produtos.</p> : groups.length ? <div className="max-h-72 divide-y divide-slate-100 overflow-y-auto [scrollbar-width:thin] dark:divide-slate-700/60">{groups.map(group => {
-                      const expanded = expandedCatalogProductId === group.productPublicId;
-                      const singleOption = group.options.length === 1 ? group.options[0] : null;
-                      const singleUnavailable = Boolean(singleOption && Number(singleOption.availableQuantity) <= 0);
-                      const blockedByStock = form.documentType === "sale" && singleUnavailable;
-                      return <div key={group.productPublicId} className="p-2"><button type="button" disabled={blockedByStock} className="flex w-full items-center gap-3 rounded-md p-2 text-left transition-colors duration-150 hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none dark:hover:bg-slate-700/50 dark:active:bg-slate-700" aria-expanded={group.options.length > 1 ? expanded : undefined} onClick={() => singleOption ? addCatalogItem(singleOption) : setExpandedCatalogProductId(expanded ? null : group.productPublicId)}><ProductThumb imagePath={group.imagePath} name={group.name} /><span className="min-w-0 flex-1"><strong className="block truncate text-sm text-slate-900 dark:text-slate-100">{group.name}</strong><span className="block text-xs text-slate-500 dark:text-slate-400">{singleOption ? `${singleOption.sku} · ${singleUnavailable ? "sem estoque" : `disponível ${formatQuantity(singleOption.availableQuantity)}`}` : `${group.options.length} variações encontradas`}</span></span>{singleOption ? <Plus className="h-4 w-4 text-blue-700 dark:text-blue-400" /> : expanded ? <ChevronDown className="h-4 w-4 text-slate-500 dark:text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-500 dark:text-slate-400" />}</button>{expanded && <div className="ml-12 mt-1 space-y-1 border-l border-slate-200 pl-3 dark:border-slate-700">{group.options.map(option => { const used = form.items.some(item => item.inventoryItemPublicId === option.inventoryItemPublicId); const unavailable = Number(option.availableQuantity) <= 0; const unavailableForSale = form.documentType === "sale" && unavailable; return <button type="button" key={option.inventoryItemPublicId} disabled={used || unavailableForSale} className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-blue-50 active:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-45 motion-reduce:transition-none dark:hover:bg-slate-700/50 dark:active:bg-slate-700" onClick={() => addCatalogItem(option)}><span className="min-w-0"><strong className="block truncate text-slate-900 dark:text-slate-100">{option.variantAttributes || option.variantName || "Produto padrão"}</strong><span className="block truncate text-xs text-slate-500 dark:text-slate-400">{option.sku} · {unavailable ? "sem estoque" : `disponível ${formatQuantity(option.availableQuantity)}`}</span></span><span className="shrink-0 font-semibold tabular-nums dark:text-slate-200">{money.format(option.salePriceCents / 100)}</span></button>; })}</div>}</div>;
-                    })}</div> : <p className="p-4 text-sm text-slate-500 dark:text-slate-400">Nenhum produto encontrado para “{catalogSearch.trim()}”.</p>}
+                    {!catalogLookupEnabled ? (
+                      <p className="p-4 text-sm text-slate-500 dark:text-slate-400">Digite ao menos {SALES_LOOKUP_MIN_LENGTH} caracteres para pesquisar o catálogo.</p>
+                    ) : (catalog.isLoading || servicesCatalog.isLoading) ? (
+                      <p role="status" className="p-4 text-sm text-slate-500 dark:text-slate-400">Buscando itens (produtos e serviços)…</p>
+                    ) : (catalog.isError && servicesCatalog.isError) ? (
+                      <p role="alert" className="p-4 text-sm text-rose-700 dark:text-rose-400">Não foi possível buscar itens do catálogo.</p>
+                    ) : (groups.length || (servicesCatalog.data?.items ?? []).length) ? (
+                      <div className="max-h-80 divide-y divide-slate-100 overflow-y-auto [scrollbar-width:thin] dark:divide-slate-700/60">
+                        {Boolean(servicesCatalog.data?.items?.length) && (
+                          <div className="p-2">
+                            <div className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-blue-400">
+                              <Wrench className="h-3.5 w-3.5" />
+                              <span>⚙️ Serviços e Mão de Obra ({servicesCatalog.data!.items.length})</span>
+                            </div>
+                            <div className="mt-1 space-y-1">
+                              {servicesCatalog.data!.items.map(service => {
+                                const isResolving = resolvingServiceId === service.id;
+                                return (
+                                  <button
+                                    type="button"
+                                    key={`service-${service.id}`}
+                                    disabled={isResolving}
+                                    onClick={() => addServiceItem(service)}
+                                    className="flex w-full items-center justify-between gap-3 rounded-md p-2 text-left transition-colors duration-150 hover:bg-blue-50/70 active:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50 dark:hover:bg-slate-800/60"
+                                  >
+                                    <div className="flex min-w-0 items-center gap-3">
+                                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300">
+                                        <Wrench className="h-4 w-4" />
+                                      </span>
+                                      <div className="min-w-0">
+                                        <div className="flex items-center gap-2">
+                                          <strong className="truncate text-sm text-slate-900 dark:text-slate-100">
+                                            {service.name}
+                                          </strong>
+                                          <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800 dark:bg-blue-950/80 dark:text-blue-300">
+                                            Serviço
+                                          </span>
+                                        </div>
+                                        <span className="block truncate text-xs text-slate-500 dark:text-slate-400">
+                                          {[
+                                            service.category || "Mão de Obra",
+                                            service.estimatedMinutes ? `${service.estimatedMinutes} min` : null,
+                                            service.code,
+                                          ]
+                                            .filter(Boolean)
+                                            .join(" · ")}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-3 shrink-0">
+                                      <span className="font-semibold tabular-nums text-slate-900 dark:text-slate-200">
+                                        {money.format(Number(service.price))}
+                                      </span>
+                                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white transition-colors dark:bg-slate-800 dark:text-blue-400">
+                                        {isResolving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                                      </span>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {Boolean(groups.length) && (
+                          <div className="p-2">
+                            {Boolean(servicesCatalog.data?.items?.length) && (
+                              <div className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                                <Package className="h-3.5 w-3.5" />
+                                <span>📦 Produtos e Peças ({groups.length})</span>
+                              </div>
+                            )}
+                            <div className="space-y-1">
+                              {groups.map(group => {
+                                const expanded = expandedCatalogProductId === group.productPublicId;
+                                const singleOption = group.options.length === 1 ? group.options[0] : null;
+                                const singleUnavailable = Boolean(singleOption && Number(singleOption.availableQuantity) <= 0);
+                                const blockedByStock = form.documentType === "sale" && singleUnavailable;
+                                return (
+                                  <div key={group.productPublicId} className="p-1">
+                                    <button
+                                      type="button"
+                                      disabled={blockedByStock}
+                                      className="flex w-full items-center gap-3 rounded-md p-2 text-left transition-colors duration-150 hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none dark:hover:bg-slate-700/50 dark:active:bg-slate-700"
+                                      aria-expanded={group.options.length > 1 ? expanded : undefined}
+                                      onClick={() => singleOption ? addCatalogItem(singleOption) : setExpandedCatalogProductId(expanded ? null : group.productPublicId)}
+                                    >
+                                      <ProductThumb imagePath={group.imagePath} name={group.name} />
+                                      <span className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-2">
+                                          <strong className="truncate text-sm text-slate-900 dark:text-slate-100">{group.name}</strong>
+                                          <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                                            Peça
+                                          </span>
+                                        </div>
+                                        <span className="block text-xs text-slate-500 dark:text-slate-400">
+                                          {singleOption ? `${singleOption.sku} · ${singleUnavailable ? "sem estoque" : `disponível ${formatQuantity(singleOption.availableQuantity)}`}` : `${group.options.length} variações encontradas`}
+                                        </span>
+                                      </span>
+                                      {singleOption ? <Plus className="h-4 w-4 text-blue-700 dark:text-blue-400" /> : expanded ? <ChevronDown className="h-4 w-4 text-slate-500 dark:text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-500 dark:text-slate-400" />}
+                                    </button>
+                                    {expanded && (
+                                      <div className="ml-12 mt-1 space-y-1 border-l border-slate-200 pl-3 dark:border-slate-700">
+                                        {group.options.map(option => {
+                                          const used = form.items.some(item => item.inventoryItemPublicId === option.inventoryItemPublicId);
+                                          const unavailable = Number(option.availableQuantity) <= 0;
+                                          const unavailableForSale = form.documentType === "sale" && unavailable;
+                                          return (
+                                            <button
+                                              type="button"
+                                              key={option.inventoryItemPublicId}
+                                              disabled={used || unavailableForSale}
+                                              className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-blue-50 active:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-45 motion-reduce:transition-none dark:hover:bg-slate-700/50 dark:active:bg-slate-700"
+                                              onClick={() => addCatalogItem(option)}
+                                            >
+                                              <span className="min-w-0">
+                                                <strong className="block truncate text-slate-900 dark:text-slate-100">{option.variantAttributes || option.variantName || "Produto padrão"}</strong>
+                                                <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{option.sku} · {unavailable ? "sem estoque" : `disponível ${formatQuantity(option.availableQuantity)}`}</span>
+                                              </span>
+                                              <span className="shrink-0 font-semibold tabular-nums dark:text-slate-200">{money.format(option.salePriceCents / 100)}</span>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="p-4 text-sm text-slate-500 dark:text-slate-400">Nenhum produto ou serviço encontrado para “{catalogSearch.trim()}”.</p>
+                    )}
                   </div>
                   {catalogLookupEnabled && <SearchPager page={catalogPage} total={catalog.data?.total ?? 0} pageSize={catalog.data?.pageSize ?? 12} onPage={setCatalogPage} />}
 
                   <div className="mt-4 space-y-2">
-                    {form.items.length ? form.items.map((item, index) => (
-                      <div key={`${item.inventoryItemPublicId}-${index}`} className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-[minmax(210px,1fr)_100px_145px_135px_110px_36px] md:items-end dark:border-slate-800 dark:bg-slate-800/40">
-                        <div className="flex min-w-0 items-center gap-3 self-center"><ProductThumb imagePath={item.imagePath} name={item.productName ?? "Produto"} /><div className="min-w-0"><strong className="block truncate text-sm text-slate-900 dark:text-slate-100">{item.productName ?? item.productPublicId}</strong><span className="block truncate text-xs text-slate-500 dark:text-slate-400">{item.variantName || item.sku} · disponível {item.availableQuantity ? formatQuantity(item.availableQuantity) : "—"}</span></div></div>
-                        <MoneyOrQuantity label="Quantidade" value={item.quantity} onChange={value => patchItem(index, { quantity: value })} />
-                        <MoneyOrQuantity money label="Preço unit." value={item.unitPriceCents} onChange={value => patchItem(index, { unitPriceCents: value })} />
-                        <MoneyOrQuantity money label="Desconto" value={item.discountCents ?? 0} onChange={value => patchItem(index, { discountCents: value })} />
-                        <div className="text-right"><span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Subtotal</span><strong className="mt-2 block text-sm tabular-nums text-slate-950 dark:text-slate-100">{money.format(Math.max(0, Math.round(Number(item.quantity || 0) * item.unitPriceCents) - (item.discountCents ?? 0)) / 100)}</strong></div>
-                        <Button type="button" size="icon" variant="ghost" aria-label={`Remover ${item.productName ?? "produto"}`} className="text-rose-700 dark:text-rose-400" onClick={() => setForm(current => current ? { ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) } : current)}><Trash2 className="h-4 w-4" /></Button>
-                      </div>
-                    )) : <div className="rounded-lg border border-dashed border-slate-300 p-5 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">Pesquise e adicione o primeiro produto da venda.</div>}
+                    {form.items.length ? form.items.map((item, index) => {
+                      const isService = isSalesItemService(item);
+                      return (
+                        <div key={`${item.inventoryItemPublicId ?? item.productPublicId}-${index}`} className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-[minmax(210px,1fr)_100px_145px_135px_110px_36px] md:items-end dark:border-slate-800 dark:bg-slate-800/40">
+                          <div className="flex min-w-0 items-center gap-3 self-center">
+                            {isService ? (
+                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300">
+                                <Wrench className="h-5 w-5" />
+                              </span>
+                            ) : (
+                              <ProductThumb imagePath={item.imagePath} name={item.productName ?? "Produto"} />
+                            )}
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <strong className="block truncate text-sm text-slate-900 dark:text-slate-100">{item.productName ?? item.productPublicId}</strong>
+                                {isService ? (
+                                  <span className="inline-flex shrink-0 items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800 dark:bg-blue-950/80 dark:text-blue-300">
+                                    Serviço
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex shrink-0 items-center rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-300">
+                                    Peça
+                                  </span>
+                                )}
+                              </div>
+                              <span className="block truncate text-xs text-slate-500 dark:text-slate-400">
+                                {isService
+                                  ? `${item.variantName || "Mão de Obra"} · sem baixa de estoque`
+                                  : `${item.variantName || item.sku} · disponível ${item.availableQuantity ? formatQuantity(item.availableQuantity) : "—"}`}
+                              </span>
+                            </div>
+                          </div>
+                          <MoneyOrQuantity label="Quantidade" value={item.quantity} onChange={value => patchItem(index, { quantity: value })} />
+                          <MoneyOrQuantity money label="Preço unit." value={item.unitPriceCents} onChange={value => patchItem(index, { unitPriceCents: value })} />
+                          <MoneyOrQuantity money label="Desconto" value={item.discountCents ?? 0} onChange={value => patchItem(index, { discountCents: value })} />
+                          <div className="text-right"><span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Subtotal</span><strong className="mt-2 block text-sm tabular-nums text-slate-950 dark:text-slate-100">{money.format(Math.max(0, Math.round(Number(item.quantity || 0) * item.unitPriceCents) - (item.discountCents ?? 0)) / 100)}</strong></div>
+                          <Button type="button" size="icon" variant="ghost" aria-label={`Remover ${item.productName ?? "produto"}`} className="text-rose-700 dark:text-rose-400" onClick={() => setForm(current => current ? { ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) } : current)}><Trash2 className="h-4 w-4" /></Button>
+                        </div>
+                      );
+                    }) : <div className="rounded-lg border border-dashed border-slate-300 p-5 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">Pesquise e adicione o primeiro produto ou serviço.</div>}
                   </div>
                   {stockIssues.length > 0 && (
                     <p role={form.documentType === "sale" ? "alert" : "status"} className={cn("mt-3 rounded-lg border p-3 text-sm", form.documentType === "sale" ? "border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200" : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200")}>
@@ -2144,7 +2387,7 @@ function SaleFormDialog({
 
               <aside className="self-start rounded-xl border border-slate-200 bg-white p-5 xl:sticky xl:top-0 dark:border-slate-800 dark:bg-slate-900/60" aria-label="Resumo da venda em edição">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Resumo</p><h3 className="mt-1 text-lg font-bold text-slate-950 dark:text-slate-100">{completeSteps}/{progress.length} etapas preenchidas</h3>
-                <div className="mt-4 space-y-2 text-sm"><div className="flex justify-between gap-3 text-slate-600 dark:text-slate-400"><span>Produtos</span><strong className="text-slate-950 dark:text-slate-100">{form.items.length}</strong></div><div className="flex justify-between gap-3 text-slate-600 dark:text-slate-400"><span>Subtotal</span><strong className="tabular-nums text-slate-950 dark:text-slate-100">{money.format(totals.subtotalCents / 100)}</strong></div><div className="flex justify-between gap-3 text-slate-600 dark:text-slate-400"><span>Descontos</span><strong className="tabular-nums text-slate-950 dark:text-slate-100">− {money.format(totals.discountCents / 100)}</strong></div><div className="flex justify-between gap-3 text-slate-600 dark:text-slate-400"><span>Frete</span><strong className="tabular-nums text-slate-950 dark:text-slate-100">{money.format((form.freightCents ?? 0) / 100)}</strong></div><div className="flex justify-between gap-3 text-slate-600 dark:text-slate-400"><span>Encargos</span><strong className="tabular-nums text-slate-950 dark:text-slate-100">{money.format((form.chargesCents ?? 0) / 100)}</strong></div><div className="flex justify-between gap-3 border-t border-slate-200 pt-3 text-base dark:border-slate-800"><strong>Total</strong><strong className="tabular-nums text-blue-700 dark:text-blue-400">{money.format(totals.totalCents / 100)}</strong></div></div>
+                <div className="mt-4 space-y-2 text-sm"><div className="flex justify-between gap-3 text-slate-600 dark:text-slate-400"><span>Itens</span><strong className="text-slate-950 dark:text-slate-100">{form.items.length}</strong></div>{form.documentType === "quote" ? (<><div className="flex justify-between gap-3 text-slate-600 dark:text-slate-400"><span>Total Peças</span><strong className="tabular-nums text-slate-950 dark:text-slate-100">{money.format(totals.partsSubtotalCents / 100)}</strong></div><div className="flex justify-between gap-3 text-slate-600 dark:text-slate-400"><span>Total Mão de Obra</span><strong className="tabular-nums text-slate-950 dark:text-slate-100">{money.format((totals.servicesSubtotalCents + (form.chargesCents ?? 0)) / 100)}</strong></div></>) : (<div className="flex justify-between gap-3 text-slate-600 dark:text-slate-400"><span>Subtotal</span><strong className="tabular-nums text-slate-950 dark:text-slate-100">{money.format(totals.subtotalCents / 100)}</strong></div>)}<div className="flex justify-between gap-3 text-slate-600 dark:text-slate-400"><span>Descontos</span><strong className="tabular-nums text-slate-950 dark:text-slate-100">− {money.format(totals.discountCents / 100)}</strong></div><div className="flex justify-between gap-3 text-slate-600 dark:text-slate-400"><span>Frete</span><strong className="tabular-nums text-slate-950 dark:text-slate-100">{money.format((form.freightCents ?? 0) / 100)}</strong></div>{form.documentType !== "quote" && <div className="flex justify-between gap-3 text-slate-600 dark:text-slate-400"><span>Encargos</span><strong className="tabular-nums text-slate-950 dark:text-slate-100">{money.format((form.chargesCents ?? 0) / 100)}</strong></div>}<div className="flex justify-between gap-3 border-t border-slate-200 pt-3 text-base dark:border-slate-800"><strong>Total</strong><strong className="tabular-nums text-blue-700 dark:text-blue-400">{money.format(totals.totalCents / 100)}</strong></div></div>
                 <div className="mt-5 rounded-lg bg-blue-50 p-3 text-xs leading-5 text-blue-900 dark:bg-blue-950/40 dark:text-blue-300"><strong className="block">Próximo passo</strong>{form.documentType === "quote" ? "Salve o orçamento e conduza-o por negociação e aprovação antes de converter em venda." : "Salve o rascunho. Categoria, conta e parcelas serão revisadas antes da confirmação."}</div>
               </aside>
             </div>

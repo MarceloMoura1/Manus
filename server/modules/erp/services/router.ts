@@ -6,6 +6,7 @@ import {
   serviceIdSchema,
   serviceInput,
   serviceListInput,
+  serviceResolveForSaleInput,
   serviceUpdateInput,
 } from "./contracts";
 import { ServiceService } from "./service";
@@ -68,4 +69,8 @@ export const servicesRouter = router({
 
   categories: megadeskProcedure
     .query(({ ctx }) => run(() => service.listCategories(identity(ctx)))),
+
+  resolveForSale: megadeskProcedure
+    .input(serviceResolveForSaleInput)
+    .mutation(({ input, ctx }) => run(() => service.resolveForSale(identity(ctx), input.serviceId))),
 });

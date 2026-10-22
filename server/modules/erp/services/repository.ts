@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Pool, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { getPool } from "../../../db";
 import type {
@@ -5,6 +6,7 @@ import type {
   ServiceItem,
   ServiceListInput,
   ServiceListResult,
+  ServiceResolvedForSale,
   ServiceUpdateInput,
 } from "./contracts";
 
@@ -232,5 +234,94 @@ export class ServiceRepository {
     );
 
     return rows.map(r => String(r.category));
+  }
+
+  async resolveForSale(clientId: string, userId: string, serviceId: number): Promise<ServiceResolvedForSale | null> {
+    const service = await this.getById(clientId, serviceId);
+    if (!service) return null;
+
+    const priceCents = Math.round(Number(service.price) * 100);
+    const costCents = Math.round(Number(service.estimatedCost || 0) * 100);
+    const serviceBarcode = `SRV:${service.id}`;
+    const defaultSku = service.code?.trim() || `SRV-${service.id}`;
+
+    const [existingProducts] = await this.database().execute<RowDataPacket[]>(
+      `SELECT id, public_id, sku, name, unit FROM erp_products
+       WHERE client_id = ? AND (barcode = ? OR sku = ?) LIMIT 1`,
+      [clientId, serviceBarcode, defaultSku]
+    );
+
+    let productId: number;
+    let productPublicId: string;
+    let productSku: string;
+
+    if (existingProducts[0]) {
+      productId = Number(existingProducts[0].id);
+      productPublicId = String(existingProducts[0].public_id);
+      productSku = String(existingProducts[0].sku);
+      await this.database().execute(
+        `UPDATE erp_products
+         SET name = ?, sale_price_cents = ?, cost_price_cents = ?, unit = 'serviço', active = 1
+         WHERE client_id = ? AND id = ?`,
+        [service.name, priceCents, costCents, clientId, productId]
+      );
+    } else {
+      productPublicId = randomUUID();
+      productSku = defaultSku;
+      const [insertProd] = await this.database().execute<ResultSetHeader>(
+        `INSERT INTO erp_products
+         (public_id, client_id, name, sku, barcode, unit, cost_price_cents, sale_price_cents, minimum_stock, active, created_by)
+         VALUES (?, ?, ?, ?, ?, 'serviço', ?, ?, '0.000', 1, ?)`,
+        [productPublicId, clientId, service.name, productSku, serviceBarcode, costCents, priceCents, userId]
+      );
+      productId = insertProd.insertId;
+      await this.database().execute(
+        `INSERT IGNORE INTO erp_stock_balances (client_id, product_id, quantity, version)
+         VALUES (?, ?, '999999.000', 0)
+         ON DUPLICATE KEY UPDATE quantity = '999999.000'`,
+        [clientId, productId]
+      );
+    }
+
+    const [existingItems] = await this.database().execute<RowDataPacket[]>(
+      `SELECT id, public_id FROM erp_inventory_items
+       WHERE client_id = ? AND product_id = ? AND kind = 'simple' AND active = 1 LIMIT 1`,
+      [clientId, productId]
+    );
+
+    let inventoryItemPublicId: string;
+    let inventoryItemId: number;
+
+    if (existingItems[0]) {
+      inventoryItemId = Number(existingItems[0].id);
+      inventoryItemPublicId = String(existingItems[0].public_id);
+    } else {
+      inventoryItemPublicId = randomUUID();
+      const [insertItem] = await this.database().execute<ResultSetHeader>(
+        `INSERT INTO erp_inventory_items
+         (public_id, client_id, product_id, kind, active, minimum_stock, created_by)
+         VALUES (?, ?, ?, 'simple', 1, '0.000', ?)`,
+        [inventoryItemPublicId, clientId, productId, userId]
+      );
+      inventoryItemId = insertItem.insertId;
+    }
+
+    await this.database().execute(
+      `INSERT IGNORE INTO erp_inventory_item_balances (client_id, inventory_item_id, quantity, version)
+       VALUES (?, ?, '999999.000', 0)
+       ON DUPLICATE KEY UPDATE quantity = '999999.000'`,
+      [clientId, inventoryItemId]
+    );
+
+    return {
+      serviceId: service.id,
+      productPublicId,
+      inventoryItemPublicId,
+      name: service.name,
+      sku: productSku,
+      unit: "serviço",
+      priceCents,
+      isService: true,
+    };
   }
 }
