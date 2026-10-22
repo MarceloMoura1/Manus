@@ -21,10 +21,225 @@ export type HermesActionType =
   | "vistoria_vps"
   | "whatsapp_check"
   | "token_telemetry"
-  | "security_audit";
+  | "security_audit"
+  | "tenant_inspection";
+
+export interface TenantStorageMetrics {
+  tenantFound: boolean;
+  clientName: string;
+  clientId?: string;
+  internalId?: string;
+  tenantDatabaseName?: string;
+  totalMessages: number;
+  totalMessageChars?: number;
+  mediaCount: number;
+  totalContacts: number;
+  totalConversations: number;
+  totalChamados: number;
+  estimatedDbSizeKB: number;
+  estimatedDbSizeFormatted: string;
+  activeStatus: string;
+  plan?: string;
+  details?: string;
+}
+
+/**
+ * Extrai o termo ou nome do cliente/tenant de uma mensagem em linguagem natural
+ */
+export function extractTenantQueryTerm(message: string): string | null {
+  const patterns = [
+    /(?:cliente|tenant|empresa)\s+["']?([a-zA-Z0-9_\-\.]+)["']?/i,
+    /(?:dados|consumo|disco|mem[oó]ria|m[eé]tricas|espa[cç]o|volume|status)\s+(?:do\s+cliente|da\s+empresa|do\s+tenant|de)\s+["']?([a-zA-Z0-9_\-\.]+)["']?/i,
+    /(?:quanto\s+espa[cç]o|quantas\s+mensagens)\s+(?:o\s+cliente|a\s+empresa|o\s+tenant|de)\s+["']?([a-zA-Z0-9_\-\.]+)["']?/i,
+  ];
+
+  for (const regex of patterns) {
+    const match = message.match(regex);
+    if (match && match[1]) {
+      const captured = match[1].trim();
+      const skipWords = ["do", "da", "de", "um", "uma", "o", "a", "os", "as", "cada", "todos", "em"];
+      if (!skipWords.includes(captured.toLowerCase())) {
+        return captured;
+      }
+    }
+  }
+
+  if (message.toLowerCase().includes("fayers")) {
+    return "FaYerS";
+  }
+
+  return null;
+}
+
+/**
+ * Consulta agregada puramente READ-ONLY das métricas de armazenamento de um cliente/tenant
+ */
+export async function inspectTenantStorageMetrics(slugOrName: string): Promise<TenantStorageMetrics> {
+  const search = slugOrName.trim().replace(/^["']|["']$/g, "");
+  const searchLower = search.toLowerCase();
+
+  try {
+    const { getPool } = await import("../../../db");
+    const pool = getPool();
+
+    // 1. Localizar o cliente/tenant de forma estritamente READ-ONLY
+    const [clientRows]: any = await pool.query(
+      `SELECT client_id, internal_id, tenant_database_name, company, contact, email, phone, plan, status
+       FROM megadesk_domain_clients
+       WHERE LOWER(client_id) = ? 
+          OR LOWER(internal_id) = ?
+          OR LOWER(tenant_database_name) = ?
+          OR LOWER(company) LIKE ?
+       LIMIT 1`,
+      [searchLower, searchLower, searchLower, `%${searchLower}%`]
+    );
+
+    if (!clientRows || clientRows.length === 0) {
+      return {
+        tenantFound: false,
+        clientName: search,
+        totalMessages: 0,
+        mediaCount: 0,
+        totalContacts: 0,
+        totalConversations: 0,
+        totalChamados: 0,
+        estimatedDbSizeKB: 0,
+        estimatedDbSizeFormatted: "0 KB",
+        activeStatus: "not_found",
+        details: `Nenhum cliente ou tenant correspondente a "${search}" foi encontrado no banco de dados.`,
+      };
+    }
+
+    const client = clientRows[0];
+    const clientId = client.client_id;
+    const clientName = client.company || client.internal_id || clientId;
+
+    // 2. Consultas agregadas READ-ONLY
+    let totalMessages = 0;
+    let totalMessageChars = 0;
+    let mediaCount = 0;
+    try {
+      const [msgRows]: any = await pool.query(
+        `SELECT 
+           COUNT(*) as totalMessages,
+           COALESCE(SUM(CHAR_LENGTH(message)), 0) as totalChars,
+           COALESCE(SUM(CASE WHEN media_reference IS NOT NULL AND media_reference != '' AND media_reference != '[]' THEN 1 ELSE 0 END), 0) as mediaCount
+         FROM megadesk_domain_conversations_messages
+         WHERE client_id = ?`,
+        [clientId]
+      );
+      if (msgRows && msgRows[0]) {
+        totalMessages = Number(msgRows[0].totalMessages) || 0;
+        totalMessageChars = Number(msgRows[0].totalChars) || 0;
+        mediaCount = Number(msgRows[0].mediaCount) || 0;
+      }
+    } catch (msgErr) {
+      console.warn("[inspectTenantStorageMetrics] Falha ao consultar mensagens:", msgErr);
+    }
+
+    let totalContacts = 0;
+    try {
+      const [custRows]: any = await pool.query(
+        `SELECT COUNT(*) as totalContacts FROM megadesk_domain_customers WHERE client_id = ?`,
+        [clientId]
+      );
+      if (custRows && custRows[0]) {
+        totalContacts = Number(custRows[0].totalContacts) || 0;
+      }
+    } catch (custErr) {
+      console.warn("[inspectTenantStorageMetrics] Falha ao consultar contatos:", custErr);
+    }
+
+    let totalConversations = 0;
+    try {
+      const [convRows]: any = await pool.query(
+        `SELECT COUNT(*) as totalConversations FROM megadesk_domain_conversations WHERE client_id = ?`,
+        [clientId]
+      );
+      if (convRows && convRows[0]) {
+        totalConversations = Number(convRows[0].totalConversations) || 0;
+      }
+    } catch (convErr) {
+      console.warn("[inspectTenantStorageMetrics] Falha ao consultar conversas:", convErr);
+    }
+
+    let totalChamados = 0;
+    try {
+      const [chamadoRows]: any = await pool.query(
+        `SELECT COUNT(*) as totalChamados FROM megadesk_domain_chamados WHERE client_id = ?`,
+        [clientId]
+      );
+      if (chamadoRows && chamadoRows[0]) {
+        totalChamados = Number(chamadoRows[0].totalChamados) || 0;
+      }
+    } catch (chamadoErr) {
+      console.warn("[inspectTenantStorageMetrics] Falha ao consultar chamados:", chamadoErr);
+    }
+
+    let physicalDbBytes = 0;
+    if (client.tenant_database_name) {
+      try {
+        const [tableRows]: any = await pool.query(
+          `SELECT COALESCE(SUM(data_length + index_length), 0) as totalBytes
+           FROM information_schema.TABLES
+           WHERE table_schema = ?`,
+          [client.tenant_database_name]
+        );
+        if (tableRows && tableRows[0]?.totalBytes) {
+          physicalDbBytes = Number(tableRows[0].totalBytes) || 0;
+        }
+      } catch (schemaErr) {
+        console.warn("[inspectTenantStorageMetrics] information_schema query:", schemaErr);
+      }
+    }
+
+    const estimatedDataBytes = totalMessageChars * 3 + totalMessages * 512 + totalContacts * 256 + totalChamados * 512 + mediaCount * 1024;
+    const finalBytes = physicalDbBytes > 0 ? physicalDbBytes : Math.max(estimatedDataBytes, 1024);
+    const estimatedDbSizeKB = Math.round(finalBytes / 1024);
+    const estimatedDbSizeFormatted = estimatedDbSizeKB >= 1024 
+      ? `${(estimatedDbSizeKB / 1024).toFixed(2)} MB` 
+      : `${estimatedDbSizeKB} KB`;
+
+    return {
+      tenantFound: true,
+      clientName,
+      clientId: client.client_id,
+      internalId: client.internal_id,
+      tenantDatabaseName: client.tenant_database_name,
+      plan: client.plan || "Padrão",
+      activeStatus: client.status || "active",
+      totalMessages,
+      totalMessageChars,
+      mediaCount,
+      totalContacts,
+      totalConversations,
+      totalChamados,
+      estimatedDbSizeKB,
+      estimatedDbSizeFormatted,
+    };
+  } catch (err: any) {
+    console.warn("[inspectTenantStorageMetrics] Operando em modo desacoplado:", err?.message);
+    return {
+      tenantFound: false,
+      clientName: search,
+      totalMessages: 0,
+      mediaCount: 0,
+      totalContacts: 0,
+      totalConversations: 0,
+      totalChamados: 0,
+      estimatedDbSizeKB: 0,
+      estimatedDbSizeFormatted: "0 KB",
+      activeStatus: "offline",
+      details: `Consulta operacional offline ou banco indisponível: ${err?.message || "Sem conexão"}`,
+    };
+  }
+}
 
 export class HermesService {
-  constructor(private repository: HermesRepository = hermesRepository) {}
+  constructor(
+    private repository: HermesRepository = hermesRepository,
+    private tenantInspector: (slugOrName: string) => Promise<TenantStorageMetrics> = inspectTenantStorageMetrics
+  ) {}
 
   async getHistory(adminUserId: string): Promise<HermesMessageItem[]> {
     return this.repository.getHistory(adminUserId);
@@ -39,6 +254,22 @@ export class HermesService {
    */
   detectAction(message: string): HermesActionType | null {
     const lower = message.toLowerCase();
+
+    // Consulta e auditoria de tenant / cliente
+    if (
+      (lower.includes("consumo") || lower.includes("memoria") || lower.includes("memória") || lower.includes("disco") || lower.includes("armazenamento") || lower.includes("dados") || lower.includes("métrica") || lower.includes("metrica") || lower.includes("volume")) &&
+      (lower.includes("cliente") || lower.includes("tenant") || lower.includes("empresa") || lower.includes("fayers"))
+    ) {
+      return "tenant_inspection";
+    }
+
+    if (
+      lower.includes("cliente fayers") ||
+      lower.includes("tenant fayers") ||
+      lower.includes("dados de fayers")
+    ) {
+      return "tenant_inspection";
+    }
 
     if (
       lower.includes("vistoria") ||
@@ -84,17 +315,51 @@ export class HermesService {
   }
 
   /**
-   * Executor determinístico de ferramentas sob demanda
+   * Executor determinístico de ferramentas sob demanda (read-only)
    */
-  executeAction(
+  async executeAction(
     action: HermesActionType,
-    adminUserId: string
-  ): { title: string; content: string } {
+    adminUserId: string,
+    rawMessage: string = ""
+  ): Promise<{ title: string; content: string; data?: any }> {
     const uptimeSec = Math.floor(process.uptime());
     const uptimeMin = Math.floor(uptimeSec / 60);
     const memMb = Math.round(process.memoryUsage().rss / (1024 * 1024));
 
     switch (action) {
+      case "tenant_inspection": {
+        const queryTerm = extractTenantQueryTerm(rawMessage) || "FaYerS";
+        const metrics = await this.tenantInspector(queryTerm);
+
+        if (!metrics.tenantFound) {
+          return {
+            title: `Auditoria de Tenant / Cliente (${queryTerm})`,
+            content: `### 🔍 Inspeção de Tenant: **${queryTerm}**\n\n` +
+              `> ⚠️ **Cliente não localizado no catálogo:** ${metrics.details || "Verifique a ortografia do nome ou slug."}\n\n` +
+              `Para consultar o armazenamento de um cliente específico, informe o nome ou slug registrado (ex.: *"consumo do cliente FaYerS"*).`,
+            data: metrics,
+          };
+        }
+
+        return {
+          title: `Auditoria de Armazenamento - ${metrics.clientName}`,
+          content: `### 📊 Auditoria de Armazenamento e Métricas do Cliente: **${metrics.clientName}**\n\n` +
+            `Dados operacionais auditados em tempo real (consultas agregadas read-only):\n\n` +
+            `| Parâmetro Operacional | Valor Auditado |\n` +
+            `| :--- | :--- |\n` +
+            `| **Identificação do Tenant** | \`${metrics.clientId}\` (${metrics.internalId || "N/A"}) |\n` +
+            `| **Banco Físico Dedicado** | \`${metrics.tenantDatabaseName || "Compartilhado (megadesk_main)"}\` |\n` +
+            `| **Status do Tenant** | ${metrics.activeStatus === "active" ? "🟢 Ativo" : metrics.activeStatus === "paused" ? "🟡 Pausado (Quarentena)" : "⚪ " + metrics.activeStatus} |\n` +
+            `| **Total de Mensagens WhatsApp** | **${metrics.totalMessages.toLocaleString("pt-BR")}** mensagens |\n` +
+            `| **Mídias Anexadas (Fotos/Áudios/Docs)** | **${metrics.mediaCount.toLocaleString("pt-BR")}** arquivos |\n` +
+            `| **Base de Contatos (Clientes Finais)** | **${metrics.totalContacts.toLocaleString("pt-BR")}** cadastrados |\n` +
+            `| **Atendimentos / Chamados Registrados** | **${metrics.totalChamados.toLocaleString("pt-BR")}** chamados |\n` +
+            `| **Volume Estimado de Dados em Disco/DB** | **${metrics.estimatedDbSizeFormatted}** (${metrics.estimatedDbSizeKB.toLocaleString("pt-BR")} KB) |\n\n` +
+            `*Todos os dados foram obtidos com segurança estritamente read-only diretamente das tabelas operacionais da plataforma.*`,
+          data: metrics,
+        };
+      }
+
       case "vistoria_vps":
         return {
           title: "Vistoria da VPS e Containers",
@@ -160,7 +425,7 @@ export class HermesService {
     // 3. Verificar despachante de ações sob demanda
     const detectedAction = this.detectAction(trimmed);
     const actionResult = detectedAction
-      ? this.executeAction(detectedAction, adminUserId)
+      ? await this.executeAction(detectedAction, adminUserId, trimmed)
       : null;
 
     let responseContent = "";
@@ -175,13 +440,16 @@ export class HermesService {
 
     if (apiKey && apiKey.trim().length > 10) {
       try {
+        const isExtensive = /relat[oó]rio\s+extenso|auditoria\s+completa|resumo\s+detalhado|an[aá]lise\s+profunda/i.test(trimmed);
+        const maxTokens = isExtensive ? 2048 : 1024;
+
         const geminiModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
         const genAI = new GoogleGenerativeAI(apiKey.trim());
         const model = genAI.getGenerativeModel({
           model: geminiModel,
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 2048,
+            maxOutputTokens: maxTokens,
           },
         });
 
@@ -199,7 +467,7 @@ Sua identidade e postura:
    - NUNCA invente problemas ou desculpas de fuso horário. Use sempre com precisão o Contexto Temporal informado acima.
 3. Postura Operacional:
    - Em interações leves, conversas ou dúvidas rápidas: responda de forma breve, calorosa, natural e prestativa.
-   - Em solicitações técnicas (diagnósticos, vistorias de VPS, checagens de WhatsApp, bancos MySQL, containers Docker, deploy): seja cirúrgico, estruturado e execute com maestria técnica, apresentando dados claros, sínteses executivas e tabelas quando útil.
+   - Em solicitações técnicas (diagnósticos, vistorias de VPS, checagens de WhatsApp, bancos MySQL, containers Docker, deploy, métricas de tenants): seja cirúrgico, estruturado e execute com maestria técnica, apresentando dados claros, sínteses executivas e tabelas quando útil.
 4. Seu objetivo principal é apoiar a gestão com inteligência prática, agilidade e excelência técnica.`;
 
         // Histórico sanitizado estritamente em { role: "user" | "model", parts: [{ text }] }
@@ -217,13 +485,13 @@ Sua identidade e postura:
           },
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 2048,
+            maxOutputTokens: maxTokens,
           },
         });
 
         // Se houver ação sob demanda executada, injetar telemetria determinística no prompt
         const promptToSend = actionResult
-          ? `[TELEMETRIA OPERACIONAL COLETADA DO SISTEMA]\n${actionResult.content}\n\n[SOLICITAÇÃO DO ADMINISTRADOR]\n${trimmed}\n\nApresente a resposta aos sócios fundamentada rigorosamente nos dados acima.`
+          ? `[TELEMETRIA OPERACIONAL COLETADA DO SISTEMA]\n${actionResult.content}\n\n[DADOS BRUTOS JSON]\n${JSON.stringify(actionResult.data || {})}\n\n[SOLICITAÇÃO DO ADMINISTRADOR]\n${trimmed}\n\nApresente a resposta ao administrador de forma clara, natural e fundamentada rigorosamente nos dados operacionais auditados acima.`
           : trimmed;
 
         const result = await chat.sendMessage(promptToSend);
@@ -252,7 +520,7 @@ Sua identidade e postura:
 
         responseContent = actionResult
           ? actionResult.content
-          : this.generateFallbackResponse(trimmed, adminUserId);
+          : await this.generateFallbackResponse(trimmed, adminUserId);
 
         metadata = {
           model: "hermes-local-core",
@@ -266,7 +534,7 @@ Sua identidade e postura:
       // Modo local quando GEMINI_API_KEY não estiver configurada
       responseContent = actionResult
         ? actionResult.content
-        : this.generateFallbackResponse(trimmed, adminUserId);
+        : await this.generateFallbackResponse(trimmed, adminUserId);
     }
 
     // 4. Persistir resposta do assistente
@@ -285,10 +553,10 @@ Sua identidade e postura:
     };
   }
 
-  private generateFallbackResponse(message: string, adminUserId: string): string {
+  private async generateFallbackResponse(message: string, adminUserId: string): Promise<string> {
     const detected = this.detectAction(message);
     if (detected) {
-      return this.executeAction(detected, adminUserId).content;
+      return (await this.executeAction(detected, adminUserId, message)).content;
     }
 
     const lower = message.toLowerCase();
@@ -301,7 +569,7 @@ Sua identidade e postura:
       return `Olá! Tudo bem? Sou o **Hermes**, seu parceiro de inteligência e operações no MegaDesk. Como posso te ajudar hoje?`;
     }
 
-    return `Olá! Sou o **Hermes**, seu copiloto de operações e estratégia no MegaAdmin.\n\nRecebi sua instrução: *"__${message}__"*.\n\nEstou pronto para ajudar com:\n1. 🏥 **Vistoria da VPS e Docker** (diagnóstico de containers e rede)\n2. 📊 **Consumo de Tokens e Quotas de IA**\n3. 🛡️ **Auditoria de Tenants e Multi-tenancy**\n4. 🚀 **Acompanhamento de Releases e Migrations**\n\nComo deseja proceder agora?`;
+    return `Olá! Sou o **Hermes**, seu copiloto de operações e estratégia no MegaAdmin.\n\nRecebi sua instrução: *"__${message}__"*.\n\nEstou pronto para ajudar com:\n1. 🏥 **Vistoria da VPS e Docker** (diagnóstico de containers e rede)\n2. 📊 **Consumo de Tokens e Quotas de IA**\n3. 🔍 **Auditoria de Armazenamento e Métricas por Cliente**\n4. 🛡️ **Auditoria de Tenants e Multi-tenancy**\n5. 🚀 **Acompanhamento de Releases e Migrations**\n\nComo deseja proceder agora?`;
   }
 
   getQuickStats(): HermesQuickStats {
