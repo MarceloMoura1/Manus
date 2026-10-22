@@ -38,7 +38,10 @@ export async function generateAIResponse(
 
   const chat = model.startChat({
     history: history.slice(0, -1), // Histórico sem a última mensagem
-    systemInstruction,
+    systemInstruction: {
+      role: "system",
+      parts: [{ text: systemInstruction }],
+    },
   });
 
   const lastMessage = messages[messages.length - 1];

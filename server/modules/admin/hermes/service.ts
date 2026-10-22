@@ -61,7 +61,10 @@ Suas atribuições e postura:
 
         const chat = model.startChat({
           history: historyPayload,
-          systemInstruction,
+          systemInstruction: {
+            role: "system",
+            parts: [{ text: systemInstruction }],
+          },
         });
 
         const result = await chat.sendMessage(trimmed);
