@@ -141,8 +141,9 @@ describe("Hermes Module - Unit & Isolation Tests", () => {
         tenantDatabaseName: "megadesk_tenant_fayers",
         totalMessages: 1250,
         mediaCount: 140,
-        totalContacts: 320,
+        totalContacts: 326,
         contatosWhatsApp: 310,
+        clientesCrm: 6,
         clientesErp: 10,
         totalConversations: 450,
         totalChamados: 85,
@@ -162,6 +163,8 @@ describe("Hermes Module - Unit & Isolation Tests", () => {
       expect(result.response.content).toContain("1.250");
       expect(result.response.content).toContain("4.39 MB");
       expect(result.response.content).toContain("310"); // WhatsApp
+      expect(result.response.content).toContain("6");   // CRM
+      expect(result.response.content).toContain("Clientes no CRM");
       expect(result.response.content).toContain("10");  // ERP
       expect(result.response.content).toContain("2 chamado(s) em aberto");
       expect(result.response.metadataJson?.actionTriggered).toBe("tenant_inspection");
