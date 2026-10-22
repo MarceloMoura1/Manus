@@ -46,6 +46,7 @@ import { ConversationReplyResolutionError, resolveConversationReplyReference } f
 import { sanitizeMegaAdminUser } from "./megaadmin-response-sanitization";
 import { emitOperationalTenantEventAsync } from "./modules/whatsapp/socket/whatsapp.socket";
 import { classifyAssistantFailure } from "./assistant-error";
+import { hermesRouter } from "./modules/admin/hermes";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -409,6 +410,9 @@ export const appRouter = router({
   notifications: notificationsRouter,
   whatsappModule: whatsappModuleRouter,
   conversas: conversasRouter,
+  admin: router({
+    hermes: hermesRouter,
+  }),
   auth: router({
     me: publicProcedure.query(({ ctx }) => ({ user: ctx.user })),
     logout: publicProcedure.mutation(({ ctx }) => {

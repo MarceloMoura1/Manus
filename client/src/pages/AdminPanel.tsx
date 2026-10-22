@@ -35,6 +35,7 @@ import { MODULE_LABELS } from "@shared/const";
 import { AdminsSection } from "./AdminsSection";
 import { AdminSettingsPage } from "./AdminSettingsPage";
 import { ClientEditPage } from "./ClientEditPage";
+import { HermesOfficePage } from "./HermesOfficePage";
 
 function cn(...classes: Array<string | false | undefined | null>) {
   return classes.filter(Boolean).join(" ");
@@ -57,7 +58,7 @@ type ModuleName = (typeof ALL_MODULES)[number];
 
 // MODULE_LABELS importado de @shared/const
 
-type Section = "dashboard" | "clients" | "users" | "admins" | "backups" | "settings";
+type Section = "dashboard" | "hermes" | "clients" | "users" | "admins" | "backups" | "settings";
 
 export type AdminAuditLog = {
   action: string;
@@ -400,6 +401,7 @@ function AccessDeniedScreen({ onLogout }: { onLogout: () => void }) {
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 const NAV_ITEMS = [
   { key: "dashboard" as Section, label: "Dashboard", icon: LayoutDashboard },
+  { key: "hermes" as Section, label: "Escritório do Hermes", icon: Bot },
   { key: "clients" as Section, label: "Clientes", icon: Building2 },
   { key: "users" as Section, label: "Usuários", icon: Users },
   { key: "admins" as Section, label: "Administradores", icon: ShieldCheck },
@@ -1008,7 +1010,22 @@ export default function AdminPanel() {
     return () => clearTimeout(timer);
   }, [utils]);
 
-  const [active, setActive] = useState<Section>("dashboard");
+  const [active, setActive] = useState<Section>(() => {
+    if (typeof window !== "undefined" && window.location.pathname.toLowerCase().includes("/admin/hermes")) {
+      return "hermes";
+    }
+    return "dashboard";
+  });
+
+  const handleSetActive = (nextSection: Section) => {
+    setActive(nextSection);
+    if (typeof window !== "undefined") {
+      const targetPath = nextSection === "hermes" ? "/admin/hermes" : "/admin";
+      if (window.location.pathname !== targetPath) {
+        window.history.pushState(null, "", targetPath);
+      }
+    }
+  };
   const [showWizard, setShowWizard] = useState(false);
   const [selectedClient, setSelectedClient] = useState<any | null>(null);
   const [showEditUserModal, setShowEditUserModal] = useState(false);
@@ -1078,34 +1095,40 @@ export default function AdminPanel() {
         <div className="relative flex min-h-screen">
           <Sidebar
             active={active}
-            setActive={setActive}
+            setActive={handleSetActive}
             userName={user.name ?? "Administrador"}
             userEmail={user.email ?? ""}
             onLogout={logout}
           />
 
           <main className="min-w-0 flex-1 p-4 md:p-8">
-            {/* Header */}
-            <header className="mb-8 flex flex-col gap-4 rounded-[2rem] border border-white/10 bg-white/[.03] p-5 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-sm text-emerald-300">MegaAdmin</p>
-                  <h2 className="mt-1 text-3xl font-semibold text-white">
-                    {active === "dashboard" ? "Dashboard administrativo" : active === "clients" ? "Clientes" : active === "users" ? "Usuários" : "Administradores"}
-                  </h2>
-                  <p className="mt-2 text-sm text-slate-400">
-                    Controle clientes, usuários e módulos com acesso sincronizado à MegaDesk.
-                  </p>
+            {/* Header comum (oculto quando no Escritório do Hermes, que tem header próprio) */}
+            {active !== "hermes" ? (
+              <header className="mb-8 flex flex-col gap-4 rounded-[2rem] border border-white/10 bg-white/[.03] p-5 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm text-emerald-300">MegaAdmin</p>
+                    <h2 className="mt-1 text-3xl font-semibold text-white">
+                      {active === "dashboard" ? "Dashboard administrativo" : active === "clients" ? "Clientes" : active === "users" ? "Usuários" : "Administradores"}
+                    </h2>
+                    <p className="mt-2 text-sm text-slate-400">
+                      Controle clientes, usuários e módulos com acesso sincronizado à MegaDesk.
+                    </p>
+                  </div>
+                  <MobileNav active={active} setActive={handleSetActive} />
                 </div>
-                <MobileNav active={active} setActive={setActive} />
+                <button
+                  onClick={() => setShowWizard(true)}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-400 px-5 py-3 font-semibold text-slate-950 transition hover:scale-[1.01]"
+                >
+                  <Plus className="h-5 w-5" /> Cadastrar novo cliente
+                </button>
+              </header>
+            ) : (
+              <div className="mb-4 xl:hidden">
+                <MobileNav active={active} setActive={handleSetActive} />
               </div>
-              <button
-                onClick={() => setShowWizard(true)}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-400 px-5 py-3 font-semibold text-slate-950 transition hover:scale-[1.01]"
-              >
-                <Plus className="h-5 w-5" /> Cadastrar novo cliente
-              </button>
-            </header>
+            )}
 
             {/* Dashboard */}
             {active === "dashboard" && (
@@ -1345,6 +1368,11 @@ export default function AdminPanel() {
                 <AdminSettingsPage clientId={selectedClient?.clientId || ""} />
               </section>
             )}
+            {/* Hermes Office */}
+            {active === "hermes" && (
+              <HermesOfficePage adminUser={user} />
+            )}
+
             {/* Backups */}
             {active === "backups" && (
               <BackupsSection />
