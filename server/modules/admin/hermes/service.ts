@@ -113,7 +113,7 @@ export class HermesService {
           title: "Telemetria de Tokens & Recursos",
           content: `### 📊 Telemetria de Tokens & Recursos\n\n` +
             `Todos os tenants possuem medição individualizada de tokens na tabela \`megadesk_ia_token_usage\`.\n\n` +
-            `- O modelo padrão é o **${process.env.GEMINI_MODEL || "Gemini 2.5 Flash Lite"}**.\n` +
+            `- O modelo padrão é o **${process.env.GEMINI_MODEL || "Gemini 3.5 Flash Lite"}**.\n` +
             `- O cálculo segregado por cliente evita consumo cruzado de créditos.\n` +
             `- Consulte a aba **Clientes** no MegaAdmin para quotas e tokens específicos de cada tenant.`,
         };
@@ -163,7 +163,7 @@ export class HermesService {
 
     if (apiKey && apiKey.trim().length > 10) {
       try {
-        const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+        const geminiModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
         const genAI = new GoogleGenerativeAI(apiKey.trim());
         const model = genAI.getGenerativeModel({
           model: geminiModel,
@@ -317,7 +317,7 @@ Suas atribuições e postura:
           key: "gemini-ai",
           status: hasGeminiKey ? "online" : "warning",
           details: hasGeminiKey
-            ? `${process.env.GEMINI_MODEL || "Gemini 2.5 Flash Lite"} conectado`
+            ? `${process.env.GEMINI_MODEL || "Gemini 3.5 Flash Lite"} conectado`
             : "Chave pendente (modo diagnóstico local)",
         },
       ],
