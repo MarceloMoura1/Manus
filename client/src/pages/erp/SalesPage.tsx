@@ -271,6 +271,7 @@ export function SalesPage({
   const [kind, setKind] = React.useState<"all" | "quotes" | "orders">(
     mode === "quotes" ? "quotes" : "orders"
   );
+  const isQuotesTable = mode === "quotes";
   const [stage, setStage] = React.useState<"all" | Stage>("all");
   const [commercialStatus, setCommercialStatus] = React.useState<"all" | "draft" | "negotiation" | "approved" | "converted" | "lost">("all");
   const [paymentStatus, setPaymentStatus] = React.useState<
@@ -888,33 +889,109 @@ export function SalesPage({
             <div className="min-w-0">
               <div className="hidden overflow-x-auto [scrollbar-gutter:stable] md:block">
                 <table className="min-w-[1160px] w-full text-sm">
-                  <colgroup>
-                    <col className="w-[31%]" />
-                    <col className="w-[14%]" />
-                    <col className="w-[9%]" />
-                    <col className="w-[10%]" />
-                    <col className="w-[10%]" />
-                    <col className="w-[11%]" />
-                    <col className="w-[9%]" />
-                    <col className="w-16" />
-                  </colgroup>
+                  {isQuotesTable ? (
+                    <colgroup>
+                      <col className="w-[43%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[11%]" />
+                      <col className="w-[11%]" />
+                      <col className="w-[13%]" />
+                      <col className="w-16" />
+                    </colgroup>
+                  ) : (
+                    <colgroup>
+                      <col className="w-[31%]" />
+                      <col className="w-[14%]" />
+                      <col className="w-[9%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[11%]" />
+                      <col className="w-[9%]" />
+                      <col className="w-16" />
+                    </colgroup>
+                  )}
                   <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold text-slate-600">
-                    <tr>
-                      <SortableColumnHeader label={kind === "quotes" ? "Orçamento" : kind === "orders" ? "Venda" : "Documento"} sortKey="orderNumber" sort={listSort} onSort={setSort} />
-                      <SortableColumnHeader label="Cliente" sortKey="customer" sort={listSort} onSort={setSort} />
-                      <SortableColumnHeader label="Data" sortKey="commercialDate" sort={listSort} onSort={setSort} className="whitespace-nowrap" />
-                      <SortableColumnHeader label="Vendedor" sortKey="seller" sort={listSort} onSort={setSort} />
-                      <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Total</th>
-                      {kind === "quotes" ? <SortableColumnHeader label="Status" sortKey="status" sort={listSort} onSort={setSort} /> : <th scope="col" className="px-3 py-3">Pagamento</th>}
-                      {kind === "quotes" ? <th scope="col" className="px-3 py-3">Fluxo</th> : <SortableColumnHeader label="Status" sortKey="status" sort={listSort} onSort={setSort} />}
-                      <th scope="col" className="px-3 py-3 text-center">Ações</th>
-                    </tr>
+                    {isQuotesTable ? (
+                      <tr>
+                        <SortableColumnHeader label="Cliente / Orçamento" sortKey="customer" sort={listSort} onSort={setSort} />
+                        <SortableColumnHeader label="Data" sortKey="commercialDate" sort={listSort} onSort={setSort} className="whitespace-nowrap" />
+                        <SortableColumnHeader label="Vendedor" sortKey="seller" sort={listSort} onSort={setSort} />
+                        <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Total</th>
+                        <SortableColumnHeader label="Status" sortKey="status" sort={listSort} onSort={setSort} />
+                        <th scope="col" className="px-3 py-3">Fluxo</th>
+                        <th scope="col" className="px-3 py-3 text-center">Ações</th>
+                      </tr>
+                    ) : (
+                      <tr>
+                        <SortableColumnHeader label={kind === "quotes" ? "Orçamento" : kind === "orders" ? "Venda" : "Documento"} sortKey="orderNumber" sort={listSort} onSort={setSort} />
+                        <SortableColumnHeader label="Cliente" sortKey="customer" sort={listSort} onSort={setSort} />
+                        <SortableColumnHeader label="Data" sortKey="commercialDate" sort={listSort} onSort={setSort} className="whitespace-nowrap" />
+                        <SortableColumnHeader label="Vendedor" sortKey="seller" sort={listSort} onSort={setSort} />
+                        <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Total</th>
+                        {kind === "quotes" ? <SortableColumnHeader label="Status" sortKey="status" sort={listSort} onSort={setSort} /> : <th scope="col" className="px-3 py-3">Pagamento</th>}
+                        {kind === "quotes" ? <th scope="col" className="px-3 py-3">Fluxo</th> : <SortableColumnHeader label="Status" sortKey="status" sort={listSort} onSort={setSort} />}
+                        <th scope="col" className="px-3 py-3 text-center">Ações</th>
+                      </tr>
+                    )}
                   </thead>
                   <tbody className="divide-y divide-slate-100 [&>tr>td]:px-3 [&>tr>td]:py-3.5">
                     {list.data.items.map(order => (
                       <tr key={order.publicId} className="group align-middle transition-colors duration-150 hover:bg-blue-50/40 focus-within:bg-blue-50/40 motion-reduce:transition-none" data-testid={`sale-row-${order.publicId}`}>
-                        <td><div className="flex min-w-0 items-center gap-4"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} featured /><div className="min-w-0"><p className="truncate text-base font-semibold leading-tight text-slate-950" title={order.firstProductName ?? "Produto histórico"}>{order.firstProductName ?? "Produto histórico"}</p><div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm text-xs font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 text-[11px] text-slate-500">{formatQuantity(order.totalQuantity)} un. · {order.itemCount} {order.itemCount === 1 ? "produto" : "produtos"}</p></div></div></td>
-                        <td className="max-w-48 truncate px-2 py-3 font-medium text-slate-800" title={order.customerName}>{order.customerName}</td>
+                        {isQuotesTable ? (
+                          <td>
+                            <div className="flex min-w-0 flex-col">
+                              <div className="flex min-w-0 items-center gap-2">
+                                {onClientNavigate && order.crmClientId ? (
+                                  <button
+                                    type="button"
+                                    className="truncate text-left text-sm font-semibold text-slate-900 transition-colors duration-150 hover:text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 dark:text-slate-100 dark:hover:text-blue-400 motion-reduce:transition-none"
+                                    title={order.customerName || "Cliente não informado"}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onClientNavigate(order.crmClientId!);
+                                    }}
+                                  >
+                                    {order.customerName || "Cliente não informado"}
+                                  </button>
+                                ) : (
+                                  <span
+                                    className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100"
+                                    title={order.customerName || "Cliente não informado"}
+                                  >
+                                    {order.customerName || "Cliente não informado"}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                                <button
+                                  type="button"
+                                  className="inline-flex shrink-0 items-center gap-1 rounded bg-violet-100 px-2 py-0.5 text-xs font-bold text-violet-800 transition-colors duration-150 hover:bg-violet-200 hover:text-violet-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 dark:bg-violet-950/80 dark:text-violet-300 dark:hover:bg-violet-900/80 motion-reduce:transition-none"
+                                  onClick={() => openSale(order.publicId)}
+                                  title="Abrir detalhes do orçamento"
+                                >
+                                  <span>{order.orderNumber}</span>
+                                  <span className="text-[10px] font-bold uppercase tracking-wide">ORÇAMENTO</span>
+                                </button>
+                                {order.archivedAt && (
+                                  <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700 dark:bg-slate-700 dark:text-slate-300">
+                                    Arquivado
+                                  </span>
+                                )}
+                                <span className="text-slate-300 dark:text-slate-600">•</span>
+                                <span className="truncate text-xs text-slate-600 dark:text-slate-400" title={order.firstProductName ?? "Itens do orçamento"}>
+                                  {order.firstProductName ? `${order.firstProductName} • ` : ""}
+                                  {order.itemCount} {order.itemCount === 1 ? "produto" : "produtos"} • {formatQuantity(order.totalQuantity)} un.
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+                        ) : (
+                          <>
+                            <td><div className="flex min-w-0 items-center gap-4"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} featured /><div className="min-w-0"><p className="truncate text-base font-semibold leading-tight text-slate-950" title={order.firstProductName ?? "Produto histórico"}>{order.firstProductName ?? "Produto histórico"}</p><div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm text-xs font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 text-[11px] text-slate-500">{formatQuantity(order.totalQuantity)} un. · {order.itemCount} {order.itemCount === 1 ? "produto" : "produtos"}</p></div></div></td>
+                            <td className="max-w-48 truncate px-2 py-3 font-medium text-slate-800" title={order.customerName}>{order.customerName}</td>
+                          </>
+                        )}
                         <td className="whitespace-nowrap px-2 py-3 tabular-nums text-slate-700">{date.format(salesCommercialDate(order.commercialDate))}</td>
                         <td className="max-w-40 truncate px-2 py-3 text-slate-700" title={order.sellerName ?? ""}>{order.sellerName ?? "—"}</td>
                         <td className="whitespace-nowrap px-2 py-3 text-right font-semibold tabular-nums text-slate-900">{money.format(order.totalCents / 100)}</td>
@@ -927,10 +1004,65 @@ export function SalesPage({
                 </table>
               </div>
               <div className="divide-y divide-slate-100 md:hidden">
-                {list.data.items.map(order => <article key={order.publicId} className="p-4 sm:p-5" data-testid={`sale-row-${order.publicId}`}>
-                  <div className="flex min-w-0 items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} large /><div className="min-w-0 flex-1"><p className="truncate text-base font-semibold leading-tight text-slate-950">{order.firstProductName ?? "Produto histórico"}</p><div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm text-xs font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-xs font-medium text-slate-800">{order.customerName}</p><p className="mt-1 text-[11px] text-slate-500">{formatQuantity(order.totalQuantity)} un. · {order.itemCount} {order.itemCount === 1 ? "produto" : "produtos"}</p><div className="mt-2 flex items-center justify-between gap-2"><strong className="text-sm tabular-nums text-slate-950">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></div></div></div>
-                  <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2"><span className="min-w-0 truncate text-xs text-slate-500">{date.format(salesCommercialDate(order.commercialDate))} · {order.sellerName ?? "—"}</span><div className="flex flex-wrap justify-end gap-1">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
-                </article>)}
+                {list.data.items.map(order => (
+                  <article key={order.publicId} className="p-4 sm:p-5" data-testid={`sale-row-${order.publicId}`}>
+                    {isQuotesTable ? (
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            {onClientNavigate && order.crmClientId ? (
+                              <button
+                                type="button"
+                                className="truncate text-left text-sm font-semibold text-slate-900 transition-colors duration-150 hover:text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 dark:text-slate-100 dark:hover:text-blue-400 motion-reduce:transition-none"
+                                title={order.customerName || "Cliente não informado"}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onClientNavigate(order.crmClientId!);
+                                }}
+                              >
+                                {order.customerName || "Cliente não informado"}
+                              </button>
+                            ) : (
+                              <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100" title={order.customerName}>
+                                {order.customerName || "Cliente não informado"}
+                              </p>
+                            )}
+                          </div>
+                          <strong className="text-sm tabular-nums text-slate-950 dark:text-slate-100">
+                            {money.format(order.totalCents / 100)}
+                          </strong>
+                        </div>
+                        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                          <button
+                            type="button"
+                            className="inline-flex shrink-0 items-center gap-1 rounded bg-violet-100 px-2 py-0.5 text-xs font-bold text-violet-800 transition-colors duration-150 hover:bg-violet-200 hover:text-violet-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 dark:bg-violet-950/80 dark:text-violet-300 dark:hover:bg-violet-900/80 motion-reduce:transition-none"
+                            onClick={() => openSale(order.publicId)}
+                            title="Abrir detalhes do orçamento"
+                          >
+                            <span>{order.orderNumber}</span>
+                            <span className="text-[10px] font-bold uppercase tracking-wide">ORÇAMENTO</span>
+                          </button>
+                          {order.archivedAt && (
+                            <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700 dark:bg-slate-700 dark:text-slate-300">
+                              Arquivado
+                            </span>
+                          )}
+                          <span className="text-slate-300 dark:text-slate-600">•</span>
+                          <span className="truncate text-xs text-slate-600 dark:text-slate-400" title={order.firstProductName ?? "Itens do orçamento"}>
+                            {order.firstProductName ? `${order.firstProductName} • ` : ""}
+                            {order.itemCount} {order.itemCount === 1 ? "produto" : "produtos"} • {formatQuantity(order.totalQuantity)} un.
+                          </span>
+                        </div>
+                        <div className="mt-2 flex items-center justify-end gap-2">
+                          <SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex min-w-0 items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} large /><div className="min-w-0 flex-1"><p className="truncate text-base font-semibold leading-tight text-slate-950" title={order.firstProductName ?? "Produto histórico"}>{order.firstProductName ?? "Produto histórico"}</p><div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm text-xs font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={() => openSale(order.publicId)}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-xs font-medium text-slate-800">{order.customerName}</p><p className="mt-1 text-[11px] text-slate-500">{formatQuantity(order.totalQuantity)} un. · {order.itemCount} {order.itemCount === 1 ? "produto" : "produtos"}</p><div className="mt-2 flex items-center justify-between gap-2"><strong className="text-sm tabular-nums text-slate-950">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></div></div></div>
+                    )}
+                    <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2"><span className="min-w-0 truncate text-xs text-slate-500">{date.format(salesCommercialDate(order.commercialDate))} · {order.sellerName ?? "—"}</span><div className="flex flex-wrap justify-end gap-1">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
+                  </article>
+                ))}
               </div>
             </div>
           )}
