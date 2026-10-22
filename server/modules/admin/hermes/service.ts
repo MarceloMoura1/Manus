@@ -5,6 +5,18 @@ import type {
   HermesQuickStats,
 } from "./contracts";
 
+export function getBrasiliaTimestamp(): string {
+  try {
+    return new Date().toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      dateStyle: "full",
+      timeStyle: "medium",
+    });
+  } catch {
+    return new Date().toISOString();
+  }
+}
+
 export type HermesActionType =
   | "vistoria_vps"
   | "whatsapp_check"
@@ -173,13 +185,22 @@ export class HermesService {
           },
         });
 
-        const systemInstruction = `Você é o Hermes, a central de inteligência executiva, operações de infraestrutura e comando estratégico do MegaAdmin para os sócios fundadores do MegaDesk.
-Você atua na sala de comando restrita dos sócios.
-Suas atribuições e postura:
-1. Responda em Português do Brasil com postura executiva, objetiva e técnica (DevOps sênior / COO técnico).
-2. Auxilie os sócios na gestão de clientes, diagnóstico de servidores VPS Oracle Cloud, containers Docker, banco MySQL e Evolution WhatsApp.
-3. Se o sócio solicitar vistoria, planos ou ações técnicas, forneça resumos organizados com tópicos claros, tabelas ou blocos de comando.
-4. Não mencione detalhes irrelevantes; foque na eficiência operacional e estabilidade do MegaDesk.`;
+        const nowBrasilia = getBrasiliaTimestamp();
+
+        const systemInstruction = `Contexto Temporal Atual: ${nowBrasilia} (Horário de Brasília).
+
+Você é o Hermes, o braço direito, copiloto de inteligência e parceiro de operações do MegaDesk para a liderança e administração da plataforma.
+
+Sua identidade e postura:
+1. Comunicação natural, humana, acolhedora e fluida em português brasileiro. Seja parceiro e direto, sem parecer um robô frio ou um terminal mecânico de Linux.
+2. Proibições de tom:
+   - NUNCA fique repetindo a palavra "sócio" a cada frase. Trate a pessoa com naturalidade e respeito.
+   - NUNCA recuse conversas amigáveis, saudações cotidianas ("olá", "bom dia", "como vai?", "que dia é hoje?") ou perguntas informais.
+   - NUNCA invente problemas ou desculpas de fuso horário. Use sempre com precisão o Contexto Temporal informado acima.
+3. Postura Operacional:
+   - Em interações leves, conversas ou dúvidas rápidas: responda de forma breve, calorosa, natural e prestativa.
+   - Em solicitações técnicas (diagnósticos, vistorias de VPS, checagens de WhatsApp, bancos MySQL, containers Docker, deploy): seja cirúrgico, estruturado e execute com maestria técnica, apresentando dados claros, sínteses executivas e tabelas quando útil.
+4. Seu objetivo principal é apoiar a gestão com inteligência prática, agilidade e excelência técnica.`;
 
         // Histórico sanitizado estritamente em { role: "user" | "model", parts: [{ text }] }
         const historyPayload = contextSlice.slice(0, -1).map((msg) => ({
@@ -268,6 +289,16 @@ Suas atribuições e postura:
     const detected = this.detectAction(message);
     if (detected) {
       return this.executeAction(detected, adminUserId).content;
+    }
+
+    const lower = message.toLowerCase();
+    if (lower.includes("que dia") || lower.includes("data") || lower.includes("hora") || lower.includes("que horas")) {
+      const nowBrasilia = getBrasiliaTimestamp();
+      return `Hoje é ${nowBrasilia} (Horário de Brasília). Se precisar de alguma vistoria da infraestrutura ou apoio operacional, estou por aqui!`;
+    }
+
+    if (lower.includes("olá") || lower.includes("ola") || lower.includes("bom dia") || lower.includes("boa tarde") || lower.includes("boa noite") || lower.includes("tudo bem")) {
+      return `Olá! Tudo bem? Sou o **Hermes**, seu parceiro de inteligência e operações no MegaDesk. Como posso te ajudar hoje?`;
     }
 
     return `Olá! Sou o **Hermes**, seu copiloto de operações e estratégia no MegaAdmin.\n\nRecebi sua instrução: *"__${message}__"*.\n\nEstou pronto para ajudar com:\n1. 🏥 **Vistoria da VPS e Docker** (diagnóstico de containers e rede)\n2. 📊 **Consumo de Tokens e Quotas de IA**\n3. 🛡️ **Auditoria de Tenants e Multi-tenancy**\n4. 🚀 **Acompanhamento de Releases e Migrations**\n\nComo deseja proceder agora?`;

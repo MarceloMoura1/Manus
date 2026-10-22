@@ -127,6 +127,16 @@ describe("Hermes Module - Unit & Isolation Tests", () => {
       expect(service.detectAction("Qual a previsão para o próximo trimestre?")).toBeNull();
     });
 
+    it("handles humanized conversational queries and injects Brasilia timestamp", async () => {
+      const socioA = "marcelo@megadesk.online";
+      const resultDate = await service.sendMessage(socioA, "Que dia é hoje?");
+      expect(resultDate.response.content).toContain("Horário de Brasília");
+
+      const resultGreeting = await service.sendMessage(socioA, "Olá, tudo bem?");
+      expect(resultGreeting.response.content).toContain("Hermes");
+      expect(resultGreeting.response.content.toLowerCase()).toContain("tudo bem");
+    });
+
     it("provides quick stats for the inspection dashboard", () => {
       const stats = service.getQuickStats();
       expect(stats.uptimeSeconds).toBeGreaterThanOrEqual(0);
