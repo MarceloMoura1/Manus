@@ -4549,8 +4549,8 @@ function Shell() {
             ariaLabel={active.startsWith("erp-") ? "Módulos do ERP" : active.startsWith("crm-") ? "Módulos do CRM" : "Ações da página"}
             activeItemId={active.startsWith("erp-") ? erpSection : active.startsWith("crm-") ? crmSection : undefined}
             items={active.startsWith("erp-") ? erpTopbarItems : active.startsWith("crm-") ? crmTopbarItems : []}
-            leading={<button ref={sidebarTriggerRef} type="button" onClick={() => setSidebarOpen(true)} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-700 hover:bg-slate-100 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
-            actions={<button type="button" onClick={() => window.dispatchEvent(new Event("megadesk-open-assistant"))} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500" title="Abrir assistente IA" aria-label="Abrir assistente IA"><Sparkles className="h-5 w-5" /></button>}
+            leading={<button ref={sidebarTriggerRef} type="button" onClick={() => setSidebarOpen(true)} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 lg:hidden" title="Abrir menu" aria-label="Abrir menu principal"><Menu className="h-5 w-5" /></button>}
+            actions={<button type="button" onClick={() => window.dispatchEvent(new Event("megadesk-open-assistant"))} className="flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-600 dark:text-slate-300 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-950 dark:hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500" title="Abrir assistente IA" aria-label="Abrir assistente IA"><Sparkles className="h-5 w-5" /></button>}
             />
         </ShellTopbarBoundary>
 
