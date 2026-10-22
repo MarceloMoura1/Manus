@@ -35,6 +35,7 @@ export interface TenantStorageMetrics {
   mediaCount: number;
   totalContacts: number;
   contatosWhatsApp: number;
+  clientesCrm: number;
   clientesErp: number;
   totalConversations: number;
   totalChamados: number;
@@ -49,7 +50,8 @@ export interface TenantStorageMetrics {
     cliente: string;
     banco: { nome: string; tamanhoKb: number; tamanhoFormatado: string };
     mensagens: { total: number; midias: number };
-    contatos: { whatsapp: number; erp: number };
+    contatos: { whatsapp: number };
+    clientes: { crm: number; erp: number; total: number };
     chamados: { total: number; abertos: number; statusRecente: string };
   };
 }
@@ -113,6 +115,7 @@ export async function inspectTenantStorageMetrics(slugOrName: string): Promise<T
         mediaCount: 0,
         totalContacts: 0,
         contatosWhatsApp: 0,
+        clientesCrm: 0,
         clientesErp: 0,
         totalConversations: 0,
         totalChamados: 0,
@@ -162,7 +165,7 @@ export async function inspectTenantStorageMetrics(slugOrName: string): Promise<T
       console.warn("[inspectTenantStorageMetrics] Falha ao consultar mensagens:", msgErr);
     }
 
-    // 3. Contatos WhatsApp (megadesk_conversation_contacts) e clientes ERP (megadesk_domain_customers)
+    // 3. Contatos WhatsApp (megadesk_conversation_contacts), clientes CRM (megadesk_crm_clients) e clientes ERP (megadesk_domain_customers)
     let contatosWhatsApp = 0;
     try {
       const [wppRows]: any = await pool.query(
@@ -181,14 +184,32 @@ export async function inspectTenantStorageMetrics(slugOrName: string): Promise<T
       console.warn("[inspectTenantStorageMetrics] Falha ao consultar contatos WhatsApp:", wppErr);
     }
 
-    let clientesErp = 0;
+    let clientesCrm = 0;
     try {
-      const [erpRows]: any = await pool.query(
-        `SELECT COUNT(*) as total FROM megadesk_domain_customers WHERE client_id = ?`,
+      const [crmRows]: any = await pool.query(
+        `SELECT COUNT(*) as total FROM megadesk_crm_clients WHERE client_id = ?`,
         [clientId]
       ).catch(async () => {
         return pool.query(
-          `SELECT COUNT(*) as total FROM megadesk_domain_customers WHERE \`clientId\` = ?`,
+          `SELECT COUNT(*) as total FROM megadesk_crm_clients WHERE \`clientId\` = ?`,
+          [clientId]
+        );
+      });
+      if (crmRows && crmRows[0]) {
+        clientesCrm = Number(crmRows[0].total) || 0;
+      }
+    } catch (crmErr) {
+      console.warn("[inspectTenantStorageMetrics] Falha ao consultar clientes CRM:", crmErr);
+    }
+
+    let clientesErp = 0;
+    try {
+      const [erpRows]: any = await pool.query(
+        `SELECT COUNT(*) as total FROM megadesk_domain_customers WHERE \`clientId\` = ?`,
+        [clientId]
+      ).catch(async () => {
+        return pool.query(
+          `SELECT COUNT(*) as total FROM megadesk_domain_customers WHERE client_id = ?`,
           [clientId]
         );
       });
@@ -199,7 +220,7 @@ export async function inspectTenantStorageMetrics(slugOrName: string): Promise<T
       console.warn("[inspectTenantStorageMetrics] Falha ao consultar clientes ERP:", erpErr);
     }
 
-    const totalContacts = contatosWhatsApp + clientesErp;
+    const totalContacts = contatosWhatsApp + clientesCrm + clientesErp;
 
     let totalConversations = 0;
     try {
@@ -292,7 +313,11 @@ export async function inspectTenantStorageMetrics(slugOrName: string): Promise<T
       },
       contatos: {
         whatsapp: contatosWhatsApp,
+      },
+      clientes: {
+        crm: clientesCrm,
         erp: clientesErp,
+        total: clientesCrm + clientesErp,
       },
       chamados: {
         total: totalChamados,
@@ -316,6 +341,7 @@ export async function inspectTenantStorageMetrics(slugOrName: string): Promise<T
       mediaCount,
       totalContacts,
       contatosWhatsApp,
+      clientesCrm,
       clientesErp,
       totalConversations,
       totalChamados,
@@ -334,6 +360,7 @@ export async function inspectTenantStorageMetrics(slugOrName: string): Promise<T
       mediaCount: 0,
       totalContacts: 0,
       contatosWhatsApp: 0,
+      clientesCrm: 0,
       clientesErp: 0,
       totalConversations: 0,
       totalChamados: 0,
@@ -469,6 +496,7 @@ export class HermesService {
             `| **Total de Mensagens WhatsApp** | **${metrics.totalMessages.toLocaleString("pt-BR")}** mensagens |\n` +
             `| **Mídias Anexadas (Fotos/Áudios/Docs)** | **${metrics.mediaCount.toLocaleString("pt-BR")}** arquivos |\n` +
             `| **Contatos WhatsApp Mapeados** | **${metrics.contatosWhatsApp.toLocaleString("pt-BR")}** contatos |\n` +
+            `| **Clientes no CRM (Funil / Gestão)** | **${metrics.clientesCrm.toLocaleString("pt-BR")}** cadastrados |\n` +
             `| **Clientes Cadastrados no ERP** | **${metrics.clientesErp.toLocaleString("pt-BR")}** clientes |\n` +
             `| **Total de Chamados / Tickets** | **${metrics.totalChamados.toLocaleString("pt-BR")}** chamados |\n` +
             `| **Chamados em Aberto** | ${chamadosStatusFormatted} |\n` +
@@ -479,7 +507,8 @@ export class HermesService {
             cliente: metrics.clientName,
             banco: { nome: metrics.tenantDatabaseName || "megadesk_main", tamanhoKb: metrics.estimatedDbSizeKB },
             mensagens: { total: metrics.totalMessages, midias: metrics.mediaCount },
-            contatos: { whatsapp: metrics.contatosWhatsApp, erp: metrics.clientesErp },
+            contatos: { whatsapp: metrics.contatosWhatsApp },
+            clientes: { crm: metrics.clientesCrm, erp: metrics.clientesErp, total: metrics.clientesCrm + metrics.clientesErp },
             chamados: { total: metrics.totalChamados, abertos: metrics.chamadosAbertos, statusRecente: metrics.ultimoChamadoData },
           },
         };
@@ -616,7 +645,7 @@ Sua identidade e postura:
 
         // Se houver ação sob demanda executada, injetar telemetria determinística no prompt
         const promptToSend = actionResult
-          ? `[TELEMETRIA OPERACIONAL COLETADA DO SISTEMA]\n${actionResult.content}\n\n[DADOS BRUTOS ESTRUTURADOS JSON]\n${JSON.stringify(actionResult.data || {})}\n\n[DIRETRIZES PARA A RESPOSTA]\n1. Destaque o status dos chamados em aberto caso existam (quantidade e criticidade de atendimento).\n2. Exponha claramente tanto os contatos de WhatsApp ativos quanto os clientes do ERP.\n3. Apresente os dados com clareza executiva, calor humano e sem inventar números.\n\n[SOLICITAÇÃO DO ADMINISTRADOR]\n${trimmed}`
+          ? `[TELEMETRIA OPERACIONAL COLETADA DO SISTEMA]\n${actionResult.content}\n\n[DADOS BRUTOS ESTRUTURADOS JSON]\n${JSON.stringify(actionResult.data || {})}\n\n[DIRETRIZES PARA A RESPOSTA]\n1. Destaque os clientes cadastrados no CRM (gestão/funil) e os contatos ativos de WhatsApp.\n2. Destaque o status dos chamados em aberto caso existam (quantidade e criticidade de atendimento).\n3. Apresente os dados com clareza executiva, calor humano e sem inventar números.\n\n[SOLICITAÇÃO DO ADMINISTRADOR]\n${trimmed}`
           : trimmed;
 
         const result = await chat.sendMessage(promptToSend);
