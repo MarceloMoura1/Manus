@@ -244,7 +244,7 @@ export function ShellTopbarBoundary({ active, mode, children }: ShellTopbarBound
   if (active === "tickets" || mode === "none") return null;
 
   return (
-    <div className={mode === "mobile-only" ? "lg:hidden" : undefined} data-testid="module-topbar-shell">
+    <div className={`w-full ${mode === "mobile-only" ? "lg:hidden" : ""}`} data-testid="module-topbar-shell">
       {children}
     </div>
   );
