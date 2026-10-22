@@ -283,6 +283,18 @@ export function renderAutomotiveQuotePages(input: AutomotiveQuoteInput): Array<{
       </div>
     `;
 
+    const hasServiceItems = items.some(item => itemKindLabel(item.unit) === "Serviço");
+    const partsSubtotal = hasServiceItems
+      ? items
+          .filter(item => itemKindLabel(item.unit) !== "Serviço")
+          .reduce((sum, item) => sum + item.lineTotalCents, 0)
+      : quote.subtotalCents;
+    const laborSubtotal = hasServiceItems
+      ? items
+          .filter(item => itemKindLabel(item.unit) === "Serviço")
+          .reduce((sum, item) => sum + item.lineTotalCents, 0) + (quote.chargesCents || 0)
+      : (quote.chargesCents || 0);
+
     // Totals & Authorization Signature Block (Last Page Only)
     const totalsAndAuthHtml = isLastPage
       ? `
@@ -317,11 +329,11 @@ export function renderAutomotiveQuotePages(input: AutomotiveQuoteInput): Array<{
           <div style="padding: 8px 12px; font-size: 10px; line-height: 1.7;">
             <div style="display: flex; justify-content: space-between; color: #52525b;">
               <span>Total Peças / Materiais:</span>
-              <strong style="color: #09090b;">${money(quote.subtotalCents)}</strong>
+              <strong style="color: #09090b;">${money(partsSubtotal)}</strong>
             </div>
             <div style="display: flex; justify-content: space-between; color: #52525b;">
               <span>Total Mão de Obra:</span>
-              <strong style="color: #09090b;">${money(quote.chargesCents || 0)}</strong>
+              <strong style="color: #09090b;">${money(laborSubtotal)}</strong>
             </div>
             <div style="display: flex; justify-content: space-between; color: #52525b;">
               <span>Serviços Terceiros / Frete:</span>

@@ -615,15 +615,27 @@ function automotiveQuotePages(input: QuotePdfInput): string[] {
       commands.push(strokeLine(padX + mmToPt(72), yFromTopMm(authTop + 30, 0), padX + mmToPt(100), yFromTopMm(authTop + 30, 0), "0.09 0.09 0.11"));
       commands.push(centerText(padX + mmToPt(86), yBaselineFromTopMm(authTop + 34, 7), 7, "Data: ___/___/____", "0.32 0.32 0.36"));
 
+      const hasServiceItems = input.quote.items.some(i => itemKindLabel(i.unit) === "Serviço");
+      const partsSubtotal = hasServiceItems
+        ? input.quote.items
+            .filter(i => itemKindLabel(i.unit) !== "Serviço")
+            .reduce((sum, i) => sum + i.lineTotalCents, 0)
+        : input.quote.subtotalCents;
+      const laborSubtotal = hasServiceItems
+        ? input.quote.items
+            .filter(i => itemKindLabel(i.unit) === "Serviço")
+            .reduce((sum, i) => sum + i.lineTotalCents, 0) + (input.quote.chargesCents || 0)
+        : input.quote.chargesCents;
+
       // Right Column: Totals (height: 62mm)
       commands.push(fillRect(rightColX, yFromTopMm(totalsTop, 62), rightColWidth, mmToPt(62), "0.98 0.98 0.98"));
       commands.push(strokeRect(rightColX, yFromTopMm(totalsTop, 62), rightColWidth, mmToPt(62), "0.89 0.89 0.91"));
 
       commands.push(text(rightColX + mmToPt(4), yBaselineFromTopMm(totalsTop + 8, 7.5), 7.5, "Total Peças / Materiais:", "0.32 0.32 0.36"));
-      commands.push(rightText(rightColX + rightColWidth - mmToPt(4), yBaselineFromTopMm(totalsTop + 8, 7.5), 7.5, money(input.quote.subtotalCents), "0.04 0.04 0.04"));
+      commands.push(rightText(rightColX + rightColWidth - mmToPt(4), yBaselineFromTopMm(totalsTop + 8, 7.5), 7.5, money(partsSubtotal), "0.04 0.04 0.04"));
 
       commands.push(text(rightColX + mmToPt(4), yBaselineFromTopMm(totalsTop + 16, 7.5), 7.5, "Total Mão de Obra:", "0.32 0.32 0.36"));
-      commands.push(rightText(rightColX + rightColWidth - mmToPt(4), yBaselineFromTopMm(totalsTop + 16, 7.5), 7.5, money(input.quote.chargesCents), "0.04 0.04 0.04"));
+      commands.push(rightText(rightColX + rightColWidth - mmToPt(4), yBaselineFromTopMm(totalsTop + 16, 7.5), 7.5, money(laborSubtotal), "0.04 0.04 0.04"));
 
       commands.push(text(rightColX + mmToPt(4), yBaselineFromTopMm(totalsTop + 24, 7.5), 7.5, "Serviços Terceiros / Frete:", "0.32 0.32 0.36"));
       commands.push(rightText(rightColX + rightColWidth - mmToPt(4), yBaselineFromTopMm(totalsTop + 24, 7.5), 7.5, money(input.quote.freightCents), "0.04 0.04 0.04"));

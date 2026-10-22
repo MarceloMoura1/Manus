@@ -213,5 +213,30 @@ describe("ERP Services Module", () => {
       expect(repo.delete).toHaveBeenCalledWith("tenant-a", 1);
       expect(res.success).toBe(true);
     });
+
+    it("resolves service for sale with product and inventory item references", async () => {
+      const repo = createMockRepo();
+      (repo as any).resolveForSale = vi.fn().mockResolvedValue({
+        serviceId: 1,
+        productPublicId: "prod-uuid-1",
+        inventoryItemPublicId: "inv-uuid-1",
+        name: "Alinhamento 3D",
+        sku: "SRV-001",
+        unit: "serviço",
+        priceCents: 12000,
+        isService: true,
+      });
+      const service = new ServiceService(repo);
+
+      const resolved = await service.resolveForSale(
+        { clientId: "tenant-a", userId: "user-1", role: "agent" },
+        1
+      );
+
+      expect((repo as any).resolveForSale).toHaveBeenCalledWith("tenant-a", "user-1", 1);
+      expect(resolved.productPublicId).toBe("prod-uuid-1");
+      expect(resolved.unit).toBe("serviço");
+      expect(resolved.isService).toBe(true);
+    });
   });
 });

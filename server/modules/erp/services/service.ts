@@ -7,6 +7,7 @@ import type {
   ServiceItem,
   ServiceListInput,
   ServiceListResult,
+  ServiceResolvedForSale,
   ServiceUpdateInput,
 } from "./contracts";
 import { ServiceRepository } from "./repository";
@@ -108,5 +109,13 @@ export class ServiceService {
 
   async listCategories(identity: ServiceIdentity): Promise<string[]> {
     return this.repository.listCategories(identity.clientId);
+  }
+
+  async resolveForSale(identity: ServiceIdentity, serviceId: number): Promise<ServiceResolvedForSale> {
+    const resolved = await this.repository.resolveForSale(identity.clientId, identity.userId, serviceId);
+    if (!resolved) {
+      throw new ErpDomainError("NOT_FOUND", "Serviço não encontrado.");
+    }
+    return resolved;
   }
 }

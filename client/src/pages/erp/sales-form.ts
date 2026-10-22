@@ -21,7 +21,15 @@ export type SalesFormItem = {
   quantity: string;
   unitPriceCents: number;
   discountCents?: number;
+  itemType?: "product" | "service";
 };
+
+const SERVICE_UNITS = new Set(["serv", "srv", "servico", "serviço", "svc", "h", "hr", "hora", "horas", "mo", "diaria", "diária"]);
+
+export function isSalesItemService(item: { unit?: string | null; itemType?: string | null }): boolean {
+  if (item.itemType === "service") return true;
+  return SERVICE_UNITS.has(String(item.unit ?? "").trim().toLowerCase());
+}
 
 export type SalesForm = {
   publicId?: string;
@@ -117,6 +125,7 @@ const quantityMillis = (value: string) => {
 };
 
 export function salesStockIssue(item: SalesFormItem) {
+  if (isSalesItemService(item)) return null;
   if (item.availableQuantity === null || item.availableQuantity === undefined) return null;
   const requested = quantityMillis(item.quantity);
   const available = quantityMillis(item.availableQuantity);
@@ -232,10 +241,19 @@ export function isSalesProductOptionDisabled(
 }
 
 export function calculateSalesFormTotals(form: SalesForm) {
-  const subtotalCents = form.items.reduce(
-    (sum, item) => sum + Math.round(Number(item.quantity || 0) * item.unitPriceCents),
-    0
-  );
+  const partsSubtotalCents = form.items
+    .filter(item => !isSalesItemService(item))
+    .reduce(
+      (sum, item) => sum + Math.round(Number(item.quantity || 0) * item.unitPriceCents),
+      0
+    );
+  const servicesSubtotalCents = form.items
+    .filter(item => isSalesItemService(item))
+    .reduce(
+      (sum, item) => sum + Math.round(Number(item.quantity || 0) * item.unitPriceCents),
+      0
+    );
+  const subtotalCents = partsSubtotalCents + servicesSubtotalCents;
   const itemDiscountCents = form.items.reduce(
     (sum, item) => sum + (item.discountCents ?? 0),
     0
@@ -245,6 +263,8 @@ export function calculateSalesFormTotals(form: SalesForm) {
   const totalWithChargesCents = totalCents + (form.chargesCents ?? 0);
   return {
     subtotalCents,
+    partsSubtotalCents,
+    servicesSubtotalCents,
     itemDiscountCents,
     discountCents,
     chargesCents: form.chargesCents ?? 0,

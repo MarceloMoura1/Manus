@@ -96,3 +96,19 @@ export type ServiceListResult = {
   pageSize: number;
   totalPages: number;
 };
+
+export const serviceResolveForSaleInput = z.object({
+  serviceId: serviceIdSchema,
+});
+export type ServiceResolveForSaleInput = z.infer<typeof serviceResolveForSaleInput>;
+
+export type ServiceResolvedForSale = {
+  serviceId: number;
+  productPublicId: string;
+  inventoryItemPublicId: string;
+  name: string;
+  sku: string;
+  unit: string;
+  priceCents: number;
+  isService: true;
+};
