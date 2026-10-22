@@ -516,14 +516,26 @@ export class ErpService {
     return deps;
   }
 
-  async deleteProduct(identity: Identity, publicId: string, force = false) {
+  async deleteProduct(identity: Identity, publicId: string, force = false, hardDelete = false) {
     this.assertWrite(identity);
     const deps = await this.repository.checkProductDependencies(identity.clientId, publicId);
     if (!deps) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado.");
 
+    if (hardDelete) {
+      const purged = await this.repository.purgeProduct(identity.clientId, publicId);
+      return {
+        success: purged,
+        hardDeleted: true,
+        hasDependencies: deps.hasDependencies,
+        salesCount: deps.salesCount,
+        stockCount: deps.stockCount,
+      };
+    }
+
     if (deps.hasDependencies && !force) {
       return {
         success: false,
+        hardDeleted: false,
         hasDependencies: true,
         salesCount: deps.salesCount,
         stockCount: deps.stockCount,
@@ -534,6 +546,7 @@ export class ErpService {
     await this.setProductActive(identity, publicId, false);
     return {
       success: true,
+      hardDeleted: false,
       hasDependencies: deps.hasDependencies,
       salesCount: deps.salesCount,
       stockCount: deps.stockCount,

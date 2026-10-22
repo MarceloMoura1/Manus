@@ -221,6 +221,41 @@ export class ErpRepository {
     return result.affectedRows > 0;
   }
 
+  async purgeProduct(clientId: string, publicId: string): Promise<boolean> {
+    const connection = await this.database().getConnection();
+    try {
+      await connection.beginTransaction();
+      const product = await this.findProduct(clientId, publicId, connection, true);
+      if (!product) {
+        await connection.rollback();
+        return false;
+      }
+      const productId = product.id;
+
+      await connection.execute("SET FOREIGN_KEY_CHECKS = 0");
+      try {
+        await connection.execute("UPDATE erp_products SET primary_media_id=NULL WHERE client_id=? AND id=?", [clientId, productId]);
+        await connection.execute("DELETE FROM erp_product_media WHERE client_id=? AND product_id=?", [clientId, productId]);
+        await connection.execute("DELETE FROM erp_product_variants WHERE client_id=? AND product_id=?", [clientId, productId]);
+        await connection.execute("DELETE FROM erp_inventory_items WHERE client_id=? AND product_id=?", [clientId, productId]);
+        await connection.execute("DELETE FROM erp_product_suppliers WHERE client_id=? AND product_id=?", [clientId, productId]);
+        await connection.execute("DELETE FROM erp_product_audit_logs WHERE client_id=? AND product_id=?", [clientId, productId]);
+        await connection.execute("DELETE FROM erp_product_fiscal_profiles WHERE product_id=?", [productId]);
+        await connection.execute("DELETE FROM erp_stock_balances WHERE client_id=? AND product_id=?", [clientId, productId]);
+        await connection.execute("DELETE FROM erp_products WHERE client_id=? AND id=?", [clientId, productId]);
+      } finally {
+        await connection.execute("SET FOREIGN_KEY_CHECKS = 1");
+      }
+      await connection.commit();
+      return true;
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
+  }
+
   async checkProductDependencies(clientId: string, publicId: string) {
     const product = await this.findProduct(clientId, publicId);
     if (!product) return null;
