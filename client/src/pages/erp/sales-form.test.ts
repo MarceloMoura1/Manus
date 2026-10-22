@@ -215,6 +215,8 @@ describe("sales form inventory identity", () => {
       })
     ).toEqual({
       subtotalCents: 2_400,
+      partsSubtotalCents: 2_400,
+      servicesSubtotalCents: 0,
       itemDiscountCents: 100,
       discountCents: 300,
       chargesCents: 40,
