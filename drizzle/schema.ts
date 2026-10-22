@@ -4539,3 +4539,26 @@ export const megadeskErpServices = mysqlTable(
 export type MegadeskErpService = typeof megadeskErpServices.$inferSelect;
 export type MegadeskErpServiceInsert = typeof megadeskErpServices.$inferInsert;
 
+export const megadeskAdminHermesMessages = mysqlTable(
+  "megadesk_admin_hermes_messages",
+  {
+    id: bigint({ mode: "number" }).autoincrement().primaryKey().notNull(),
+    adminUserId: varchar("admin_user_id", { length: 100 }).notNull(),
+    role: varchar("role", { length: 20 }).notNull(),
+    content: text("content").notNull(),
+    metadataJson: json("metadata_json"),
+    createdAt: timestamp("created_at", { mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  table => [
+    index("idx_admin_hermes_messages_user_created").on(
+      table.adminUserId,
+      table.createdAt
+    ),
+  ]
+);
+
+export type MegadeskAdminHermesMessage = typeof megadeskAdminHermesMessages.$inferSelect;
+export type MegadeskAdminHermesMessageInsert = typeof megadeskAdminHermesMessages.$inferInsert;
+
