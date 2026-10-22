@@ -32,12 +32,17 @@ export function ModuleTopbar({
   const visibleItems = items.filter(item => !item.hidden);
 
   return (
-    <header className="shrink-0 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/90 backdrop-blur-md text-slate-800 dark:text-slate-200 transition-colors">
-      <div className="flex min-h-14 min-w-0 items-center gap-2 px-3 sm:px-6">
-        {leading ? <div className="shrink-0">{leading}</div> : null}
+    <header className="w-full shrink-0 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/90 backdrop-blur-md text-slate-800 dark:text-slate-200 transition-colors">
+      <div className="flex min-h-14 w-full min-w-0 items-center justify-between gap-2 px-3 sm:px-6">
+        <div className="flex shrink-0 items-center justify-start min-w-10">
+          {leading ? leading : null}
+        </div>
         {visibleItems.length > 0 ? (
-          <nav aria-label={ariaLabel} className="min-w-0 flex-1 overflow-x-auto scrollbar-hide no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-            <div className="flex min-w-max items-center py-1">
+          <nav
+            aria-label={ariaLabel}
+            className="flex-1 flex items-center justify-center min-w-0 overflow-x-auto scrollbar-hide no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden py-1"
+          >
+            <div className="flex items-center mx-auto shrink-0 min-w-max">
               {visibleItems.map((item, index) => {
                 const isActive = item.id === activeItemId;
                 const unavailableLabel = item.unavailableReason
@@ -89,8 +94,10 @@ export function ModuleTopbar({
             </div>
           </nav>
         ) : <div className="min-w-0 flex-1" />}
-        {complementaryContent ? <div className="hidden shrink-0 md:block">{complementaryContent}</div> : null}
-        {actions ? <div className="flex shrink-0 items-center gap-1">{actions}</div> : null}
+        <div className="flex shrink-0 items-center justify-end min-w-10 gap-1">
+          {complementaryContent ? <div className="hidden shrink-0 md:block">{complementaryContent}</div> : null}
+          {actions ? actions : null}
+        </div>
       </div>
     </header>
   );
