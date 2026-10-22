@@ -108,9 +108,23 @@ describe("Hermes Module - Unit & Isolation Tests", () => {
       const resultVistoria = await service.sendMessage(socioA, "Faça uma vistoria da VPS");
       expect(resultVistoria.response.content).toContain("Vistoria Operacional da Plataforma");
       expect(resultVistoria.response.metadataJson?.source).toBe("fallback");
+      expect(resultVistoria.response.metadataJson?.actionTriggered).toBe("vistoria_vps");
 
       const resultTokens = await service.sendMessage(socioA, "Como está o consumo de tokens?");
       expect(resultTokens.response.content).toContain("Telemetria de Tokens & Recursos");
+      expect(resultTokens.response.metadataJson?.actionTriggered).toBe("token_telemetry");
+
+      const resultWhatsApp = await service.sendMessage(socioA, "Como está a conexão do WhatsApp Evolution?");
+      expect(resultWhatsApp.response.content).toContain("Diagnóstico do Gateway WhatsApp");
+      expect(resultWhatsApp.response.metadataJson?.actionTriggered).toBe("whatsapp_check");
+    });
+
+    it("detects on-demand actions accurately", () => {
+      expect(service.detectAction("Checar containers Docker")).toBe("vistoria_vps");
+      expect(service.detectAction("Status do zap e evolution")).toBe("whatsapp_check");
+      expect(service.detectAction("Consumo de cotas")).toBe("token_telemetry");
+      expect(service.detectAction("Auditoria de multi-tenant")).toBe("security_audit");
+      expect(service.detectAction("Qual a previsão para o próximo trimestre?")).toBeNull();
     });
 
     it("provides quick stats for the inspection dashboard", () => {
