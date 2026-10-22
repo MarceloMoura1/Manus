@@ -4,6 +4,7 @@ import {
   calculateSalesFormTotals,
   firstSalesStockIssue,
   hasDuplicateSalesItemIdentity,
+  isSalesItemService,
   isSalesProductOptionDisabled,
   salesDraftFromForm,
   salesCommercialDate,
@@ -232,5 +233,112 @@ describe("sales form inventory identity", () => {
       { dueDate: "2026-12-05", amountCents: 333 },
     ]);
     expect(installments.reduce((sum, item) => sum + item.amountCents, 0)).toBe(1_000);
+  });
+
+  it("identifies services by itemType, sku, variantName or unit and bypasses stock checks", () => {
+    const serviceByType: SalesFormItem = {
+      productPublicId: "10000000-0000-4000-8000-000000000099",
+      inventoryItemPublicId: "20000000-0000-4000-8000-000000000099",
+      productName: "Mão de obra mecânica",
+      quantity: "2.000",
+      availableQuantity: "0.000",
+      unitPriceCents: 5_000,
+      itemType: "service",
+    };
+    const serviceBySku: SalesFormItem = {
+      productPublicId: "10000000-0000-4000-8000-000000000098",
+      sku: "SRV-12",
+      productName: "Alinhamento",
+      quantity: "1.000",
+      availableQuantity: "0.000",
+      unitPriceCents: 8_000,
+    };
+    const serviceByUnit: SalesFormItem = {
+      productPublicId: "10000000-0000-4000-8000-000000000097",
+      unit: "serviço",
+      productName: "Balanceamento",
+      quantity: "4.000",
+      availableQuantity: "0.000",
+      unitPriceCents: 2_500,
+    };
+
+    expect(isSalesItemService(serviceByType)).toBe(true);
+    expect(isSalesItemService(serviceBySku)).toBe(true);
+    expect(isSalesItemService(serviceByUnit)).toBe(true);
+    expect(salesStockIssue(serviceByType)).toBeNull();
+    expect(salesStockIssue(serviceBySku)).toBeNull();
+    expect(salesStockIssue(serviceByUnit)).toBeNull();
+  });
+
+  it("calculates combined products and services subtotals and discounts correctly", () => {
+    const productItem: SalesFormItem = {
+      productPublicId,
+      inventoryItemPublicId,
+      productName: "Pastilha de Freio",
+      quantity: "2.000",
+      unitPriceCents: 15_000,
+      discountCents: 2_000,
+      itemType: "product",
+    };
+    const serviceItem: SalesFormItem = {
+      productPublicId: "10000000-0000-4000-8000-000000000099",
+      inventoryItemPublicId: "20000000-0000-4000-8000-000000000099",
+      productName: "Troca de Pastilhas",
+      quantity: "1.000",
+      unitPriceCents: 8_000,
+      discountCents: 1_000,
+      itemType: "service",
+    };
+
+    const totals = calculateSalesFormTotals({
+      ...blankSalesForm("quote"),
+      crmClientId: "customer-1",
+      orderDiscountCents: 500,
+      freightCents: 1_500,
+      chargesCents: 0,
+      items: [productItem, serviceItem],
+    });
+
+    // product subtotal: 2 * 15000 = 30000
+    // service subtotal: 1 * 8000 = 8000
+    // total subtotal: 38000
+    // item discounts: 2000 + 1000 = 3000
+    // order discount: 500 -> total discount = 3500
+    // freight: 1500
+    // total: 38000 - 3500 + 1500 = 36000
+    expect(totals).toEqual({
+      subtotalCents: 38_000,
+      partsSubtotalCents: 30_000,
+      servicesSubtotalCents: 8_000,
+      itemDiscountCents: 3_000,
+      discountCents: 3_500,
+      chargesCents: 0,
+      totalCents: 36_000,
+    });
+  });
+
+  it("preserves service identity and attributes when converting detail to form", () => {
+    const form = salesFormFromDetail({
+      publicId: "30000000-0000-4000-8000-000000000001",
+      documentType: "quote",
+      crmClientId: "customer-1",
+      items: [
+        {
+          productPublicId: "10000000-0000-4000-8000-000000000099",
+          inventoryItemPublicId: "20000000-0000-4000-8000-000000000099",
+          productName: "Instalação de Acessórios",
+          variantName: "Serviço · Mecânica",
+          sku: "SRV-50",
+          unit: "serviço",
+          quantity: "1.000",
+          unitPriceCents: 10_000,
+          discountCents: 0,
+        },
+      ],
+    });
+
+    expect(form.items[0].itemType).toBe("service");
+    expect(form.items[0].unit).toBe("serviço");
+    expect(isSalesItemService(form.items[0])).toBe(true);
   });
 });

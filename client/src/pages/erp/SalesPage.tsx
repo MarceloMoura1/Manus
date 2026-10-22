@@ -56,6 +56,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { normalizeContactPhone, formatContactPhone } from "../../../../shared/contact-phone";
+import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { productMediaUrl, saleDocumentUrl } from "@/lib/trpc-url";
 import { cn } from "@/lib/utils";
@@ -2173,24 +2174,49 @@ function SaleFormDialog({
     try {
       setResolvingServiceId(service.id);
       const resolved = await resolveServiceMutation.mutateAsync({ serviceId: service.id });
-      setForm(current => current ? { ...current, items: [...current.items, {
-        productPublicId: resolved.productPublicId,
-        inventoryItemPublicId: resolved.inventoryItemPublicId,
-        productName: resolved.name,
-        variantName: service.category ? `Serviço · ${service.category}` : "Serviço",
-        sku: resolved.sku,
-        unit: "serviço",
-        imagePath: null,
-        availableQuantity: null,
-        quantity: "1.000",
-        unitPriceCents: resolved.priceCents,
-        discountCents: 0,
-        itemType: "service",
-      }] } : current);
+      setForm(current => {
+        if (!current) return current;
+        const existingIndex = current.items.findIndex(
+          it =>
+            (resolved.inventoryItemPublicId && it.inventoryItemPublicId === resolved.inventoryItemPublicId) ||
+            it.productPublicId === resolved.productPublicId
+        );
+        if (existingIndex >= 0) {
+          const existing = current.items[existingIndex];
+          const currentQty = Number(existing.quantity || "1");
+          const updatedItems = [...current.items];
+          updatedItems[existingIndex] = {
+            ...existing,
+            quantity: (currentQty + 1).toFixed(3),
+          };
+          return { ...current, items: updatedItems };
+        }
+        return {
+          ...current,
+          items: [
+            ...current.items,
+            {
+              productPublicId: resolved.productPublicId,
+              inventoryItemPublicId: resolved.inventoryItemPublicId,
+              productName: resolved.name,
+              variantName: service.category ? `Serviço · ${service.category}` : "Serviço",
+              sku: resolved.sku,
+              unit: "serviço",
+              imagePath: null,
+              availableQuantity: null,
+              quantity: "1.000",
+              unitPriceCents: resolved.priceCents,
+              discountCents: 0,
+              itemType: "service",
+            },
+          ],
+        };
+      });
       setCatalogSearch("");
       setExpandedCatalogProductId(null);
     } catch (err) {
       console.error("Falha ao resolver serviço para venda", err);
+      toast.error(err instanceof Error ? err.message : "Não foi possível adicionar o serviço ao documento.");
     } finally {
       setResolvingServiceId(null);
     }
