@@ -18,6 +18,13 @@ describe("Module Navigation — CRM and ERP tab ordering", () => {
       { id: "activities", label: "Atividades" },
       { id: "reports", label: "Relatórios" },
     ]);
+
+    items.forEach(item => {
+      expect(item.icon).toBeDefined();
+    });
+
+    const automationsItem = items.find(i => i.id === "automations");
+    expect(automationsItem?.badge).toBeDefined();
   });
 
   it("enforces the mandatory ERP navigation sequence with Fornecedores at the end", () => {
@@ -47,5 +54,11 @@ describe("Module Navigation — CRM and ERP tab ordering", () => {
       { id: "reports", label: "Relatórios" },
       { id: "suppliers", label: "Fornecedores" },
     ]);
+
+    items
+      .filter(item => !item.disabled)
+      .forEach(item => {
+        expect(item.icon).toBeDefined();
+      });
   });
 });

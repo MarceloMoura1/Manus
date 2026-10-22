@@ -4,7 +4,29 @@ import { trpc } from "@/lib/trpc";
 import { formatDateTime } from "@/lib/conversationDateTime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AlertCircle, Boxes, Image as ImageIcon, LayoutGrid, LayoutList, PackagePlus, Search, Trash2, TrendingDown, Upload, WalletCards } from "lucide-react";
+import {
+  AlertCircle,
+  BarChart3,
+  Boxes,
+  DollarSign,
+  Image as ImageIcon,
+  LayoutDashboard,
+  LayoutGrid,
+  LayoutList,
+  Package,
+  PackagePlus,
+  Receipt,
+  Search,
+  ShoppingBag,
+  ShoppingCart,
+  Trash2,
+  TrendingDown,
+  Truck,
+  Upload,
+  Users,
+  WalletCards,
+  Wrench,
+} from "lucide-react";
 import { SuppliersPage } from "./SuppliersPage";
 import { ClientesPage } from "../ClientesPage";
 import type { CrmWhatsAppIntent } from "../../../../shared/crm";
@@ -47,17 +69,17 @@ export function getErpTopbarItems({
   onNavigate: (section: ErpSection) => void;
 }): ModuleTopbarItem[] {
   const available = [
-    {id:"summary" as const,label:"Resumo"},
-    {id:"products" as const,label:"Produtos"},
-    {id:"services" as const,label:"Serviços"},
-    {id:"stock" as const,label:"Estoque"},
-    {id:"sales" as const,label:"Vendas",hidden:!canAccessSales},
-    {id:"purchases" as const,label:"Compras"},
-    {id:"finance" as const,label:"Financeiro",hidden:!canAccessFinance},
-    {id:"fiscal" as const,label:"Fiscal",hidden:!canAccessFiscal},
-    {id:"reports" as const,label:"Relatórios",hidden:!canAccessReports},
-    {id:"suppliers" as const,label:"Fornecedores"},
-    ...(canAccessClients ? [{id:"clients" as const,label:"Clientes"}] : []),
+    { id: "summary" as const, label: "Resumo", icon: LayoutDashboard },
+    { id: "products" as const, label: "Produtos", icon: Package },
+    { id: "services" as const, label: "Serviços", icon: Wrench },
+    { id: "stock" as const, label: "Estoque", icon: Boxes },
+    { id: "sales" as const, label: "Vendas", icon: ShoppingCart, hidden: !canAccessSales },
+    { id: "purchases" as const, label: "Compras", icon: ShoppingBag },
+    { id: "finance" as const, label: "Financeiro", icon: DollarSign, hidden: !canAccessFinance },
+    { id: "fiscal" as const, label: "Fiscal", icon: Receipt, hidden: !canAccessFiscal },
+    { id: "reports" as const, label: "Relatórios", icon: BarChart3, hidden: !canAccessReports },
+    { id: "suppliers" as const, label: "Fornecedores", icon: Truck },
+    ...(canAccessClients ? [{ id: "clients" as const, label: "Clientes", icon: Users }] : []),
   ];
 
   return [

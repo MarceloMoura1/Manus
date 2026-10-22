@@ -10,13 +10,14 @@ import { ReportsPage } from "./ReportsPage";
 import { LeadsPage } from "./LeadsPage";
 import { PipelinePage } from "./PipelinePage";
 import {
+  LayoutDashboard,
   Users,
-  Target,
-  CalendarCheck,
   FileText,
-  Sparkles,
+  UserPlus,
+  Filter,
+  SlidersHorizontal,
+  Calendar,
   BarChart3,
-  Layers,
 } from "lucide-react";
 
 export type CrmSection =
@@ -35,14 +36,24 @@ export function getCrmTopbarItems({
   onNavigate: (section: CrmSection) => void;
 }): ModuleTopbarItem[] {
   const items: ModuleTopbarItem[] = [
-    { id: "summary" as const, label: "Resumo", onSelect: () => onNavigate("summary") },
-    { id: "clients" as const, label: "Clientes", onSelect: () => onNavigate("clients") },
-    { id: "proposals" as const, label: "Propostas", onSelect: () => onNavigate("proposals") },
-    { id: "leads" as const, label: "Leads", onSelect: () => onNavigate("leads") },
-    { id: "pipeline" as const, label: "Funil de Vendas", onSelect: () => onNavigate("pipeline") },
-    { id: "automations" as const, label: "Automações e IA", onSelect: () => onNavigate("automations") },
-    { id: "activities" as const, label: "Atividades", onSelect: () => onNavigate("activities") },
-    { id: "reports" as const, label: "Relatórios", onSelect: () => onNavigate("reports") },
+    { id: "summary" as const, label: "Resumo", icon: LayoutDashboard, onSelect: () => onNavigate("summary") },
+    { id: "clients" as const, label: "Clientes", icon: Users, onSelect: () => onNavigate("clients") },
+    { id: "proposals" as const, label: "Propostas", icon: FileText, onSelect: () => onNavigate("proposals") },
+    { id: "leads" as const, label: "Leads", icon: UserPlus, onSelect: () => onNavigate("leads") },
+    { id: "pipeline" as const, label: "Funil de Vendas", icon: Filter, onSelect: () => onNavigate("pipeline") },
+    {
+      id: "automations" as const,
+      label: "Automações e IA",
+      icon: SlidersHorizontal,
+      badge: (
+        <span className="ml-1 inline-flex items-center rounded border border-purple-500/30 bg-purple-500/20 px-1 text-[10px] font-bold text-purple-400">
+          IA
+        </span>
+      ),
+      onSelect: () => onNavigate("automations"),
+    },
+    { id: "activities" as const, label: "Atividades", icon: Calendar, onSelect: () => onNavigate("activities") },
+    { id: "reports" as const, label: "Relatórios", icon: BarChart3, onSelect: () => onNavigate("reports") },
   ];
 
   return items;
