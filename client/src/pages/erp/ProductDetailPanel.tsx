@@ -192,6 +192,7 @@ export type ProductDetailViewProps = {
   error?: { data?: { code?: string } | null; message?: string } | null;
   onBack: () => void;
   onEdit?: (product: ProductDetail) => void;
+  onDelete?: (product: ProductDetail) => void;
   canWrite?: boolean;
   currentTab: "general" | "variants" | "suppliers" | "history";
   onTabChange: (tab: "general" | "variants" | "suppliers" | "history") => void;
@@ -225,6 +226,7 @@ export function ProductDetailView({
   error,
   onBack,
   onEdit,
+  onDelete,
   canWrite,
   currentTab,
   onTabChange,
@@ -310,6 +312,18 @@ export function ProductDetailView({
               <Button size="sm" variant="outline" onClick={() => onEdit(product)} data-testid="edit-product-button">
                 <Edit className="mr-1.5 h-3.5 w-3.5" />
                 Editar produto
+              </Button>
+            )}
+            {canWrite && onDelete && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 border-rose-200 dark:border-rose-900/40"
+                onClick={() => onDelete(product)}
+                data-testid="delete-product-button"
+              >
+                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                Excluir produto
               </Button>
             )}
           </div>
@@ -1436,12 +1450,14 @@ export function ProductDetailPanel({
   productPublicId,
   onBack,
   onEdit,
+  onDelete,
   canWrite,
   onProductMediaChanged,
 }: {
   productPublicId: string;
   onBack: () => void;
   onEdit?: (product: ProductDetail) => void;
+  onDelete?: (product: ProductDetail) => void;
   canWrite?: boolean;
   onProductMediaChanged?: (productPublicId: string) => void;
 }) {
@@ -1585,6 +1601,7 @@ export function ProductDetailPanel({
         error={productQuery.error}
         onBack={onBack}
         onEdit={onEdit}
+        onDelete={onDelete}
         canWrite={canWrite}
         currentTab={currentTab}
         onTabChange={setCurrentTab}
