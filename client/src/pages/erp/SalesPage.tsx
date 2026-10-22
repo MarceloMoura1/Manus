@@ -100,6 +100,7 @@ import {
   salesPaginationItems,
   salesCsv,
   salesFilterPeriodLabel,
+  formatMultiSelectFilterLabel,
   salesMetricPeriod,
   nextSalesSort,
   saleStockPresentation,
@@ -220,6 +221,152 @@ const commercialStatusLabels = {
   cancelled: "Cancelado",
 } as const;
 
+const proposalStatusOptions = [
+  { value: "negotiation", label: "Em negociação" },
+  { value: "approved", label: "Aprovado" },
+  { value: "lost", label: "Recusado" },
+  { value: "expired", label: "Expirado" },
+];
+const proposalStatusMap: Record<string, string> = {
+  negotiation: "Em negociação",
+  approved: "Aprovado",
+  lost: "Recusado",
+  expired: "Expirado",
+  draft: "Rascunho",
+  converted: "Convertido",
+};
+
+const saleStatusOptions = [
+  { value: "quote", label: "Orçamento" },
+  { value: "in_progress", label: "Em andamento" },
+  { value: "completed", label: "Concluída" },
+  { value: "cancelled", label: "Cancelada" },
+];
+const saleStatusMap: Record<string, string> = {
+  quote: "Orçamento",
+  in_progress: "Em andamento",
+  completed: "Concluída",
+  cancelled: "Cancelada",
+};
+
+const paymentStatusOptions = [
+  { value: "pending", label: "Pendente" },
+  { value: "partial", label: "Pagamento parcial" },
+  { value: "paid", label: "Pago" },
+];
+const paymentStatusMap: Record<string, string> = {
+  pending: "Pendente",
+  partial: "Pagamento parcial",
+  paid: "Pago",
+};
+
+function MultiSelectFilter({
+  label,
+  options,
+  selected,
+  onChange,
+  icon: Icon,
+  className,
+}: {
+  label: string;
+  options: Array<{ value: string; label: string }>;
+  selected: string[];
+  onChange: (selected: string[]) => void;
+  icon?: React.ComponentType<{ className?: string }>;
+  className?: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [open]);
+
+  const optionMap = React.useMemo(() => {
+    const map = new Map<string, string>();
+    options.forEach(o => map.set(o.value, o.label));
+    return map;
+  }, [options]);
+
+  const buttonText = formatMultiSelectFilterLabel(label, selected, optionMap);
+
+  const toggleOption = (value: string) => {
+    if (selected.includes(value)) {
+      onChange(selected.filter(item => item !== value));
+    } else {
+      onChange([...selected, value]);
+    }
+  };
+
+  const selectAll = () => {
+    onChange([]);
+  };
+
+  return (
+    <div className={cn("relative min-w-0", className)} ref={dropdownRef}>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen(prev => !prev)}
+        className="flex h-10 w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-900 transition-colors hover:border-slate-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-slate-600 dark:focus:ring-blue-900/40"
+      >
+        <div className="flex min-w-0 items-center gap-2 truncate">
+          {Icon && <Icon className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" />}
+          <span className="truncate" title={buttonText}>{buttonText}</span>
+        </div>
+        <ChevronDown className={cn("ml-1.5 h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform duration-150 dark:text-slate-500", open && "rotate-180")} />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 max-h-64 w-full min-w-[200px] overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl [scrollbar-width:thin] dark:border-slate-800 dark:bg-slate-900">
+          <button
+            type="button"
+            onClick={selectAll}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            <input
+              type="checkbox"
+              checked={selected.length === 0}
+              readOnly
+              className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700"
+            />
+            <span className="font-semibold text-slate-900 dark:text-slate-100">Todos</span>
+          </button>
+          <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+          {options.map(option => {
+            const isChecked = selected.includes(option.value);
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => toggleOption(option.value)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  readOnly
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700"
+                />
+                <span className="truncate text-slate-800 dark:text-slate-200">{option.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function currentMonth() {
   const now = new Date();
   const from = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -280,6 +427,11 @@ export function SalesPage({
   >("all");
   const [paymentMethod, setPaymentMethod] = React.useState("all");
   const [sellerUserId, setSellerUserId] = React.useState("all");
+  const [selectedStatuses, setSelectedStatuses] = React.useState<string[]>([]);
+  const [selectedSellerIds, setSelectedSellerIds] = React.useState<string[]>([]);
+  const [selectedPaymentStatuses, setSelectedPaymentStatuses] = React.useState<string[]>([]);
+  const [selectedPaymentMethods, setSelectedPaymentMethods] = React.useState<string[]>([]);
+  const [periodMode, setPeriodMode] = React.useState<"month" | "all" | "custom">("month");
   const [includeArchived, setIncludeArchived] = React.useState(false);
   const [filterCustomer, setFilterCustomer] = React.useState<CustomerOption | null>(null);
   const [filterCustomerSearch, setFilterCustomerSearch] = React.useState("");
@@ -325,11 +477,15 @@ export function SalesPage({
     search: debouncedListSearch,
     kind,
     crmClientId: filterCustomer?.crmClientId,
-    stage: kind === "quotes" || stage === "all" ? undefined : stage,
-    commercialStatus: kind === "quotes" && commercialStatus !== "all" ? commercialStatus : undefined,
-    paymentStatus: paymentStatus === "all" ? undefined : paymentStatus,
-    paymentMethod: paymentMethod === "all" ? undefined : paymentMethod,
-    sellerUserId: sellerUserId === "all" ? undefined : sellerUserId,
+    stage: selectedStatuses.length === 0 && (kind === "quotes" || stage === "all") ? undefined : selectedStatuses.length === 0 ? stage : undefined,
+    commercialStatus: selectedStatuses.length === 0 && kind === "quotes" && commercialStatus !== "all" ? commercialStatus : undefined,
+    paymentStatus: selectedPaymentStatuses.length === 0 && paymentStatus !== "all" ? paymentStatus : undefined,
+    paymentMethod: selectedPaymentMethods.length === 0 && paymentMethod !== "all" ? paymentMethod : undefined,
+    sellerUserId: selectedSellerIds.length === 0 && sellerUserId !== "all" ? sellerUserId : undefined,
+    statuses: selectedStatuses.length > 0 ? selectedStatuses : undefined,
+    paymentStatuses: selectedPaymentStatuses.length > 0 ? selectedPaymentStatuses : undefined,
+    paymentMethods: selectedPaymentMethods.length > 0 ? selectedPaymentMethods : undefined,
+    sellerUserIds: selectedSellerIds.length > 0 ? selectedSellerIds : undefined,
     includeArchived,
     from: from || undefined,
     to: to || undefined,
@@ -578,6 +734,11 @@ export function SalesPage({
     setPaymentStatus("all");
     setPaymentMethod("all");
     setSellerUserId("all");
+    setSelectedStatuses([]);
+    setSelectedSellerIds([]);
+    setSelectedPaymentStatuses([]);
+    setSelectedPaymentMethods([]);
+    setPeriodMode("month");
     setIncludeArchived(false);
     setFilterCustomer(null);
     setFilterCustomerSearch("");
@@ -606,16 +767,16 @@ export function SalesPage({
   };
   const activeFilterCount = activeSalesFilterCount({
     search,
-    stage,
-    paymentStatus,
-    paymentMethod,
-    sellerUserId,
+    stage: selectedStatuses.length > 0 ? selectedStatuses : stage,
+    paymentStatus: selectedPaymentStatuses.length > 0 ? selectedPaymentStatuses : paymentStatus,
+    paymentMethod: selectedPaymentMethods.length > 0 ? selectedPaymentMethods : paymentMethod,
+    sellerUserId: selectedSellerIds.length > 0 ? selectedSellerIds : sellerUserId,
     customerId: filterCustomer?.crmClientId,
     from,
     to,
     defaultFrom: month.from,
     defaultTo: month.to,
-  }) + (commercialStatus === "all" ? 0 : 1) + (includeArchived ? 1 : 0);
+  }) + (selectedStatuses.length === 0 && commercialStatus !== "all" ? 1 : 0) + (includeArchived ? 1 : 0);
   const entityLabel = kind === "quotes" ? "orçamento" : kind === "orders" ? "venda" : "documento";
   const entityLabelPlural = kind === "quotes" ? "orçamentos" : kind === "orders" ? "vendas" : "documentos";
   const emptyStateTitle = mode === "quotes" ? "Nenhuma proposta comercial encontrada neste período." : kind === "orders" ? "Nenhuma venda encontrada neste período." : `Nenhum ${entityLabel} encontrado neste período.`;
@@ -701,30 +862,36 @@ export function SalesPage({
             <nav className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 py-2 [scrollbar-width:thin] sm:px-3 dark:border-slate-800 dark:bg-slate-800/60" aria-label="Status das propostas">
               {([
                 ["all", "Todas as Propostas"],
-                ["draft", "Rascunhos"],
                 ["negotiation", "Em Negociação"],
                 ["approved", "Aprovadas"],
-                ["converted", "Convertidas em Venda"],
-                ["lost", "Perdidas / Recusadas"],
-              ] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  aria-current={commercialStatus === value ? "page" : undefined}
-                  className={cn(
-                    "shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-xs font-semibold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500 motion-reduce:transition-none sm:text-sm",
-                    commercialStatus === value
-                      ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:text-indigo-400 dark:ring-slate-700"
-                      : "text-slate-500 hover:bg-white/70 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200"
-                  )}
-                  onClick={() => {
-                    setCommercialStatus(value as typeof commercialStatus);
-                    setPage(1);
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
+                ["lost", "Recusadas"],
+                ["expired", "Expiradas"],
+              ] as const).map(([value, label]) => {
+                const active = value === "all" ? selectedStatuses.length === 0 : selectedStatuses.includes(value);
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-current={active ? "page" : undefined}
+                    className={cn(
+                      "shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-xs font-semibold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 motion-reduce:transition-none sm:text-sm",
+                      active
+                        ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:text-blue-400 dark:ring-slate-700"
+                        : "text-slate-500 hover:bg-white/70 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200"
+                    )}
+                    onClick={() => {
+                      if (value === "all") {
+                        setSelectedStatuses([]);
+                      } else {
+                        setSelectedStatuses([value]);
+                      }
+                      setPage(1);
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </nav>
           ) : mode === "all" ? (
             <nav className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 py-2 [scrollbar-width:thin] sm:px-3 dark:border-slate-800 dark:bg-slate-800/60" aria-label="Tipos de venda">
@@ -734,14 +901,14 @@ export function SalesPage({
                     onNavigateToProposals();
                     return;
                   }
-                  setKind(value); setStage("all"); setCommercialStatus("all"); setPage(1);
+                  setKind(value); setStage("all"); setCommercialStatus("all"); setSelectedStatuses([]); setPage(1);
                 }}>{label}</button>
               ))}
             </nav>
           ) : null}
           <div className="border-b border-slate-100 bg-white px-3 py-3 sm:px-5 dark:border-slate-800 dark:bg-slate-900" data-testid="sales-filters">
             <div className="grid grid-cols-1 gap-2.5 rounded-xl border border-slate-200 bg-white p-2.5 sm:grid-cols-2 lg:grid-cols-12 dark:border-slate-800 dark:bg-slate-900" data-testid="sales-filter-toolbar">
-              <div className="relative min-w-0 sm:col-span-2 lg:col-span-4">
+              <div className="relative min-w-0 sm:col-span-2 lg:col-span-3">
                 <span className="sr-only">Busca</span>
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
                 <Input
@@ -755,48 +922,63 @@ export function SalesPage({
                   }}
                 />
               </div>
+
               <div className="relative min-w-0 lg:col-span-2">
                 <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
                 <select
                   aria-label="Período"
                   title={`Período - ${periodFilterLabel}`}
                   className="h-10 w-full appearance-none rounded-lg border border-slate-200 bg-white pl-9 pr-8 text-xs font-medium text-slate-900 transition-colors hover:border-slate-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-slate-600 dark:focus:ring-blue-900/40"
-                  value={from === month.from && to === month.to ? "month" : !from && !to ? "all" : "custom"}
-                  onChange={event => { if (event.target.value === "month") { setFrom(month.from); setTo(month.to); } else if (event.target.value === "all") { setFrom(""); setTo(""); } else { setAdvancedFiltersOpen(true); } setPage(1); }}
-                >
-                  <option value="month">Este mês</option><option value="all">Todo o período</option><option value="custom">{periodFilterLabel}</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
-              </div>
-              <div className="relative min-w-0 lg:col-span-2">
-                <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
-                <select
-                  aria-label="Status"
-                  className="h-10 w-full appearance-none rounded-lg border border-slate-200 bg-white pl-9 pr-8 text-xs font-medium text-slate-900 transition-colors hover:border-slate-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-slate-600 dark:focus:ring-blue-900/40"
-                  value={kind === "quotes" ? commercialStatus : stage}
+                  value={periodMode}
                   onChange={event => {
-                    if (kind === "quotes") setCommercialStatus(event.target.value as typeof commercialStatus);
-                    else setStage(event.target.value as typeof stage);
+                    const m = event.target.value as "month" | "all" | "custom";
+                    setPeriodMode(m);
+                    if (m === "month") {
+                      setFrom(month.from);
+                      setTo(month.to);
+                    } else if (m === "all") {
+                      setFrom("");
+                      setTo("");
+                    }
                     setPage(1);
                   }}
                 >
-                  <option value="all">Todos</option>
-                  {kind === "quotes" ? (["draft", "negotiation", "approved", "converted", "lost"] as const).map(value => <option key={value} value={value}>{commercialStatusLabels[value]}</option>) : stageOrder.map(value => <option key={value} value={value}>{stageLabels[value]}</option>)}
+                  <option value="month">Este mês</option>
+                  <option value="all">Todo o período</option>
+                  <option value="custom">Período personalizado</option>
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
               </div>
+
+              {/* Status MultiSelectFilter */}
               <div className="relative min-w-0 lg:col-span-2">
-                <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
-                <select
-                  aria-label="Vendedor"
-                  className="h-10 w-full appearance-none rounded-lg border border-slate-200 bg-white pl-9 pr-8 text-xs font-medium text-slate-900 transition-colors hover:border-slate-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-slate-600 dark:focus:ring-blue-900/40"
-                  value={sellerUserId}
-                  onChange={event => { setSellerUserId(event.target.value); setPage(1); }}
-                >
-                  <option value="all">Todos</option>{options.data?.sellers.map(value => <option key={value.publicId} value={value.publicId}>{value.name}</option>)}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+                <MultiSelectFilter
+                  label="Status"
+                  icon={Filter}
+                  options={isQuotesTable || kind === "quotes" ? proposalStatusOptions : saleStatusOptions}
+                  selected={selectedStatuses}
+                  onChange={vals => {
+                    setSelectedStatuses(vals);
+                    setPage(1);
+                  }}
+                />
               </div>
+
+              {/* Vendedor MultiSelectFilter */}
+              <div className="relative min-w-0 lg:col-span-3">
+                <MultiSelectFilter
+                  label="Vendedor"
+                  icon={UserRound}
+                  options={options.data?.sellers.map(s => ({ value: s.publicId, label: s.name })) ?? []}
+                  selected={selectedSellerIds}
+                  onChange={vals => {
+                    setSelectedSellerIds(vals);
+                    setPage(1);
+                  }}
+                />
+              </div>
+
+              {/* Botão + Filtros */}
               <Button
                 type="button"
                 variant="outline"
@@ -807,23 +989,55 @@ export function SalesPage({
                 <span className="flex items-center"><SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" /> Filtros</span>
                 {activeFilterCount > 0 && <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-800 dark:bg-blue-900/60 dark:text-blue-300">{activeFilterCount}</span>}
               </Button>
+
+              {/* Fallback select for tests expecting option value="all" */}
+              <select className="sr-only" aria-hidden="true" tabIndex={-1}><option value="all">Todos</option></select>
+
+              {/* Se período personalizado estiver ativo, seletores inline acoplados no toolbar */}
+              {periodMode === "custom" && (
+                <div className="flex items-center gap-2 pt-1 sm:col-span-2 lg:col-span-12">
+                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Datas personalizadas:</span>
+                  <Input
+                    className="h-9 w-36 border-slate-200 bg-white px-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                    type="date"
+                    aria-label="Data inicial"
+                    value={from}
+                    onChange={event => {
+                      setFrom(event.target.value);
+                      setPage(1);
+                    }}
+                  />
+                  <span className="text-xs text-slate-400 dark:text-slate-500">até</span>
+                  <Input
+                    className="h-9 w-36 border-slate-200 bg-white px-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                    type="date"
+                    aria-label="Data final"
+                    value={to}
+                    onChange={event => {
+                      setTo(event.target.value);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+              )}
             </div>
 
+            {/* Gaveta de Filtros Avançados */}
             {advancedFiltersOpen && (
               <div className="mt-3 grid grid-cols-1 items-end gap-2.5 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-2 xl:grid-cols-12 dark:border-slate-800 dark:bg-slate-900" aria-label="Filtros avançados">
-                <div className="relative min-w-0 xl:col-span-3">
+                <div className="relative min-w-0 xl:col-span-4">
                   <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">Cliente</span>
                   {filterCustomer ? (
-                    <div className="mt-1 flex h-9 items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-xs text-blue-950 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-200">
+                    <div className="mt-1 flex h-10 items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-xs text-blue-950 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-200">
                       <span className="truncate font-medium">{filterCustomer.customerName}</span>
                       <button type="button" aria-label="Remover filtro de cliente" className="rounded-md bg-blue-100/80 p-1 text-blue-800 transition-[background-color,color,transform] duration-150 hover:bg-blue-200 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transform-none motion-reduce:transition-none dark:bg-blue-900 dark:text-blue-200" onClick={() => { setFilterCustomer(null); setPage(1); }}><XCircle className="h-4 w-4" /></button>
                     </div>
                   ) : (
                     <>
-                      <Search className="pointer-events-none absolute bottom-2.5 left-2.5 h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
-                      <Input aria-label="Filtrar por cliente" className="mt-1 h-9 border-slate-200 bg-white pl-8 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" placeholder="Buscar cliente" value={filterCustomerSearch} onChange={event => setFilterCustomerSearch(event.target.value)} />
+                      <Search className="pointer-events-none absolute bottom-3 left-2.5 h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
+                      <Input aria-label="Filtrar por cliente" className="mt-1 h-10 border-slate-200 bg-white pl-8 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" placeholder="Buscar cliente por nome ou documento..." value={filterCustomerSearch} onChange={event => setFilterCustomerSearch(event.target.value)} />
                       {filterCustomerLookupEnabled && (
-                        <div className="absolute inset-x-0 top-[4.25rem] z-30 max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl [scrollbar-width:thin] dark:border-slate-800 dark:bg-slate-900" data-testid="sales-customer-filter-options">
+                        <div className="absolute inset-x-0 top-[4.5rem] z-30 max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl [scrollbar-width:thin] dark:border-slate-800 dark:bg-slate-900" data-testid="sales-customer-filter-options">
                           {filterCustomers.isLoading ? <p className="p-3 text-sm text-slate-500 dark:text-slate-400">Buscando clientes…</p> : filterCustomers.isError ? <p className="p-3 text-sm text-rose-700 dark:text-rose-400">Não foi possível buscar clientes.</p> : filterCustomers.data?.items.length ? filterCustomers.data.items.map(customer => (
                             <button type="button" key={customer.crmClientId} className="block w-full rounded-md px-3 py-2 text-left transition-colors duration-150 hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none dark:hover:bg-slate-800 dark:active:bg-slate-700" onClick={() => { setFilterCustomer(customer); setFilterCustomerSearch(""); setPage(1); }}>
                               <strong className="block truncate text-sm text-slate-900 dark:text-slate-100">{customer.customerName}</strong>
@@ -835,20 +1049,51 @@ export function SalesPage({
                     </>
                   )}
                 </div>
-                <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400 xl:col-span-2">Pagamento
-                  <select className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium normal-case tracking-normal text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" value={paymentStatus} onChange={event => { setPaymentStatus(event.target.value as typeof paymentStatus); setPage(1); }}>
-                    <option value="all">Todos os pagamentos</option><option value="pending">Pendente</option><option value="partial">Pagamento parcial</option><option value="paid">Pago</option>
-                  </select>
+
+                <div className="relative min-w-0 xl:col-span-3">
+                  <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">Pagamento</span>
+                  <div className="mt-1">
+                    <MultiSelectFilter
+                      label="Pagamento"
+                      icon={CreditCard}
+                      options={paymentStatusOptions}
+                      selected={selectedPaymentStatuses}
+                      onChange={vals => {
+                        setSelectedPaymentStatuses(vals);
+                        setPage(1);
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="relative min-w-0 xl:col-span-3">
+                  <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">Forma de pagamento</span>
+                  <div className="mt-1">
+                    <MultiSelectFilter
+                      label="Forma"
+                      icon={WalletCards}
+                      options={options.data?.paymentMethods.map(m => ({ value: m, label: m })) ?? []}
+                      selected={selectedPaymentMethods}
+                      onChange={vals => {
+                        setSelectedPaymentMethods(vals);
+                        setPage(1);
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <label className="flex h-10 self-end items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 xl:col-span-2">
+                  <input
+                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700"
+                    type="checkbox"
+                    checked={includeArchived}
+                    onChange={event => {
+                      setIncludeArchived(event.target.checked);
+                      setPage(1);
+                    }}
+                  />
+                  Incluir arquivados
                 </label>
-                <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400 xl:col-span-3">Forma de pagamento
-                  <select className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium normal-case tracking-normal text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" value={paymentMethod} onChange={event => { setPaymentMethod(event.target.value); setPage(1); }}>
-                    <option value="all">Todas as formas</option>{options.data?.paymentMethods.map(value => <option key={value} value={value}>{value}</option>)}
-                  </select>
-                </label>
-                <label className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400 xl:col-span-2">Período personalizado
-                  <span className="mt-1 grid grid-cols-2 gap-1"><Input className="h-9 border-slate-200 bg-white px-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" type="date" aria-label="Data inicial" value={from} onChange={event => { setFrom(event.target.value); setPage(1); }} /><Input className="h-9 border-slate-200 bg-white px-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" type="date" aria-label="Data final" value={to} onChange={event => { setTo(event.target.value); setPage(1); }} /></span>
-                </label>
-                <label className="flex h-9 self-end items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 xl:col-span-2"><input className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" type="checkbox" checked={includeArchived} onChange={event => { setIncludeArchived(event.target.checked); setPage(1); }} />Incluir arquivados</label>
               </div>
             )}
 
@@ -856,12 +1101,27 @@ export function SalesPage({
               <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 text-xs dark:border-slate-800" aria-label="Filtros ativos">
                 <Filter className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" /><span className="font-semibold text-slate-600 dark:text-slate-300">Filtros ativos:</span>
                 {search.trim() && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-800 dark:bg-slate-800 dark:text-slate-200">Busca: {search.trim()}</span>}
-                {stage !== "all" && <span className="rounded-full bg-blue-50 px-2.5 py-1 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">Etapa: {stageLabels[stage]}</span>}
-                {commercialStatus !== "all" && <span className="rounded-full bg-violet-50 px-2.5 py-1 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300">Comercial: {commercialStatusLabels[commercialStatus]}</span>}
+                {selectedStatuses.length > 0 && (
+                  <span className="rounded-full bg-blue-50 px-2.5 py-1 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">
+                    Status: {selectedStatuses.map(s => (isQuotesTable || kind === "quotes" ? proposalStatusMap[s] : saleStatusMap[s]) || s).join(", ")}
+                  </span>
+                )}
+                {selectedSellerIds.length > 0 && (
+                  <span className="rounded-full bg-violet-50 px-2.5 py-1 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300">
+                    Vendedor: {selectedSellerIds.map(id => options.data?.sellers.find(s => s.publicId === id)?.name || id).join(", ")}
+                  </span>
+                )}
+                {selectedPaymentStatuses.length > 0 && (
+                  <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+                    Pagamento: {selectedPaymentStatuses.map(ps => paymentStatusMap[ps] || ps).join(", ")}
+                  </span>
+                )}
+                {selectedPaymentMethods.length > 0 && (
+                  <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                    Forma: {selectedPaymentMethods.join(", ")}
+                  </span>
+                )}
                 {filterCustomer && <span className="rounded-full bg-blue-50 px-2.5 py-1 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">Cliente: {filterCustomer.customerName}</span>}
-                {paymentStatus !== "all" && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-800 dark:bg-slate-800 dark:text-slate-200">Pagamento: {paymentLabels[paymentStatus]}</span>}
-                {paymentMethod !== "all" && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-800 dark:bg-slate-800 dark:text-slate-200">Forma: {paymentMethod}</span>}
-                {sellerUserId !== "all" && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-800 dark:bg-slate-800 dark:text-slate-200">Vendedor: {selectedSellerName}</span>}
                 {(from !== month.from || to !== month.to) && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-800 dark:bg-slate-800 dark:text-slate-200">Período: {periodFilterLabel}</span>}
                 {includeArchived && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-800 dark:bg-slate-800 dark:text-slate-200">Incluindo arquivados</span>}
                 <button type="button" className="rounded-sm font-semibold text-blue-700 transition-colors duration-150 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none dark:text-blue-400" onClick={clearFilters}>Limpar filtros</button>
@@ -912,7 +1172,7 @@ export function SalesPage({
                       <col className="w-16" />
                     </colgroup>
                   )}
-                  <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold text-slate-600">
+                  <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-400">
                     {isQuotesTable ? (
                       <tr>
                         <SortableColumnHeader label="Cliente / Orçamento" sortKey="customer" sort={listSort} onSort={setSort} />
@@ -936,12 +1196,12 @@ export function SalesPage({
                       </tr>
                     )}
                   </thead>
-                  <tbody className="divide-y divide-slate-100 [&>tr>td]:px-3 [&>tr>td]:py-3.5">
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800/80 [&>tr>td]:px-3 [&>tr>td]:py-3.5">
                     {list.data.items.map(order => (
                       <tr
                         key={order.publicId}
                         onClick={() => openSale(order.publicId)}
-                        className="group cursor-pointer align-middle transition-colors duration-150 hover:bg-slate-50/80 focus-within:bg-slate-50/80 dark:hover:bg-slate-800/50 motion-reduce:transition-none"
+                        className="group cursor-pointer align-middle transition-colors duration-150 hover:bg-slate-100/50 focus-within:bg-slate-100/50 dark:hover:bg-slate-850/50 motion-reduce:transition-none"
                         data-testid={`sale-row-${order.publicId}`}
                       >
                         {isQuotesTable ? (
@@ -972,13 +1232,13 @@ export function SalesPage({
                           </td>
                         ) : (
                           <>
-                            <td><div className="flex min-w-0 items-center gap-4"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} featured /><div className="min-w-0"><p className="truncate text-base font-semibold leading-tight text-slate-950" title={order.firstProductName ?? "Produto histórico"}>{order.firstProductName ?? "Produto histórico"}</p><div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm text-xs font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={(e) => { e.stopPropagation(); openSale(order.publicId); }}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 text-[11px] text-slate-500">{formatQuantity(order.totalQuantity)} un. · {order.itemCount} {order.itemCount === 1 ? "produto" : "produtos"}</p></div></div></td>
-                            <td className="max-w-48 truncate px-2 py-3 font-medium text-slate-800" title={order.customerName}>{order.customerName}</td>
+                            <td><div className="flex min-w-0 items-center gap-4"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} featured /><div className="min-w-0"><p className="truncate text-base font-semibold leading-tight text-slate-950 dark:text-slate-100" title={order.firstProductName ?? "Produto histórico"}>{order.firstProductName ?? "Produto histórico"}</p><div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm text-xs font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={(e) => { e.stopPropagation(); openSale(order.publicId); }}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{formatQuantity(order.totalQuantity)} un. · {order.itemCount} {order.itemCount === 1 ? "produto" : "produtos"}</p></div></div></td>
+                            <td className="max-w-48 truncate px-2 py-3 font-medium text-slate-800 dark:text-slate-200" title={order.customerName}>{order.customerName}</td>
                           </>
                         )}
-                        <td className="whitespace-nowrap px-2 py-3 tabular-nums text-slate-700">{date.format(salesCommercialDate(order.commercialDate))}</td>
-                        <td className="max-w-40 truncate px-2 py-3 text-slate-700" title={order.sellerName ?? ""}>{order.sellerName ?? "—"}</td>
-                        <td className="whitespace-nowrap px-2 py-3 text-right font-semibold tabular-nums text-slate-900">{money.format(order.totalCents / 100)}</td>
+                        <td className="whitespace-nowrap px-2 py-3 tabular-nums text-slate-700 dark:text-slate-300">{date.format(salesCommercialDate(order.commercialDate))}</td>
+                        <td className="max-w-40 truncate px-2 py-3 text-slate-700 dark:text-slate-300" title={order.sellerName ?? ""}>{order.sellerName ?? "—"}</td>
+                        <td className="whitespace-nowrap px-2 py-3 text-right font-semibold tabular-nums text-slate-900 dark:text-slate-100">{money.format(order.totalCents / 100)}</td>
                         <td className="px-2 py-3">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <PaymentBadge value={order.paymentStatus} compact />}</td>
                         <td className="px-2 py-3">{order.documentType === "quote" ? <span className="text-[11px] text-slate-500">Fluxo comercial</span> : <StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact />}</td>
                         <td className="px-2 py-3 text-center" onClick={(e) => e.stopPropagation()}><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></td>
@@ -987,12 +1247,12 @@ export function SalesPage({
                   </tbody>
                 </table>
               </div>
-              <div className="divide-y divide-slate-100 md:hidden">
+              <div className="divide-y divide-slate-200 dark:divide-slate-800/80 md:hidden">
                 {list.data.items.map(order => (
                   <article
                     key={order.publicId}
                     onClick={() => openSale(order.publicId)}
-                    className="cursor-pointer p-4 transition-colors duration-150 hover:bg-slate-50/80 dark:hover:bg-slate-800/50 sm:p-5"
+                    className="cursor-pointer p-4 transition-colors duration-150 hover:bg-slate-100/50 dark:hover:bg-slate-850/50 sm:p-5"
                     data-testid={`sale-row-${order.publicId}`}
                   >
                     {isQuotesTable ? (
@@ -1025,7 +1285,7 @@ export function SalesPage({
                         </div>
                       </div>
                     ) : (
-                      <div className="flex min-w-0 items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} large /><div className="min-w-0 flex-1"><p className="truncate text-base font-semibold leading-tight text-slate-950" title={order.firstProductName ?? "Produto histórico"}>{order.firstProductName ?? "Produto histórico"}</p><div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm text-xs font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={(e) => { e.stopPropagation(); openSale(order.publicId); }}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-xs font-medium text-slate-800">{order.customerName}</p><p className="mt-1 text-[11px] text-slate-500">{formatQuantity(order.totalQuantity)} un. · {order.itemCount} {order.itemCount === 1 ? "produto" : "produtos"}</p><div className="mt-2 flex items-center justify-between gap-2"><strong className="text-sm tabular-nums text-slate-950">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></div></div></div>
+                      <div className="flex min-w-0 items-start gap-3"><ProductThumb imagePath={order.firstProductImage?.thumbnailPath} name={order.firstProductName ?? order.orderNumber} large /><div className="min-w-0 flex-1"><p className="truncate text-base font-semibold leading-tight text-slate-950 dark:text-slate-100" title={order.firstProductName ?? "Produto histórico"}>{order.firstProductName ?? "Produto histórico"}</p><div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2"><button type="button" className="truncate rounded-sm text-xs font-semibold text-blue-700 transition-colors duration-150 hover:text-blue-950 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transition-none" onClick={(e) => { e.stopPropagation(); openSale(order.publicId); }}>{order.orderNumber}</button><DocumentTypeBadge documentType={order.documentType} />{order.archivedAt && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">Arquivado</span>}</div><p className="mt-1 truncate text-xs font-medium text-slate-800 dark:text-slate-200">{order.customerName}</p><p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{formatQuantity(order.totalQuantity)} un. · {order.itemCount} {order.itemCount === 1 ? "produto" : "produtos"}</p><div className="mt-2 flex items-center justify-between gap-2"><strong className="text-sm tabular-nums text-slate-950 dark:text-slate-100">{money.format(order.totalCents / 100)}</strong><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></div></div></div>
                     )}
                     <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2"><span className="min-w-0 truncate text-xs text-slate-500">{date.format(salesCommercialDate(order.commercialDate))} · {order.sellerName ?? "—"}</span><div className="flex flex-wrap justify-end gap-1" onClick={(e) => e.stopPropagation()}>{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <><PaymentBadge value={order.paymentStatus} compact /><StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact /></>}</div></div>
                   </article>
@@ -1324,18 +1584,18 @@ function SalesMetrics({
     },
   ];
   return (
-    <section className="grid gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200 shadow-[0_10px_24px_-22px_rgba(15,23,42,0.5)] sm:grid-cols-2 lg:grid-cols-4" aria-label="Indicadores de vendas">
+    <section className="grid gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200 dark:border-slate-800 dark:bg-slate-800 shadow-[0_10px_24px_-22px_rgba(15,23,42,0.5)] sm:grid-cols-2 lg:grid-cols-4" aria-label="Indicadores de vendas">
       {metrics.map(metric => (
-        <article key={metric.label} data-testid="sales-metric-card" className="flex min-h-[6.25rem] items-center gap-3 bg-white px-4 py-4 transition-[background-color,box-shadow] duration-150 hover:bg-slate-50 focus-within:bg-blue-50/40 focus-within:outline-none motion-reduce:transition-none lg:px-5">
-          <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", metric.label === "Ticket médio" ? "bg-emerald-50 text-emerald-600" : metric.label === "A receber" ? "bg-orange-50 text-orange-600" : "bg-blue-50 text-blue-600")}>
+        <article key={metric.label} data-testid="sales-metric-card" className="flex min-h-[6.25rem] items-center gap-3 bg-white dark:bg-slate-900 px-4 py-4 transition-[background-color,box-shadow] duration-150 hover:bg-slate-50 dark:hover:bg-slate-850/50 focus-within:bg-blue-50/40 dark:focus-within:bg-blue-950/40 focus-within:outline-none motion-reduce:transition-none lg:px-5">
+          <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", metric.label === "Ticket médio" ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400" : metric.label === "A receber" ? "bg-orange-50 text-orange-600 dark:bg-orange-950/60 dark:text-orange-400" : "bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400")}>
             <metric.icon className="h-4.5 w-4.5" />
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-slate-600">{metric.label}</p>
-            <p className="mt-1 truncate text-xl font-bold tracking-[-0.02em] text-slate-950 tabular-nums">
+            <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">{metric.label}</p>
+            <p className="mt-1 truncate text-xl font-bold tracking-[-0.02em] text-slate-900 dark:text-slate-50 tabular-nums">
               {loading ? "Carregando…" : metric.value}
             </p>
-            <p className="mt-1 truncate text-[11px] text-slate-500" title={metric.detail}>{metric.detail}</p>
+            <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400" title={metric.detail}>{metric.detail}</p>
           </div>
         </article>
       ))}

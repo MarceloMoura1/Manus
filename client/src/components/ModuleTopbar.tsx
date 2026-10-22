@@ -61,9 +61,9 @@ export function ModuleTopbar({
                       title={item.disabled ? unavailableLabel : undefined}
                       onClick={item.onSelect}
                       className={cn(
-                        "group relative inline-flex items-center gap-2 whitespace-nowrap text-xs md:text-sm transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1",
+                        "group relative inline-flex items-center gap-2 whitespace-nowrap text-xs md:text-sm transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1",
                         isActive
-                          ? "my-1 mx-1.5 rounded-lg px-3.5 py-1.5 font-semibold text-white bg-slate-900 border border-slate-800 shadow-sm dark:border-purple-500/40 dark:shadow-[0_0_14px_rgba(168,85,247,0.25)] dark:ring-1 dark:ring-purple-500/20"
+                          ? "my-1 mx-1.5 rounded-lg px-3.5 py-1.5 font-semibold text-white bg-slate-900 border border-slate-800 shadow-sm dark:border-blue-700/60 dark:shadow-[0_0_12px_rgba(30,58,138,0.35)] dark:ring-1 dark:ring-blue-900/40"
                           : "px-4 py-2 font-medium text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100/60 dark:hover:bg-slate-900/40 rounded-md",
                         item.disabled && "cursor-not-allowed opacity-50 hover:bg-transparent hover:text-slate-400 dark:hover:bg-transparent dark:hover:text-slate-500"
                       )}
@@ -73,7 +73,7 @@ export function ModuleTopbar({
                           className={cn(
                             "h-4 w-4 shrink-0 transition-colors",
                             isActive
-                              ? "text-purple-300 dark:text-purple-400"
+                              ? "text-blue-400 dark:text-blue-400"
                               : "text-slate-400 group-hover:text-slate-600 dark:text-slate-500 dark:group-hover:text-slate-300"
                           )}
                         />

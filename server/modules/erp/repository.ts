@@ -221,6 +221,55 @@ export class ErpRepository {
     return result.affectedRows > 0;
   }
 
+  async checkProductDependencies(clientId: string, publicId: string) {
+    const product = await this.findProduct(clientId, publicId);
+    if (!product) return null;
+
+    let salesCount = 0;
+    try {
+      const [rows] = await this.database().execute<RowDataPacket[]>(
+        `SELECT COUNT(*) total FROM erp_sale_order_items i
+         INNER JOIN erp_sale_orders o ON o.id=i.sale_order_id
+         WHERE o.client_id=? AND i.product_id=?`,
+        [clientId, product.id]
+      );
+      salesCount += Number(rows[0]?.total ?? 0);
+    } catch {
+      // ignore table if missing
+    }
+
+    try {
+      const [purchaseRows] = await this.database().execute<RowDataPacket[]>(
+        `SELECT COUNT(*) total FROM erp_purchase_order_items poi
+         INNER JOIN erp_purchase_orders po ON po.id=poi.purchase_order_id
+         WHERE po.client_id=? AND poi.product_id=?`,
+        [clientId, product.id]
+      );
+      salesCount += Number(purchaseRows[0]?.total ?? 0);
+    } catch {
+      // ignore table if missing
+    }
+
+    let stockCount = 0;
+    try {
+      const [stockRows] = await this.database().execute<RowDataPacket[]>(
+        `SELECT COALESCE(SUM(quantity), 0) total FROM erp_stock_balances
+         WHERE client_id=? AND product_id=?`,
+        [clientId, product.id]
+      );
+      stockCount = Math.max(0, Math.round(Number(stockRows[0]?.total ?? 0)));
+    } catch {
+      // ignore
+    }
+
+    const hasDependencies = salesCount > 0 || stockCount > 0;
+    return {
+      hasDependencies,
+      salesCount,
+      stockCount,
+    };
+  }
+
   async listMovements(clientId: string, filters: { productPublicId?: string; type?: string; search: string; from?: string; to?: string; page: number; pageSize: number }) {
     const limit = Math.max(1, Math.min(100, Math.trunc(filters.pageSize)));
     const offset = Math.max(0, (Math.max(1, Math.trunc(filters.page)) - 1) * limit);

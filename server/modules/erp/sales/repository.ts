@@ -533,34 +533,114 @@ export class SaleRepository {
       where.push("o.crm_client_id=?");
       values.push(options.crmClientId);
     }
+    const statusInputs: string[] = [];
     if (options.status) {
-      where.push("o.status=?");
-      values.push(options.status);
+      if (Array.isArray(options.status)) statusInputs.push(...options.status);
+      else if (options.status !== "all") statusInputs.push(options.status);
     }
+    if (options.statuses) {
+      statusInputs.push(...options.statuses);
+    }
+    const uniqueStatuses = Array.from(new Set(statusInputs.filter(Boolean)));
+    if (uniqueStatuses.length > 0) {
+      const statusClauses: string[] = [];
+      const exactStatuses: string[] = [];
+      for (const st of uniqueStatuses) {
+        if (st === "quote") {
+          statusClauses.push("o.document_type='quote'");
+        } else if (st === "in_progress") {
+          statusClauses.push("(o.document_type='sale' AND o.status IN ('draft','confirmed') AND (o.commercial_status IS NULL OR o.commercial_status NOT IN ('completed','cancelled')))");
+        } else if (st === "completed") {
+          statusClauses.push("(o.status='fulfilled' OR o.commercial_status='completed')");
+        } else if (st === "cancelled") {
+          statusClauses.push("(o.status='cancelled' OR o.commercial_status='cancelled')");
+        } else {
+          exactStatuses.push(st);
+        }
+      }
+      if (exactStatuses.length > 0) {
+        statusClauses.push(`o.status IN (${exactStatuses.map(() => "?").join(",")})`);
+        values.push(...exactStatuses);
+      }
+      if (statusClauses.length > 0) {
+        where.push(`(${statusClauses.join(" OR ")})`);
+      }
+    }
+
+    const stageInputs: string[] = [];
     if (options.stage) {
-      where.push(`${STAGE_SQL}=?`);
-      values.push(options.stage);
+      if (Array.isArray(options.stage)) stageInputs.push(...options.stage);
+      else if (options.stage !== "all") stageInputs.push(options.stage);
     }
+    if (options.stages) {
+      stageInputs.push(...options.stages);
+    }
+    const uniqueStages = Array.from(new Set(stageInputs.filter(Boolean)));
+    if (uniqueStages.length > 0) {
+      where.push(`${STAGE_SQL} IN (${uniqueStages.map(() => "?").join(",")})`);
+      values.push(...uniqueStages);
+    }
+
+    const commInputs: string[] = [];
     if (options.commercialStatus) {
-      where.push("o.commercial_status=?");
-      values.push(options.commercialStatus);
+      if (Array.isArray(options.commercialStatus)) commInputs.push(...options.commercialStatus);
+      else if (options.commercialStatus !== "all") commInputs.push(options.commercialStatus);
     }
+    if (options.commercialStatuses) {
+      commInputs.push(...options.commercialStatuses);
+    }
+    const uniqueComm = Array.from(new Set(commInputs.filter(Boolean)));
+    if (uniqueComm.length > 0) {
+      where.push(`o.commercial_status IN (${uniqueComm.map(() => "?").join(",")})`);
+      values.push(...uniqueComm);
+    }
+
+    const payInputs: string[] = [];
     if (options.paymentStatus) {
-      where.push(
-        options.paymentStatus === "pending"
+      if (Array.isArray(options.paymentStatus)) payInputs.push(...options.paymentStatus);
+      else if (options.paymentStatus !== "all") payInputs.push(options.paymentStatus);
+    }
+    if (options.paymentStatuses) {
+      payInputs.push(...options.paymentStatuses);
+    }
+    const uniquePay = Array.from(new Set(payInputs.filter(Boolean)));
+    if (uniquePay.length > 0) {
+      const payClauses = uniquePay.map(ps =>
+        ps === "pending"
           ? "COALESCE(fin.paid_cents,0)=0"
-          : options.paymentStatus === "paid"
+          : ps === "paid"
             ? "COALESCE(fin.paid_cents,0)>=o.total_cents"
             : "COALESCE(fin.paid_cents,0)>0 AND COALESCE(fin.paid_cents,0)<o.total_cents"
       );
+      where.push(`(${payClauses.join(" OR ")})`);
     }
+
+    const methodInputs: string[] = [];
     if (options.paymentMethod) {
-      where.push("o.payment_method_snapshot=?");
-      values.push(options.paymentMethod);
+      if (Array.isArray(options.paymentMethod)) methodInputs.push(...options.paymentMethod);
+      else if (options.paymentMethod !== "all") methodInputs.push(options.paymentMethod);
     }
+    if (options.paymentMethods) {
+      methodInputs.push(...options.paymentMethods);
+    }
+    const uniqueMethods = Array.from(new Set(methodInputs.filter(Boolean)));
+    if (uniqueMethods.length > 0) {
+      where.push(`o.payment_method_snapshot IN (${uniqueMethods.map(() => "?").join(",")})`);
+      values.push(...uniqueMethods);
+    }
+
+    const sellerInputs: string[] = [];
     if (options.sellerUserId) {
-      where.push("COALESCE(o.seller_user_id,o.created_by)=?");
-      values.push(options.sellerUserId);
+      if (Array.isArray(options.sellerUserId)) sellerInputs.push(...options.sellerUserId);
+      else if (options.sellerUserId !== "all") sellerInputs.push(options.sellerUserId);
+    }
+    if (options.sellerUserIds) {
+      sellerInputs.push(...options.sellerUserIds);
+    }
+    const uniqueSellers = Array.from(new Set(sellerInputs.filter(Boolean)));
+    if (uniqueSellers.length > 0) {
+      where.push(`COALESCE(o.seller_user_id,o.created_by) IN (${uniqueSellers.map(() => "?").join(",")})`);
+      values.push(...uniqueSellers);
     }
     if (options.from) {
       where.push("DATE(COALESCE(o.commercial_date,o.created_at))>=?");

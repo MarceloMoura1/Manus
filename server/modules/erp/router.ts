@@ -70,6 +70,9 @@ export const erpRouter = router({
     create: megadeskProcedure.input(productInput).mutation(({ input, ctx }) => runErp(() => service.createProduct(identity(ctx), input))),
     update: megadeskProcedure.input(productInput.extend({ publicId: productPublicId })).mutation(({ input, ctx }) => { const { publicId, ...command } = input; return runErp(() => service.updateProduct(identity(ctx), publicId, command)); }),
     setActive: megadeskProcedure.input(z.object({ publicId: productPublicId, active: z.boolean() })).mutation(({ input, ctx }) => runErp(() => service.setProductActive(identity(ctx), input.publicId, input.active))),
+    checkDependencies: megadeskProcedure.input(z.object({ publicId: productPublicId })).query(({ input, ctx }) => runErp(() => service.checkProductDependencies(identity(ctx), input.publicId))),
+    delete: megadeskProcedure.input(z.object({ publicId: productPublicId, force: z.boolean().optional().default(false) })).mutation(({ input, ctx }) => runErp(() => service.deleteProduct(identity(ctx), input.publicId, input.force))),
+    deleteProduct: megadeskProcedure.input(z.object({ publicId: productPublicId, force: z.boolean().optional().default(false) })).mutation(({ input, ctx }) => runErp(() => service.deleteProduct(identity(ctx), input.publicId, input.force))),
     history: productAuditRouter,
   }),
   stock: router({
