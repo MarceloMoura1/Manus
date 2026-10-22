@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
+import type { HermesMessageItem } from "../../../server/modules/admin/hermes/contracts";
 
 function cn(...classes: Array<string | false | undefined | null>) {
   return classes.filter(Boolean).join(" ");
@@ -298,6 +299,30 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
   const utils = trpc.useUtils();
 
   const sendMessageMutation = trpc.admin.hermes.sendMessage.useMutation({
+    onMutate: async (variables) => {
+      await utils.admin.hermes.getHistory.cancel();
+      const previousData = utils.admin.hermes.getHistory.getData();
+
+      const optimisticMessage: HermesMessageItem = {
+        id: -Date.now(),
+        adminUserId: String(adminUser.email || adminUser.id || "admin"),
+        role: "user",
+        content: variables.message,
+        metadataJson: null,
+        createdAt: new Date().toISOString(),
+      };
+
+      utils.admin.hermes.getHistory.setData(undefined, (old) => {
+        const currentMessages = old?.messages ?? [];
+        return {
+          adminUserId: old?.adminUserId || optimisticMessage.adminUserId,
+          messages: [...currentMessages, optimisticMessage],
+        };
+      });
+
+      scrollToBottom();
+      return { previousData };
+    },
     onSuccess(data) {
       utils.admin.hermes.getHistory.setData(undefined, {
         adminUserId: data.response.adminUserId,
@@ -305,7 +330,10 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
       });
       scrollToBottom();
     },
-    onError(err) {
+    onError(err, _variables, context) {
+      if (context?.previousData) {
+        utils.admin.hermes.getHistory.setData(undefined, context.previousData);
+      }
       toast.error(err.message || "Falha ao enviar mensagem para o Hermes.");
     },
   });
@@ -520,15 +548,19 @@ export function HermesOfficePage({ adminUser }: HermesOfficePageProps) {
             })}
 
             {sendMessageMutation.isPending && (
-              <div className="flex flex-col items-start">
-                <div className="flex items-center gap-2 mb-1.5 px-1 text-xs text-slate-500">
-                  <span>Hermes</span>
+              <div className="flex flex-col items-start transition-all duration-300 animate-in fade-in slide-in-from-bottom-2">
+                <div className="flex items-center gap-2 mb-1.5 px-1 text-xs text-slate-500 font-medium">
+                  <span className="text-emerald-400">Hermes</span>
                   <span>•</span>
-                  <span>Analisando</span>
+                  <span className="text-slate-400">Digitando</span>
                 </div>
-                <div className="rounded-2xl rounded-tl-none bg-slate-900/90 border border-emerald-400/30 p-4 sm:p-5 text-sm text-slate-300 flex items-center gap-3 shadow-xl">
-                  <div className="h-4 w-4 rounded-full border-2 border-emerald-400 border-t-transparent animate-spin" />
-                  <span className="text-xs sm:text-sm text-emerald-300 animate-pulse font-medium">
+                <div className="rounded-2xl rounded-tl-none bg-slate-900/90 border border-emerald-400/30 px-5 py-4 text-sm text-slate-300 flex items-center gap-3 shadow-xl">
+                  <div className="flex items-center gap-1.5 py-0.5">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-bounce [animation-delay:-0.3s]" />
+                    <span className="h-2 w-2 rounded-full bg-cyan-400 animate-bounce [animation-delay:-0.15s]" />
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-bounce" />
+                  </div>
+                  <span className="text-xs sm:text-sm text-emerald-300/90 font-medium tracking-wide">
                     Hermes está analisando e sintetizando sua resposta...
                   </span>
                 </div>

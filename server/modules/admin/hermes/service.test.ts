@@ -124,7 +124,64 @@ describe("Hermes Module - Unit & Isolation Tests", () => {
       expect(service.detectAction("Status do zap e evolution")).toBe("whatsapp_check");
       expect(service.detectAction("Consumo de cotas")).toBe("token_telemetry");
       expect(service.detectAction("Auditoria de multi-tenant")).toBe("security_audit");
+      expect(service.detectAction("Consumo do cliente FaYerS")).toBe("tenant_inspection");
+      expect(service.detectAction("Ver armazenamento do cliente")).toBe("tenant_inspection");
       expect(service.detectAction("Qual a previsão para o próximo trimestre?")).toBeNull();
+    });
+
+    it("handles tenant storage inspection with structured read-only metrics", async () => {
+      const socioA = "marcelo@megadesk.online";
+
+      // Mock inspector customizado para validar os dados auditados
+      const mockInspector = vi.fn().mockResolvedValue({
+        tenantFound: true,
+        clientName: "FaYerS Indústria",
+        clientId: "client-fayers-01",
+        internalId: "fayers",
+        tenantDatabaseName: "megadesk_tenant_fayers",
+        totalMessages: 1250,
+        mediaCount: 140,
+        totalContacts: 320,
+        totalConversations: 450,
+        totalChamados: 85,
+        estimatedDbSizeKB: 4500,
+        estimatedDbSizeFormatted: "4.39 MB",
+        activeStatus: "active",
+      });
+
+      const customService = new HermesService(mockRepo, mockInspector);
+      const result = await customService.sendMessage(socioA, "Qual o consumo do cliente FaYerS?");
+
+      expect(mockInspector).toHaveBeenCalledWith("FaYerS");
+      expect(result.response.content).toContain("Auditoria de Armazenamento e Métricas do Cliente");
+      expect(result.response.content).toContain("FaYerS Indústria");
+      expect(result.response.content).toContain("1.250");
+      expect(result.response.content).toContain("4.39 MB");
+      expect(result.response.metadataJson?.actionTriggered).toBe("tenant_inspection");
+    });
+
+    it("handles tenant not found gracefully without hallucinations", async () => {
+      const socioA = "marcelo@megadesk.online";
+
+      const mockNotFoundInspector = vi.fn().mockResolvedValue({
+        tenantFound: false,
+        clientName: "InexistenteCorp",
+        totalMessages: 0,
+        mediaCount: 0,
+        totalContacts: 0,
+        totalConversations: 0,
+        totalChamados: 0,
+        estimatedDbSizeKB: 0,
+        estimatedDbSizeFormatted: "0 KB",
+        activeStatus: "not_found",
+        details: "Tenant não localizado",
+      });
+
+      const customService = new HermesService(mockRepo, mockNotFoundInspector);
+      const result = await customService.sendMessage(socioA, "consumo do cliente InexistenteCorp");
+
+      expect(result.response.content).toContain("Cliente não localizado");
+      expect(result.response.metadataJson?.actionTriggered).toBe("tenant_inspection");
     });
 
     it("handles humanized conversational queries and injects Brasilia timestamp", async () => {
