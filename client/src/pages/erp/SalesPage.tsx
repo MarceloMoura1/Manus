@@ -1390,9 +1390,9 @@ function SaleDetailPanel({
     <aside className="space-y-3" aria-label="Detalhes da venda selecionada">
       {/* ─── BLOCO 1: CARD ÚNICO DO CLIENTE & FATOS COMERCIAIS (Topo - Padrão Chamados) ─── */}
       <header className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900" data-testid="quote-client-header">
-        {/* Linha 1: Identificação Principal em Grid / Flexbox Alinhado */}
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          {/* Coluna 1 (Cliente): Avatar + Nome + Badges */}
+        {/* Linha 1: Identificação Principal em Flexbox Alinhado com Divisores Verticais */}
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          {/* Bloco A (Identificação do Cliente) */}
           <div className="flex min-w-0 items-center gap-3.5">
             <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-blue-700 shadow-sm ring-4 ring-blue-50/50 dark:bg-blue-950/60 dark:text-blue-300 dark:ring-blue-900/20">
               <Building2 className="h-6 w-6" />
@@ -1422,33 +1422,43 @@ function SaleDetailPanel({
             </div>
           </div>
 
-          {/* Coluna 2 (Documento) & Coluna 3 (Contato) */}
-          <div className="flex flex-wrap items-center gap-4 sm:gap-6 border-t border-slate-100 pt-3 lg:border-l lg:border-t-0 lg:py-1 lg:pl-6 dark:border-slate-800">
-            {/* Coluna 2 (Documento): Ícone sutil (FileText), label "CPF / CNPJ" */}
-            <div className="flex min-w-0 items-center gap-2.5">
-              <FileText className="h-4 w-4 shrink-0 text-slate-400" />
-              <div className="min-w-0">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">CPF / CNPJ</p>
-                <p className="mt-0.5 font-mono text-sm font-semibold text-slate-800 dark:text-slate-200">
-                  {formattedDocument}
-                </p>
-              </div>
-            </div>
+          {/* Divisor vertical sutil entre Bloco A e Bloco B */}
+          <div className="hidden md:block h-10 w-px bg-slate-100 dark:bg-slate-800" />
 
-            {/* Coluna 3 (Contato): Ícone Phone, label "TELEFONE" */}
-            <div className="flex min-w-0 items-center gap-2.5">
-              <Phone className="h-4 w-4 shrink-0 text-slate-400" />
-              <div className="min-w-0">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Telefone</p>
-                <p className="mt-0.5 font-mono text-sm font-semibold text-slate-800 dark:text-slate-200">
-                  {formattedPhone || "Não informado"}
-                </p>
-              </div>
+          {/* Bloco B (Documento) */}
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+              <FileText className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">CPF / CNPJ</p>
+              <p className="mt-0.5 font-mono text-sm font-semibold text-slate-800 dark:text-slate-200">
+                {formattedDocument}
+              </p>
             </div>
           </div>
 
-          {/* Coluna 4 (Status & Número no Canto Direito) */}
-          <div className="flex flex-col items-start lg:items-end justify-center border-t border-slate-100 pt-3 lg:border-l lg:border-t-0 lg:py-1 lg:pl-6 dark:border-slate-800 shrink-0">
+          {/* Divisor vertical sutil entre Bloco B e Bloco C */}
+          <div className="hidden md:block h-10 w-px bg-slate-100 dark:bg-slate-800" />
+
+          {/* Bloco C (Contato / Telefone) */}
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+              <Phone className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Telefone</p>
+              <p className="mt-0.5 font-mono text-sm font-semibold text-slate-800 dark:text-slate-200">
+                {formattedPhone || "Não informado"}
+              </p>
+            </div>
+          </div>
+
+          {/* Divisor vertical sutil entre Bloco C e Bloco D */}
+          <div className="hidden md:block h-10 w-px bg-slate-100 dark:bg-slate-800" />
+
+          {/* Bloco D (Identificação da Proposta - Canto Direito) */}
+          <div className="flex flex-col items-start md:items-end justify-center shrink-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-base font-bold text-slate-900 dark:text-slate-100">
                 {isQuote ? "Orçamento" : "Venda"} {order.orderNumber}
@@ -1795,16 +1805,16 @@ function DocumentHistory({ order }: { order: SaleDetail }) {
   const historyId = `sales-history-${order.publicId}`;
   const events = order.history.slice().reverse();
   return (
-    <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <button
         type="button"
-        className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 motion-reduce:transition-none"
+        className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 motion-reduce:transition-none"
         aria-expanded={expanded}
         aria-controls={historyId}
         onClick={() => setExpanded(value => !value)}
       >
-        <span className="flex items-center gap-2 text-sm font-bold text-slate-900"><Clock3 className="h-4 w-4 text-slate-500" />Histórico <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{events.length}</span></span>
-        <ChevronDown className={cn("h-4 w-4 text-slate-500 transition-transform motion-reduce:transition-none", expanded && "rotate-180")} aria-hidden="true" />
+        <span className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100"><Clock3 className="h-4 w-4 text-slate-500 dark:text-slate-400" />Histórico <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{events.length}</span></span>
+        <ChevronDown className={cn("h-4 w-4 text-slate-500 dark:text-slate-400 transition-transform motion-reduce:transition-none", expanded && "rotate-180")} aria-hidden="true" />
       </button>
       <div id={historyId} hidden={!expanded} className="border-t border-slate-100 px-4 pb-4">
         {!order.historyComplete && (
@@ -2630,7 +2640,7 @@ function SaleDocuments({ salePublicId, canWrite, isQuote: _isQuote }: { salePubl
   };
 
   return (
-    <section aria-label="Documentos privados da venda">
+    <section aria-label="Documentos privados da venda" className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100"><Paperclip className="h-4 w-4 text-slate-500 dark:text-slate-400" />Documentos</h3>
         <div className="flex flex-wrap items-center gap-2">
