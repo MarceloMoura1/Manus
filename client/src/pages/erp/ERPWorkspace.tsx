@@ -171,7 +171,7 @@ export function ERPWorkspace({ section, onNavigate, canAccessClients, canAccessS
   useErpRealtime();
   const denied = <div role="alert" className="rounded-2xl border border-slate-200 bg-white p-8 text-center"><h1 className="text-xl font-bold text-slate-900">Acesso indisponível</h1><p className="mt-2 text-sm text-slate-600">Este módulo não está disponível para o seu perfil.</p></div>;
   const content = section === "summary" ? <Summary onNavigate={onNavigate}/> : section === "clients" ? canAccessClients ? <ClientesPage initialSelectedId={initialCrmClientId} onNavigate={onClientNavigate} onSaleNavigate={salePublicId => onNavigateToSale(salePublicId)} canAccessSales={canAccessSales} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDelete={canPermanentlyDeleteClients}/> : denied : section === "products" ? <Products/> : section === "services" ? <ServicesPage/> : section === "suppliers" ? <SuppliersPage onNavigate={onNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} onClientNavigate={onClientNavigate}/> : section === "purchases" ? <PurchasesPage onNavigate={onNavigate}/> : section === "sales" ? canAccessSales ? <SalesPage initialSelectedId={initialSalePublicId} onSaleNavigate={onNavigateToSale} onClientNavigate={onNavigateToClient} onNavigateToProposals={onNavigateToProposals}/> : denied : section === "finance" ? canAccessFinance ? <FinancePage/> : denied : section === "fiscal" ? canAccessFiscal ? <FiscalPage/> : denied : section === "reports" ? canAccessReports ? <ReportsPage/> : denied : <StockPage/>;
-  return <div className="min-w-0 max-w-full" data-testid="erp-workspace">{content}</div>;
+  return <div className="min-w-0 max-w-full min-h-screen bg-slate-950 dark:bg-slate-950 text-slate-100" data-testid="erp-workspace">{content}</div>;
 }
 
 function Summary({ onNavigate }: { onNavigate: (section: ErpSection) => void }) {
@@ -307,7 +307,7 @@ function ProductsGlowPagination({
   return (
     <div
       data-testid="products-glow-pagination"
-      className="bg-slate-950/90 dark:bg-slate-950/90 border border-slate-800/80 rounded-2xl px-6 py-3 my-4 flex flex-wrap items-center justify-between gap-4 text-slate-300 shadow-[0_10px_30px_rgba(0,0,0,0.5)]"
+      className="bg-slate-950/95 dark:bg-slate-950/95 border border-white/20 rounded-2xl px-6 py-3 my-4 flex flex-wrap items-center justify-between gap-4 text-slate-300 shadow-[0_-4px_25px_rgba(255,255,255,0.07),0_10px_30px_rgba(0,0,0,0.6)]"
     >
       <span className="text-xs font-medium text-slate-300 tabular-nums">
         Mostrando <strong className="text-white">{start}–{end}</strong> de <strong className="text-white">{total}</strong> produtos
@@ -407,6 +407,7 @@ function Products() {
   const [productToDelete, setProductToDelete] = React.useState<{ publicId: string; name: string } | null>(null);
   const [isDeleteAlertOpen, setIsDeleteAlertOpen] = React.useState(false);
   const [deleteDependencies, setDeleteDependencies] = React.useState<{ salesCount: number; stockCount: number } | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = React.useState("");
 
   React.useEffect(() => () => {
     if (photoPreview?.startsWith("blob:")) URL.revokeObjectURL(photoPreview);
@@ -461,6 +462,7 @@ function Products() {
       setIsDeleteAlertOpen(false);
       setProductToDelete(null);
       setDeleteDependencies(null);
+      setDeleteConfirmText("");
       if (selectedProductPublicId === productToDelete?.publicId) {
         setSelectedProductPublicId(null);
       }
@@ -475,6 +477,7 @@ function Products() {
 
   const handleDeleteRequest = (product: { publicId: string; name: string }) => {
     setProductToDelete(product);
+    setDeleteConfirmText("");
     setIsDeleteAlertOpen(true);
     setDeleteDependencies(null);
     void utils.erp.products.checkDependencies.fetch({ publicId: product.publicId })
@@ -488,9 +491,11 @@ function Products() {
 
   const handleConfirmDelete = () => {
     if (!productToDelete) return;
+    if (deleteConfirmText.trim().toUpperCase() !== "EXCLUIR") return;
     deleteMutation.mutate({
       publicId: productToDelete.publicId,
-      force: Boolean(deleteDependencies),
+      force: true,
+      hardDelete: true,
     });
   };
 
@@ -615,36 +620,57 @@ function Products() {
           setIsDeleteAlertOpen(false);
           setProductToDelete(null);
           setDeleteDependencies(null);
+          setDeleteConfirmText("");
         }
       }}
     >
       <DialogContent className="sm:max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 rounded-2xl shadow-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-rose-600 dark:text-rose-400 font-bold text-lg">
-            <AlertCircle className="h-5 w-5" /> Excluir produto
+            <AlertCircle className="h-5 w-5" /> Excluir produto definitivamente
           </DialogTitle>
         </DialogHeader>
-        <div className="py-3 text-sm text-slate-600 dark:text-slate-300">
-          {deleteDependencies && (deleteDependencies.salesCount > 0 || deleteDependencies.stockCount > 0) ? (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 space-y-2">
-              <p className="font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                <AlertCircle className="h-4 w-4" /> Dependências detectadas
+        <div className="py-3 text-sm text-slate-600 dark:text-slate-300 space-y-3">
+          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3.5 space-y-1.5">
+            <p className="font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5 text-xs">
+              <AlertCircle className="h-4 w-4 shrink-0" /> Esta ação é irreversível e apagará o produto permanentemente do sistema.
+            </p>
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              O produto <strong className="text-slate-900 dark:text-white">&quot;{productToDelete?.name}&quot;</strong> será removido permanentemente.
+            </p>
+          </div>
+
+          {deleteDependencies && (deleteDependencies.salesCount > 0 || deleteDependencies.stockCount > 0) && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-1">
+              <p className="font-semibold text-amber-600 dark:text-amber-400 text-xs flex items-center gap-1">
+                <AlertCircle className="h-3.5 w-3.5" /> Registros vinculados detectados
               </p>
-              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
                 Este produto possui{" "}
                 <strong className="text-rose-600 dark:text-rose-400">
                   {deleteDependencies.salesCount > 0 && `${deleteDependencies.salesCount} vínculo(s) em vendas/pedidos`}
                   {deleteDependencies.salesCount > 0 && deleteDependencies.stockCount > 0 && " e "}
                   {deleteDependencies.stockCount > 0 && `${deleteDependencies.stockCount} em saldo de estoque`}
                 </strong>
-                . A exclusão aplicará desativação segura (soft-delete), preservando a integridade das ordens já registradas.
+                . A exclusão definitiva desvinculará ou limpará esses registros sem impedir a remoção do produto.
               </p>
             </div>
-          ) : (
-            <p>
-              Deseja realmente excluir o produto <strong className="text-slate-900 dark:text-white">&quot;{productToDelete?.name}&quot;</strong> do catálogo?
-            </p>
           )}
+
+          <div className="space-y-1.5 pt-1">
+            <label htmlFor="delete-product-confirm-input" className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+              Para confirmar, digite <span className="font-bold text-rose-600 dark:text-rose-400 font-mono">EXCLUIR</span> abaixo:
+            </label>
+            <Input
+              id="delete-product-confirm-input"
+              data-testid="delete-product-confirm-input"
+              className="h-9 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono uppercase tracking-wider text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-rose-500"
+              placeholder="Digite EXCLUIR"
+              value={deleteConfirmText}
+              onChange={e => setDeleteConfirmText(e.target.value)}
+              autoFocus
+            />
+          </div>
         </div>
         <DialogFooter className="flex gap-2 sm:justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
           <Button
@@ -653,6 +679,7 @@ function Products() {
               setIsDeleteAlertOpen(false);
               setProductToDelete(null);
               setDeleteDependencies(null);
+              setDeleteConfirmText("");
             }}
             disabled={deleteMutation.isPending}
             className="dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
@@ -661,9 +688,10 @@ function Products() {
           </Button>
           <Button
             variant="destructive"
-            className="bg-rose-600 hover:bg-rose-700 text-white font-semibold shadow-sm"
+            className="bg-rose-600 hover:bg-rose-700 text-white font-semibold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleConfirmDelete}
-            disabled={deleteMutation.isPending}
+            disabled={deleteMutation.isPending || deleteConfirmText.trim().toUpperCase() !== "EXCLUIR"}
+            data-testid="confirm-delete-product-button"
           >
             {deleteMutation.isPending ? "Excluindo…" : "Confirmar Exclusão"}
           </Button>
@@ -719,7 +747,7 @@ function Products() {
   }
 
   return (
-    <div className="space-y-5" data-testid="erp-products-page">
+    <div className="space-y-5 min-h-screen bg-slate-950 dark:bg-slate-950 text-slate-100" data-testid="erp-products-page">
       {/* 1. Cabeçalho e Ação Principal */}
       <ErpPageHeader
         title="Produtos"
@@ -733,17 +761,17 @@ function Products() {
                 clearPhoto();
                 setForm({ ...emptyProduct });
               }}
-              className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-xl shadow-[0_0_15px_rgba(37,99,235,0.35)] transition-all flex items-center gap-2 cursor-pointer"
+              className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-xl shadow-[0_0_15px_rgba(37,99,235,0.35)] transition-all flex items-center cursor-pointer"
             >
-              <Plus className="h-4 w-4" />
-              + Novo produto
+              <Plus className="w-4 h-4 mr-1.5" />
+              <span>Novo produto</span>
             </button>
           )
         }
       />
 
       {/* 2. Barra Superior de Visualização */}
-      <section aria-label="Visão do catálogo" className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-5 text-white shadow-sm">
+      <section aria-label="Visão do catálogo" className="flex flex-wrap items-center justify-between gap-4 border border-slate-700 dark:border-slate-700/80 rounded-2xl bg-slate-900/90 p-5 text-white shadow-sm">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-400">Catálogo visual</p>
           <p className="mt-1 text-sm text-slate-300">Fotos, preços e disponibilidade reunidos em layout dinâmico.</p>
@@ -944,7 +972,7 @@ function Products() {
                               }}
                               className="cursor-pointer text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 focus:text-rose-600 dark:focus:text-rose-400 focus:bg-rose-50 dark:focus:bg-rose-950/40"
                             >
-                              <Trash2 className="mr-2 h-4 w-4" />
+                              <Trash2 className="mr-2 h-4 w-4 text-rose-500" />
                               Excluir produto
                             </DropdownMenuItem>
                           </>
@@ -1013,20 +1041,12 @@ function Products() {
                       <div className="flex items-center gap-3">
                         <ProductThumbnail
                           product={product}
-                          className="h-12 w-12 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs shrink-0 object-cover"
+                          className="w-14 h-14 rounded-xl object-cover border border-slate-700/80 shadow-md shrink-0"
                           version={mediaVersions[product.publicId]}
                         />
                         <div className="min-w-0 max-w-xs">
-                          <p className="font-semibold text-sm text-slate-900 dark:text-slate-100 truncate">{product.name}</p>
-                          <div className="flex items-center gap-1.5 mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                            <span className="font-mono">{product.sku}</span>
-                            {product.category && (
-                              <>
-                                <span>•</span>
-                                <span className="truncate">{product.category}</span>
-                              </>
-                            )}
-                          </div>
+                          <p className="text-base font-bold text-slate-900 dark:text-slate-100 truncate">{product.name}</p>
+                          <span className="text-xs text-slate-400 truncate block mt-0.5">{product.category || "Sem categoria"}</span>
                         </div>
                       </div>
                     </td>
@@ -1093,7 +1113,7 @@ function Products() {
                                 }}
                                 className="cursor-pointer text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 focus:text-rose-600 dark:focus:text-rose-400 focus:bg-rose-50 dark:focus:bg-rose-950/40"
                               >
-                                <Trash2 className="mr-2 h-4 w-4" />
+                                <Trash2 className="mr-2 h-4 w-4 text-rose-500" />
                                 Excluir produto
                               </DropdownMenuItem>
                             </>
@@ -1162,7 +1182,7 @@ function Products() {
                               }}
                               className="text-rose-600 dark:text-rose-400"
                             >
-                              <Trash2 className="mr-2 h-4 w-4" /> Excluir produto
+                              <Trash2 className="mr-2 h-4 w-4 text-rose-500" /> Excluir produto
                             </DropdownMenuItem>
                           </>
                         )}

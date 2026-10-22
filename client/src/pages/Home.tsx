@@ -4543,7 +4543,7 @@ function Shell() {
       </div>
 
       {/* Main Content */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div className={cn("flex min-w-0 flex-1 flex-col overflow-hidden", active.startsWith("erp-") && "bg-slate-950")}>
         <ShellTopbarBoundary active={active} mode={shellLayout.moduleTopbar}>
             <ModuleTopbar
             ariaLabel={active.startsWith("erp-") ? "Módulos do ERP" : active.startsWith("crm-") ? "Módulos do CRM" : "Ações da página"}
@@ -4555,7 +4555,7 @@ function Shell() {
         </ShellTopbarBoundary>
 
         {/* Content */}
-        <main ref={mainContentRef} tabIndex={-1} className={`flex min-h-0 min-w-0 flex-1 flex-col ${shellLayout.mainContentClassName}`}>
+        <main ref={mainContentRef} tabIndex={-1} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", shellLayout.mainContentClassName, active.startsWith("erp-") && "bg-slate-950 text-slate-100")}>
           <ErrorBoundary key={active}>
           {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} />}
           {active === "conversations" && <ConversationsPage
