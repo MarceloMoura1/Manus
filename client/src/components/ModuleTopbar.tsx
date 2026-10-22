@@ -34,7 +34,7 @@ export function ModuleTopbar({
       <div className="flex min-h-14 min-w-0 items-center gap-2 px-4 sm:px-8">
         {leading ? <div className="shrink-0">{leading}</div> : null}
         {visibleItems.length > 0 ? (
-          <nav aria-label={ariaLabel} className="min-w-0 flex-1 overflow-x-auto scrollbar-hide">
+          <nav aria-label={ariaLabel} className="min-w-0 flex-1 overflow-x-auto scrollbar-hide no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             <div className="flex min-w-max items-center gap-1 py-2">
               {visibleItems.map(item => {
                 const isActive = item.id === activeItemId;
