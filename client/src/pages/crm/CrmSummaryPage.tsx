@@ -82,31 +82,10 @@ export function CrmSummaryPage({ onNavigate }: CrmSummaryPageProps) {
 
   const quickNavCards = [
     {
-      title: "Funil Comercial (Kanban)",
-      description: "Visualização em colunas por estágios de qualificação, valores ponderados e movimentação ágil.",
-      section: "pipeline" as CrmSection,
-      icon: Target,
-      tag: "Operacional",
-    },
-    {
-      title: "Leads e Prospecção",
-      description: "Entrada e captação de contatos comerciais, enriquecimento cadastral e qualificação.",
-      section: "leads" as CrmSection,
-      icon: Users,
-      tag: "Operacional",
-    },
-    {
       title: "Clientes & Contatos",
       description: "Cadastro unificado de clientes B2B/B2C, histórico completo de conversas, chamados e arquivos.",
       section: "clients" as CrmSection,
       icon: Layers,
-      tag: "Operacional",
-    },
-    {
-      title: "Atividades e Tarefas",
-      description: "Follow-ups, tarefas, compromissos e histórico de contato com compradores por operador.",
-      section: "activities" as CrmSection,
-      icon: CalendarCheck,
       tag: "Operacional",
     },
     {
@@ -117,10 +96,31 @@ export function CrmSummaryPage({ onNavigate }: CrmSummaryPageProps) {
       tag: "Operacional",
     },
     {
+      title: "Leads e Prospecção",
+      description: "Entrada e captação de contatos comerciais, enriquecimento cadastral e qualificação.",
+      section: "leads" as CrmSection,
+      icon: Users,
+      tag: "Operacional",
+    },
+    {
+      title: "Funil Comercial (Kanban)",
+      description: "Visualização em colunas por estágios de qualificação, valores ponderados e movimentação ágil.",
+      section: "pipeline" as CrmSection,
+      icon: Target,
+      tag: "Operacional",
+    },
+    {
       title: "Automações & IA (Gemini)",
       description: "Gatilhos por mudança de estágio, captura via webhooks e assistência inteligente do Gemini.",
       section: "automations" as CrmSection,
       icon: Sparkles,
+      tag: "Operacional",
+    },
+    {
+      title: "Atividades e Tarefas",
+      description: "Follow-ups, tarefas, compromissos e histórico de contato com compradores por operador.",
+      section: "activities" as CrmSection,
+      icon: CalendarCheck,
       tag: "Operacional",
     },
     {

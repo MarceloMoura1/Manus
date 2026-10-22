@@ -36,12 +36,12 @@ export function getCrmTopbarItems({
 }): ModuleTopbarItem[] {
   const items: ModuleTopbarItem[] = [
     { id: "summary" as const, label: "Resumo", onSelect: () => onNavigate("summary") },
-    { id: "pipeline" as const, label: "Funil de Vendas", onSelect: () => onNavigate("pipeline") },
-    { id: "leads" as const, label: "Leads", onSelect: () => onNavigate("leads") },
     { id: "clients" as const, label: "Clientes", onSelect: () => onNavigate("clients") },
-    { id: "activities" as const, label: "Atividades", onSelect: () => onNavigate("activities") },
     { id: "proposals" as const, label: "Propostas", onSelect: () => onNavigate("proposals") },
-    { id: "automations" as const, label: "Automações & IA", onSelect: () => onNavigate("automations") },
+    { id: "leads" as const, label: "Leads", onSelect: () => onNavigate("leads") },
+    { id: "pipeline" as const, label: "Funil de Vendas", onSelect: () => onNavigate("pipeline") },
+    { id: "automations" as const, label: "Automações e IA", onSelect: () => onNavigate("automations") },
+    { id: "activities" as const, label: "Atividades", onSelect: () => onNavigate("activities") },
     { id: "reports" as const, label: "Relatórios", onSelect: () => onNavigate("reports") },
   ];
 

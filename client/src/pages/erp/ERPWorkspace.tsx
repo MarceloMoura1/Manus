@@ -48,16 +48,16 @@ export function getErpTopbarItems({
 }): ModuleTopbarItem[] {
   const available = [
     {id:"summary" as const,label:"Resumo"},
-    {id:"clients" as const,label:"Clientes",hidden:!canAccessClients},
     {id:"products" as const,label:"Produtos"},
     {id:"services" as const,label:"Serviços"},
     {id:"stock" as const,label:"Estoque"},
-    {id:"suppliers" as const,label:"Fornecedores"},
-    {id:"purchases" as const,label:"Compras"},
     {id:"sales" as const,label:"Vendas",hidden:!canAccessSales},
+    {id:"purchases" as const,label:"Compras"},
     {id:"finance" as const,label:"Financeiro",hidden:!canAccessFinance},
     {id:"fiscal" as const,label:"Fiscal",hidden:!canAccessFiscal},
     {id:"reports" as const,label:"Relatórios",hidden:!canAccessReports},
+    {id:"suppliers" as const,label:"Fornecedores"},
+    ...(canAccessClients ? [{id:"clients" as const,label:"Clientes"}] : []),
   ];
 
   return [
