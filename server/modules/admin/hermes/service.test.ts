@@ -142,8 +142,12 @@ describe("Hermes Module - Unit & Isolation Tests", () => {
         totalMessages: 1250,
         mediaCount: 140,
         totalContacts: 320,
+        contatosWhatsApp: 310,
+        clientesErp: 10,
         totalConversations: 450,
         totalChamados: 85,
+        chamadosAbertos: 2,
+        ultimoChamadoData: "2026-10-22T10:00:00.000Z",
         estimatedDbSizeKB: 4500,
         estimatedDbSizeFormatted: "4.39 MB",
         activeStatus: "active",
@@ -157,6 +161,9 @@ describe("Hermes Module - Unit & Isolation Tests", () => {
       expect(result.response.content).toContain("FaYerS Indústria");
       expect(result.response.content).toContain("1.250");
       expect(result.response.content).toContain("4.39 MB");
+      expect(result.response.content).toContain("310"); // WhatsApp
+      expect(result.response.content).toContain("10");  // ERP
+      expect(result.response.content).toContain("2 chamado(s) em aberto");
       expect(result.response.metadataJson?.actionTriggered).toBe("tenant_inspection");
     });
 
