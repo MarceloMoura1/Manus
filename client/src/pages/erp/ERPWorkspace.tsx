@@ -198,11 +198,13 @@ export function ProductThumbnail({
   className = "h-16 w-16",
   version = 0,
   style,
+  imageStyle,
 }: {
   product: { publicId: string; name: string; hasImage?: boolean | null; updatedAt?: string | Date };
   className?: string;
   version?: number;
   style?: React.CSSProperties;
+  imageStyle?: React.CSSProperties;
 }) {
   const [failed, setFailed] = React.useState(false);
   const resolvedVersion = version || (product.updatedAt ? new Date(product.updatedAt).getTime() : 0);
@@ -228,8 +230,8 @@ export function ProductThumbnail({
         alt={`Foto de ${product.name}`}
         loading="lazy"
         decoding="async"
-        className="w-full h-full object-cover"
-        style={{ width: "64px", height: "64px" }}
+        className="w-full h-full object-cover block"
+        style={imageStyle}
         onError={() => setFailed(true)}
       />
     </div>
@@ -1046,17 +1048,18 @@ function Products() {
                     onClick={() => setSelectedProductPublicId(product.publicId)}
                     className="cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors"
                   >
-                    <td className="min-w-[280px] px-4 py-3">
+                    <td className="min-w-[320px] px-4 py-3">
                       <div className="flex items-center gap-4">
                         <ProductThumbnail
                           product={product}
-                          className="h-16 w-16 min-h-[64px] min-w-[64px] shrink-0 rounded-xl border border-border shadow-sm"
+                          className="w-16 h-16 min-w-[64px] min-h-[64px] max-w-[64px] max-h-[64px] rounded-xl overflow-hidden border border-border shadow-sm flex-shrink-0 bg-muted"
                           style={{ width: "64px", height: "64px", minWidth: "64px", minHeight: "64px" }}
+                          imageStyle={{ width: "64px", height: "64px" }}
                           version={mediaVersions[product.publicId]}
                         />
-                        <div className="min-w-0">
-                          <span className="mb-1 block text-sm font-semibold leading-tight text-foreground">{product.name}</span>
-                          <span className="block text-xs text-muted-foreground">{product.category || "Sem categoria"}</span>
+                        <div className="min-w-0 flex flex-col justify-center">
+                          <span className="font-bold text-base text-foreground leading-snug line-clamp-2">{product.name}</span>
+                          <span className="text-xs text-muted-foreground mt-0.5 block">{product.category || "Sem categoria"}</span>
                         </div>
                       </div>
                     </td>

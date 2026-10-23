@@ -24,10 +24,14 @@ describe("Produtos: contratos visuais do workspace", () => {
 
   it("destaca imagem e nome e mantém o SKU fora do subtítulo da tabela", () => {
     const table = workspace.slice(workspace.indexOf("/* 4. Visualização em Lista"), workspace.indexOf('<div className="grid gap-3 md:hidden">'));
-    expect(table).toContain("min-w-[280px] px-4 py-3");
-    expect(table).toContain("h-16 w-16 min-h-[64px] min-w-[64px] shrink-0 rounded-xl border border-border shadow-sm");
-    expect(workspace).toContain('className="w-full h-full object-cover"');
-    expect(table).toContain("mb-1 block text-sm font-semibold leading-tight text-foreground");
+    expect(table).toContain("min-w-[320px] px-4 py-3");
+    expect(table).toContain("w-16 h-16 min-w-[64px] min-h-[64px] max-w-[64px] max-h-[64px] rounded-xl overflow-hidden border border-border shadow-sm flex-shrink-0 bg-muted");
+    expect(table).toContain('style={{ width: "64px", height: "64px", minWidth: "64px", minHeight: "64px" }}');
+    expect(table).toContain('imageStyle={{ width: "64px", height: "64px" }}');
+    expect(workspace).toContain('className="w-full h-full object-cover block"');
+    expect(table).toContain("min-w-0 flex flex-col justify-center");
+    expect(table).toContain("font-bold text-base text-foreground leading-snug line-clamp-2");
+    expect(table).toContain("text-xs text-muted-foreground mt-0.5 block");
     expect(table).toContain('{product.category || "Sem categoria"}');
     expect(table.match(/product\.sku/g)).toHaveLength(1);
   });
