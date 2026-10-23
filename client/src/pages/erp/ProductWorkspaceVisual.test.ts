@@ -41,9 +41,9 @@ describe("Produtos: contratos visuais do workspace", () => {
 
   it("mantém iluminação interna contida e delega a rolagem do ERP ao main", () => {
     expect(workspace).toContain("const deepNavySurfaceStyle: React.CSSProperties");
-    expect(workspace).toContain('backgroundColor: "#050b14"');
-    expect(workspace).toContain('border: "1px solid rgba(255, 255, 255, 0.22)"');
-    expect(workspace).toContain('boxShadow: "inset 0 1px 0 0 rgba(255, 255, 255, 0.15)"');
+    expect(workspace).toContain('background: "radial-gradient(100% 140% at 50% 40%, #0d1e38 0%, #081324 45%, #040812 100%)"');
+    expect(workspace).toContain('border: "1px solid rgba(255, 255, 255, 0.18)"');
+    expect(workspace).toContain('boxShadow: "inset 0 1px 0 0 rgba(255, 255, 255, 0.12), inset 0 0 30px rgba(14, 116, 144, 0.04)"');
     expect(workspace.match(/style=\{deepNavySurfaceStyle\}/g)).toHaveLength(2);
     expect(workspace).not.toContain("0_-8px_30px_rgba(255,255,255");
     const root = workspace.match(/return <div className="([^"]+)" data-testid="erp-workspace"/);

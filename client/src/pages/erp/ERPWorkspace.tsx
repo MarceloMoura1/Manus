@@ -266,9 +266,9 @@ function StockBadge({ quantity, minimumStock }: { quantity: string; minimumStock
 }
 
 const deepNavySurfaceStyle: React.CSSProperties = {
-  backgroundColor: "#050b14",
-  border: "1px solid rgba(255, 255, 255, 0.22)",
-  boxShadow: "inset 0 1px 0 0 rgba(255, 255, 255, 0.15)",
+  background: "radial-gradient(100% 140% at 50% 40%, #0d1e38 0%, #081324 45%, #040812 100%)",
+  border: "1px solid rgba(255, 255, 255, 0.18)",
+  boxShadow: "inset 0 1px 0 0 rgba(255, 255, 255, 0.12), inset 0 0 30px rgba(14, 116, 144, 0.04)",
 };
 
 function ProductsGlowPagination({
