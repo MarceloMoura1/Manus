@@ -12,7 +12,6 @@ import {
   ImageIcon,
   Trash2,
   TrendingUp,
-  Upload,
 } from "lucide-react";
 import { sanitizeErrorMessage as baseSanitizeErrorMessage } from "./ProductDetailPanel";
 
@@ -147,13 +146,13 @@ function FormField({
   className?: string;
 }) {
   return (
-    <label htmlFor={id} className={`block text-xs font-medium text-muted-foreground ${className ?? ""}`}>
+    <label htmlFor={id} className={`mb-1.5 block text-xs font-medium text-slate-300 ${className ?? ""}`}>
       {label}
       {required && <span className="ml-1 text-rose-500">*</span>}
       <Input
         id={id}
         data-testid={id}
-        className="mt-1.5 h-10 rounded-xl border border-border/80 bg-background text-base text-foreground placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary/40"
+        className="h-10 rounded-xl border border-slate-700/70 bg-slate-900/80 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40"
         value={value}
         onChange={e => onChange(e.target.value)}
         required={required}
@@ -224,98 +223,108 @@ export function ProductFormContent({
   const marginPercentNum = costNum > 0 ? ((profitNum / costNum) * 100).toFixed(1) : (saleNum > 0 ? "100.0" : "0.0");
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-4 text-sm">
+    <form onSubmit={onSubmit} className="flex flex-col gap-5 text-sm">
       {/* Indicador de Modo (Editar vs Novo) para acessibilidade e testes */}
       <div className="sr-only" aria-live="polite">
         <h2>{form.publicId ? "Editar produto" : "Novo produto"}</h2>
       </div>
 
-      {/* Dados principais em duas colunas em telas maiores. */}
-      <div className="grid gap-4 sm:grid-cols-2">
-      <div className="contents">
-        {/* Prévia da foto */}
-        <div className="flex flex-col items-center shrink-0 sm:col-start-1 sm:row-start-1 sm:row-span-2">
-          <div className="relative flex h-32 w-32 items-center justify-center overflow-hidden rounded-xl border border-dashed border-border/80 bg-muted/40 transition-colors hover:border-primary/50">
-            {photoPreview && !removePhoto ? (
-              <img
-                src={photoPreview}
-                alt="Prévia da foto do produto"
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <ImageIcon className="h-7 w-7 text-slate-400" />
-            )}
-          </div>
-          <div className="mt-1 flex items-center gap-1">
-            <label
-              aria-disabled={pending}
-              className={`inline-flex items-center rounded-lg border border-border/80 bg-card px-3 py-2 text-xs font-medium text-foreground transition-colors ${
-                pending ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:border-primary/50 hover:bg-muted"
-              }`}
-            >
-              <Upload className="mr-1 h-3 w-3 text-blue-500" />
-              {photoPreview && !removePhoto ? "Trocar" : "Foto"}
-              <input
-                className="sr-only"
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                disabled={pending}
-                onChange={event => {
-                  const file = event.currentTarget.files?.[0] ?? null;
-                  event.currentTarget.value = "";
-                  if (file && onPhotoSelect) onPhotoSelect(file);
-                }}
-              />
-            </label>
-            {photoPreview && !removePhoto && onPhotoRemove && (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={onPhotoRemove}
-                title="Remover foto"
-                className="rounded p-0.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40"
-              >
-                <Trash2 className="h-3 w-3" />
-              </button>
-            )}
-          </div>
-        </div>
+      {/* Identificação */}
+      <section className="grid gap-4" aria-label="Identificação do produto">
+        <FormField
+          id="product-name-input"
+          label="Nome do produto"
+          value={form.name}
+          onChange={name => setForm({ ...form, name })}
+          required
+        />
 
-        {/* Nome, SKU e Código de Barras */}
-        <div className="space-y-3 sm:col-start-2 sm:row-start-1 sm:row-span-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           <FormField
-            id="product-name-input"
-            label="Nome do produto"
-            value={form.name}
-            onChange={name => setForm({ ...form, name })}
+            id="product-sku-input"
+            label="SKU"
+            value={form.sku}
+            onChange={sku => setForm({ ...form, sku })}
             required
           />
 
-          <div className="grid gap-2.5 sm:grid-cols-2">
-            <FormField
-              id="product-sku-input"
-              label="SKU"
-              value={form.sku}
-              onChange={sku => setForm({ ...form, sku })}
-              required
-            />
-
-            <FormField
-              id="product-barcode-input"
-              label="Código de barras (EAN/GTIN)"
-              value={form.barcode}
-              onChange={barcode => setForm({ ...form, barcode })}
-            />
-          </div>
+          <FormField
+            id="product-barcode-input"
+            label="Código de barras (EAN/GTIN)"
+            value={form.barcode}
+            onChange={barcode => setForm({ ...form, barcode })}
+          />
         </div>
-      </div>
+      </section>
+
+      {/* Upload da foto */}
+      <section aria-label="Foto do produto">
+        <div
+          className={`relative flex min-h-[140px] flex-col items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-slate-700 bg-slate-900/40 p-4 text-center transition-colors ${
+            pending ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:border-blue-500/60"
+          }`}
+          onDragOver={event => event.preventDefault()}
+          onDrop={event => {
+            event.preventDefault();
+            const file = event.dataTransfer.files?.[0] ?? null;
+            if (!pending && file && onPhotoSelect) onPhotoSelect(file);
+          }}
+        >
+          {photoPreview && !removePhoto ? (
+            <img
+              src={photoPreview}
+              alt="Prévia da foto do produto"
+              className="h-32 w-32 rounded-xl object-cover shadow-md"
+            />
+          ) : (
+            <>
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-slate-700/70 bg-slate-900/80">
+                <ImageIcon className="h-6 w-6 text-blue-400" />
+              </div>
+              <span className="mt-3 text-sm font-medium text-slate-200">Adicionar foto do produto</span>
+              <span className="mt-1 text-xs text-slate-400">Clique ou arraste a foto do produto</span>
+            </>
+          )}
+          <label
+            aria-disabled={pending}
+            className="absolute inset-0 cursor-pointer"
+            aria-label={photoPreview && !removePhoto ? "Trocar foto do produto" : "Adicionar foto do produto"}
+          >
+            <input
+              className="sr-only"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              disabled={pending}
+              onChange={event => {
+                const file = event.currentTarget.files?.[0] ?? null;
+                event.currentTarget.value = "";
+                if (file && onPhotoSelect) onPhotoSelect(file);
+              }}
+            />
+          </label>
+          {photoPreview && !removePhoto && onPhotoRemove && (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={event => {
+                event.stopPropagation();
+                onPhotoRemove();
+              }}
+              title="Remover foto"
+              className="absolute top-3 right-3 z-10 rounded-lg border border-slate-700 bg-slate-950/90 p-2 text-rose-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </section>
 
       {/* Categoria, marca, unidade e estoque mínimo */}
-      <div className="contents">
+      <section className="grid gap-4 sm:grid-cols-3" aria-label="Classificação e medida">
         {/* Categoria */}
-        <div className="sm:col-start-1 sm:row-start-3">
+        <div>
           <div className="flex items-center justify-between">
-            <label htmlFor="product-category-select" className="text-xs font-medium text-muted-foreground">
+            <label htmlFor="product-category-select" className="text-xs font-medium text-slate-300">
               Categoria
             </label>
             {onOpenNewCategory && (
@@ -342,7 +351,7 @@ export function ProductFormContent({
                 : undefined
             }
             disabled={pending || categoriesLoading || Boolean(categoriesError)}
-            className="mt-1.5 h-10 w-full rounded-xl border border-border/80 bg-background px-3 text-base text-foreground focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50"
+            className="mt-1.5 h-10 w-full rounded-xl border border-slate-700/70 bg-slate-900/80 px-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40 disabled:opacity-50"
             value={form.categoryPublicId || ""}
             onChange={e => {
               const val = e.target.value;
@@ -396,9 +405,9 @@ export function ProductFormContent({
         </div>
 
         {/* Marca */}
-        <div className="sm:col-start-1 sm:row-start-4">
+        <div>
           <div className="flex items-center justify-between">
-            <label htmlFor="product-brand-select" className="text-xs font-medium text-muted-foreground">
+            <label htmlFor="product-brand-select" className="text-xs font-medium text-slate-300">
               Marca
             </label>
             {onOpenNewBrand && (
@@ -419,7 +428,7 @@ export function ProductFormContent({
             aria-label="Marca"
             aria-describedby={brandsError ? "brand-error-hint" : undefined}
             disabled={pending || brandsLoading || Boolean(brandsError)}
-            className="mt-1.5 h-10 w-full rounded-xl border border-border/80 bg-background px-3 text-base text-foreground focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50"
+            className="mt-1.5 h-10 w-full rounded-xl border border-slate-700/70 bg-slate-900/80 px-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40 disabled:opacity-50"
             value={form.brandPublicId || ""}
             onChange={e => {
               const val = e.target.value;
@@ -448,14 +457,14 @@ export function ProductFormContent({
         </div>
 
         {/* Unidade */}
-        <div className="sm:col-start-1 sm:row-start-5">
-          <label htmlFor="product-unit-select" className="text-xs font-medium text-muted-foreground">
+        <div>
+          <label htmlFor="product-unit-select" className="text-xs font-medium text-slate-300">
             Unidade
           </label>
           <select
             id="product-unit-select"
             data-testid="product-unit-select"
-            className="mt-1.5 h-10 w-full rounded-xl border border-border/80 bg-background px-3 text-base text-foreground focus-visible:ring-2 focus-visible:ring-primary/40"
+            className="mt-1.5 h-10 w-full rounded-xl border border-slate-700/70 bg-slate-900/80 px-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40"
             value={form.unit}
             onChange={e => setForm({ ...form, unit: e.target.value as ProductForm["unit"] })}
           >
@@ -466,19 +475,11 @@ export function ProductFormContent({
           </select>
         </div>
 
-        {/* Estoque Mínimo */}
-        <div className="sm:col-start-2 sm:row-start-5">
-          <FormField
-            id="product-minimum-stock-input"
-            label="Estoque mínimo"
-            value={form.minimumStock}
-            onChange={minimumStock => setForm({ ...form, minimumStock })}
-          />
-        </div>
-      </div>
+      </section>
 
       {/* Preços e margem */}
-      <div className="grid gap-3 sm:col-start-2 sm:row-start-3 sm:row-span-2">
+      <section className="rounded-xl border border-slate-800/80 bg-slate-900/50 p-4" aria-label="Financeiro e estoque">
+        <div className="grid gap-4 sm:grid-cols-3">
         <FormField
           id="product-cost-input"
           label="Preço de custo (R$)"
@@ -493,40 +494,47 @@ export function ProductFormContent({
           onChange={sale => setForm({ ...form, sale })}
         />
 
+        <FormField
+          id="product-minimum-stock-input"
+          label="Estoque mínimo"
+          value={form.minimumStock}
+          onChange={minimumStock => setForm({ ...form, minimumStock })}
+        />
+        </div>
+
         {/* Margem calculada */}
-        <div className="flex flex-col justify-between rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
-          <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+        <div className="mt-4 flex flex-col justify-between rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 sm:flex-row sm:items-center">
+          <span className="flex items-center gap-1 text-xs font-medium text-emerald-300">
             <TrendingUp className="h-3 w-3" /> Margem calculada
           </span>
           <div className="mt-1 flex items-baseline justify-between gap-1">
-            <span className={`text-base font-semibold ${profitNum >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+            <span className={`text-base font-semibold ${profitNum >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
               {costNum > 0 || saleNum > 0 ? `${marginPercentNum}%` : "0,0%"}
             </span>
             {(costNum > 0 || saleNum > 0) && (
-              <span className="truncate text-xs font-medium text-muted-foreground">
+              <span className="truncate text-xs font-medium text-slate-400">
                 Lucro: {profitNum.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
               </span>
             )}
           </div>
         </div>
-      </div>
-      </div>
+      </section>
 
       {/* Descrição */}
-      <div className="rounded-xl border border-border/80 bg-muted/40 p-3">
-        <label htmlFor="product-description-input" className="block text-xs font-medium text-muted-foreground">
+      <section className="rounded-xl border border-slate-800/80 bg-slate-900/50 p-4" aria-label="Descrição do produto">
+        <label htmlFor="product-description-input" className="mb-1.5 block text-xs font-medium text-slate-300">
           Descrição do produto
         </label>
         <textarea
           id="product-description-input"
           data-testid="product-description-input"
-          rows={2}
-          className="mt-1.5 w-full resize-y rounded-xl border border-border/80 bg-background p-3 text-base text-foreground placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary/40"
+          rows={3}
+          className="min-h-[80px] w-full resize-y rounded-xl border border-slate-700/70 bg-slate-900/80 p-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40"
           placeholder="Informações técnicas, composição, garantias..."
           value={form.description}
           onChange={e => setForm({ ...form, description: e.target.value })}
         />
-      </div>
+      </section>
 
       {/* Erros sanitizados de submissão */}
       {errorMessage && (
@@ -536,13 +544,13 @@ export function ProductFormContent({
       )}
 
       {/* Rodapé com botões Cancelar e Salvar fixos na base */}
-      <div className="mt-2 flex items-center justify-end gap-3 border-t border-border/40 pt-4">
+      <div className="mt-6 flex items-center justify-end gap-3 border-t border-slate-800/80 pt-4">
         <Button
           type="button"
           variant="ghost"
           onClick={onCancel}
           disabled={pending}
-          className="rounded-xl px-4 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="rounded-xl border border-slate-700 px-4 text-sm text-slate-300 hover:bg-slate-800 hover:text-white"
         >
           Cancelar
         </Button>
@@ -550,7 +558,7 @@ export function ProductFormContent({
           type="submit"
           disabled={pending}
           data-testid="submit-product-form"
-          className="h-10 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:from-blue-500 hover:to-indigo-500"
+          className="h-10 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-blue-600/20 transition-colors hover:bg-blue-500"
         >
           {pending ? "Salvando…" : "Salvar produto"}
         </Button>
@@ -586,14 +594,14 @@ export function ProductFormDialogView({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         overlayClassName="!bg-black/70 backdrop-blur-sm"
-        className="z-50 w-full max-w-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-border/60 bg-card p-6 text-card-foreground shadow-2xl"
+        className="z-50 w-full max-w-3xl max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-2xl"
       >
-        <DialogHeader className="border-b border-border/60 pb-4">
-          <DialogTitle className="text-lg font-semibold tracking-tight text-foreground">
+        <DialogHeader className="mb-5 border-b border-slate-800/80 pb-4">
+          <DialogTitle className="text-xl font-semibold tracking-tight text-slate-100">
             {form.publicId ? "Editar produto" : "Novo produto"}
           </DialogTitle>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Preencha os dados do produto abaixo de forma rápida e compacta.
+          <p className="mt-0.5 text-sm text-slate-400">
+            Organize identificação, classificação, estoque e precificação em um só lugar.
           </p>
         </DialogHeader>
         <ProductFormContent
