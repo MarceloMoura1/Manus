@@ -87,7 +87,7 @@ describe("ProductFormDialog (P1-A10 Relational Category & Brand Integration)", (
     const nameInput = markup.match(/<input\b[^>]*id="product-name-input"[^>]*>/)?.[0] ?? "";
     const categorySelect = markup.match(/<select\b[^>]*id="product-category-select"[^>]*>/)?.[0] ?? "";
     expect(nameInput).toContain("h-10");
-    expect(nameInput).toContain("md:text-base");
+    expect(nameInput).toContain("rounded-xl");
     expect(categorySelect).toContain("h-10");
     expect(categorySelect).toContain("text-base");
   });

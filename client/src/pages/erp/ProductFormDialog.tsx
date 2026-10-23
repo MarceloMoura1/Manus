@@ -147,13 +147,13 @@ function FormField({
   className?: string;
 }) {
   return (
-    <label htmlFor={id} className={`block text-sm font-semibold text-slate-700 dark:text-slate-300 ${className ?? ""}`}>
+    <label htmlFor={id} className={`block text-xs font-medium text-muted-foreground ${className ?? ""}`}>
       {label}
       {required && <span className="ml-1 text-rose-500">*</span>}
       <Input
         id={id}
         data-testid={id}
-        className="mt-1 h-10 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-base md:text-base text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-blue-500"
+        className="mt-1.5 h-10 rounded-xl border border-border/80 bg-background text-base text-foreground placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary/40"
         value={value}
         onChange={e => onChange(e.target.value)}
         required={required}
@@ -235,7 +235,7 @@ export function ProductFormContent({
       <div className="contents">
         {/* Prévia da foto */}
         <div className="flex flex-col items-center shrink-0 sm:col-start-1 sm:row-start-1 sm:row-span-2">
-          <div className="relative flex h-32 w-32 items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden shadow-xs">
+          <div className="relative flex h-32 w-32 items-center justify-center overflow-hidden rounded-xl border border-dashed border-border/80 bg-muted/40 transition-colors hover:border-primary/50">
             {photoPreview && !removePhoto ? (
               <img
                 src={photoPreview}
@@ -249,8 +249,8 @@ export function ProductFormContent({
           <div className="mt-1 flex items-center gap-1">
             <label
               aria-disabled={pending}
-              className={`inline-flex items-center rounded px-3 py-2 text-sm font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 shadow-xs ${
-                pending ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700"
+              className={`inline-flex items-center rounded-lg border border-border/80 bg-card px-3 py-2 text-xs font-medium text-foreground transition-colors ${
+                pending ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:border-primary/50 hover:bg-muted"
               }`}
             >
               <Upload className="mr-1 h-3 w-3 text-blue-500" />
@@ -315,7 +315,7 @@ export function ProductFormContent({
         {/* Categoria */}
         <div className="sm:col-start-1 sm:row-start-3">
           <div className="flex items-center justify-between">
-            <label htmlFor="product-category-select" className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+            <label htmlFor="product-category-select" className="text-xs font-medium text-muted-foreground">
               Categoria
             </label>
             {onOpenNewCategory && (
@@ -323,7 +323,7 @@ export function ProductFormContent({
                 type="button"
                 onClick={onOpenNewCategory}
                 disabled={pending}
-                className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                className="cursor-pointer text-xs font-medium text-primary hover:underline disabled:opacity-50"
                 data-testid="btn-new-category"
               >
                 + Nova categoria
@@ -342,7 +342,7 @@ export function ProductFormContent({
                 : undefined
             }
             disabled={pending || categoriesLoading || Boolean(categoriesError)}
-            className="mt-1 h-10 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 text-base text-slate-900 dark:text-slate-100 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+            className="mt-1.5 h-10 w-full rounded-xl border border-border/80 bg-background px-3 text-base text-foreground focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50"
             value={form.categoryPublicId || ""}
             onChange={e => {
               const val = e.target.value;
@@ -398,7 +398,7 @@ export function ProductFormContent({
         {/* Marca */}
         <div className="sm:col-start-1 sm:row-start-4">
           <div className="flex items-center justify-between">
-            <label htmlFor="product-brand-select" className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+            <label htmlFor="product-brand-select" className="text-xs font-medium text-muted-foreground">
               Marca
             </label>
             {onOpenNewBrand && (
@@ -406,7 +406,7 @@ export function ProductFormContent({
                 type="button"
                 onClick={onOpenNewBrand}
                 disabled={pending}
-                className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                className="cursor-pointer text-xs font-medium text-primary hover:underline disabled:opacity-50"
                 data-testid="btn-new-brand"
               >
                 + Nova marca
@@ -419,7 +419,7 @@ export function ProductFormContent({
             aria-label="Marca"
             aria-describedby={brandsError ? "brand-error-hint" : undefined}
             disabled={pending || brandsLoading || Boolean(brandsError)}
-            className="mt-1 h-10 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 text-base text-slate-900 dark:text-slate-100 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+            className="mt-1.5 h-10 w-full rounded-xl border border-border/80 bg-background px-3 text-base text-foreground focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50"
             value={form.brandPublicId || ""}
             onChange={e => {
               const val = e.target.value;
@@ -449,13 +449,13 @@ export function ProductFormContent({
 
         {/* Unidade */}
         <div className="sm:col-start-1 sm:row-start-5">
-          <label htmlFor="product-unit-select" className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+          <label htmlFor="product-unit-select" className="text-xs font-medium text-muted-foreground">
             Unidade
           </label>
           <select
             id="product-unit-select"
             data-testid="product-unit-select"
-            className="mt-1 h-10 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 text-base text-slate-900 dark:text-slate-100 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="mt-1.5 h-10 w-full rounded-xl border border-border/80 bg-background px-3 text-base text-foreground focus-visible:ring-2 focus-visible:ring-primary/40"
             value={form.unit}
             onChange={e => setForm({ ...form, unit: e.target.value as ProductForm["unit"] })}
           >
@@ -494,16 +494,16 @@ export function ProductFormContent({
         />
 
         {/* Margem calculada */}
-        <div className="flex flex-col justify-between rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 px-3 py-1">
-          <span className="text-sm font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1">
+        <div className="flex flex-col justify-between rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
+          <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
             <TrendingUp className="h-3 w-3" /> Margem calculada
           </span>
-          <div className="flex items-baseline justify-between gap-1">
-            <span className={`text-sm font-extrabold ${profitNum >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+          <div className="mt-1 flex items-baseline justify-between gap-1">
+            <span className={`text-base font-semibold ${profitNum >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
               {costNum > 0 || saleNum > 0 ? `${marginPercentNum}%` : "0,0%"}
             </span>
             {(costNum > 0 || saleNum > 0) && (
-              <span className="text-sm text-slate-500 dark:text-slate-400 font-medium truncate">
+              <span className="truncate text-xs font-medium text-muted-foreground">
                 Lucro: {profitNum.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
               </span>
             )}
@@ -513,15 +513,15 @@ export function ProductFormContent({
       </div>
 
       {/* Descrição */}
-      <div className="rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50 p-2.5">
-        <label htmlFor="product-description-input" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
+      <div className="rounded-xl border border-border/80 bg-muted/40 p-3">
+        <label htmlFor="product-description-input" className="block text-xs font-medium text-muted-foreground">
           Descrição do produto
         </label>
         <textarea
           id="product-description-input"
           data-testid="product-description-input"
           rows={2}
-          className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-base text-slate-900 dark:text-slate-100 placeholder:text-slate-400 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y"
+          className="mt-1.5 w-full resize-y rounded-xl border border-border/80 bg-background p-3 text-base text-foreground placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary/40"
           placeholder="Informações técnicas, composição, garantias..."
           value={form.description}
           onChange={e => setForm({ ...form, description: e.target.value })}
@@ -536,23 +536,21 @@ export function ProductFormContent({
       )}
 
       {/* Rodapé com botões Cancelar e Salvar fixos na base */}
-      <div className="flex items-center justify-end gap-3 border-t border-slate-200 dark:border-slate-800 pt-2.5">
+      <div className="mt-2 flex items-center justify-end gap-3 border-t border-border/40 pt-4">
         <Button
           type="button"
-          variant="outline"
-          size="sm"
+          variant="ghost"
           onClick={onCancel}
           disabled={pending}
-          className="dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 text-sm"
+          className="rounded-xl px-4 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           Cancelar
         </Button>
         <Button
           type="submit"
-          size="sm"
           disabled={pending}
           data-testid="submit-product-form"
-          className="bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-[0_0_15px_rgba(37,99,235,0.35)] px-5 text-sm"
+          className="h-10 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:from-blue-500 hover:to-indigo-500"
         >
           {pending ? "Salvando…" : "Salvar produto"}
         </Button>
@@ -588,13 +586,13 @@ export function ProductFormDialogView({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         overlayClassName="!bg-black/70 backdrop-blur-sm"
-        className="z-50 w-full max-w-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-2xl"
+        className="z-50 w-full max-w-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-border/60 bg-card p-6 text-card-foreground shadow-2xl"
       >
-        <DialogHeader className="border-b border-slate-100 dark:border-slate-800 pb-2">
-          <DialogTitle className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">
+        <DialogHeader className="border-b border-border/60 pb-4">
+          <DialogTitle className="text-lg font-semibold tracking-tight text-foreground">
             {form.publicId ? "Editar produto" : "Novo produto"}
           </DialogTitle>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+          <p className="mt-0.5 text-sm text-muted-foreground">
             Preencha os dados do produto abaixo de forma rápida e compacta.
           </p>
         </DialogHeader>

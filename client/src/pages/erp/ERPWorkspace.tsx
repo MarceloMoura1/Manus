@@ -777,7 +777,7 @@ function Products() {
                 clearPhoto();
                 setForm({ ...emptyProduct });
               }}
-              className="flex cursor-pointer items-center rounded-xl bg-primary px-4 py-2 font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90"
+              className="flex cursor-pointer items-center rounded-xl border border-blue-400/30 bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 font-medium text-white shadow-md shadow-blue-600/20 transition-all duration-200 hover:from-blue-500 hover:to-indigo-500 hover:shadow-lg hover:shadow-blue-600/30"
             >
               <Plus className="w-4 h-4 mr-2" />
               <span>Novo produto</span>
