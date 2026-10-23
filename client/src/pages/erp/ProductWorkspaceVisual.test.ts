@@ -10,7 +10,8 @@ describe("Produtos: contratos visuais do workspace", () => {
     const banner = workspace.slice(workspace.indexOf('<section aria-label="Visão do catálogo"'), workspace.indexOf("{message &&"));
     expect(banner).toContain("Fotos, preço e disponibilidade reunidos para uma leitura rápida.");
     expect(banner).toContain("border-slate-700/80 rounded-2xl bg-slate-900/90 px-6 py-4");
-    expect(banner.match(/bg-white text-slate-900 shadow-sm/g)).toHaveLength(2);
+    expect(banner).toContain('!bg-white !text-slate-900 shadow-sm');
+    expect(banner).toContain('backgroundColor: "#ffffff", color: "#0f172a"');
     expect(banner.match(/fontSize: "0.75rem"/g)).toHaveLength(2);
     expect(banner).not.toContain("bg-blue-600");
     expect(banner).toContain("query.data?.total ?? 0");
@@ -26,7 +27,8 @@ describe("Produtos: contratos visuais do workspace", () => {
 
   it("mantém glow superior e workspace sem rolagem vertical própria", () => {
     expect(workspace).toContain("border-t-white/40 border-x border-b border-white/10");
-    expect(workspace).toContain("0_-8px_30px_rgba(255,255,255,0.15)");
+    expect(workspace).toContain("0_-8px_30px_rgba(255,255,255,0.18)");
+    expect(workspace).toContain('className="pt-4 pb-6"');
     const root = workspace.match(/return <div className="([^"]+)" data-testid="erp-workspace"/);
     expect(root?.[1]).toContain("min-h-screen bg-slate-950 dark:bg-slate-950");
     expect(root?.[1]).not.toMatch(/(?:^|\s)(?:h-screen|max-h-screen|overflow-y-auto)(?:\s|$)/);

@@ -197,10 +197,12 @@ export function ProductThumbnail({
   product,
   className = "h-16 w-16",
   version = 0,
+  style,
 }: {
   product: { publicId: string; name: string; hasImage?: boolean | null; updatedAt?: string | Date };
   className?: string;
   version?: number;
+  style?: React.CSSProperties;
 }) {
   const [failed, setFailed] = React.useState(false);
   const resolvedVersion = version || (product.updatedAt ? new Date(product.updatedAt).getTime() : 0);
@@ -210,6 +212,7 @@ export function ProductThumbnail({
     return (
       <div
         className={`${frame} flex items-center justify-center`}
+        style={style}
         data-testid="product-image-placeholder"
         aria-label={`Sem foto para ${product.name}`}
       >
@@ -225,6 +228,7 @@ export function ProductThumbnail({
       loading="lazy"
       decoding="async"
       className={`${frame} object-cover`}
+      style={style}
       onError={() => setFailed(true)}
     />
   );
@@ -307,7 +311,8 @@ function ProductsGlowPagination({
   return (
     <div
       data-testid="products-glow-pagination"
-      className="border-t border-t-white/40 border-x border-b border-white/10 shadow-[0_-8px_30px_rgba(255,255,255,0.15),0_15px_35px_rgba(0,0,0,0.8)] bg-slate-950/95 rounded-2xl px-6 py-3 my-4 flex flex-wrap items-center justify-between gap-4 text-slate-300"
+      className="relative z-10 border-t border-t-white/40 border-x border-b border-white/10 shadow-[0_-8px_30px_rgba(255,255,255,0.18),0_15px_35px_rgba(0,0,0,0.8)] bg-slate-950/95 rounded-2xl px-6 py-3 flex flex-wrap items-center justify-between gap-4 text-slate-300"
+      style={{ boxShadow: "0 -8px 30px rgba(255, 255, 255, 0.18), 0 15px 35px rgba(0, 0, 0, 0.8)" }}
     >
       <span className="text-xs font-medium text-slate-300 tabular-nums">
         Mostrando <strong className="text-white">{start}–{end}</strong> de <strong className="text-white">{total}</strong> produtos
@@ -782,9 +787,9 @@ function Products() {
               type="button"
               onClick={() => setViewMode("table")}
               aria-pressed={viewMode === "table"}
-              style={{ fontSize: "0.75rem", fontWeight: viewMode === "table" ? 600 : 500 }}
+              style={{ fontSize: "0.75rem", fontWeight: viewMode === "table" ? 600 : 500, ...(viewMode === "table" ? { backgroundColor: "#ffffff", color: "#0f172a" } : {}) }}
               className={viewMode === "table"
-                ? "bg-white text-slate-900 shadow-sm font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-all"
+                ? "!bg-white !text-slate-900 shadow-sm font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-all"
                 : "bg-transparent text-slate-400 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"}
               data-testid="view-mode-table"
             >
@@ -1037,11 +1042,12 @@ function Products() {
                     onClick={() => setSelectedProductPublicId(product.publicId)}
                     className="cursor-pointer hover:bg-slate-800/60 transition-colors"
                   >
-                    <td className="p-3 font-medium">
+                    <td className="w-20 min-w-[80px] py-3 pl-4 pr-2 font-medium">
                       <div className="flex items-center gap-3">
                         <ProductThumbnail
                           product={product}
-                          className="w-16 h-16 min-w-[64px] min-h-[64px] rounded-xl object-cover border border-slate-700 shadow-md shrink-0"
+                          className="w-16 h-16 min-w-[64px] min-h-[64px] rounded-xl object-cover border border-slate-700 shadow-md shrink-0 block"
+                          style={{ width: "64px", height: "64px", minWidth: "64px", minHeight: "64px" }}
                           version={mediaVersions[product.publicId]}
                         />
                         <div className="min-w-0 max-w-xs">
@@ -1205,14 +1211,16 @@ function Products() {
 
       {/* 4. Rodapé de Paginação Glow */}
       {query.data && (
-        <ProductsGlowPagination
-          page={page}
-          pageSize={pageSize}
-          total={query.data.total}
-          totalPages={query.data.totalPages}
-          onPageChange={setPage}
-          onPageSizeChange={setPageSize}
-        />
+        <div className="pt-4 pb-6">
+          <ProductsGlowPagination
+            page={page}
+            pageSize={pageSize}
+            total={query.data.total}
+            totalPages={query.data.totalPages}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
+        </div>
       )}
 
       <ProductFormDialog
