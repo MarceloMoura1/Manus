@@ -32,7 +32,7 @@ describe("Produtos: contratos visuais do workspace", () => {
     expect(table).toContain("h-[76px] w-[76px] min-h-[76px] min-w-[76px]");
     expect(table).toContain('style={{ width: "76px", height: "76px", minWidth: "76px", minHeight: "76px" }}');
     expect(table).toContain('imageStyle={{ width: "76px", height: "76px" }}');
-    expect(workspace).toContain('className="w-full h-full object-cover block"');
+    expect(workspace).toContain('imageClassName ?? "w-full h-full object-cover block"');
     expect(table).toContain("min-w-0 flex flex-col justify-center");
     expect(table).toContain("text-base font-semibold tracking-tight leading-snug text-slate-100 transition-colors hover:text-sky-400");
     expect(table).not.toContain("SKU: {product.sku ||");
@@ -53,5 +53,18 @@ describe("Produtos: contratos visuais do workspace", () => {
     expect(root?.[1]).not.toMatch(/(?:^|\s)(?:h-screen|max-h-screen|overflow-y-auto)(?:\s|$)/);
     expect(home).toMatch(/active\.startsWith\("erp-"\)\s*\?\s*"overflow-y-auto bg-background p-4 text-foreground sm:p-8"\s*:\s*shellLayout\.mainContentClassName/);
     expect(theme).toMatch(/html,\r?\nbody,\r?\n#root \{\r?\n  height: 100%;\r?\n  overflow: hidden;/);
+    const catalogStart = workspace.indexOf("/* 5. Catálogo Visual (Grade de Cards) */");
+    const catalogEnd = workspace.indexOf("/* 4.", catalogStart);
+    const catalog = workspace.slice(catalogStart, catalogEnd);
+
+    expect(catalogStart).toBeGreaterThanOrEqual(0);
+    expect(catalogEnd).toBeGreaterThan(catalogStart);
+    expect(catalog).toContain("h-48 w-full overflow-hidden rounded-t-2xl");
+    expect(catalog).toContain("object-contain p-3.5");
+    expect(catalog).toContain("Sem imagem cadastrada");
+    expect(catalog).toContain("top-3 left-3 z-10");
+    expect(catalog).toContain("border border-emerald-500/30 bg-emerald-950/70 text-emerald-300");
+    expect(catalog).toContain("top-3 right-3 z-10");
+    expect(catalog).toContain("border border-white/15 bg-black/50");
   });
 });

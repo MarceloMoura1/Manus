@@ -199,12 +199,14 @@ export function ProductThumbnail({
   version = 0,
   style,
   imageStyle,
+  imageClassName,
 }: {
   product: { publicId: string; name: string; hasImage?: boolean | null; updatedAt?: string | Date };
   className?: string;
   version?: number;
   style?: React.CSSProperties;
   imageStyle?: React.CSSProperties;
+  imageClassName?: string;
 }) {
   const [failed, setFailed] = React.useState(false);
   const resolvedVersion = version || (product.updatedAt ? new Date(product.updatedAt).getTime() : 0);
@@ -230,7 +232,7 @@ export function ProductThumbnail({
         alt={`Foto de ${product.name}`}
         loading="lazy"
         decoding="async"
-        className="w-full h-full object-cover block"
+        className={imageClassName ?? "w-full h-full object-cover block"}
         style={imageStyle}
         onError={() => setFailed(true)}
       />
@@ -947,21 +949,32 @@ function Products() {
               key={product.publicId}
               data-testid="product-catalog-card"
               onClick={() => setSelectedProductPublicId(product.publicId)}
-              className="group relative flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-xl transition-all duration-200 cursor-pointer"
+              className="group relative flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:border-blue-400 hover:shadow-xl dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-500 cursor-pointer"
             >
               <div className="relative">
-                <div className="relative h-44 w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
-                  <ProductThumbnail
-                    product={product}
-                    className="h-44 w-full object-cover rounded-t-xl group-hover:scale-105 transition-transform duration-300"
-                    version={mediaVersions[product.publicId]}
-                  />
-                  <div className="absolute top-2.5 right-2.5 z-10" onClick={e => e.stopPropagation()}>
+                <div className="relative h-48 w-full overflow-hidden rounded-t-2xl bg-[#040914] bg-[radial-gradient(ellipse_at_center,_rgba(30,64,175,0.18),_transparent_68%)]">
+                  {product.hasImage ? (
+                    <ProductThumbnail
+                      product={product}
+                      className="h-full w-full rounded-none !border-0 !bg-transparent transition-transform duration-300 ease-out group-hover:scale-105"
+                      imageClassName="h-full w-full object-contain p-3.5"
+                      version={mediaVersions[product.publicId]}
+                    />
+                  ) : (
+                    <div
+                      data-testid="catalog-product-image-placeholder"
+                      className="flex h-full w-full flex-col items-center justify-center border-b border-slate-800/60 bg-slate-900/40"
+                    >
+                      <Package className="h-8 w-8 text-slate-600" aria-hidden="true" />
+                      <span className="mt-2 text-[11px] font-medium tracking-wide text-slate-500">Sem imagem cadastrada</span>
+                    </div>
+                  )}
+                  <div className="absolute top-3 right-3 z-10" onClick={e => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <button
                           type="button"
-                          className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-900/60 text-white backdrop-blur-md hover:bg-slate-900/80 transition-colors shadow-sm"
+                          className="flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-black/50 text-slate-200 backdrop-blur-md shadow-sm transition-colors hover:bg-black/75"
                           aria-label={`Ações para ${product.name}`}
                         >
                           <MoreHorizontal className="h-4 w-4" />
@@ -998,14 +1011,14 @@ function Products() {
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
-                  <div className="absolute top-2.5 left-2.5">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold backdrop-blur-md shadow-xs ${product.active ? "bg-emerald-500/80 text-white" : "bg-slate-700/80 text-slate-200"}`}>
+                  <div className="absolute top-3 left-3 z-10">
+                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold backdrop-blur-md shadow-sm ${product.active ? "border border-emerald-500/30 bg-emerald-950/70 text-emerald-300" : "border border-slate-500/30 bg-slate-950/70 text-slate-300"}`}>
                       {product.active ? "Ativo" : "Inativo"}
                     </span>
                   </div>
                 </div>
 
-                <div className="p-4">
+                <div className="border-t border-slate-100 p-4 dark:border-slate-800/80">
                   <p className="truncate font-bold text-slate-900 dark:text-slate-100 text-sm leading-snug">{product.name}</p>
                   <div className="mt-1 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                     <span className="font-mono">{product.sku}</span>
@@ -1017,7 +1030,7 @@ function Products() {
                 </div>
               </div>
 
-              <div className="px-4 py-3 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50 flex items-end justify-between">
+              <div className="flex items-end justify-between border-t border-slate-100 bg-slate-50/50 px-4 py-3 dark:border-slate-800/80 dark:bg-slate-900/50">
                 <div>
                   <span className="text-[10px] uppercase font-semibold text-slate-400 block tracking-wider">Preço de venda</span>
                   <span className="text-base font-extrabold text-slate-900 dark:text-slate-100">{money.format(product.salePriceCents / 100)}</span>
