@@ -4555,7 +4555,12 @@ function Shell() {
         </ShellTopbarBoundary>
 
         {/* Content */}
-        <main ref={mainContentRef} tabIndex={-1} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", shellLayout.mainContentClassName, active.startsWith("erp-") && "min-h-full overflow-y-auto bg-background text-foreground")}>
+        <main ref={mainContentRef} tabIndex={-1} className={cn(
+          "flex min-h-0 min-w-0 flex-1 flex-col",
+          active.startsWith("erp-")
+            ? "overflow-y-auto bg-background p-4 text-foreground sm:p-8"
+            : shellLayout.mainContentClassName,
+        )}>
           <ErrorBoundary key={active}>
           {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} />}
           {active === "conversations" && <ConversationsPage

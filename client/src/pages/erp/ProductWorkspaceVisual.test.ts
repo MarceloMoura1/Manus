@@ -36,12 +36,12 @@ describe("Produtos: contratos visuais do workspace", () => {
     expect(table.match(/product\.sku/g)).toHaveLength(1);
   });
 
-  it("mantém iluminação interna contida e workspace sem rolagem vertical própria", () => {
+  it("mantém iluminação interna contida e delega a rolagem do ERP ao main", () => {
     expect(workspace).toContain("mt-4 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-800/80 bg-slate-900/80 px-6 py-3.5 backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]");
     expect(workspace).not.toContain("0_-8px_30px_rgba(255,255,255");
     const root = workspace.match(/return <div className="([^"]+)" data-testid="erp-workspace"/);
-    expect(root?.[1]).toContain("min-h-full bg-background text-foreground");
+    expect(root?.[1]).toContain("w-full min-h-full bg-background text-foreground flex flex-col");
     expect(root?.[1]).not.toMatch(/(?:^|\s)(?:h-screen|max-h-screen|overflow-y-auto)(?:\s|$)/);
-    expect(home).toContain('shellLayout.mainContentClassName, active.startsWith("erp-") && "min-h-full overflow-y-auto bg-background text-foreground"');
+    expect(home).toMatch(/active\.startsWith\("erp-"\)\s*\?\s*"overflow-y-auto bg-background p-4 text-foreground sm:p-8"\s*:\s*shellLayout\.mainContentClassName/);
   });
 });
