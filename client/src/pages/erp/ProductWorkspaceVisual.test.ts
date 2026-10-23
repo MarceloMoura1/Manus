@@ -36,8 +36,8 @@ describe("Produtos: contratos visuais do workspace", () => {
     expect(table.match(/product\.sku/g)).toHaveLength(1);
   });
 
-  it("mantém glow superior e workspace sem rolagem vertical própria", () => {
-    expect(workspace).toContain("mt-4 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-card/90 px-6 py-3.5 text-card-foreground shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-slate-900/80");
+  it("mantém iluminação interna contida e workspace sem rolagem vertical própria", () => {
+    expect(workspace).toContain("mt-4 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-800/80 bg-slate-900/80 px-6 py-3.5 backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]");
     expect(workspace).not.toContain("0_-8px_30px_rgba(255,255,255");
     const root = workspace.match(/return <div className="([^"]+)" data-testid="erp-workspace"/);
     expect(root?.[1]).toContain("min-h-full bg-background text-foreground");
