@@ -1032,6 +1032,6 @@ describe("ERPWorkspace — Products view mode correctness (static source scan)",
     expect(workspaceSource).toMatch(/data-testid="product-catalog-card"[\s\S]*?<ProductThumbnail[\s\S]*?version=\{mediaVersions\[product\.publicId\]\}/);
 
     // Linha da tabela de lista passa mediaVersions
-    expect(workspaceSource).toMatch(/<td className="min-w-\[320px\] px-4 py-3">[\s\S]*?<ProductThumbnail[\s\S]*?version=\{mediaVersions\[product\.publicId\]\}/);
+    expect(workspaceSource).toMatch(/<td className="min-w-\[320px\] align-middle px-4 py-3\.5">[\s\S]*?<ProductThumbnail[\s\S]*?version=\{mediaVersions\[product\.publicId\]\}/);
   });
 });

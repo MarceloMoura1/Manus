@@ -1053,36 +1053,43 @@ function Products() {
                   <tr
                     key={product.publicId}
                     onClick={() => setSelectedProductPublicId(product.publicId)}
-                    className="cursor-pointer border-b border-border transition-colors hover:bg-muted/50"
+                    className="cursor-pointer border-b border-slate-800/50 transition-colors hover:bg-slate-900/30"
                   >
-                    <td className="min-w-[320px] px-4 py-3">
-                      <div className="flex items-center gap-4">
+                    <td className="min-w-[320px] align-middle px-4 py-3.5">
+                      <div className="flex items-center gap-4 py-3.5">
                         <ProductThumbnail
                           product={product}
-                          className="w-16 h-16 min-w-[64px] min-h-[64px] max-w-[64px] max-h-[64px] rounded-xl overflow-hidden !border !border-slate-800 !bg-slate-900 shadow-sm flex-shrink-0"
-                          style={{ width: "64px", height: "64px", minWidth: "64px", minHeight: "64px" }}
-                          imageStyle={{ width: "64px", height: "64px" }}
+                          className="relative h-[76px] w-[76px] min-h-[76px] min-w-[76px] overflow-hidden rounded-xl border !border-slate-700/70 !bg-[#060d1a] shadow-sm shadow-black/50"
+                          style={{ width: "76px", height: "76px", minWidth: "76px", minHeight: "76px" }}
+                          imageStyle={{ width: "76px", height: "76px" }}
                           version={mediaVersions[product.publicId]}
                         />
                         <div className="min-w-0 flex flex-col justify-center">
-                          <span className="truncate text-sm font-medium leading-snug text-slate-900 dark:text-slate-100 md:text-base">{product.name}</span>
-                          <span className="mt-0.5 flex items-center gap-2 truncate text-xs text-slate-500 dark:text-slate-400">
-                            <span className="truncate">SKU: {product.sku || "—"}</span>
-                            <span aria-hidden="true">•</span>
-                            <span className="truncate">{product.category || "Sem categoria"}</span>
-                          </span>
+                          <span className="cursor-pointer text-base font-semibold tracking-tight leading-snug text-slate-100 transition-colors hover:text-sky-400">{product.name}</span>
                         </div>
                       </div>
                     </td>
-                    <td className="p-3 font-mono text-xs text-slate-700 dark:text-slate-300">{product.sku}</td>
-                    <td className="p-3 text-xs text-slate-700 dark:text-slate-300">{product.category ?? "—"}</td>
-                    <td className="p-3 text-xs text-slate-600 dark:text-slate-400">{money.format(product.costPriceCents / 100)}</td>
-                    <td className="p-3 text-sm font-bold text-slate-900 dark:text-slate-100">{money.format(product.salePriceCents / 100)}</td>
-                    <td className="p-3">
+                    <td className="align-middle p-3">
+                      <span className="inline-flex rounded-md border border-slate-800 bg-slate-900/80 px-2.5 py-1 font-mono text-xs tracking-wider text-slate-300">
+                        {product.sku || "—"}
+                      </span>
+                    </td>
+                    <td className="align-middle p-3">
+                      {product.category && product.category !== "Sem categoria" ? (
+                        <span className="inline-flex rounded-full border border-slate-700/50 bg-slate-800/40 px-3 py-0.5 text-xs font-medium text-slate-300">
+                          {product.category}
+                        </span>
+                      ) : (
+                        <span className="text-slate-600">—</span>
+                      )}
+                    </td>
+                    <td className="align-middle p-3 text-xs text-slate-600 dark:text-slate-400">{money.format(product.costPriceCents / 100)}</td>
+                    <td className="align-middle p-3 text-sm font-bold text-slate-900 dark:text-slate-100">{money.format(product.salePriceCents / 100)}</td>
+                    <td className="align-middle p-3">
                       <StockBadge quantity={product.quantity} minimumStock={product.minimumStock} />
                     </td>
-                    <td className="p-3 text-xs text-slate-600 dark:text-slate-400">{formatQuantity(product.minimumStock)}</td>
-                    <td className="p-3">
+                    <td className="align-middle p-3 text-xs text-slate-600 dark:text-slate-400">{formatQuantity(product.minimumStock)}</td>
+                    <td className="align-middle p-3">
                       <span
                         className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
                           product.active
@@ -1093,7 +1100,7 @@ function Products() {
                         {product.active ? "Ativo" : "Inativo"}
                       </span>
                     </td>
-                    <td className="p-3 pr-4 text-right" onClick={e => e.stopPropagation()}>
+                    <td className="align-middle p-3 pr-4 text-right" onClick={e => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button

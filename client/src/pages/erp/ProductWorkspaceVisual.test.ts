@@ -24,19 +24,21 @@ describe("Produtos: contratos visuais do workspace", () => {
     expect(banner).toContain("{totalProducts}");
   });
 
-  it("destaca imagem, nome, SKU e categoria sem comprimir a miniatura", () => {
+  it("destaca foto e nome, mantendo SKU e categoria apenas nas colunas dedicadas", () => {
     const table = workspace.slice(workspace.indexOf("/* 4. Visualização em Lista"), workspace.indexOf('<div className="grid gap-3 md:hidden">'));
-    expect(table).toContain("min-w-[320px] px-4 py-3");
-    expect(table).toContain("w-16 h-16 min-w-[64px] min-h-[64px] max-w-[64px] max-h-[64px] rounded-xl overflow-hidden !border !border-slate-800 !bg-slate-900 shadow-sm flex-shrink-0");
-    expect(table).toContain('style={{ width: "64px", height: "64px", minWidth: "64px", minHeight: "64px" }}');
-    expect(table).toContain('imageStyle={{ width: "64px", height: "64px" }}');
+    expect(table).toContain("cursor-pointer border-b border-slate-800/50 transition-colors hover:bg-slate-900/30");
+    expect(table).toContain("min-w-[320px] align-middle px-4 py-3.5");
+    expect(table).toContain("flex items-center gap-4 py-3.5");
+    expect(table).toContain("h-[76px] w-[76px] min-h-[76px] min-w-[76px]");
+    expect(table).toContain('style={{ width: "76px", height: "76px", minWidth: "76px", minHeight: "76px" }}');
+    expect(table).toContain('imageStyle={{ width: "76px", height: "76px" }}');
     expect(workspace).toContain('className="w-full h-full object-cover block"');
     expect(table).toContain("min-w-0 flex flex-col justify-center");
-    expect(table).toContain("truncate text-sm font-medium leading-snug text-slate-900 dark:text-slate-100 md:text-base");
-    expect(table).toContain("mt-0.5 flex items-center gap-2 truncate text-xs text-slate-500 dark:text-slate-400");
-    expect(table).toContain("SKU: {product.sku ||");
-    expect(table).toContain('{product.category || "Sem categoria"}');
-    expect(table.match(/product\.sku/g)).toHaveLength(2);
+    expect(table).toContain("text-base font-semibold tracking-tight leading-snug text-slate-100 transition-colors hover:text-sky-400");
+    expect(table).not.toContain("SKU: {product.sku ||");
+    expect(table).toContain("rounded-md border border-slate-800 bg-slate-900/80 px-2.5 py-1 font-mono text-xs tracking-wider text-slate-300");
+    expect(table).toContain("rounded-full border border-slate-700/50 bg-slate-800/40 px-3 py-0.5 text-xs font-medium text-slate-300");
+    expect(table.match(/product\.sku/g)).toHaveLength(1);
   });
 
   it("mantém iluminação interna contida e delega a rolagem do ERP ao main", () => {
