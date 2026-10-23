@@ -792,7 +792,7 @@ export function SalesPage({
       className="min-w-0 space-y-5 selection:bg-blue-100 selection:text-blue-950"
       data-testid="erp-sales-page"
     >
-      <div className={selectedId ? "hidden" : "contents"} aria-hidden={selectedId ? true : undefined}>
+      <div className={cn(selectedId ? "hidden" : "contents", "[&>header]:border-b-0")} aria-hidden={selectedId ? true : undefined}>
       {mode === "quotes" ? (
         <ErpPageHeader
           title={title ?? "Propostas Comerciais"}
@@ -859,8 +859,8 @@ export function SalesPage({
       <div className="min-w-0">
         <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_12px_28px_-26px_rgba(15,23,42,0.55)] dark:border-slate-800 dark:bg-slate-900" aria-label="Lista comercial">
           {mode === "quotes" ? (
-            <nav className="my-4 flex justify-center overflow-x-auto px-3 [scrollbar-width:thin]" aria-label="Status das propostas">
-              <div className="inline-flex items-center gap-1 rounded-xl border border-slate-800/80 bg-slate-900/70 p-1 shadow-sm backdrop-blur-sm">
+            <nav className="my-4 overflow-x-auto px-3 [scrollbar-width:thin]" aria-label="Status das propostas">
+              <div className="mx-auto flex w-max items-center gap-1 rounded-2xl p-1.5" style={{ background: "radial-gradient(100% 140% at 50% 40%, #0d1e38 0%, #081324 45%, #040812 100%)", border: "1px solid rgba(255, 255, 255, 0.18)", boxShadow: "inset 0 1px 0 0 rgba(255, 255, 255, 0.12), 0 4px 12px rgba(0, 0, 0, 0.4)" }}>
               {([
                 ["all", "Todas as Propostas"],
                 ["negotiation", "Em Negociação"],
@@ -875,10 +875,10 @@ export function SalesPage({
                     type="button"
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "shrink-0 whitespace-nowrap rounded-lg px-4 py-1.5 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500 motion-reduce:transition-none",
+                      "shrink-0 whitespace-nowrap rounded-xl px-4 py-2 text-xs transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500 motion-reduce:transition-none",
                       active
-                        ? "border border-sky-500/30 bg-sky-500/15 text-sky-400 shadow-sm shadow-sky-500/10"
-                        : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+                        ? "border border-sky-400/50 bg-sky-500/20 font-semibold text-sky-300 shadow-sm shadow-sky-500/20"
+                        : "font-medium text-slate-300 hover:bg-white/10 hover:text-white"
                     )}
                     onClick={() => {
                       if (value === "all") {
