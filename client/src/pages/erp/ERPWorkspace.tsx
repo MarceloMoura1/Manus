@@ -266,9 +266,9 @@ function StockBadge({ quantity, minimumStock }: { quantity: string; minimumStock
 }
 
 const deepNavySurfaceStyle: React.CSSProperties = {
-  borderColor: "rgba(255, 255, 255, 0.35)",
-  background: "radial-gradient(120% 120% at 50% 0%, rgba(255, 255, 255, 0.14) 0%, rgba(56, 189, 248, 0.08) 25%, rgba(6, 13, 26, 0.95) 70%, #040914 100%)",
-  boxShadow: "inset 0 1px 2px rgba(255, 255, 255, 0.45), inset 0 0 25px rgba(255, 255, 255, 0.05)",
+  backgroundColor: "#050b14",
+  border: "1px solid rgba(255, 255, 255, 0.22)",
+  boxShadow: "inset 0 1px 0 0 rgba(255, 255, 255, 0.15)",
 };
 
 function ProductsGlowPagination({
@@ -321,7 +321,7 @@ function ProductsGlowPagination({
   return (
     <div
       data-testid="products-glow-pagination"
-      className="relative mt-4 flex flex-wrap items-center justify-between gap-4 overflow-hidden rounded-2xl border px-6 py-3.5 backdrop-blur-md"
+      className="relative mt-4 flex flex-wrap items-center justify-between gap-4 overflow-hidden rounded-2xl p-4"
       style={deepNavySurfaceStyle}
     >
       <span className="text-xs font-medium text-slate-300 tabular-nums">
@@ -787,10 +787,10 @@ function Products() {
       />
 
       {/* 2. Barra Superior de Visualização */}
-      <section aria-label="Visão do catálogo" className="relative mb-6 flex flex-col items-start justify-between gap-4 overflow-hidden rounded-2xl border px-6 py-4 backdrop-blur-md sm:flex-row sm:items-center" style={deepNavySurfaceStyle}>
+      <section aria-label="Visão do catálogo" className="relative mb-6 flex flex-col justify-between gap-4 overflow-hidden rounded-2xl p-5 md:flex-row md:items-center" style={deepNavySurfaceStyle}>
         <div>
-          <span className="mb-0.5 block text-[11px] font-bold tracking-[0.16em] text-blue-400">CATÁLOGO VISUAL</span>
-          <p className="text-sm font-normal text-slate-300">Fotos, preço e disponibilidade reunidos para uma leitura rápida.</p>
+          <span className="block text-[11px] font-bold tracking-widest uppercase text-sky-400">CATÁLOGO VISUAL</span>
+          <p className="mt-0.5 text-xs text-slate-400">Fotos, preço e disponibilidade reunidos para uma leitura rápida.</p>
         </div>
         <div className="flex self-end items-center gap-4 sm:self-auto">
           <div className="flex items-center gap-1 rounded-xl border border-slate-700/60 bg-slate-800/90 p-1" role="group" aria-label="Modo de visualização">
