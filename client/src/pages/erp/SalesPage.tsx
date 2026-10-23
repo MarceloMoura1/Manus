@@ -859,7 +859,8 @@ export function SalesPage({
       <div className="min-w-0">
         <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_12px_28px_-26px_rgba(15,23,42,0.55)] dark:border-slate-800 dark:bg-slate-900" aria-label="Lista comercial">
           {mode === "quotes" ? (
-            <nav className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 py-2 [scrollbar-width:thin] sm:px-3 dark:border-slate-800 dark:bg-slate-800/60" aria-label="Status das propostas">
+            <nav className="my-4 flex justify-center overflow-x-auto px-3 [scrollbar-width:thin]" aria-label="Status das propostas">
+              <div className="inline-flex items-center gap-1 rounded-xl border border-slate-800/80 bg-slate-900/70 p-1 shadow-sm backdrop-blur-sm">
               {([
                 ["all", "Todas as Propostas"],
                 ["negotiation", "Em Negociação"],
@@ -874,10 +875,10 @@ export function SalesPage({
                     type="button"
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-xs font-semibold transition-[background-color,color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 motion-reduce:transition-none sm:text-sm",
+                      "shrink-0 whitespace-nowrap rounded-lg px-4 py-1.5 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500 motion-reduce:transition-none",
                       active
-                        ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:text-blue-400 dark:ring-slate-700"
-                        : "text-slate-500 hover:bg-white/70 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200"
+                        ? "border border-sky-500/30 bg-sky-500/15 text-sky-400 shadow-sm shadow-sky-500/10"
+                        : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
                     )}
                     onClick={() => {
                       if (value === "all") {
@@ -892,6 +893,7 @@ export function SalesPage({
                   </button>
                 );
               })}
+              </div>
             </nav>
           ) : mode === "all" ? (
             <nav className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 py-2 [scrollbar-width:thin] sm:px-3 dark:border-slate-800 dark:bg-slate-800/60" aria-label="Tipos de venda">
@@ -1124,31 +1126,31 @@ export function SalesPage({
             />
           ) : (
             <div className="min-w-0">
-              <div className="hidden overflow-x-auto [scrollbar-gutter:stable] md:block">
-                <table className="min-w-[1160px] w-full text-sm">
+              <div className="hidden w-full overflow-x-auto [scrollbar-gutter:stable] md:block">
+                <table className="w-full min-w-[1160px] table-fixed text-sm">
                   {isQuotesTable ? (
                     <colgroup>
-                      <col className="w-[43%]" />
-                      <col className="w-[10%]" />
+                      <col className="w-[34%]" />
+                      <col className="w-[11%]" />
                       <col className="w-[12%]" />
                       <col className="w-[11%]" />
                       <col className="w-[11%]" />
                       <col className="w-[13%]" />
-                      <col className="w-16" />
+                      <col className="w-[8%]" />
                     </colgroup>
                   ) : (
                     <colgroup>
-                      <col className="w-[31%]" />
+                      <col className="w-[28%]" />
                       <col className="w-[14%]" />
                       <col className="w-[9%]" />
                       <col className="w-[10%]" />
                       <col className="w-[10%]" />
                       <col className="w-[11%]" />
-                      <col className="w-[9%]" />
-                      <col className="w-16" />
+                      <col className="w-[10%]" />
+                      <col className="w-[8%]" />
                     </colgroup>
                   )}
-                  <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-400">
+                  <thead className="w-full border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-400">
                     {isQuotesTable ? (
                       <tr>
                         <SortableColumnHeader label="Cliente / Orçamento" sortKey="customer" sort={listSort} onSort={setSort} />
@@ -1157,7 +1159,7 @@ export function SalesPage({
                         <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Total</th>
                         <SortableColumnHeader label="Status" sortKey="status" sort={listSort} onSort={setSort} />
                         <th scope="col" className="px-3 py-3">Fluxo</th>
-                        <th scope="col" className="px-3 py-3 text-center">Ações</th>
+                        <th scope="col" className="whitespace-nowrap px-3 py-3 pr-6 text-right">Ações</th>
                       </tr>
                     ) : (
                       <tr>
@@ -1168,7 +1170,7 @@ export function SalesPage({
                         <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Total</th>
                         {kind === "quotes" ? <SortableColumnHeader label="Status" sortKey="status" sort={listSort} onSort={setSort} /> : <th scope="col" className="px-3 py-3">Pagamento</th>}
                         {kind === "quotes" ? <th scope="col" className="px-3 py-3">Fluxo</th> : <SortableColumnHeader label="Status" sortKey="status" sort={listSort} onSort={setSort} />}
-                        <th scope="col" className="px-3 py-3 text-center">Ações</th>
+                        <th scope="col" className="whitespace-nowrap px-3 py-3 pr-6 text-right">Ações</th>
                       </tr>
                     )}
                   </thead>
@@ -1217,7 +1219,7 @@ export function SalesPage({
                         <td className="whitespace-nowrap px-2 py-3 text-right font-semibold tabular-nums text-slate-900 dark:text-slate-100">{money.format(order.totalCents / 100)}</td>
                         <td className="px-2 py-3">{order.documentType === "quote" ? <CommercialBadge value={order.commercialStatus} /> : <PaymentBadge value={order.paymentStatus} compact />}</td>
                         <td className="px-2 py-3">{order.documentType === "quote" ? <span className="text-[11px] text-slate-500">Fluxo comercial</span> : <StageBadge stage={order.currentStage as Stage} cancelled={order.cancelled} compact />}</td>
-                        <td className="px-2 py-3 text-center" onClick={(e) => e.stopPropagation()}><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></td>
+                        <td className="px-3 py-3 pr-6 text-right" onClick={(e) => e.stopPropagation()}><SaleActionsMenu order={order} canWrite={canWrite} onOpen={() => openSale(order.publicId)} onPrint={() => printDocument(order.publicId)} onEdit={() => void edit(order.publicId)} onDuplicate={() => duplicateSale.mutate({ publicId: order.publicId, idempotencyKey: crypto.randomUUID() })} onCommercialStatus={(toStatus, requireReason) => requireReason ? setCommercialChange({ publicId: order.publicId, toStatus, reason: "" }) : changeCommercialStatus.mutate({ publicId: order.publicId, toStatus })} onConvert={() => void reviewConversion(order.publicId)} onConfirm={() => openSale(order.publicId)} onTransition={toStage => setTransition({ publicId: order.publicId, idempotencyKey: crypto.randomUUID(), fromStage: order.currentStage as Stage, toStage, reason: "", correction: stageOrder.indexOf(toStage) < stageOrder.indexOf(order.currentStage as Stage) })} onCancel={() => setCancellation({ publicId: order.publicId, reason: "" })} onArchive={() => setArchiveRequest({ publicId: order.publicId, reason: "", documentType: order.documentType, orderNumber: order.orderNumber })} /></td>
                       </tr>
                     ))}
                   </tbody>
@@ -1560,9 +1562,9 @@ function SalesMetrics({
     },
   ];
   return (
-    <section className="grid gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200 dark:border-slate-800 dark:bg-slate-800 shadow-[0_10px_24px_-22px_rgba(15,23,42,0.5)] sm:grid-cols-2 lg:grid-cols-4" aria-label="Indicadores de vendas">
+    <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Indicadores de vendas">
       {metrics.map(metric => (
-        <article key={metric.label} data-testid="sales-metric-card" className="flex min-h-[6.25rem] items-center gap-3 bg-white dark:bg-slate-900 px-4 py-4 transition-[background-color,box-shadow] duration-150 hover:bg-slate-50 dark:hover:bg-slate-800/50 focus-within:bg-blue-50/40 dark:focus-within:bg-blue-950/40 focus-within:outline-none motion-reduce:transition-none lg:px-5">
+        <article key={metric.label} data-testid="sales-metric-card" className="flex min-h-[6.25rem] items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-[0_10px_24px_-22px_rgba(15,23,42,0.5)] transition-[background-color,box-shadow] duration-150 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800/50 focus-within:bg-blue-50/40 dark:focus-within:bg-blue-950/40 focus-within:outline-none motion-reduce:transition-none lg:px-5">
           <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", metric.label === "Ticket médio" ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400" : metric.label === "A receber" ? "bg-orange-50 text-orange-600 dark:bg-orange-950/60 dark:text-orange-400" : "bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400")}>
             <metric.icon className="h-4.5 w-4.5" />
           </span>
