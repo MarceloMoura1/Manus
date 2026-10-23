@@ -80,17 +80,17 @@ describe("ProductFormDialog (P1-A10 Relational Category & Brand Integration)", (
     onOpenNewBrand: () => {},
   };
 
-  it("organiza seções amplas, dropzone e campos legíveis sem compactar a foto", () => {
+  it("organiza foto e identificação lado a lado com campos confortáveis", () => {
     const markup = renderToStaticMarkup(React.createElement(ProductFormContent, defaultProps));
     expect(markup).toContain("sm:grid-cols-2");
-    expect(markup).toContain("grid-cols-1 gap-6 md:grid-cols-2");
-    expect(markup).toContain("min-h-[110px]");
-    expect(markup).toContain("Clique ou arraste a foto do produto");
+    expect(markup).toContain("grid-cols-1 gap-4 md:grid-cols-[11rem_minmax(0,1fr)]");
+    expect(markup).toContain("min-h-[140px]");
+    expect(markup).toContain("Clique ou arraste");
     const nameInput = markup.match(/<input\b[^>]*id="product-name-input"[^>]*>/)?.[0] ?? "";
     const categorySelect = markup.match(/<select\b[^>]*id="product-category-select"[^>]*>/)?.[0] ?? "";
-    expect(nameInput).toContain("h-9");
+    expect(nameInput).toContain("h-11");
     expect(nameInput).toContain("rounded-xl");
-    expect(categorySelect).toContain("h-9");
+    expect(categorySelect).toContain("h-10");
     expect(categorySelect).toContain("text-sm");
   });
 

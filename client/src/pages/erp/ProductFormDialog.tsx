@@ -137,6 +137,7 @@ function FormField({
   onChange,
   required,
   className,
+  inputClassName,
 }: {
   id: string;
   label: string;
@@ -144,6 +145,7 @@ function FormField({
   onChange: (val: string) => void;
   required?: boolean;
   className?: string;
+  inputClassName?: string;
 }) {
   return (
     <label htmlFor={id} className={`mb-1.5 block text-xs font-medium text-slate-300 ${className ?? ""}`}>
@@ -152,7 +154,7 @@ function FormField({
       <Input
         id={id}
         data-testid={id}
-        className="h-9 rounded-xl border border-slate-700/70 bg-slate-900/80 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40"
+        className={`h-10 rounded-xl border border-slate-700/70 bg-slate-900/80 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 ${inputClassName ?? ""}`}
         value={value}
         onChange={e => onChange(e.target.value)}
         required={required}
@@ -229,18 +231,19 @@ export function ProductFormContent({
         <h2>{form.publicId ? "Editar produto" : "Novo produto"}</h2>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-[11rem_minmax(0,1fr)]">
       {/* Identificação */}
-      <section className="grid gap-3 md:col-start-1 md:row-start-1" aria-label="Identificação do produto">
+      <section className="grid gap-4 md:col-start-2 md:row-start-1" aria-label="Identificação do produto">
         <FormField
           id="product-name-input"
           label="Nome do produto"
           value={form.name}
           onChange={name => setForm({ ...form, name })}
           required
+          inputClassName="h-11 px-3.5"
         />
 
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           <FormField
             id="product-sku-input"
             label="SKU"
@@ -259,9 +262,9 @@ export function ProductFormContent({
       </section>
 
       {/* Upload da foto */}
-      <section className="md:col-start-1 md:row-start-2" aria-label="Foto do produto">
+      <section className="md:col-start-1 md:row-start-1 md:row-span-2 md:h-44 md:w-44" aria-label="Foto do produto">
         <div
-          className={`relative flex min-h-[110px] flex-col items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-slate-700/80 bg-slate-900/40 p-3 text-center transition-colors ${
+          className={`relative flex min-h-[140px] h-full flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-slate-700/80 bg-slate-900/40 p-3 text-center transition-all ${
             pending ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:border-blue-500/60"
           }`}
           onDragOver={event => event.preventDefault()}
@@ -275,15 +278,15 @@ export function ProductFormContent({
             <img
               src={photoPreview}
               alt="Prévia da foto do produto"
-              className="h-20 w-20 rounded-xl object-cover shadow-md"
+              className="h-full w-full object-cover"
             />
           ) : (
             <>
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700/70 bg-slate-900/80">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-700/70 bg-slate-900/80">
                 <ImageIcon className="h-5 w-5 text-blue-400" />
               </div>
-              <span className="mt-2 text-sm font-medium text-slate-200">Adicionar foto do produto</span>
-              <span className="mt-1 text-xs text-slate-400">Clique ou arraste a foto do produto</span>
+              <span className="mt-2 text-xs font-medium text-slate-200">Adicionar foto</span>
+              <span className="mt-1 text-xs text-slate-400">Clique ou arraste</span>
             </>
           )}
           <label
@@ -321,7 +324,7 @@ export function ProductFormContent({
       </section>
 
       {/* Categoria, marca, unidade e estoque mínimo */}
-      <section className="grid gap-3 sm:grid-cols-2 md:col-start-2 md:row-start-1" aria-label="Classificação e medida">
+      <section className="grid gap-4 sm:grid-cols-2 md:col-start-2 md:row-start-2" aria-label="Classificação e medida">
         {/* Categoria */}
         <div>
           <div className="flex items-center justify-between">
@@ -352,7 +355,7 @@ export function ProductFormContent({
                 : undefined
             }
             disabled={pending || categoriesLoading || Boolean(categoriesError)}
-            className="mt-1 h-9 w-full rounded-xl border border-slate-700/70 bg-slate-900/80 px-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40 disabled:opacity-50"
+            className="mt-1.5 h-10 w-full rounded-xl border border-slate-700/70 bg-slate-900/80 px-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 disabled:opacity-50"
             value={form.categoryPublicId || ""}
             onChange={e => {
               const val = e.target.value;
@@ -429,7 +432,7 @@ export function ProductFormContent({
             aria-label="Marca"
             aria-describedby={brandsError ? "brand-error-hint" : undefined}
             disabled={pending || brandsLoading || Boolean(brandsError)}
-            className="mt-1 h-9 w-full rounded-xl border border-slate-700/70 bg-slate-900/80 px-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40 disabled:opacity-50"
+            className="mt-1.5 h-10 w-full rounded-xl border border-slate-700/70 bg-slate-900/80 px-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 disabled:opacity-50"
             value={form.brandPublicId || ""}
             onChange={e => {
               const val = e.target.value;
@@ -457,30 +460,11 @@ export function ProductFormContent({
           )}
         </div>
 
-        {/* Unidade */}
-        <div className="sm:col-span-2">
-          <label htmlFor="product-unit-select" className="text-xs font-medium text-slate-300">
-            Unidade
-          </label>
-          <select
-            id="product-unit-select"
-            data-testid="product-unit-select"
-            className="mt-1 h-9 w-full rounded-xl border border-slate-700/70 bg-slate-900/80 px-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40"
-            value={form.unit}
-            onChange={e => setForm({ ...form, unit: e.target.value as ProductForm["unit"] })}
-          >
-            <option value="unit">Unidade (UN)</option>
-            <option value="kg">Quilograma (KG)</option>
-            <option value="liter">Litro (L)</option>
-            <option value="meter">Metro (M)</option>
-          </select>
-        </div>
-
       </section>
 
       {/* Preços e margem */}
-      <section className="rounded-xl border border-slate-800/80 bg-slate-900/50 p-3.5 md:col-start-2 md:row-start-2" aria-label="Financeiro e estoque">
-        <div className="grid grid-cols-2 gap-3">
+      <section className="rounded-xl border border-slate-800/80 bg-slate-900/50 p-4 md:col-span-2 md:col-start-1 md:row-start-3" aria-label="Financeiro e estoque">
+        <div className="grid grid-cols-1 items-center gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <FormField
           id="product-cost-input"
           label="Preço de custo (R$)"
@@ -495,23 +479,40 @@ export function ProductFormContent({
           onChange={sale => setForm({ ...form, sale })}
         />
 
-        <FormField
-          id="product-minimum-stock-input"
-          label="Estoque mínimo"
-          value={form.minimumStock}
-          onChange={minimumStock => setForm({ ...form, minimumStock })}
-        />
+        <div className="grid grid-cols-2 gap-2">
+          <FormField
+            id="product-minimum-stock-input"
+            label="Estoque mínimo"
+            value={form.minimumStock}
+            onChange={minimumStock => setForm({ ...form, minimumStock })}
+          />
+          <label htmlFor="product-unit-select" className="mb-1.5 block text-xs font-medium text-slate-300">
+            Unidade
+            <select
+              id="product-unit-select"
+              data-testid="product-unit-select"
+              className="mt-1.5 h-10 w-full rounded-xl border border-slate-700/70 bg-slate-900/80 px-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
+              value={form.unit}
+              onChange={e => setForm({ ...form, unit: e.target.value as ProductForm["unit"] })}
+            >
+              <option value="unit">Unidade (UN)</option>
+              <option value="kg">Quilograma (KG)</option>
+              <option value="liter">Litro (L)</option>
+              <option value="meter">Metro (M)</option>
+            </select>
+          </label>
+        </div>
         {/* Margem calculada */}
-        <div className="flex flex-col justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
-          <span className="flex items-center gap-1 text-xs font-medium text-emerald-300">
+        <div className="flex flex-col justify-center rounded-xl border border-emerald-500/30 bg-emerald-950/40 p-2.5 text-center">
+          <span className="flex items-center justify-center gap-1 text-[10px] font-bold tracking-wider text-emerald-500 uppercase">
             <TrendingUp className="h-3 w-3" /> Margem calculada
           </span>
-          <div className="mt-1 flex items-baseline justify-between gap-1">
-            <span className={`text-base font-semibold ${profitNum >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+          <div className="mt-1 flex flex-col items-center gap-0.5">
+            <span className={`text-sm font-bold ${profitNum >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
               {costNum > 0 || saleNum > 0 ? `${marginPercentNum}%` : "0,0%"}
             </span>
             {(costNum > 0 || saleNum > 0) && (
-              <span className="truncate text-xs font-medium text-slate-400">
+              <span className="truncate text-[11px] font-medium text-slate-400">
                 Lucro: {profitNum.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
               </span>
             )}
@@ -521,7 +522,7 @@ export function ProductFormContent({
       </section>
 
       {/* Descrição */}
-      <section className="rounded-xl border border-slate-800/80 bg-slate-900/50 p-3 md:col-start-1 md:row-start-3" aria-label="Descrição do produto">
+      <section className="rounded-xl border border-slate-800/80 bg-slate-900/50 p-4 md:col-span-2 md:col-start-1 md:row-start-4" aria-label="Descrição do produto">
         <label htmlFor="product-description-input" className="mb-1.5 block text-xs font-medium text-slate-300">
           Descrição do produto
         </label>
@@ -529,7 +530,7 @@ export function ProductFormContent({
           id="product-description-input"
           data-testid="product-description-input"
           rows={2}
-          className="min-h-[60px] w-full resize-y rounded-xl border border-slate-700/70 bg-slate-900/80 p-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40"
+          className="w-full resize-y rounded-xl border border-slate-700/70 bg-slate-900/80 p-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
           placeholder="Informações técnicas, composição, garantias..."
           value={form.description}
           onChange={e => setForm({ ...form, description: e.target.value })}
@@ -545,7 +546,7 @@ export function ProductFormContent({
       )}
 
       {/* Rodapé com botões Cancelar e Salvar fixos na base */}
-      <div className="mt-4 flex items-center justify-end gap-3 border-t border-slate-800/80 pt-3">
+      <div className="mt-4 flex items-center justify-end gap-3 border-t border-slate-800/80 pt-4">
         <Button
           type="button"
           variant="ghost"
@@ -559,7 +560,7 @@ export function ProductFormContent({
           type="submit"
           disabled={pending}
           data-testid="submit-product-form"
-          className="h-9 rounded-xl bg-blue-600 px-5 py-2 text-sm font-medium text-white shadow-md shadow-blue-600/20 transition-colors hover:bg-blue-500"
+          className="h-10 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-lg shadow-blue-600/25 transition-all hover:bg-blue-500"
         >
           {pending ? "Salvando…" : "Salvar produto"}
         </Button>
@@ -595,14 +596,14 @@ export function ProductFormDialogView({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         overlayClassName="!bg-black/70 backdrop-blur-sm"
-        className="z-50 w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-950 p-5 text-slate-100 shadow-2xl"
+        className="z-50 w-full max-w-4xl rounded-2xl border border-slate-800/80 bg-[#070d19] p-7 text-slate-100 shadow-2xl sm:!max-w-4xl"
       >
-        <DialogHeader className="mb-3 border-b border-slate-800/80 pb-3 pr-10">
+        <DialogHeader className="mb-6 border-b border-slate-800/80 pb-4 pr-10">
           <DialogTitle className="text-xl font-semibold tracking-tight text-slate-100">
             {form.publicId ? "Editar produto" : "Novo produto"}
           </DialogTitle>
-          <p className="mt-0.5 text-sm text-slate-400">
-            Organize identificação, classificação, estoque e precificação em um só lugar.
+          <p className="mt-1 text-xs text-slate-400">
+            Cadastre as informações comerciais, fiscais e estoque do produto.
           </p>
         </DialogHeader>
         <ProductFormContent
