@@ -4368,7 +4368,7 @@ function Shell() {
   const shellLayout = getShellWorkspaceLayout(active);
 
   return (
-    <div className={`flex h-screen h-[100dvh] min-w-0 overflow-hidden bg-slate-50 ${theme === 'dark' ? 'dark bg-slate-950' : ''}`}>
+    <div className={cn("flex h-screen h-[100dvh] min-h-screen min-w-0 overflow-hidden bg-slate-50", theme === "dark" && "dark bg-slate-950", active.startsWith("erp-") && "bg-slate-950 text-slate-100")}>
       {sidebarOpen && active !== 'conversations' && <button type="button" aria-label="Fechar menu lateral" onClick={() => closeMobileSidebar()} className="fixed inset-0 z-30 bg-slate-950/50 lg:hidden" />}
       {/* Sidebar */}
       <div ref={sidebarRef} aria-label="Menu principal" className={cn(
@@ -4543,7 +4543,7 @@ function Shell() {
       </div>
 
       {/* Main Content */}
-      <div className={cn("flex min-w-0 flex-1 flex-col overflow-hidden", active.startsWith("erp-") && "bg-slate-950")}>
+      <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", active.startsWith("erp-") && "bg-slate-950 dark:bg-slate-950 text-slate-100")}>
         <ShellTopbarBoundary active={active} mode={shellLayout.moduleTopbar}>
             <ModuleTopbar
             ariaLabel={active.startsWith("erp-") ? "Módulos do ERP" : active.startsWith("crm-") ? "Módulos do CRM" : "Ações da página"}
@@ -4555,7 +4555,7 @@ function Shell() {
         </ShellTopbarBoundary>
 
         {/* Content */}
-        <main ref={mainContentRef} tabIndex={-1} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", shellLayout.mainContentClassName, active.startsWith("erp-") && "bg-slate-950 text-slate-100")}>
+        <main ref={mainContentRef} tabIndex={-1} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", shellLayout.mainContentClassName, active.startsWith("erp-") && "bg-slate-950 dark:bg-slate-950 text-slate-100")}>
           <ErrorBoundary key={active}>
           {active === "home" && <DashboardPage setActive={navigateToRoute} indicadores={indicadores} />}
           {active === "conversations" && <ConversationsPage
