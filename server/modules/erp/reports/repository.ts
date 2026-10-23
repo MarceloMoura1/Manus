@@ -187,9 +187,9 @@ export class ReportsRepository {
         [clientId, f.from, f.to]
       ),
       this.rows(
-        `SELECT p.public_id publicId,p.name,p.sku,CAST(COALESCE(b.quantity,0)*1000 AS SIGNED) quantityMillis,CAST(p.minimum_stock*1000 AS SIGNED) minimumMillis,CAST(COALESCE(SUM(CASE WHEN DATE(m.created_at) BETWEEN ? AND ? THEN m.quantity*1000 ELSE 0 END),0) AS SIGNED) movementMillis FROM erp_products p LEFT JOIN erp_stock_balances b ON b.product_id=p.id AND b.client_id=p.client_id LEFT JOIN erp_stock_movements m ON m.product_id=p.id AND m.client_id=p.client_id WHERE p.client_id=? AND (? IS NULL OR p.public_id=?) GROUP BY p.id,b.quantity ORDER BY ${order.replace(/, id ASC$/, ", p.id ASC")} LIMIT ? OFFSET ?`,
+        `SELECT p.public_id publicId,p.name,p.sku,CAST(COALESCE(b.quantity,0)*1000 AS SIGNED) quantityMillis,CAST(p.minimum_stock*1000 AS SIGNED) minimumMillis,CAST(COALESCE(SUM(CASE WHEN DATE(m.created_at) BETWEEN ? AND ? THEN m.quantity*1000 ELSE 0 END),0) AS SIGNED) movementMillis FROM erp_products p LEFT JOIN erp_stock_balances b ON b.product_id=p.id AND b.client_id=p.client_id LEFT JOIN erp_stock_movements m ON m.product_id=p.id AND m.client_id=p.client_id WHERE p.client_id=? AND p.active <> -1 AND (? IS NULL OR p.public_id=?) GROUP BY p.id,b.quantity ORDER BY ${order.replace(/, id ASC$/, ", p.id ASC")} LIMIT ? OFFSET ?`,
         [f.from, f.to, clientId, f.publicId ?? null, f.publicId ?? null, l, o]
-      ), this.rows("SELECT COUNT(*) total FROM erp_products p WHERE p.client_id=? AND (? IS NULL OR p.public_id=?)", [clientId,f.publicId??null,f.publicId??null]),
+      ), this.rows("SELECT COUNT(*) total FROM erp_products p WHERE p.client_id=? AND p.active <> -1 AND (? IS NULL OR p.public_id=?)", [clientId,f.publicId??null,f.publicId??null]),
     ]);
     return { summary: this.numeric(summary[0]), byType, ...this.pagination(f, total[0]?.total, rows) };
   }
@@ -270,7 +270,7 @@ export class ReportsRepository {
         [clientId, f.from, f.to]
       ),
       this.rows(
-        "SELECT (SELECT COUNT(*) FROM erp_products p LEFT JOIN erp_product_fiscal_profiles fp ON fp.product_id=p.id AND fp.client_id=p.client_id WHERE p.client_id=? AND (fp.id IS NULL OR fp.completeness='incomplete')) incompleteProducts,(SELECT COUNT(*) FROM erp_fiscal_settings WHERE client_id=? AND status='incomplete') incompleteSettings",
+        "SELECT (SELECT COUNT(*) FROM erp_products p LEFT JOIN erp_product_fiscal_profiles fp ON fp.product_id=p.id AND fp.client_id=p.client_id WHERE p.client_id=? AND p.active <> -1 AND (fp.id IS NULL OR fp.completeness='incomplete')) incompleteProducts,(SELECT COUNT(*) FROM erp_fiscal_settings WHERE client_id=? AND status='incomplete') incompleteSettings",
         [clientId, clientId]
       ),
       this.rows(`SELECT public_id publicId,internal_number number,DATE_FORMAT(internal_issue_date,'%Y-%m-%d') date,status,type origin FROM erp_fiscal_documents WHERE client_id=? AND internal_issue_date BETWEEN ? AND ? AND (? IS NULL OR status=?) ORDER BY ${order} LIMIT ? OFFSET ?`, [clientId,f.from,f.to,f.status??null,f.status??null,l,o]),

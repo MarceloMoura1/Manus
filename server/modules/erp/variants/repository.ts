@@ -50,7 +50,7 @@ export class VariantRepository {
   async list(clientId: string, options: VariantListInput) {
     const limit = Math.max(1, Math.min(100, Math.trunc(options.pageSize)));
     const offset = Math.max(0, (Math.max(1, Math.trunc(options.page)) - 1) * limit);
-    const conditions = ["v.client_id = ?"];
+    const conditions = ["v.client_id = ?", "p.active <> -1"];
     const parameters: Array<string | number> = [clientId];
 
     if (options.productPublicId) {
@@ -126,7 +126,7 @@ export class VariantRepository {
         AND ii.variant_id=v.id AND ii.kind='variant'
        LEFT JOIN erp_inventory_item_balances ib
          ON ib.client_id=ii.client_id AND ib.inventory_item_id=ii.id
-       WHERE v.client_id = ? AND v.public_id = ?
+       WHERE v.client_id = ? AND v.public_id = ? AND p.active <> -1
        LIMIT 1${lock ? " FOR UPDATE" : ""}`,
       [clientId, publicId]
     );

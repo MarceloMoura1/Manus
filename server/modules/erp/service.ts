@@ -191,7 +191,7 @@ export class ErpService {
       }
     }
 
-    if (!row) {
+    if (!row || row.active === -1) {
       throw new ErpDomainError("NOT_FOUND", "Produto não encontrado para o SKU informado.");
     }
 
@@ -222,7 +222,7 @@ export class ErpService {
       }
     }
 
-    if (!row) {
+    if (!row || row.active === -1) {
       throw new ErpDomainError("NOT_FOUND", "Produto não encontrado para o código de barras informado.");
     }
 
@@ -516,41 +516,42 @@ export class ErpService {
     return deps;
   }
 
-  async deleteProduct(identity: Identity, publicId: string, force = false, hardDelete = false) {
+  async deleteProduct(identity: Identity, publicId: string, _force = false, _hardDelete = false) {
     this.assertWrite(identity);
     const deps = await this.repository.checkProductDependencies(identity.clientId, publicId);
     if (!deps) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado.");
-
-    if (hardDelete) {
-      const purged = await this.repository.purgeProduct(identity.clientId, publicId);
-      return {
-        success: purged,
-        hardDeleted: true,
-        hasDependencies: deps.hasDependencies,
-        salesCount: deps.salesCount,
-        stockCount: deps.stockCount,
-      };
+    const connection = await this.repository.getPool().getConnection();
+    try {
+      await connection.beginTransaction();
+      const current = await this.repository.findProduct(identity.clientId, publicId, connection, true);
+      if (!current) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado.");
+      const updated = await this.repository.purgeProduct(identity.clientId, publicId, identity.userId, connection);
+      if (!updated) throw new ErpDomainError("NOT_FOUND", "Produto não encontrado.");
+      await this.auditRepository.record({
+        clientId: identity.clientId,
+        productId: current.id,
+        entityType: "product",
+        entityPublicId: current.public_id,
+        action: "product_purged",
+        actorUserId: identity.userId,
+        actorNameSnapshot: identity.userName?.trim() || identity.userId,
+        actorRole: identity.role,
+        summary: `Produto excluído logicamente: ${current.name} (${current.sku})`,
+        changesJson: { active: { before: current.active, after: -1 } },
+      }, connection);
+      await connection.commit();
+      await this.publish(identity.clientId, "erp:product.changed", {
+        productPublicId: publicId,
+        operation: "deactivated",
+        occurredAt: new Date().toISOString(),
+      });
+      return { success: true, hardDeleted: false, ...deps };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
     }
-
-    if (deps.hasDependencies && !force) {
-      return {
-        success: false,
-        hardDeleted: false,
-        hasDependencies: true,
-        salesCount: deps.salesCount,
-        stockCount: deps.stockCount,
-      };
-    }
-
-    // Apply soft delete
-    await this.setProductActive(identity, publicId, false);
-    return {
-      success: true,
-      hardDeleted: false,
-      hasDependencies: deps.hasDependencies,
-      salesCount: deps.salesCount,
-      stockCount: deps.stockCount,
-    };
   }
   async summary(identity: Identity) {
     const result = await this.repository.summary(identity.clientId);

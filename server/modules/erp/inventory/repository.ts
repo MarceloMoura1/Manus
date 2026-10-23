@@ -351,7 +351,7 @@ export class InventoryRepository {
        LEFT JOIN erp_product_variant_attribute_values vv ON vv.client_id=i.client_id AND vv.variant_id=v.id
        LEFT JOIN erp_product_attribute_types t ON t.client_id=vv.client_id AND t.id=vv.attribute_type_id
        LEFT JOIN erp_product_attribute_values av ON av.client_id=vv.client_id AND av.id=vv.attribute_value_id
-       WHERE i.client_id=?${productFilter}
+       WHERE i.client_id=? AND p.active <> -1${productFilter}
        GROUP BY i.id,p.id,v.id,pm.media_id,b.quantity
        ORDER BY p.name,i.kind,v.sku,i.id`,
       params

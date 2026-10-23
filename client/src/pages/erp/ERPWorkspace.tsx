@@ -171,7 +171,7 @@ export function ERPWorkspace({ section, onNavigate, canAccessClients, canAccessS
   useErpRealtime();
   const denied = <div role="alert" className="rounded-2xl border border-slate-200 bg-white p-8 text-center"><h1 className="text-xl font-bold text-slate-900">Acesso indisponível</h1><p className="mt-2 text-sm text-slate-600">Este módulo não está disponível para o seu perfil.</p></div>;
   const content = section === "summary" ? <Summary onNavigate={onNavigate}/> : section === "clients" ? canAccessClients ? <ClientesPage initialSelectedId={initialCrmClientId} onNavigate={onClientNavigate} onSaleNavigate={salePublicId => onNavigateToSale(salePublicId)} canAccessSales={canAccessSales} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDelete={canPermanentlyDeleteClients}/> : denied : section === "products" ? <Products/> : section === "services" ? <ServicesPage/> : section === "suppliers" ? <SuppliersPage onNavigate={onNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} onClientNavigate={onClientNavigate}/> : section === "purchases" ? <PurchasesPage onNavigate={onNavigate}/> : section === "sales" ? canAccessSales ? <SalesPage initialSelectedId={initialSalePublicId} onSaleNavigate={onNavigateToSale} onClientNavigate={onNavigateToClient} onNavigateToProposals={onNavigateToProposals}/> : denied : section === "finance" ? canAccessFinance ? <FinancePage/> : denied : section === "fiscal" ? canAccessFiscal ? <FiscalPage/> : denied : section === "reports" ? canAccessReports ? <ReportsPage/> : denied : <StockPage/>;
-  return <div className="min-w-0 max-w-full min-h-screen bg-slate-950 dark:bg-slate-950 text-slate-100" data-testid="erp-workspace">{content}</div>;
+  return <div className="min-w-0 max-w-full min-h-full bg-slate-950 dark:bg-slate-950 text-slate-100" data-testid="erp-workspace">{content}</div>;
 }
 
 function Summary({ onNavigate }: { onNavigate: (section: ErpSection) => void }) {
@@ -205,7 +205,7 @@ export function ProductThumbnail({
   const [failed, setFailed] = React.useState(false);
   const resolvedVersion = version || (product.updatedAt ? new Date(product.updatedAt).getTime() : 0);
   React.useEffect(() => setFailed(false), [product.publicId, product.hasImage, resolvedVersion]);
-  const frame = `${className} shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm`;
+  const frame = `${className} shrink-0 overflow-hidden rounded-xl border border-slate-700 bg-slate-800 shadow-sm`;
   if (!product.hasImage || failed) {
     return (
       <div
@@ -307,7 +307,7 @@ function ProductsGlowPagination({
   return (
     <div
       data-testid="products-glow-pagination"
-      className="bg-slate-950/95 dark:bg-slate-950/95 border border-white/20 rounded-2xl px-6 py-3 my-4 flex flex-wrap items-center justify-between gap-4 text-slate-300 shadow-[0_-4px_25px_rgba(255,255,255,0.07),0_10px_30px_rgba(0,0,0,0.6)]"
+      className="bg-slate-950/95 border border-white/20 rounded-2xl px-6 py-3 my-4 flex flex-wrap items-center justify-between gap-4 text-slate-300 shadow-[0_-4px_25px_rgba(255,255,255,0.1),0_10px_30px_rgba(0,0,0,0.6)]"
     >
       <span className="text-xs font-medium text-slate-300 tabular-nums">
         Mostrando <strong className="text-white">{start}–{end}</strong> de <strong className="text-white">{total}</strong> produtos
@@ -491,7 +491,7 @@ function Products() {
 
   const handleConfirmDelete = () => {
     if (!productToDelete) return;
-    if (deleteConfirmText.trim().toUpperCase() !== "EXCLUIR") return;
+    if (deleteConfirmText !== "EXCLUIR") return;
     deleteMutation.mutate({
       publicId: productToDelete.publicId,
       force: true,
@@ -633,10 +633,10 @@ function Products() {
         <div className="py-3 text-sm text-slate-600 dark:text-slate-300 space-y-3">
           <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3.5 space-y-1.5">
             <p className="font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5 text-xs">
-              <AlertCircle className="h-4 w-4 shrink-0" /> Esta ação é irreversível e apagará o produto permanentemente do sistema.
+              <AlertCircle className="h-4 w-4 shrink-0" /> O produto será ocultado do catálogo; seu histórico será preservado.
             </p>
             <p className="text-xs text-slate-600 dark:text-slate-300">
-              O produto <strong className="text-slate-900 dark:text-white">&quot;{productToDelete?.name}&quot;</strong> será removido permanentemente.
+              O produto <strong className="text-slate-900 dark:text-white">&quot;{productToDelete?.name}&quot;</strong> não aparecerá entre produtos ativos ou inativos.
             </p>
           </div>
 
@@ -652,7 +652,7 @@ function Products() {
                   {deleteDependencies.salesCount > 0 && deleteDependencies.stockCount > 0 && " e "}
                   {deleteDependencies.stockCount > 0 && `${deleteDependencies.stockCount} em saldo de estoque`}
                 </strong>
-                . A exclusão definitiva desvinculará ou limpará esses registros sem impedir a remoção do produto.
+                . Os registros vinculados permanecerão preservados.
               </p>
             </div>
           )}
@@ -664,7 +664,7 @@ function Products() {
             <Input
               id="delete-product-confirm-input"
               data-testid="delete-product-confirm-input"
-              className="h-9 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono uppercase tracking-wider text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-rose-500"
+              className="h-9 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono tracking-wider text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-rose-500"
               placeholder="Digite EXCLUIR"
               value={deleteConfirmText}
               onChange={e => setDeleteConfirmText(e.target.value)}
@@ -690,7 +690,7 @@ function Products() {
             variant="destructive"
             className="bg-rose-600 hover:bg-rose-700 text-white font-semibold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleConfirmDelete}
-            disabled={deleteMutation.isPending || deleteConfirmText.trim().toUpperCase() !== "EXCLUIR"}
+            disabled={deleteMutation.isPending || deleteConfirmText !== "EXCLUIR"}
             data-testid="confirm-delete-product-button"
           >
             {deleteMutation.isPending ? "Excluindo…" : "Confirmar Exclusão"}
@@ -747,7 +747,7 @@ function Products() {
   }
 
   return (
-    <div className="space-y-5 min-h-screen bg-slate-950 dark:bg-slate-950 text-slate-100" data-testid="erp-products-page">
+    <div className="space-y-5 min-h-full bg-slate-950 dark:bg-slate-950 text-slate-100" data-testid="erp-products-page">
       {/* 1. Cabeçalho e Ação Principal */}
       <ErpPageHeader
         title="Produtos"
@@ -763,7 +763,7 @@ function Products() {
               }}
               className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-xl shadow-[0_0_15px_rgba(37,99,235,0.35)] transition-all flex items-center cursor-pointer"
             >
-              <Plus className="w-4 h-4 mr-1.5" />
+              <Plus className="w-4 h-4 mr-2" />
               <span>Novo produto</span>
             </button>
           )
@@ -1015,9 +1015,9 @@ function Products() {
       ) : (
         /* 4. Visualização em Lista (Tabela Premium) */
         <>
-          <div className="hidden overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 md:block shadow-xs">
+          <div className="hidden overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900 md:block shadow-xs">
             <table className="w-full min-w-[800px] text-left text-xs">
-              <thead className="bg-slate-50/80 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider text-[11px]">
+              <thead className="bg-slate-800/50 border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider text-[11px]">
                 <tr>
                   <th className="p-3.5 pl-4">Produto</th>
                   <th className="p-3.5">SKU</th>
@@ -1030,12 +1030,12 @@ function Products() {
                   <th className="p-3.5 pr-4 text-right">Ações</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+              <tbody className="divide-y divide-slate-800/80">
                 {query.data?.items.map(product => (
                   <tr
                     key={product.publicId}
                     onClick={() => setSelectedProductPublicId(product.publicId)}
-                    className="cursor-pointer hover:bg-slate-50/80 dark:hover:bg-slate-800/60 transition-colors"
+                    className="cursor-pointer hover:bg-slate-800/60 transition-colors"
                   >
                     <td className="p-3 font-medium">
                       <div className="flex items-center gap-3">
@@ -1045,19 +1045,19 @@ function Products() {
                           version={mediaVersions[product.publicId]}
                         />
                         <div className="min-w-0 max-w-xs">
-                          <p className="text-base font-bold text-slate-900 dark:text-slate-100 truncate">{product.name}</p>
+                          <p className="block mb-0.5 text-base font-bold text-slate-100 truncate">{product.name}</p>
                           <span className="text-xs text-slate-400 truncate block mt-0.5">{product.category || "Sem categoria"}</span>
                         </div>
                       </div>
                     </td>
-                    <td className="p-3 font-mono text-xs text-slate-600 dark:text-slate-300">{product.sku}</td>
-                    <td className="p-3 text-xs text-slate-600 dark:text-slate-300">{product.category ?? "—"}</td>
-                    <td className="p-3 text-xs text-slate-500 dark:text-slate-400">{money.format(product.costPriceCents / 100)}</td>
-                    <td className="p-3 text-sm font-bold text-slate-900 dark:text-slate-100">{money.format(product.salePriceCents / 100)}</td>
+                    <td className="p-3 font-mono text-xs text-slate-300">{product.sku}</td>
+                    <td className="p-3 text-xs text-slate-300">{product.category ?? "—"}</td>
+                    <td className="p-3 text-xs text-slate-400">{money.format(product.costPriceCents / 100)}</td>
+                    <td className="p-3 text-sm font-bold text-slate-100">{money.format(product.salePriceCents / 100)}</td>
                     <td className="p-3">
                       <StockBadge quantity={product.quantity} minimumStock={product.minimumStock} />
                     </td>
-                    <td className="p-3 text-xs text-slate-500 dark:text-slate-400">{formatQuantity(product.minimumStock)}</td>
+                    <td className="p-3 text-xs text-slate-400">{formatQuantity(product.minimumStock)}</td>
                     <td className="p-3">
                       <span
                         className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
@@ -1075,7 +1075,7 @@ function Products() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-8 w-8 p-0 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
+                            className="h-8 w-8 p-0 rounded-lg hover:bg-slate-800 text-slate-300"
                           >
                             <MoreHorizontal className="h-4 w-4" />
                             <span className="sr-only">Ações para {product.name}</span>

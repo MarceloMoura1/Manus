@@ -147,13 +147,13 @@ function FormField({
   className?: string;
 }) {
   return (
-    <label htmlFor={id} className={`block text-xs font-semibold text-slate-700 dark:text-slate-300 ${className ?? ""}`}>
+    <label htmlFor={id} className={`block text-sm font-semibold text-slate-700 dark:text-slate-300 ${className ?? ""}`}>
       {label}
       {required && <span className="ml-1 text-rose-500">*</span>}
       <Input
         id={id}
         data-testid={id}
-        className="mt-1 h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-blue-500 text-xs"
+        className="mt-1 h-10 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-base md:text-base text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-blue-500"
         value={value}
         onChange={e => onChange(e.target.value)}
         required={required}
@@ -224,17 +224,18 @@ export function ProductFormContent({
   const marginPercentNum = costNum > 0 ? ((profitNum / costNum) * 100).toFixed(1) : (saleNum > 0 ? "100.0" : "0.0");
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col justify-between gap-2.5 text-xs">
+    <form onSubmit={onSubmit} className="flex flex-col gap-4 text-sm">
       {/* Indicador de Modo (Editar vs Novo) para acessibilidade e testes */}
       <div className="sr-only" aria-live="polite">
         <h2>{form.publicId ? "Editar produto" : "Novo produto"}</h2>
       </div>
 
-      {/* Linha 1 (Topo): Preview da foto compacto ao lado de Nome, SKU e Código de Barras */}
-      <div className="flex items-start gap-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50 p-2.5">
-        {/* Foto compacta w-20 h-20 */}
-        <div className="flex flex-col items-center shrink-0">
-          <div className="relative flex h-20 w-20 items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden shadow-xs">
+      {/* Dados principais em duas colunas em telas maiores. */}
+      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="contents">
+        {/* Prévia da foto */}
+        <div className="flex flex-col items-center shrink-0 sm:col-start-1 sm:row-start-1 sm:row-span-2">
+          <div className="relative flex h-32 w-32 items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden shadow-xs">
             {photoPreview && !removePhoto ? (
               <img
                 src={photoPreview}
@@ -248,7 +249,7 @@ export function ProductFormContent({
           <div className="mt-1 flex items-center gap-1">
             <label
               aria-disabled={pending}
-              className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 shadow-xs ${
+              className={`inline-flex items-center rounded px-3 py-2 text-sm font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 shadow-xs ${
                 pending ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700"
               }`}
             >
@@ -281,7 +282,7 @@ export function ProductFormContent({
         </div>
 
         {/* Nome, SKU e Código de Barras */}
-        <div className="flex-1 space-y-1.5">
+        <div className="space-y-3 sm:col-start-2 sm:row-start-1 sm:row-span-2">
           <FormField
             id="product-name-input"
             label="Nome do produto"
@@ -309,12 +310,12 @@ export function ProductFormContent({
         </div>
       </div>
 
-      {/* Linha 2 (Meio 1): Grid de 4 colunas com Categoria, Marca, Unidade e Estoque Mínimo */}
-      <div className="grid gap-2.5 sm:grid-cols-4 rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50 p-2.5">
+      {/* Categoria, marca, unidade e estoque mínimo */}
+      <div className="contents">
         {/* Categoria */}
-        <div>
+        <div className="sm:col-start-1 sm:row-start-3">
           <div className="flex items-center justify-between">
-            <label htmlFor="product-category-select" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+            <label htmlFor="product-category-select" className="text-sm font-semibold text-slate-700 dark:text-slate-300">
               Categoria
             </label>
             {onOpenNewCategory && (
@@ -322,7 +323,7 @@ export function ProductFormContent({
                 type="button"
                 onClick={onOpenNewCategory}
                 disabled={pending}
-                className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
                 data-testid="btn-new-category"
               >
                 + Nova categoria
@@ -341,7 +342,7 @@ export function ProductFormContent({
                 : undefined
             }
             disabled={pending || categoriesLoading || Boolean(categoriesError)}
-            className="mt-1 h-8 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 text-xs text-slate-900 dark:text-slate-100 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+            className="mt-1 h-10 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 text-base text-slate-900 dark:text-slate-100 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
             value={form.categoryPublicId || ""}
             onChange={e => {
               const val = e.target.value;
@@ -383,21 +384,21 @@ export function ProductFormContent({
             )}
           </select>
           {hasLegacyCategory && (
-            <p id="legacy-category-notice" data-testid="legacy-category-notice" className="mt-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+            <p id="legacy-category-notice" data-testid="legacy-category-notice" className="mt-0.5 text-sm text-amber-600 dark:text-amber-400">
               Categoria legada atual: &quot;{form.category}&quot;.
             </p>
           )}
           {categoriesError && (
-            <p id="category-error-hint" data-testid="categories-error-message" className="mt-0.5 text-[10px] text-red-600 dark:text-red-400">
+            <p id="category-error-hint" data-testid="categories-error-message" className="mt-0.5 text-sm text-red-600 dark:text-red-400">
               Não foi possível carregar as categorias. {sanitizeErrorMessage(categoriesError)}
             </p>
           )}
         </div>
 
         {/* Marca */}
-        <div>
+        <div className="sm:col-start-1 sm:row-start-4">
           <div className="flex items-center justify-between">
-            <label htmlFor="product-brand-select" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+            <label htmlFor="product-brand-select" className="text-sm font-semibold text-slate-700 dark:text-slate-300">
               Marca
             </label>
             {onOpenNewBrand && (
@@ -405,7 +406,7 @@ export function ProductFormContent({
                 type="button"
                 onClick={onOpenNewBrand}
                 disabled={pending}
-                className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
                 data-testid="btn-new-brand"
               >
                 + Nova marca
@@ -418,7 +419,7 @@ export function ProductFormContent({
             aria-label="Marca"
             aria-describedby={brandsError ? "brand-error-hint" : undefined}
             disabled={pending || brandsLoading || Boolean(brandsError)}
-            className="mt-1 h-8 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 text-xs text-slate-900 dark:text-slate-100 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+            className="mt-1 h-10 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 text-base text-slate-900 dark:text-slate-100 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
             value={form.brandPublicId || ""}
             onChange={e => {
               const val = e.target.value;
@@ -440,21 +441,21 @@ export function ProductFormContent({
             )}
           </select>
           {brandsError && (
-            <p id="brand-error-hint" data-testid="brands-error-message" className="mt-0.5 text-[10px] text-red-600 dark:text-red-400">
+            <p id="brand-error-hint" data-testid="brands-error-message" className="mt-0.5 text-sm text-red-600 dark:text-red-400">
               Não foi possível carregar as marcas. {sanitizeErrorMessage(brandsError)}
             </p>
           )}
         </div>
 
         {/* Unidade */}
-        <div>
-          <label htmlFor="product-unit-select" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+        <div className="sm:col-start-1 sm:row-start-5">
+          <label htmlFor="product-unit-select" className="text-sm font-semibold text-slate-700 dark:text-slate-300">
             Unidade
           </label>
           <select
             id="product-unit-select"
             data-testid="product-unit-select"
-            className="mt-1 h-8 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 text-xs text-slate-900 dark:text-slate-100 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="mt-1 h-10 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 text-base text-slate-900 dark:text-slate-100 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             value={form.unit}
             onChange={e => setForm({ ...form, unit: e.target.value as ProductForm["unit"] })}
           >
@@ -466,7 +467,7 @@ export function ProductFormContent({
         </div>
 
         {/* Estoque Mínimo */}
-        <div>
+        <div className="sm:col-start-2 sm:row-start-5">
           <FormField
             id="product-minimum-stock-input"
             label="Estoque mínimo"
@@ -476,8 +477,8 @@ export function ProductFormContent({
         </div>
       </div>
 
-      {/* Linha 3 (Meio 2): Grid de 3 colunas com Preço de Custo, Preço de Venda e Margem */}
-      <div className="grid gap-2.5 sm:grid-cols-3 rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50 p-2.5">
+      {/* Preços e margem */}
+      <div className="grid gap-3 sm:col-start-2 sm:row-start-3 sm:row-span-2">
         <FormField
           id="product-cost-input"
           label="Preço de custo (R$)"
@@ -494,7 +495,7 @@ export function ProductFormContent({
 
         {/* Margem calculada */}
         <div className="flex flex-col justify-between rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 px-3 py-1">
-          <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1">
+          <span className="text-sm font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1">
             <TrendingUp className="h-3 w-3" /> Margem calculada
           </span>
           <div className="flex items-baseline justify-between gap-1">
@@ -502,24 +503,25 @@ export function ProductFormContent({
               {costNum > 0 || saleNum > 0 ? `${marginPercentNum}%` : "0,0%"}
             </span>
             {(costNum > 0 || saleNum > 0) && (
-              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate">
+              <span className="text-sm text-slate-500 dark:text-slate-400 font-medium truncate">
                 Lucro: {profitNum.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
               </span>
             )}
           </div>
         </div>
       </div>
+      </div>
 
-      {/* Linha 4 (Base): Descrição compacta com rows={2} */}
+      {/* Descrição */}
       <div className="rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50 p-2.5">
-        <label htmlFor="product-description-input" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+        <label htmlFor="product-description-input" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
           Descrição do produto
         </label>
         <textarea
           id="product-description-input"
           data-testid="product-description-input"
           rows={2}
-          className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+          className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-base text-slate-900 dark:text-slate-100 placeholder:text-slate-400 shadow-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y"
           placeholder="Informações técnicas, composição, garantias..."
           value={form.description}
           onChange={e => setForm({ ...form, description: e.target.value })}
@@ -528,7 +530,7 @@ export function ProductFormContent({
 
       {/* Erros sanitizados de submissão */}
       {errorMessage && (
-        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 dark:bg-rose-950/40 dark:border-rose-900/60 p-2 text-xs text-rose-700 dark:text-rose-300" data-testid="product-form-error">
+        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 dark:bg-rose-950/40 dark:border-rose-900/60 p-2 text-sm text-rose-700 dark:text-rose-300" data-testid="product-form-error">
           {sanitizeErrorMessage(errorMessage)}
         </div>
       )}
@@ -541,7 +543,7 @@ export function ProductFormContent({
           size="sm"
           onClick={onCancel}
           disabled={pending}
-          className="dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 text-xs"
+          className="dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 text-sm"
         >
           Cancelar
         </Button>
@@ -550,7 +552,7 @@ export function ProductFormContent({
           size="sm"
           disabled={pending}
           data-testid="submit-product-form"
-          className="bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-[0_0_15px_rgba(37,99,235,0.35)] px-5 text-xs"
+          className="bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-[0_0_15px_rgba(37,99,235,0.35)] px-5 text-sm"
         >
           {pending ? "Salvando…" : "Salvar produto"}
         </Button>
@@ -584,12 +586,12 @@ export function ProductFormDialogView({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[92vh] flex flex-col p-6 overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 rounded-2xl shadow-2xl">
+      <DialogContent className="w-[calc(100%-2rem)] sm:max-w-4xl max-h-[calc(100dvh-2rem)] overflow-y-auto p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 rounded-2xl shadow-2xl">
         <DialogHeader className="border-b border-slate-100 dark:border-slate-800 pb-2">
           <DialogTitle className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">
             {form.publicId ? "Editar produto" : "Novo produto"}
           </DialogTitle>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
             Preencha os dados do produto abaixo de forma rápida e compacta.
           </p>
         </DialogHeader>

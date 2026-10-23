@@ -93,6 +93,7 @@ export const actionLabels: Record<string, string> = {
   product_updated: "Produto atualizado",
   product_activated: "Produto ativado",
   product_deactivated: "Produto desativado",
+  product_purged: "Produto excluído",
   category_changed: "Categoria alterada",
   brand_changed: "Marca alterada",
   variant_created: "Variante criada",

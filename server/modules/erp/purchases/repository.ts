@@ -336,7 +336,7 @@ export class PurchaseRepository {
       const orderId = Number(ids[0].id);
       if (to === "approved") {
         const [refs] = await c.execute<RowDataPacket[]>(
-          "SELECT s.active supplier_active,COUNT(i.id) item_count,SUM(p.active=0 OR p.client_id<>o.client_id) invalid_products FROM erp_purchase_orders o INNER JOIN erp_suppliers s ON s.id=o.supplier_id LEFT JOIN erp_purchase_order_items i ON i.purchase_order_id=o.id LEFT JOIN erp_products p ON p.id=i.product_id WHERE o.id=? GROUP BY s.active",
+          "SELECT s.active supplier_active,COUNT(i.id) item_count,SUM(p.id IS NULL OR p.active<>1 OR p.client_id<>o.client_id) invalid_products FROM erp_purchase_orders o INNER JOIN erp_suppliers s ON s.id=o.supplier_id LEFT JOIN erp_purchase_order_items i ON i.purchase_order_id=o.id LEFT JOIN erp_products p ON p.id=i.product_id WHERE o.id=? GROUP BY s.active",
           [orderId]
         );
         if (

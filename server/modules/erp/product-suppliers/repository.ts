@@ -38,7 +38,7 @@ export class ProductSupplierRepository {
   async list(clientId: string, options: ProductSupplierListInput) {
     const limit = Math.max(1, Math.min(100, Math.trunc(options.pageSize)));
     const offset = Math.max(0, (Math.max(1, Math.trunc(options.page)) - 1) * limit);
-    const conditions = ["ps.client_id = ?"];
+    const conditions = ["ps.client_id = ?", "p.active <> -1"];
     const parameters: Array<string | number> = [clientId];
 
     if (options.productPublicId) {
@@ -123,7 +123,7 @@ export class ProductSupplierRepository {
        INNER JOIN erp_products p ON p.client_id = ps.client_id AND p.id = ps.product_id
        INNER JOIN erp_suppliers s ON s.client_id = ps.client_id AND s.id = ps.supplier_id
        LEFT JOIN megadesk_domain_client_users u_created ON u_created.client_id = ps.client_id AND u_created.user_id = ps.created_by
-       WHERE ps.client_id = ? AND ps.public_id = ?
+       WHERE ps.client_id = ? AND ps.public_id = ? AND p.active <> -1
        LIMIT 1${lock ? " FOR UPDATE" : ""}`,
       [clientId, publicId]
     );
