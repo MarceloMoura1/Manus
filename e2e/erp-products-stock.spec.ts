@@ -302,6 +302,31 @@ async function capture(page: Page, name: string) {
 }
 
 test.describe("ERP products and stock", () => {
+  test("renders the product list styling on the active route", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await prepare(page, { hasImage: true });
+    await erpModules(page).getByRole("button", { name: "Produtos", exact: true }).click();
+    await expect(page).toHaveURL(/\/erp\/produtos$/);
+    const products = page.getByTestId("erp-products-page");
+    await expect(products.getByText("Fotos, preço e disponibilidade reunidos para uma leitura rápida.")).toBeVisible();
+    const list = products.getByTestId("view-mode-table");
+    await expect(list).toHaveAttribute("aria-pressed", "true");
+    await expect(list).toHaveCSS("background-color", "rgb(255, 255, 255)");
+    await expect(list).toHaveCSS("font-size", "12px");
+    const row = products.locator("tbody tr").filter({ hasText: product.sku });
+    const image = row.locator("img, [data-testid=product-image-placeholder]");
+    await expect(image).toHaveCSS("width", "64px");
+    await expect(image).toHaveCSS("height", "64px");
+    const productCell = row.locator("td").first();
+    await expect(productCell.getByText(product.name)).toHaveCSS("font-size", "18px");
+    await expect(productCell).toContainText(product.category);
+    await expect(productCell).not.toContainText(product.sku);
+    const pagination = products.getByTestId("products-glow-pagination");
+    await expect(pagination).toHaveCSS("border-top-color", /^(?:oklab\(.* \/ 0\.4\)|rgba\(255, 255, 255, 0\.4\))$/);
+    await expect(pagination).toHaveCSS("box-shadow", /255, 255, 255/);
+    await expect(page.getByTestId("erp-workspace")).toHaveCSS("overflow-y", "visible");
+    await expect(page.locator("main")).toHaveCSS("overflow-y", "auto");
+  });
   test("navigates the ERP group and keeps future modules unavailable", async ({
     page,
   }) => {
