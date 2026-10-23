@@ -587,7 +587,7 @@ export function ProductFormDialogView({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        overlayClassName="bg-black/60 backdrop-blur-sm"
+        overlayClassName="!bg-black/70 backdrop-blur-sm"
         className="z-50 w-full max-w-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-2xl"
       >
         <DialogHeader className="border-b border-slate-100 dark:border-slate-800 pb-2">

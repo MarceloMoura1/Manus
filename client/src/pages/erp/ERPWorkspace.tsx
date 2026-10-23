@@ -315,7 +315,7 @@ function ProductsGlowPagination({
   return (
     <div
       data-testid="products-glow-pagination"
-      className="mt-4 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-800/80 bg-slate-900/80 px-6 py-3.5 backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]"
+      className="relative mt-4 flex flex-wrap items-center justify-between gap-4 overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/60 px-6 py-3.5 backdrop-blur-md shadow-[inset_0_1px_1px_0_rgba(255,255,255,0.06)]"
     >
       <span className="text-xs font-medium text-slate-300 tabular-nums">
         Mostrando <strong className="text-white">{start}–{end}</strong> de <strong className="text-white">{total}</strong> produtos
@@ -1052,14 +1052,18 @@ function Products() {
                       <div className="flex items-center gap-4">
                         <ProductThumbnail
                           product={product}
-                          className="w-16 h-16 min-w-[64px] min-h-[64px] max-w-[64px] max-h-[64px] rounded-xl overflow-hidden border border-border shadow-sm flex-shrink-0 bg-muted"
+                          className="w-16 h-16 min-w-[64px] min-h-[64px] max-w-[64px] max-h-[64px] rounded-xl overflow-hidden !border !border-slate-800 !bg-slate-900 shadow-sm flex-shrink-0"
                           style={{ width: "64px", height: "64px", minWidth: "64px", minHeight: "64px" }}
                           imageStyle={{ width: "64px", height: "64px" }}
                           version={mediaVersions[product.publicId]}
                         />
                         <div className="min-w-0 flex flex-col justify-center">
-                          <span className="font-bold text-base text-foreground leading-snug line-clamp-2">{product.name}</span>
-                          <span className="text-xs text-muted-foreground mt-0.5 block">{product.category || "Sem categoria"}</span>
+                          <span className="truncate text-sm font-medium leading-snug text-slate-900 dark:text-slate-100 md:text-base">{product.name}</span>
+                          <span className="mt-0.5 flex items-center gap-2 truncate text-xs text-slate-500 dark:text-slate-400">
+                            <span className="truncate">SKU: {product.sku || "—"}</span>
+                            <span aria-hidden="true">•</span>
+                            <span className="truncate">{product.category || "Sem categoria"}</span>
+                          </span>
                         </div>
                       </div>
                     </td>
