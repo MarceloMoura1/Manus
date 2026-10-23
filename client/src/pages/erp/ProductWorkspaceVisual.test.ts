@@ -6,13 +6,17 @@ const workspace = readFileSync(resolve(process.cwd(), "client/src/pages/erp/ERPW
 const home = readFileSync(resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
 
 describe("Produtos: contratos visuais do workspace", () => {
-  it("restaura o banner e o seletor branco com contagem real", () => {
+  it("mantém o banner de catálogo e o seletor alinhados à referência", () => {
     const banner = workspace.slice(workspace.indexOf('<section aria-label="Visão do catálogo"'), workspace.indexOf("{message &&"));
     expect(banner).toContain("Fotos, preço e disponibilidade reunidos para uma leitura rápida.");
-    expect(banner).toContain("mb-6 flex flex-col gap-4 rounded-2xl border border-border bg-card/80 px-6 py-4 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-slate-900/60");
-    expect(banner).toContain('!bg-white !text-slate-900 shadow-sm');
-    expect(banner).toContain('backgroundColor: "#ffffff", color: "#0f172a"');
-    expect(banner).toContain("text-muted-foreground hover:text-foreground");
+    expect(banner).toContain("mb-6 flex flex-col items-start justify-between gap-4 rounded-2xl border border-slate-800/80 bg-slate-900/60 px-6 py-4 backdrop-blur-md");
+    expect(banner).toContain("CATÁLOGO VISUAL");
+    expect(banner).toContain("mb-0.5 block text-[11px] font-bold tracking-[0.16em] text-blue-400");
+    expect(banner).toContain("flex items-center gap-1 rounded-xl border border-slate-700/60 bg-slate-800/90 p-1");
+    expect(banner).toContain('"bg-white text-slate-900 font-semibold shadow-sm"');
+    expect(banner).toContain('"text-slate-400 hover:text-white"');
+    expect(banner).toContain("text-xl font-bold leading-none text-white");
+    expect(banner).toContain("ml-1 text-xs font-normal text-slate-400");
     expect(banner).not.toContain("bg-blue-600");
     expect(workspace).toContain("const totalProducts = query.data?.total ?? 0;");
     expect(banner).toContain("{totalProducts}");

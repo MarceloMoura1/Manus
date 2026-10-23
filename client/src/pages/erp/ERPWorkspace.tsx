@@ -778,23 +778,22 @@ function Products() {
       />
 
       {/* 2. Barra Superior de Visualização */}
-      <section aria-label="Visão do catálogo" className="mb-6 flex flex-col gap-4 rounded-2xl border border-border bg-card/80 px-6 py-4 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-slate-900/60 sm:flex-row sm:items-center sm:justify-between">
+      <section aria-label="Visão do catálogo" className="mb-6 flex flex-col items-start justify-between gap-4 rounded-2xl border border-slate-800/80 bg-slate-900/60 px-6 py-4 backdrop-blur-md sm:flex-row sm:items-center">
         <div>
-          <p className="mb-0.5 text-[11px] font-bold uppercase tracking-[0.18em] text-blue-500 dark:text-blue-400">Catálogo visual</p>
-          <p className="text-sm font-normal text-muted-foreground dark:text-slate-300">Fotos, preço e disponibilidade reunidos para uma leitura rápida.</p>
+          <span className="mb-0.5 block text-[11px] font-bold tracking-[0.16em] text-blue-400">CATÁLOGO VISUAL</span>
+          <p className="text-sm font-normal text-slate-300">Fotos, preço e disponibilidade reunidos para uma leitura rápida.</p>
         </div>
         <div className="flex self-end items-center gap-4 sm:self-auto">
-          <div className="flex items-center gap-1 rounded-xl border border-border bg-muted/60 p-1 dark:border-white/10 dark:bg-slate-800/80" role="group" aria-label="Modo de visualização">
+          <div className="flex items-center gap-1 rounded-xl border border-slate-700/60 bg-slate-800/90 p-1" role="group" aria-label="Modo de visualização">
             <button
               type="button"
               onClick={() => setViewMode("table")}
               aria-pressed={viewMode === "table"}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition-all ${
                 viewMode === "table"
-                  ? "!bg-white !text-slate-900 shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-white text-slate-900 font-semibold shadow-sm"
+                  : "text-slate-400 hover:text-white"
               }`}
-              style={{ fontSize: "0.75rem", ...(viewMode === "table" ? { backgroundColor: "#ffffff", color: "#0f172a" } : {}) }}
               data-testid="view-mode-table"
             >
               <LayoutList className="h-4 w-4" />
@@ -804,21 +803,20 @@ function Products() {
               type="button"
               onClick={() => setViewMode("cards")}
               aria-pressed={viewMode === "cards"}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition-all ${
                 viewMode === "cards"
-                  ? "!bg-white !text-slate-900 shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-white text-slate-900 font-semibold shadow-sm"
+                  : "text-slate-400 hover:text-white"
               }`}
-              style={{ fontSize: "0.75rem", ...(viewMode === "cards" ? { backgroundColor: "#ffffff", color: "#0f172a" } : {}) }}
               data-testid="view-mode-cards"
             >
               <LayoutGrid className="h-4 w-4" />
               Catálogo visual
             </button>
           </div>
-          <div className="flex items-baseline gap-1 text-right">
-            <span className="text-lg font-bold text-foreground">{totalProducts}</span>
-            <span className="text-xs text-muted-foreground">itens</span>
+          <div className="flex items-baseline text-right">
+            <span className="text-xl font-bold leading-none text-white">{totalProducts}</span>
+            <span className="ml-1 text-xs font-normal text-slate-400">itens</span>
           </div>
         </div>
       </section>
