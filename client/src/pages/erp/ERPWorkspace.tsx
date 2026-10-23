@@ -307,7 +307,7 @@ function ProductsGlowPagination({
   return (
     <div
       data-testid="products-glow-pagination"
-      className="bg-slate-950/95 border-t border-t-white/30 border-x border-b border-white/10 rounded-2xl px-6 py-3 my-4 flex flex-wrap items-center justify-between gap-4 text-slate-300 shadow-[0_-6px_25px_rgba(255,255,255,0.12),0_15px_35px_rgba(0,0,0,0.8)]"
+      className="bg-slate-950/95 border-t border-t-white/40 border-x border-b border-white/10 rounded-2xl px-6 py-3 my-4 flex flex-wrap items-center justify-between gap-4 text-slate-300 shadow-[0_-8px_30px_rgba(255,255,255,0.15),0_15px_35px_rgba(0,0,0,0.8)]"
     >
       <span className="text-xs font-medium text-slate-300 tabular-nums">
         Mostrando <strong className="text-white">{start}–{end}</strong> de <strong className="text-white">{total}</strong> produtos
