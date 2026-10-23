@@ -826,13 +826,13 @@ function Products() {
       {message && <p role="status" className="rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 p-3 text-xs text-blue-800 dark:text-blue-300">{message}</p>}
 
       {/* 3. Barra de Filtros Unificada */}
-      <div className="grid gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:grid-cols-2 xl:grid-cols-4 shadow-xs">
+      <div className="grid gap-3 rounded-2xl border border-border bg-card p-4 text-card-foreground shadow-xs sm:grid-cols-2 xl:grid-cols-4">
         <div className="relative sm:col-span-2">
           <label htmlFor="search-products-input" className="sr-only">Buscar produtos</label>
           <Search className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
           <Input
             id="search-products-input"
-            className="pl-10 h-10 rounded-xl border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 text-slate-900 dark:text-slate-100 text-xs focus-visible:ring-2 focus-visible:ring-blue-500"
+            className="h-10 rounded-xl border-border bg-background pl-10 text-xs text-foreground focus-visible:ring-2 focus-visible:ring-blue-500"
             value={search}
             onChange={e => {
               setSearch(e.target.value);
@@ -844,16 +844,16 @@ function Products() {
 
         <select
           aria-label="Filtrar categoria"
-          className="h-10 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 px-3 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+          className="h-10 cursor-pointer rounded-xl border border-border bg-background px-3 text-xs font-medium text-foreground hover:bg-muted focus:outline-none focus:ring-2 focus:ring-blue-500"
           value={category}
           onChange={e => {
             setCategory(e.target.value);
             resetPage();
           }}
         >
-          <option value="" className="bg-white dark:bg-slate-900">Todas as categorias</option>
+          <option value="" className="bg-background text-foreground">Todas as categorias</option>
           {categoriesQuery.data?.items.map(cat => (
-            <option key={cat.publicId} value={cat.name} className="bg-white dark:bg-slate-900">
+            <option key={cat.publicId} value={cat.name} className="bg-background text-foreground">
               {formatCategoryOptionLabel(cat)}
             </option>
           ))}
@@ -919,7 +919,7 @@ function Products() {
         <Button
           variant="outline"
           onClick={reset}
-          className="h-10 rounded-xl border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center gap-1.5"
+          className="flex h-10 items-center justify-center gap-1.5 rounded-xl border-border bg-card text-xs text-card-foreground hover:bg-muted"
         >
           <X className="h-3.5 w-3.5 text-slate-400" />
           Limpar filtros
@@ -1026,9 +1026,9 @@ function Products() {
       ) : (
         /* 4. Visualização em Lista (Tabela Premium) */
         <>
-          <div className="hidden overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 md:block shadow-xs">
+          <div className="hidden overflow-x-auto rounded-2xl border border-border bg-card text-card-foreground shadow-xs md:block">
             <table className="w-full min-w-[800px] text-left text-xs">
-              <thead className="bg-slate-100 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-semibold uppercase tracking-wider text-[11px]">
+              <thead className="border-b border-border bg-muted/40 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 <tr>
                   <th className="p-3.5 pl-4">Produto</th>
                   <th className="p-3.5">SKU</th>
@@ -1041,12 +1041,12 @@ function Products() {
                   <th className="p-3.5 pr-4 text-right">Ações</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800/80">
+              <tbody>
                 {query.data?.items.map(product => (
                   <tr
                     key={product.publicId}
                     onClick={() => setSelectedProductPublicId(product.publicId)}
-                    className="cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors"
+                    className="cursor-pointer border-b border-border transition-colors hover:bg-muted/50"
                   >
                     <td className="min-w-[320px] px-4 py-3">
                       <div className="flex items-center gap-4">
@@ -1265,4 +1265,4 @@ function Products() {
   );
 }
 
-function Filter({label,value,onChange,options}:{label:string;value:string;onChange:(value:string)=>void;options:Array<[string,string]>}) { return <select aria-label={label} className="min-h-10 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-200 px-3 text-xs font-medium hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer" value={value} onChange={e=>onChange(e.target.value)}>{options.map(([key,text])=><option key={key||"all"} value={key} className="bg-white dark:bg-slate-900">{text}</option>)}</select>; }
+function Filter({label,value,onChange,options}:{label:string;value:string;onChange:(value:string)=>void;options:Array<[string,string]>}) { return <select aria-label={label} className="min-h-10 cursor-pointer rounded-xl border border-border bg-background px-3 text-xs font-medium text-foreground hover:bg-muted focus:outline-none focus:ring-2 focus:ring-blue-500" value={value} onChange={e=>onChange(e.target.value)}>{options.map(([key,text])=><option key={key||"all"} value={key} className="bg-background text-foreground">{text}</option>)}</select>; }

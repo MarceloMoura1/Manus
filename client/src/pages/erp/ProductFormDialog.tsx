@@ -586,7 +586,10 @@ export function ProductFormDialogView({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100%-2rem)] sm:max-w-4xl max-h-[calc(100dvh-2rem)] overflow-y-auto p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 rounded-2xl shadow-2xl">
+      <DialogContent
+        overlayClassName="bg-black/60 backdrop-blur-sm"
+        className="z-50 w-full max-w-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-2xl"
+      >
         <DialogHeader className="border-b border-slate-100 dark:border-slate-800 pb-2">
           <DialogTitle className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">
             {form.publicId ? "Editar produto" : "Novo produto"}
