@@ -171,7 +171,7 @@ export function ERPWorkspace({ section, onNavigate, canAccessClients, canAccessS
   useErpRealtime();
   const denied = <div role="alert" className="rounded-2xl border border-slate-200 bg-white p-8 text-center"><h1 className="text-xl font-bold text-slate-900">Acesso indisponível</h1><p className="mt-2 text-sm text-slate-600">Este módulo não está disponível para o seu perfil.</p></div>;
   const content = section === "summary" ? <Summary onNavigate={onNavigate}/> : section === "clients" ? canAccessClients ? <ClientesPage initialSelectedId={initialCrmClientId} onNavigate={onClientNavigate} onSaleNavigate={salePublicId => onNavigateToSale(salePublicId)} canAccessSales={canAccessSales} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDelete={canPermanentlyDeleteClients}/> : denied : section === "products" ? <Products/> : section === "services" ? <ServicesPage/> : section === "suppliers" ? <SuppliersPage onNavigate={onNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} onClientNavigate={onClientNavigate}/> : section === "purchases" ? <PurchasesPage onNavigate={onNavigate}/> : section === "sales" ? canAccessSales ? <SalesPage initialSelectedId={initialSalePublicId} onSaleNavigate={onNavigateToSale} onClientNavigate={onNavigateToClient} onNavigateToProposals={onNavigateToProposals}/> : denied : section === "finance" ? canAccessFinance ? <FinancePage/> : denied : section === "fiscal" ? canAccessFiscal ? <FiscalPage/> : denied : section === "reports" ? canAccessReports ? <ReportsPage/> : denied : <StockPage/>;
-  return <div className="min-w-0 max-w-full w-full min-h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100" data-testid="erp-workspace">{content}</div>;
+  return <div className="min-w-0 max-w-full w-full min-h-full bg-background text-foreground" data-testid="erp-workspace">{content}</div>;
 }
 
 function Summary({ onNavigate }: { onNavigate: (section: ErpSection) => void }) {
@@ -207,7 +207,7 @@ export function ProductThumbnail({
   const [failed, setFailed] = React.useState(false);
   const resolvedVersion = version || (product.updatedAt ? new Date(product.updatedAt).getTime() : 0);
   React.useEffect(() => setFailed(false), [product.publicId, product.hasImage, resolvedVersion]);
-  const frame = `${className} shrink-0 overflow-hidden rounded-xl border border-slate-300 dark:border-slate-700/50 bg-slate-100 dark:bg-slate-800`;
+  const frame = `${className} shrink-0 overflow-hidden rounded-xl border border-border bg-muted`;
   if (!product.hasImage || failed) {
     return (
       <div
@@ -221,16 +221,18 @@ export function ProductThumbnail({
     );
   }
   return (
-    <img
-      src={productMediaUrl(`/api/products/${product.publicId}/image?variant=thumbnail&v=${resolvedVersion}`)}
-      crossOrigin="use-credentials"
-      alt={`Foto de ${product.name}`}
-      loading="lazy"
-      decoding="async"
-      className={`${frame} object-cover`}
-      style={style}
-      onError={() => setFailed(true)}
-    />
+    <div className={frame} style={style}>
+      <img
+        src={productMediaUrl(`/api/products/${product.publicId}/image?variant=thumbnail&v=${resolvedVersion}`)}
+        crossOrigin="use-credentials"
+        alt={`Foto de ${product.name}`}
+        loading="lazy"
+        decoding="async"
+        className="w-full h-full object-cover"
+        style={{ width: "64px", height: "64px" }}
+        onError={() => setFailed(true)}
+      />
+    </div>
   );
 }
 
@@ -311,7 +313,7 @@ function ProductsGlowPagination({
   return (
     <div
       data-testid="products-glow-pagination"
-      className="relative z-10 border border-white/10 border-t-white/20 bg-slate-900/80 backdrop-blur-md rounded-2xl px-6 py-3 shadow-[inset_0_1px_1px_rgba(255,255,255,0.15),0_10px_25px_-5px_rgba(0,0,0,0.5)] flex flex-wrap items-center justify-between gap-4 text-slate-300"
+      className="mt-4 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-card/90 px-6 py-3.5 text-card-foreground shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-slate-900/80"
     >
       <span className="text-xs font-medium text-slate-300 tabular-nums">
         Mostrando <strong className="text-white">{start}–{end}</strong> de <strong className="text-white">{total}</strong> produtos
@@ -429,6 +431,7 @@ function Products() {
     page,
     pageSize,
   });
+  const totalProducts = query.data?.total ?? 0;
 
   const categoriesQuery = trpc.erp.categories.list.useQuery(
     { pageSize: 100 },
@@ -751,7 +754,7 @@ function Products() {
   }
 
   return (
-    <div className="space-y-5 min-h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100" data-testid="erp-products-page">
+    <div className="min-h-full space-y-5 bg-background text-foreground" data-testid="erp-products-page">
       {/* 1. Cabeçalho e Ação Principal */}
       <ErpPageHeader
         title="Produtos"
@@ -765,7 +768,7 @@ function Products() {
                 clearPhoto();
                 setForm({ ...emptyProduct });
               }}
-              className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-xl shadow-[0_0_15px_rgba(37,99,235,0.35)] transition-all flex items-center cursor-pointer"
+              className="flex cursor-pointer items-center rounded-xl bg-primary px-4 py-2 font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90"
             >
               <Plus className="w-4 h-4 mr-2" />
               <span>Novo produto</span>
@@ -775,21 +778,23 @@ function Products() {
       />
 
       {/* 2. Barra Superior de Visualização */}
-      <section aria-label="Visão do catálogo" className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-slate-900/60 backdrop-blur-md px-6 py-4 text-white">
+      <section aria-label="Visão do catálogo" className="mb-6 flex flex-col gap-4 rounded-2xl border border-border bg-card/80 px-6 py-4 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-slate-900/60 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-400 block mb-1">Catálogo visual</p>
-          <p className="text-sm text-slate-300 font-normal">Fotos, preço e disponibilidade reunidos para uma leitura rápida.</p>
+          <p className="mb-0.5 text-[11px] font-bold uppercase tracking-[0.18em] text-blue-500 dark:text-blue-400">Catálogo visual</p>
+          <p className="text-sm font-normal text-muted-foreground dark:text-slate-300">Fotos, preço e disponibilidade reunidos para uma leitura rápida.</p>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="p-1 bg-slate-800/80 rounded-xl border border-white/10 flex items-center gap-1" role="group" aria-label="Modo de visualização">
+        <div className="flex self-end items-center gap-4 sm:self-auto">
+          <div className="flex items-center gap-1 rounded-xl border border-border bg-muted/60 p-1 dark:border-white/10 dark:bg-slate-800/80" role="group" aria-label="Modo de visualização">
             <button
               type="button"
               onClick={() => setViewMode("table")}
               aria-pressed={viewMode === "table"}
-              style={{ fontSize: "0.75rem", fontWeight: viewMode === "table" ? 600 : 500, ...(viewMode === "table" ? { backgroundColor: "#ffffff", color: "#0f172a" } : {}) }}
-              className={viewMode === "table"
-                ? "!bg-white !text-slate-900 shadow-sm font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-all"
-                : "bg-transparent text-slate-400 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                viewMode === "table"
+                  ? "!bg-white !text-slate-900 shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              style={{ fontSize: "0.75rem", ...(viewMode === "table" ? { backgroundColor: "#ffffff", color: "#0f172a" } : {}) }}
               data-testid="view-mode-table"
             >
               <LayoutList className="h-4 w-4" />
@@ -799,19 +804,21 @@ function Products() {
               type="button"
               onClick={() => setViewMode("cards")}
               aria-pressed={viewMode === "cards"}
-              style={{ fontSize: "0.75rem", fontWeight: viewMode === "cards" ? 600 : 500 }}
-              className={viewMode === "cards"
-                ? "bg-white text-slate-900 shadow-sm font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-all"
-                : "bg-transparent text-slate-400 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                viewMode === "cards"
+                  ? "!bg-white !text-slate-900 shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              style={{ fontSize: "0.75rem", ...(viewMode === "cards" ? { backgroundColor: "#ffffff", color: "#0f172a" } : {}) }}
               data-testid="view-mode-cards"
             >
               <LayoutGrid className="h-4 w-4" />
               Catálogo visual
             </button>
           </div>
-          <div className="rounded-xl bg-slate-800/80 border border-slate-700/80 px-3.5 py-1.5 flex items-baseline gap-1.5">
-            <span className="text-lg font-bold text-white">{query.data?.total ?? 0}</span>
-            <span className="text-xs font-medium text-slate-400">itens</span>
+          <div className="flex items-baseline gap-1 text-right">
+            <span className="text-lg font-bold text-foreground">{totalProducts}</span>
+            <span className="text-xs text-muted-foreground">itens</span>
           </div>
         </div>
       </section>
@@ -1041,17 +1048,17 @@ function Products() {
                     onClick={() => setSelectedProductPublicId(product.publicId)}
                     className="cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors"
                   >
-                    <td className="w-20 min-w-[80px] py-3 pl-4 pr-2 font-medium">
+                    <td className="min-w-[280px] px-4 py-3">
                       <div className="flex items-center gap-4">
                         <ProductThumbnail
                           product={product}
-                          className="w-16 h-16 min-w-[64px] min-h-[64px] rounded-xl object-cover border border-slate-700/50 shadow-sm shrink-0 block"
+                          className="h-16 w-16 min-h-[64px] min-w-[64px] shrink-0 rounded-xl border border-border shadow-sm"
                           style={{ width: "64px", height: "64px", minWidth: "64px", minHeight: "64px" }}
                           version={mediaVersions[product.publicId]}
                         />
-                        <div className="min-w-0 max-w-xs">
-                          <p className="text-base font-semibold text-slate-900 dark:text-slate-100 leading-tight block mb-1">{product.name}</p>
-                          <span className="text-xs text-slate-500 dark:text-slate-400">{product.category || "Sem categoria"}</span>
+                        <div className="min-w-0">
+                          <span className="mb-1 block text-sm font-semibold leading-tight text-foreground">{product.name}</span>
+                          <span className="block text-xs text-muted-foreground">{product.category || "Sem categoria"}</span>
                         </div>
                       </div>
                     </td>

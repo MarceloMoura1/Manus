@@ -9,29 +9,31 @@ describe("Produtos: contratos visuais do workspace", () => {
   it("restaura o banner e o seletor branco com contagem real", () => {
     const banner = workspace.slice(workspace.indexOf('<section aria-label="Visão do catálogo"'), workspace.indexOf("{message &&"));
     expect(banner).toContain("Fotos, preço e disponibilidade reunidos para uma leitura rápida.");
-    expect(banner).toContain("rounded-2xl border border-white/10 bg-slate-900/60 backdrop-blur-md px-6 py-4");
+    expect(banner).toContain("mb-6 flex flex-col gap-4 rounded-2xl border border-border bg-card/80 px-6 py-4 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-slate-900/60");
     expect(banner).toContain('!bg-white !text-slate-900 shadow-sm');
     expect(banner).toContain('backgroundColor: "#ffffff", color: "#0f172a"');
-    expect(banner.match(/fontSize: "0.75rem"/g)).toHaveLength(2);
+    expect(banner).toContain("text-muted-foreground hover:text-foreground");
     expect(banner).not.toContain("bg-blue-600");
-    expect(banner).toContain("query.data?.total ?? 0");
+    expect(workspace).toContain("const totalProducts = query.data?.total ?? 0;");
+    expect(banner).toContain("{totalProducts}");
   });
 
   it("destaca imagem e nome e mantém o SKU fora do subtítulo da tabela", () => {
     const table = workspace.slice(workspace.indexOf("/* 4. Visualização em Lista"), workspace.indexOf('<div className="grid gap-3 md:hidden">'));
-    expect(table).toContain("w-16 h-16 min-w-[64px] min-h-[64px] rounded-xl object-cover border border-slate-700/50 shadow-sm shrink-0");
-    expect(table).toContain("text-base font-semibold text-slate-900 dark:text-slate-100 leading-tight block mb-1");
+    expect(table).toContain("min-w-[280px] px-4 py-3");
+    expect(table).toContain("h-16 w-16 min-h-[64px] min-w-[64px] shrink-0 rounded-xl border border-border shadow-sm");
+    expect(workspace).toContain('className="w-full h-full object-cover"');
+    expect(table).toContain("mb-1 block text-sm font-semibold leading-tight text-foreground");
     expect(table).toContain('{product.category || "Sem categoria"}');
     expect(table.match(/product\.sku/g)).toHaveLength(1);
   });
 
   it("mantém glow superior e workspace sem rolagem vertical própria", () => {
-    expect(workspace).toContain("border border-white/10 border-t-white/20");
-    expect(workspace).toContain("inset_0_1px_1px_rgba(255,255,255,0.15)");
+    expect(workspace).toContain("mt-4 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-card/90 px-6 py-3.5 text-card-foreground shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-slate-900/80");
     expect(workspace).not.toContain("0_-8px_30px_rgba(255,255,255");
     const root = workspace.match(/return <div className="([^"]+)" data-testid="erp-workspace"/);
-    expect(root?.[1]).toContain("min-h-full bg-slate-50 dark:bg-slate-950");
+    expect(root?.[1]).toContain("min-h-full bg-background text-foreground");
     expect(root?.[1]).not.toMatch(/(?:^|\s)(?:h-screen|max-h-screen|overflow-y-auto)(?:\s|$)/);
-    expect(home).toContain('shellLayout.mainContentClassName, active.startsWith("erp-") && "bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"');
+    expect(home).toContain('shellLayout.mainContentClassName, active.startsWith("erp-") && "min-h-full overflow-y-auto bg-background text-foreground"');
   });
 });

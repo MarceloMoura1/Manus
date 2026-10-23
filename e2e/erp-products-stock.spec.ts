@@ -318,12 +318,12 @@ test.describe("ERP products and stock", () => {
     await expect(image).toHaveCSS("width", "64px");
     await expect(image).toHaveCSS("height", "64px");
     const productCell = row.locator("td").first();
-    await expect(productCell.getByText(product.name)).toHaveCSS("font-size", "16px");
+    await expect(productCell.getByText(product.name)).toHaveCSS("font-size", "14px");
     await expect(productCell).toContainText(product.category);
     await expect(productCell).not.toContainText(product.sku);
     const pagination = products.getByTestId("products-glow-pagination");
-    await expect(pagination).toHaveCSS("border-top-color", /^(?:oklab\(.* \/ 0\.2\)|rgba\(255, 255, 255, 0\.2\))$/);
-    await expect(pagination).toHaveCSS("box-shadow", /255, 255, 255/);
+    await expect(pagination).toHaveClass(/border-border/);
+    await expect(pagination).toHaveClass(/shadow-sm/);
     await expect(page.getByTestId("erp-workspace")).toHaveCSS("overflow-y", "visible");
     await expect(page.locator("main")).toHaveCSS("overflow-y", "auto");
   });
@@ -335,17 +335,18 @@ test.describe("ERP products and stock", () => {
       await erpModules(page).getByRole("button", { name: "Produtos", exact: true }).click();
       const workspace = page.getByTestId("erp-workspace");
       const table = page.getByTestId("erp-products-page").locator("table");
-      const colorsMatchTheme = await page.evaluate(currentTheme => {
+      const colorsMatchTheme = await page.evaluate(() => {
+        const workspace = document.querySelector('[data-testid="erp-workspace"]')!;
         const expected = document.createElement("div");
-        expected.className = currentTheme === "light" ? "bg-slate-50 text-slate-900" : "bg-slate-950 text-slate-100";
-        document.body.append(expected);
+        expected.className = "bg-background text-foreground";
+        workspace.append(expected);
         const expectedStyles = getComputedStyle(expected);
-        const workspaceStyles = getComputedStyle(document.querySelector('[data-testid="erp-workspace"]')!);
-        const nameStyles = getComputedStyle(document.querySelector('[data-testid="erp-products-page"] tbody tr td p')!);
+        const workspaceStyles = getComputedStyle(workspace);
+        const nameStyles = getComputedStyle(document.querySelector('[data-testid="erp-products-page"] tbody tr td:first-child span')!);
         const matches = workspaceStyles.backgroundColor === expectedStyles.backgroundColor && nameStyles.color === expectedStyles.color;
         expected.remove();
         return matches;
-      }, theme);
+      });
       expect(colorsMatchTheme).toBe(true);
       await expect(page.getByLabel("Filtrar categoria")).toBeVisible();
     });
