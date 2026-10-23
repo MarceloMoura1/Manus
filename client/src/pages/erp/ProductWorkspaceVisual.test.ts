@@ -11,13 +11,14 @@ describe("Produtos: contratos visuais do workspace", () => {
     expect(banner).toContain("Fotos, preço e disponibilidade reunidos para uma leitura rápida.");
     expect(banner).toContain("border-slate-700/80 rounded-2xl bg-slate-900/90 px-6 py-4");
     expect(banner.match(/bg-white text-slate-900 shadow-sm/g)).toHaveLength(2);
+    expect(banner.match(/fontSize: "0.75rem"/g)).toHaveLength(2);
     expect(banner).not.toContain("bg-blue-600");
     expect(banner).toContain("query.data?.total ?? 0");
   });
 
   it("destaca imagem e nome e mantém o SKU fora do subtítulo da tabela", () => {
     const table = workspace.slice(workspace.indexOf("/* 4. Visualização em Lista"), workspace.indexOf('<div className="grid gap-3 md:hidden">'));
-    expect(table).toContain("w-16 h-16 rounded-xl object-cover border border-slate-700 shadow-md shrink-0");
+    expect(table).toContain("w-16 h-16 min-w-[64px] min-h-[64px] rounded-xl object-cover border border-slate-700 shadow-md shrink-0");
     expect(table).toContain("text-lg font-bold text-slate-100 block mb-0.5 tracking-tight");
     expect(table).toContain('{product.category || "Sem categoria"}');
     expect(table.match(/product\.sku/g)).toHaveLength(1);

@@ -205,7 +205,7 @@ export function ProductThumbnail({
   const [failed, setFailed] = React.useState(false);
   const resolvedVersion = version || (product.updatedAt ? new Date(product.updatedAt).getTime() : 0);
   React.useEffect(() => setFailed(false), [product.publicId, product.hasImage, resolvedVersion]);
-  const frame = `${className} shrink-0 overflow-hidden rounded-xl border border-slate-700 bg-slate-800 shadow-sm`;
+  const frame = `${className} shrink-0 overflow-hidden rounded-xl border border-slate-700 bg-slate-800`;
   if (!product.hasImage || failed) {
     return (
       <div
@@ -782,6 +782,7 @@ function Products() {
               type="button"
               onClick={() => setViewMode("table")}
               aria-pressed={viewMode === "table"}
+              style={{ fontSize: "0.75rem", fontWeight: viewMode === "table" ? 600 : 500 }}
               className={viewMode === "table"
                 ? "bg-white text-slate-900 shadow-sm font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-all"
                 : "bg-transparent text-slate-400 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"}
@@ -794,6 +795,7 @@ function Products() {
               type="button"
               onClick={() => setViewMode("cards")}
               aria-pressed={viewMode === "cards"}
+              style={{ fontSize: "0.75rem", fontWeight: viewMode === "cards" ? 600 : 500 }}
               className={viewMode === "cards"
                 ? "bg-white text-slate-900 shadow-sm font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-all"
                 : "bg-transparent text-slate-400 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"}
@@ -1039,7 +1041,7 @@ function Products() {
                       <div className="flex items-center gap-3">
                         <ProductThumbnail
                           product={product}
-                          className="w-16 h-16 rounded-xl object-cover border border-slate-700 shadow-md shrink-0"
+                          className="w-16 h-16 min-w-[64px] min-h-[64px] rounded-xl object-cover border border-slate-700 shadow-md shrink-0"
                           version={mediaVersions[product.publicId]}
                         />
                         <div className="min-w-0 max-w-xs">
@@ -1136,7 +1138,7 @@ function Products() {
                   <div className="flex min-w-0 items-center gap-3">
                     <ProductThumbnail
                       product={product}
-                      className="w-16 h-16 rounded-xl object-cover border border-slate-700 shadow-md shrink-0"
+                      className="w-16 h-16 min-w-[64px] min-h-[64px] rounded-xl object-cover border border-slate-700 shadow-md shrink-0"
                       version={mediaVersions[product.publicId]}
                     />
                     <div className="min-w-0">
