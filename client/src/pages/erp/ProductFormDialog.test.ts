@@ -80,6 +80,18 @@ describe("ProductFormDialog (P1-A10 Relational Category & Brand Integration)", (
     onOpenNewBrand: () => {},
   };
 
+  it("usa grade responsiva e campos legíveis sem compactar a foto", () => {
+    const markup = renderToStaticMarkup(React.createElement(ProductFormContent, defaultProps));
+    expect(markup).toContain("sm:grid-cols-2");
+    expect(markup).toContain("h-32 w-32");
+    const nameInput = markup.match(/<input\b[^>]*id="product-name-input"[^>]*>/)?.[0] ?? "";
+    const categorySelect = markup.match(/<select\b[^>]*id="product-category-select"[^>]*>/)?.[0] ?? "";
+    expect(nameInput).toContain("h-10");
+    expect(nameInput).toContain("md:text-base");
+    expect(categorySelect).toContain("h-10");
+    expect(categorySelect).toContain("text-base");
+  });
+
   // -------------------------------------------------------------------------
   // 1. categories.list alimenta seletor relacional
   // -------------------------------------------------------------------------

@@ -1451,7 +1451,7 @@ export class SaleRepository {
       }
       const [activeReferences] = await connection.execute<RowDataPacket[]>(
         `SELECT c.status customer_status,COUNT(i.id) item_count,
-                SUM(p.id IS NULL OR p.active=0) invalid_products
+                SUM(p.id IS NULL OR p.active<>1) invalid_products
          FROM erp_sale_orders o
          INNER JOIN megadesk_crm_clients c ON c.crm_client_id=o.crm_client_id AND c.client_id=o.client_id
          LEFT JOIN erp_sale_order_items i ON i.sale_order_id=o.id

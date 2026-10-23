@@ -13,6 +13,7 @@ export const productAuditActions = [
   "product_updated",
   "product_activated",
   "product_deactivated",
+  "product_purged",
   "category_changed",
   "brand_changed",
 ] as const;

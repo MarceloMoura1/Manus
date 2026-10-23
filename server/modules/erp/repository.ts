@@ -36,7 +36,7 @@ export class ErpRepository {
   async listProducts(clientId: string, options: ProductListOptions) {
     const limit = Math.max(1, Math.min(100, Math.trunc(options.pageSize)));
     const offset = Math.max(0, (Math.max(1, Math.trunc(options.page)) - 1) * limit);
-    const conditions = ["p.client_id = ?"];
+    const conditions = ["p.client_id = ?", "p.active <> -1"];
     const values: Array<string | number> = [clientId];
     if (options.search) { conditions.push("(p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)"); const value = `%${options.search}%`; values.push(value, value, value); }
     if (options.active !== undefined) { conditions.push("p.active = ?"); values.push(options.active ? 1 : 0); }
@@ -57,7 +57,7 @@ export class ErpRepository {
   }
 
   async findProduct(clientId: string, publicId: string, connection: Pool | PoolConnection = this.database(), lock = false): Promise<ProductRow | null> {
-    const [rows] = await connection.execute<ProductRow[]>(`SELECT p.*, COALESCE(b.quantity, '0.000') quantity, cat.public_id AS category_public_id, cat.name AS category_name, cat.slug AS category_slug, br.public_id AS brand_public_id, br.name AS brand_name, br.slug AS brand_slug FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id LEFT JOIN erp_product_categories cat ON cat.client_id=p.client_id AND cat.id=p.category_id LEFT JOIN erp_product_brands br ON br.client_id=p.client_id AND br.id=p.brand_id WHERE p.client_id=? AND p.public_id=? LIMIT 1${lock ? " FOR UPDATE" : ""}`, [clientId, publicId]);
+    const [rows] = await connection.execute<ProductRow[]>(`SELECT p.*, COALESCE(b.quantity, '0.000') quantity, cat.public_id AS category_public_id, cat.name AS category_name, cat.slug AS category_slug, br.public_id AS brand_public_id, br.name AS brand_name, br.slug AS brand_slug FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id LEFT JOIN erp_product_categories cat ON cat.client_id=p.client_id AND cat.id=p.category_id LEFT JOIN erp_product_brands br ON br.client_id=p.client_id AND br.id=p.brand_id WHERE p.client_id=? AND p.public_id=? AND p.active <> -1 LIMIT 1${lock ? " FOR UPDATE" : ""}`, [clientId, publicId]);
     return rows[0] ?? null;
   }
 
@@ -186,7 +186,7 @@ export class ErpRepository {
     connection: Pool | PoolConnection = this.database()
   ) {
     const [result] = await connection.execute<ResultSetHeader>(
-      "UPDATE erp_products SET name=?,sku=?,barcode=?,description=?,category=?,category_id=?,brand_id=?,unit=?,cost_price_cents=?,sale_price_cents=?,minimum_stock=?,updated_by=? WHERE client_id=? AND public_id=?",
+      "UPDATE erp_products SET name=?,sku=?,barcode=?,description=?,category=?,category_id=?,brand_id=?,unit=?,cost_price_cents=?,sale_price_cents=?,minimum_stock=?,updated_by=? WHERE client_id=? AND public_id=? AND active <> -1",
       [
         input.name,
         input.sku,
@@ -215,45 +215,18 @@ export class ErpRepository {
     connection: Pool | PoolConnection = this.database()
   ) {
     const [result] = await connection.execute<ResultSetHeader>(
-      "UPDATE erp_products SET active=?,updated_by=? WHERE client_id=? AND public_id=?",
+      "UPDATE erp_products SET active=?,updated_by=? WHERE client_id=? AND public_id=? AND active <> -1",
       [active ? 1 : 0, userId, clientId, publicId]
     );
     return result.affectedRows > 0;
   }
 
-  async purgeProduct(clientId: string, publicId: string): Promise<boolean> {
-    const connection = await this.database().getConnection();
-    try {
-      await connection.beginTransaction();
-      const product = await this.findProduct(clientId, publicId, connection, true);
-      if (!product) {
-        await connection.rollback();
-        return false;
-      }
-      const productId = product.id;
-
-      await connection.execute("SET FOREIGN_KEY_CHECKS = 0");
-      try {
-        await connection.execute("UPDATE erp_products SET primary_media_id=NULL WHERE client_id=? AND id=?", [clientId, productId]);
-        await connection.execute("DELETE FROM erp_product_media WHERE client_id=? AND product_id=?", [clientId, productId]);
-        await connection.execute("DELETE FROM erp_product_variants WHERE client_id=? AND product_id=?", [clientId, productId]);
-        await connection.execute("DELETE FROM erp_inventory_items WHERE client_id=? AND product_id=?", [clientId, productId]);
-        await connection.execute("DELETE FROM erp_product_suppliers WHERE client_id=? AND product_id=?", [clientId, productId]);
-        await connection.execute("DELETE FROM erp_product_audit_logs WHERE client_id=? AND product_id=?", [clientId, productId]);
-        await connection.execute("DELETE FROM erp_product_fiscal_profiles WHERE product_id=?", [productId]);
-        await connection.execute("DELETE FROM erp_stock_balances WHERE client_id=? AND product_id=?", [clientId, productId]);
-        await connection.execute("DELETE FROM erp_products WHERE client_id=? AND id=?", [clientId, productId]);
-      } finally {
-        await connection.execute("SET FOREIGN_KEY_CHECKS = 1");
-      }
-      await connection.commit();
-      return true;
-    } catch (err) {
-      await connection.rollback();
-      throw err;
-    } finally {
-      connection.release();
-    }
+  async purgeProduct(clientId: string, publicId: string, userId: string, connection: PoolConnection): Promise<boolean> {
+    const [result] = await connection.execute<ResultSetHeader>(
+      "UPDATE erp_products SET active=-1,updated_at=NOW(),updated_by=? WHERE client_id=? AND public_id=? AND active <> -1",
+      [userId, clientId, publicId]
+    );
+    return result.affectedRows > 0;
   }
 
   async checkProductDependencies(clientId: string, publicId: string) {
@@ -321,8 +294,8 @@ export class ErpRepository {
   }
 
   async summary(clientId: string) {
-    const [metrics] = await this.database().execute<RowDataPacket[]>("SELECT SUM(p.active=1) activeProducts,SUM(p.active=0) inactiveProducts,SUM(COALESCE(b.quantity,0)=0) emptyProducts,SUM(COALESCE(b.quantity,0)>0 AND COALESCE(b.quantity,0)<=p.minimum_stock) lowProducts,COALESCE(SUM(COALESCE(b.quantity,0)),0) totalQuantity,COALESCE(SUM(ROUND(COALESCE(b.quantity,0)*p.cost_price_cents)),0) costValueCents,COALESCE(SUM(ROUND(COALESCE(b.quantity,0)*p.sale_price_cents)),0) saleValueCents FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id WHERE p.client_id=?", [clientId]);
-    const [variantMetrics] = await this.database().execute<RowDataPacket[]>("SELECT COUNT(*) totalVariants, COALESCE(SUM(active = 1), 0) activeVariants, COALESCE(SUM(active = 0), 0) inactiveVariants FROM erp_product_variants WHERE client_id = ?", [clientId]);
+    const [metrics] = await this.database().execute<RowDataPacket[]>("SELECT SUM(p.active=1) activeProducts,SUM(p.active=0) inactiveProducts,SUM(COALESCE(b.quantity,0)=0) emptyProducts,SUM(COALESCE(b.quantity,0)>0 AND COALESCE(b.quantity,0)<=p.minimum_stock) lowProducts,COALESCE(SUM(COALESCE(b.quantity,0)),0) totalQuantity,COALESCE(SUM(ROUND(COALESCE(b.quantity,0)*p.cost_price_cents)),0) costValueCents,COALESCE(SUM(ROUND(COALESCE(b.quantity,0)*p.sale_price_cents)),0) saleValueCents FROM erp_products p LEFT JOIN erp_stock_balances b ON b.client_id=p.client_id AND b.product_id=p.id WHERE p.client_id=? AND p.active <> -1", [clientId]);
+    const [variantMetrics] = await this.database().execute<RowDataPacket[]>("SELECT COUNT(*) totalVariants, COALESCE(SUM(v.active = 1), 0) activeVariants, COALESCE(SUM(v.active = 0), 0) inactiveVariants FROM erp_product_variants v INNER JOIN erp_products p ON p.client_id=v.client_id AND p.id=v.product_id WHERE v.client_id = ? AND p.active <> -1", [clientId]);
     const critical = await this.listProducts(clientId, { search: "", active: true, stock: "low", sort: "stock", direction: "asc", page: 1, pageSize: 5 });
     const recent = await this.listMovements(clientId, { search: "", page: 1, pageSize: 5 });
     return { metrics: { ...(metrics[0] ?? {}), ...(variantMetrics[0] ?? {}) }, critical: critical.items, recent: recent.items };

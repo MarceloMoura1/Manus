@@ -146,7 +146,7 @@ export class FiscalRepository {
     clientId: string,
     o: { search: string; incomplete?: boolean; page: number; pageSize: number }
   ) {
-    const where = ["p.client_id=?"],
+    const where = ["p.client_id=?", "p.active <> -1"],
       values: any[] = [clientId];
     if (o.search) {
       where.push("(p.name LIKE ? OR p.sku LIKE ?)");
@@ -182,7 +182,7 @@ export class FiscalRepository {
     try {
       await c.beginTransaction();
       const [products] = await c.execute<RowDataPacket[]>(
-        "SELECT id,unit,barcode FROM erp_products WHERE client_id=? AND public_id=? LIMIT 1 FOR UPDATE",
+        "SELECT id,unit,barcode FROM erp_products WHERE client_id=? AND public_id=? AND active <> -1 LIMIT 1 FOR UPDATE",
         [clientId, input.productPublicId]
       );
       if (!products[0])
@@ -676,7 +676,7 @@ export class FiscalRepository {
       [clientId]
     );
     const [p] = await this.db().execute<RowDataPacket[]>(
-      "SELECT COUNT(*) total,SUM(f.id IS NULL OR f.completeness='incomplete') incomplete FROM erp_products p LEFT JOIN erp_product_fiscal_profiles f ON f.product_id=p.id AND f.client_id=p.client_id WHERE p.client_id=?",
+      "SELECT COUNT(*) total,SUM(f.id IS NULL OR f.completeness='incomplete') incomplete FROM erp_products p LEFT JOIN erp_product_fiscal_profiles f ON f.product_id=p.id AND f.client_id=p.client_id WHERE p.client_id=? AND p.active <> -1",
       [clientId]
     );
     return {
