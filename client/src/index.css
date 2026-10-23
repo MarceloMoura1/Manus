@@ -7,8 +7,15 @@
 
 /* Tailwind v4 semantic surfaces used by shared dialog/sheet primitives. */
 @theme inline {
-  --color-background: var(--bg-secondary);
+  /* `background` is the application canvas. Cards retain their own raised
+     surface, so route wrappers cannot accidentally turn the whole shell gray. */
+  --color-background: var(--bg-primary);
   --color-foreground: var(--text-primary);
+  --color-card: var(--bg-secondary);
+  --color-card-foreground: var(--text-primary);
+  --color-border: var(--border-color);
+  --color-muted: var(--bg-tertiary);
+  --color-muted-foreground: var(--text-secondary);
 }
 
 :root {
@@ -32,13 +39,15 @@
 
 html.dark {
   color-scheme: dark;
-  --bg-primary: #0f172a;
-  --bg-secondary: #1e293b;
-  --bg-tertiary: #334155;
+  /* Keep the canvas aligned with the root shell's `bg-slate-950`. */
+  background: #020617;
+  --bg-primary: #020617;
+  --bg-secondary: #0f172a;
+  --bg-tertiary: #1e293b;
   --text-primary: #f1f5f9;
   --text-secondary: #cbd5e1;
   --text-tertiary: #94a3b8;
-  --border-color: #334155;
+  --border-color: #1e293b;
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
