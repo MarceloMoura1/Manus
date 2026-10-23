@@ -10,7 +10,7 @@ describe("Produtos: contratos visuais do workspace", () => {
   it("mantém o banner de catálogo e o seletor alinhados à referência", () => {
     const banner = workspace.slice(workspace.indexOf('<section aria-label="Visão do catálogo"'), workspace.indexOf("{message &&"));
     expect(banner).toContain("Fotos, preço e disponibilidade reunidos para uma leitura rápida.");
-    expect(banner).toContain("mb-6 flex flex-col items-start justify-between gap-4 rounded-2xl border border-slate-800/80 bg-slate-900/60 px-6 py-4 backdrop-blur-md");
+    expect(banner).toContain("relative mb-6 flex flex-col items-start justify-between gap-4 overflow-hidden rounded-2xl border border-white/20 bg-[#060d1a] px-6 py-4 backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_0_15px_rgba(255,255,255,0.03)]");
     expect(banner).toContain("CATÁLOGO VISUAL");
     expect(banner).toContain("mb-0.5 block text-[11px] font-bold tracking-[0.16em] text-blue-400");
     expect(banner).toContain("flex items-center gap-1 rounded-xl border border-slate-700/60 bg-slate-800/90 p-1");
@@ -39,7 +39,7 @@ describe("Produtos: contratos visuais do workspace", () => {
   });
 
   it("mantém iluminação interna contida e delega a rolagem do ERP ao main", () => {
-    expect(workspace).toContain("relative mt-4 flex flex-wrap items-center justify-between gap-4 overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/60 px-6 py-3.5 backdrop-blur-md shadow-[inset_0_1px_1px_0_rgba(255,255,255,0.06)]");
+    expect(workspace).toContain("relative mt-4 flex flex-wrap items-center justify-between gap-4 overflow-hidden rounded-2xl border border-white/20 bg-[#060d1a] px-6 py-3.5 backdrop-blur-md shadow-[inset_0_1px_1px_0_rgba(255,255,255,0.25)]");
     expect(workspace).not.toContain("0_-8px_30px_rgba(255,255,255");
     const root = workspace.match(/return <div className="([^"]+)" data-testid="erp-workspace"/);
     expect(root?.[1]).toContain("w-full min-h-full bg-background text-foreground flex flex-col");

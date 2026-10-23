@@ -315,7 +315,7 @@ function ProductsGlowPagination({
   return (
     <div
       data-testid="products-glow-pagination"
-      className="relative mt-4 flex flex-wrap items-center justify-between gap-4 overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/60 px-6 py-3.5 backdrop-blur-md shadow-[inset_0_1px_1px_0_rgba(255,255,255,0.06)]"
+      className="relative mt-4 flex flex-wrap items-center justify-between gap-4 overflow-hidden rounded-2xl border border-white/20 bg-[#060d1a] px-6 py-3.5 backdrop-blur-md shadow-[inset_0_1px_1px_0_rgba(255,255,255,0.25)]"
     >
       <span className="text-xs font-medium text-slate-300 tabular-nums">
         Mostrando <strong className="text-white">{start}–{end}</strong> de <strong className="text-white">{total}</strong> produtos
@@ -780,7 +780,7 @@ function Products() {
       />
 
       {/* 2. Barra Superior de Visualização */}
-      <section aria-label="Visão do catálogo" className="mb-6 flex flex-col items-start justify-between gap-4 rounded-2xl border border-slate-800/80 bg-slate-900/60 px-6 py-4 backdrop-blur-md sm:flex-row sm:items-center">
+      <section aria-label="Visão do catálogo" className="relative mb-6 flex flex-col items-start justify-between gap-4 overflow-hidden rounded-2xl border border-white/20 bg-[#060d1a] px-6 py-4 backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_0_15px_rgba(255,255,255,0.03)] sm:flex-row sm:items-center">
         <div>
           <span className="mb-0.5 block text-[11px] font-bold tracking-[0.16em] text-blue-400">CATÁLOGO VISUAL</span>
           <p className="text-sm font-normal text-slate-300">Fotos, preço e disponibilidade reunidos para uma leitura rápida.</p>
