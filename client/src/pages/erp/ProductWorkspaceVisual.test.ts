@@ -10,7 +10,7 @@ describe("Produtos: contratos visuais do workspace", () => {
   it("mantém o banner de catálogo e o seletor alinhados à referência", () => {
     const banner = workspace.slice(workspace.indexOf('<section aria-label="Visão do catálogo"'), workspace.indexOf("{message &&"));
     expect(banner).toContain("Fotos, preço e disponibilidade reunidos para uma leitura rápida.");
-    expect(banner).toContain("relative mb-6 flex flex-col items-start justify-between gap-4 overflow-hidden rounded-2xl border border-white/20 bg-[#060d1a] px-6 py-4 backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),0_0_15px_rgba(255,255,255,0.03)]");
+    expect(banner).toContain("relative mb-6 flex flex-col items-start justify-between gap-4 overflow-hidden rounded-2xl border px-6 py-4 backdrop-blur-md sm:flex-row sm:items-center\" style={deepNavySurfaceStyle}");
     expect(banner).toContain("CATÁLOGO VISUAL");
     expect(banner).toContain("mb-0.5 block text-[11px] font-bold tracking-[0.16em] text-blue-400");
     expect(banner).toContain("flex items-center gap-1 rounded-xl border border-slate-700/60 bg-slate-800/90 p-1");
@@ -39,7 +39,11 @@ describe("Produtos: contratos visuais do workspace", () => {
   });
 
   it("mantém iluminação interna contida e delega a rolagem do ERP ao main", () => {
-    expect(workspace).toContain("relative mt-4 flex flex-wrap items-center justify-between gap-4 overflow-hidden rounded-2xl border border-white/20 bg-[#060d1a] px-6 py-3.5 backdrop-blur-md shadow-[inset_0_1px_1px_0_rgba(255,255,255,0.25)]");
+    expect(workspace).toContain("const deepNavySurfaceStyle: React.CSSProperties");
+    expect(workspace).toContain('borderColor: "rgba(255, 255, 255, 0.35)"');
+    expect(workspace).toContain('background: "radial-gradient(120% 120% at 50% 0%, rgba(255, 255, 255, 0.14) 0%, rgba(56, 189, 248, 0.08) 25%, rgba(6, 13, 26, 0.95) 70%, #040914 100%)"');
+    expect(workspace).toContain('boxShadow: "inset 0 1px 2px rgba(255, 255, 255, 0.45), inset 0 0 25px rgba(255, 255, 255, 0.05)"');
+    expect(workspace.match(/style=\{deepNavySurfaceStyle\}/g)).toHaveLength(2);
     expect(workspace).not.toContain("0_-8px_30px_rgba(255,255,255");
     const root = workspace.match(/return <div className="([^"]+)" data-testid="erp-workspace"/);
     expect(root?.[1]).toContain("w-full min-h-full bg-background text-foreground flex flex-col");
