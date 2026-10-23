@@ -314,10 +314,8 @@ describe("ERP Vendas B+C interface", () => {
     expect(source).toContain('rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-[0_10px_24px_-22px_rgba(15,23,42,0.5)]');
     expect(source).toContain('lg:grid-cols-4');
     expect(source).toContain('[&>header]:border-b-0');
-    expect(source).toContain('my-4 overflow-x-auto px-3 [scrollbar-width:thin]');
-    expect(source).toContain('mx-auto flex w-max items-center gap-1 rounded-2xl p-1.5');
-    expect(source).toContain('radial-gradient(100% 140% at 50% 40%, #0d1e38 0%, #081324 45%, #040812 100%)');
-    expect(source).toContain('border border-sky-400/50 bg-sky-500/20 font-semibold text-sky-300');
+    expect(source).not.toContain('aria-label="Status das propostas"');
+    expect(source).not.toContain('Todas as Propostas');
     expect(source).toContain('whitespace-nowrap px-3 py-3 pr-6 text-right');
     expect(source).toContain('data-testid="sales-premium-pagination"');
     expect(source).toContain("from-slate-950 via-slate-900 to-slate-800");
