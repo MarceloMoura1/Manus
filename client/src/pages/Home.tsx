@@ -4368,7 +4368,7 @@ function Shell() {
   const shellLayout = getShellWorkspaceLayout(active);
 
   return (
-    <div className={cn("flex h-screen h-[100dvh] min-w-0 overflow-hidden bg-background", theme === "dark" && "dark")}>
+    <div className={cn("flex h-screen h-[100dvh] min-w-0 overflow-hidden bg-slate-50", theme === "dark" && "dark bg-slate-950")}>
       {sidebarOpen && active !== 'conversations' && <button type="button" aria-label="Fechar menu lateral" onClick={() => closeMobileSidebar()} className="fixed inset-0 z-30 bg-slate-950/50 lg:hidden" />}
       {/* Sidebar */}
       <div ref={sidebarRef} aria-label="Menu principal" className={cn(
