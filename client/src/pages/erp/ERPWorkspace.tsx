@@ -171,7 +171,7 @@ export function ERPWorkspace({ section, onNavigate, canAccessClients, canAccessS
   useErpRealtime();
   const denied = <div role="alert" className="rounded-2xl border border-slate-200 bg-white p-8 text-center"><h1 className="text-xl font-bold text-slate-900">Acesso indisponível</h1><p className="mt-2 text-sm text-slate-600">Este módulo não está disponível para o seu perfil.</p></div>;
   const content = section === "summary" ? <Summary onNavigate={onNavigate}/> : section === "clients" ? canAccessClients ? <ClientesPage initialSelectedId={initialCrmClientId} onNavigate={onClientNavigate} onSaleNavigate={salePublicId => onNavigateToSale(salePublicId)} canAccessSales={canAccessSales} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} canPermanentlyDelete={canPermanentlyDeleteClients}/> : denied : section === "products" ? <Products/> : section === "services" ? <ServicesPage/> : section === "suppliers" ? <SuppliersPage onNavigate={onNavigate} whatsappConnected={whatsappConnected} canStartConversation={canStartConversation} onClientNavigate={onClientNavigate}/> : section === "purchases" ? <PurchasesPage onNavigate={onNavigate}/> : section === "sales" ? canAccessSales ? <SalesPage initialSelectedId={initialSalePublicId} onSaleNavigate={onNavigateToSale} onClientNavigate={onNavigateToClient} onNavigateToProposals={onNavigateToProposals}/> : denied : section === "finance" ? canAccessFinance ? <FinancePage/> : denied : section === "fiscal" ? canAccessFiscal ? <FiscalPage/> : denied : section === "reports" ? canAccessReports ? <ReportsPage/> : denied : <StockPage/>;
-  return <div className="min-w-0 max-w-full w-full min-h-screen bg-slate-950 dark:bg-slate-950 pb-12 text-slate-100" data-testid="erp-workspace">{content}</div>;
+  return <div className="min-w-0 max-w-full w-full min-h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100" data-testid="erp-workspace">{content}</div>;
 }
 
 function Summary({ onNavigate }: { onNavigate: (section: ErpSection) => void }) {
@@ -207,7 +207,7 @@ export function ProductThumbnail({
   const [failed, setFailed] = React.useState(false);
   const resolvedVersion = version || (product.updatedAt ? new Date(product.updatedAt).getTime() : 0);
   React.useEffect(() => setFailed(false), [product.publicId, product.hasImage, resolvedVersion]);
-  const frame = `${className} shrink-0 overflow-hidden rounded-xl border border-slate-700 bg-slate-800`;
+  const frame = `${className} shrink-0 overflow-hidden rounded-xl border border-slate-300 dark:border-slate-700/50 bg-slate-100 dark:bg-slate-800`;
   if (!product.hasImage || failed) {
     return (
       <div
@@ -311,8 +311,7 @@ function ProductsGlowPagination({
   return (
     <div
       data-testid="products-glow-pagination"
-      className="relative z-10 border-t border-t-white/40 border-x border-b border-white/10 shadow-[0_-8px_30px_rgba(255,255,255,0.18),0_15px_35px_rgba(0,0,0,0.8)] bg-slate-950/95 rounded-2xl px-6 py-3 flex flex-wrap items-center justify-between gap-4 text-slate-300"
-      style={{ boxShadow: "0 -8px 30px rgba(255, 255, 255, 0.18), 0 15px 35px rgba(0, 0, 0, 0.8)" }}
+      className="relative z-10 border border-white/10 border-t-white/20 bg-slate-900/80 backdrop-blur-md rounded-2xl px-6 py-3 shadow-[inset_0_1px_1px_rgba(255,255,255,0.15),0_10px_25px_-5px_rgba(0,0,0,0.5)] flex flex-wrap items-center justify-between gap-4 text-slate-300"
     >
       <span className="text-xs font-medium text-slate-300 tabular-nums">
         Mostrando <strong className="text-white">{start}–{end}</strong> de <strong className="text-white">{total}</strong> produtos
@@ -752,7 +751,7 @@ function Products() {
   }
 
   return (
-    <div className="space-y-5 min-h-full bg-slate-950 dark:bg-slate-950 text-slate-100" data-testid="erp-products-page">
+    <div className="space-y-5 min-h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100" data-testid="erp-products-page">
       {/* 1. Cabeçalho e Ação Principal */}
       <ErpPageHeader
         title="Produtos"
@@ -776,13 +775,13 @@ function Products() {
       />
 
       {/* 2. Barra Superior de Visualização */}
-      <section aria-label="Visão do catálogo" className="flex flex-wrap items-center justify-between gap-4 border border-slate-700/80 rounded-2xl bg-slate-900/90 px-6 py-4 text-white shadow-sm">
+      <section aria-label="Visão do catálogo" className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-slate-900/60 backdrop-blur-md px-6 py-4 text-white">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-400">Catálogo visual</p>
-          <p className="mt-1 text-sm text-slate-300">Fotos, preço e disponibilidade reunidos para uma leitura rápida.</p>
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-400 block mb-1">Catálogo visual</p>
+          <p className="text-sm text-slate-300 font-normal">Fotos, preço e disponibilidade reunidos para uma leitura rápida.</p>
         </div>
         <div className="flex items-center gap-4">
-          <div className="bg-slate-800/80 border border-slate-700/60 p-1 rounded-xl flex items-center gap-1" role="group" aria-label="Modo de visualização">
+          <div className="p-1 bg-slate-800/80 rounded-xl border border-white/10 flex items-center gap-1" role="group" aria-label="Modo de visualização">
             <button
               type="button"
               onClick={() => setViewMode("table")}
@@ -1020,9 +1019,9 @@ function Products() {
       ) : (
         /* 4. Visualização em Lista (Tabela Premium) */
         <>
-          <div className="hidden overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900 md:block shadow-xs">
+          <div className="hidden overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 md:block shadow-xs">
             <table className="w-full min-w-[800px] text-left text-xs">
-              <thead className="bg-slate-800/50 border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider text-[11px]">
+              <thead className="bg-slate-100 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-semibold uppercase tracking-wider text-[11px]">
                 <tr>
                   <th className="p-3.5 pl-4">Produto</th>
                   <th className="p-3.5">SKU</th>
@@ -1035,35 +1034,35 @@ function Products() {
                   <th className="p-3.5 pr-4 text-right">Ações</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/80">
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800/80">
                 {query.data?.items.map(product => (
                   <tr
                     key={product.publicId}
                     onClick={() => setSelectedProductPublicId(product.publicId)}
-                    className="cursor-pointer hover:bg-slate-800/60 transition-colors"
+                    className="cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors"
                   >
                     <td className="w-20 min-w-[80px] py-3 pl-4 pr-2 font-medium">
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-4">
                         <ProductThumbnail
                           product={product}
-                          className="w-16 h-16 min-w-[64px] min-h-[64px] rounded-xl object-cover border border-slate-700 shadow-md shrink-0 block"
+                          className="w-16 h-16 min-w-[64px] min-h-[64px] rounded-xl object-cover border border-slate-700/50 shadow-sm shrink-0 block"
                           style={{ width: "64px", height: "64px", minWidth: "64px", minHeight: "64px" }}
                           version={mediaVersions[product.publicId]}
                         />
                         <div className="min-w-0 max-w-xs">
-                          <p className="text-lg font-bold text-slate-100 block mb-0.5 tracking-tight">{product.name}</p>
-                          <span className="text-xs text-slate-400">{product.category || "Sem categoria"}</span>
+                          <p className="text-base font-semibold text-slate-900 dark:text-slate-100 leading-tight block mb-1">{product.name}</p>
+                          <span className="text-xs text-slate-500 dark:text-slate-400">{product.category || "Sem categoria"}</span>
                         </div>
                       </div>
                     </td>
-                    <td className="p-3 font-mono text-xs text-slate-300">{product.sku}</td>
-                    <td className="p-3 text-xs text-slate-300">{product.category ?? "—"}</td>
-                    <td className="p-3 text-xs text-slate-400">{money.format(product.costPriceCents / 100)}</td>
-                    <td className="p-3 text-sm font-bold text-slate-100">{money.format(product.salePriceCents / 100)}</td>
+                    <td className="p-3 font-mono text-xs text-slate-700 dark:text-slate-300">{product.sku}</td>
+                    <td className="p-3 text-xs text-slate-700 dark:text-slate-300">{product.category ?? "—"}</td>
+                    <td className="p-3 text-xs text-slate-600 dark:text-slate-400">{money.format(product.costPriceCents / 100)}</td>
+                    <td className="p-3 text-sm font-bold text-slate-900 dark:text-slate-100">{money.format(product.salePriceCents / 100)}</td>
                     <td className="p-3">
                       <StockBadge quantity={product.quantity} minimumStock={product.minimumStock} />
                     </td>
-                    <td className="p-3 text-xs text-slate-400">{formatQuantity(product.minimumStock)}</td>
+                    <td className="p-3 text-xs text-slate-600 dark:text-slate-400">{formatQuantity(product.minimumStock)}</td>
                     <td className="p-3">
                       <span
                         className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
@@ -1081,7 +1080,7 @@ function Products() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-8 w-8 p-0 rounded-lg hover:bg-slate-800 text-slate-300"
+                            className="h-8 w-8 p-0 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
                           >
                             <MoreHorizontal className="h-4 w-4" />
                             <span className="sr-only">Ações para {product.name}</span>
@@ -1144,12 +1143,12 @@ function Products() {
                   <div className="flex min-w-0 items-center gap-3">
                     <ProductThumbnail
                       product={product}
-                      className="w-16 h-16 min-w-[64px] min-h-[64px] rounded-xl object-cover border border-slate-700 shadow-md shrink-0"
+                      className="w-16 h-16 min-w-[64px] min-h-[64px] rounded-xl object-cover border border-slate-700/50 shadow-sm shrink-0"
                       version={mediaVersions[product.publicId]}
                     />
                     <div className="min-w-0">
-                      <p className="text-lg font-bold text-slate-900 dark:text-slate-100 block mb-0.5 tracking-tight truncate">{product.name}</p>
-                      <p className="truncate text-xs text-slate-400">{product.category || "Sem categoria"}</p>
+                      <p className="text-base font-semibold text-slate-900 dark:text-slate-100 leading-tight block mb-1 truncate">{product.name}</p>
+                      <p className="truncate text-xs text-slate-500 dark:text-slate-400">{product.category || "Sem categoria"}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
@@ -1211,7 +1210,7 @@ function Products() {
 
       {/* 4. Rodapé de Paginação Glow */}
       {query.data && (
-        <div className="pt-4 pb-6">
+        <div className="pt-2 pb-4">
           <ProductsGlowPagination
             page={page}
             pageSize={pageSize}

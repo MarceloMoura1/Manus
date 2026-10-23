@@ -318,15 +318,38 @@ test.describe("ERP products and stock", () => {
     await expect(image).toHaveCSS("width", "64px");
     await expect(image).toHaveCSS("height", "64px");
     const productCell = row.locator("td").first();
-    await expect(productCell.getByText(product.name)).toHaveCSS("font-size", "18px");
+    await expect(productCell.getByText(product.name)).toHaveCSS("font-size", "16px");
     await expect(productCell).toContainText(product.category);
     await expect(productCell).not.toContainText(product.sku);
     const pagination = products.getByTestId("products-glow-pagination");
-    await expect(pagination).toHaveCSS("border-top-color", /^(?:oklab\(.* \/ 0\.4\)|rgba\(255, 255, 255, 0\.4\))$/);
+    await expect(pagination).toHaveCSS("border-top-color", /^(?:oklab\(.* \/ 0\.2\)|rgba\(255, 255, 255, 0\.2\))$/);
     await expect(pagination).toHaveCSS("box-shadow", /255, 255, 255/);
     await expect(page.getByTestId("erp-workspace")).toHaveCSS("overflow-y", "visible");
     await expect(page.locator("main")).toHaveCSS("overflow-y", "auto");
   });
+  for (const theme of ["light", "dark"] as const) {
+    test(`renders readable product surfaces in ${theme} theme`, async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.addInitScript(value => localStorage.setItem("megadesk_theme", value), theme);
+      await prepare(page);
+      await erpModules(page).getByRole("button", { name: "Produtos", exact: true }).click();
+      const workspace = page.getByTestId("erp-workspace");
+      const table = page.getByTestId("erp-products-page").locator("table");
+      const colorsMatchTheme = await page.evaluate(currentTheme => {
+        const expected = document.createElement("div");
+        expected.className = currentTheme === "light" ? "bg-slate-50 text-slate-900" : "bg-slate-950 text-slate-100";
+        document.body.append(expected);
+        const expectedStyles = getComputedStyle(expected);
+        const workspaceStyles = getComputedStyle(document.querySelector('[data-testid="erp-workspace"]')!);
+        const nameStyles = getComputedStyle(document.querySelector('[data-testid="erp-products-page"] tbody tr td p')!);
+        const matches = workspaceStyles.backgroundColor === expectedStyles.backgroundColor && nameStyles.color === expectedStyles.color;
+        expected.remove();
+        return matches;
+      }, theme);
+      expect(colorsMatchTheme).toBe(true);
+      await expect(page.getByLabel("Filtrar categoria")).toBeVisible();
+    });
+  }
   test("navigates the ERP group and keeps future modules unavailable", async ({
     page,
   }) => {
