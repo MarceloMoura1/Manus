@@ -59,12 +59,15 @@ describe("Produtos: contratos visuais do workspace", () => {
 
     expect(catalogStart).toBeGreaterThanOrEqual(0);
     expect(catalogEnd).toBeGreaterThan(catalogStart);
-    expect(catalog).toContain("h-48 w-full overflow-hidden rounded-t-2xl");
-    expect(catalog).toContain("object-contain p-3.5");
+    expect(catalog).toContain("h-52 w-full overflow-hidden rounded-t-2xl bg-slate-950 sm:h-56");
+    expect(catalog).toContain("object-cover transition-transform duration-300 ease-out group-hover:scale-105");
     expect(catalog).toContain("Sem imagem cadastrada");
-    expect(catalog).toContain("top-3 left-3 z-10");
-    expect(catalog).toContain("border border-emerald-500/30 bg-emerald-950/70 text-emerald-300");
-    expect(catalog).toContain("top-3 right-3 z-10");
-    expect(catalog).toContain("border border-white/15 bg-black/50");
+    expect(catalog).toContain("bg-gradient-to-b from-slate-900 to-slate-950");
+    expect(catalog).toContain("top-2.5 left-2.5 z-10");
+    expect(catalog).toContain("border border-emerald-500/30 bg-emerald-950/80 text-emerald-300");
+    expect(catalog).toContain("top-2.5 right-2.5 z-10");
+    expect(catalog).toContain("border border-white/20 bg-black/60 text-white");
+    expect(catalog).toContain("flex flex-col justify-between gap-2.5 rounded-b-2xl border-t border-slate-800/80 bg-[#070d19] p-3.5");
+    expect(catalog).toContain("flex items-baseline justify-between border-t border-slate-800/50 pt-1");
   });
 });

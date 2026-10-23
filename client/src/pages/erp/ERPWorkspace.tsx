@@ -952,29 +952,29 @@ function Products() {
               className="group relative flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:border-blue-400 hover:shadow-xl dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-500 cursor-pointer"
             >
               <div className="relative">
-                <div className="relative h-48 w-full overflow-hidden rounded-t-2xl bg-[#040914] bg-[radial-gradient(ellipse_at_center,_rgba(30,64,175,0.18),_transparent_68%)]">
+                <div className="relative h-52 w-full overflow-hidden rounded-t-2xl bg-slate-950 sm:h-56">
                   {product.hasImage ? (
                     <ProductThumbnail
                       product={product}
-                      className="h-full w-full rounded-none !border-0 !bg-transparent transition-transform duration-300 ease-out group-hover:scale-105"
-                      imageClassName="h-full w-full object-contain p-3.5"
+                      className="h-full w-full !rounded-none !border-0 !bg-transparent"
+                      imageClassName="block h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-105"
                       version={mediaVersions[product.publicId]}
                     />
                   ) : (
                     <div
                       data-testid="catalog-product-image-placeholder"
-                      className="flex h-full w-full flex-col items-center justify-center border-b border-slate-800/60 bg-slate-900/40"
+                      className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-b from-slate-900 to-slate-950"
                     >
                       <Package className="h-8 w-8 text-slate-600" aria-hidden="true" />
                       <span className="mt-2 text-[11px] font-medium tracking-wide text-slate-500">Sem imagem cadastrada</span>
                     </div>
                   )}
-                  <div className="absolute top-3 right-3 z-10" onClick={e => e.stopPropagation()}>
+                  <div className="absolute top-2.5 right-2.5 z-10" onClick={e => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <button
                           type="button"
-                          className="flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-black/50 text-slate-200 backdrop-blur-md shadow-sm transition-colors hover:bg-black/75"
+                          className="flex h-7 w-7 items-center justify-center rounded-full border border-white/20 bg-black/60 text-white backdrop-blur-md transition-colors hover:bg-black/85"
                           aria-label={`Ações para ${product.name}`}
                         >
                           <MoreHorizontal className="h-4 w-4" />
@@ -1011,33 +1011,28 @@ function Products() {
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
-                  <div className="absolute top-3 left-3 z-10">
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold backdrop-blur-md shadow-sm ${product.active ? "border border-emerald-500/30 bg-emerald-950/70 text-emerald-300" : "border border-slate-500/30 bg-slate-950/70 text-slate-300"}`}>
+                  <div className="absolute top-2.5 left-2.5 z-10">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold backdrop-blur-md shadow-sm ${product.active ? "border border-emerald-500/30 bg-emerald-950/80 text-emerald-300" : "border border-slate-500/30 bg-slate-950/80 text-slate-300"}`}>
                       {product.active ? "Ativo" : "Inativo"}
                     </span>
                   </div>
                 </div>
 
-                <div className="border-t border-slate-100 p-4 dark:border-slate-800/80">
-                  <p className="truncate font-bold text-slate-900 dark:text-slate-100 text-sm leading-snug">{product.name}</p>
-                  <div className="mt-1 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-                    <span className="font-mono">{product.sku}</span>
-                    {product.category && <span className="truncate max-w-[120px]">{product.category}</span>}
+                <div className="flex flex-col justify-between gap-2.5 rounded-b-2xl border-t border-slate-800/80 bg-[#070d19] p-3.5">
+                  <div>
+                    <p className="line-clamp-1 text-sm font-semibold tracking-tight text-slate-100 transition-colors group-hover:text-sky-400">{product.name}</p>
+                    <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
+                      <span className="font-mono">{product.sku}</span>
+                      {product.category && <span className="truncate max-w-[120px]">{product.category}</span>}
+                    </div>
                   </div>
-                  <div className="mt-3">
+                  <div>
                     <StockBadge quantity={product.quantity} minimumStock={product.minimumStock} />
                   </div>
-                </div>
-              </div>
-
-              <div className="flex items-end justify-between border-t border-slate-100 bg-slate-50/50 px-4 py-3 dark:border-slate-800/80 dark:bg-slate-900/50">
-                <div>
-                  <span className="text-[10px] uppercase font-semibold text-slate-400 block tracking-wider">Preço de venda</span>
-                  <span className="text-base font-extrabold text-slate-900 dark:text-slate-100">{money.format(product.salePriceCents / 100)}</span>
-                </div>
-                <div className="text-right">
-                  <span className="text-[10px] uppercase font-semibold text-slate-400 block tracking-wider">Custo</span>
-                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{money.format(product.costPriceCents / 100)}</span>
+                  <div className="flex items-baseline justify-between border-t border-slate-800/50 pt-1">
+                    <span className="text-sm font-bold text-slate-100">{money.format(product.salePriceCents / 100)}</span>
+                    <span className="text-[10px] text-slate-400">Custo {money.format(product.costPriceCents / 100)}</span>
+                  </div>
                 </div>
               </div>
             </article>
