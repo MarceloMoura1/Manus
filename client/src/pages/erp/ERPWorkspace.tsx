@@ -307,7 +307,7 @@ function ProductsGlowPagination({
   return (
     <div
       data-testid="products-glow-pagination"
-      className="bg-slate-950/95 border-t border-t-white/40 border-x border-b border-white/10 rounded-2xl px-6 py-3 my-4 flex flex-wrap items-center justify-between gap-4 text-slate-300 shadow-[0_-8px_30px_rgba(255,255,255,0.15),0_15px_35px_rgba(0,0,0,0.8)]"
+      className="border-t border-t-white/40 border-x border-b border-white/10 shadow-[0_-8px_30px_rgba(255,255,255,0.15),0_15px_35px_rgba(0,0,0,0.8)] bg-slate-950/95 rounded-2xl px-6 py-3 my-4 flex flex-wrap items-center justify-between gap-4 text-slate-300"
     >
       <span className="text-xs font-medium text-slate-300 tabular-nums">
         Mostrando <strong className="text-white">{start}–{end}</strong> de <strong className="text-white">{total}</strong> produtos
@@ -781,11 +781,10 @@ function Products() {
             <button
               type="button"
               onClick={() => setViewMode("table")}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
-                viewMode === "table"
-                  ? "bg-white text-slate-900 shadow-sm"
-                  : "bg-transparent text-slate-300 hover:text-white"
-              }`}
+              aria-pressed={viewMode === "table"}
+              className={viewMode === "table"
+                ? "bg-white text-slate-900 shadow-sm font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-all"
+                : "bg-transparent text-slate-400 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"}
               data-testid="view-mode-table"
             >
               <LayoutList className="h-4 w-4" />
@@ -794,11 +793,10 @@ function Products() {
             <button
               type="button"
               onClick={() => setViewMode("cards")}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
-                viewMode === "cards"
-                  ? "bg-white text-slate-900 shadow-sm"
-                  : "bg-transparent text-slate-300 hover:text-white"
-              }`}
+              aria-pressed={viewMode === "cards"}
+              className={viewMode === "cards"
+                ? "bg-white text-slate-900 shadow-sm font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-all"
+                : "bg-transparent text-slate-400 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"}
               data-testid="view-mode-cards"
             >
               <LayoutGrid className="h-4 w-4" />
@@ -1045,8 +1043,8 @@ function Products() {
                           version={mediaVersions[product.publicId]}
                         />
                         <div className="min-w-0 max-w-xs">
-                          <p className="text-lg font-bold text-slate-100 block mb-0.5 tracking-tight truncate">{product.name}</p>
-                          <span className="text-xs text-slate-400 truncate block mt-0.5">{product.category || "Sem categoria"}</span>
+                          <p className="text-lg font-bold text-slate-100 block mb-0.5 tracking-tight">{product.name}</p>
+                          <span className="text-xs text-slate-400">{product.category || "Sem categoria"}</span>
                         </div>
                       </div>
                     </td>
