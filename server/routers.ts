@@ -1837,7 +1837,7 @@ export const appRouter = router({
         const { chatWithClientGemini, loadConversationHistory } = await import("./gemini-client");
         const userId = sessionBoundAssistantUserId(input.userId, ctx.userEmail);
         await hydrateSyncState();
-        const client = getReleasedClientOrThrow(ctx.tenantId, "Assistente IA");
+        const client = getReleasedClientOrThrow(ctx.tenantId, "ai-assistant");
         // Validação explícita do módulo, além da sessão exigida por megadeskProcedure.
         const user = assertClientUserPermission(client, "ai-assistant", userId);
         const history = await loadConversationHistory(ctx.tenantId, userId);
@@ -1870,7 +1870,7 @@ export const appRouter = router({
         const userId = ctx.userEmail?.trim().toLowerCase();
         if (!userId) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão de usuário ausente." });
         await hydrateSyncState();
-        const client = getReleasedClientOrThrow(ctx.tenantId, "Assistente IA");
+        const client = getReleasedClientOrThrow(ctx.tenantId, "ai-assistant");
         const user = assertAssistantActionPermission(client, userId, input.actionType);
         try {
           const pending = beginPendingHermesAction({ ...input, clientId: ctx.tenantId, userId });
@@ -1928,7 +1928,7 @@ export const appRouter = router({
         const userId = ctx.userEmail?.trim().toLowerCase();
         if (!userId) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão de usuário ausente." });
         await hydrateSyncState();
-        const client = getReleasedClientOrThrow(ctx.tenantId, "Assistente IA");
+        const client = getReleasedClientOrThrow(ctx.tenantId, "ai-assistant");
         assertAssistantActionPermission(client, userId, input.actionType);
         try {
           cancelPendingHermesAction({ ...input, clientId: ctx.tenantId, userId });

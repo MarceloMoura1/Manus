@@ -3,6 +3,7 @@
  * Valida: estrutura de mensagens, histórico, function calling, token por cliente
  */
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
 vi.mock("./db", async importOriginal => ({
   ...(await importOriginal<typeof import("./db")>()),
   getPool: vi.fn(),
@@ -216,6 +217,13 @@ describe("ChatResult structure", () => {
 });
 
 describe("Hermes security controls", () => {
+  it("uses the canonical ai-assistant module slug in every assistant release gate", () => {
+    const routersSource = readFileSync(new URL("./routers.ts", import.meta.url), "utf8");
+    const canonicalGates = routersSource.match(/getReleasedClientOrThrow\(ctx\.tenantId, "ai-assistant"\)/g) ?? [];
+    expect(canonicalGates).toHaveLength(3);
+    expect(routersSource).not.toContain('getReleasedClientOrThrow(ctx.tenantId, "Assistente IA")');
+  });
+
   it("uses the registry as the source of the real function names", () => {
     expect(HERMES_TOOL_REGISTRY.map(tool => tool.name)).toEqual([
       "get_sales_summary",
