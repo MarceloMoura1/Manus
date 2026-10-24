@@ -8,7 +8,9 @@ import { getPool } from "./db";
 import { nanoid } from "nanoid";
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
+export const MAX_GEMINI_PROMPT_HISTORY_MESSAGES = 12;
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -16,6 +18,11 @@ export interface IAMessage {
   role: "user" | "assistant";
   content: string;
   timestamp?: number;
+}
+
+/** Seleciona apenas a janela recente enviada ao provedor, sem truncar o histórico persistido. */
+export function selectGeminiPromptHistory(history: readonly IAMessage[]): IAMessage[] {
+  return history.slice(-MAX_GEMINI_PROMPT_HISTORY_MESSAGES);
 }
 
 export interface ChatResult {
@@ -1098,7 +1105,7 @@ export async function chatWithClientGemini(
   const geminiKey = iaStatus.geminiKey!;
 
   // 2. Monta o histórico no formato REST do Gemini
-  const contents: GeminiContent[] = existingHistory.map((msg) => ({
+  const contents: GeminiContent[] = selectGeminiPromptHistory(existingHistory).map((msg) => ({
     role: msg.role === "user" ? "user" : "model",
     parts: [{ text: msg.content }],
   }));

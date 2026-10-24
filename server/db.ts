@@ -4,6 +4,7 @@ import { eq, and } from "drizzle-orm";
 import { users, megadeskDomainCustomers, megadeskDomainTickets, megadeskDomainConversations, megadeskDomainChamados, megadeskDomainChamadoSequence, megadeskDomainClientUsers, megadeskDomainAuditLogs, megadeskDomainClients } from "../drizzle/schema";
 import { getTestDatabaseUrl } from "./test-integration-gates";
 import { sanitizeConversationMessagesForPersistence } from "./conversation-message-store";
+import { CONFIGURABLE_MODULES } from "@shared/const";
 
 type Database = ReturnType<typeof drizzle>;
 type UpsertUserInput = {
@@ -27,6 +28,23 @@ export type MegaDeskStructuredState = {
 let cachedDb: Database | null = null;
 let cachedPool: mysql.Pool | null = null;
 export let inMemoryState: MegaDeskStructuredState | null = null;
+
+/**
+ * Clientes ativos legados podem ter modules_json vazio. Nesse caso, o catálogo
+ * vazio não pode ser interpretado como remoção de todas as telas do tenant.
+ */
+export function resolveLoadedClientModules(status: string, modulesJson: unknown): string[] {
+  let modules: string[] = [];
+  if (typeof modulesJson === "string" && modulesJson.trim()) {
+    try {
+      const parsed = JSON.parse(modulesJson);
+      modules = Array.isArray(parsed) ? parsed.filter((module): module is string => typeof module === "string") : [];
+    } catch {
+      modules = [];
+    }
+  }
+  return status === "active" && modules.length === 0 ? [...CONFIGURABLE_MODULES] : modules;
+}
 
 export const REQUIRED_MAIN_TABLES = [
   "admin_credentials", "evolution_failed_messages", "evolution_queue_config",
@@ -462,7 +480,7 @@ export async function loadMegaDeskStructuredState(defaultState: MegaDeskStructur
     }
 
     const loadedState = {
-      clients: (clientRows as any[]).map((row) => ({ id: row.internal_id, clientId: row.client_id, tenantDatabaseName: row.tenant_database_name, company: row.company, contact: row.contact, email: row.email || "", phone: row.phone, cnpj: row.cnpj || "", plan: row.plan, maxUsers: row.max_users || 5, status: row.status, statusType: row.status_type || "test", accessReleased: Boolean(row.access_released), apiToken: row.api_token, modules: JSON.parse(row.modules_json || "[]"), integrations: JSON.parse(row.integrations_json || "{}"), users: usersByClient.get(row.client_id) ?? [] })),
+      clients: (clientRows as any[]).map((row) => ({ id: row.internal_id, clientId: row.client_id, tenantDatabaseName: row.tenant_database_name, company: row.company, contact: row.contact, email: row.email || "", phone: row.phone, cnpj: row.cnpj || "", plan: row.plan, maxUsers: row.max_users || 5, status: row.status, statusType: row.status_type || "test", accessReleased: Boolean(row.access_released), apiToken: row.api_token, modules: resolveLoadedClientModules(row.status, row.modules_json), integrations: JSON.parse(row.integrations_json || "{}"), users: usersByClient.get(row.client_id) ?? [] })),
       conversations: (conversationRows as any[]).map((row) => ({ id: row.conversation_id, clientId: row.client_id, name: row.customer_name, phone: row.phone, company: row.company, status: row.status, lastMessage: row.last_message, time: row.time_label, messages: JSON.parse(row.messages_json || "[]") })),
       tickets: (ticketRows as any[]).map((row) => ({ id: row.ticket_id, clientId: row.client_id, company: row.company, customer: row.customer, problem: row.problem, category: row.category, status: row.status, createdAt: row.created_label, description: row.description })),
       botScripts: (scriptRows as any[]).map((row) => ({ id: row.script_id, clientId: row.client_id, name: row.name, description: row.description, initialMessage: row.initial_message, active: Boolean(row.active) })),

@@ -7,7 +7,7 @@ import { decodeConversationMediaDataUrl, removeConversationMedia } from "./conve
 
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure, megadeskProcedure } from "./_core/trpc";
-import { COOKIE_NAME, normalizeModuleNamesToBackend, normalizeModuleNamesToAdmin } from "@shared/const";
+import { CONFIGURABLE_MODULES as CANONICAL_CONFIGURABLE_MODULES, COOKIE_NAME, normalizeModuleNamesToBackend, normalizeModuleNamesToAdmin } from "@shared/const";
 import { loadMegaDeskStructuredState, saveMegaDeskStructuredState, persistMegaDeskClientUser, MegaDeskClientUserPersistenceError, recordMegaDeskMetric, readMegaDeskTenantObservability, type MegaDeskStructuredState, getDb, getPool, createMegaDeskBackup, listMegaDeskBackups, getMegaDeskBackupInfo, applyMegaDeskBackup } from "./db";
 import bcrypt from "bcryptjs";
 import { megaadminCredentials, megadeskDomainClientUsers } from "../drizzle/schema";
@@ -291,17 +291,7 @@ function getReleasedClientOrThrow(clientId: string, requiredModule?: string) {
 
 // Módulos configuráveis da MegaDesk (controlados pelo MegaAdmin por usuário)
 // home, settings, notifications são SEMPRE ativos — não aparecem como permissão configurável
-export const CONFIGURABLE_MODULES = [
-  "active-attendance",
-  "conversations",
-  "tickets",
-  "tracking",
-  "clients",
-  "erp",
-  "crm",
-  "bot-config",
-  "ai-assistant",
-] as const;
+export const CONFIGURABLE_MODULES = CANONICAL_CONFIGURABLE_MODULES;
 
 export function rolePermissions(role: MegaClient["users"][number]["role"]) {
   // home, settings e notifications são sempre ativos para qualquer usuário
@@ -884,6 +874,7 @@ export const appRouter = router({
       await persistExistingClientUser(client, user.id, { permissions: normalizedPermissions }, auditEntry);
       Object.assign(user, updatedUser);
       appendAudit(auditEntry);
+      await persistSyncState();
       // Retornar permissões resolvidas (sem misturar com role)
       const resolvedPermissions = resolveUserPermissions(updatedUser, client.modules);
       return { ok: true, user: sanitizeMegaAdminUser({ ...updatedUser, permissions: resolvedPermissions }) };

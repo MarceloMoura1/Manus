@@ -20,6 +20,9 @@ import {
   getAuthorizedHermesTool,
   insertTokenUsage,
   readMonthlyTokenUsage,
+  DEFAULT_GEMINI_MODEL,
+  MAX_GEMINI_PROMPT_HISTORY_MESSAGES,
+  selectGeminiPromptHistory,
   type HermesToolDefinition,
 } from "./gemini-client";
 import { executeHermesTicketAction } from "./hermes-ticket-actions";
@@ -213,6 +216,21 @@ describe("ChatResult structure", () => {
       tokensUsed: 50,
     };
     expect(result.functionCallsMade).toHaveLength(0);
+  });
+
+  it("limits provider context to the latest persisted conversation messages", () => {
+    const history = Array.from({ length: MAX_GEMINI_PROMPT_HISTORY_MESSAGES + 4 }, (_, index) => ({
+      role: index % 2 === 0 ? "user" as const : "assistant" as const,
+      content: `mensagem-${index}`,
+    }));
+    const promptHistory = selectGeminiPromptHistory(history);
+    expect(promptHistory).toHaveLength(MAX_GEMINI_PROMPT_HISTORY_MESSAGES);
+    expect(promptHistory[0]?.content).toBe("mensagem-4");
+    expect(promptHistory.at(-1)?.content).toBe(`mensagem-${history.length - 1}`);
+  });
+
+  it("uses the responsive Gemini Flash Lite model by default", () => {
+    expect(DEFAULT_GEMINI_MODEL).toBe("gemini-2.5-flash-lite");
   });
 });
 

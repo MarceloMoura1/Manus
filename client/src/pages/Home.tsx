@@ -3773,6 +3773,8 @@ function SettingsPagePlaceholder() {
 
 // BotConfigPage é importada de BotConfigPage.tsx
 
+const HERMES_TYPING_CONTENT = "Hermes está digitando…";
+
 function AIAssistantPage() {
   // IMPORTANTE: usar a mesma chave que o login salva a sessão
   const SESSION_KEY = "megadesk_session_v1";
@@ -3912,7 +3914,7 @@ function AIAssistantPage() {
     setSending(true);
 
     // Mensagem de "digitando"
-    const typingMsg: ChatMessage = { role: "assistant", content: "...", timestamp: Date.now() };
+    const typingMsg: ChatMessage = { role: "assistant", content: HERMES_TYPING_CONTENT, timestamp: Date.now() };
     setMessages(prev => [...prev, typingMsg]);
 
     try {
@@ -4041,16 +4043,19 @@ function AIAssistantPage() {
                 className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                   msg.role === "user"
                     ? "bg-emerald-600 text-white rounded-tr-sm"
-                    : msg.content === "..."
+                    : msg.content === HERMES_TYPING_CONTENT
                     ? "bg-white border border-slate-200 text-slate-400 rounded-tl-sm"
                     : "bg-white border border-slate-200 text-slate-800 rounded-tl-sm shadow-sm"
                 }`}
               >
-                {msg.content === "..." ? (
-                  <span className="flex gap-1 items-center">
-                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                {msg.content === HERMES_TYPING_CONTENT ? (
+                  <span className="flex items-center gap-2" aria-live="polite">
+                    <span className="flex gap-1" aria-hidden="true">
+                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                    </span>
+                    <span>Hermes está digitando…</span>
                   </span>
                 ) : (
                   <div className="whitespace-pre-wrap">{msg.content}</div>

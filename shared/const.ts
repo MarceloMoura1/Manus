@@ -25,6 +25,19 @@ export const MODULE_NAME_MAP_REVERSE = Object.fromEntries(
   Object.entries(MODULE_NAME_MAP).map(([k, v]) => [v, k])
 ) as Record<string, string>;
 
+/** Módulos liberáveis do MegaDesk, no formato canônico consumido pelo backend. */
+export const CONFIGURABLE_MODULES = [
+  "active-attendance",
+  "conversations",
+  "tickets",
+  "tracking",
+  "clients",
+  "erp",
+  "crm",
+  "bot-config",
+  "ai-assistant",
+] as const;
+
 // Labels dos módulos (mesmo em ambos os sistemas)
 export const MODULE_LABELS = {
   "atendimento_ativo": "Atendimento Ativo",

@@ -138,6 +138,7 @@ describe("MegaAdmin user-response hardening", () => {
     });
     expect(permissions.user.permissions).toContain("tickets");
     expect(permissions.user).not.toHaveProperty("passwordHash");
+    expect(inMemoryState?.clients.find((client) => client.clientId === fixtureClient.clientId)?.users.find((user: { id: string }) => user.id === added.user.id)?.permissions).toEqual(["tickets"]);
   });
 
   it("limits an in-memory user mutation and its audit record to the selected client", () => {
