@@ -24,6 +24,97 @@ export interface ChatResult {
   tokensUsed: number;
   conversationId: string;
   functionCallsMade?: string[];
+  pendingActionRequest?: PendingActionRequest;
+}
+
+export type HermesToolType = "READ" | "MUTATION";
+export type HermesPermission = string;
+
+export interface GeminiFunctionDeclaration {
+  name: string;
+  description: string;
+  parameters: { type: "OBJECT"; properties: Record<string, unknown>; required: string[] };
+}
+
+export interface HermesToolDefinition {
+  name: string;
+  type: HermesToolType;
+  requiredPermissions: readonly HermesPermission[];
+  declaration: GeminiFunctionDeclaration;
+  validateArgs: (args: Record<string, unknown>) => Record<string, unknown>;
+}
+
+export interface PendingActionRequest {
+  id: string;
+  toolName: string;
+  type: "MUTATION";
+  args: Record<string, unknown>;
+  status: "PENDING_APPROVAL";
+}
+
+type SqlExecutor = (sql: string, values: unknown[]) => Promise<unknown>;
+
+const noArguments = (args: Record<string, unknown>): Record<string, unknown> => {
+  if (Object.keys(args).length > 0) {
+    throw new Error("A ferramenta não aceita parâmetros.");
+  }
+  return {};
+};
+
+/**
+ * Registry único de capacidades Hermes. Ferramentas de mutação futuras devem
+ * declarar validateArgs; o executor nunca as executa antes de aprovação humana.
+ */
+export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
+  {
+    name: "get_sales_summary",
+    type: "READ",
+    requiredPermissions: ["sales", "erp-sales", "erp"],
+    declaration: { name: "get_sales_summary", description: "Retorna o resumo de vendas do cliente para hoje, incluindo total de vendas e valor total.", parameters: { type: "OBJECT", properties: {}, required: [] } },
+    validateArgs: noArguments,
+  },
+  {
+    name: "get_open_tickets",
+    type: "READ",
+    requiredPermissions: ["tickets", "support"],
+    declaration: { name: "get_open_tickets", description: "Retorna o número de chamados/tickets abertos e quantos são urgentes.", parameters: { type: "OBJECT", properties: {}, required: [] } },
+    validateArgs: noArguments,
+  },
+  {
+    name: "get_conversations_summary",
+    type: "READ",
+    requiredPermissions: ["conversations", "chat"],
+    declaration: { name: "get_conversations_summary", description: "Retorna o resumo de conversas dos últimos 7 dias, incluindo abertas e fechadas.", parameters: { type: "OBJECT", properties: {}, required: [] } },
+    validateArgs: noArguments,
+  },
+  {
+    name: "get_erp_products",
+    type: "READ",
+    requiredPermissions: ["products", "erp"],
+    declaration: { name: "get_erp_products", description: "Retorna a lista de produtos cadastrados no ERP do cliente com estoque.", parameters: { type: "OBJECT", properties: {}, required: [] } },
+    validateArgs: noArguments,
+  },
+];
+
+export function getAllowedHermesTools(permissions: readonly string[]): HermesToolDefinition[] {
+  const granted = new Set(permissions);
+  return HERMES_TOOL_REGISTRY.filter(tool => tool.requiredPermissions.some(permission => granted.has(permission)));
+}
+
+/** Defesa em profundidade: a ferramenta precisa ser autorizada na execução, não só na declaração enviada ao modelo. */
+export function getAuthorizedHermesTool(name: string, permissions: readonly string[]): HermesToolDefinition | null {
+  return getAllowedHermesTools(permissions).find(tool => tool.name === name) ?? null;
+}
+
+export function createPendingActionRequest(tool: HermesToolDefinition, args: Record<string, unknown>): PendingActionRequest {
+  if (tool.type !== "MUTATION") throw new Error("Somente ferramentas de mutação exigem aprovação humana.");
+  return {
+    id: `action-${nanoid()}`,
+    toolName: tool.name,
+    type: "MUTATION",
+    args: tool.validateArgs(args),
+    status: "PENDING_APPROVAL",
+  };
 }
 
 // ─── Helpers de chamada HTTP Gemini ──────────────────────────────────────────
@@ -121,18 +212,32 @@ export async function getClientGeminiConfig(clientId: string): Promise<{ geminiK
 }
 
 /** Busca o total de tokens usados no mês atual pelo cliente */
+/**
+ * Consulta isolada para que falhas possam ser testadas sem abrir conexão.
+ * Nunca transforma uma indisponibilidade do banco em consumo zero: a quota é
+ * um controle de segurança e deve falhar fechada.
+ */
+export async function readMonthlyTokenUsage(execute: SqlExecutor, clientId: string): Promise<number> {
+  const result = await execute(
+    `SELECT COALESCE(SUM(tokens_used), 0) as total
+     FROM megadesk_domain_ia_conversations
+     WHERE client_id = ? AND MONTH(created_at) = MONTH(CURDATE()) AND YEAR(created_at) = YEAR(CURDATE())`,
+    [clientId]
+  ) as [Array<{ total?: unknown }>];
+  const total = Number(result[0]?.[0]?.total ?? 0);
+  if (!Number.isFinite(total) || total < 0) {
+    throw new Error("Não foi possível validar o consumo mensal de tokens.");
+  }
+  return Math.floor(total);
+}
+
+/** Busca o total de tokens usados no mês atual pelo cliente, falhando fechada. */
 export async function getClientTokensUsedThisMonth(clientId: string): Promise<number> {
   const pool = getPool();
   try {
-    const [rows] = await pool.execute(
-      `SELECT COALESCE(SUM(tokens_used), 0) as total
-       FROM megadesk_domain_ia_conversations
-       WHERE client_id = ? AND MONTH(created_at) = MONTH(CURDATE()) AND YEAR(created_at) = YEAR(CURDATE())`,
-      [clientId]
-    ) as any[];
-    return Number((rows as any[])[0]?.total ?? 0);
+    return await readMonthlyTokenUsage((sql, values) => pool.execute(sql, values as any), clientId);
   } catch {
-    return 0;
+    throw new Error("Não foi possível validar a quota de IA no momento. Tente novamente mais tarde.");
   }
 }
 
@@ -227,14 +332,60 @@ export async function logIAConversation(
   return conversationId;
 }
 
+export interface TokenUsageRecord {
+  clientId: string;
+  userEmail: string;
+  conversationId: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  model: string;
+  functionCallsCount: number;
+}
+
+/** Gravação detalhada mantida no backend para impedir números forjados pelo navegador. */
+export async function insertTokenUsage(execute: SqlExecutor, usage: TokenUsageRecord): Promise<string> {
+  const id = `tu-${nanoid()}`;
+  await execute(
+    `INSERT INTO megadesk_ia_token_usage
+      (id, client_id, user_email, conversation_id, prompt_tokens, completion_tokens, total_tokens, model, function_calls_count, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      usage.clientId,
+      usage.userEmail,
+      usage.conversationId,
+      usage.promptTokens,
+      usage.completionTokens,
+      usage.totalTokens,
+      usage.model,
+      usage.functionCallsCount,
+      Date.now(),
+    ]
+  );
+  return id;
+}
+
+async function recordTokenUsage(usage: TokenUsageRecord): Promise<string> {
+  const pool = getPool();
+  return insertTokenUsage((sql, values) => pool.execute(sql, values as any), usage);
+}
+
 // ─── Function Calling — consultas ao banco do cliente ─────────────────────────
 
 /** Busca dados do ERP/conversas/chamados do cliente para o Gemini */
 async function executeClientFunction(
   functionName: string,
-  args: Record<string, any>,
-  clientId: string
+  args: Record<string, unknown>,
+  clientId: string,
+  permissions: readonly string[]
 ): Promise<string> {
+  const tool = getAuthorizedHermesTool(functionName, permissions);
+  if (!tool) {
+    return JSON.stringify({ erro: "Você não possui permissão para consultar dados deste módulo." });
+  }
+  // Validação ocorre novamente no executor, mesmo se o modelo recebeu a tool.
+  tool.validateArgs(args);
   const pool = getPool();
 
   if (functionName === "get_sales_summary") {
@@ -289,49 +440,32 @@ async function executeClientFunction(
 
 // ─── Declarações de funções para o Gemini (formato REST) ──────────────────────
 
-const CLIENT_FUNCTIONS_TOOL = {
-  functionDeclarations: [
-    {
-      name: "get_sales_summary",
-      description: "Retorna o resumo de vendas do cliente para hoje, incluindo total de vendas e valor total.",
-      parameters: { type: "OBJECT", properties: {}, required: [] },
-    },
-    {
-      name: "get_open_tickets",
-      description: "Retorna o número de chamados/tickets abertos e quantos são urgentes.",
-      parameters: { type: "OBJECT", properties: {}, required: [] },
-    },
-    {
-      name: "get_conversations_summary",
-      description: "Retorna o resumo de conversas dos últimos 7 dias, incluindo abertas e fechadas.",
-      parameters: { type: "OBJECT", properties: {}, required: [] },
-    },
-    {
-      name: "get_erp_products",
-      description: "Retorna a lista de produtos cadastrados no ERP do cliente com estoque.",
-      parameters: { type: "OBJECT", properties: {}, required: [] },
-    },
-  ],
-};
+function tokenUsagePart(data: any, field: "promptTokenCount" | "candidatesTokenCount"): number {
+  const value = Number(data?.usageMetadata?.[field] ?? 0);
+  return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+}
 
-const SYSTEM_INSTRUCTION = `Você é o Assistente IA da plataforma MegaDesk, especializado em ajudar a equipe de atendimento.
+function tokenUsageTotal(data: any, promptTokens: number, completionTokens: number): number {
+  const total = Number(data?.usageMetadata?.totalTokenCount);
+  return Number.isFinite(total) && total >= 0 ? Math.floor(total) : promptTokens + completionTokens;
+}
 
-Você tem acesso a dados em tempo real do sistema através de funções especiais. Quando o usuário perguntar sobre:
-- Vendas, faturamento, produtos → use get_sales_summary ou get_erp_products
-- Chamados, tickets, suporte → use get_open_tickets
-- Conversas, atendimentos, WhatsApp → use get_conversations_summary
+function buildSystemInstruction(allowedTools: readonly HermesToolDefinition[]): string {
+  const names = allowedTools.map(tool => tool.name).join(", ") || "nenhuma";
+  return `Você é o Assistente IA da plataforma MegaDesk, especializado em ajudar a equipe de atendimento.
 
+Você só pode usar as ferramentas explicitamente disponibilizadas nesta conversa: ${names}. Nunca alegue consultar dados de uma ferramenta que não esteja disponível.
 Sempre responda em português brasileiro de forma clara, objetiva e profissional.
 Quando buscar dados, informe ao usuário que está consultando o sistema antes de responder.
 Se não tiver dados suficientes, seja honesto e sugira como o usuário pode obter a informação.`;
-
-// ─── Chat principal ────────────────────────────────────────────────────────────
+}
 
 export async function chatWithClientGemini(
   clientId: string,
   userId: string,
   userMessage: string,
-  existingHistory: IAMessage[]
+  existingHistory: IAMessage[],
+  userPermissions: readonly string[]
 ): Promise<ChatResult> {
   // 1. Busca o token e verifica quota do cliente
   const iaStatus = await getClientIAStatus(clientId);
@@ -353,16 +487,20 @@ export async function chatWithClientGemini(
   contents.push({ role: "user", parts: [{ text: userMessage }] });
 
   // 3. Primeira chamada ao Gemini
+  const allowedTools = getAllowedHermesTools(userPermissions);
   const requestBody: GeminiRequest = {
     contents,
-    tools: [CLIENT_FUNCTIONS_TOOL],
-    systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+    ...(allowedTools.length > 0 ? { tools: [{ functionDeclarations: allowedTools.map(tool => tool.declaration) }] } : {}),
+    systemInstruction: { parts: [{ text: buildSystemInstruction(allowedTools) }] },
     generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
   };
 
   let data = await callGeminiAPI(geminiKey, requestBody);
   const functionCallsMade: string[] = [];
-  let tokensUsed = data?.usageMetadata?.totalTokenCount ?? 0;
+  let promptTokens = tokenUsagePart(data, "promptTokenCount");
+  let completionTokens = tokenUsagePart(data, "candidatesTokenCount");
+  let tokensUsed = tokenUsageTotal(data, promptTokens, completionTokens);
+  let pendingActionRequest: PendingActionRequest | undefined;
 
   // 4. Processa function calls em loop
   let iterations = 0;
@@ -376,8 +514,15 @@ export async function chatWithClientGemini(
     const fc = functionCallPart.functionCall;
     functionCallsMade.push(fc.name);
 
+    const authorizedTool = getAuthorizedHermesTool(fc.name, userPermissions);
+    if (authorizedTool?.type === "MUTATION") {
+      // Nunca executa mutações no loop do modelo. A interface recebe apenas a solicitação pendente.
+      pendingActionRequest = createPendingActionRequest(authorizedTool, fc.args ?? {});
+      break;
+    }
+
     // Executa a função localmente
-    const funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId);
+    const funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId, userPermissions);
 
     // Adiciona o resultado da função ao contexto e chama novamente
     const modelTurn: GeminiContent = {
@@ -391,10 +536,16 @@ export async function chatWithClientGemini(
 
     requestBody.contents = [...requestBody.contents, modelTurn, functionResponseTurn];
     data = await callGeminiAPI(geminiKey, requestBody);
-    tokensUsed += data?.usageMetadata?.totalTokenCount ?? 0;
+    const nextPromptTokens = tokenUsagePart(data, "promptTokenCount");
+    const nextCompletionTokens = tokenUsagePart(data, "candidatesTokenCount");
+    promptTokens += nextPromptTokens;
+    completionTokens += nextCompletionTokens;
+    tokensUsed += tokenUsageTotal(data, nextPromptTokens, nextCompletionTokens);
   }
 
-  const finalResponse: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "Sem resposta do modelo.";
+  const finalResponse: string = pendingActionRequest
+    ? "Ação preparada e aguardando sua aprovação antes de qualquer alteração."
+    : data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "Sem resposta do modelo.";
 
   // 5. Salva no histórico
   const updatedHistory: IAMessage[] = [
@@ -411,6 +562,16 @@ export async function chatWithClientGemini(
   const conversationId = await logIAConversation(
     clientId, userId, userMessage, finalResponse, tokensUsed
   );
+  await recordTokenUsage({
+    clientId,
+    userEmail: userId,
+    conversationId,
+    promptTokens,
+    completionTokens,
+    totalTokens: tokensUsed,
+    model: GEMINI_MODEL,
+    functionCallsCount: functionCallsMade.length,
+  });
 
   return {
     ok: true,
@@ -418,5 +579,6 @@ export async function chatWithClientGemini(
     tokensUsed,
     conversationId,
     functionCallsMade,
+    pendingActionRequest,
   };
 }

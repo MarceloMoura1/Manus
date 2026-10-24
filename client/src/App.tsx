@@ -8,7 +8,6 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { BotConfigPage } from "./pages/BotConfigPage";
 import { NotificationsModernPage } from "./pages/NotificationsModernPage";
 import { WhatsAppBaileysPage } from "./pages/WhatsAppBaileysPage";
-import { AIAssistant } from "./components/AIAssistant";
 import { trpc } from "./lib/trpc";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -72,17 +71,9 @@ export default function App() {
     }),
   );
 
-  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   useEffect(() => {
     document.title = browserBrand.title;
   }, []);
-  useEffect(() => {
-    const openAssistant = () => setIsAssistantOpen(true);
-    window.addEventListener("megadesk-open-assistant", openAssistant);
-    return () => window.removeEventListener("megadesk-open-assistant", openAssistant);
-  }, []);
-  const usesAuthenticatedHomeShell = !isAdminRoute() && !isSettingsRoute() && !isBotConfigRoute() && !isNotificationsRoute() && !isWhatsAppBaileysRoute();
-  const platform = isAdminRoute() ? "megaadmin" : isSettingsRoute() || isBotConfigRoute() || isNotificationsRoute() || isWhatsAppBaileysRoute() ? "megadesk" : "megadesk";
 
   return (
     <ThemeProvider>
@@ -91,21 +82,6 @@ export default function App() {
           <ErrorBoundary>
             {isAdminRoute() ? <AdminPanel /> : isBotConfigRoute() ? <BotConfigPage /> : isNotificationsRoute() ? <NotificationsModernPage /> : isWhatsAppBaileysRoute() ? <WhatsAppBaileysPage /> : isSettingsRoute() ? <SettingsPage /> : <Home />}
           </ErrorBoundary>
-
-          <AIAssistant
-            isOpen={isAssistantOpen}
-            onClose={() => setIsAssistantOpen(false)}
-            platform={platform}
-          />
-          {!isAssistantOpen && !usesAuthenticatedHomeShell && (
-            <button
-              onClick={() => setIsAssistantOpen(true)}
-              className="fixed bottom-4 right-4 w-14 h-14 bg-blue-500 text-white rounded-full shadow-lg hover:bg-blue-600 transition flex items-center justify-center z-40"
-              title="Abrir assistente IA"
-            >
-              <span className="text-2xl">✨</span>
-            </button>
-          )}
         </QueryClientProvider>
       </trpc.Provider>
     </ThemeProvider>

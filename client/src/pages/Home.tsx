@@ -3801,7 +3801,13 @@ function AIAssistantPage() {
   // Use email as userId for history (stable identifier)
   const userId = session?.userEmail ?? "";
 
-  type ChatMessage = { role: "user" | "assistant"; content: string; timestamp: number; functionCalls?: string[] };
+  type ChatMessage = {
+    role: "user" | "assistant";
+    content: string;
+    timestamp: number;
+    functionCalls?: string[];
+    pendingActionRequest?: { id: string; toolName: string; type: "MUTATION"; status: "PENDING_APPROVAL" };
+  };
 
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
   const [input, setInput] = React.useState("");
@@ -3873,6 +3879,7 @@ function AIAssistantPage() {
           content: result.response,
           timestamp: Date.now(),
           functionCalls: result.functionCallsMade,
+          pendingActionRequest: result.pendingActionRequest,
         },
       ]);
     } catch (err: any) {
@@ -4011,6 +4018,12 @@ function AIAssistantPage() {
                       🔍 {fc.replace(/_/g, " ")}
                     </span>
                   ))}
+                </div>
+              )}
+              {msg.pendingActionRequest && (
+                <div className="mt-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  <p className="font-semibold">Ação aguardando aprovação</p>
+                  <p className="mt-0.5">{msg.pendingActionRequest.toolName.replace(/_/g, " ")} — nenhuma alteração foi executada.</p>
                 </div>
               )}
               <p className="text-xs text-slate-400 mt-1 px-1">

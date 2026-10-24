@@ -1803,13 +1803,18 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const { chatWithClientGemini, loadConversationHistory } = await import("./gemini-client");
         const userId = sessionBoundAssistantUserId(input.userId, ctx.userEmail);
+        await hydrateSyncState();
+        const client = getReleasedClientOrThrow(ctx.tenantId, "Assistente IA");
+        // Validação explícita do módulo, além da sessão exigida por megadeskProcedure.
+        const user = assertClientUserPermission(client, "ai-assistant", userId);
         const history = await loadConversationHistory(ctx.tenantId, userId);
         try {
           const result = await chatWithClientGemini(
             ctx.tenantId,
             userId,
             input.message,
-            history
+            history,
+            user.permissions
           );
           return result;
         } catch (error) {

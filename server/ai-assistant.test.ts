@@ -3,6 +3,15 @@
  * Valida: estrutura de mensagens, histórico, function calling, token por cliente
  */
 import { describe, it, expect, vi } from "vitest";
+import {
+  HERMES_TOOL_REGISTRY,
+  createPendingActionRequest,
+  getAllowedHermesTools,
+  getAuthorizedHermesTool,
+  insertTokenUsage,
+  readMonthlyTokenUsage,
+  type HermesToolDefinition,
+} from "./gemini-client";
 
 // ─── Testes de estrutura de mensagem ─────────────────────────────────────────
 
@@ -40,9 +49,9 @@ describe("Conversation history", () => {
     }
   });
 
-  it("deve limitar histórico a 20 mensagens para evitar tokens excessivos", () => {
-    const MAX_HISTORY = 20;
-    const history = Array.from({ length: 30 }, (_, i) => ({
+  it("deve limitar histórico a 50 mensagens para evitar tokens excessivos", () => {
+    const MAX_HISTORY = 50;
+    const history = Array.from({ length: 70 }, (_, i) => ({
       role: i % 2 === 0 ? "user" : "assistant",
       content: `Mensagem ${i}`,
       timestamp: Date.now() + i * 1000,
@@ -50,7 +59,7 @@ describe("Conversation history", () => {
     const trimmed = history.slice(-MAX_HISTORY);
     expect(trimmed.length).toBe(MAX_HISTORY);
     // Deve manter as mensagens mais recentes
-    expect(trimmed[trimmed.length - 1].content).toBe("Mensagem 29");
+    expect(trimmed[trimmed.length - 1].content).toBe("Mensagem 69");
   });
 
   it("deve retornar array vazio se não há histórico", () => {
@@ -67,8 +76,7 @@ describe("Function calling declarations", () => {
     "get_sales_summary",
     "get_open_tickets",
     "get_conversations_summary",
-    "get_erp_inventory",
-    "get_client_info",
+    "get_erp_products",
   ];
 
   it("deve ter funções de consulta de dados definidas", () => {
@@ -88,11 +96,11 @@ describe("Function calling declarations", () => {
   });
 
   it("deve incluir função de estoque/ERP", () => {
-    expect(AVAILABLE_FUNCTIONS).toContain("get_erp_inventory");
+    expect(AVAILABLE_FUNCTIONS).toContain("get_erp_products");
   });
 
-  it("deve incluir função de informações do cliente", () => {
-    expect(AVAILABLE_FUNCTIONS).toContain("get_client_info");
+  it("não declara funções sem implementação no registry", () => {
+    expect(AVAILABLE_FUNCTIONS).not.toContain("get_client_info");
   });
 });
 
@@ -194,5 +202,67 @@ describe("ChatResult structure", () => {
       tokensUsed: 50,
     };
     expect(result.functionCallsMade).toHaveLength(0);
+  });
+});
+
+describe("Hermes security controls", () => {
+  it("uses the registry as the source of the real function names", () => {
+    expect(HERMES_TOOL_REGISTRY.map(tool => tool.name)).toEqual([
+      "get_sales_summary",
+      "get_open_tickets",
+      "get_conversations_summary",
+      "get_erp_products",
+    ]);
+    expect(HERMES_TOOL_REGISTRY.every(tool => tool.type === "READ")).toBe(true);
+  });
+
+  it("does not expose or authorize a sales tool without an ERP/sales permission", () => {
+    expect(getAllowedHermesTools(["ai-assistant"]).map(tool => tool.name)).not.toContain("get_sales_summary");
+    expect(getAuthorizedHermesTool("get_sales_summary", ["ai-assistant"])).toBeNull();
+  });
+
+  it("authorizes only the tool covered by an operational permission", () => {
+    expect(getAllowedHermesTools(["tickets"]).map(tool => tool.name)).toEqual(["get_open_tickets"]);
+    expect(getAuthorizedHermesTool("get_open_tickets", ["tickets"])?.type).toBe("READ");
+  });
+
+  it("creates a pending request instead of executing a mutation", () => {
+    const validateArgs = vi.fn((args: Record<string, unknown>) => ({ title: String(args.title ?? "") }));
+    const mutation: HermesToolDefinition = {
+      name: "create_ticket",
+      type: "MUTATION",
+      requiredPermissions: ["tickets"],
+      declaration: { name: "create_ticket", description: "Creates a ticket after approval.", parameters: { type: "OBJECT", properties: {}, required: [] } },
+      validateArgs,
+    };
+
+    const request = createPendingActionRequest(mutation, { title: "Retorno ao cliente" });
+    expect(validateArgs).toHaveBeenCalledWith({ title: "Retorno ao cliente" });
+    expect(request).toMatchObject({ toolName: "create_ticket", type: "MUTATION", status: "PENDING_APPROVAL", args: { title: "Retorno ao cliente" } });
+    expect(request.id).toMatch(/^action-/);
+  });
+
+  it("fails closed when monthly token usage cannot be read", async () => {
+    await expect(readMonthlyTokenUsage(async () => { throw new Error("database unavailable"); }, "tenant-a"))
+      .rejects.toThrow("database unavailable");
+  });
+
+  it("records detailed provider usage server-side", async () => {
+    const execute = vi.fn(async () => []);
+    const id = await insertTokenUsage(execute, {
+      clientId: "tenant-a",
+      userEmail: "user@example.invalid",
+      conversationId: "conversation-a",
+      promptTokens: 30,
+      completionTokens: 12,
+      totalTokens: 42,
+      model: "gemini-test",
+      functionCallsCount: 1,
+    });
+
+    expect(id).toMatch(/^tu-/);
+    expect(execute).toHaveBeenCalledOnce();
+    expect(execute.mock.calls[0]?.[0]).toContain("INSERT INTO megadesk_ia_token_usage");
+    expect(execute.mock.calls[0]?.[1]).toEqual(expect.arrayContaining(["tenant-a", "user@example.invalid", "conversation-a", 30, 12, 42, "gemini-test", 1]));
   });
 });
