@@ -31,7 +31,8 @@ export type HermesToolType = "READ" | "MUTATION";
 export type HermesPermission = string;
 export type HermesTicketActionType = "CREATE_TICKET" | "UPDATE_TICKET_STATUS" | "ASSIGN_TICKET" | "ADD_TICKET_ACTIVITY";
 export type HermesCrmActionType = "CREATE_CLIENT" | "UPDATE_CLIENT" | "ADD_CLIENT_TIMELINE" | "CREATE_PROPOSAL" | "UPDATE_PROPOSAL_STATUS" | "SEND_PROPOSAL_WHATSAPP";
-export type HermesActionType = HermesTicketActionType | HermesCrmActionType;
+export type HermesErpActionType = "CREATE_PRODUCT" | "UPDATE_PRODUCT" | "LINK_PRODUCT_SUPPLIER" | "UPDATE_SERVICE" | "CREATE_SUPPLIER" | "UPDATE_SUPPLIER" | "REQUEST_PURCHASE" | "SEND_SUPPLIER_MESSAGE";
+export type HermesActionType = HermesTicketActionType | HermesCrmActionType | HermesErpActionType;
 
 export interface GeminiFunctionDeclaration {
   name: string;
@@ -252,6 +253,42 @@ function proposalWhatsappArgs(args: Record<string, unknown>): Record<string, unk
   return { proposalId: stringArg(args, "proposalId", { min: 1, max: 80 })!, recipientPhone: stringArg(args, "recipientPhone", { min: 8, max: 40 })!, ...(stringArg(args, "customMessage", { min: 1, max: 2_000, optional: true }) ? { customMessage: stringArg(args, "customMessage", { min: 1, max: 2_000, optional: true }) } : {}) };
 }
 
+function erpLookupArgs(args: Record<string, unknown>, fields: readonly string[]): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, fields);
+  const result: Record<string, unknown> = {};
+  for (const field of fields) if (typeof args[field] === "string") result[field] = stringArg(args, field, { min: 1, max: 180, optional: true });
+  return result;
+}
+function productMutationArgs(args: Record<string, unknown>, update = false): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, update ? ["productId", "fieldsToUpdate"] : ["name", "sku", "category", "salePrice", "costPrice", "initialStock", "unit"]);
+  if (update) {
+    const fields = args.fieldsToUpdate;
+    if (!fields || typeof fields !== "object" || Array.isArray(fields) || !Object.keys(fields).length) throw new Error("fieldsToUpdate inválido.");
+    const record = fields as Record<string, unknown>;
+    rejectUnknownArgs(record, ["name", "sku", "barcode", "description", "category", "categoryPublicId", "brandPublicId", "unit", "costPriceCents", "salePriceCents", "minimumStock"]);
+    return { productId: stringArg(args, "productId", { min: 1, max: 80 })!, fieldsToUpdate: record };
+  }
+  const price = (key: string) => { const value = Number(args[key]); if (!Number.isFinite(value) || value < 0) throw new Error(`${key} inválido.`); return value; };
+  const quantity = Number(args.initialStock ?? 0); if (!Number.isFinite(quantity) || quantity < 0) throw new Error("initialStock inválido.");
+  return { name: stringArg(args, "name", { min: 2, max: 180 })!, sku: stringArg(args, "sku", { min: 1, max: 80 })!, category: stringArg(args, "category", { min: 1, max: 120, optional: true }), salePrice: price("salePrice"), costPrice: price("costPrice"), initialStock: quantity, unit: enumArg(args, "unit", ["unit", "kg", "liter", "meter"] as const) };
+}
+function erpActionArgs(args: Record<string, unknown>, kind: "supplier" | "purchase" | "message" | "service" | "link"): Record<string, unknown> {
+  objectArgs(args);
+  const allowed = kind === "supplier" ? ["name", "document", "phone", "email", "contactName", "fieldsToUpdate", "supplierId"] : kind === "purchase" ? ["supplierId", "items", "notes"] : kind === "message" ? ["supplierId", "recipientPhone", "messageText"] : kind === "service" ? ["serviceId", "fieldsToUpdate"] : ["productId", "supplierId"];
+  rejectUnknownArgs(args, allowed);
+  if (kind === "link") return { productId: stringArg(args, "productId", { min: 1, max: 80 })!, supplierId: stringArg(args, "supplierId", { min: 1, max: 80 })! };
+  if (kind === "service") { if (!args.fieldsToUpdate || typeof args.fieldsToUpdate !== "object" || Array.isArray(args.fieldsToUpdate)) throw new Error("fieldsToUpdate inválido."); return { serviceId: Number(args.serviceId), fieldsToUpdate: args.fieldsToUpdate as Record<string, unknown> }; }
+  if (kind === "message") return { supplierId: stringArg(args, "supplierId", { min: 1, max: 80 })!, recipientPhone: stringArg(args, "recipientPhone", { min: 8, max: 40 })!, messageText: stringArg(args, "messageText", { min: 1, max: 2_000 })! };
+  if (kind === "purchase") { if (!Array.isArray(args.items) || !args.items.length || args.items.length > 100) throw new Error("items inválido."); return { supplierId: stringArg(args, "supplierId", { min: 1, max: 80 })!, items: args.items, ...(typeof args.notes === "string" ? { notes: stringArg(args, "notes", { min: 1, max: 4_000 }) } : {}) }; }
+  const update = args.fieldsToUpdate;
+  if (update !== undefined && (!update || typeof update !== "object" || Array.isArray(update) || !Object.keys(update).length)) throw new Error("fieldsToUpdate inválido.");
+  if (update) rejectUnknownArgs(update as Record<string, unknown>, ["name", "legalName", "document", "taxId", "phone", "email", "contactName", "tradeName", "notes"]);
+  const result = { ...(typeof args.supplierId === "string" ? { supplierId: stringArg(args, "supplierId", { min: 1, max: 80 }) } : {}), ...(update ? { fieldsToUpdate: update as Record<string, unknown> } : {}), ...(typeof args.name === "string" ? { name: stringArg(args, "name", { min: 2, max: 180 }) } : {}), ...(typeof args.document === "string" ? { document: stringArg(args, "document", { min: 11, max: 20 }) } : {}), ...(typeof args.phone === "string" ? { phone: stringArg(args, "phone", { min: 8, max: 40 }) } : {}), ...(typeof args.email === "string" ? { email: stringArg(args, "email", { min: 3, max: 255 }) } : {}), ...(typeof args.contactName === "string" ? { contactName: stringArg(args, "contactName", { min: 1, max: 120 }) } : {}) };
+  if (!result.supplierId && (!result.name || !result.document)) throw new Error("name e document são obrigatórios para criar fornecedor.");
+  if (result.supplierId && !result.fieldsToUpdate) throw new Error("fieldsToUpdate é obrigatório para atualizar fornecedor.");
+  return result;
+}
+
 /**
  * Registry único de capacidades Hermes. Ferramentas de mutação futuras devem
  * declarar validateArgs; o executor nunca as executa antes de aprovação humana.
@@ -327,6 +364,20 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
   { name: "create_proposal", type: "MUTATION", actionType: "CREATE_PROPOSAL", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "create_proposal", description: "Prepara proposta comercial; exige aprovação humana.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING" }, items: { type: "ARRAY" }, notes: { type: "STRING" }, paymentTerms: { type: "STRING" } }, required: ["clientId", "items"] } }, validateArgs: createProposalArgs },
   { name: "update_proposal_status", type: "MUTATION", actionType: "UPDATE_PROPOSAL_STATUS", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "update_proposal_status", description: "Prepara mudança de status comercial; exige aprovação humana.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, newStatus: { type: "STRING", enum: ["draft", "negotiation", "approved", "rejected", "expired"] }, reason: { type: "STRING" } }, required: ["proposalId", "newStatus"] } }, validateArgs: proposalStatusArgs },
   { name: "send_proposal_whatsapp", type: "MUTATION", actionType: "SEND_PROPOSAL_WHATSAPP", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "send_proposal_whatsapp", description: "Prepara envio de proposta por WhatsApp; exige aprovação humana.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, recipientPhone: { type: "STRING" }, customMessage: { type: "STRING" } }, required: ["proposalId", "recipientPhone"] } }, validateArgs: proposalWhatsappArgs },
+  { name: "get_erp_summary", type: "READ", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "get_erp_summary", description: "Retorna o resumo de produtos, estoque e serviços ativos do tenant.", parameters: { type: "OBJECT", properties: {}, required: [] } }, validateArgs: noArguments },
+  { name: "get_product_details", type: "READ", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "get_product_details", description: "Retorna detalhes de produto por ID público ou SKU.", parameters: { type: "OBJECT", properties: { productId: { type: "STRING" }, sku: { type: "STRING" } }, required: [] } }, validateArgs: args => { const value = erpLookupArgs(args, ["productId", "sku"]); if ((value.productId ? 1 : 0) + (value.sku ? 1 : 0) !== 1) throw new Error("Informe exatamente productId ou sku."); return value; } },
+  { name: "get_inventory_status", type: "READ", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "get_inventory_status", description: "Consulta saldos por status de estoque ou busca textual.", parameters: { type: "OBJECT", properties: { status: { type: "STRING" }, search: { type: "STRING" } }, required: [] } }, validateArgs: args => { objectArgs(args); rejectUnknownArgs(args, ["status", "search"]); const value: Record<string, unknown> = {}; if (typeof args.search === "string") value.search = stringArg(args, "search", { min: 1, max: 180 }); if (args.status !== undefined) value.status = enumArg(args, "status", ["empty", "low", "regular"] as const); return value; } },
+  { name: "create_product", type: "MUTATION", actionType: "CREATE_PRODUCT", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "create_product", description: "Prepara criação de produto; exige aprovação humana.", parameters: { type: "OBJECT", properties: { name: { type: "STRING" }, sku: { type: "STRING" }, category: { type: "STRING" }, salePrice: { type: "NUMBER" }, costPrice: { type: "NUMBER" }, initialStock: { type: "NUMBER" }, unit: { type: "STRING" } }, required: ["name", "sku", "salePrice", "costPrice", "unit"] } }, validateArgs: args => productMutationArgs(args) },
+  { name: "update_product", type: "MUTATION", actionType: "UPDATE_PRODUCT", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "update_product", description: "Prepara atualização de produto; exige aprovação humana.", parameters: { type: "OBJECT", properties: { productId: { type: "STRING" }, fieldsToUpdate: { type: "OBJECT" } }, required: ["productId", "fieldsToUpdate"] } }, validateArgs: args => productMutationArgs(args, true) },
+  { name: "link_product_supplier", type: "MUTATION", actionType: "LINK_PRODUCT_SUPPLIER", requiredPermissions: ["products", "suppliers", "erp"], declaration: { name: "link_product_supplier", description: "Prepara vínculo de fornecedor ao produto; exige aprovação humana.", parameters: { type: "OBJECT", properties: { productId: { type: "STRING" }, supplierId: { type: "STRING" } }, required: ["productId", "supplierId"] } }, validateArgs: args => erpActionArgs(args, "link") },
+  { name: "get_services_list", type: "READ", requiredPermissions: ["services", "erp"], declaration: { name: "get_services_list", description: "Lista serviços, valores e status do tenant.", parameters: { type: "OBJECT", properties: { search: { type: "STRING" } }, required: [] } }, validateArgs: args => erpLookupArgs(args, ["search"]) },
+  { name: "update_service", type: "MUTATION", actionType: "UPDATE_SERVICE", requiredPermissions: ["services", "erp"], declaration: { name: "update_service", description: "Prepara atualização de serviço; exige aprovação humana.", parameters: { type: "OBJECT", properties: { serviceId: { type: "INTEGER" }, fieldsToUpdate: { type: "OBJECT" } }, required: ["serviceId", "fieldsToUpdate"] } }, validateArgs: args => erpActionArgs(args, "service") },
+  { name: "get_sales_analytics", type: "READ", requiredPermissions: ["sales", "erp"], declaration: { name: "get_sales_analytics", description: "Retorna faturamento, pedidos e ticket médio no período solicitado.", parameters: { type: "OBJECT", properties: { period: { type: "STRING" }, startDate: { type: "STRING" }, endDate: { type: "STRING" } }, required: [] } }, validateArgs: args => { objectArgs(args); rejectUnknownArgs(args, ["period", "startDate", "endDate"]); const period = args.period === undefined ? "month" : enumArg(args, "period", ["today", "week", "month", "custom"] as const); const result: Record<string, unknown> = { period }; if (period === "custom") { result.startDate = stringArg(args, "startDate", { min: 10, max: 10 })!; result.endDate = stringArg(args, "endDate", { min: 10, max: 10 })!; } return result; } },
+  { name: "get_suppliers_list", type: "READ", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "get_suppliers_list", description: "Busca fornecedores por nome, documento ou segmento.", parameters: { type: "OBJECT", properties: { search: { type: "STRING" } }, required: [] } }, validateArgs: args => erpLookupArgs(args, ["search"]) },
+  { name: "create_supplier", type: "MUTATION", actionType: "CREATE_SUPPLIER", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "create_supplier", description: "Prepara criação de fornecedor; exige aprovação humana.", parameters: { type: "OBJECT", properties: { name: { type: "STRING" }, document: { type: "STRING" }, phone: { type: "STRING" }, email: { type: "STRING" }, contactName: { type: "STRING" } }, required: ["name", "document"] } }, validateArgs: args => erpActionArgs(args, "supplier") },
+  { name: "update_supplier", type: "MUTATION", actionType: "UPDATE_SUPPLIER", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "update_supplier", description: "Prepara atualização de fornecedor; exige aprovação humana.", parameters: { type: "OBJECT", properties: { supplierId: { type: "STRING" }, fieldsToUpdate: { type: "OBJECT" } }, required: ["supplierId", "fieldsToUpdate"] } }, validateArgs: args => erpActionArgs(args, "supplier") },
+  { name: "request_purchase_order", type: "MUTATION", actionType: "REQUEST_PURCHASE", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "request_purchase_order", description: "Prepara pedido de compra; exige aprovação humana.", parameters: { type: "OBJECT", properties: { supplierId: { type: "STRING" }, items: { type: "ARRAY" }, notes: { type: "STRING" } }, required: ["supplierId", "items"] } }, validateArgs: args => erpActionArgs(args, "purchase") },
+  { name: "send_supplier_message", type: "MUTATION", actionType: "SEND_SUPPLIER_MESSAGE", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "send_supplier_message", description: "Prepara mensagem a fornecedor; exige aprovação humana.", parameters: { type: "OBJECT", properties: { supplierId: { type: "STRING" }, recipientPhone: { type: "STRING" }, messageText: { type: "STRING" } }, required: ["supplierId", "recipientPhone", "messageText"] } }, validateArgs: args => erpActionArgs(args, "message") },
   {
     name: "get_conversations_summary",
     type: "READ",
@@ -848,6 +899,52 @@ export async function executeClientFunction(
       [proposal.id],
     ) as any[];
     return JSON.stringify({ proposta: proposal, itens: itemRows });
+  }
+
+  if (functionName === "get_erp_summary") {
+    const [productRows] = await pool.execute(`SELECT COUNT(*) total, SUM(active = 1) active, SUM(active = 1 AND quantity <= 0) empty, SUM(active = 1 AND quantity > 0 AND quantity <= minimum_stock) low FROM erp_products WHERE client_id = ? AND active <> -1`, [clientId]) as any[];
+    const [serviceRows] = await pool.execute(`SELECT COUNT(*) total FROM megadesk_erp_services WHERE client_id = ? AND is_active = 1`, [clientId]) as any[];
+    return JSON.stringify({ produtos: productRows[0] ?? { total: 0, active: 0, empty: 0, low: 0 }, servicosAtivos: serviceRows[0]?.total ?? 0 });
+  }
+
+  if (functionName === "get_product_details") {
+    const lookup = validatedArgs as { productId?: string; sku?: string };
+    const predicate = lookup.productId ? "p.public_id = ?" : "p.sku = ?";
+    const [rows] = await pool.execute(`SELECT p.public_id publicId,p.name,p.sku,p.description,p.unit,p.cost_price_cents costPriceCents,p.sale_price_cents salePriceCents,p.quantity,p.minimum_stock minimumStock,p.active,p.category,ps.supplier_public_id supplierId,ps.supplier_legal_name supplierName FROM erp_products p LEFT JOIN erp_product_suppliers ps ON ps.product_id=p.id AND ps.client_id=p.client_id AND ps.is_preferred=1 AND ps.active=1 WHERE p.client_id=? AND p.active<>-1 AND ${predicate} LIMIT 1`, [clientId, lookup.productId ?? lookup.sku]) as any[];
+    if (!rows[0]) return JSON.stringify({ erro: "Produto não encontrado neste tenant." });
+    const [auditRows] = await pool.execute(`SELECT action,summary,created_at createdAt FROM erp_product_audit_logs WHERE client_id=? AND product_id=(SELECT id FROM erp_products WHERE client_id=? AND public_id=? LIMIT 1) ORDER BY created_at DESC LIMIT 20`, [clientId, clientId, rows[0].publicId]) as any[];
+    return JSON.stringify({ produto: rows[0], timeline: auditRows });
+  }
+
+  if (functionName === "get_inventory_status") {
+    const filters = validatedArgs as { status?: string; search?: string };
+    const where = ["client_id = ?", "active <> -1"]; const values: unknown[] = [clientId];
+    if (filters.search) { where.push("(name LIKE ? OR sku LIKE ?)"); values.push(`%${filters.search}%`, `%${filters.search}%`); }
+    if (filters.status === "empty") where.push("quantity <= 0");
+    if (filters.status === "low") where.push("quantity > 0 AND quantity <= minimum_stock");
+    if (filters.status === "regular") where.push("quantity > minimum_stock");
+    const [rows] = await pool.execute(`SELECT public_id publicId,name,sku,quantity,minimum_stock minimumStock,unit FROM erp_products WHERE ${where.join(" AND ")} ORDER BY name LIMIT 100`, values) as any[];
+    return JSON.stringify({ itens: rows });
+  }
+
+  if (functionName === "get_services_list") {
+    const query = (validatedArgs as { search?: string }).search;
+    const [rows] = await pool.execute(`SELECT id,name,code,category,price,estimated_cost estimatedCost,is_active isActive FROM megadesk_erp_services WHERE client_id=? ${query ? "AND (name LIKE ? OR code LIKE ? OR category LIKE ?)" : ""} ORDER BY name LIMIT 100`, query ? [clientId, `%${query}%`, `%${query}%`, `%${query}%`] : [clientId]) as any[];
+    return JSON.stringify({ servicos: rows });
+  }
+
+  if (functionName === "get_sales_analytics") {
+    const filters = validatedArgs as { period: string; startDate?: string; endDate?: string };
+    const range = filters.period === "today" ? ["CURDATE()", "CURDATE()"] : filters.period === "week" ? ["DATE_SUB(CURDATE(), INTERVAL 6 DAY)", "CURDATE()"] : filters.period === "month" ? ["DATE_FORMAT(CURDATE(), '%Y-%m-01')", "CURDATE()"] : ["?", "?"];
+    const values: unknown[] = [clientId, ...(filters.period === "custom" ? [filters.startDate, filters.endDate] : [])];
+    const [rows] = await pool.execute(`SELECT COUNT(*) orders,COALESCE(SUM(total_cents),0) revenueCents,COALESCE(AVG(total_cents),0) averageTicketCents FROM erp_sale_orders WHERE client_id=? AND document_type='sale' AND status<>'cancelled' AND DATE(created_at) BETWEEN ${range[0]} AND ${range[1]}`, values) as any[];
+    return JSON.stringify({ analise: rows[0] ?? { orders: 0, revenueCents: 0, averageTicketCents: 0 } });
+  }
+
+  if (functionName === "get_suppliers_list") {
+    const query = (validatedArgs as { search?: string }).search;
+    const [rows] = await pool.execute(`SELECT public_id publicId,legal_name legalName,trade_name tradeName,tax_id taxId,phone,email,contact_name contactName,active FROM erp_suppliers WHERE client_id=? ${query ? "AND (legal_name LIKE ? OR trade_name LIKE ? OR tax_id LIKE ?)" : ""} ORDER BY legal_name LIMIT 100`, query ? [clientId, `%${query}%`, `%${query}%`, `%${query}%`] : [clientId]) as any[];
+    return JSON.stringify({ fornecedores: rows });
   }
 
   if (functionName === "get_conversations_summary") {

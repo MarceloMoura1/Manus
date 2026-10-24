@@ -235,12 +235,27 @@ describe("Hermes security controls", () => {
       "create_proposal",
       "update_proposal_status",
       "send_proposal_whatsapp",
+      "get_erp_summary",
+      "get_product_details",
+      "get_inventory_status",
+      "create_product",
+      "update_product",
+      "link_product_supplier",
+      "get_services_list",
+      "update_service",
+      "get_sales_analytics",
+      "get_suppliers_list",
+      "create_supplier",
+      "update_supplier",
+      "request_purchase_order",
+      "send_supplier_message",
       "get_conversations_summary",
       "get_erp_products",
     ]);
     expect(HERMES_TOOL_REGISTRY.filter(tool => tool.type === "MUTATION").map(tool => tool.actionType)).toEqual([
       "CREATE_TICKET", "UPDATE_TICKET_STATUS", "ASSIGN_TICKET", "ADD_TICKET_ACTIVITY",
       "CREATE_CLIENT", "UPDATE_CLIENT", "ADD_CLIENT_TIMELINE", "CREATE_PROPOSAL", "UPDATE_PROPOSAL_STATUS", "SEND_PROPOSAL_WHATSAPP",
+      "CREATE_PRODUCT", "UPDATE_PRODUCT", "LINK_PRODUCT_SUPPLIER", "UPDATE_SERVICE", "CREATE_SUPPLIER", "UPDATE_SUPPLIER", "REQUEST_PURCHASE", "SEND_SUPPLIER_MESSAGE",
     ]);
   });
 
@@ -255,6 +270,39 @@ describe("Hermes security controls", () => {
     expect(tools).not.toContain("create_client");
     expect(tools).not.toContain("get_proposals_summary");
     expect(getAuthorizedHermesTool("create_proposal", ["ai-assistant"])).toBeNull();
+  });
+
+  it("does not expose ERP tools to a user without ERP operational permissions", () => {
+    const tools = getAllowedHermesTools(["ai-assistant"]).map(tool => tool.name);
+    expect(tools).not.toContain("get_erp_summary");
+    expect(tools).not.toContain("create_product");
+    expect(tools).not.toContain("request_purchase_order");
+    expect(getAuthorizedHermesTool("send_supplier_message", ["ai-assistant"])).toBeNull();
+  });
+
+  it("runs ERP inventory only with the authenticated tenant predicate", async () => {
+    const execute = vi.fn(async () => [[{ publicId: "product-a", name: "Produto", quantity: "0.000" }]]);
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    const response = JSON.parse(await executeClientFunction("get_inventory_status", { status: "empty" }, "tenant-a", ["inventory"]));
+    expect(response.itens).toHaveLength(1);
+    expect(execute.mock.calls[0]?.[0]).toContain("client_id = ?");
+    expect(execute.mock.calls[0]?.[1]).toEqual(["tenant-a"]);
+  });
+
+  it("runs sales analytics only with the tenant predicate and a validated date range", async () => {
+    const execute = vi.fn(async () => [[{ orders: 2, revenueCents: 10000, averageTicketCents: 5000 }]]);
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    const response = JSON.parse(await executeClientFunction("get_sales_analytics", { period: "custom", startDate: "2026-01-01", endDate: "2026-01-31" }, "tenant-a", ["sales"]));
+    expect(response.analise.orders).toBe(2);
+    expect(execute.mock.calls[0]?.[1]).toEqual(["tenant-a", "2026-01-01", "2026-01-31"]);
+  });
+
+  it("creates a tenant-owned product HITL proposal and rejects a changed payload", () => {
+    const tool = HERMES_TOOL_REGISTRY.find(item => item.name === "create_product")!;
+    const args = { name: "Produto", sku: "SKU-1", salePrice: 10, costPrice: 5, initialStock: 2, unit: "unit" };
+    const request = createPendingActionRequest(tool, args, { clientId: "tenant-a", userId: "owner@example.invalid" });
+    expect(() => beginPendingHermesAction({ actionId: request.id, actionType: "CREATE_PRODUCT", clientId: "tenant-a", userId: "owner@example.invalid", payload: { ...args, salePrice: 11 } })).toThrow("payload");
+    expect(beginPendingHermesAction({ actionId: request.id, actionType: "CREATE_PRODUCT", clientId: "tenant-a", userId: "owner@example.invalid", payload: request.args }).actionType).toBe("CREATE_PRODUCT");
   });
 
   it("runs CRM summary only with the authenticated tenant predicate", async () => {

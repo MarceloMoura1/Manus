@@ -49,6 +49,7 @@ import { classifyAssistantFailure } from "./assistant-error";
 import { hermesRouter } from "./modules/admin/hermes";
 import { executeHermesTicketAction } from "./hermes-ticket-actions";
 import { executeHermesCrmAction } from "./hermes-crm-actions";
+import { executeHermesErpAction } from "./hermes-erp-actions";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -386,10 +387,14 @@ function sessionBoundAssistantUserId(requestedUserId: string, sessionUserEmail: 
 
 const hermesTicketActionTypes = ["CREATE_TICKET", "UPDATE_TICKET_STATUS", "ASSIGN_TICKET", "ADD_TICKET_ACTIVITY"] as const;
 const hermesCrmActionTypes = ["CREATE_CLIENT", "UPDATE_CLIENT", "ADD_CLIENT_TIMELINE", "CREATE_PROPOSAL", "UPDATE_PROPOSAL_STATUS", "SEND_PROPOSAL_WHATSAPP"] as const;
-const hermesActionTypes = [...hermesTicketActionTypes, ...hermesCrmActionTypes] as const;
+const hermesErpActionTypes = ["CREATE_PRODUCT", "UPDATE_PRODUCT", "LINK_PRODUCT_SUPPLIER", "UPDATE_SERVICE", "CREATE_SUPPLIER", "UPDATE_SUPPLIER", "REQUEST_PURCHASE", "SEND_SUPPLIER_MESSAGE"] as const;
+const hermesActionTypes = [...hermesTicketActionTypes, ...hermesCrmActionTypes, ...hermesErpActionTypes] as const;
 
 function isHermesTicketAction(actionType: string): actionType is typeof hermesTicketActionTypes[number] {
   return (hermesTicketActionTypes as readonly string[]).includes(actionType);
+}
+function isHermesErpAction(actionType: string): actionType is typeof hermesErpActionTypes[number] {
+  return (hermesErpActionTypes as readonly string[]).includes(actionType);
 }
 
 function assertAssistantActionPermission(client: MegaClient, userEmail: string, actionType: typeof hermesActionTypes[number]) {
@@ -398,7 +403,11 @@ function assertAssistantActionPermission(client: MegaClient, userEmail: string, 
     ? ["tickets", "support"]
     : actionType === "CREATE_CLIENT" || actionType === "UPDATE_CLIENT" || actionType === "ADD_CLIENT_TIMELINE"
       ? ["crm", "clients"]
-      : ["sales", "crm", "proposals"];
+      : isHermesErpAction(actionType)
+        ? actionType === "UPDATE_SERVICE" ? ["services", "erp"]
+          : actionType === "CREATE_SUPPLIER" || actionType === "UPDATE_SUPPLIER" || actionType === "REQUEST_PURCHASE" || actionType === "SEND_SUPPLIER_MESSAGE" ? ["suppliers", "purchases", "erp"]
+            : ["products", "inventory", "erp"]
+        : ["sales", "crm", "proposals"];
   if (!user.permissions.some(permission => required.includes(permission))) {
     audit("MegaDesk", `Usuário ${user.email} sem permissão operacional para ${actionType} no Hermes`, client.clientId, false);
     throw new TRPCError({ code: "FORBIDDEN", message: "Você não possui permissão para executar esta ação neste módulo." });
@@ -1882,7 +1891,15 @@ export const appRouter = router({
                 return matches.length === 1 ? { userId: matches[0].id, userName: matches[0].name } : null;
               },
             })
-            : await executeHermesCrmAction({
+            : isHermesErpAction(pending.actionType)
+              ? await executeHermesErpAction({
+                tenantId: ctx.tenantId,
+                userId: user.id,
+                userName: user.name,
+                role: user.role === "admin" ? "admin" : user.role === "manager" ? "manager" : user.role === "viewer" ? "viewer" : "agent",
+                action: { actionType: pending.actionType, args: pending.args },
+              })
+              : await executeHermesCrmAction({
               tenantId: ctx.tenantId,
               userId: user.id,
               userName: user.name,
