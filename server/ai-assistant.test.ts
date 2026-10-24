@@ -20,6 +20,9 @@ import {
   getAuthorizedHermesTool,
   insertTokenUsage,
   readMonthlyTokenUsage,
+  callGeminiAPI,
+  callGeminiWithEnvironmentFallback,
+  getClientGeminiConfig,
   DEFAULT_GEMINI_MODEL,
   MAX_GEMINI_PROMPT_HISTORY_MESSAGES,
   selectGeminiPromptHistory,
@@ -231,6 +234,69 @@ describe("ChatResult structure", () => {
 
   it("uses the responsive Gemini Flash Lite model by default", () => {
     expect(DEFAULT_GEMINI_MODEL).toBe("gemini-3.5-flash-lite");
+  });
+
+  it("uses a trimmed environment key when the tenant key is missing or blank", async () => {
+    const previous = process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEY = "  environment-gemini-key  ";
+    vi.mocked(getPool).mockReturnValue({
+      execute: vi.fn(async () => [[{
+        integrations_json: JSON.stringify({ geminiKey: "   ", geminiQuotaMensal: 2000 }),
+      }]]),
+    } as any);
+
+    try {
+      await expect(getClientGeminiConfig("tenant-a")).resolves.toEqual({ geminiKey: "environment-gemini-key", geminiQuotaMensal: 2000 });
+    } finally {
+      if (previous === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previous;
+      vi.mocked(getPool).mockClear();
+    }
+  });
+
+  it("retries a rejected tools payload once as a text-only Gemini request", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: { message: "Unsupported function declaration", status: "INVALID_ARGUMENT", details: [{ field: "tools" }] } }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: "Resposta textual" }] } }] }) });
+
+    await expect(callGeminiAPI(" key with space ", {
+      contents: [
+        { role: "user", parts: [{ text: "Olá" }] },
+        { role: "model", parts: [{ functionCall: { name: "get_open_tickets", args: {} } }] },
+        { role: "user", parts: [{ functionResponse: { name: "get_open_tickets", response: {} } }] },
+      ],
+      tools: [{ functionDeclarations: [{ name: "get_open_tickets" }] }],
+    }, request)).resolves.toEqual({ candidates: [{ content: { parts: [{ text: "Resposta textual" }] } }] });
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[0]?.[0]).toContain("key=key%20with%20space");
+    const fallbackBody = JSON.parse(request.mock.calls[1]?.[1]?.body as string);
+    expect(fallbackBody.tools).toBeUndefined();
+    expect(fallbackBody.contents).toEqual([{ role: "user", parts: [{ text: "Olá" }] }]);
+  });
+
+  it("preserves the provider error status and details when a text request fails", async () => {
+    const request = vi.fn(async () => ({ ok: false, status: 403, json: async () => ({ error: { message: "Permission denied", status: "PERMISSION_DENIED", details: [{ reason: "API_KEY_SERVICE_BLOCKED" }] } }) }));
+
+    await expect(callGeminiAPI("test-key", { contents: [{ role: "user", parts: [{ text: "Olá" }] }] }, request))
+      .rejects.toThrow("Gemini API HTTP 403 PERMISSION_DENIED: Permission denied details=[{\"reason\":\"API_KEY_SERVICE_BLOCKED\"}]");
+  });
+
+  it("retries a rejected tenant credential once with the trimmed environment credential", async () => {
+    const previous = process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEY = "  environment-key  ";
+    const request = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({ error: { message: "API key not valid", status: "PERMISSION_DENIED" } }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ candidates: [] }) });
+
+    try {
+      await expect(callGeminiWithEnvironmentFallback("expired-tenant-key", { contents: [{ role: "user", parts: [{ text: "Olá" }] }] }, request))
+        .resolves.toMatchObject({ data: { candidates: [] }, apiKey: "environment-key" });
+      expect(request.mock.calls[1]?.[0]).toContain("key=environment-key");
+    } finally {
+      if (previous === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previous;
+    }
   });
 });
 

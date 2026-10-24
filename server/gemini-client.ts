@@ -12,6 +12,14 @@ export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
 export const MAX_GEMINI_PROMPT_HISTORY_MESSAGES = 12;
 
+function normalizeGeminiApiKey(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function getEnvironmentGeminiApiKey(): string | null {
+  return normalizeGeminiApiKey(process.env.GEMINI_API_KEY);
+}
+
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 export interface IAMessage {
@@ -513,6 +521,38 @@ interface GeminiRequest {
 
 type GeminiHttpRequest = (url: string, init: RequestInit) => Promise<Pick<Response, "ok" | "status" | "json">>;
 
+export class GeminiProviderError extends Error {
+  constructor(
+    message: string,
+    readonly httpStatus: number,
+    readonly providerStatus?: unknown,
+    readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = "GeminiProviderError";
+  }
+}
+
+function stringifyGeminiErrorDetails(details: unknown): string {
+  if (details === undefined) return "";
+  try {
+    return ` details=${JSON.stringify(details)}`;
+  } catch {
+    return " details=[unserializable]";
+  }
+}
+
+function toTextOnlyGeminiRequest(body: GeminiRequest): GeminiRequest {
+  const { tools: _tools, ...textOnlyBody } = body;
+  const contents = body.contents
+    .map(content => ({
+      ...content,
+      parts: content.parts.filter(part => typeof part.text === "string" && part.text.trim().length > 0),
+    }))
+    .filter(content => content.parts.length > 0);
+  return { ...textOnlyBody, contents };
+}
+
 function webSearchFallback(message: string): string {
   return JSON.stringify({ ok: false, results: [], message });
 }
@@ -567,7 +607,13 @@ export async function executeWebSearch(
   }
 }
 
-async function callGeminiAPI(apiKey: string, body: GeminiRequest): Promise<any> {
+export async function callGeminiAPI(
+  apiKey: string,
+  body: GeminiRequest,
+  request: GeminiHttpRequest = (url, init) => fetch(url, init),
+): Promise<any> {
+  const normalizedApiKey = normalizeGeminiApiKey(apiKey);
+  if (!normalizedApiKey) throw new Error("Chave da API Gemini não configurada.");
   const normalizedBody = {
     ...body,
     ...(body.systemInstruction
@@ -579,8 +625,8 @@ async function callGeminiAPI(apiKey: string, body: GeminiRequest): Promise<any> 
         }
       : {}),
   };
-  const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
+  const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(normalizedApiKey)}`;
+  const response = await request(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(normalizedBody),
@@ -588,10 +634,58 @@ async function callGeminiAPI(apiKey: string, body: GeminiRequest): Promise<any> 
   const data = await response.json() as any;
   if (!response.ok) {
     const errMsg = data?.error?.message ?? `HTTP ${response.status}`;
-    const errStatus = data?.error?.status ?? "";
-    throw new Error(`${errStatus}: ${errMsg}`);
+    const errStatus = data?.error?.status;
+    const details = data?.error?.details;
+    const providerError = new GeminiProviderError(
+      `Gemini API HTTP ${response.status}${errStatus ? ` ${String(errStatus)}` : ""}: ${String(errMsg)}${stringifyGeminiErrorDetails(details)}`,
+      response.status,
+      errStatus,
+      details,
+    );
+    if (response.status === 400 && body.tools?.length) {
+      console.warn("[Assistant] Gemini rejected the tools payload; retrying once without tools.", {
+        message: providerError.message,
+        details: providerError.details,
+      });
+      return callGeminiAPI(normalizedApiKey, toTextOnlyGeminiRequest(body), request);
+    }
+    console.error("[Assistant] Gemini provider request failed:", {
+      message: providerError.message,
+      stack: providerError.stack,
+      details: providerError.details,
+    });
+    throw providerError;
   }
   return data;
+}
+
+function isGeminiCredentialFailure(error: unknown): boolean {
+  if (!(error instanceof GeminiProviderError)) return false;
+  const details = stringifyGeminiErrorDetails(error.details);
+  return /api[_\s-]?key|permission[_\s-]?denied|unauthenticated/i.test(
+    `${error.message} ${String(error.providerStatus ?? "")} ${details}`,
+  );
+}
+
+export async function callGeminiWithEnvironmentFallback(
+  apiKey: string,
+  body: GeminiRequest,
+  request: GeminiHttpRequest = (url, init) => fetch(url, init),
+): Promise<{ data: any; apiKey: string }> {
+  const normalizedApiKey = normalizeGeminiApiKey(apiKey);
+  if (!normalizedApiKey) throw new Error("Chave da API Gemini não configurada.");
+
+  try {
+    return { data: await callGeminiAPI(normalizedApiKey, body, request), apiKey: normalizedApiKey };
+  } catch (error) {
+    const environmentKey = getEnvironmentGeminiApiKey();
+    if (!environmentKey || environmentKey === normalizedApiKey || !isGeminiCredentialFailure(error)) throw error;
+
+    console.warn("[Assistant] Tenant Gemini credential was rejected; retrying once with the configured environment credential.", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return { data: await callGeminiAPI(environmentKey, body, request), apiKey: environmentKey };
+  }
 }
 
 /** Testa a conexão com a API Gemini usando fetch direto */
@@ -635,15 +729,15 @@ export async function getClientGeminiConfig(clientId: string): Promise<{ geminiK
     "SELECT integrations_json FROM megadesk_domain_clients WHERE client_id = ? LIMIT 1",
     [clientId]
   ) as any[];
-  if (!rows || rows.length === 0) return { geminiKey: null, geminiQuotaMensal: 0 };
+  if (!rows || rows.length === 0) return { geminiKey: getEnvironmentGeminiApiKey(), geminiQuotaMensal: 0 };
   try {
     const integrations = JSON.parse(rows[0].integrations_json ?? "{}");
     return {
-      geminiKey: integrations.geminiKey ?? null,
+      geminiKey: normalizeGeminiApiKey(integrations.geminiKey) ?? getEnvironmentGeminiApiKey(),
       geminiQuotaMensal: Number(integrations.geminiQuotaMensal ?? 0),
     };
   } catch {
-    return { geminiKey: null, geminiQuotaMensal: 0 };
+    return { geminiKey: getEnvironmentGeminiApiKey(), geminiQuotaMensal: 0 };
   }
 }
 
@@ -700,18 +794,7 @@ export async function getClientIAStatus(clientId: string): Promise<{
 
 /** Busca o token Gemini do cliente diretamente na tabela megadesk_domain_clients */
 export async function getClientGeminiToken(clientId: string): Promise<string | null> {
-  const pool = getPool();
-  const [rows] = await pool.execute(
-    "SELECT integrations_json FROM megadesk_domain_clients WHERE client_id = ? LIMIT 1",
-    [clientId]
-  ) as any[];
-  if (!rows || rows.length === 0) return null;
-  try {
-    const integrations = JSON.parse(rows[0].integrations_json ?? "{}");
-    return integrations.geminiKey ?? null;
-  } catch {
-    return null;
-  }
+  return (await getClientGeminiConfig(clientId)).geminiKey;
 }
 
 /** Carrega histórico de conversa do usuário no banco */
@@ -1087,7 +1170,7 @@ Quando buscar dados, informe ao usuário que está consultando o sistema antes d
 Se não tiver dados suficientes, seja honesto e sugira como o usuário pode obter a informação.`;
 }
 
-export async function chatWithClientGemini(
+async function chatWithClientGeminiInternal(
   clientId: string,
   userId: string,
   userMessage: string,
@@ -1102,7 +1185,7 @@ export async function chatWithClientGemini(
   if (iaStatus.status === "quota_atingida") {
     throw new Error(`Quota mensal de tokens atingida (${iaStatus.tokensUsadosMes.toLocaleString("pt-BR")} / ${iaStatus.geminiQuotaMensal.toLocaleString("pt-BR")} tokens). O Assistente IA será liberado no próximo mês ou após o administrador ajustar o limite.`);
   }
-  const geminiKey = iaStatus.geminiKey!;
+  let geminiKey = iaStatus.geminiKey!;
 
   // 2. Monta o histórico no formato REST do Gemini
   const contents: GeminiContent[] = selectGeminiPromptHistory(existingHistory).map((msg) => ({
@@ -1122,7 +1205,9 @@ export async function chatWithClientGemini(
     generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
   };
 
-  let data = await callGeminiAPI(geminiKey, requestBody);
+  let providerResponse = await callGeminiWithEnvironmentFallback(geminiKey, requestBody);
+  let data = providerResponse.data;
+  geminiKey = providerResponse.apiKey;
   const functionCallsMade: string[] = [];
   let promptTokens = tokenUsagePart(data, "promptTokenCount");
   let completionTokens = tokenUsagePart(data, "candidatesTokenCount");
@@ -1162,7 +1247,9 @@ export async function chatWithClientGemini(
     };
 
     requestBody.contents = [...requestBody.contents, modelTurn, functionResponseTurn];
-    data = await callGeminiAPI(geminiKey, requestBody);
+    providerResponse = await callGeminiWithEnvironmentFallback(geminiKey, requestBody);
+    data = providerResponse.data;
+    geminiKey = providerResponse.apiKey;
     const nextPromptTokens = tokenUsagePart(data, "promptTokenCount");
     const nextCompletionTokens = tokenUsagePart(data, "candidatesTokenCount");
     promptTokens += nextPromptTokens;
@@ -1208,4 +1295,28 @@ export async function chatWithClientGemini(
     functionCallsMade,
     pendingActionRequest,
   };
+}
+
+/**
+ * Boundary for the tenant chat: logs diagnostic provider details server-side
+ * while callers continue to receive the existing safe tRPC error response.
+ */
+export async function chatWithClientGemini(
+  clientId: string,
+  userId: string,
+  userMessage: string,
+  existingHistory: IAMessage[],
+  userPermissions: readonly string[],
+): Promise<ChatResult> {
+  try {
+    return await chatWithClientGeminiInternal(clientId, userId, userMessage, existingHistory, userPermissions);
+  } catch (error) {
+    const providerError = error as Error & { details?: unknown; cause?: unknown };
+    console.error("[Assistant] Gemini chat failed:", {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      details: providerError?.details ?? providerError?.cause,
+    });
+    throw error;
+  }
 }

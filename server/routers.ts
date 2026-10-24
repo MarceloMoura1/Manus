@@ -1843,7 +1843,13 @@ export const appRouter = router({
           return result;
         } catch (error) {
           const failure = classifyAssistantFailure(error);
-          console.error("[Assistant] Tenant provider request failed.", { errorClass: failure.errorClass });
+          const providerError = error as Error & { details?: unknown; cause?: unknown };
+          console.error("[Assistant] Tenant provider request failed:", {
+            message: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            details: providerError?.details ?? providerError?.cause,
+            errorClass: failure.errorClass,
+          });
           throw new TRPCError({ code: failure.code, message: failure.message });
         }
       }),
