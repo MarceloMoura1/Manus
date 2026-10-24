@@ -3810,7 +3810,7 @@ function AIAssistantPage() {
       id: string;
       toolName: string;
       type: "MUTATION";
-      actionType: "CREATE_TICKET" | "UPDATE_TICKET_STATUS" | "ASSIGN_TICKET" | "ADD_TICKET_ACTIVITY";
+      actionType: "CREATE_TICKET" | "UPDATE_TICKET_STATUS" | "ASSIGN_TICKET" | "ADD_TICKET_ACTIVITY" | "CREATE_CLIENT" | "UPDATE_CLIENT" | "ADD_CLIENT_TIMELINE" | "CREATE_PROPOSAL" | "UPDATE_PROPOSAL_STATUS" | "SEND_PROPOSAL_WHATSAPP";
       args: Record<string, unknown>;
       status: "PENDING_APPROVAL";
     };
@@ -4068,12 +4068,12 @@ function AIAssistantPage() {
               {msg.pendingActionRequest && (
                 <div className="mt-2 rounded-xl border border-sky-500/40 bg-slate-900/90 p-4 text-xs text-slate-100 shadow-sm">
                   <p className="font-semibold text-sky-200">Ação sugerida pelo Hermes que requer sua aprovação</p>
-                  <p className="mt-1 text-slate-300">{msg.pendingActionRequest.toolName.replace(/_/g, " ")} — nenhuma alteração foi executada.</p>
+                  <p className="mt-1 text-slate-300">{msg.pendingActionRequest.actionType.includes("PROPOSAL") ? "Proposta comercial" : msg.pendingActionRequest.actionType.includes("CLIENT") ? "Cliente CRM" : msg.pendingActionRequest.toolName.replace(/_/g, " ")} — nenhuma alteração foi executada.</p>
                   <dl className="mt-3 grid gap-1.5 rounded-lg border border-slate-700/80 bg-slate-950/60 p-2.5 text-slate-300">
                     {Object.entries(msg.pendingActionRequest.args).map(([key, value]) => (
                       <div key={key} className="flex items-start justify-between gap-3">
                         <dt className="capitalize text-slate-500">{key.replace(/([A-Z])/g, " $1")}</dt>
-                        <dd className="max-w-[60%] break-words text-right text-slate-200">{typeof value === "boolean" ? (value ? "Sim" : "Não") : String(value)}</dd>
+                        <dd className="max-w-[60%] break-words text-right text-slate-200">{typeof value === "boolean" ? (value ? "Sim" : "Não") : Array.isArray(value) ? `${value.length} item(ns)` : typeof value === "object" && value ? "Dados estruturados" : String(value)}</dd>
                       </div>
                     ))}
                   </dl>

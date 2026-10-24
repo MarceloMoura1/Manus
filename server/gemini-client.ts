@@ -30,6 +30,8 @@ export interface ChatResult {
 export type HermesToolType = "READ" | "MUTATION";
 export type HermesPermission = string;
 export type HermesTicketActionType = "CREATE_TICKET" | "UPDATE_TICKET_STATUS" | "ASSIGN_TICKET" | "ADD_TICKET_ACTIVITY";
+export type HermesCrmActionType = "CREATE_CLIENT" | "UPDATE_CLIENT" | "ADD_CLIENT_TIMELINE" | "CREATE_PROPOSAL" | "UPDATE_PROPOSAL_STATUS" | "SEND_PROPOSAL_WHATSAPP";
+export type HermesActionType = HermesTicketActionType | HermesCrmActionType;
 
 export interface GeminiFunctionDeclaration {
   name: string;
@@ -43,14 +45,14 @@ export interface HermesToolDefinition {
   requiredPermissions: readonly HermesPermission[];
   declaration: GeminiFunctionDeclaration;
   validateArgs: (args: Record<string, unknown>) => Record<string, unknown>;
-  actionType?: HermesTicketActionType;
+  actionType?: HermesActionType;
 }
 
 export interface PendingActionRequest {
   id: string;
   toolName: string;
   type: "MUTATION";
-  actionType: HermesTicketActionType;
+  actionType: HermesActionType;
   args: Record<string, unknown>;
   status: "PENDING_APPROVAL";
 }
@@ -165,6 +167,91 @@ function addTicketActivityArgs(args: Record<string, unknown>): Record<string, un
   };
 }
 
+function crmSummaryArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, []); return {};
+}
+
+function crmClientLookupArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["clientId", "search"]);
+  const clientId = stringArg(args, "clientId", { min: 1, max: 80, optional: true });
+  const search = stringArg(args, "search", { min: 2, max: 180, optional: true });
+  if ((clientId ? 1 : 0) + (search ? 1 : 0) !== 1) throw new Error("Informe exatamente clientId ou search.");
+  return clientId ? { clientId } : { search };
+}
+
+function createClientArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["name", "document", "phone", "email", "notes"]);
+  const email = stringArg(args, "email", { min: 3, max: 255, optional: true });
+  if (email && !/^\S+@\S+\.\S+$/.test(email)) throw new Error("E-mail inválido.");
+  return {
+    name: stringArg(args, "name", { min: 1, max: 255 })!,
+    ...(stringArg(args, "document", { min: 8, max: 20, optional: true }) ? { document: stringArg(args, "document", { min: 8, max: 20, optional: true }) } : {}),
+    ...(stringArg(args, "phone", { min: 8, max: 40, optional: true }) ? { phone: stringArg(args, "phone", { min: 8, max: 40, optional: true }) } : {}),
+    ...(email ? { email } : {}),
+    ...(stringArg(args, "notes", { min: 1, max: 2_000, optional: true }) ? { notes: stringArg(args, "notes", { min: 1, max: 2_000, optional: true }) } : {}),
+  };
+}
+
+function updateClientArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["clientId", "fieldsToUpdate"]);
+  const fields = args.fieldsToUpdate;
+  if (!fields || typeof fields !== "object" || Array.isArray(fields)) throw new Error("fieldsToUpdate inválido.");
+  const allowed = ["name", "document", "phone", "email", "notes"];
+  const record = fields as Record<string, unknown>;
+  rejectUnknownArgs(record, allowed);
+  if (!Object.keys(record).length) throw new Error("fieldsToUpdate não pode estar vazio.");
+  const normalized = createClientArgs({ name: typeof record.name === "string" ? record.name : "Atualização", ...record });
+  delete normalized.name;
+  return { clientId: stringArg(args, "clientId", { min: 1, max: 80 })!, fieldsToUpdate: normalized };
+}
+
+function clientTimelineArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["clientId", "title", "description", "eventType"]);
+  return {
+    clientId: stringArg(args, "clientId", { min: 1, max: 80 })!, title: stringArg(args, "title", { min: 1, max: 180 })!,
+    description: stringArg(args, "description", { min: 1, max: 2_000 })!, eventType: enumArg(args, "eventType", ["call", "note", "meeting"] as const),
+  };
+}
+
+function proposalSummaryArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["status", "sellerId", "period"]);
+  const status = args.status === undefined ? undefined : enumArg(args, "status", ["draft", "negotiation", "approved", "lost"] as const);
+  const sellerId = stringArg(args, "sellerId", { min: 1, max: 80, optional: true });
+  const period = args.period === undefined ? undefined : enumArg(args, "period", ["7", "30", "90"] as const);
+  return { ...(status ? { status } : {}), ...(sellerId ? { sellerId } : {}), ...(period ? { period } : {}) };
+}
+
+function proposalDetailsArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["proposalId", "proposalNumber"]);
+  const proposalId = stringArg(args, "proposalId", { min: 1, max: 80, optional: true });
+  const proposalNumber = stringArg(args, "proposalNumber", { min: 1, max: 80, optional: true });
+  if ((proposalId ? 1 : 0) + (proposalNumber ? 1 : 0) !== 1) throw new Error("Informe exatamente proposalId ou proposalNumber.");
+  return proposalId ? { proposalId } : { proposalNumber };
+}
+
+function createProposalArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["clientId", "items", "notes", "paymentTerms"]);
+  if (!Array.isArray(args.items) || args.items.length < 1 || args.items.length > 100) throw new Error("items inválido.");
+  const items = args.items.map(item => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Item inválido.");
+    const value = item as Record<string, unknown>; rejectUnknownArgs(value, ["productId", "productName", "quantity", "unitPrice"]);
+    const quantity = Number(value.quantity); const unitPrice = Number(value.unitPrice);
+    if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) throw new Error("Quantidade ou preço inválido.");
+    return { productId: stringArg(value, "productId", { min: 1, max: 80 })!, productName: stringArg(value, "productName", { min: 1, max: 255 })!, quantity, unitPrice };
+  });
+  return { clientId: stringArg(args, "clientId", { min: 1, max: 80 })!, items, ...(stringArg(args, "notes", { min: 1, max: 4_000, optional: true }) ? { notes: stringArg(args, "notes", { min: 1, max: 4_000, optional: true }) } : {}), ...(stringArg(args, "paymentTerms", { min: 1, max: 500, optional: true }) ? { paymentTerms: stringArg(args, "paymentTerms", { min: 1, max: 500, optional: true }) } : {}) };
+}
+
+function proposalStatusArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["proposalId", "newStatus", "reason"]);
+  return { proposalId: stringArg(args, "proposalId", { min: 1, max: 80 })!, newStatus: enumArg(args, "newStatus", ["draft", "negotiation", "approved", "rejected", "expired"] as const), ...(stringArg(args, "reason", { min: 1, max: 500, optional: true }) ? { reason: stringArg(args, "reason", { min: 1, max: 500, optional: true }) } : {}) };
+}
+
+function proposalWhatsappArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["proposalId", "recipientPhone", "customMessage"]);
+  return { proposalId: stringArg(args, "proposalId", { min: 1, max: 80 })!, recipientPhone: stringArg(args, "recipientPhone", { min: 8, max: 40 })!, ...(stringArg(args, "customMessage", { min: 1, max: 2_000, optional: true }) ? { customMessage: stringArg(args, "customMessage", { min: 1, max: 2_000, optional: true }) } : {}) };
+}
+
 /**
  * Registry único de capacidades Hermes. Ferramentas de mutação futuras devem
  * declarar validateArgs; o executor nunca as executa antes de aprovação humana.
@@ -230,6 +317,16 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
     declaration: { name: "add_ticket_activity", description: "Prepara uma atividade em chamado; só executa após aprovação explícita.", parameters: { type: "OBJECT", properties: { ticketId: { type: "STRING" }, noteContent: { type: "STRING" }, isInternal: { type: "BOOLEAN" } }, required: ["ticketId", "noteContent"] } },
     validateArgs: addTicketActivityArgs,
   },
+  { name: "get_crm_summary", type: "READ", requiredPermissions: ["crm", "clients"], declaration: { name: "get_crm_summary", description: "Retorna métricas básicas da carteira CRM do tenant.", parameters: { type: "OBJECT", properties: {}, required: [] } }, validateArgs: crmSummaryArgs },
+  { name: "get_client_360", type: "READ", requiredPermissions: ["crm", "clients"], declaration: { name: "get_client_360", description: "Retorna cadastro, chamados, conversas e timeline de um cliente CRM do tenant.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING" }, search: { type: "STRING" } }, required: [] } }, validateArgs: crmClientLookupArgs },
+  { name: "create_client", type: "MUTATION", actionType: "CREATE_CLIENT", requiredPermissions: ["crm", "clients"], declaration: { name: "create_client", description: "Prepara a criação de cliente CRM; exige aprovação humana.", parameters: { type: "OBJECT", properties: { name: { type: "STRING" }, document: { type: "STRING" }, phone: { type: "STRING" }, email: { type: "STRING" }, notes: { type: "STRING" } }, required: ["name"] } }, validateArgs: createClientArgs },
+  { name: "update_client", type: "MUTATION", actionType: "UPDATE_CLIENT", requiredPermissions: ["crm", "clients"], declaration: { name: "update_client", description: "Prepara atualização de cliente CRM; exige aprovação humana.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING" }, fieldsToUpdate: { type: "OBJECT" } }, required: ["clientId", "fieldsToUpdate"] } }, validateArgs: updateClientArgs },
+  { name: "add_client_timeline_event", type: "MUTATION", actionType: "ADD_CLIENT_TIMELINE", requiredPermissions: ["crm", "clients"], declaration: { name: "add_client_timeline_event", description: "Prepara evento de timeline CRM; exige aprovação humana.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING" }, title: { type: "STRING" }, description: { type: "STRING" }, eventType: { type: "STRING", enum: ["call", "note", "meeting"] } }, required: ["clientId", "title", "description", "eventType"] } }, validateArgs: clientTimelineArgs },
+  { name: "get_proposals_summary", type: "READ", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "get_proposals_summary", description: "Retorna métricas de propostas comerciais do tenant.", parameters: { type: "OBJECT", properties: { status: { type: "STRING" }, sellerId: { type: "STRING" }, period: { type: "STRING" } }, required: [] } }, validateArgs: proposalSummaryArgs },
+  { name: "get_proposal_details", type: "READ", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "get_proposal_details", description: "Retorna proposta, cliente e itens do tenant.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, proposalNumber: { type: "STRING" } }, required: [] } }, validateArgs: proposalDetailsArgs },
+  { name: "create_proposal", type: "MUTATION", actionType: "CREATE_PROPOSAL", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "create_proposal", description: "Prepara proposta comercial; exige aprovação humana.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING" }, items: { type: "ARRAY" }, notes: { type: "STRING" }, paymentTerms: { type: "STRING" } }, required: ["clientId", "items"] } }, validateArgs: createProposalArgs },
+  { name: "update_proposal_status", type: "MUTATION", actionType: "UPDATE_PROPOSAL_STATUS", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "update_proposal_status", description: "Prepara mudança de status comercial; exige aprovação humana.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, newStatus: { type: "STRING", enum: ["draft", "negotiation", "approved", "rejected", "expired"] }, reason: { type: "STRING" } }, required: ["proposalId", "newStatus"] } }, validateArgs: proposalStatusArgs },
+  { name: "send_proposal_whatsapp", type: "MUTATION", actionType: "SEND_PROPOSAL_WHATSAPP", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "send_proposal_whatsapp", description: "Prepara envio de proposta por WhatsApp; exige aprovação humana.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, recipientPhone: { type: "STRING" }, customMessage: { type: "STRING" } }, required: ["proposalId", "recipientPhone"] } }, validateArgs: proposalWhatsappArgs },
   {
     name: "get_conversations_summary",
     type: "READ",
@@ -282,7 +379,7 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export function beginPendingHermesAction(input: { actionId: string; actionType: HermesTicketActionType; payload: Record<string, unknown>; clientId: string; userId: string }) {
+export function beginPendingHermesAction(input: { actionId: string; actionType: HermesActionType; payload: Record<string, unknown>; clientId: string; userId: string }) {
   const stored = pendingActions.get(input.actionId);
   if (!stored || stored.expiresAt <= Date.now()) {
     pendingActions.delete(input.actionId);
@@ -308,7 +405,7 @@ export function releasePendingHermesAction(actionId: string): void {
   if (stored?.state === "EXECUTING") stored.state = "PENDING_APPROVAL";
 }
 
-export function cancelPendingHermesAction(input: { actionId: string; actionType: HermesTicketActionType; clientId: string; userId: string }): void {
+export function cancelPendingHermesAction(input: { actionId: string; actionType: HermesActionType; clientId: string; userId: string }): void {
   const stored = pendingActions.get(input.actionId);
   if (!stored || stored.expiresAt <= Date.now()) {
     pendingActions.delete(input.actionId);
@@ -663,6 +760,94 @@ export async function executeClientFunction(
       [clientId, ticket.chamadoId],
     ) as any[];
     return JSON.stringify({ chamado: ticket, atividades: activityRows });
+  }
+
+  if (functionName === "get_crm_summary") {
+    const [rows] = await pool.execute(
+      `SELECT COUNT(*) AS total,
+              SUM(lifecycle_state = 'active') AS active,
+              SUM(lifecycle_state = 'inactive') AS inactive,
+              SUM(status = 'lead') AS leads
+         FROM megadesk_crm_clients
+        WHERE client_id = ? AND lifecycle_state <> 'archived'`,
+      [clientId],
+    ) as any[];
+    return JSON.stringify({ resumo: rows[0] ?? { total: 0, active: 0, inactive: 0, leads: 0 } });
+  }
+
+  if (functionName === "get_client_360") {
+    const lookup = validatedArgs as { clientId?: string; search?: string };
+    const predicate = lookup.clientId ? "crm_client_id = ?" : "(company_name LIKE ? OR phone LIKE ? OR email LIKE ?)";
+    const lookupValue = lookup.clientId ?? `%${lookup.search}%`;
+    const clientValues = lookup.clientId ? [clientId, lookupValue] : [clientId, lookupValue, lookupValue, lookupValue];
+    const [clientRows] = await pool.execute(
+      `SELECT crm_client_id AS crmClientId, company_name AS name, responsible_name AS responsibleName,
+              phone, whatsapp, email, status, lifecycle_state AS lifecycleState, observations, created_at AS createdAt, updated_at AS updatedAt
+         FROM megadesk_crm_clients
+        WHERE client_id = ? AND lifecycle_state <> 'archived' AND ${predicate}
+        ORDER BY updated_at DESC LIMIT 1`,
+      clientValues,
+    ) as any[];
+    const crmClient = clientRows[0];
+    if (!crmClient) return JSON.stringify({ erro: "Cliente não encontrado neste tenant." });
+    const [timelineRows] = await pool.execute(
+      `SELECT timeline_id AS timelineId, entry_type AS type, description, author, created_at AS createdAt
+         FROM megadesk_crm_timeline
+        WHERE client_id = ? AND crm_client_id = ? ORDER BY created_at DESC LIMIT 30`,
+      [clientId, crmClient.crmClientId],
+    ) as any[];
+    const [ticketRows] = await pool.execute(
+      `SELECT chamadoId, chamadoNumber, title, status, priority, updatedAt
+         FROM megadesk_domain_chamados
+        WHERE clientId = ? AND customerId = ? ORDER BY updatedAt DESC LIMIT 20`,
+      [clientId, crmClient.crmClientId],
+    ) as any[];
+    const [conversationRows] = await pool.execute(
+      `SELECT conversation_id AS conversationId, status, last_message AS lastMessage, updated_at AS updatedAt
+         FROM megadesk_domain_conversations
+        WHERE client_id = ? AND crm_client_id = ? ORDER BY updated_at DESC LIMIT 20`,
+      [clientId, crmClient.crmClientId],
+    ) as any[];
+    return JSON.stringify({ cliente: crmClient, timeline: timelineRows, chamados: ticketRows, conversas: conversationRows });
+  }
+
+  if (functionName === "get_proposals_summary") {
+    const filters = validatedArgs as { status?: string; sellerId?: string; period?: string };
+    const where = ["client_id = ?", "document_type = 'quote'"];
+    const values: unknown[] = [clientId];
+    if (filters.status) { where.push("commercial_status = ?"); values.push(filters.status); }
+    if (filters.sellerId) { where.push("seller_user_id = ?"); values.push(filters.sellerId); }
+    if (filters.period) { where.push("created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)"); values.push(Number(filters.period)); }
+    const [rows] = await pool.execute(
+      `SELECT COUNT(*) AS total, COALESCE(SUM(total_cents), 0) AS totalCents,
+              SUM(commercial_status = 'draft') AS drafts, SUM(commercial_status = 'negotiation') AS negotiation,
+              SUM(commercial_status = 'approved') AS approved, SUM(commercial_status = 'lost') AS lost
+         FROM erp_sale_orders WHERE ${where.join(" AND ")}`,
+      values,
+    ) as any[];
+    return JSON.stringify({ resumo: rows[0] ?? { total: 0, totalCents: 0, drafts: 0, negotiation: 0, approved: 0, lost: 0 } });
+  }
+
+  if (functionName === "get_proposal_details") {
+    const lookup = validatedArgs as { proposalId?: string; proposalNumber?: string };
+    const predicate = lookup.proposalId ? "o.public_id = ?" : "o.order_number = ?";
+    const [orderRows] = await pool.execute(
+      `SELECT o.id, o.public_id AS publicId, o.order_number AS orderNumber, o.commercial_status AS commercialStatus,
+              o.total_cents AS totalCents, o.notes, o.payment_terms_snapshot AS paymentTerms, o.created_at AS createdAt,
+              c.crm_client_id AS crmClientId, c.company_name AS clientName, c.phone AS clientPhone
+         FROM erp_sale_orders o JOIN megadesk_crm_clients c ON c.crm_client_id = o.crm_client_id AND c.client_id = o.client_id
+        WHERE o.client_id = ? AND o.document_type = 'quote' AND ${predicate} LIMIT 1`,
+      [clientId, lookup.proposalId ?? lookup.proposalNumber],
+    ) as any[];
+    const proposal = orderRows[0];
+    if (!proposal) return JSON.stringify({ erro: "Proposta não encontrada neste tenant." });
+    const [itemRows] = await pool.execute(
+      `SELECT public_id AS publicId, product_name_snapshot AS productName, sku_snapshot AS sku, quantity,
+              unit_price_cents AS unitPriceCents, discount_cents AS discountCents, line_total_cents AS lineTotalCents
+         FROM erp_sale_order_items WHERE sale_order_id = ? ORDER BY id ASC`,
+      [proposal.id],
+    ) as any[];
+    return JSON.stringify({ proposta: proposal, itens: itemRows });
   }
 
   if (functionName === "get_conversations_summary") {

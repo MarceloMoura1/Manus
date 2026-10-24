@@ -225,17 +225,69 @@ describe("Hermes security controls", () => {
       "update_ticket_status",
       "assign_ticket",
       "add_ticket_activity",
+      "get_crm_summary",
+      "get_client_360",
+      "create_client",
+      "update_client",
+      "add_client_timeline_event",
+      "get_proposals_summary",
+      "get_proposal_details",
+      "create_proposal",
+      "update_proposal_status",
+      "send_proposal_whatsapp",
       "get_conversations_summary",
       "get_erp_products",
     ]);
     expect(HERMES_TOOL_REGISTRY.filter(tool => tool.type === "MUTATION").map(tool => tool.actionType)).toEqual([
       "CREATE_TICKET", "UPDATE_TICKET_STATUS", "ASSIGN_TICKET", "ADD_TICKET_ACTIVITY",
+      "CREATE_CLIENT", "UPDATE_CLIENT", "ADD_CLIENT_TIMELINE", "CREATE_PROPOSAL", "UPDATE_PROPOSAL_STATUS", "SEND_PROPOSAL_WHATSAPP",
     ]);
   });
 
   it("does not expose or authorize a sales tool without an ERP/sales permission", () => {
     expect(getAllowedHermesTools(["ai-assistant"]).map(tool => tool.name)).not.toContain("get_sales_summary");
     expect(getAuthorizedHermesTool("get_sales_summary", ["ai-assistant"])).toBeNull();
+  });
+
+  it("does not expose CRM or proposal tools without a corresponding operational permission", () => {
+    const tools = getAllowedHermesTools(["ai-assistant"]).map(tool => tool.name);
+    expect(tools).not.toContain("get_crm_summary");
+    expect(tools).not.toContain("create_client");
+    expect(tools).not.toContain("get_proposals_summary");
+    expect(getAuthorizedHermesTool("create_proposal", ["ai-assistant"])).toBeNull();
+  });
+
+  it("runs CRM summary only with the authenticated tenant predicate", async () => {
+    const execute = vi.fn(async () => [[{ total: 3, active: 2, inactive: 1, leads: 1 }]]);
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    const response = JSON.parse(await executeClientFunction("get_crm_summary", {}, "tenant-a", ["crm"]));
+    expect(response.resumo.total).toBe(3);
+    expect(execute.mock.calls[0]?.[0]).toContain("client_id = ?");
+    expect(execute.mock.calls[0]?.[1]).toEqual(["tenant-a"]);
+  });
+
+  it("loads the 360 view only through tenant-scoped CRM, timeline, ticket, and conversation queries", async () => {
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM megadesk_crm_clients")) return [[{ crmClientId: "crm-a", name: "Cliente" }]];
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    const response = JSON.parse(await executeClientFunction("get_client_360", { clientId: "crm-a" }, "tenant-a", ["clients"]));
+    expect(response.cliente.crmClientId).toBe("crm-a");
+    expect(execute).toHaveBeenCalledTimes(4);
+    for (const [, values] of execute.mock.calls) expect(values).toEqual(expect.arrayContaining(["tenant-a"]));
+  });
+
+  it("creates a tenant-owned CRM action request and rejects a forged payload", () => {
+    const tool = HERMES_TOOL_REGISTRY.find(item => item.name === "create_client")!;
+    const request = createPendingActionRequest(tool, { name: "Cliente CRM", phone: "11999999999" }, { clientId: "tenant-a", userId: "owner@example.invalid" });
+    expect(() => beginPendingHermesAction({
+      actionId: request.id, actionType: "CREATE_CLIENT", clientId: "tenant-a", userId: "owner@example.invalid",
+      payload: { name: "Outro cliente", phone: "11999999999" },
+    })).toThrow("payload");
+    expect(beginPendingHermesAction({
+      actionId: request.id, actionType: "CREATE_CLIENT", clientId: "tenant-a", userId: "owner@example.invalid", payload: request.args,
+    }).actionType).toBe("CREATE_CLIENT");
   });
 
   it("runs the tickets overview only with the authenticated tenant predicate", async () => {

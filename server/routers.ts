@@ -48,6 +48,7 @@ import { emitOperationalTenantEventAsync } from "./modules/whatsapp/socket/whats
 import { classifyAssistantFailure } from "./assistant-error";
 import { hermesRouter } from "./modules/admin/hermes";
 import { executeHermesTicketAction } from "./hermes-ticket-actions";
+import { executeHermesCrmAction } from "./hermes-crm-actions";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -383,11 +384,24 @@ function sessionBoundAssistantUserId(requestedUserId: string, sessionUserEmail: 
   return expected;
 }
 
-function assertAssistantTicketPermission(client: MegaClient, userEmail: string) {
+const hermesTicketActionTypes = ["CREATE_TICKET", "UPDATE_TICKET_STATUS", "ASSIGN_TICKET", "ADD_TICKET_ACTIVITY"] as const;
+const hermesCrmActionTypes = ["CREATE_CLIENT", "UPDATE_CLIENT", "ADD_CLIENT_TIMELINE", "CREATE_PROPOSAL", "UPDATE_PROPOSAL_STATUS", "SEND_PROPOSAL_WHATSAPP"] as const;
+const hermesActionTypes = [...hermesTicketActionTypes, ...hermesCrmActionTypes] as const;
+
+function isHermesTicketAction(actionType: string): actionType is typeof hermesTicketActionTypes[number] {
+  return (hermesTicketActionTypes as readonly string[]).includes(actionType);
+}
+
+function assertAssistantActionPermission(client: MegaClient, userEmail: string, actionType: typeof hermesActionTypes[number]) {
   const user = assertClientUserPermission(client, "ai-assistant", userEmail);
-  if (!user.permissions.some(permission => permission === "tickets" || permission === "support")) {
-    audit("MegaDesk", `Usuário ${user.email} sem permissão de chamados para Hermes`, client.clientId, false);
-    throw new TRPCError({ code: "FORBIDDEN", message: "Você não possui permissão para executar ações no módulo de chamados." });
+  const required = isHermesTicketAction(actionType)
+    ? ["tickets", "support"]
+    : actionType === "CREATE_CLIENT" || actionType === "UPDATE_CLIENT" || actionType === "ADD_CLIENT_TIMELINE"
+      ? ["crm", "clients"]
+      : ["sales", "crm", "proposals"];
+  if (!user.permissions.some(permission => required.includes(permission))) {
+    audit("MegaDesk", `Usuário ${user.email} sem permissão operacional para ${actionType} no Hermes`, client.clientId, false);
+    throw new TRPCError({ code: "FORBIDDEN", message: "Você não possui permissão para executar esta ação neste módulo." });
   }
   return user;
 }
@@ -1838,7 +1852,7 @@ export const appRouter = router({
     /** Executes only a registry action that this authenticated user explicitly approved. */
     executeAction: megadeskProcedure
       .input(z.object({
-        actionType: z.enum(["CREATE_TICKET", "UPDATE_TICKET_STATUS", "ASSIGN_TICKET", "ADD_TICKET_ACTIVITY"]),
+        actionType: z.enum(hermesActionTypes),
         payload: z.record(z.string(), z.unknown()),
         actionId: z.string().regex(/^action-[A-Za-z0-9_-]{8,}$/),
       }).strict())
@@ -1848,25 +1862,33 @@ export const appRouter = router({
         if (!userId) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão de usuário ausente." });
         await hydrateSyncState();
         const client = getReleasedClientOrThrow(ctx.tenantId, "Assistente IA");
-        const user = assertAssistantTicketPermission(client, userId);
+        const user = assertAssistantActionPermission(client, userId, input.actionType);
         try {
           const pending = beginPendingHermesAction({ ...input, clientId: ctx.tenantId, userId });
           const tool = getAuthorizedHermesTool(pending.toolName, user.permissions);
           if (!tool || tool.type !== "MUTATION" || tool.actionType !== pending.actionType) {
             throw new TRPCError({ code: "FORBIDDEN", message: "Você não possui permissão para executar esta ação." });
           }
-          const result = await executeHermesTicketAction({
-            clientId: ctx.tenantId,
-            actorUserId: user.id,
-            action: { actionType: pending.actionType, args: pending.args },
-            resolveAssignee: async reference => {
-              const normalized = reference.trim().toLocaleLowerCase();
-              const matches = client.users.filter(candidate => candidate.status === "active" && (
-                candidate.id === reference || candidate.name.trim().toLocaleLowerCase() === normalized
-              ));
-              return matches.length === 1 ? { userId: matches[0].id, userName: matches[0].name } : null;
-            },
-          });
+          const result = isHermesTicketAction(pending.actionType)
+            ? await executeHermesTicketAction({
+              clientId: ctx.tenantId,
+              actorUserId: user.id,
+              action: { actionType: pending.actionType, args: pending.args },
+              resolveAssignee: async reference => {
+                const normalized = reference.trim().toLocaleLowerCase();
+                const matches = client.users.filter(candidate => candidate.status === "active" && (
+                  candidate.id === reference || candidate.name.trim().toLocaleLowerCase() === normalized
+                ));
+                return matches.length === 1 ? { userId: matches[0].id, userName: matches[0].name } : null;
+              },
+            })
+            : await executeHermesCrmAction({
+              tenantId: ctx.tenantId,
+              userId: user.id,
+              userName: user.name,
+              role: user.role === "admin" ? "admin" : user.role === "manager" ? "manager" : user.role === "viewer" ? "viewer" : "agent",
+              action: { actionType: pending.actionType, args: pending.args },
+            });
           completePendingHermesAction(input.actionId);
           audit("MegaDesk", `Hermes executou ${pending.actionType} após aprovação humana`, ctx.tenantId);
           return result;
@@ -1881,7 +1903,7 @@ export const appRouter = router({
     /** Cancels a proposal without writing to the tickets database. */
     cancelAction: megadeskProcedure
       .input(z.object({
-        actionType: z.enum(["CREATE_TICKET", "UPDATE_TICKET_STATUS", "ASSIGN_TICKET", "ADD_TICKET_ACTIVITY"]),
+        actionType: z.enum(hermesActionTypes),
         actionId: z.string().regex(/^action-[A-Za-z0-9_-]{8,}$/),
       }).strict())
       .mutation(async ({ input, ctx }) => {
@@ -1890,7 +1912,7 @@ export const appRouter = router({
         if (!userId) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão de usuário ausente." });
         await hydrateSyncState();
         const client = getReleasedClientOrThrow(ctx.tenantId, "Assistente IA");
-        assertAssistantTicketPermission(client, userId);
+        assertAssistantActionPermission(client, userId, input.actionType);
         try {
           cancelPendingHermesAction({ ...input, clientId: ctx.tenantId, userId });
           return { success: true, message: "Ação cancelada. Nenhuma alteração foi executada." };
