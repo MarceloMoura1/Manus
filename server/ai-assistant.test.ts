@@ -230,7 +230,7 @@ describe("ChatResult structure", () => {
   });
 
   it("uses the responsive Gemini Flash Lite model by default", () => {
-    expect(DEFAULT_GEMINI_MODEL).toBe("gemini-2.5-flash-lite");
+    expect(DEFAULT_GEMINI_MODEL).toBe("gemini-3.5-flash-lite");
   });
 });
 
