@@ -47,6 +47,7 @@ import { sanitizeMegaAdminUser } from "./megaadmin-response-sanitization";
 import { emitOperationalTenantEventAsync } from "./modules/whatsapp/socket/whatsapp.socket";
 import { classifyAssistantFailure } from "./assistant-error";
 import { hermesRouter } from "./modules/admin/hermes";
+import { executeHermesTicketAction } from "./hermes-ticket-actions";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -380,6 +381,15 @@ function sessionBoundAssistantUserId(requestedUserId: string, sessionUserEmail: 
     throw new TRPCError({ code: "FORBIDDEN", message: "Identidade de usuário inválida." });
   }
   return expected;
+}
+
+function assertAssistantTicketPermission(client: MegaClient, userEmail: string) {
+  const user = assertClientUserPermission(client, "ai-assistant", userEmail);
+  if (!user.permissions.some(permission => permission === "tickets" || permission === "support")) {
+    audit("MegaDesk", `Usuário ${user.email} sem permissão de chamados para Hermes`, client.clientId, false);
+    throw new TRPCError({ code: "FORBIDDEN", message: "Você não possui permissão para executar ações no módulo de chamados." });
+  }
+  return user;
 }
 
 async function emitConversationEventBestEffort(clientId: string, event: string, payload: unknown): Promise<void> {
@@ -1825,6 +1835,70 @@ export const appRouter = router({
       }),
 
     // ── Carrega histórico de conversa do usuário ──
+    /** Executes only a registry action that this authenticated user explicitly approved. */
+    executeAction: megadeskProcedure
+      .input(z.object({
+        actionType: z.enum(["CREATE_TICKET", "UPDATE_TICKET_STATUS", "ASSIGN_TICKET", "ADD_TICKET_ACTIVITY"]),
+        payload: z.record(z.string(), z.unknown()),
+        actionId: z.string().regex(/^action-[A-Za-z0-9_-]{8,}$/),
+      }).strict())
+      .mutation(async ({ input, ctx }) => {
+        const { beginPendingHermesAction, completePendingHermesAction, getAuthorizedHermesTool, releasePendingHermesAction } = await import("./gemini-client");
+        const userId = ctx.userEmail?.trim().toLowerCase();
+        if (!userId) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão de usuário ausente." });
+        await hydrateSyncState();
+        const client = getReleasedClientOrThrow(ctx.tenantId, "Assistente IA");
+        const user = assertAssistantTicketPermission(client, userId);
+        try {
+          const pending = beginPendingHermesAction({ ...input, clientId: ctx.tenantId, userId });
+          const tool = getAuthorizedHermesTool(pending.toolName, user.permissions);
+          if (!tool || tool.type !== "MUTATION" || tool.actionType !== pending.actionType) {
+            throw new TRPCError({ code: "FORBIDDEN", message: "Você não possui permissão para executar esta ação." });
+          }
+          const result = await executeHermesTicketAction({
+            clientId: ctx.tenantId,
+            actorUserId: user.id,
+            action: { actionType: pending.actionType, args: pending.args },
+            resolveAssignee: async reference => {
+              const normalized = reference.trim().toLocaleLowerCase();
+              const matches = client.users.filter(candidate => candidate.status === "active" && (
+                candidate.id === reference || candidate.name.trim().toLocaleLowerCase() === normalized
+              ));
+              return matches.length === 1 ? { userId: matches[0].id, userName: matches[0].name } : null;
+            },
+          });
+          completePendingHermesAction(input.actionId);
+          audit("MegaDesk", `Hermes executou ${pending.actionType} após aprovação humana`, ctx.tenantId);
+          return result;
+        } catch (error) {
+          releasePendingHermesAction(input.actionId);
+          if (error instanceof TRPCError) throw error;
+          console.error("[Assistant] Approved Hermes action failed.", { actionType: input.actionType, error: error instanceof Error ? error.message : "unknown" });
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Não foi possível executar a ação aprovada. Verifique os dados e tente novamente." });
+        }
+      }),
+
+    /** Cancels a proposal without writing to the tickets database. */
+    cancelAction: megadeskProcedure
+      .input(z.object({
+        actionType: z.enum(["CREATE_TICKET", "UPDATE_TICKET_STATUS", "ASSIGN_TICKET", "ADD_TICKET_ACTIVITY"]),
+        actionId: z.string().regex(/^action-[A-Za-z0-9_-]{8,}$/),
+      }).strict())
+      .mutation(async ({ input, ctx }) => {
+        const { cancelPendingHermesAction } = await import("./gemini-client");
+        const userId = ctx.userEmail?.trim().toLowerCase();
+        if (!userId) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão de usuário ausente." });
+        await hydrateSyncState();
+        const client = getReleasedClientOrThrow(ctx.tenantId, "Assistente IA");
+        assertAssistantTicketPermission(client, userId);
+        try {
+          cancelPendingHermesAction({ ...input, clientId: ctx.tenantId, userId });
+          return { success: true, message: "Ação cancelada. Nenhuma alteração foi executada." };
+        } catch {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Ação pendente ausente, expirada ou não autorizada." });
+        }
+      }),
+
     getHistory: megadeskProcedure
       .input(z.object({
         clientId: z.string().min(1),

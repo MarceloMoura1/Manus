@@ -3,15 +3,24 @@
  * Valida: estrutura de mensagens, histórico, function calling, token por cliente
  */
 import { describe, it, expect, vi } from "vitest";
+vi.mock("./db", async importOriginal => ({
+  ...(await importOriginal<typeof import("./db")>()),
+  getPool: vi.fn(),
+}));
+import { getPool } from "./db";
 import {
   HERMES_TOOL_REGISTRY,
+  beginPendingHermesAction,
+  cancelPendingHermesAction,
   createPendingActionRequest,
+  executeClientFunction,
   getAllowedHermesTools,
   getAuthorizedHermesTool,
   insertTokenUsage,
   readMonthlyTokenUsage,
   type HermesToolDefinition,
 } from "./gemini-client";
+import { executeHermesTicketAction } from "./hermes-ticket-actions";
 
 // ─── Testes de estrutura de mensagem ─────────────────────────────────────────
 
@@ -210,10 +219,18 @@ describe("Hermes security controls", () => {
     expect(HERMES_TOOL_REGISTRY.map(tool => tool.name)).toEqual([
       "get_sales_summary",
       "get_open_tickets",
+      "get_tickets_overview",
+      "get_ticket_details",
+      "create_ticket",
+      "update_ticket_status",
+      "assign_ticket",
+      "add_ticket_activity",
       "get_conversations_summary",
       "get_erp_products",
     ]);
-    expect(HERMES_TOOL_REGISTRY.every(tool => tool.type === "READ")).toBe(true);
+    expect(HERMES_TOOL_REGISTRY.filter(tool => tool.type === "MUTATION").map(tool => tool.actionType)).toEqual([
+      "CREATE_TICKET", "UPDATE_TICKET_STATUS", "ASSIGN_TICKET", "ADD_TICKET_ACTIVITY",
+    ]);
   });
 
   it("does not expose or authorize a sales tool without an ERP/sales permission", () => {
@@ -221,9 +238,40 @@ describe("Hermes security controls", () => {
     expect(getAuthorizedHermesTool("get_sales_summary", ["ai-assistant"])).toBeNull();
   });
 
+  it("runs the tickets overview only with the authenticated tenant predicate", async () => {
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("COUNT(*) AS total")) return [[{ total: 1, open: 1, in_progress: 0, waiting: 0, closed: 0 }]];
+      return [[{ chamadoId: "ticket-a", title: "Acesso" }]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+    const response = JSON.parse(await executeClientFunction("get_tickets_overview", { status: "open", search: "Acesso", limit: 5 }, "tenant-a", ["tickets"]));
+    expect(response.resumo.total).toBe(1);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[0]?.[0]).toContain("clientId = ?");
+    expect(execute.mock.calls[0]?.[1]).toEqual(expect.arrayContaining(["tenant-a", "open"]));
+    expect(execute.mock.calls[1]?.[1]).toEqual(expect.arrayContaining(["tenant-a", 5]));
+  });
+
+  it("loads ticket details and activities with tenant-scoped parameters", async () => {
+    const execute = vi.fn(async (sql: string) => sql.includes("FROM megadesk_domain_chamados")
+      ? [[{ chamadoId: "ticket-a", chamadoNumber: 9, title: "Acesso" }]]
+      : [[{ activityId: "activity-a", description: "Criado" }]],
+    );
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+    const response = JSON.parse(await executeClientFunction("get_ticket_details", { ticketId: "ticket-a" }, "tenant-a", ["support"]));
+    expect(response.chamado.chamadoId).toBe("ticket-a");
+    expect(response.atividades).toHaveLength(1);
+    expect(execute.mock.calls[0]?.[1]).toEqual(["tenant-a", "ticket-a"]);
+    expect(execute.mock.calls[1]?.[1]).toEqual(["tenant-a", "ticket-a"]);
+  });
+
   it("authorizes only the tool covered by an operational permission", () => {
-    expect(getAllowedHermesTools(["tickets"]).map(tool => tool.name)).toEqual(["get_open_tickets"]);
-    expect(getAuthorizedHermesTool("get_open_tickets", ["tickets"])?.type).toBe("READ");
+    expect(getAllowedHermesTools(["tickets"]).map(tool => tool.name)).toEqual([
+      "get_open_tickets", "get_tickets_overview", "get_ticket_details", "create_ticket", "update_ticket_status", "assign_ticket", "add_ticket_activity",
+    ]);
+    expect(getAuthorizedHermesTool("create_ticket", ["tickets"])?.type).toBe("MUTATION");
   });
 
   it("creates a pending request instead of executing a mutation", () => {
@@ -231,6 +279,7 @@ describe("Hermes security controls", () => {
     const mutation: HermesToolDefinition = {
       name: "create_ticket",
       type: "MUTATION",
+      actionType: "CREATE_TICKET",
       requiredPermissions: ["tickets"],
       declaration: { name: "create_ticket", description: "Creates a ticket after approval.", parameters: { type: "OBJECT", properties: {}, required: [] } },
       validateArgs,
@@ -238,8 +287,66 @@ describe("Hermes security controls", () => {
 
     const request = createPendingActionRequest(mutation, { title: "Retorno ao cliente" });
     expect(validateArgs).toHaveBeenCalledWith({ title: "Retorno ao cliente" });
-    expect(request).toMatchObject({ toolName: "create_ticket", type: "MUTATION", status: "PENDING_APPROVAL", args: { title: "Retorno ao cliente" } });
+    expect(request).toMatchObject({ toolName: "create_ticket", type: "MUTATION", actionType: "CREATE_TICKET", status: "PENDING_APPROVAL", args: { title: "Retorno ao cliente" } });
     expect(request.id).toMatch(/^action-/);
+  });
+
+  it("stores a pending ticket mutation for its owner and rejects a forged payload", () => {
+    const tool = HERMES_TOOL_REGISTRY.find(item => item.name === "create_ticket")!;
+    const request = createPendingActionRequest(tool, {
+      title: "Retorno ao cliente", description: "Solicitação recebida", priority: "high", clientNameOuId: "crm-1",
+    }, { clientId: "tenant-a", userId: "user@example.invalid" });
+
+    expect(() => beginPendingHermesAction({
+      actionId: request.id, actionType: "CREATE_TICKET", clientId: "tenant-a", userId: "user@example.invalid",
+      payload: { title: "Alterado", description: "Solicitação recebida", priority: "high", clientNameOuId: "crm-1" },
+    })).toThrow("payload");
+
+    const pending = beginPendingHermesAction({
+      actionId: request.id, actionType: "CREATE_TICKET", clientId: "tenant-a", userId: "user@example.invalid",
+      payload: request.args,
+    });
+    expect(pending.args).toEqual(request.args);
+  });
+
+  it("does not let a different tenant or user cancel a pending action", () => {
+    const tool = HERMES_TOOL_REGISTRY.find(item => item.name === "add_ticket_activity")!;
+    const request = createPendingActionRequest(tool, { ticketId: "ticket-a", noteContent: "Nota" }, { clientId: "tenant-a", userId: "owner@example.invalid" });
+    expect(() => cancelPendingHermesAction({
+      actionId: request.id, actionType: "ADD_TICKET_ACTIVITY", clientId: "tenant-b", userId: "owner@example.invalid",
+    })).toThrow("não pertence");
+  });
+
+  it("executes an approved create-ticket action through the canonical ticket service", async () => {
+    const createChamadoWithActivity = vi.fn(async () => ({ id: "ticket-1", number: 7 }));
+    const result = await executeHermesTicketAction({
+      clientId: "tenant-a",
+      actorUserId: "operator-1",
+      action: { actionType: "CREATE_TICKET", args: { title: "Sem acesso", description: "Cliente precisa de retorno", priority: "urgent", clientNameOuId: "crm-1", category: "Acesso" } },
+      resolveAssignee: vi.fn(),
+    }, {
+      getActiveClientUser: vi.fn(async () => ({ userId: "operator-1", userName: "Operadora" })),
+      getChamadoWithActivities: vi.fn(),
+      getCrmClientById: vi.fn(async () => ({ crmClientId: "crm-1", lifecycleState: "active", companyName: "Cliente A", responsibleName: "", customerType: "company" })),
+      listCrmClients: vi.fn(),
+      createChamadoWithActivity,
+      updateChamadoWithActivity: vi.fn(),
+      registerManualTicketActivity: vi.fn(),
+    } as any);
+
+    expect(result).toEqual({ success: true, message: "Chamado #7 criado com sucesso.", entityId: "ticket-1" });
+    expect(createChamadoWithActivity).toHaveBeenCalledWith(expect.objectContaining({ clientId: "tenant-a", priority: "critica", observations: expect.stringContaining("Categoria: Acesso") }));
+  });
+
+  it("fails closed before ticket writes when the canonical actor is not active", async () => {
+    const createChamadoWithActivity = vi.fn();
+    await expect(executeHermesTicketAction({
+      clientId: "tenant-a", actorUserId: "blocked", action: { actionType: "ADD_TICKET_ACTIVITY", args: { ticketId: "ticket-a", noteContent: "Nota" } }, resolveAssignee: vi.fn(),
+    }, {
+      getActiveClientUser: vi.fn(async () => null), getChamadoWithActivities: vi.fn(), getCrmClientById: vi.fn(), listCrmClients: vi.fn(), createChamadoWithActivity,
+      updateChamadoWithActivity: vi.fn(), registerManualTicketActivity: vi.fn(),
+    } as any)).rejects.toThrow("ACTOR_NOT_ACTIVE");
+    expect(createChamadoWithActivity).not.toHaveBeenCalled();
   });
 
   it("fails closed when monthly token usage cannot be read", async () => {

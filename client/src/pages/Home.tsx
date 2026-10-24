@@ -3806,7 +3806,16 @@ function AIAssistantPage() {
     content: string;
     timestamp: number;
     functionCalls?: string[];
-    pendingActionRequest?: { id: string; toolName: string; type: "MUTATION"; status: "PENDING_APPROVAL" };
+    pendingActionRequest?: {
+      id: string;
+      toolName: string;
+      type: "MUTATION";
+      actionType: "CREATE_TICKET" | "UPDATE_TICKET_STATUS" | "ASSIGN_TICKET" | "ADD_TICKET_ACTIVITY";
+      args: Record<string, unknown>;
+      status: "PENDING_APPROVAL";
+    };
+    actionState?: "EXECUTING" | "EXECUTED" | "CANCELLED" | "FAILED";
+    actionMessage?: string;
   };
 
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
@@ -3856,6 +3865,42 @@ function AIAssistantPage() {
 
   const chatMutation = trpc.assistant.clientChat.useMutation();
   const clearHistoryMutation = trpc.assistant.clearHistory.useMutation();
+  const executeActionMutation = trpc.assistant.executeAction.useMutation();
+  const cancelActionMutation = trpc.assistant.cancelAction.useMutation();
+
+  const updatePendingActionCard = (actionId: string, patch: Pick<ChatMessage, "actionState" | "actionMessage">) => {
+    setMessages(previous => previous.map(message => message.pendingActionRequest?.id === actionId ? { ...message, ...patch } : message));
+  };
+
+  const confirmPendingAction = async (request: NonNullable<ChatMessage["pendingActionRequest"]>) => {
+    if (executeActionMutation.isPending || cancelActionMutation.isPending) return;
+    updatePendingActionCard(request.id, { actionState: "EXECUTING", actionMessage: "Executando a ação aprovada…" });
+    try {
+      const result = await executeActionMutation.mutateAsync({
+        actionId: request.id,
+        actionType: request.actionType,
+        payload: request.args,
+      });
+      updatePendingActionCard(request.id, { actionState: "EXECUTED", actionMessage: result.message });
+      setMessages(previous => [...previous, {
+        role: "assistant",
+        content: `✓ ${result.message}`,
+        timestamp: Date.now(),
+      }]);
+    } catch (error: any) {
+      updatePendingActionCard(request.id, { actionState: "FAILED", actionMessage: error?.message ?? "Não foi possível executar a ação." });
+    }
+  };
+
+  const cancelPendingAction = async (request: NonNullable<ChatMessage["pendingActionRequest"]>) => {
+    if (executeActionMutation.isPending || cancelActionMutation.isPending) return;
+    try {
+      await cancelActionMutation.mutateAsync({ actionId: request.id, actionType: request.actionType });
+      updatePendingActionCard(request.id, { actionState: "CANCELLED", actionMessage: "Ação cancelada. Nenhuma alteração foi executada." });
+    } catch (error: any) {
+      updatePendingActionCard(request.id, { actionState: "FAILED", actionMessage: error?.message ?? "Não foi possível cancelar a ação." });
+    }
+  };
 
   const handleSend = async () => {
     const text = input.trim();
@@ -4021,9 +4066,30 @@ function AIAssistantPage() {
                 </div>
               )}
               {msg.pendingActionRequest && (
-                <div className="mt-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                  <p className="font-semibold">Ação aguardando aprovação</p>
-                  <p className="mt-0.5">{msg.pendingActionRequest.toolName.replace(/_/g, " ")} — nenhuma alteração foi executada.</p>
+                <div className="mt-2 rounded-xl border border-sky-500/40 bg-slate-900/90 p-4 text-xs text-slate-100 shadow-sm">
+                  <p className="font-semibold text-sky-200">Ação sugerida pelo Hermes que requer sua aprovação</p>
+                  <p className="mt-1 text-slate-300">{msg.pendingActionRequest.toolName.replace(/_/g, " ")} — nenhuma alteração foi executada.</p>
+                  <dl className="mt-3 grid gap-1.5 rounded-lg border border-slate-700/80 bg-slate-950/60 p-2.5 text-slate-300">
+                    {Object.entries(msg.pendingActionRequest.args).map(([key, value]) => (
+                      <div key={key} className="flex items-start justify-between gap-3">
+                        <dt className="capitalize text-slate-500">{key.replace(/([A-Z])/g, " $1")}</dt>
+                        <dd className="max-w-[60%] break-words text-right text-slate-200">{typeof value === "boolean" ? (value ? "Sim" : "Não") : String(value)}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {msg.actionMessage && (
+                    <p className={`mt-3 ${msg.actionState === "FAILED" ? "text-rose-300" : msg.actionState === "EXECUTED" ? "text-emerald-300" : "text-slate-300"}`}>{msg.actionMessage}</p>
+                  )}
+                  {!msg.actionState && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button size="sm" className="bg-sky-600 text-white hover:bg-sky-500" onClick={() => void confirmPendingAction(msg.pendingActionRequest!)}>
+                        Confirmar e Executar
+                      </Button>
+                      <Button size="sm" variant="outline" className="border-slate-600 bg-transparent text-slate-200 hover:bg-slate-800" onClick={() => void cancelPendingAction(msg.pendingActionRequest!)}>
+                        Cancelar
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
               <p className="text-xs text-slate-400 mt-1 px-1">

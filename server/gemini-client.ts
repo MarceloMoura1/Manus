@@ -29,6 +29,7 @@ export interface ChatResult {
 
 export type HermesToolType = "READ" | "MUTATION";
 export type HermesPermission = string;
+export type HermesTicketActionType = "CREATE_TICKET" | "UPDATE_TICKET_STATUS" | "ASSIGN_TICKET" | "ADD_TICKET_ACTIVITY";
 
 export interface GeminiFunctionDeclaration {
   name: string;
@@ -42,15 +43,23 @@ export interface HermesToolDefinition {
   requiredPermissions: readonly HermesPermission[];
   declaration: GeminiFunctionDeclaration;
   validateArgs: (args: Record<string, unknown>) => Record<string, unknown>;
+  actionType?: HermesTicketActionType;
 }
 
 export interface PendingActionRequest {
   id: string;
   toolName: string;
   type: "MUTATION";
+  actionType: HermesTicketActionType;
   args: Record<string, unknown>;
   status: "PENDING_APPROVAL";
 }
+
+type PendingActionOwner = { clientId: string; userId: string };
+type StoredPendingAction = PendingActionRequest & PendingActionOwner & {
+  expiresAt: number;
+  state: "PENDING_APPROVAL" | "EXECUTING";
+};
 
 type SqlExecutor = (sql: string, values: unknown[]) => Promise<unknown>;
 
@@ -60,6 +69,101 @@ const noArguments = (args: Record<string, unknown>): Record<string, unknown> => 
   }
   return {};
 };
+
+const HERMES_ACTION_TTL_MS = 10 * 60 * 1_000;
+const pendingActions = new Map<string, StoredPendingAction>();
+
+function objectArgs(args: Record<string, unknown>): Record<string, unknown> {
+  if (!args || Array.isArray(args)) throw new Error("Parâmetros de ferramenta inválidos.");
+  return args;
+}
+
+function stringArg(args: Record<string, unknown>, key: string, options: { min?: number; max?: number; optional?: boolean } = {}): string | undefined {
+  const value = args[key];
+  if (value === undefined || value === null) {
+    if (options.optional) return undefined;
+    throw new Error(`Parâmetro obrigatório ausente: ${key}.`);
+  }
+  if (typeof value !== "string") throw new Error(`Parâmetro inválido: ${key}.`);
+  const normalized = value.trim();
+  if ((options.min ?? 1) > normalized.length || normalized.length > (options.max ?? 2_000)) {
+    throw new Error(`Tamanho inválido para ${key}.`);
+  }
+  return normalized;
+}
+
+function enumArg<T extends readonly string[]>(args: Record<string, unknown>, key: string, allowed: T): T[number] {
+  const value = stringArg(args, key, { max: 80 });
+  if (!value || !allowed.includes(value)) throw new Error(`Valor inválido para ${key}.`);
+  return value as T[number];
+}
+
+function optionalLimit(args: Record<string, unknown>): number | undefined {
+  if (args.limit === undefined) return undefined;
+  const value = Number(args.limit);
+  if (!Number.isInteger(value) || value < 1 || value > 20) throw new Error("limit deve ser um inteiro entre 1 e 20.");
+  return value;
+}
+
+function rejectUnknownArgs(args: Record<string, unknown>, allowed: readonly string[]) {
+  if (Object.keys(args).some(key => !allowed.includes(key))) throw new Error("Parâmetros não permitidos para esta ferramenta.");
+}
+
+function ticketOverviewArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["status", "search", "limit"]);
+  const status = args.status === undefined ? undefined : enumArg(args, "status", ["open", "in_progress", "waiting", "closed"] as const);
+  const search = stringArg(args, "search", { min: 1, max: 180, optional: true });
+  const limit = optionalLimit(args);
+  return { ...(status ? { status } : {}), ...(search ? { search } : {}), ...(limit ? { limit } : {}) };
+}
+
+function ticketDetailsArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["ticketId", "ticketNumber"]);
+  const ticketId = stringArg(args, "ticketId", { min: 1, max: 80, optional: true });
+  const ticketNumber = args.ticketNumber === undefined ? undefined : Number(args.ticketNumber);
+  if (ticketNumber !== undefined && (!Number.isInteger(ticketNumber) || ticketNumber < 1)) throw new Error("ticketNumber inválido.");
+  if ((ticketId ? 1 : 0) + (ticketNumber ? 1 : 0) !== 1) throw new Error("Informe exatamente ticketId ou ticketNumber.");
+  return ticketId ? { ticketId } : { ticketNumber };
+}
+
+function createTicketArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["title", "description", "priority", "clientNameOuId", "category"]);
+  return {
+    title: stringArg(args, "title", { min: 1, max: 500 })!,
+    description: stringArg(args, "description", { min: 1, max: 2_000 })!,
+    priority: enumArg(args, "priority", ["low", "medium", "high", "urgent"] as const),
+    clientNameOuId: stringArg(args, "clientNameOuId", { min: 1, max: 180 })!,
+    ...(stringArg(args, "category", { min: 1, max: 120, optional: true }) ? { category: stringArg(args, "category", { min: 1, max: 120, optional: true }) } : {}),
+  };
+}
+
+function updateTicketStatusArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["ticketId", "newStatus", "resolutionNotes"]);
+  return {
+    ticketId: stringArg(args, "ticketId", { min: 1, max: 80 })!,
+    newStatus: enumArg(args, "newStatus", ["open", "in_progress", "resolved", "closed"] as const),
+    ...(stringArg(args, "resolutionNotes", { min: 1, max: 2_000, optional: true }) ? { resolutionNotes: stringArg(args, "resolutionNotes", { min: 1, max: 2_000, optional: true }) } : {}),
+  };
+}
+
+function assignTicketArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["ticketId", "assigneeNameOuId", "transferReason"]);
+  return {
+    ticketId: stringArg(args, "ticketId", { min: 1, max: 80 })!,
+    assigneeNameOuId: stringArg(args, "assigneeNameOuId", { min: 1, max: 180 })!,
+    ...(stringArg(args, "transferReason", { min: 1, max: 2_000, optional: true }) ? { transferReason: stringArg(args, "transferReason", { min: 1, max: 2_000, optional: true }) } : {}),
+  };
+}
+
+function addTicketActivityArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["ticketId", "noteContent", "isInternal"]);
+  if (args.isInternal !== undefined && typeof args.isInternal !== "boolean") throw new Error("isInternal deve ser booleano.");
+  return {
+    ticketId: stringArg(args, "ticketId", { min: 1, max: 80 })!,
+    noteContent: stringArg(args, "noteContent", { min: 1, max: 2_000 })!,
+    isInternal: args.isInternal === true,
+  };
+}
 
 /**
  * Registry único de capacidades Hermes. Ferramentas de mutação futuras devem
@@ -79,6 +183,52 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
     requiredPermissions: ["tickets", "support"],
     declaration: { name: "get_open_tickets", description: "Retorna o número de chamados/tickets abertos e quantos são urgentes.", parameters: { type: "OBJECT", properties: {}, required: [] } },
     validateArgs: noArguments,
+  },
+  {
+    name: "get_tickets_overview",
+    type: "READ",
+    requiredPermissions: ["tickets", "support"],
+    declaration: { name: "get_tickets_overview", description: "Retorna totais e chamados recentes do tenant; permite filtrar por status e texto.", parameters: { type: "OBJECT", properties: { status: { type: "STRING" }, search: { type: "STRING" }, limit: { type: "INTEGER" } }, required: [] } },
+    validateArgs: ticketOverviewArgs,
+  },
+  {
+    name: "get_ticket_details",
+    type: "READ",
+    requiredPermissions: ["tickets", "support"],
+    declaration: { name: "get_ticket_details", description: "Retorna dados, responsável, atividades e mensagens de um chamado do tenant.", parameters: { type: "OBJECT", properties: { ticketId: { type: "STRING" }, ticketNumber: { type: "INTEGER" } }, required: [] } },
+    validateArgs: ticketDetailsArgs,
+  },
+  {
+    name: "create_ticket",
+    type: "MUTATION",
+    actionType: "CREATE_TICKET",
+    requiredPermissions: ["tickets", "support"],
+    declaration: { name: "create_ticket", description: "Prepara a criação de chamado; só executa após aprovação explícita.", parameters: { type: "OBJECT", properties: { title: { type: "STRING" }, description: { type: "STRING" }, priority: { type: "STRING", enum: ["low", "medium", "high", "urgent"] }, clientNameOuId: { type: "STRING" }, category: { type: "STRING" } }, required: ["title", "description", "priority", "clientNameOuId"] } },
+    validateArgs: createTicketArgs,
+  },
+  {
+    name: "update_ticket_status",
+    type: "MUTATION",
+    actionType: "UPDATE_TICKET_STATUS",
+    requiredPermissions: ["tickets", "support"],
+    declaration: { name: "update_ticket_status", description: "Prepara a mudança de status de um chamado; só executa após aprovação explícita.", parameters: { type: "OBJECT", properties: { ticketId: { type: "STRING" }, newStatus: { type: "STRING", enum: ["open", "in_progress", "resolved", "closed"] }, resolutionNotes: { type: "STRING" } }, required: ["ticketId", "newStatus"] } },
+    validateArgs: updateTicketStatusArgs,
+  },
+  {
+    name: "assign_ticket",
+    type: "MUTATION",
+    actionType: "ASSIGN_TICKET",
+    requiredPermissions: ["tickets", "support"],
+    declaration: { name: "assign_ticket", description: "Prepara o encaminhamento de chamado; só executa após aprovação explícita.", parameters: { type: "OBJECT", properties: { ticketId: { type: "STRING" }, assigneeNameOuId: { type: "STRING" }, transferReason: { type: "STRING" } }, required: ["ticketId", "assigneeNameOuId"] } },
+    validateArgs: assignTicketArgs,
+  },
+  {
+    name: "add_ticket_activity",
+    type: "MUTATION",
+    actionType: "ADD_TICKET_ACTIVITY",
+    requiredPermissions: ["tickets", "support"],
+    declaration: { name: "add_ticket_activity", description: "Prepara uma atividade em chamado; só executa após aprovação explícita.", parameters: { type: "OBJECT", properties: { ticketId: { type: "STRING" }, noteContent: { type: "STRING" }, isInternal: { type: "BOOLEAN" } }, required: ["ticketId", "noteContent"] } },
+    validateArgs: addTicketActivityArgs,
   },
   {
     name: "get_conversations_summary",
@@ -106,15 +256,68 @@ export function getAuthorizedHermesTool(name: string, permissions: readonly stri
   return getAllowedHermesTools(permissions).find(tool => tool.name === name) ?? null;
 }
 
-export function createPendingActionRequest(tool: HermesToolDefinition, args: Record<string, unknown>): PendingActionRequest {
+export function createPendingActionRequest(tool: HermesToolDefinition, args: Record<string, unknown>, owner?: PendingActionOwner): PendingActionRequest {
   if (tool.type !== "MUTATION") throw new Error("Somente ferramentas de mutação exigem aprovação humana.");
-  return {
+  if (!tool.actionType) throw new Error("Ferramenta de mutação sem actionType autorizado.");
+  const request: PendingActionRequest = {
     id: `action-${nanoid()}`,
     toolName: tool.name,
     type: "MUTATION",
+    actionType: tool.actionType,
     args: tool.validateArgs(args),
     status: "PENDING_APPROVAL",
   };
+  if (owner) {
+    pendingActions.set(request.id, { ...request, ...owner, expiresAt: Date.now() + HERMES_ACTION_TTL_MS, state: "PENDING_APPROVAL" });
+  }
+  return request;
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export function beginPendingHermesAction(input: { actionId: string; actionType: HermesTicketActionType; payload: Record<string, unknown>; clientId: string; userId: string }) {
+  const stored = pendingActions.get(input.actionId);
+  if (!stored || stored.expiresAt <= Date.now()) {
+    pendingActions.delete(input.actionId);
+    throw new Error("Ação pendente ausente ou expirada; solicite uma nova ação ao Hermes.");
+  }
+  if (stored.state !== "PENDING_APPROVAL" || stored.clientId !== input.clientId || stored.userId !== input.userId || stored.actionType !== input.actionType) {
+    throw new Error("Ação pendente não pertence à sessão autenticada.");
+  }
+  const tool = HERMES_TOOL_REGISTRY.find(item => item.name === stored.toolName && item.actionType === input.actionType);
+  if (!tool) throw new Error("Ação pendente inválida.");
+  const validatedPayload = tool.validateArgs(input.payload);
+  if (stableJson(validatedPayload) !== stableJson(stored.args)) throw new Error("O payload da ação não confere com a aprovação pendente.");
+  stored.state = "EXECUTING";
+  return { ...stored, args: validatedPayload };
+}
+
+export function completePendingHermesAction(actionId: string): void {
+  pendingActions.delete(actionId);
+}
+
+export function releasePendingHermesAction(actionId: string): void {
+  const stored = pendingActions.get(actionId);
+  if (stored?.state === "EXECUTING") stored.state = "PENDING_APPROVAL";
+}
+
+export function cancelPendingHermesAction(input: { actionId: string; actionType: HermesTicketActionType; clientId: string; userId: string }): void {
+  const stored = pendingActions.get(input.actionId);
+  if (!stored || stored.expiresAt <= Date.now()) {
+    pendingActions.delete(input.actionId);
+    throw new Error("Ação pendente ausente ou expirada.");
+  }
+  if (stored.state !== "PENDING_APPROVAL" || stored.clientId !== input.clientId || stored.userId !== input.userId || stored.actionType !== input.actionType) {
+    throw new Error("Ação pendente não pertence à sessão autenticada.");
+  }
+  pendingActions.delete(input.actionId);
 }
 
 // ─── Helpers de chamada HTTP Gemini ──────────────────────────────────────────
@@ -374,7 +577,7 @@ async function recordTokenUsage(usage: TokenUsageRecord): Promise<string> {
 // ─── Function Calling — consultas ao banco do cliente ─────────────────────────
 
 /** Busca dados do ERP/conversas/chamados do cliente para o Gemini */
-async function executeClientFunction(
+export async function executeClientFunction(
   functionName: string,
   args: Record<string, unknown>,
   clientId: string,
@@ -385,7 +588,7 @@ async function executeClientFunction(
     return JSON.stringify({ erro: "Você não possui permissão para consultar dados deste módulo." });
   }
   // Validação ocorre novamente no executor, mesmo se o modelo recebeu a tool.
-  tool.validateArgs(args);
+  const validatedArgs = tool.validateArgs(args);
   const pool = getPool();
 
   if (functionName === "get_sales_summary") {
@@ -402,13 +605,64 @@ async function executeClientFunction(
   if (functionName === "get_open_tickets") {
     const [rows] = await pool.execute(
       `SELECT COUNT(*) as total, 
-       SUM(CASE WHEN priority = 'high' OR priority = 'urgent' THEN 1 ELSE 0 END) as urgentes
+       SUM(CASE WHEN priority = 'alta' OR priority = 'critica' THEN 1 ELSE 0 END) as urgentes
        FROM megadesk_domain_chamados 
-       WHERE client_id = ? AND status NOT IN ('closed', 'resolved')`,
+       WHERE clientId = ? AND status <> 'closed'`,
       [clientId]
     ) as any[];
     const data = rows[0] ?? { total: 0, urgentes: 0 };
     return JSON.stringify({ chamados_abertos: data.total, urgentes: data.urgentes });
+  }
+
+  if (functionName === "get_tickets_overview") {
+    const filters = validatedArgs as { status?: string; search?: string; limit?: number };
+    const where = ["clientId = ?"];
+    const values: unknown[] = [clientId];
+    if (filters.status) {
+      where.push("status = ?");
+      values.push(filters.status);
+    }
+    if (filters.search) {
+      where.push("(title LIKE ? OR customerName LIKE ? OR company LIKE ? OR CAST(chamadoNumber AS CHAR) LIKE ?)");
+      const query = `%${filters.search}%`;
+      values.push(query, query, query, query);
+    }
+    const [totalsRows] = await pool.execute(
+      `SELECT COUNT(*) AS total,
+              SUM(status = 'open') AS open,
+              SUM(status = 'in_progress') AS in_progress,
+              SUM(status = 'waiting') AS waiting,
+              SUM(status = 'closed') AS closed
+         FROM megadesk_domain_chamados WHERE ${where.join(" AND ")}`,
+      values,
+    ) as any[];
+    const [recentRows] = await pool.execute(
+      `SELECT chamadoId, chamadoNumber, title, customerName, company, status, priority, assignedTo, updatedAt
+         FROM megadesk_domain_chamados WHERE ${where.join(" AND ")}
+        ORDER BY updatedAt DESC, chamadoNumber DESC LIMIT ?`,
+      [...values, filters.limit ?? 10],
+    ) as any[];
+    return JSON.stringify({ resumo: totalsRows[0] ?? { total: 0, open: 0, in_progress: 0, waiting: 0, closed: 0 }, chamados: recentRows });
+  }
+
+  if (functionName === "get_ticket_details") {
+    const selector = validatedArgs as { ticketId?: string; ticketNumber?: number };
+    const predicate = selector.ticketId ? "chamadoId = ?" : "chamadoNumber = ?";
+    const value = selector.ticketId ?? selector.ticketNumber;
+    const [ticketRows] = await pool.execute(
+      `SELECT chamadoId, chamadoNumber, customerId, customerName, company, title, observations, status, priority, assignedTo, assigned_to_user_id AS assignedToUserId, createdAt, updatedAt
+         FROM megadesk_domain_chamados WHERE clientId = ? AND ${predicate} LIMIT 1`,
+      [clientId, value],
+    ) as any[];
+    const ticket = ticketRows[0];
+    if (!ticket) return JSON.stringify({ erro: "Chamado não encontrado neste tenant." });
+    const [activityRows] = await pool.execute(
+      `SELECT activity_id AS activityId, description, attendant, action_type AS actionType, created_at AS createdAt
+         FROM megadesk_domain_chamado_activities
+        WHERE client_id = ? AND chamado_id = ? ORDER BY created_at DESC, activity_id DESC LIMIT 50`,
+      [clientId, ticket.chamadoId],
+    ) as any[];
+    return JSON.stringify({ chamado: ticket, atividades: activityRows });
   }
 
   if (functionName === "get_conversations_summary") {
@@ -517,7 +771,7 @@ export async function chatWithClientGemini(
     const authorizedTool = getAuthorizedHermesTool(fc.name, userPermissions);
     if (authorizedTool?.type === "MUTATION") {
       // Nunca executa mutações no loop do modelo. A interface recebe apenas a solicitação pendente.
-      pendingActionRequest = createPendingActionRequest(authorizedTool, fc.args ?? {});
+      pendingActionRequest = createPendingActionRequest(authorizedTool, fc.args ?? {}, { clientId, userId });
       break;
     }
 
