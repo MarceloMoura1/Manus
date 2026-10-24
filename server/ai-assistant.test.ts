@@ -14,6 +14,7 @@ import {
   cancelPendingHermesAction,
   createPendingActionRequest,
   executeClientFunction,
+  executeWebSearch,
   getAllowedHermesTools,
   getAuthorizedHermesTool,
   insertTokenUsage,
@@ -251,6 +252,7 @@ describe("Hermes security controls", () => {
       "send_supplier_message",
       "get_conversations_summary",
       "get_erp_products",
+      "web_search",
     ]);
     expect(HERMES_TOOL_REGISTRY.filter(tool => tool.type === "MUTATION").map(tool => tool.actionType)).toEqual([
       "CREATE_TICKET", "UPDATE_TICKET_STATUS", "ASSIGN_TICKET", "ADD_TICKET_ACTIVITY",
@@ -260,8 +262,35 @@ describe("Hermes security controls", () => {
   });
 
   it("does not expose or authorize a sales tool without an ERP/sales permission", () => {
-    expect(getAllowedHermesTools(["ai-assistant"]).map(tool => tool.name)).not.toContain("get_sales_summary");
+    const tools = getAllowedHermesTools(["ai-assistant"]).map(tool => tool.name);
+    expect(tools).toContain("web_search");
+    expect(tools).not.toContain("get_sales_summary");
     expect(getAuthorizedHermesTool("get_sales_summary", ["ai-assistant"])).toBeNull();
+  });
+
+  it("formats a grounded web search result using the provider response without tenant storage", async () => {
+    const request = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{
+          content: { parts: [{ text: "Fornecedor Exemplo — contato público e resumo." }] },
+          groundingMetadata: { groundingChunks: [{ web: { uri: "https://example.invalid/fornecedor", title: "Fornecedor Exemplo" } }] },
+        }],
+      }),
+    }));
+
+    const result = JSON.parse(await executeWebSearch("test-key", "fornecedores de embalagens", "fornecedores", request));
+    expect(result).toMatchObject({ ok: true, query: "fornecedores de embalagens", focus: "fornecedores", result: "Fornecedor Exemplo — contato público e resumo.", sources: [{ url: "https://example.invalid/fornecedor", title: "Fornecedor Exemplo" }] });
+    const requestBody = JSON.parse(request.mock.calls[0]?.[1]?.body as string);
+    expect(requestBody.tools).toEqual([{ googleSearch: {} }]);
+    expect(vi.mocked(getPool)).not.toHaveBeenCalled();
+  });
+
+  it("keeps the chat-safe result when Google grounding fails", async () => {
+    const request = vi.fn(async () => ({ ok: false, status: 403, json: async () => ({ error: { message: "grounding unavailable" } }) }));
+    const result = JSON.parse(await executeWebSearch("test-key", "fornecedores", undefined, request));
+    expect(result).toEqual({ ok: false, results: [], message: "Pesquisa web temporariamente indisponível." });
   });
 
   it("does not expose CRM or proposal tools without a corresponding operational permission", () => {

@@ -120,6 +120,13 @@ function ticketOverviewArgs(args: Record<string, unknown>): Record<string, unkno
   return { ...(status ? { status } : {}), ...(search ? { search } : {}), ...(limit ? { limit } : {}) };
 }
 
+function webSearchArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["query", "focus"]);
+  const query = stringArg(args, "query", { min: 2, max: 500 })!;
+  const focus = stringArg(args, "focus", { min: 2, max: 120, optional: true });
+  return { query, ...(focus ? { focus } : {}) };
+}
+
 function ticketDetailsArgs(args: Record<string, unknown>): Record<string, unknown> {
   objectArgs(args); rejectUnknownArgs(args, ["ticketId", "ticketNumber"]);
   const ticketId = stringArg(args, "ticketId", { min: 1, max: 80, optional: true });
@@ -392,6 +399,21 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
     declaration: { name: "get_erp_products", description: "Retorna a lista de produtos cadastrados no ERP do cliente com estoque.", parameters: { type: "OBJECT", properties: {}, required: [] } },
     validateArgs: noArguments,
   },
+  {
+    name: "web_search",
+    type: "READ",
+    requiredPermissions: ["ai-assistant"],
+    declaration: {
+      name: "web_search",
+      description: "Realiza pesquisas em tempo real na web para buscar informações públicas, fornecedores, cotações, concorrentes e contatos.",
+      parameters: {
+        type: "OBJECT",
+        properties: { query: { type: "STRING" }, focus: { type: "STRING" } },
+        required: ["query"],
+      },
+    },
+    validateArgs: webSearchArgs,
+  },
 ];
 
 export function getAllowedHermesTools(permissions: readonly string[]): HermesToolDefinition[] {
@@ -480,6 +502,62 @@ interface GeminiRequest {
   tools?: any[];
   systemInstruction?: { parts: Array<{ text: string }> } | string;
   generationConfig?: { temperature?: number; maxOutputTokens?: number };
+}
+
+type GeminiHttpRequest = (url: string, init: RequestInit) => Promise<Pick<Response, "ok" | "status" | "json">>;
+
+function webSearchFallback(message: string): string {
+  return JSON.stringify({ ok: false, results: [], message });
+}
+
+/**
+ * Executa uma consulta de leitura com Google Search Grounding via Gemini.
+ * Falhas do provedor são retornadas como resultado estruturado para não derrubar
+ * a conversa nem permitir que o chamador tente uma operação fora do registry.
+ */
+export async function executeWebSearch(
+  geminiKey: string,
+  query: string,
+  focus?: string,
+  request: GeminiHttpRequest = (url, init) => fetch(url, init),
+): Promise<string> {
+  const prompt = [
+    "Pesquise na web e retorne resultados públicos de forma estruturada, incluindo nomes, contatos publicados, links e um resumo objetivo quando disponíveis.",
+    focus ? `Foco da pesquisa: ${focus}.` : undefined,
+    `Consulta: ${query}`,
+  ].filter(Boolean).join("\n");
+
+  try {
+    const response = await request(`${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(geminiKey)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        tools: [{ googleSearch: {} }],
+        generationConfig: { maxOutputTokens: 1024, temperature: 0.2 },
+      }),
+    });
+    const data = await response.json() as any;
+    if (!response.ok) return webSearchFallback("Pesquisa web temporariamente indisponível.");
+
+    const result = (data?.candidates?.[0]?.content?.parts ?? [])
+      .map((part: { text?: unknown }) => typeof part.text === "string" ? part.text.trim() : "")
+      .filter(Boolean)
+      .join("\n");
+    if (!result) return webSearchFallback("A pesquisa web não retornou resultados textuais.");
+
+    const sources = (data?.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [])
+      .map((chunk: { web?: { uri?: unknown; title?: unknown } }) => {
+        const web = chunk.web;
+        if (!web || typeof web.uri !== "string") return null;
+        return { url: web.uri, ...(typeof web.title === "string" ? { title: web.title } : {}) };
+      })
+      .filter((source: { url: string } | null): source is { url: string; title?: string } => source !== null);
+
+    return JSON.stringify({ ok: true, query, ...(focus ? { focus } : {}), result, sources });
+  } catch {
+    return webSearchFallback("Pesquisa web temporariamente indisponível.");
+  }
 }
 
 async function callGeminiAPI(apiKey: string, body: GeminiRequest): Promise<any> {
@@ -729,7 +807,8 @@ export async function executeClientFunction(
   functionName: string,
   args: Record<string, unknown>,
   clientId: string,
-  permissions: readonly string[]
+  permissions: readonly string[],
+  geminiKey?: string,
 ): Promise<string> {
   const tool = getAuthorizedHermesTool(functionName, permissions);
   if (!tool) {
@@ -737,6 +816,11 @@ export async function executeClientFunction(
   }
   // Validação ocorre novamente no executor, mesmo se o modelo recebeu a tool.
   const validatedArgs = tool.validateArgs(args);
+  if (functionName === "web_search") {
+    if (!geminiKey) return webSearchFallback("Pesquisa web indisponível: credencial do provedor ausente.");
+    const search = validatedArgs as { query: string; focus?: string };
+    return executeWebSearch(geminiKey, search.query, search.focus);
+  }
   const pool = getPool();
 
   if (functionName === "get_sales_summary") {
@@ -1058,7 +1142,7 @@ export async function chatWithClientGemini(
     }
 
     // Executa a função localmente
-    const funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId, userPermissions);
+    const funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId, userPermissions, geminiKey);
 
     // Adiciona o resultado da função ao contexto e chama novamente
     const modelTurn: GeminiContent = {
