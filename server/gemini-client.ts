@@ -10,7 +10,8 @@ import { nanoid } from "nanoid";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
-export const MAX_GEMINI_PROMPT_HISTORY_MESSAGES = 12;
+export const MAX_GEMINI_PROMPT_HISTORY_MESSAGES = 10;
+export const GEMINI_REQUEST_TIMEOUT_MS = 45_000;
 
 function normalizeGeminiApiKey(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -71,6 +72,8 @@ export interface PendingActionRequest {
   actionType: HermesActionType;
   args: Record<string, unknown>;
   status: "PENDING_APPROVAL";
+  /** Descrição amigável exibida no card de aprovação (HITL). */
+  summary: string;
 }
 
 type PendingActionOwner = { clientId: string; userId: string };
@@ -253,7 +256,10 @@ function proposalDetailsArgs(args: Record<string, unknown>): Record<string, unkn
 }
 
 function createProposalArgs(args: Record<string, unknown>): Record<string, unknown> {
-  objectArgs(args); rejectUnknownArgs(args, ["clientId", "items", "notes", "paymentTerms"]);
+  objectArgs(args); rejectUnknownArgs(args, ["clientId", "clientName", "items", "notes", "paymentTerms"]);
+  const clientId = stringArg(args, "clientId", { min: 1, max: 80, optional: true });
+  const clientName = stringArg(args, "clientName", { min: 2, max: 180, optional: true });
+  if ((clientId ? 1 : 0) + (clientName ? 1 : 0) !== 1) throw new Error("Informe exatamente clientId ou clientName.");
   if (!Array.isArray(args.items) || args.items.length < 1 || args.items.length > 100) throw new Error("items inválido.");
   const items = args.items.map(item => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Item inválido.");
@@ -262,7 +268,7 @@ function createProposalArgs(args: Record<string, unknown>): Record<string, unkno
     if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) throw new Error("Quantidade ou preço inválido.");
     return { productId: stringArg(value, "productId", { min: 1, max: 80 })!, productName: stringArg(value, "productName", { min: 1, max: 255 })!, quantity, unitPrice };
   });
-  return { clientId: stringArg(args, "clientId", { min: 1, max: 80 })!, items, ...(stringArg(args, "notes", { min: 1, max: 4_000, optional: true }) ? { notes: stringArg(args, "notes", { min: 1, max: 4_000, optional: true }) } : {}), ...(stringArg(args, "paymentTerms", { min: 1, max: 500, optional: true }) ? { paymentTerms: stringArg(args, "paymentTerms", { min: 1, max: 500, optional: true }) } : {}) };
+  return { ...(clientId ? { clientId } : { clientName }), items, ...(stringArg(args, "notes", { min: 1, max: 4_000, optional: true }) ? { notes: stringArg(args, "notes", { min: 1, max: 4_000, optional: true }) } : {}), ...(stringArg(args, "paymentTerms", { min: 1, max: 500, optional: true }) ? { paymentTerms: stringArg(args, "paymentTerms", { min: 1, max: 500, optional: true }) } : {}) };
 }
 
 function proposalStatusArgs(args: Record<string, unknown>): Record<string, unknown> {
@@ -383,7 +389,7 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
   { name: "add_client_timeline_event", type: "MUTATION", actionType: "ADD_CLIENT_TIMELINE", requiredPermissions: ["crm", "clients"], declaration: { name: "add_client_timeline_event", description: "Prepara evento de timeline CRM; exige aprovação humana.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING" }, title: { type: "STRING" }, description: { type: "STRING" }, eventType: { type: "STRING", enum: ["call", "note", "meeting"] } }, required: ["clientId", "title", "description", "eventType"] } }, validateArgs: clientTimelineArgs },
   { name: "get_proposals_summary", type: "READ", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "get_proposals_summary", description: "Retorna métricas de propostas comerciais do tenant.", parameters: { type: "OBJECT", properties: { status: { type: "STRING" }, sellerId: { type: "STRING" }, period: { type: "STRING" } }, required: [] } }, validateArgs: proposalSummaryArgs },
   { name: "get_proposal_details", type: "READ", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "get_proposal_details", description: "Retorna proposta, cliente e itens do tenant.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, proposalNumber: { type: "STRING" } }, required: [] } }, validateArgs: proposalDetailsArgs },
-  { name: "create_proposal", type: "MUTATION", actionType: "CREATE_PROPOSAL", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "create_proposal", description: "Prepara proposta comercial; exige aprovação humana.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING" }, items: { type: "ARRAY" }, notes: { type: "STRING" }, paymentTerms: { type: "STRING" } }, required: ["clientId", "items"] } }, validateArgs: createProposalArgs },
+  { name: "create_proposal", type: "MUTATION", actionType: "CREATE_PROPOSAL", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "create_proposal", description: "Prepara proposta comercial; exige aprovação humana.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING", description: "ID do cliente CRM (obtido via get_client_360). Use este OU clientName." }, clientName: { type: "STRING", description: "Nome do cliente CRM; deve identificar um único cliente." }, items: { type: "ARRAY", items: { type: "OBJECT", properties: { productId: { type: "STRING" }, productName: { type: "STRING" }, quantity: { type: "NUMBER" }, unitPrice: { type: "NUMBER" } }, required: ["productId", "productName", "quantity", "unitPrice"] } }, notes: { type: "STRING" }, paymentTerms: { type: "STRING" } }, required: ["items"] } }, validateArgs: createProposalArgs },
   { name: "update_proposal_status", type: "MUTATION", actionType: "UPDATE_PROPOSAL_STATUS", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "update_proposal_status", description: "Prepara mudança de status comercial; exige aprovação humana.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, newStatus: { type: "STRING", enum: ["draft", "negotiation", "approved", "rejected", "expired"] }, reason: { type: "STRING" } }, required: ["proposalId", "newStatus"] } }, validateArgs: proposalStatusArgs },
   { name: "send_proposal_whatsapp", type: "MUTATION", actionType: "SEND_PROPOSAL_WHATSAPP", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "send_proposal_whatsapp", description: "Prepara envio de proposta por WhatsApp; exige aprovação humana.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, recipientPhone: { type: "STRING" }, customMessage: { type: "STRING" } }, required: ["proposalId", "recipientPhone"] } }, validateArgs: proposalWhatsappArgs },
   { name: "get_erp_summary", type: "READ", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "get_erp_summary", description: "Retorna o resumo de produtos, estoque e serviços ativos do tenant.", parameters: { type: "OBJECT", properties: {}, required: [] } }, validateArgs: noArguments },
@@ -441,16 +447,29 @@ export function getAuthorizedHermesTool(name: string, permissions: readonly stri
   return getAllowedHermesTools(permissions).find(tool => tool.name === name) ?? null;
 }
 
+/** Descrição amigável de uma mutação pendente, usada no card de aprovação humana. */
+export function summarizePendingAction(actionType: HermesActionType, args: Record<string, unknown>): string {
+  if (actionType === "CREATE_CLIENT") return `Cadastrar o cliente "${String(args.name ?? "")}"${args.phone ? ` (telefone ${String(args.phone)})` : ""}.`;
+  if (actionType === "CREATE_PROPOSAL") {
+    const items = Array.isArray(args.items) ? args.items as Array<{ quantity?: number; unitPrice?: number }> : [];
+    const total = items.reduce((sum, item) => sum + Number(item.quantity ?? 0) * Number(item.unitPrice ?? 0), 0);
+    return `Criar proposta comercial para ${String(args.clientName ?? args.clientId ?? "o cliente")} com ${items.length} item(ns), total de R$ ${total.toFixed(2).replace(".", ",")}.`;
+  }
+  return `Executar a ação ${actionType} mediante sua aprovação.`;
+}
+
 export function createPendingActionRequest(tool: HermesToolDefinition, args: Record<string, unknown>, owner?: PendingActionOwner): PendingActionRequest {
   if (tool.type !== "MUTATION") throw new Error("Somente ferramentas de mutação exigem aprovação humana.");
   if (!tool.actionType) throw new Error("Ferramenta de mutação sem actionType autorizado.");
+  const validatedArgs = tool.validateArgs(args);
   const request: PendingActionRequest = {
     id: `action-${nanoid()}`,
     toolName: tool.name,
     type: "MUTATION",
     actionType: tool.actionType,
-    args: tool.validateArgs(args),
+    args: validatedArgs,
     status: "PENDING_APPROVAL",
+    summary: summarizePendingAction(tool.actionType, validatedArgs),
   };
   if (owner) {
     pendingActions.set(request.id, { ...request, ...owner, expiresAt: Date.now() + HERMES_ACTION_TTL_MS, state: "PENDING_APPROVAL" });
@@ -521,6 +540,20 @@ interface GeminiRequest {
 
 type GeminiHttpRequest = (url: string, init: RequestInit) => Promise<Pick<Response, "ok" | "status" | "json">>;
 
+/** Requisição padrão com timeout explícito para não travar o chat quando o provedor demora. */
+const defaultGeminiRequest: GeminiHttpRequest = async (url, init) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GEMINI_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(`Gemini API excedeu o tempo limite de ${GEMINI_REQUEST_TIMEOUT_MS / 1000}s.`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 export class GeminiProviderError extends Error {
   constructor(
     message: string,
@@ -566,7 +599,7 @@ export async function executeWebSearch(
   geminiKey: string,
   query: string,
   focus?: string,
-  request: GeminiHttpRequest = (url, init) => fetch(url, init),
+  request: GeminiHttpRequest = defaultGeminiRequest,
 ): Promise<string> {
   const prompt = [
     "Pesquise na web e retorne resultados públicos de forma estruturada, incluindo nomes, contatos publicados, links e um resumo objetivo quando disponíveis.",
@@ -610,7 +643,7 @@ export async function executeWebSearch(
 export async function callGeminiAPI(
   apiKey: string,
   body: GeminiRequest,
-  request: GeminiHttpRequest = (url, init) => fetch(url, init),
+  request: GeminiHttpRequest = defaultGeminiRequest,
 ): Promise<any> {
   const normalizedApiKey = normalizeGeminiApiKey(apiKey);
   if (!normalizedApiKey) throw new Error("Chave da API Gemini não configurada.");
@@ -670,7 +703,7 @@ function isGeminiCredentialFailure(error: unknown): boolean {
 export async function callGeminiWithEnvironmentFallback(
   apiKey: string,
   body: GeminiRequest,
-  request: GeminiHttpRequest = (url, init) => fetch(url, init),
+  request: GeminiHttpRequest = defaultGeminiRequest,
 ): Promise<{ data: any; apiKey: string }> {
   const normalizedApiKey = normalizeGeminiApiKey(apiKey);
   if (!normalizedApiKey) throw new Error("Chave da API Gemini não configurada.");
@@ -810,6 +843,22 @@ export async function loadConversationHistory(clientId: string, userId: string):
   } catch {
     return [];
   }
+}
+
+/**
+ * Persiste IMEDIATAMENTE a mensagem do usuário, antes de qualquer chamada ao provedor.
+ * Se o Gemini falhar ou o usuário recarregar a página, a mensagem permanece no histórico.
+ */
+export async function persistUserMessageImmediately(
+  clientId: string,
+  userId: string,
+  previousHistory: IAMessage[],
+  userMessage: string,
+): Promise<IAMessage[]> {
+  const userEntry: IAMessage = { role: "user", content: userMessage, timestamp: Date.now() };
+  const next: IAMessage[] = [...previousHistory, userEntry].slice(-50);
+  await saveConversationHistory(clientId, userId, next);
+  return next;
 }
 
 /** Salva/atualiza histórico de conversa do usuário no banco */
@@ -997,7 +1046,18 @@ export async function executeClientFunction(
         WHERE client_id = ? AND lifecycle_state <> 'archived'`,
       [clientId],
     ) as any[];
-    return JSON.stringify({ resumo: rows[0] ?? { total: 0, active: 0, inactive: 0, leads: 0 } });
+    const [newRows] = await pool.execute(
+      `SELECT COUNT(*) AS total FROM megadesk_crm_clients
+        WHERE client_id = ? AND lifecycle_state <> 'archived' AND created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')`,
+      [clientId],
+    ) as any[];
+    const [latestRows] = await pool.execute(
+      `SELECT crm_client_id AS crmClientId, company_name AS name, phone, email, created_at AS createdAt
+         FROM megadesk_crm_clients WHERE client_id = ? AND lifecycle_state <> 'archived'
+        ORDER BY created_at DESC LIMIT 5`,
+      [clientId],
+    ) as any[];
+    return JSON.stringify({ resumo: { ...(rows[0] ?? { total: 0, active: 0, inactive: 0, leads: 0 }), newThisMonth: newRows[0]?.total ?? 0 }, ultimosClientes: latestRows });
   }
 
   if (functionName === "get_client_360") {
@@ -1165,6 +1225,7 @@ function buildSystemInstruction(allowedTools: readonly HermesToolDefinition[]): 
   return `Você é o Assistente IA da plataforma MegaDesk, especializado em ajudar a equipe de atendimento.
 
 Você só pode usar as ferramentas explicitamente disponibilizadas nesta conversa: ${names}. Nunca alegue consultar dados de uma ferramenta que não esteja disponível.
+Para cadastrar cliente use create_client; para propostas comerciais use create_proposal (identifique o cliente com get_client_360 e os produtos com get_product_details antes). Ferramentas de escrita NÃO alteram dados: elas geram um card de aprovação humana. Nunca diga que algo foi criado antes da confirmação do usuário.
 Sempre responda em português brasileiro de forma clara, objetiva e profissional.
 Quando buscar dados, informe ao usuário que está consultando o sistema antes de responder.
 Se não tiver dados suficientes, seja honesto e sugira como o usuário pode obter a informação.`;
@@ -1202,7 +1263,7 @@ async function chatWithClientGeminiInternal(
     contents,
     ...(allowedTools.length > 0 ? { tools: [{ functionDeclarations: allowedTools.map(tool => tool.declaration) }] } : {}),
     systemInstruction: { parts: [{ text: buildSystemInstruction(allowedTools) }] },
-    generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+    generationConfig: { temperature: 0.4, maxOutputTokens: 1024 },
   };
 
   let providerResponse = await callGeminiWithEnvironmentFallback(geminiKey, requestBody);

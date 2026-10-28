@@ -3815,9 +3815,11 @@ function AIAssistantPage() {
       actionType: "CREATE_TICKET" | "UPDATE_TICKET_STATUS" | "ASSIGN_TICKET" | "ADD_TICKET_ACTIVITY" | "CREATE_CLIENT" | "UPDATE_CLIENT" | "ADD_CLIENT_TIMELINE" | "CREATE_PROPOSAL" | "UPDATE_PROPOSAL_STATUS" | "SEND_PROPOSAL_WHATSAPP" | "CREATE_PRODUCT" | "UPDATE_PRODUCT" | "LINK_PRODUCT_SUPPLIER" | "UPDATE_SERVICE" | "CREATE_SUPPLIER" | "UPDATE_SUPPLIER" | "REQUEST_PURCHASE" | "SEND_SUPPLIER_MESSAGE";
       args: Record<string, unknown>;
       status: "PENDING_APPROVAL";
+      summary?: string;
     };
     actionState?: "EXECUTING" | "EXECUTED" | "CANCELLED" | "FAILED";
     actionMessage?: string;
+    actionEntityId?: string;
   };
 
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
@@ -3870,7 +3872,7 @@ function AIAssistantPage() {
   const executeActionMutation = trpc.assistant.executeAction.useMutation();
   const cancelActionMutation = trpc.assistant.cancelAction.useMutation();
 
-  const updatePendingActionCard = (actionId: string, patch: Pick<ChatMessage, "actionState" | "actionMessage">) => {
+  const updatePendingActionCard = (actionId: string, patch: Pick<ChatMessage, "actionState" | "actionMessage"> & Partial<Pick<ChatMessage, "actionEntityId">>) => {
     setMessages(previous => previous.map(message => message.pendingActionRequest?.id === actionId ? { ...message, ...patch } : message));
   };
 
@@ -3883,7 +3885,7 @@ function AIAssistantPage() {
         actionType: request.actionType,
         payload: request.args,
       });
-      updatePendingActionCard(request.id, { actionState: "EXECUTED", actionMessage: result.message });
+      updatePendingActionCard(request.id, { actionState: "EXECUTED", actionMessage: result.message, actionEntityId: "entityId" in result ? String(result.entityId) : undefined });
       setMessages(previous => [...previous, {
         role: "assistant",
         content: `✓ ${result.message}`,
@@ -4073,7 +4075,7 @@ function AIAssistantPage() {
               {msg.pendingActionRequest && (
                 <div className="mt-2 rounded-xl border border-sky-500/40 bg-slate-900/90 p-4 text-xs text-slate-100 shadow-sm">
                   <p className="font-semibold text-sky-200">Ação sugerida pelo Hermes que requer sua aprovação</p>
-                  <p className="mt-1 text-slate-300">{msg.pendingActionRequest.actionType.includes("PROPOSAL") ? "Proposta comercial" : msg.pendingActionRequest.actionType.includes("CLIENT") ? "Cliente CRM" : msg.pendingActionRequest.actionType.includes("PRODUCT") ? "Produto ERP" : msg.pendingActionRequest.actionType.includes("SUPPLIER") ? "Fornecedor" : msg.pendingActionRequest.actionType === "REQUEST_PURCHASE" ? "Pedido de compra" : msg.pendingActionRequest.actionType === "UPDATE_SERVICE" ? "Serviço ERP" : msg.pendingActionRequest.toolName.replace(/_/g, " ")} — nenhuma alteração foi executada.</p>
+                  <p className="mt-1 text-slate-300">{msg.pendingActionRequest.summary ?? `${msg.pendingActionRequest.actionType.includes("PROPOSAL") ? "Nova Proposta Comercial" : msg.pendingActionRequest.actionType.includes("CLIENT") ? "Proposta de Ação: Cadastro de Cliente" : msg.pendingActionRequest.actionType.includes("PRODUCT") ? "Produto ERP" : msg.pendingActionRequest.actionType.includes("SUPPLIER") ? "Fornecedor" : msg.pendingActionRequest.actionType === "REQUEST_PURCHASE" ? "Pedido de compra" : msg.pendingActionRequest.actionType === "UPDATE_SERVICE" ? "Serviço ERP" : msg.pendingActionRequest.toolName.replace(/_/g, " ")}`} — nenhuma alteração foi executada.</p>
                   <dl className="mt-3 grid gap-1.5 rounded-lg border border-slate-700/80 bg-slate-950/60 p-2.5 text-slate-300">
                     {Object.entries(msg.pendingActionRequest.args).map(([key, value]) => (
                       <div key={key} className="flex items-start justify-between gap-3">
@@ -4082,16 +4084,30 @@ function AIAssistantPage() {
                       </div>
                     ))}
                   </dl>
+                  {Array.isArray(msg.pendingActionRequest.args.items) && (
+                    <table className="mt-2 w-full rounded-lg border border-slate-700/80 text-left text-slate-300">
+                      <thead><tr className="text-slate-500"><th className="p-1.5">Item</th><th className="p-1.5">Qtd</th><th className="p-1.5">Unit.</th></tr></thead>
+                      <tbody>
+                        {(msg.pendingActionRequest.args.items as Array<Record<string, unknown>>).map((item, itemIndex) => (
+                          <tr key={itemIndex}><td className="p-1.5">{String(item.productName ?? item.description ?? item.productId ?? "")}</td><td className="p-1.5">{String(item.quantity ?? "")}</td><td className="p-1.5">R$ {Number(item.unitPrice ?? 0).toFixed(2).replace(".", ",")}</td></tr>
+                        ))}
+                      </tbody>
+                      <tfoot><tr className="font-semibold text-slate-100"><td className="p-1.5" colSpan={2}>Valor total</td><td className="p-1.5">R$ {(msg.pendingActionRequest.args.items as Array<Record<string, unknown>>).reduce((sum, item) => sum + Number(item.quantity ?? 0) * Number(item.unitPrice ?? 0), 0).toFixed(2).replace(".", ",")}</td></tr></tfoot>
+                    </table>
+                  )}
+                  {msg.actionState === "EXECUTED" && (
+                    <span className="mt-3 inline-block rounded-full bg-emerald-500/20 px-2.5 py-0.5 font-semibold text-emerald-300">✓ Concluído com sucesso{msg.actionEntityId ? ` · registro ${msg.actionEntityId}` : ""}</span>
+                  )}
                   {msg.actionMessage && (
                     <p className={`mt-3 ${msg.actionState === "FAILED" ? "text-rose-300" : msg.actionState === "EXECUTED" ? "text-emerald-300" : "text-slate-300"}`}>{msg.actionMessage}</p>
                   )}
                   {!msg.actionState && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button size="sm" className="bg-sky-600 text-white hover:bg-sky-500" onClick={() => void confirmPendingAction(msg.pendingActionRequest!)}>
-                        Confirmar e Executar
+                        Confirmar e Criar no Sistema
                       </Button>
                       <Button size="sm" variant="outline" className="border-slate-600 bg-transparent text-slate-200 hover:bg-slate-800" onClick={() => void cancelPendingAction(msg.pendingActionRequest!)}>
-                        Cancelar
+                        Rejeitar/Cancelar
                       </Button>
                     </div>
                   )}

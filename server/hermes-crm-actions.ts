@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { addCrmTimeline, createCrmClient, getCrmClientById, updateCrmClient } from "./db-crm";
+import { getPool } from "./db";
 import { SaleService } from "./modules/erp/sales/service";
 import { QuotePdfService } from "./modules/erp/sales/quote-pdf-service";
 import { SaleDocumentService } from "./modules/erp/sales/documents-service";
@@ -22,6 +23,19 @@ function required(args: Record<string, unknown>, key: string): string {
 function identity(input: { tenantId: string; userId: string; userName: string; role: OperationalRole }): Identity {
   if (!input.tenantId || !input.userId) throw new Error("HERMES_CRM_IDENTITY_REQUIRED");
   return { clientId: input.tenantId, userId: input.userId, userName: input.userName, role: input.role };
+}
+
+/** Resolve um cliente CRM por nome exato dentro do tenant; ambiguidade ou ausência bloqueiam a ação. */
+async function resolveCrmClientId(tenantId: string, args: Record<string, unknown>): Promise<string> {
+  if (typeof args.clientId === "string" && args.clientId.trim()) return args.clientId.trim();
+  const name = required(args, "clientName");
+  const [rows] = await getPool().execute(
+    `SELECT crm_client_id AS crmClientId FROM megadesk_crm_clients
+      WHERE client_id = ? AND lifecycle_state <> 'archived' AND LOWER(company_name) = LOWER(?) LIMIT 2`,
+    [tenantId, name],
+  ) as any[];
+  if (!Array.isArray(rows) || rows.length !== 1) throw new Error("HERMES_CRM_CLIENT_NOT_UNIQUE");
+  return String(rows[0].crmClientId);
 }
 
 function clientInput(args: Record<string, unknown>) {
@@ -78,7 +92,7 @@ export async function executeHermesCrmAction(input: {
   if (input.action.actionType === "CREATE_PROPOSAL") {
     const entries = args.items as Array<Record<string, unknown>>;
     const quote = await saleService.create(actor, {
-      documentType: "quote", crmClientId: required(args, "clientId"), commercialDate: null,
+      documentType: "quote", crmClientId: await resolveCrmClientId(input.tenantId, args), commercialDate: null,
       notes: typeof args.notes === "string" ? args.notes : null,
       paymentTerms: typeof args.paymentTerms === "string" ? args.paymentTerms : null,
       paymentMethod: null, expectedDate: null, documentCustomName: null, serviceMetadata: null,

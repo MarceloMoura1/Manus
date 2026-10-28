@@ -26,6 +26,7 @@ import {
   DEFAULT_GEMINI_MODEL,
   MAX_GEMINI_PROMPT_HISTORY_MESSAGES,
   selectGeminiPromptHistory,
+  persistUserMessageImmediately,
   type HermesToolDefinition,
 } from "./gemini-client";
 import { executeHermesTicketAction } from "./hermes-ticket-actions";
@@ -592,5 +593,52 @@ describe("Hermes security controls", () => {
     expect(execute).toHaveBeenCalledOnce();
     expect(execute.mock.calls[0]?.[0]).toContain("INSERT INTO megadesk_ia_token_usage");
     expect(execute.mock.calls[0]?.[1]).toEqual(expect.arrayContaining(["tenant-a", "user@example.invalid", "conversation-a", 30, 12, 42, "gemini-test", 1]));
+  });
+});
+
+describe("Hermes persistence, CRM tools and latency", () => {
+  it("limits the provider sliding window to 10 messages", () => {
+    expect(MAX_GEMINI_PROMPT_HISTORY_MESSAGES).toBe(10);
+  });
+
+  it("persists the user message immediately before any provider call", async () => {
+    const execute = vi.fn(async () => [[]]);
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    const history = await persistUserMessageImmediately("tenant-a", "user@example.invalid", [], "Cadastre o cliente Ana");
+    expect(history.at(-1)).toMatchObject({ role: "user", content: "Cadastre o cliente Ana" });
+    expect(execute).toHaveBeenCalledOnce();
+    expect(String(execute.mock.calls[0]?.[0])).toContain("megadesk_domain_ia_conversation_history");
+    expect(JSON.parse((execute.mock.calls[0]?.[1] as unknown[])[3] as string)).toHaveLength(1);
+  });
+
+  it("registers CRM/proposal tools with RBAC and read/mutation types", () => {
+    const byName = (name: string) => HERMES_TOOL_REGISTRY.find(tool => tool.name === name);
+    expect(byName("create_client")).toMatchObject({ type: "MUTATION", actionType: "CREATE_CLIENT" });
+    expect(byName("create_proposal")).toMatchObject({ type: "MUTATION", actionType: "CREATE_PROPOSAL" });
+    expect(byName("get_crm_summary")?.type).toBe("READ");
+    expect(byName("get_proposals_summary")?.type).toBe("READ");
+    expect(getAuthorizedHermesTool("create_client", ["tickets"])).toBeNull();
+    expect(getAuthorizedHermesTool("create_proposal", ["sales"])?.name).toBe("create_proposal");
+  });
+
+  it("turns create_client into a PENDING_APPROVAL card with a friendly summary", () => {
+    const tool = getAuthorizedHermesTool("create_client", ["crm"])!;
+    const pending = createPendingActionRequest(tool, { name: "Ana Souza", phone: "11999990000" });
+    expect(pending).toMatchObject({ status: "PENDING_APPROVAL", actionType: "CREATE_CLIENT" });
+    expect(pending.id).toMatch(/^action-/);
+    expect(pending.summary).toContain("Ana Souza");
+  });
+
+  it("accepts clientName for proposals, summarizes the total and rejects ambiguous client refs", () => {
+    const tool = getAuthorizedHermesTool("create_proposal", ["crm"])!;
+    const item = { productId: "p1", productName: "Servico", quantity: 2, unitPrice: 50 };
+    const pending = createPendingActionRequest(tool, { clientName: "Ana Souza", items: [item] });
+    expect(pending.summary).toContain("R$ 100,00");
+    expect(() => tool.validateArgs({ clientId: "c1", clientName: "Ana", items: [item] })).toThrow();
+  });
+
+  it("propagates provider network failures without hiding them", async () => {
+    const failing = vi.fn(async () => { throw new Error("network down"); });
+    await expect(callGeminiAPI("key", { contents: [] }, failing as any)).rejects.toThrow("network down");
   });
 });

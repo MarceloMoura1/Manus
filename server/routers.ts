@@ -1825,13 +1825,15 @@ export const appRouter = router({
         message: z.string().min(1).max(4000),
       }))
       .mutation(async ({ input, ctx }) => {
-        const { chatWithClientGemini, loadConversationHistory } = await import("./gemini-client");
+        const { chatWithClientGemini, loadConversationHistory, persistUserMessageImmediately } = await import("./gemini-client");
         const userId = sessionBoundAssistantUserId(input.userId, ctx.userEmail);
         await hydrateSyncState();
         const client = getReleasedClientOrThrow(ctx.tenantId, "ai-assistant");
         // Validação explícita do módulo, além da sessão exigida por megadeskProcedure.
         const user = assertClientUserPermission(client, "ai-assistant", userId);
         const history = await loadConversationHistory(ctx.tenantId, userId);
+        // Persistência imediata: a mensagem do usuário fica segura mesmo se o provedor falhar ou a aba for fechada.
+        await persistUserMessageImmediately(ctx.tenantId, userId, history, input.message);
         try {
           const result = await chatWithClientGemini(
             ctx.tenantId,
@@ -1904,7 +1906,7 @@ export const appRouter = router({
               action: { actionType: pending.actionType, args: pending.args },
             });
           completePendingHermesAction(input.actionId);
-          audit("MegaDesk", `Hermes executou ${pending.actionType} após aprovação humana`, ctx.tenantId);
+          audit("MegaDesk", `Hermes executou ${pending.actionType} após aprovação humana (HITL) por ${user.id}; registro ${"entityId" in result ? String(result.entityId) : "n/a"}`, ctx.tenantId);
           return result;
         } catch (error) {
           releasePendingHermesAction(input.actionId);
