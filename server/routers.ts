@@ -1912,18 +1912,26 @@ export const appRouter = router({
               action: { actionType: pending.actionType, args: pending.args },
             });
           completePendingHermesAction(input.actionId);
+          const entityIdPart = "entityId" in result && result.entityId ? ` (ID: #${result.entityId})` : "";
+          const confirmationText = `✓ [Ação Concluída] ${result.message}${entityIdPart}`;
           await appendAssistantMessageToHistory(
             ctx.tenantId,
             userId,
-            `✓ Ação executada com sucesso: ${result.message}`
+            confirmationText
           );
           audit("MegaDesk", `Hermes executou ${pending.actionType} após aprovação humana (HITL) por ${user.id}; registro ${"entityId" in result ? String(result.entityId) : "n/a"}`, ctx.tenantId);
           return result;
         } catch (error) {
           releasePendingHermesAction(input.actionId);
+          const reason = error instanceof Error ? error.message : "Erro desconhecido";
+          await appendAssistantMessageToHistory(
+            ctx.tenantId,
+            userId,
+            `❌ Não foi possível concluir a ação: ${reason}.`
+          ).catch(() => {});
           if (error instanceof TRPCError) throw error;
-          console.error("[Assistant] Approved Hermes action failed.", { actionType: input.actionType, error: error instanceof Error ? error.message : "unknown" });
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Não foi possível executar a ação aprovada. Verifique os dados e tente novamente." });
+          console.error("[Assistant] Approved Hermes action failed.", { actionType: input.actionType, error: reason });
+          throw new TRPCError({ code: "BAD_REQUEST", message: `Não foi possível executar a ação aprovada: ${reason}.` });
         }
       }),
 

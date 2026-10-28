@@ -263,10 +263,25 @@ function createProposalArgs(args: Record<string, unknown>): Record<string, unkno
   if (!Array.isArray(args.items) || args.items.length < 1 || args.items.length > 100) throw new Error("items inválido.");
   const items = args.items.map(item => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Item inválido.");
-    const value = item as Record<string, unknown>; rejectUnknownArgs(value, ["productId", "productName", "quantity", "unitPrice"]);
-    const quantity = Number(value.quantity); const unitPrice = Number(value.unitPrice);
-    if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) throw new Error("Quantidade ou preço inválido.");
-    return { productId: stringArg(value, "productId", { min: 1, max: 80 })!, productName: stringArg(value, "productName", { min: 1, max: 255 })!, quantity, unitPrice };
+    const value = item as Record<string, unknown>;
+    rejectUnknownArgs(value, ["productId", "productName", "description", "quantity", "unitPrice"]);
+    const productId = stringArg(value, "productId", { min: 1, max: 80, optional: true });
+    const productName = stringArg(value, "productName", { min: 1, max: 255, optional: true });
+    const description = stringArg(value, "description", { min: 1, max: 1_000, optional: true });
+    if (!productId && !productName && !description) {
+      throw new Error("Item deve possuir ao menos productId, productName ou description.");
+    }
+    const rawQty = value.quantity !== undefined ? Number(value.quantity) : 1;
+    const quantity = Number.isFinite(rawQty) && rawQty > 0 ? rawQty : 1;
+    const rawPrice = value.unitPrice !== undefined ? Number(value.unitPrice) : 0;
+    const unitPrice = Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : 0;
+    return {
+      ...(productId ? { productId } : {}),
+      productName: productName ?? description ?? (productId ? `Produto ${productId}` : "Item Avulso"),
+      ...(description ? { description } : {}),
+      quantity,
+      unitPrice,
+    };
   });
   return { ...(clientId ? { clientId } : { clientName }), items, ...(stringArg(args, "notes", { min: 1, max: 4_000, optional: true }) ? { notes: stringArg(args, "notes", { min: 1, max: 4_000, optional: true }) } : {}), ...(stringArg(args, "paymentTerms", { min: 1, max: 500, optional: true }) ? { paymentTerms: stringArg(args, "paymentTerms", { min: 1, max: 500, optional: true }) } : {}) };
 }
@@ -389,7 +404,7 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
   { name: "add_client_timeline_event", type: "MUTATION", actionType: "ADD_CLIENT_TIMELINE", requiredPermissions: ["crm", "clients"], declaration: { name: "add_client_timeline_event", description: "Prepara evento de timeline CRM; exige aprovação humana.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING" }, title: { type: "STRING" }, description: { type: "STRING" }, eventType: { type: "STRING", enum: ["call", "note", "meeting"] } }, required: ["clientId", "title", "description", "eventType"] } }, validateArgs: clientTimelineArgs },
   { name: "get_proposals_summary", type: "READ", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "get_proposals_summary", description: "Retorna métricas de propostas comerciais do tenant.", parameters: { type: "OBJECT", properties: { status: { type: "STRING" }, sellerId: { type: "STRING" }, period: { type: "STRING" } }, required: [] } }, validateArgs: proposalSummaryArgs },
   { name: "get_proposal_details", type: "READ", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "get_proposal_details", description: "Retorna proposta, cliente e itens do tenant.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, proposalNumber: { type: "STRING" } }, required: [] } }, validateArgs: proposalDetailsArgs },
-  { name: "create_proposal", type: "MUTATION", actionType: "CREATE_PROPOSAL", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "create_proposal", description: "Prepara proposta comercial; exige aprovação humana.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING", description: "ID do cliente CRM (obtido via get_client_360). Use este OU clientName." }, clientName: { type: "STRING", description: "Nome do cliente CRM; deve identificar um único cliente." }, items: { type: "ARRAY", items: { type: "OBJECT", properties: { productId: { type: "STRING" }, productName: { type: "STRING" }, quantity: { type: "NUMBER" }, unitPrice: { type: "NUMBER" } }, required: ["productId", "productName", "quantity", "unitPrice"] } }, notes: { type: "STRING" }, paymentTerms: { type: "STRING" } }, required: ["items"] } }, validateArgs: createProposalArgs },
+  { name: "create_proposal", type: "MUTATION", actionType: "CREATE_PROPOSAL", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "create_proposal", description: "Prepara proposta comercial; exige aprovação humana.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING", description: "ID do cliente CRM (obtido via get_client_360). Use este OU clientName." }, clientName: { type: "STRING", description: "Nome do cliente CRM; deve identificar um único cliente." }, items: { type: "ARRAY", description: "Itens ou serviços da proposta. Aceita productId de catálogo ou descrição/nome avulso.", items: { type: "OBJECT", properties: { productId: { type: "STRING", description: "ID do produto no catálogo (opcional)" }, productName: { type: "STRING", description: "Nome do produto ou serviço" }, description: { type: "STRING", description: "Descrição do item ou serviço avulso" }, quantity: { type: "NUMBER", description: "Quantidade (padrão 1 se omitido)" }, unitPrice: { type: "NUMBER", description: "Preço unitário em reais (padrão 0 para rascunho se omitido)" } }, required: [] } }, notes: { type: "STRING" }, paymentTerms: { type: "STRING" } }, required: ["items"] } }, validateArgs: createProposalArgs },
   { name: "update_proposal_status", type: "MUTATION", actionType: "UPDATE_PROPOSAL_STATUS", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "update_proposal_status", description: "Prepara mudança de status comercial; exige aprovação humana.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, newStatus: { type: "STRING", enum: ["draft", "negotiation", "approved", "rejected", "expired"] }, reason: { type: "STRING" } }, required: ["proposalId", "newStatus"] } }, validateArgs: proposalStatusArgs },
   { name: "send_proposal_whatsapp", type: "MUTATION", actionType: "SEND_PROPOSAL_WHATSAPP", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "send_proposal_whatsapp", description: "Prepara envio de proposta por WhatsApp; exige aprovação humana.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, recipientPhone: { type: "STRING" }, customMessage: { type: "STRING" } }, required: ["proposalId", "recipientPhone"] } }, validateArgs: proposalWhatsappArgs },
   { name: "get_erp_summary", type: "READ", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "get_erp_summary", description: "Retorna o resumo de produtos, estoque e serviços ativos do tenant.", parameters: { type: "OBJECT", properties: {}, required: [] } }, validateArgs: noArguments },
@@ -965,12 +980,13 @@ export async function executeClientFunction(
   permissions: readonly string[],
   geminiKey?: string,
 ): Promise<string> {
-  const tool = getAuthorizedHermesTool(functionName, permissions);
-  if (!tool) {
-    return JSON.stringify({ erro: "Você não possui permissão para consultar dados deste módulo." });
-  }
-  // Validação ocorre novamente no executor, mesmo se o modelo recebeu a tool.
-  const validatedArgs = tool.validateArgs(args);
+  try {
+    const tool = getAuthorizedHermesTool(functionName, permissions);
+    if (!tool) {
+      return JSON.stringify({ success: false, error: "Você não possui permissão para consultar dados deste módulo." });
+    }
+    // Validação ocorre novamente no executor, mesmo se o modelo recebeu a tool.
+    const validatedArgs = tool.validateArgs(args);
   if (functionName === "web_search") {
     if (!geminiKey) return webSearchFallback("Pesquisa web indisponível: credencial do provedor ausente.");
     const search = validatedArgs as { query: string; focus?: string };
@@ -1236,7 +1252,11 @@ export async function executeClientFunction(
     return JSON.stringify({ produtos: rows });
   }
 
-  return JSON.stringify({ erro: "Função não reconhecida" });
+    return JSON.stringify({ success: false, error: "Função não reconhecida" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erro ao processar consulta interna.";
+    return JSON.stringify({ success: false, error: message });
+  }
 }
 
 // ─── Declarações de funções para o Gemini (formato REST) ──────────────────────
@@ -1257,7 +1277,7 @@ function buildSystemInstruction(allowedTools: readonly HermesToolDefinition[]): 
 
 Você só pode usar as ferramentas explicitamente disponibilizadas nesta conversa: ${names}. Nunca alegue consultar dados de uma ferramenta que não esteja disponível.
 Para cadastrar cliente use create_client; para propostas comerciais use create_proposal (identifique o cliente com get_client_360 e os produtos com get_product_details antes). Ferramentas de escrita NÃO alteram dados: elas geram um card de aprovação humana. Nunca diga que algo foi criado antes da confirmação do usuário.
-Se consultar um cliente ou produto com get_client_360 ou get_product_details e o retorno indicar found: false, informe amigavelmente ao usuário que não encontrou o cadastro e pergunte se deseja realizar o cadastro antes de prosseguir com o orçamento ou proposta.
+Se consultar um cliente ou produto com get_client_360 ou get_product_details e o retorno indicar found: false, você pode sugerir o cadastro antes de prosseguir OU gerar a proposta em rascunho com o nome e itens informados usando create_proposal.
 Sempre responda em português brasileiro de forma clara, objetiva e profissional.
 Quando buscar dados, informe ao usuário que está consultando o sistema antes de responder.
 Se não tiver dados suficientes, seja honesto e sugira como o usuário pode obter a informação.`;
@@ -1307,9 +1327,9 @@ async function chatWithClientGeminiInternal(
   let tokensUsed = tokenUsageTotal(data, promptTokens, completionTokens);
   let pendingActionRequest: PendingActionRequest | undefined;
 
-  // 4. Processa function calls em loop
+  // 4. Processa function calls em loop (até 4 iterações consecutivas)
   let iterations = 0;
-  while (iterations < 5) {
+  while (iterations < 4) {
     const candidate = data?.candidates?.[0];
     const parts = candidate?.content?.parts ?? [];
     const functionCallPart = parts.find((p: any) => p.functionCall);
@@ -1326,8 +1346,14 @@ async function chatWithClientGeminiInternal(
       break;
     }
 
-    // Executa a função localmente
-    const funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId, userPermissions, geminiKey);
+    // Executa a função localmente com tolerância estrita a erros
+    let funcResult: string;
+    try {
+      funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId, userPermissions, geminiKey);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Falha ao executar ferramenta local.";
+      funcResult = JSON.stringify({ success: false, error: message });
+    }
 
     // Adiciona o resultado da função ao contexto com role: "function" e chama novamente
     const modelTurn: GeminiContent = {

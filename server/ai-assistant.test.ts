@@ -766,4 +766,143 @@ describe("Hermes persistence, CRM tools and latency", () => {
     const failing = vi.fn(async () => { throw new Error("network down"); });
     await expect(callGeminiAPI("key", { contents: [] }, failing as any)).rejects.toThrow("network down");
   });
+
+  it("decouples create_proposal items: accepts free-text description/name without productId and defaults price to 0", () => {
+    const proposalTool = HERMES_TOOL_REGISTRY.find(t => t.name === "create_proposal")!;
+    expect(proposalTool).toBeDefined();
+
+    const result = proposalTool.validateArgs({
+      clientName: "Pedro Ferrari",
+      items: [
+        { productName: "lavagem de carro" },
+        { description: "troca da correia dentada", unitPrice: 350 },
+      ],
+    }) as any;
+
+    expect(result.clientName).toBe("Pedro Ferrari");
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]).toEqual({
+      productName: "lavagem de carro",
+      quantity: 1,
+      unitPrice: 0,
+    });
+    expect(result.items[1]).toEqual({
+      productName: "troca da correia dentada",
+      description: "troca da correia dentada",
+      quantity: 1,
+      unitPrice: 350,
+    });
+  });
+
+  it("handles tool execution errors resiliently without uncaught exception", async () => {
+    const execute = vi.fn(async () => {
+      throw new Error("Tabela temporariamente inacessível");
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+    const res = await executeClientFunction("get_sales_summary", {}, "tenant-a", ["sales"]);
+    const parsed = JSON.parse(res);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error).toContain("Tabela temporariamente inacessível");
+  });
+
+  it("completes chained multi-turn proposal flow when client is not found, issuing HITL action", async () => {
+    const execute = vi.fn(async (sql) => {
+      if (sql.includes("megadesk_domain_clients")) {
+        return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      }
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) {
+        return [[{ total: 0 }]];
+      }
+      if (sql.includes("megadesk_crm_clients")) {
+        return [[]]; // não encontrado no CRM
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute });
+
+    let callCount = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [{
+              content: {
+                parts: [{
+                  functionCall: { name: "get_client_360", args: { search: "Pedro Ferrari" } }
+                }]
+              }
+            }],
+            usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 10, totalTokenCount: 60 }
+          })
+        };
+      }
+      if (callCount === 2) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [{
+              content: {
+                parts: [{
+                  functionCall: {
+                    name: "create_proposal",
+                    args: {
+                      clientName: "Pedro Ferrari",
+                      items: [{ productName: "lavagem de carro" }, { description: "troca da correia dentada" }]
+                    }
+                  }
+                }]
+              }
+            }],
+            usageMetadata: { promptTokenCount: 70, candidatesTokenCount: 15, totalTokenCount: 85 }
+          })
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: "Proposta preparada em rascunho." }] } }],
+          usageMetadata: { promptTokenCount: 80, candidatesTokenCount: 20, totalTokenCount: 100 }
+        })
+      };
+    });
+
+    try {
+      const result = await chatWithClientGemini("tenant-a", "user@example.invalid", "faça um orçamento pro cliente Pedro Ferrari para lavagem de carro e troca de correia", [], ["crm", "sales"]);
+      expect(callCount).toBe(2);
+      expect(result.ok).toBe(true);
+      expect(result.functionCallsMade).toEqual(["get_client_360", "create_proposal"]);
+      expect(result.pendingActionRequest).toBeDefined();
+      expect(result.pendingActionRequest?.actionType).toBe("CREATE_PROPOSAL");
+      expect(result.pendingActionRequest?.args.clientName).toBe("Pedro Ferrari");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("persists synchronous [Ação Concluída] format into conversation history after HITL action", async () => {
+    const execute = vi.fn(async (sql) => {
+      if (sql.includes("SELECT conversation_history_json")) {
+        return [[{ conversation_history_json: "[]" }]];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute });
+
+    const history = await appendAssistantMessageToHistory(
+      "tenant-a",
+      "user@example.invalid",
+      "✓ [Ação Concluída] Cliente Rafael Guanabara cadastrado com sucesso (ID: #123)."
+    );
+    expect(history.at(-1)).toMatchObject({
+      role: "assistant",
+      content: "✓ [Ação Concluída] Cliente Rafael Guanabara cadastrado com sucesso (ID: #123).",
+    });
+  });
 });

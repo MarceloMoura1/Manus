@@ -3848,24 +3848,38 @@ function AIAssistantPage() {
     { enabled: !!clientId && !!userId, refetchOnWindowFocus: false, refetchOnMount: "always" }
   );
 
-  // Sincroniza com o banco a cada atualização da query, sem descartar mensagens otimistas,
-  // o indicador "digitando" nem cards de ação (HITL) ainda não refletidos no histórico persistido.
+  // Sincroniza com o banco a cada atualização da query, sem descartar mensagens otimistas
+  // nem cards de ação (HITL) ainda não refletidos no histórico persistido.
   React.useEffect(() => {
-    if (!historyData) return;
+    if (!historyData?.history) return;
     const server: ChatMessage[] = historyData.history.map((m: any) => ({
       role: m.role,
       content: m.content,
       timestamp: m.timestamp ?? Date.now(),
     }));
+
     setMessages(previous => {
-      const unmatched = [...previous];
-      const merged = server.map(serverMessage => {
-        const index = unmatched.findIndex(local => local.role === serverMessage.role && local.content === serverMessage.content);
-        if (index === -1) return serverMessage;
-        const [local] = unmatched.splice(index, 1);
-        return local;
-      });
-      return [...merged, ...unmatched];
+      if (previous.length === 0) return server;
+
+      // Preserva mensagens locais que o servidor ainda não tem (mensagens otimistas ou em envio)
+      // e mantém metadados enriquecidos locais (como pendingActionRequest, actionState, etc.)
+      const merged: ChatMessage[] = [];
+      const remainingLocal = [...previous];
+
+      for (const s of server) {
+        const localIdx = remainingLocal.findIndex(
+          loc => loc.role === s.role && loc.content.trim() === s.content.trim()
+        );
+        if (localIdx !== -1) {
+          const [matched] = remainingLocal.splice(localIdx, 1);
+          merged.push({ ...s, ...matched });
+        } else {
+          merged.push(s);
+        }
+      }
+
+      // Adiciona as mensagens locais que o servidor ainda não possui
+      return [...merged, ...remainingLocal];
     });
     setHistoryLoaded(true);
   }, [historyData]);
@@ -3927,18 +3941,15 @@ function AIAssistantPage() {
     if (!text || sending) return;
 
     const userMsg: ChatMessage = { role: "user", content: text, timestamp: Date.now() };
+    // A mensagem do usuário é adicionada imediatamente e NUNCA removida
     setMessages(prev => [...prev, userMsg]);
     setInput("");
     setSending(true);
 
-    // Mensagem de "digitando"
-    const typingMsg: ChatMessage = { role: "assistant", content: HERMES_TYPING_CONTENT, timestamp: Date.now() };
-    setMessages(prev => [...prev, typingMsg]);
-
     try {
       const result = await chatMutation.mutateAsync({ clientId, userId, message: text });
       setMessages(prev => [
-        ...prev.filter(message => message.content !== HERMES_TYPING_CONTENT), // remove typing
+        ...prev,
         {
           role: "assistant",
           content: result.response,
@@ -3947,12 +3958,12 @@ function AIAssistantPage() {
           pendingActionRequest: result.pendingActionRequest,
         },
       ]);
-    } catch (err: any) {
+    } catch {
       setMessages(prev => [
-        ...prev.filter(message => message.content !== HERMES_TYPING_CONTENT), // remove typing
+        ...prev,
         {
           role: "assistant",
-          content: `❌ Erro: ${err.message ?? "Não foi possível obter resposta."}`,
+          content: "⚠️ Tive uma instabilidade ao processar seu pedido. Por favor, tente novamente.",
           timestamp: Date.now(),
         },
       ]);
@@ -4142,6 +4153,25 @@ function AIAssistantPage() {
             )}
           </div>
         ))}
+        {sending && (
+          <div className="flex gap-3 justify-start animate-fade-in">
+            <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 mt-1">
+              <Sparkles className="w-4 h-4 text-emerald-600 animate-spin" />
+            </div>
+            <div className="max-w-[75%]">
+              <div className="rounded-2xl px-4 py-3 text-sm leading-relaxed bg-white border border-slate-200 text-slate-500 rounded-tl-sm shadow-sm">
+                <span className="flex items-center gap-2" aria-live="polite">
+                  <span className="flex gap-1" aria-hidden="true">
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                  </span>
+                  <span className="font-medium text-slate-600">Hermes está digitando…</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
 
