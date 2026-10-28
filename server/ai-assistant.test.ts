@@ -978,4 +978,84 @@ describe("Hermes persistence, CRM tools and latency", () => {
       globalThis.fetch = originalFetch;
     }
   });
+  it("synthesizes deterministic proposal fallback and emits create_proposal HITL card when Gemini returns empty text after client lookup", async () => {
+    const execute = vi.fn(async (sql) => {
+      if (sql.includes("megadesk_domain_clients")) {
+        return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      }
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) {
+        return [[{ total: 0 }]];
+      }
+      if (sql.includes("megadesk_crm_clients")) {
+        return [[]]; // Cliente Pedro Ferrari não encontrado
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute });
+
+    let callCount = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [{
+              content: {
+                parts: [
+                  { functionCall: { name: "get_client_360", args: { search: "Pedro Ferrari" } } },
+                ],
+              },
+            }],
+            usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 15, totalTokenCount: 65 },
+          }),
+        };
+      }
+      // Segundo turno: Gemini devolve vazio
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{
+            content: {
+              parts: [],
+            },
+          }],
+          usageMetadata: { promptTokenCount: 70, candidatesTokenCount: 0, totalTokenCount: 70 },
+        }),
+      };
+    });
+
+    try {
+      const result = await chatWithClientGemini(
+        "tenant-a",
+        "user@example.invalid",
+        "faça um orçamento pro cliente Pedro Ferrari para lavagem de carro e troca da correia dentada",
+        [],
+        ["crm", "clients", "sales", "proposals"]
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.response).not.toBe("Sem resposta do modelo.");
+      expect(result.response).toContain("O cliente 'Pedro Ferrari' não foi localizado no cadastro");
+      expect(result.response).toContain("lavagem de carro");
+      expect(result.response).toContain("troca da correia dentada");
+
+      // Card HITL de orçamento emitido
+      expect(result.pendingActionRequest).toBeDefined();
+      expect(result.pendingActionRequest?.actionType).toBe("CREATE_PROPOSAL");
+      expect(result.pendingActionRequest?.status).toBe("PENDING_APPROVAL");
+      expect(result.pendingActionRequest?.args).toMatchObject({
+        clientName: "Pedro Ferrari",
+      });
+      const items = result.pendingActionRequest?.args.items as any[];
+      expect(items).toHaveLength(2);
+      expect(items[0].productName).toBe("lavagem de carro");
+      expect(items[1].productName).toBe("troca da correia dentada");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

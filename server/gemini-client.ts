@@ -1282,9 +1282,154 @@ Se consultar um cliente ou produto com get_client_360 ou get_product_details e o
 REGRA CRÍTICA DE EXECUÇÃO DE FERRAMENTAS:
 Quando você decidir invocar qualquer ferramenta (functionCall), NUNCA gere mensagens preliminares ou textos de espera como 'Estou consultando o sistema...', 'Um momento...', 'Verificando...'.
 Emita EXCLUSIVAMENTE o bloco functionCall. O backend executará a ferramenta e devolverá o resultado na mesma sessão para que você formule a resposta final completa com os dados reais já consultados.
+Ao receber o resultado de uma ferramenta (functionResponse), forneça IMEDIATAMENTE a resposta final completa, amigável e resolutiva para o usuário com base nos dados retornados. NUNCA deixe a resposta vazia. Se for uma solicitação de proposta ou orçamento e o cliente não foi encontrado, informe claramente que ele não está cadastrado e pergunte se deseja cadastrá-lo ou já avance gerando a proposta em rascunho com os itens informados via create_proposal.
 
 Sempre responda em português brasileiro de forma clara, objetiva e profissional.
 Se não tiver dados suficientes, seja honesto e sugira como o usuário pode obter a informação.`;
+}
+
+function extractProposalDetailsFromMessage(
+  userMessage: string,
+  executedReadResults: Array<{ name: string; args: Record<string, unknown>; output: any }>
+): {
+  isProposal: boolean;
+  clientName: string;
+  items: Array<{ productName: string; quantity: number; unitPrice: number }>;
+} {
+  const isProposal = /\b(orçamento|orcamento|proposta|cotacao|cotação)\b/i.test(userMessage);
+
+  // 1. Extrai nome do cliente a partir de get_client_360 executado ou da mensagem
+  let clientName = "";
+  const client360Call = executedReadResults.find(r => r.name === "get_client_360");
+  if (client360Call) {
+    const rawSearch = client360Call.args.search ?? client360Call.args.clientId;
+    if (typeof rawSearch === "string" && rawSearch.trim().length >= 2) {
+      clientName = rawSearch.trim();
+    }
+  }
+
+  if (!clientName) {
+    const clientMatch = userMessage.match(/(?:cliente|pro\s+cliente|para\s+o\s+cliente|para\s+cliente|ao\s+cliente)\s+([A-ZÀ-Úa-zà-ú0-9\s]+?)(?:\s+(?:para|com|de\s+serviços?|itens?)|\s*$)/i);
+    if (clientMatch && clientMatch[1]) {
+      clientName = clientMatch[1].trim();
+    }
+  }
+
+  // 2. Extrai itens a partir de trechos após "para", "com", "de", "itens"
+  let items: Array<{ productName: string; quantity: number; unitPrice: number }> = [];
+  const itemsMatch = userMessage.match(/(?:para|com|de\s+serviços?|itens?)\s+([^.]+)/i);
+  if (itemsMatch && itemsMatch[1]) {
+    const textAfterClient = clientName && userMessage.toLowerCase().includes(clientName.toLowerCase())
+      ? userMessage.substring(userMessage.toLowerCase().indexOf(clientName.toLowerCase()) + clientName.length)
+      : itemsMatch[1];
+
+    const secondMatch = textAfterClient.match(/(?:para|com|de\s+serviços?|itens?)\s+([^.]+)/i) || { 1: textAfterClient };
+    const rawTarget = secondMatch[1]?.trim() || itemsMatch[1].trim();
+
+    const rawParts = rawTarget
+      .split(/\s+e\s+|,\s*/i)
+      .map(s => s.replace(/^(para|com|de)\s+/i, "").trim())
+      .filter(s => s.length >= 2 && !/^(cliente|orçamento|proposta)/i.test(s));
+
+    if (rawParts.length > 0) {
+      items = rawParts.map(name => ({ productName: name, quantity: 1, unitPrice: 0 }));
+    }
+  }
+
+  if (items.length === 0) {
+    items = [{ productName: "Serviço solicitado", quantity: 1, unitPrice: 0 }];
+  }
+
+  return { isProposal, clientName: clientName || "Cliente", items };
+}
+
+function synthesizeDeterministicResponse(
+  executedReadResults: Array<{ name: string; args: Record<string, unknown>; output: any }>,
+  userMessage: string,
+): string | null {
+  if (!executedReadResults.length) return null;
+
+  const lastResult = executedReadResults[executedReadResults.length - 1];
+  const { name, args, output } = lastResult;
+
+  if (name === "get_open_tickets") {
+    const rawTotal = output?.chamados?.length ?? output?.resumo?.total ?? output?.resumo?.open ?? output?.total ?? 0;
+    const total = Number(rawTotal) || 0;
+    if (total === 0) {
+      return "Não há nenhum chamado aberto no sistema no momento. Tudo em dia!";
+    }
+    if (Array.isArray(output?.chamados) && output.chamados.length > 0) {
+      const list = output.chamados
+        .slice(0, 5)
+        .map((c: any) => `#${c.chamadoNumber || c.chamadoId}: "${c.title}" (${c.customerName || c.company || "Cliente não informado"})`)
+        .join("; ");
+      return `Você possui ${total} chamado(s) aberto(s) no momento: ${list}.`;
+    }
+    return `Você possui ${total} chamado(s) aberto(s) no momento no sistema.`;
+  }
+
+  if (name === "get_client_360") {
+    const searchName = String(args.search ?? args.clientId ?? "o cliente");
+    const isProposal = /\b(orçamento|orcamento|proposta|cotacao|cotação)\b/i.test(userMessage);
+
+    if (output?.found === false) {
+      if (isProposal) {
+        const proposal = extractProposalDetailsFromMessage(userMessage, executedReadResults);
+        const services = proposal.items.map(i => `'${i.productName}'`).join(" e ");
+        return `O cliente '${proposal.clientName}' não foi localizado no cadastro. Deseja que eu realize o cadastro dele agora ou prefere gerar a proposta como rascunho para os serviços: ${services}?`;
+      }
+      return `O cliente '${searchName}' não foi localizado no cadastro do CRM. Deseja que eu realize o cadastro dele agora?`;
+    }
+
+    if (output?.cliente) {
+      const c = output.cliente;
+      return `Cliente localizado: ${c.name || searchName} (Status: ${c.status || "Ativo"}). Telefone: ${c.phone || "Não informado"}.`;
+    }
+  }
+
+  if (name === "get_crm_summary") {
+    const r = output?.resumo;
+    if (r) {
+      return `Resumo da carteira CRM: ${r.total ?? 0} clientes (${r.active ?? 0} ativos, ${r.leads ?? 0} leads). Novos cadastrados este mês: ${r.newThisMonth ?? 0}.`;
+    }
+  }
+
+  if (name === "get_proposals_summary") {
+    const r = output?.resumo;
+    if (r) {
+      const totalReais = ((r.totalCents ?? 0) / 100).toFixed(2).replace(".", ",");
+      return `Resumo de propostas: ${r.total ?? 0} propostas no total (R$ ${totalReais}). Rascunhos: ${r.drafts ?? 0}, Em negociação: ${r.negotiation ?? 0}, Aprovadas: ${r.approved ?? 0}.`;
+    }
+  }
+
+  if (name === "get_sales_summary") {
+    const total = output?.total ?? 0;
+    const count = output?.count ?? output?.vendas ?? 0;
+    const valorFormatado = typeof total === "number" ? `R$ ${(total / 100).toFixed(2).replace(".", ",")}` : String(total);
+    return `Resumo de vendas de hoje: ${count} venda(s) registrada(s), totalizando ${valorFormatado}.`;
+  }
+
+  if (name === "get_erp_products") {
+    const prods = output?.produtos;
+    if (Array.isArray(prods) && prods.length > 0) {
+      const list = prods.map((p: any) => `${p.nome} (Estoque: ${p.estoque ?? 0})`).join(", ");
+      return `Produtos cadastrados no ERP: ${list}.`;
+    }
+    return "Nenhum produto cadastrado com estoque encontrado no ERP.";
+  }
+
+  if (name === "get_product_details") {
+    if (output?.found === false) {
+      return output.message || "Produto não encontrado no cadastro.";
+    }
+    if (output?.produto) {
+      const p = output.produto;
+      const price = ((p.salePriceCents ?? 0) / 100).toFixed(2).replace(".", ",");
+      return `Produto: ${p.name} (SKU: ${p.sku}). Preço de venda: R$ ${price}. Estoque: ${p.quantity ?? 0} ${p.unit || "un"}.`;
+    }
+  }
+
+  return null;
 }
 
 async function chatWithClientGeminiInternal(
@@ -1330,6 +1475,7 @@ async function chatWithClientGeminiInternal(
   let completionTokens = tokenUsagePart(data, "candidatesTokenCount");
   let tokensUsed = tokenUsageTotal(data, promptTokens, completionTokens);
   let pendingActionRequest: PendingActionRequest | undefined;
+  const executedReadResults: Array<{ name: string; args: Record<string, unknown>; output: any }> = [];
 
   // 4. Processa function calls em loop (até 4 iterações consecutivas)
   let iterations = 0;
@@ -1371,6 +1517,8 @@ async function chatWithClientGeminiInternal(
       parsedOutput = funcResult;
     }
 
+    executedReadResults.push({ name: fc.name, args: fc.args ?? {}, output: parsedOutput });
+
     // Turno 2: resposta da função
     const functionResponseTurn: GeminiContent = {
       role: "function",
@@ -1380,6 +1528,7 @@ async function chatWithClientGeminiInternal(
             name: fc.name,
             response: {
               output: parsedOutput,
+              instrucao_resposta: "Com base nos dados retornados pela ferramenta acima, forneça a resposta final completa, amigável e resolutiva para o usuário. Se for uma solicitação de proposta/orçamento e o cliente não foi encontrado, informe claramente que o cliente não está cadastrado e pergunte se deseja cadastrá-lo ou já avance gerando a proposta em rascunho com os itens informados (via create_proposal). NUNCA retorne vazio.",
               ...(parsedOutput && typeof parsedOutput === "object" && !Array.isArray(parsedOutput) ? parsedOutput : {}),
             },
           },
@@ -1398,26 +1547,50 @@ async function chatWithClientGeminiInternal(
     tokensUsed += tokenUsageTotal(data, nextPromptTokens, nextCompletionTokens);
   }
 
+  // Se a intenção do usuário foi orçamento/proposta e a checagem READ terminou sem pendingActionRequest,
+  // emite a pendingActionRequest de create_proposal para que o Card HITL seja renderizado na tela.
+  const proposalDetails = extractProposalDetailsFromMessage(userMessage, executedReadResults);
+  if (proposalDetails.isProposal && !pendingActionRequest) {
+    const createProposalTool = getAllowedHermesTools(userPermissions).find(t => t.name === "create_proposal");
+    if (createProposalTool) {
+      try {
+        pendingActionRequest = createPendingActionRequest(
+          createProposalTool,
+          {
+            clientName: proposalDetails.clientName,
+            items: proposalDetails.items,
+            notes: `Orçamento gerado a partir do pedido do usuário: "${userMessage}"`,
+          },
+          { clientId, userId }
+        );
+        if (!functionCallsMade.includes("create_proposal")) {
+          functionCallsMade.push("create_proposal");
+        }
+      } catch {
+        // Se houver qualquer falha na validação de parâmetros, segue sem travar
+      }
+    }
+  }
+
   const candidateParts = data?.candidates?.[0]?.content?.parts ?? [];
   const modelText = candidateParts
     .map((p: any) => (typeof p.text === "string" ? p.text.trim() : ""))
     .filter(Boolean)
-    .filter((text: string) => {
-      const lower = text.toLowerCase();
-      return (
-        !lower.startsWith("estou consultando") &&
-        !lower.startsWith("consultando o sistema") &&
-        !lower.startsWith("verificando no sistema") &&
-        !lower.startsWith("verificando os dados") &&
-        !lower.startsWith("um momento")
-      );
-    })
     .join("\n")
     .trim();
 
-  const finalResponse: string = pendingActionRequest
-    ? (modelText || pendingActionRequest.summary || "Ação preparada e aguardando sua aprovação antes de qualquer alteração.")
-    : (modelText || "Sem resposta do modelo.");
+  const synthesizedFallback = synthesizeDeterministicResponse(executedReadResults, userMessage);
+
+  let finalResponse = modelText;
+  if (!finalResponse) {
+    if (synthesizedFallback) {
+      finalResponse = synthesizedFallback;
+    } else if (pendingActionRequest?.summary) {
+      finalResponse = pendingActionRequest.summary;
+    } else {
+      finalResponse = "Sem resposta do modelo.";
+    }
+  }
 
   // 5. Salva no histórico
   const updatedHistory: IAMessage[] = [
