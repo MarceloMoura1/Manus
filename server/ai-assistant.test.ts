@@ -637,6 +637,19 @@ describe("Hermes persistence, CRM tools and latency", () => {
     expect(() => tool.validateArgs({ clientId: "c1", clientName: "Ana", items: [item] })).toThrow();
   });
 
+  it("declares valid Gemini schemas: every ARRAY has items and every OBJECT has properties", () => {
+    const problems: string[] = [];
+    const walk = (node: any, path: string) => {
+      if (!node || typeof node !== "object") return;
+      if (node.type === "ARRAY" && !node.items) problems.push(path + ": ARRAY sem items");
+      if (node.type === "OBJECT" && (!node.properties || Object.keys(node.properties).length === 0) && path.includes(".")) problems.push(path + ": OBJECT sem properties");
+      if (node.items) walk(node.items, path + ".items");
+      for (const [key, value] of Object.entries(node.properties ?? {})) walk(value, path + "." + key);
+    };
+    for (const tool of HERMES_TOOL_REGISTRY) walk(tool.declaration.parameters, tool.name);
+    expect(problems).toEqual([]);
+  });
+
   it("propagates provider network failures without hiding them", async () => {
     const failing = vi.fn(async () => { throw new Error("network down"); });
     await expect(callGeminiAPI("key", { contents: [] }, failing as any)).rejects.toThrow("network down");

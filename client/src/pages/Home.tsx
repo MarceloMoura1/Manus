@@ -3845,28 +3845,37 @@ function AIAssistantPage() {
   // Carregar histórico do banco
   const { data: historyData } = trpc.assistant.getHistory.useQuery(
     { clientId, userId },
-    { enabled: !!clientId && !!userId && !historyLoaded, refetchOnWindowFocus: false }
+    { enabled: !!clientId && !!userId, refetchOnWindowFocus: false, refetchOnMount: "always" }
   );
 
+  // Sincroniza com o banco a cada atualização da query, sem descartar mensagens otimistas,
+  // o indicador "digitando" nem cards de ação (HITL) ainda não refletidos no histórico persistido.
   React.useEffect(() => {
-    if (historyData && !historyLoaded) {
-      const loaded: ChatMessage[] = historyData.history.map((m: any) => ({
-        role: m.role,
-        content: m.content,
-        timestamp: m.timestamp ?? Date.now(),
-      }));
-      if (loaded.length > 0) {
-        setMessages(loaded);
-      }
-      setHistoryLoaded(true);
-    }
-  }, [historyData, historyLoaded]);
+    if (!historyData) return;
+    const server: ChatMessage[] = historyData.history.map((m: any) => ({
+      role: m.role,
+      content: m.content,
+      timestamp: m.timestamp ?? Date.now(),
+    }));
+    setMessages(previous => {
+      const unmatched = [...previous];
+      const merged = server.map(serverMessage => {
+        const index = unmatched.findIndex(local => local.role === serverMessage.role && local.content === serverMessage.content);
+        if (index === -1) return serverMessage;
+        const [local] = unmatched.splice(index, 1);
+        return local;
+      });
+      return [...merged, ...unmatched];
+    });
+    setHistoryLoaded(true);
+  }, [historyData]);
 
   // Scroll para o final ao receber nova mensagem
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const historyUtils = trpc.useUtils();
   const chatMutation = trpc.assistant.clientChat.useMutation();
   const clearHistoryMutation = trpc.assistant.clearHistory.useMutation();
   const executeActionMutation = trpc.assistant.executeAction.useMutation();
@@ -3922,7 +3931,7 @@ function AIAssistantPage() {
     try {
       const result = await chatMutation.mutateAsync({ clientId, userId, message: text });
       setMessages(prev => [
-        ...prev.slice(0, -1), // remove typing
+        ...prev.filter(message => message.content !== HERMES_TYPING_CONTENT), // remove typing
         {
           role: "assistant",
           content: result.response,
@@ -3933,7 +3942,7 @@ function AIAssistantPage() {
       ]);
     } catch (err: any) {
       setMessages(prev => [
-        ...prev.slice(0, -1), // remove typing
+        ...prev.filter(message => message.content !== HERMES_TYPING_CONTENT), // remove typing
         {
           role: "assistant",
           content: `❌ Erro: ${err.message ?? "Não foi possível obter resposta."}`,
@@ -3942,6 +3951,7 @@ function AIAssistantPage() {
       ]);
     } finally {
       setSending(false);
+      void historyUtils.assistant.getHistory.invalidate({ clientId, userId });
       textareaRef.current?.focus();
     }
   };
@@ -3956,6 +3966,7 @@ function AIAssistantPage() {
   const handleClearHistory = async () => {
     if (!confirm("Limpar todo o histórico de conversa com o Assistente IA?")) return;
     await clearHistoryMutation.mutateAsync({ clientId, userId });
+    historyUtils.assistant.getHistory.setData({ clientId, userId }, { ok: true, history: [] });
     setMessages([]);
     setHistoryLoaded(false);
   };
