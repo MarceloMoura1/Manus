@@ -3776,9 +3776,10 @@ function SettingsPagePlaceholder() {
 const HERMES_TYPING_CONTENT = "Hermes está digitando…";
 
 type HermesChatMessage = {
+  id?: string;
   role: "user" | "assistant";
   content: string;
-  timestamp: number;
+  timestamp?: number;
   functionCalls?: string[];
   pendingActionRequest?: {
     id: string;
@@ -3793,52 +3794,6 @@ type HermesChatMessage = {
   actionMessage?: string;
   actionEntityId?: string;
 };
-
-/**
- * Deduplica e ordena estritamente mensagens em ordem cronológica crescente (ASC):
- * mensagens antigas no topo, mensagens recentes no rodapé.
- */
-function deduplicateAndSortMessages(raw: HermesChatMessage[]): HermesChatMessage[] {
-  // 1. Assegura timestamp numérico válido
-  const normalized: HermesChatMessage[] = raw.map(m => ({
-    ...m,
-    timestamp: typeof m.timestamp === "number" && Number.isFinite(m.timestamp) && m.timestamp > 0
-      ? m.timestamp
-      : Date.now(),
-  }));
-
-  // 2. Ordenação cronológica estrita crescente (ASC)
-  normalized.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
-
-  // 3. Deduplicação eliminando duplicatas por role + content + timestamp aproximado (< 10s)
-  const result: HermesChatMessage[] = [];
-  for (const msg of normalized) {
-    const existingIndex = result.findIndex(
-      existing =>
-        existing.role === msg.role &&
-        existing.content.trim() === msg.content.trim() &&
-        Math.abs((existing.timestamp ?? 0) - (msg.timestamp ?? 0)) < 10_000
-    );
-
-    if (existingIndex !== -1) {
-      const existing = result[existingIndex];
-      result[existingIndex] = {
-        ...existing,
-        ...msg,
-        pendingActionRequest: existing.pendingActionRequest ?? msg.pendingActionRequest,
-        actionState: existing.actionState ?? msg.actionState,
-        actionMessage: existing.actionMessage ?? msg.actionMessage,
-        actionEntityId: existing.actionEntityId ?? msg.actionEntityId,
-        functionCalls: existing.functionCalls ?? msg.functionCalls,
-        timestamp: Math.min(existing.timestamp, msg.timestamp),
-      };
-    } else {
-      result.push(msg);
-    }
-  }
-
-  return result.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
-}
 
 function formatAssistantMessageContent(msg: { content?: string; pendingActionRequest?: unknown }): string {
   const content = msg.content?.trim() || "";
@@ -3896,14 +3851,10 @@ function AIAssistantPage() {
     });
   }, []);
 
-  const sortedMessages = React.useMemo(() => {
-    return deduplicateAndSortMessages(messages);
-  }, [messages]);
-
   // Scroll suave automático sempre que as mensagens mudarem ou status de envio alterar
   React.useEffect(() => {
     scrollToBottom(historyLoaded ? "smooth" : "auto");
-  }, [sortedMessages.length, sending, historyLoaded, scrollToBottom]);
+  }, [messages.length, sending, historyLoaded, scrollToBottom]);
 
   // Verificar se Gemini está configurado
   const { data: geminiConfig } = trpc.assistant.checkGeminiConfig.useQuery(
@@ -3917,86 +3868,42 @@ function AIAssistantPage() {
     }
   }, [geminiConfig]);
 
-  // Carregar histórico do banco
+  // Carregar histórico do banco uma única vez na carga inicial
   const { data: historyData } = trpc.assistant.getHistory.useQuery(
     { clientId, userId },
-    { enabled: !!clientId && !!userId, refetchOnWindowFocus: false, refetchOnMount: "always" }
+    { enabled: !!clientId && !!userId && !historyLoaded, refetchOnWindowFocus: false, refetchOnMount: "always" }
   );
 
-  // Sincroniza com o banco a cada atualização da query, sem descartar mensagens otimistas
-  // nem cards de ação (HITL), garantindo ordenação cronológica estrita crescente.
+  // Inicializa o chat como lista sequencial append-only a partir do banco
   React.useEffect(() => {
-    if (!historyData?.history) return;
+    if (historyLoaded || !historyData?.history) return;
     const rawHistory = historyData.history as Array<{ role: "user" | "assistant"; content: string; timestamp?: number }>;
 
     let lastTs = 0;
-    const server: ChatMessage[] = rawHistory.map((m, idx) => {
+    const initialList: ChatMessage[] = rawHistory.map((m, idx) => {
       let ts = typeof m.timestamp === "number" && Number.isFinite(m.timestamp) && m.timestamp > 0
         ? m.timestamp
         : 0;
 
       if (!ts) {
-        // Se mensagens antigas no banco não possuem timestamp, deriva sequencialmente no passado
         const fallbackBase = Date.now() - (rawHistory.length - idx) * 2000;
         ts = lastTs > 0 ? Math.max(lastTs + 1, fallbackBase) : fallbackBase;
       }
       lastTs = ts;
 
       return {
+        id: `hist-${idx}-${ts}`,
         role: m.role,
         content: m.content,
         timestamp: ts,
       };
     });
 
-    setMessages(previous => {
-      if (previous.length === 0) {
-        return deduplicateAndSortMessages(server);
-      }
-
-      // Preserva mensagens locais que o servidor ainda não tem (mensagens otimistas ou em envio)
-      // e mantém metadados enriquecidos locais (como pendingActionRequest, actionState, etc.)
-      const merged: ChatMessage[] = [];
-      const remainingLocal = [...previous];
-
-      for (const s of server) {
-        // Encontra correspondente local para mesclar metadados HITL
-        const localIdx = remainingLocal.findIndex(
-          loc => loc.role === s.role &&
-                 loc.content.trim() === s.content.trim() &&
-                 Math.abs((loc.timestamp ?? 0) - (s.timestamp ?? 0)) < 120_000
-        );
-        if (localIdx !== -1) {
-          const [matched] = remainingLocal.splice(localIdx, 1);
-          merged.push({
-            ...s,
-            ...matched,
-            timestamp: s.timestamp > 0 ? s.timestamp : (matched.timestamp ?? s.timestamp),
-          });
-        } else {
-          // Também tenta match apenas por role + content se for a única ocorrência
-          const exactContentIdx = remainingLocal.findIndex(
-            loc => loc.role === s.role && loc.content.trim() === s.content.trim()
-          );
-          if (exactContentIdx !== -1) {
-            const [matched] = remainingLocal.splice(exactContentIdx, 1);
-            merged.push({
-              ...s,
-              ...matched,
-              timestamp: s.timestamp > 0 ? s.timestamp : (matched.timestamp ?? s.timestamp),
-            });
-          } else {
-            merged.push(s);
-          }
-        }
-      }
-
-      // Combina histórico do servidor mesclado com mensagens locais ainda não sincronizadas
-      const combined = [...merged, ...remainingLocal];
-      return deduplicateAndSortMessages(combined);
-    });
+    // Ordenação estrita realizada uma única vez na carga inicial
+    initialList.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+    setMessages(initialList);
     setHistoryLoaded(true);
-  }, [historyData]);
+  }, [historyData, historyLoaded]);
 
   const historyUtils = trpc.useUtils();
   const chatMutation = trpc.assistant.clientChat.useMutation();
@@ -4019,11 +3926,12 @@ function AIAssistantPage() {
       });
       updatePendingActionCard(request.id, { actionState: "EXECUTED", actionMessage: result.message, actionEntityId: "entityId" in result ? String(result.entityId) : undefined });
       const entityIdPart = "entityId" in result && result.entityId ? ` (ID: #${result.entityId})` : "";
-      setMessages(previous => deduplicateAndSortMessages([...previous, {
+      setMessages(previous => [...previous, {
+        id: "action-" + Date.now(),
         role: "assistant",
         content: `✓ [Ação Concluída] ${result.message}${entityIdPart}`,
         timestamp: Date.now(),
-      }]));
+      }]);
       void historyUtils.assistant.getHistory.invalidate({ clientId, userId });
       scrollToBottom("smooth");
     } catch (error: any) {
@@ -4036,11 +3944,12 @@ function AIAssistantPage() {
     try {
       await cancelActionMutation.mutateAsync({ actionId: request.id, actionType: request.actionType });
       updatePendingActionCard(request.id, { actionState: "CANCELLED", actionMessage: "Ação cancelada. Nenhuma alteração foi executada." });
-      setMessages(previous => deduplicateAndSortMessages([...previous, {
+      setMessages(previous => [...previous, {
+        id: "cancel-" + Date.now(),
         role: "assistant",
         content: "❌ Ação cancelada pelo usuário.",
         timestamp: Date.now(),
-      }]));
+      }]);
       void historyUtils.assistant.getHistory.invalidate({ clientId, userId });
       scrollToBottom("smooth");
     } catch (error: any) {
@@ -4052,37 +3961,41 @@ function AIAssistantPage() {
     const text = input.trim();
     if (!text || sending) return;
 
-    const userMsg: ChatMessage = { role: "user", content: text, timestamp: Date.now() };
-    // A mensagem do usuário é adicionada imediatamente e NUNCA removida
-    setMessages(prev => deduplicateAndSortMessages([...prev, userMsg]));
+    // Chat append-only: adiciona mensagem do usuário no final da lista
+    const userMsg: ChatMessage = {
+      id: "msg-" + Date.now(),
+      role: "user",
+      content: text,
+      timestamp: Date.now(),
+    };
+    setMessages(prev => [...prev, userMsg]);
     setInput("");
     setSending(true);
     scrollToBottom("smooth");
 
     try {
       const result = await chatMutation.mutateAsync({ clientId, userId, message: text });
-      setMessages(prev => deduplicateAndSortMessages([
-        ...prev,
-        {
-          role: "assistant",
-          content: formatAssistantMessageContent({ content: result.response, pendingActionRequest: result.pendingActionRequest }),
-          timestamp: Date.now(),
-          functionCalls: result.functionCallsMade,
-          pendingActionRequest: result.pendingActionRequest,
-        },
-      ]));
+      const assistantMsg: ChatMessage = {
+        id: "asst-" + Date.now(),
+        role: "assistant",
+        content: formatAssistantMessageContent({ content: result.response, pendingActionRequest: result.pendingActionRequest }),
+        timestamp: Date.now(),
+        functionCalls: result.functionCallsMade,
+        pendingActionRequest: result.pendingActionRequest,
+      };
+      setMessages(prev => [...prev, assistantMsg]);
     } catch {
-      setMessages(prev => deduplicateAndSortMessages([
+      setMessages(prev => [
         ...prev,
         {
+          id: "err-" + Date.now(),
           role: "assistant",
           content: "⚠️ Tive uma instabilidade ao processar seu pedido. Por favor, tente novamente.",
           timestamp: Date.now(),
         },
-      ]));
+      ]);
     } finally {
       setSending(false);
-      void historyUtils.assistant.getHistory.invalidate({ clientId, userId });
       textareaRef.current?.focus();
       scrollToBottom("smooth");
     }
@@ -4153,7 +4066,7 @@ function AIAssistantPage() {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 bg-slate-50">
-        {sortedMessages.length === 0 && (
+        {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full gap-6 py-12">
             <div className="w-14 h-14 rounded-2xl bg-emerald-100 flex items-center justify-center">
               <Sparkles className="w-7 h-7 text-emerald-500" />
@@ -4176,7 +4089,7 @@ function AIAssistantPage() {
           </div>
         )}
 
-        {sortedMessages.map((msg, i) => (
+        {messages.map((msg, i) => (
           <div key={i} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
             {msg.role === "assistant" && (
               <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0 mt-1">

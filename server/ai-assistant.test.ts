@@ -1171,4 +1171,149 @@ describe("Hermes persistence, CRM tools and latency", () => {
     expect(sqlExecuted).toContain("LOWER(status) IN ('open', 'aberto', 'pendente', 'em_andamento', 'in_progress', 'aguardando')");
     expect(sqlExecuted).toContain("LPAD(CAST(chamadoNumber AS CHAR), 4, '0') LIKE ?");
   });
+
+  it("enforces user-provided price for correia dentada (120 reais) while preserving other items", async () => {
+    const existingHistory = [
+      {
+        role: "user" as const,
+        content: "faça um orçamento pro cliente Pedro Ferrari para lavagem de carro e troca da correia dentada",
+        timestamp: 1_700_000_000_000,
+      },
+      {
+        role: "assistant" as const,
+        content: "Preparei a proposta abaixo para sua revisão:",
+        timestamp: 1_700_000_001_000,
+        pendingActionRequest: {
+          id: "act-proposal-1",
+          toolName: "create_proposal",
+          type: "MUTATION" as const,
+          actionType: "CREATE_PROPOSAL" as const,
+          args: {
+            clientName: "Pedro Ferrari",
+            items: [
+              { productName: "lavagem de carro", quantity: 1, unitPrice: 0 },
+              { productName: "troca da correia dentada", quantity: 1, unitPrice: 0 },
+            ],
+          },
+          status: "PENDING_APPROVAL" as const,
+        },
+      },
+    ];
+
+    const execute = vi.fn(async (sql) => {
+      if (sql.includes("megadesk_domain_clients")) {
+        return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      }
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) {
+        return [[{ total: 0 }]];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{ content: { parts: [] } }],
+        usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 0, totalTokenCount: 50 },
+      }),
+    }));
+
+    try {
+      const result = await chatWithClientGemini(
+        "tenant-a",
+        "user@example.invalid",
+        "coloca o valor da correia dentada por 120 reais",
+        existingHistory,
+        ["crm", "clients", "sales", "proposals"]
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.pendingActionRequest).toBeDefined();
+      expect(result.pendingActionRequest?.actionType).toBe("CREATE_PROPOSAL");
+      expect(result.pendingActionRequest?.args.clientName).toBe("Pedro Ferrari");
+      const items = result.pendingActionRequest?.args.items as any[];
+      expect(items).toHaveLength(2);
+      const lavagem = items.find(i => i.productName.includes("lavagem"));
+      const correia = items.find(i => i.productName.includes("correia"));
+      expect(lavagem?.unitPrice).toBe(0);
+      expect(correia?.unitPrice).toBe(120);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("guarantees direct clear response for ticket queries when Gemini returns preliminary waiting text in turn 2", async () => {
+    let callCount = 0;
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("megadesk_domain_clients")) {
+        return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      }
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) {
+        return [[{ total: 0 }]];
+      }
+      if (sql.includes("COUNT(*) as total")) {
+        return [[{ total: 2, urgentes: 1 }]];
+      }
+      if (sql.includes("SELECT chamadoId, chamadoNumber")) {
+        return [[
+          { chamadoId: "c-1", chamadoNumber: 1, title: "Erro no Login", customerName: "Cliente A" },
+          { chamadoId: "c-2", chamadoNumber: 2, title: "Falha na Nota Fiscal", customerName: "Cliente B" },
+        ]];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [{
+              content: {
+                parts: [
+                  { functionCall: { name: "get_open_tickets", args: {} } },
+                ],
+              },
+            }],
+            usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 15, totalTokenCount: 65 },
+          }),
+        };
+      }
+      // Turno 2: Gemini hesita ou retorna texto de espera
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{
+            content: {
+              parts: [
+                { text: "Estou consultando o sistema para verificar o status atual dos chamados." },
+              ],
+            },
+          }],
+          usageMetadata: { promptTokenCount: 80, candidatesTokenCount: 15, totalTokenCount: 95 },
+        }),
+      };
+    });
+
+    try {
+      const result = await chatWithClientGemini("tenant-a", "user@example.invalid", "Quantos chamados estão abertos?", [], ["tickets"]);
+      expect(result.ok).toBe(true);
+      expect(result.functionCallsMade).toContain("get_open_tickets");
+      expect(result.response).not.toContain("Estou consultando");
+      expect(result.response).not.toBe("Sem resposta do modelo.");
+      expect(result.response).toContain("Você possui 2 chamado(s) aberto(s)");
+      expect(result.response).toContain('#0001: "Erro no Login"');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
+

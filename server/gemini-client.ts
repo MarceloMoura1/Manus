@@ -1343,19 +1343,198 @@ function tokenUsageTotal(data: any, promptTokens: number, completionTokens: numb
 function buildSystemInstruction(allowedTools: readonly HermesToolDefinition[]): string {
   const names = allowedTools.map(tool => tool.name).join(", ") || "nenhuma";
   return `Você é o Assistente IA da plataforma MegaDesk, especializado em ajudar a equipe de atendimento.
+Você é um assistente de CRM e ERP inteligente, atento e resolutivo.
 
 Você só pode usar as ferramentas explicitamente disponibilizadas nesta conversa: ${names}. Nunca alegue consultar dados de uma ferramenta que não esteja disponível.
 Para cadastrar cliente use create_client; para propostas comerciais use create_proposal (identifique o cliente com get_client_360 e os produtos com get_product_details antes). Ferramentas de escrita NÃO alteram dados: elas geram um card de aprovação humana. Nunca diga que algo foi criado antes da confirmação do usuário.
 Se consultar um cliente ou produto com get_client_360 ou get_product_details e o retorno indicar found: false, você pode sugerir o cadastro antes de prosseguir OU gerar a proposta em rascunho com o nome e itens informados usando create_proposal.
 
+REGRA DE PREÇOS E PROPOSTAS:
+- Quando o usuário disser para alterar um valor, você DEVE alterar o valor especificado no item correspondente na chamada da ferramenta create_proposal.
+- Quando o usuário informar valores explicitamente no prompt (ex: "120 reais", "R$ 60", "troca por 120", "o valor da correia dentada é 120 reais"), atribua exatamente esse valor numérico a unitPrice do item citado.
+- Nunca zere valores informados pelo usuário. Mantenha os demais itens da proposta e seus preços anteriores preservados.
+
 REGRA CRÍTICA DE EXECUÇÃO DE FERRAMENTAS:
 Quando você decidir invocar qualquer ferramenta (functionCall), NUNCA gere mensagens preliminares ou textos de espera como 'Estou consultando o sistema...', 'Um momento...', 'Verificando...'.
 Emita EXCLUSIVAMENTE o bloco functionCall. O backend executará a ferramenta e devolverá o resultado na mesma sessão para que você formule a resposta final completa com os dados reais já consultados.
-Ao receber o resultado de uma ferramenta (functionResponse), forneça IMEDIATAMENTE a resposta final completa, amigável e resolutiva para o usuário com base nos dados retornados. NUNCA deixe a resposta vazia. Se for uma solicitação de proposta ou orçamento e o cliente não foi encontrado, informe claramente que ele não está cadastrado e pergunte se deseja cadastrá-lo ou já avance gerando a proposta em rascunho com os itens informados via create_proposal.
+Ao receber o resultado de uma ferramenta (functionResponse), forneça IMEDIATAMENTE a resposta final completa, amigável e resolutiva para o usuário com base nos dados retornados. NUNCA deixe a resposta vazia.
+Ao executar get_open_tickets, retorne imediatamente o resultado em texto claro: "Você possui X chamado(s) aberto(s): [listar títulos e números]" ou "Não há chamados abertos no momento." Nunca retorne "Sem resposta do modelo."
 Quando o usuário solicitar correções, ajustes de preço ou adições a um orçamento/proposta anterior, MANTENHA todos os dados já definidos (cliente, itens existentes) e altere apenas os campos solicitados (ex: atualizar o preço unitário do item indicado).
 
 Sempre responda em português brasileiro de forma clara, objetiva e profissional.
 Se não tiver dados suficientes, seja honesto e sugira como o usuário pode obter a informação.`;
+}
+
+const ACTION_STOPWORDS = new Set([
+  "troca", "trocar", "troque", "muda", "mudar", "mude", "coloca", "colocar", "coloque",
+  "altera", "alterar", "altere", "ajusta", "ajustar", "ajuste", "bote", "botar", "bota",
+  "atualiza", "atualizar", "atualize", "falei", "disse", "quero", "favor", "por", "para",
+  "pra", "de", "do", "da", "dos", "das", "o", "a", "os", "as", "um", "uma", "uns", "umas",
+  "valor", "preço", "preco", "custo", "é", "e", "em", "no", "na", "nos", "nas", "reais",
+  "real", "r$"
+]);
+
+export function extractPriceFromText(text: string): number | null {
+  // 1. R$ 120 or R$120,50
+  const rDollar = text.match(/(?:r\$|\$)\s*(\d+(?:[.,]\d{1,2})?)/i);
+  if (rDollar && rDollar[1]) {
+    const val = Number(rDollar[1].replace(",", "."));
+    if (Number.isFinite(val) && val >= 0) return val;
+  }
+
+  // 2. 120 reais or 120,00 reais
+  const reais = text.match(/(\d+(?:[.,]\d{1,2})?)\s*(?:reais|real)\b/i);
+  if (reais && reais[1]) {
+    const val = Number(reais[1].replace(",", "."));
+    if (Number.isFinite(val) && val >= 0) return val;
+  }
+
+  // 3. por / para / pra / de / = / : seguido de número
+  const prep = text.match(/(?:por|para|pra|de|em|a|=|:)\s*(\d+(?:[.,]\d{1,2})?)\b/i);
+  if (prep && prep[1]) {
+    const val = Number(prep[1].replace(",", "."));
+    if (Number.isFinite(val) && val >= 0) return val;
+  }
+
+  // 4. Qualquer número isolado no texto
+  const standalone = text.match(/\b(\d+(?:[.,]\d{1,2})?)\b/);
+  if (standalone && standalone[1]) {
+    const val = Number(standalone[1].replace(",", "."));
+    if (Number.isFinite(val) && val >= 0) return val;
+  }
+
+  return null;
+}
+
+export function updateItemsWithUserPrices<T extends { productName: string; quantity: number; unitPrice: number }>(
+  items: T[],
+  userText: string
+): T[] {
+  if (!items.length) return items;
+
+  const result = items.map(it => ({ ...it }));
+  const chunks = userText.split(/(?:\s+e\s+|[,;\n]+)/i).map(c => c.trim()).filter(Boolean);
+  let updatedAny = false;
+
+  for (const chunk of chunks) {
+    const price = extractPriceFromText(chunk);
+    if (price === null) continue;
+
+    const chunkWords = chunk.toLowerCase().split(/[\s:=-]+/).map(w => w.replace(/[^a-zà-ú0-9]/g, "")).filter(Boolean);
+    const chunkKeywords = chunkWords.filter(w => !ACTION_STOPWORDS.has(w) && !/^\d+$/.test(w));
+
+    let bestItemIdx = -1;
+    let maxMatches = 0;
+
+    result.forEach((item, idx) => {
+      const itemWords = item.productName.toLowerCase().split(/[\s:=-]+/).map(w => w.replace(/[^a-zà-ú0-9]/g, "")).filter(Boolean);
+      const itemKeywords = itemWords.filter(w => !ACTION_STOPWORDS.has(w));
+      const effectiveKeywords = itemKeywords.length > 0 ? itemKeywords : itemWords;
+
+      let matches = 0;
+      for (const kw of effectiveKeywords) {
+        if (chunkKeywords.some(cw => cw.includes(kw) || kw.includes(cw))) {
+          matches++;
+        }
+      }
+      if (matches > maxMatches) {
+        maxMatches = matches;
+        bestItemIdx = idx;
+      }
+    });
+
+    if (bestItemIdx !== -1 && maxMatches > 0) {
+      result[bestItemIdx].unitPrice = price;
+      updatedAny = true;
+    }
+  }
+
+  if (!updatedAny) {
+    const overallPrice = extractPriceFromText(userText);
+    if (overallPrice !== null) {
+      const textWords = userText.toLowerCase().split(/[\s:=-]+/).map(w => w.replace(/[^a-zà-ú0-9]/g, "")).filter(Boolean);
+      const textKeywords = textWords.filter(w => !ACTION_STOPWORDS.has(w) && !/^\d+$/.test(w));
+
+      let bestItemIdx = -1;
+      let maxMatches = 0;
+
+      result.forEach((item, idx) => {
+        const itemWords = item.productName.toLowerCase().split(/[\s:=-]+/).map(w => w.replace(/[^a-zà-ú0-9]/g, "")).filter(Boolean);
+        const itemKeywords = itemWords.filter(w => !ACTION_STOPWORDS.has(w));
+        const effectiveKeywords = itemKeywords.length > 0 ? itemKeywords : itemWords;
+
+        let matches = 0;
+        for (const kw of effectiveKeywords) {
+          if (textKeywords.some(tw => tw.includes(kw) || kw.includes(tw))) {
+            matches++;
+          }
+        }
+        if (matches > maxMatches) {
+          maxMatches = matches;
+          bestItemIdx = idx;
+        }
+      });
+
+      if (bestItemIdx !== -1 && maxMatches > 0) {
+        result[bestItemIdx].unitPrice = overallPrice;
+        updatedAny = true;
+      } else if (result.length === 1) {
+        result[0].unitPrice = overallPrice;
+        updatedAny = true;
+      }
+    }
+  }
+
+  return result;
+}
+
+export function enforceUserProvidedPrices(
+  args: Record<string, unknown>,
+  userMessage: string,
+  existingHistory: readonly IAMessage[] = []
+): Record<string, unknown> {
+  const lastProposal = findLastProposalInHistory(existingHistory);
+  let rawItems = Array.isArray(args.items) ? (args.items as Array<Record<string, unknown>>) : [];
+
+  if (rawItems.length === 0 && lastProposal) {
+    rawItems = lastProposal.items;
+  }
+
+  const typedItems = rawItems.map(it => ({
+    productName: String(it.productName ?? it.description ?? "Item"),
+    quantity: Number(it.quantity ?? 1) || 1,
+    unitPrice: Number(it.unitPrice ?? 0) || 0,
+    ...(it.productId ? { productId: String(it.productId) } : {}),
+    ...(it.description ? { description: String(it.description) } : {}),
+  }));
+
+  const isAdjustment = Boolean(
+    lastProposal &&
+    /\b(valor|preço|preco|custo|ajuste|corrija|altere|mude|troque|coloque|bote|adicione|atualize|reais)\b/i.test(userMessage)
+  );
+
+  let mergedItems = typedItems;
+  if (isAdjustment && lastProposal && typedItems.length < lastProposal.items.length) {
+    const updatedNames = new Set(typedItems.map(i => i.productName.toLowerCase()));
+    const missingItems = lastProposal.items.filter(prev => !updatedNames.has(prev.productName.toLowerCase()));
+    mergedItems = [...missingItems, ...typedItems];
+  }
+
+  const updatedItems = updateItemsWithUserPrices(mergedItems, userMessage);
+
+  return {
+    ...args,
+    items: updatedItems,
+  };
+}
+
+export function isPreliminaryWaitingText(text: string): boolean {
+  if (!text) return false;
+  const t = text.trim();
+  return (
+    /^(?:estou\s+consultando|consultando|verificando|buscando|aguarde|um\s+momento|só\s+um\s+instante|vou\s+verificar|para\s+responder\s+[àa]\s+sua\s+pergunta,\s*preciso)/i.test(t) ||
+    /^(?:estou\s+consultando\s+o\s+sistema|estou\s+verificando\s+no\s+sistema)/i.test(t)
+  );
 }
 
 function findLastProposalInHistory(history: readonly IAMessage[]): {
@@ -1421,22 +1600,8 @@ function extractProposalDetailsFromMessage(
   // 2. Extrai itens ou atualiza itens da proposta anterior
   let items: Array<{ productName: string; quantity: number; unitPrice: number }> = [];
 
-  // Se houver proposta anterior e o usuário estiver ajustando preço (ex: "valor da lavagem é 60 reais" ou "lavagem 60 reais")
-  const priceMatch = userMessage.match(/(?:valor|preço|preco|custo)?\s*(?:da|do|de|)\s*(.+?)\s*(?:é|e|para|por|de|=|:)\s*(?:r\$)?\s*(\d+(?:[.,]\d{1,2})?)\s*(?:reais)?/i)
-    || userMessage.match(/(.+?)\s*(?:por|custa|fica|sai a)\s*(?:r\$)?\s*(\d+(?:[.,]\d{1,2})?)\s*(?:reais)?/i);
-
-  if (lastProposal && priceMatch) {
-    const targetItemName = priceMatch[1].replace(/^(?:o|a|os|as|valor|preço|preco|o\s+valor)\s+/i, "").trim().toLowerCase();
-    const newPrice = Number(priceMatch[2].replace(",", "."));
-    if (Number.isFinite(newPrice) && newPrice >= 0) {
-      items = lastProposal.items.map(it => {
-        const itemLower = it.productName.toLowerCase();
-        if (itemLower.includes(targetItemName) || targetItemName.includes(itemLower) || (targetItemName.includes("lavagem") && itemLower.includes("lavagem"))) {
-          return { ...it, unitPrice: newPrice };
-        }
-        return { ...it };
-      });
-    }
+  if (lastProposal && isAdjustment) {
+    items = updateItemsWithUserPrices(lastProposal.items, userMessage);
   }
 
   if (items.length === 0) {
@@ -1455,13 +1620,21 @@ function extractProposalDetailsFromMessage(
         .filter(s => s.length >= 2 && !/^(cliente|orçamento|proposta)/i.test(s));
 
       if (rawParts.length > 0) {
-        items = rawParts.map(name => ({ productName: name, quantity: 1, unitPrice: 0 }));
+        items = rawParts.map(part => {
+          const price = extractPriceFromText(part) ?? 0;
+          const cleanName = part
+            .replace(/(?:por|para|pra|de|=|:)?\s*(?:r\$|\$)?\s*\d+(?:[.,]\d{1,2})?\s*(?:reais|real)?/gi, "")
+            .trim();
+          return { productName: cleanName || part, quantity: 1, unitPrice: price };
+        });
+        // Atualiza caso haja valores numéricos adicionais no texto
+        items = updateItemsWithUserPrices(items, userMessage);
       }
     }
   }
 
   if (items.length === 0 && lastProposal) {
-    items = lastProposal.items.map(it => ({ ...it }));
+    items = updateItemsWithUserPrices(lastProposal.items, userMessage);
   }
 
   if (items.length === 0) {
@@ -1506,16 +1679,20 @@ function synthesizeDeterministicResponse(
     const rawTotal = output?.total ?? output?.chamados_abertos ?? output?.resumo?.total ?? output?.chamados?.length ?? 0;
     const total = Number(rawTotal) || 0;
     if (total === 0) {
-      return "Não há nenhum chamado aberto no sistema no momento. Tudo em dia!";
+      return "Não há chamados abertos no momento.";
     }
     if (Array.isArray(output?.chamados) && output.chamados.length > 0) {
-      const list = output.chamados
+      const validChamados = output.chamados
         .slice(0, 5)
-        .map((c: any) => `#${String(c.chamadoNumber ?? c.chamadoId).padStart(4, "0")}: "${c.title}" (${c.customerName || c.company || "Cliente não informado"})`)
-        .join("; ");
-      return `Você possui ${total} chamado(s) aberto(s) no momento: ${list}.`;
+        .filter((c: any) => c && (c.title || c.chamadoNumber !== undefined || c.chamadoId));
+      if (validChamados.length > 0) {
+        const list = validChamados
+          .map((c: any) => `#${String(c.chamadoNumber ?? c.chamadoId ?? "").padStart(4, "0")}: "${c.title ?? "Sem título"}"`)
+          .join("; ");
+        return `Você possui ${total} chamado(s) aberto(s): ${list}.`;
+      }
     }
-    return `Você possui ${total} chamado(s) aberto(s) no momento no sistema.`;
+    return `Você possui ${total} chamado(s) aberto(s) no momento.`;
   }
 
   if (name === "get_client_360") {
@@ -1641,8 +1818,12 @@ async function chatWithClientGeminiInternal(
 
     const authorizedTool = getAuthorizedHermesTool(fc.name, userPermissions);
     if (authorizedTool?.type === "MUTATION") {
+      let mutationArgs = fc.args ?? {};
+      if (fc.name === "create_proposal") {
+        mutationArgs = enforceUserProvidedPrices(mutationArgs, userMessage, existingHistory);
+      }
       // Ferramentas de mutação geram solicitação pendente para aprovação humana (HITL)
-      pendingActionRequest = createPendingActionRequest(authorizedTool, fc.args ?? {}, { clientId, userId });
+      pendingActionRequest = createPendingActionRequest(authorizedTool, mutationArgs, { clientId, userId });
       break;
     }
 
@@ -1731,7 +1912,18 @@ async function chatWithClientGeminiInternal(
 
   modelText = sanitizeModelResponseText(modelText);
 
+  if (isPreliminaryWaitingText(modelText)) {
+    modelText = "";
+  }
+
   const synthesizedFallback = synthesizeDeterministicResponse(executedReadResults, userMessage);
+
+  const ticketsResult = executedReadResults.find(r => r.name === "get_open_tickets");
+  if (ticketsResult) {
+    if (!modelText || isPreliminaryWaitingText(modelText) || !/\b(?:chamado|ticket|aberto|nenhum)/i.test(modelText)) {
+      modelText = synthesizeDeterministicResponse([ticketsResult], userMessage) || "";
+    }
+  }
 
   let finalResponse = modelText;
   if (!finalResponse) {
@@ -1744,6 +1936,11 @@ async function chatWithClientGeminiInternal(
     } else {
       finalResponse = "Sem resposta do modelo.";
     }
+  }
+
+  // Garantia absoluta: se get_open_tickets foi executado, nunca retornar "Sem resposta do modelo."
+  if (ticketsResult && (finalResponse === "Sem resposta do modelo." || !finalResponse)) {
+    finalResponse = synthesizeDeterministicResponse([ticketsResult], userMessage) || "Não há chamados abertos no momento.";
   }
 
   // 5. Salva no histórico
