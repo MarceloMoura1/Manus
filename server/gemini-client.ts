@@ -527,7 +527,7 @@ export function cancelPendingHermesAction(input: { actionId: string; actionType:
 // ─── Helpers de chamada HTTP Gemini ──────────────────────────────────────────
 
 interface GeminiContent {
-  role: "user" | "model";
+  role: "user" | "model" | "function";
   parts: Array<{ text?: string; functionCall?: any; functionResponse?: any }>;
 }
 
@@ -861,6 +861,22 @@ export async function persistUserMessageImmediately(
   return next;
 }
 
+/**
+ * Persiste uma mensagem gerada pelo assistente (ex.: confirmação ou cancelamento de ação HITL)
+ * diretamente no histórico do banco, garantindo que permaneça visível após reload/troca de abas.
+ */
+export async function appendAssistantMessageToHistory(
+  clientId: string,
+  userId: string,
+  content: string,
+): Promise<IAMessage[]> {
+  const current = await loadConversationHistory(clientId, userId);
+  const assistantEntry: IAMessage = { role: "assistant", content, timestamp: Date.now() };
+  const next: IAMessage[] = [...current, assistantEntry].slice(-50);
+  await saveConversationHistory(clientId, userId, next);
+  return next;
+}
+
 /** Salva/atualiza histórico de conversa do usuário no banco */
 export async function saveConversationHistory(
   clientId: string,
@@ -1026,7 +1042,10 @@ export async function executeClientFunction(
       [clientId, value],
     ) as any[];
     const ticket = ticketRows[0];
-    if (!ticket) return JSON.stringify({ erro: "Chamado não encontrado neste tenant." });
+    if (!ticket) {
+      const target = selector.ticketId ?? selector.ticketNumber ?? "";
+      return JSON.stringify({ found: false, message: target ? `Chamado ${target} não encontrado no sistema.` : "Chamado não encontrado no sistema." });
+    }
     const [activityRows] = await pool.execute(
       `SELECT activity_id AS activityId, description, attendant, action_type AS actionType, created_at AS createdAt
          FROM megadesk_domain_chamado_activities
@@ -1074,7 +1093,13 @@ export async function executeClientFunction(
       clientValues,
     ) as any[];
     const crmClient = clientRows[0];
-    if (!crmClient) return JSON.stringify({ erro: "Cliente não encontrado neste tenant." });
+    if (!crmClient) {
+      const searchTarget = lookup.search ?? lookup.clientId ?? "";
+      return JSON.stringify({
+        found: false,
+        message: searchTarget ? `Cliente ${searchTarget} não encontrado no cadastro.` : "Cliente não encontrado no cadastro.",
+      });
+    }
     const [timelineRows] = await pool.execute(
       `SELECT timeline_id AS timelineId, entry_type AS type, description, author, created_at AS createdAt
          FROM megadesk_crm_timeline
@@ -1125,7 +1150,10 @@ export async function executeClientFunction(
       [clientId, lookup.proposalId ?? lookup.proposalNumber],
     ) as any[];
     const proposal = orderRows[0];
-    if (!proposal) return JSON.stringify({ erro: "Proposta não encontrada neste tenant." });
+    if (!proposal) {
+      const target = lookup.proposalId ?? lookup.proposalNumber ?? "";
+      return JSON.stringify({ found: false, message: target ? `Proposta ${target} não encontrada no sistema.` : "Proposta não encontrada no sistema." });
+    }
     const [itemRows] = await pool.execute(
       `SELECT public_id AS publicId, product_name_snapshot AS productName, sku_snapshot AS sku, quantity,
               unit_price_cents AS unitPriceCents, discount_cents AS discountCents, line_total_cents AS lineTotalCents
@@ -1145,7 +1173,10 @@ export async function executeClientFunction(
     const lookup = validatedArgs as { productId?: string; sku?: string };
     const predicate = lookup.productId ? "p.public_id = ?" : "p.sku = ?";
     const [rows] = await pool.execute(`SELECT p.public_id publicId,p.name,p.sku,p.description,p.unit,p.cost_price_cents costPriceCents,p.sale_price_cents salePriceCents,p.quantity,p.minimum_stock minimumStock,p.active,p.category,ps.supplier_public_id supplierId,ps.supplier_legal_name supplierName FROM erp_products p LEFT JOIN erp_product_suppliers ps ON ps.product_id=p.id AND ps.client_id=p.client_id AND ps.is_preferred=1 AND ps.active=1 WHERE p.client_id=? AND p.active<>-1 AND ${predicate} LIMIT 1`, [clientId, lookup.productId ?? lookup.sku]) as any[];
-    if (!rows[0]) return JSON.stringify({ erro: "Produto não encontrado neste tenant." });
+    if (!rows[0]) {
+      const target = lookup.sku ?? lookup.productId ?? "";
+      return JSON.stringify({ found: false, message: target ? `Produto ${target} não encontrado no cadastro.` : "Produto não encontrado no cadastro." });
+    }
     const [auditRows] = await pool.execute(`SELECT action,summary,created_at createdAt FROM erp_product_audit_logs WHERE client_id=? AND product_id=(SELECT id FROM erp_products WHERE client_id=? AND public_id=? LIMIT 1) ORDER BY created_at DESC LIMIT 20`, [clientId, clientId, rows[0].publicId]) as any[];
     return JSON.stringify({ produto: rows[0], timeline: auditRows });
   }
@@ -1226,6 +1257,7 @@ function buildSystemInstruction(allowedTools: readonly HermesToolDefinition[]): 
 
 Você só pode usar as ferramentas explicitamente disponibilizadas nesta conversa: ${names}. Nunca alegue consultar dados de uma ferramenta que não esteja disponível.
 Para cadastrar cliente use create_client; para propostas comerciais use create_proposal (identifique o cliente com get_client_360 e os produtos com get_product_details antes). Ferramentas de escrita NÃO alteram dados: elas geram um card de aprovação humana. Nunca diga que algo foi criado antes da confirmação do usuário.
+Se consultar um cliente ou produto com get_client_360 ou get_product_details e o retorno indicar found: false, informe amigavelmente ao usuário que não encontrou o cadastro e pergunte se deseja realizar o cadastro antes de prosseguir com o orçamento ou proposta.
 Sempre responda em português brasileiro de forma clara, objetiva e profissional.
 Quando buscar dados, informe ao usuário que está consultando o sistema antes de responder.
 Se não tiver dados suficientes, seja honesto e sugira como o usuário pode obter a informação.`;
@@ -1297,14 +1329,30 @@ async function chatWithClientGeminiInternal(
     // Executa a função localmente
     const funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId, userPermissions, geminiKey);
 
-    // Adiciona o resultado da função ao contexto e chama novamente
+    // Adiciona o resultado da função ao contexto com role: "function" e chama novamente
     const modelTurn: GeminiContent = {
       role: "model",
-      parts: [{ functionCall: fc }],
+      parts: candidate?.content?.parts?.length ? candidate.content.parts : [{ functionCall: fc }],
     };
+    let parsedOutput: unknown;
+    try {
+      parsedOutput = JSON.parse(funcResult);
+    } catch {
+      parsedOutput = funcResult;
+    }
     const functionResponseTurn: GeminiContent = {
-      role: "user",
-      parts: [{ functionResponse: { name: fc.name, response: JSON.parse(funcResult) } }],
+      role: "function",
+      parts: [
+        {
+          functionResponse: {
+            name: fc.name,
+            response: {
+              output: parsedOutput,
+              ...(parsedOutput && typeof parsedOutput === "object" && !Array.isArray(parsedOutput) ? parsedOutput : {}),
+            },
+          },
+        },
+      ],
     };
 
     requestBody.contents = [...requestBody.contents, modelTurn, functionResponseTurn];
@@ -1318,9 +1366,16 @@ async function chatWithClientGeminiInternal(
     tokensUsed += tokenUsageTotal(data, nextPromptTokens, nextCompletionTokens);
   }
 
+  const candidateParts = data?.candidates?.[0]?.content?.parts ?? [];
+  const modelText = candidateParts
+    .map((p: any) => (typeof p.text === "string" ? p.text.trim() : ""))
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+
   const finalResponse: string = pendingActionRequest
-    ? "Ação preparada e aguardando sua aprovação antes de qualquer alteração."
-    : data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "Sem resposta do modelo.";
+    ? (modelText || "Ação preparada e aguardando sua aprovação antes de qualquer alteração.")
+    : (modelText || "Sem resposta do modelo.");
 
   // 5. Salva no histórico
   const updatedHistory: IAMessage[] = [

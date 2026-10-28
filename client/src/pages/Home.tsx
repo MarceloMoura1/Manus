@@ -3897,9 +3897,10 @@ function AIAssistantPage() {
       updatePendingActionCard(request.id, { actionState: "EXECUTED", actionMessage: result.message, actionEntityId: "entityId" in result ? String(result.entityId) : undefined });
       setMessages(previous => [...previous, {
         role: "assistant",
-        content: `✓ ${result.message}`,
+        content: `✓ Ação executada com sucesso: ${result.message}`,
         timestamp: Date.now(),
       }]);
+      void historyUtils.assistant.getHistory.invalidate({ clientId, userId });
     } catch (error: any) {
       updatePendingActionCard(request.id, { actionState: "FAILED", actionMessage: error?.message ?? "Não foi possível executar a ação." });
     }
@@ -3910,6 +3911,12 @@ function AIAssistantPage() {
     try {
       await cancelActionMutation.mutateAsync({ actionId: request.id, actionType: request.actionType });
       updatePendingActionCard(request.id, { actionState: "CANCELLED", actionMessage: "Ação cancelada. Nenhuma alteração foi executada." });
+      setMessages(previous => [...previous, {
+        role: "assistant",
+        content: "❌ Ação cancelada pelo usuário.",
+        timestamp: Date.now(),
+      }]);
+      void historyUtils.assistant.getHistory.invalidate({ clientId, userId });
     } catch (error: any) {
       updatePendingActionCard(request.id, { actionState: "FAILED", actionMessage: error?.message ?? "Não foi possível cancelar a ação." });
     }

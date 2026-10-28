@@ -1865,7 +1865,13 @@ export const appRouter = router({
         actionId: z.string().regex(/^action-[A-Za-z0-9_-]{8,}$/),
       }).strict())
       .mutation(async ({ input, ctx }) => {
-        const { beginPendingHermesAction, completePendingHermesAction, getAuthorizedHermesTool, releasePendingHermesAction } = await import("./gemini-client");
+        const {
+          beginPendingHermesAction,
+          completePendingHermesAction,
+          getAuthorizedHermesTool,
+          releasePendingHermesAction,
+          appendAssistantMessageToHistory,
+        } = await import("./gemini-client");
         const userId = ctx.userEmail?.trim().toLowerCase();
         if (!userId) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão de usuário ausente." });
         await hydrateSyncState();
@@ -1906,6 +1912,11 @@ export const appRouter = router({
               action: { actionType: pending.actionType, args: pending.args },
             });
           completePendingHermesAction(input.actionId);
+          await appendAssistantMessageToHistory(
+            ctx.tenantId,
+            userId,
+            `✓ Ação executada com sucesso: ${result.message}`
+          );
           audit("MegaDesk", `Hermes executou ${pending.actionType} após aprovação humana (HITL) por ${user.id}; registro ${"entityId" in result ? String(result.entityId) : "n/a"}`, ctx.tenantId);
           return result;
         } catch (error) {
@@ -1923,7 +1934,7 @@ export const appRouter = router({
         actionId: z.string().regex(/^action-[A-Za-z0-9_-]{8,}$/),
       }).strict())
       .mutation(async ({ input, ctx }) => {
-        const { cancelPendingHermesAction } = await import("./gemini-client");
+        const { cancelPendingHermesAction, appendAssistantMessageToHistory } = await import("./gemini-client");
         const userId = ctx.userEmail?.trim().toLowerCase();
         if (!userId) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão de usuário ausente." });
         await hydrateSyncState();
@@ -1931,6 +1942,11 @@ export const appRouter = router({
         assertAssistantActionPermission(client, userId, input.actionType);
         try {
           cancelPendingHermesAction({ ...input, clientId: ctx.tenantId, userId });
+          await appendAssistantMessageToHistory(
+            ctx.tenantId,
+            userId,
+            "❌ Ação cancelada pelo usuário."
+          );
           return { success: true, message: "Ação cancelada. Nenhuma alteração foi executada." };
         } catch {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Ação pendente ausente, expirada ou não autorizada." });

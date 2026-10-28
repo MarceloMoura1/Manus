@@ -27,6 +27,8 @@ import {
   MAX_GEMINI_PROMPT_HISTORY_MESSAGES,
   selectGeminiPromptHistory,
   persistUserMessageImmediately,
+  appendAssistantMessageToHistory,
+  chatWithClientGemini,
   type HermesToolDefinition,
 } from "./gemini-client";
 import { executeHermesTicketAction } from "./hermes-ticket-actions";
@@ -650,6 +652,116 @@ describe("Hermes persistence, CRM tools and latency", () => {
     expect(problems).toEqual([]);
   });
 
+
+  it("persists assistant HITL action confirmations and cancellations to conversation history", async () => {
+    const execute = vi.fn(async () => [[]]);
+    vi.mocked(getPool).mockReturnValue({
+      execute,
+    } as any);
+
+    const history = await appendAssistantMessageToHistory(
+      "tenant-a",
+      "user@example.invalid",
+      "✓ Ação executada com sucesso: Cliente criado com sucesso."
+    );
+    expect(history.at(-1)).toMatchObject({
+      role: "assistant",
+      content: "✓ Ação executada com sucesso: Cliente criado com sucesso.",
+    });
+    expect(execute).toHaveBeenCalledTimes(2); // load + save
+  });
+
+  it("returns found: false when client or product does not exist in READ tools", async () => {
+    const execute = vi.fn(async () => [[]]);
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+    const clientRes = JSON.parse(await executeClientFunction("get_client_360", { search: "Pedro Ferrari" }, "tenant-a", ["crm"]));
+    expect(clientRes).toEqual({
+      found: false,
+      message: "Cliente Pedro Ferrari não encontrado no cadastro.",
+    });
+
+    const prodRes = JSON.parse(await executeClientFunction("get_product_details", { sku: "SKU-999" }, "tenant-a", ["products"]));
+    expect(prodRes).toEqual({
+      found: false,
+      message: "Produto SKU-999 não encontrado no cadastro.",
+    });
+  });
+
+  it("executes multi-turn loop: sends READ tool result with role 'function' and completes conversation", async () => {
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("megadesk_domain_clients")) {
+        return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      }
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) {
+        return [[{ total: 0 }]];
+      }
+      if (sql.includes("megadesk_crm_clients")) {
+        return [[]]; // cliente não encontrado
+      }
+      if (sql.includes("megadesk_domain_ia_conversation_history") || sql.includes("megadesk_domain_ia_conversations") || sql.includes("megadesk_ia_token_usage")) {
+        return [[]];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+    let callCount = 0;
+    const receivedPayloads: any[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: any, init: any) => {
+      callCount++;
+      const body = JSON.parse(init.body);
+      receivedPayloads.push(body);
+      if (callCount === 1) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [{
+              content: {
+                parts: [{
+                  functionCall: { name: "get_client_360", args: { search: "Pedro Ferrari" } }
+                }]
+              }
+            }],
+            usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 10, totalTokenCount: 60 }
+          })
+        } as any;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{
+            content: {
+              parts: [{
+                text: "Não encontrei o cliente Pedro Ferrari no sistema. Deseja que eu faça o cadastro dele antes de gerar o orçamento?"
+              }]
+            }
+          }],
+          usageMetadata: { promptTokenCount: 80, candidatesTokenCount: 20, totalTokenCount: 100 }
+        })
+      } as any;
+    }) as any;
+
+    try {
+      const result = await chatWithClientGemini("tenant-a", "user@example.invalid", "faça um orçamento pro cliente Pedro Ferrari", [], ["crm", "sales"]);
+      expect(callCount).toBe(2);
+      expect(result.ok).toBe(true);
+      expect(result.functionCallsMade).toContain("get_client_360");
+      expect(result.response).toContain("Não encontrei o cliente Pedro Ferrari");
+
+      // Validar que o payload da 2ª chamada continha role: "function" com functionResponse
+      const secondCallContents = receivedPayloads[1].contents;
+      const functionTurn = secondCallContents.find((c: any) => c.role === "function");
+      expect(functionTurn).toBeDefined();
+      expect(functionTurn.parts[0].functionResponse.name).toBe("get_client_360");
+      expect(functionTurn.parts[0].functionResponse.response.found).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
   it("propagates provider network failures without hiding them", async () => {
     const failing = vi.fn(async () => { throw new Error("network down"); });
     await expect(callGeminiAPI("key", { contents: [] }, failing as any)).rejects.toThrow("network down");
