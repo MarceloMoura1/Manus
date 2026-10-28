@@ -1278,8 +1278,12 @@ function buildSystemInstruction(allowedTools: readonly HermesToolDefinition[]): 
 Você só pode usar as ferramentas explicitamente disponibilizadas nesta conversa: ${names}. Nunca alegue consultar dados de uma ferramenta que não esteja disponível.
 Para cadastrar cliente use create_client; para propostas comerciais use create_proposal (identifique o cliente com get_client_360 e os produtos com get_product_details antes). Ferramentas de escrita NÃO alteram dados: elas geram um card de aprovação humana. Nunca diga que algo foi criado antes da confirmação do usuário.
 Se consultar um cliente ou produto com get_client_360 ou get_product_details e o retorno indicar found: false, você pode sugerir o cadastro antes de prosseguir OU gerar a proposta em rascunho com o nome e itens informados usando create_proposal.
+
+REGRA CRÍTICA DE EXECUÇÃO DE FERRAMENTAS:
+Quando você decidir invocar qualquer ferramenta (functionCall), NUNCA gere mensagens preliminares ou textos de espera como 'Estou consultando o sistema...', 'Um momento...', 'Verificando...'.
+Emita EXCLUSIVAMENTE o bloco functionCall. O backend executará a ferramenta e devolverá o resultado na mesma sessão para que você formule a resposta final completa com os dados reais já consultados.
+
 Sempre responda em português brasileiro de forma clara, objetiva e profissional.
-Quando buscar dados, informe ao usuário que está consultando o sistema antes de responder.
 Se não tiver dados suficientes, seja honesto e sugira como o usuário pode obter a informação.`;
 }
 
@@ -1341,12 +1345,12 @@ async function chatWithClientGeminiInternal(
 
     const authorizedTool = getAuthorizedHermesTool(fc.name, userPermissions);
     if (authorizedTool?.type === "MUTATION") {
-      // Nunca executa mutações no loop do modelo. A interface recebe apenas a solicitação pendente.
+      // Ferramentas de mutação geram solicitação pendente para aprovação humana (HITL)
       pendingActionRequest = createPendingActionRequest(authorizedTool, fc.args ?? {}, { clientId, userId });
       break;
     }
 
-    // Executa a função localmente com tolerância estrita a erros
+    // Ferramenta READ: executa localmente no banco com tolerância estrita a erros
     let funcResult: string;
     try {
       funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId, userPermissions, geminiKey);
@@ -1355,10 +1359,10 @@ async function chatWithClientGeminiInternal(
       funcResult = JSON.stringify({ success: false, error: message });
     }
 
-    // Adiciona o resultado da função ao contexto com role: "function" e chama novamente
+    // Turno 1: emite EXCLUSIVAMENTE o bloco functionCall (ignora qualquer texto preliminar como "Estou consultando...")
     const modelTurn: GeminiContent = {
       role: "model",
-      parts: candidate?.content?.parts?.length ? candidate.content.parts : [{ functionCall: fc }],
+      parts: [{ functionCall: fc }],
     };
     let parsedOutput: unknown;
     try {
@@ -1366,6 +1370,8 @@ async function chatWithClientGeminiInternal(
     } catch {
       parsedOutput = funcResult;
     }
+
+    // Turno 2: resposta da função
     const functionResponseTurn: GeminiContent = {
       role: "function",
       parts: [
@@ -1396,11 +1402,21 @@ async function chatWithClientGeminiInternal(
   const modelText = candidateParts
     .map((p: any) => (typeof p.text === "string" ? p.text.trim() : ""))
     .filter(Boolean)
+    .filter((text: string) => {
+      const lower = text.toLowerCase();
+      return (
+        !lower.startsWith("estou consultando") &&
+        !lower.startsWith("consultando o sistema") &&
+        !lower.startsWith("verificando no sistema") &&
+        !lower.startsWith("verificando os dados") &&
+        !lower.startsWith("um momento")
+      );
+    })
     .join("\n")
     .trim();
 
   const finalResponse: string = pendingActionRequest
-    ? (modelText || "Ação preparada e aguardando sua aprovação antes de qualquer alteração.")
+    ? (modelText || pendingActionRequest.summary || "Ação preparada e aguardando sua aprovação antes de qualquer alteração.")
     : (modelText || "Sem resposta do modelo.");
 
   // 5. Salva no histórico

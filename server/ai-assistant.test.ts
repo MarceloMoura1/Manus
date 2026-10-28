@@ -905,4 +905,77 @@ describe("Hermes persistence, CRM tools and latency", () => {
       content: "✓ [Ação Concluída] Cliente Rafael Guanabara cadastrado com sucesso (ID: #123).",
     });
   });
+
+  it("ignores preliminary waiting text and returns final tool execution summary when asking about open tickets", async () => {
+    const execute = vi.fn(async (sql) => {
+      if (sql.includes("megadesk_domain_clients")) {
+        return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      }
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) {
+        return [[{ total: 0 }]];
+      }
+      if (sql.includes("megadesk_domain_chamados")) {
+        return [[{ total: 5, urgentes: 2 }]];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute });
+
+    let callCount = 0;
+    const capturedBodies = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      callCount++;
+      capturedBodies.push(JSON.parse(init.body));
+      if (callCount === 1) {
+        // Simula Gemini retornando part preliminar de texto E functionCall
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [{
+              content: {
+                parts: [
+                  { text: "Estou consultando o sistema para verificar o status atual dos chamados." },
+                  { functionCall: { name: "get_open_tickets", args: {} } },
+                ],
+              },
+            }],
+            usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 15, totalTokenCount: 65 },
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{
+            content: {
+              parts: [
+                { text: "Atualmente existem 5 chamados abertos no sistema, sendo 2 com prioridade urgente." },
+              ],
+            },
+          }],
+          usageMetadata: { promptTokenCount: 80, candidatesTokenCount: 25, totalTokenCount: 105 },
+        }),
+      };
+    });
+
+    try {
+      const result = await chatWithClientGemini("tenant-a", "user@example.invalid", "Quantos chamados estão abertos?", [], ["tickets"]);
+      expect(callCount).toBe(2);
+      expect(result.ok).toBe(true);
+      expect(result.functionCallsMade).toContain("get_open_tickets");
+      expect(result.response).not.toContain("Estou consultando");
+      expect(result.response).toContain("Atualmente existem 5 chamados abertos");
+
+      // Confirma que o model turn emitido não incluiu a frase preliminar "Estou consultando"
+      const secondCallContents = capturedBodies[1].contents;
+      const modelTurn = secondCallContents.find((c) => c.role === "model");
+      expect(modelTurn).toBeDefined();
+      expect(modelTurn.parts).toEqual([{ functionCall: { name: "get_open_tickets", args: {} } }]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
