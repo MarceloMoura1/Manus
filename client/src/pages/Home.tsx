@@ -3840,6 +3840,18 @@ function deduplicateAndSortMessages(raw: HermesChatMessage[]): HermesChatMessage
   return result.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
 }
 
+function formatAssistantMessageContent(msg: { content?: string; pendingActionRequest?: unknown }): string {
+  const content = msg.content?.trim() || "";
+  const isToolLeak = /^[a-zA-Z0-9_]+\s*\(\{?[\s\S]*?\}?\);?$/i.test(content) ||
+    /^(?:get_|create_|update_|delete_|add_|link_|send_|request_)[a-zA-Z0-9_]+\s*\(/i.test(content);
+  if (isToolLeak) {
+    return msg.pendingActionRequest
+      ? "Preparei a proposta abaixo para sua revisão:"
+      : "Consultei os dados no sistema para você.";
+  }
+  return msg.content || "";
+}
+
 function AIAssistantPage() {
   // IMPORTANTE: usar a mesma chave que o login salva a sessão
   const SESSION_KEY = "megadesk_session_v1";
@@ -4053,7 +4065,7 @@ function AIAssistantPage() {
         ...prev,
         {
           role: "assistant",
-          content: result.response,
+          content: formatAssistantMessageContent({ content: result.response, pendingActionRequest: result.pendingActionRequest }),
           timestamp: Date.now(),
           functionCalls: result.functionCallsMade,
           pendingActionRequest: result.pendingActionRequest,
@@ -4191,7 +4203,7 @@ function AIAssistantPage() {
                     <span>Hermes está digitando…</span>
                   </span>
                 ) : (
-                  <div className="whitespace-pre-wrap">{msg.content}</div>
+                  <div className="whitespace-pre-wrap">{msg.role === "assistant" ? formatAssistantMessageContent(msg) : msg.content}</div>
                 )}
               </div>
               {msg.functionCalls && msg.functionCalls.length > 0 && (

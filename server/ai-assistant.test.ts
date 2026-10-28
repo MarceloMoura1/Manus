@@ -1058,4 +1058,117 @@ describe("Hermes persistence, CRM tools and latency", () => {
       globalThis.fetch = originalFetch;
     }
   });
+  it("enriches prompt history with previous proposal summary in selectGeminiPromptHistory", () => {
+    const history = [
+      { role: "user", content: "faça um orçamento pro cliente Pedro Ferrari" },
+      {
+        role: "assistant",
+        content: "Preparei a proposta abaixo para sua revisão:",
+        pendingActionRequest: {
+          id: "action-123",
+          toolName: "create_proposal",
+          type: "MUTATION",
+          actionType: "CREATE_PROPOSAL",
+          args: {
+            clientName: "Pedro Ferrari",
+            items: [
+              { productName: "lavagem de carro", quantity: 1, unitPrice: 0 },
+              { productName: "troca da correia dentada", quantity: 1, unitPrice: 0 },
+            ],
+          },
+          status: "PENDING_APPROVAL",
+        },
+      },
+    ];
+
+    const promptHistory = selectGeminiPromptHistory(history as any);
+    expect(promptHistory).toHaveLength(2);
+    expect(promptHistory[1].content).toContain("[Proposta em rascunho anterior: Cliente: Pedro Ferrari");
+    expect(promptHistory[1].content).toContain("1x lavagem de carro (R$ 0,00)");
+    expect(promptHistory[1].content).toContain("1x troca da correia dentada (R$ 0,00)");
+  });
+
+  it("retains proposal context and updates price when user adjusts an existing proposal", async () => {
+    const existingHistory = [
+      { role: "user" as const, content: "faça um orçamento pro cliente Pedro Ferrari para lavagem de carro e troca da correia dentada" },
+      {
+        role: "assistant" as const,
+        content: "Preparei a proposta abaixo para sua revisão:",
+        pendingActionRequest: {
+          id: "action-prev",
+          toolName: "create_proposal",
+          type: "MUTATION" as const,
+          actionType: "CREATE_PROPOSAL" as const,
+          args: {
+            clientName: "Pedro Ferrari",
+            items: [
+              { productName: "lavagem de carro", quantity: 1, unitPrice: 0 },
+              { productName: "troca da correia dentada", quantity: 1, unitPrice: 0 },
+            ],
+          },
+          status: "PENDING_APPROVAL" as const,
+        },
+      },
+    ];
+
+    const execute = vi.fn(async (sql) => {
+      if (sql.includes("megadesk_domain_clients")) {
+        return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      }
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) {
+        return [[{ total: 0 }]];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{ content: { parts: [] } }],
+        usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 0, totalTokenCount: 50 },
+      }),
+    }));
+
+    try {
+      const result = await chatWithClientGemini(
+        "tenant-a",
+        "user@example.invalid",
+        "o valor da lavagem de carro é 60 reais",
+        existingHistory,
+        ["crm", "clients", "sales", "proposals"]
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.pendingActionRequest).toBeDefined();
+      expect(result.pendingActionRequest?.actionType).toBe("CREATE_PROPOSAL");
+      expect(result.pendingActionRequest?.args.clientName).toBe("Pedro Ferrari");
+      const items = result.pendingActionRequest?.args.items as any[];
+      expect(items).toHaveLength(2);
+      expect(items.find(i => i.productName.includes("lavagem"))?.unitPrice).toBe(60);
+      expect(items.find(i => i.productName.includes("correia"))?.unitPrice).toBe(0);
+      expect(result.response).not.toContain("get_");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("queries open tickets with broader active statuses and supports search by ticket code/number", async () => {
+    const execute = vi.fn(async (sql: string, values?: unknown[]) => {
+      if (sql.includes("COUNT(*) as total")) {
+        return [[{ total: 1, urgentes: 0 }]];
+      }
+      return [[{ chamadoId: "c-0003", chamadoNumber: 3, title: "Suporte", status: "open", priority: "normal" }]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute });
+
+    const response = JSON.parse(await executeClientFunction("get_open_tickets", { search: "0003" }, "tenant-a", ["tickets"]));
+    expect(response.total).toBe(1);
+    expect(execute).toHaveBeenCalled();
+    const sqlExecuted = execute.mock.calls[0]?.[0] as string;
+    expect(sqlExecuted).toContain("LOWER(status) IN ('open', 'aberto', 'pendente', 'em_andamento', 'in_progress', 'aguardando')");
+    expect(sqlExecuted).toContain("LPAD(CAST(chamadoNumber AS CHAR), 4, '0') LIKE ?");
+  });
 });

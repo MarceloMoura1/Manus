@@ -27,11 +27,32 @@ export interface IAMessage {
   role: "user" | "assistant";
   content: string;
   timestamp?: number;
+  pendingActionRequest?: PendingActionRequest;
 }
 
-/** Seleciona apenas a janela recente enviada ao provedor, sem truncar o histórico persistido. */
+export function serializeMessageForPrompt(msg: IAMessage): IAMessage {
+  let content = msg.content;
+  if (msg.role === "assistant" && msg.pendingActionRequest) {
+    const action = msg.pendingActionRequest;
+    if (action.actionType === "CREATE_PROPOSAL") {
+      const clientName = String(action.args.clientName ?? action.args.clientId ?? "Cliente");
+      const items = Array.isArray(action.args.items)
+        ? (action.args.items as Array<Record<string, unknown>>)
+            .map(it => `${Number(it.quantity ?? 1)}x ${String(it.productName ?? it.description ?? "Item")} (R$ ${Number(it.unitPrice ?? 0).toFixed(2).replace(".", ",")})`)
+            .join(", ")
+        : "";
+      const proposalContext = `[Proposta em rascunho anterior: Cliente: ${clientName}, Itens: ${items || "Nenhum"}].`;
+      content = content ? `${content}\n\n${proposalContext}` : proposalContext;
+    } else if (action.summary) {
+      content = content ? `${content}\n\n[Ação anterior: ${action.summary}]` : `[Ação anterior: ${action.summary}]`;
+    }
+  }
+  return { ...msg, content };
+}
+
+/** Seleciona apenas a janela recente enviada ao provedor, enriquecendo o contexto de propostas/ações anteriores. */
 export function selectGeminiPromptHistory(history: readonly IAMessage[]): IAMessage[] {
-  return history.slice(-MAX_GEMINI_PROMPT_HISTORY_MESSAGES);
+  return history.slice(-MAX_GEMINI_PROMPT_HISTORY_MESSAGES).map(serializeMessageForPrompt);
 }
 
 export interface ChatResult {
@@ -128,6 +149,18 @@ function optionalLimit(args: Record<string, unknown>): number | undefined {
 
 function rejectUnknownArgs(args: Record<string, unknown>, allowed: readonly string[]) {
   if (Object.keys(args).some(key => !allowed.includes(key))) throw new Error("Parâmetros não permitidos para esta ferramenta.");
+}
+
+function openTicketsArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args);
+  rejectUnknownArgs(args, ["search", "ticketNumber"]);
+  const search = stringArg(args, "search", { min: 1, max: 180, optional: true });
+  const rawNum = args.ticketNumber !== undefined ? Number(args.ticketNumber) : undefined;
+  const ticketNumber = rawNum !== undefined && Number.isFinite(rawNum) ? rawNum : undefined;
+  return {
+    ...(search ? { search } : {}),
+    ...(ticketNumber !== undefined ? { ticketNumber } : {}),
+  };
 }
 
 function ticketOverviewArgs(args: Record<string, unknown>): Record<string, unknown> {
@@ -348,8 +381,19 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
     name: "get_open_tickets",
     type: "READ",
     requiredPermissions: ["tickets", "support"],
-    declaration: { name: "get_open_tickets", description: "Retorna o número de chamados/tickets abertos e quantos são urgentes.", parameters: { type: "OBJECT", properties: {}, required: [] } },
-    validateArgs: noArguments,
+    declaration: {
+      name: "get_open_tickets",
+      description: "Retorna o número e a lista de chamados/tickets abertos ou em andamento. Permite buscar por código, número ou termo.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          search: { type: "STRING", description: "Código, número ou termo do chamado (ex: '0003')" },
+          ticketNumber: { type: "INTEGER", description: "Número do chamado (ex: 3)" },
+        },
+        required: [],
+      },
+    },
+    validateArgs: openTicketsArgs,
   },
   {
     name: "get_tickets_overview",
@@ -1006,15 +1050,40 @@ export async function executeClientFunction(
   }
 
   if (functionName === "get_open_tickets") {
-    const [rows] = await pool.execute(
+    const filters = (validatedArgs ?? {}) as { search?: string; ticketNumber?: number };
+    const where = [
+      "clientId = ?",
+      "LOWER(status) IN ('open', 'aberto', 'pendente', 'em_andamento', 'in_progress', 'aguardando')",
+    ];
+    const values: unknown[] = [clientId];
+    const searchTerm = filters.search ?? (filters.ticketNumber !== undefined ? String(filters.ticketNumber) : undefined);
+    if (searchTerm) {
+      where.push("(title LIKE ? OR customerName LIKE ? OR company LIKE ? OR CAST(chamadoNumber AS CHAR) LIKE ? OR LPAD(CAST(chamadoNumber AS CHAR), 4, '0') LIKE ? OR chamadoId LIKE ?)");
+      const query = `%${searchTerm.trim()}%`;
+      values.push(query, query, query, query, query, query);
+    }
+    const [totalsRows] = await pool.execute(
       `SELECT COUNT(*) as total, 
-       SUM(CASE WHEN priority = 'alta' OR priority = 'critica' THEN 1 ELSE 0 END) as urgentes
+       SUM(CASE WHEN LOWER(priority) IN ('alta', 'critica', 'high', 'urgent') THEN 1 ELSE 0 END) as urgentes
        FROM megadesk_domain_chamados 
-       WHERE clientId = ? AND status <> 'closed'`,
-      [clientId]
+       WHERE ${where.join(" AND ")}`,
+      values
     ) as any[];
-    const data = rows[0] ?? { total: 0, urgentes: 0 };
-    return JSON.stringify({ chamados_abertos: data.total, urgentes: data.urgentes });
+    const [recentRows] = await pool.execute(
+      `SELECT chamadoId, chamadoNumber, title, customerName, company, status, priority, assignedTo, updatedAt
+       FROM megadesk_domain_chamados 
+       WHERE ${where.join(" AND ")}
+       ORDER BY updatedAt DESC, chamadoNumber DESC LIMIT 10`,
+      values
+    ) as any[];
+    const data = totalsRows?.[0] ?? { total: 0, urgentes: 0 };
+    return JSON.stringify({
+      total: data.total ?? 0,
+      chamados_abertos: data.total ?? 0,
+      urgentes: data.urgentes ?? 0,
+      resumo: { total: data.total ?? 0, urgentes: data.urgentes ?? 0 },
+      chamados: Array.isArray(recentRows) ? recentRows : [],
+    });
   }
 
   if (functionName === "get_tickets_overview") {
@@ -1283,22 +1352,52 @@ REGRA CRÍTICA DE EXECUÇÃO DE FERRAMENTAS:
 Quando você decidir invocar qualquer ferramenta (functionCall), NUNCA gere mensagens preliminares ou textos de espera como 'Estou consultando o sistema...', 'Um momento...', 'Verificando...'.
 Emita EXCLUSIVAMENTE o bloco functionCall. O backend executará a ferramenta e devolverá o resultado na mesma sessão para que você formule a resposta final completa com os dados reais já consultados.
 Ao receber o resultado de uma ferramenta (functionResponse), forneça IMEDIATAMENTE a resposta final completa, amigável e resolutiva para o usuário com base nos dados retornados. NUNCA deixe a resposta vazia. Se for uma solicitação de proposta ou orçamento e o cliente não foi encontrado, informe claramente que ele não está cadastrado e pergunte se deseja cadastrá-lo ou já avance gerando a proposta em rascunho com os itens informados via create_proposal.
+Quando o usuário solicitar correções, ajustes de preço ou adições a um orçamento/proposta anterior, MANTENHA todos os dados já definidos (cliente, itens existentes) e altere apenas os campos solicitados (ex: atualizar o preço unitário do item indicado).
 
 Sempre responda em português brasileiro de forma clara, objetiva e profissional.
 Se não tiver dados suficientes, seja honesto e sugira como o usuário pode obter a informação.`;
 }
 
+function findLastProposalInHistory(history: readonly IAMessage[]): {
+  clientName: string;
+  items: Array<{ productName: string; quantity: number; unitPrice: number }>;
+} | null {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const msg = history[i];
+    if (msg.pendingActionRequest?.actionType === "CREATE_PROPOSAL") {
+      const args = msg.pendingActionRequest.args;
+      const clientName = String(args.clientName ?? args.clientId ?? "").trim();
+      const rawItems = Array.isArray(args.items) ? args.items as Array<Record<string, unknown>> : [];
+      const items = rawItems.map(it => ({
+        productName: String(it.productName ?? it.description ?? "Item"),
+        quantity: Number(it.quantity ?? 1) || 1,
+        unitPrice: Number(it.unitPrice ?? 0) || 0,
+      }));
+      if (clientName || items.length > 0) {
+        return { clientName, items };
+      }
+    }
+  }
+  return null;
+}
+
 function extractProposalDetailsFromMessage(
   userMessage: string,
-  executedReadResults: Array<{ name: string; args: Record<string, unknown>; output: any }>
+  executedReadResults: Array<{ name: string; args: Record<string, unknown>; output: any }>,
+  existingHistory: readonly IAMessage[] = []
 ): {
   isProposal: boolean;
   clientName: string;
   items: Array<{ productName: string; quantity: number; unitPrice: number }>;
 } {
-  const isProposal = /\b(orçamento|orcamento|proposta|cotacao|cotação)\b/i.test(userMessage);
+  const lastProposal = findLastProposalInHistory(existingHistory);
+  const isAdjustment = Boolean(
+    lastProposal &&
+    /\b(valor|preço|preco|custo|ajuste|corrija|altere|mude|troque|coloque|bote|adicione|atualize|reais)\b/i.test(userMessage)
+  );
+  const isProposal = isAdjustment || /\b(orçamento|orcamento|proposta|cotacao|cotação)\b/i.test(userMessage);
 
-  // 1. Extrai nome do cliente a partir de get_client_360 executado ou da mensagem
+  // 1. Extrai nome do cliente a partir de get_client_360 executado, da mensagem ou da proposta anterior
   let clientName = "";
   const client360Call = executedReadResults.find(r => r.name === "get_client_360");
   if (client360Call) {
@@ -1315,25 +1414,54 @@ function extractProposalDetailsFromMessage(
     }
   }
 
-  // 2. Extrai itens a partir de trechos após "para", "com", "de", "itens"
+  if (!clientName && lastProposal) {
+    clientName = lastProposal.clientName;
+  }
+
+  // 2. Extrai itens ou atualiza itens da proposta anterior
   let items: Array<{ productName: string; quantity: number; unitPrice: number }> = [];
-  const itemsMatch = userMessage.match(/(?:para|com|de\s+serviços?|itens?)\s+([^.]+)/i);
-  if (itemsMatch && itemsMatch[1]) {
-    const textAfterClient = clientName && userMessage.toLowerCase().includes(clientName.toLowerCase())
-      ? userMessage.substring(userMessage.toLowerCase().indexOf(clientName.toLowerCase()) + clientName.length)
-      : itemsMatch[1];
 
-    const secondMatch = textAfterClient.match(/(?:para|com|de\s+serviços?|itens?)\s+([^.]+)/i) || { 1: textAfterClient };
-    const rawTarget = secondMatch[1]?.trim() || itemsMatch[1].trim();
+  // Se houver proposta anterior e o usuário estiver ajustando preço (ex: "valor da lavagem é 60 reais" ou "lavagem 60 reais")
+  const priceMatch = userMessage.match(/(?:valor|preço|preco|custo)?\s*(?:da|do|de|)\s*(.+?)\s*(?:é|e|para|por|de|=|:)\s*(?:r\$)?\s*(\d+(?:[.,]\d{1,2})?)\s*(?:reais)?/i)
+    || userMessage.match(/(.+?)\s*(?:por|custa|fica|sai a)\s*(?:r\$)?\s*(\d+(?:[.,]\d{1,2})?)\s*(?:reais)?/i);
 
-    const rawParts = rawTarget
-      .split(/\s+e\s+|,\s*/i)
-      .map(s => s.replace(/^(para|com|de)\s+/i, "").trim())
-      .filter(s => s.length >= 2 && !/^(cliente|orçamento|proposta)/i.test(s));
-
-    if (rawParts.length > 0) {
-      items = rawParts.map(name => ({ productName: name, quantity: 1, unitPrice: 0 }));
+  if (lastProposal && priceMatch) {
+    const targetItemName = priceMatch[1].replace(/^(?:o|a|os|as|valor|preço|preco|o\s+valor)\s+/i, "").trim().toLowerCase();
+    const newPrice = Number(priceMatch[2].replace(",", "."));
+    if (Number.isFinite(newPrice) && newPrice >= 0) {
+      items = lastProposal.items.map(it => {
+        const itemLower = it.productName.toLowerCase();
+        if (itemLower.includes(targetItemName) || targetItemName.includes(itemLower) || (targetItemName.includes("lavagem") && itemLower.includes("lavagem"))) {
+          return { ...it, unitPrice: newPrice };
+        }
+        return { ...it };
+      });
     }
+  }
+
+  if (items.length === 0) {
+    const itemsMatch = userMessage.match(/(?:para|com|de\s+serviços?|itens?)\s+([^.]+)/i);
+    if (itemsMatch && itemsMatch[1]) {
+      const textAfterClient = clientName && userMessage.toLowerCase().includes(clientName.toLowerCase())
+        ? userMessage.substring(userMessage.toLowerCase().indexOf(clientName.toLowerCase()) + clientName.length)
+        : itemsMatch[1];
+
+      const secondMatch = textAfterClient.match(/(?:para|com|de\s+serviços?|itens?)\s+([^.]+)/i) || { 1: textAfterClient };
+      const rawTarget = secondMatch[1]?.trim() || itemsMatch[1].trim();
+
+      const rawParts = rawTarget
+        .split(/\s+e\s+|,\s*/i)
+        .map(s => s.replace(/^(para|com|de)\s+/i, "").trim())
+        .filter(s => s.length >= 2 && !/^(cliente|orçamento|proposta)/i.test(s));
+
+      if (rawParts.length > 0) {
+        items = rawParts.map(name => ({ productName: name, quantity: 1, unitPrice: 0 }));
+      }
+    }
+  }
+
+  if (items.length === 0 && lastProposal) {
+    items = lastProposal.items.map(it => ({ ...it }));
   }
 
   if (items.length === 0) {
@@ -1341,6 +1469,28 @@ function extractProposalDetailsFromMessage(
   }
 
   return { isProposal, clientName: clientName || "Cliente", items };
+}
+
+export function sanitizeModelResponseText(text: string): string {
+  if (!text) return "";
+  const trimmed = text.trim();
+  // Se for exclusivamente uma chamada de tool (ex: get_client_360({search: 'Pedro Ferrari'}) ou get_services_list({search: 'lavagem'}))
+  if (/^[a-zA-Z0-9_]+\s*\(\{?[\s\S]*?\}?\);?$/i.test(trimmed)) {
+    return "";
+  }
+  // Se for código em bloco json ou similar
+  if (/^```(?:json)?\s*\{[\s\S]*?"(?:name|function|tool)":/i.test(trimmed)) {
+    return "";
+  }
+  // Remove linhas que são chamadas de ferramentas isoladas
+  const lines = text.split("\n");
+  const filtered = lines.filter(line => {
+    const l = line.trim();
+    if (/^[a-zA-Z0-9_]+\s*\(\{?[\s\S]*?\}?\);?$/i.test(l)) return false;
+    if (/^(?:get_|create_|update_|delete_|add_|link_|send_|request_)[a-zA-Z0-9_]+\s*\(/i.test(l)) return false;
+    return true;
+  });
+  return filtered.join("\n").trim();
 }
 
 function synthesizeDeterministicResponse(
@@ -1353,7 +1503,7 @@ function synthesizeDeterministicResponse(
   const { name, args, output } = lastResult;
 
   if (name === "get_open_tickets") {
-    const rawTotal = output?.chamados?.length ?? output?.resumo?.total ?? output?.resumo?.open ?? output?.total ?? 0;
+    const rawTotal = output?.total ?? output?.chamados_abertos ?? output?.resumo?.total ?? output?.chamados?.length ?? 0;
     const total = Number(rawTotal) || 0;
     if (total === 0) {
       return "Não há nenhum chamado aberto no sistema no momento. Tudo em dia!";
@@ -1361,7 +1511,7 @@ function synthesizeDeterministicResponse(
     if (Array.isArray(output?.chamados) && output.chamados.length > 0) {
       const list = output.chamados
         .slice(0, 5)
-        .map((c: any) => `#${c.chamadoNumber || c.chamadoId}: "${c.title}" (${c.customerName || c.company || "Cliente não informado"})`)
+        .map((c: any) => `#${String(c.chamadoNumber ?? c.chamadoId).padStart(4, "0")}: "${c.title}" (${c.customerName || c.company || "Cliente não informado"})`)
         .join("; ");
       return `Você possui ${total} chamado(s) aberto(s) no momento: ${list}.`;
     }
@@ -1549,7 +1699,7 @@ async function chatWithClientGeminiInternal(
 
   // Se a intenção do usuário foi orçamento/proposta e a checagem READ terminou sem pendingActionRequest,
   // emite a pendingActionRequest de create_proposal para que o Card HITL seja renderizado na tela.
-  const proposalDetails = extractProposalDetailsFromMessage(userMessage, executedReadResults);
+  const proposalDetails = extractProposalDetailsFromMessage(userMessage, executedReadResults, existingHistory);
   if (proposalDetails.isProposal && !pendingActionRequest) {
     const createProposalTool = getAllowedHermesTools(userPermissions).find(t => t.name === "create_proposal");
     if (createProposalTool) {
@@ -1573,11 +1723,13 @@ async function chatWithClientGeminiInternal(
   }
 
   const candidateParts = data?.candidates?.[0]?.content?.parts ?? [];
-  const modelText = candidateParts
+  let modelText = candidateParts
     .map((p: any) => (typeof p.text === "string" ? p.text.trim() : ""))
     .filter(Boolean)
     .join("\n")
     .trim();
+
+  modelText = sanitizeModelResponseText(modelText);
 
   const synthesizedFallback = synthesizeDeterministicResponse(executedReadResults, userMessage);
 
@@ -1585,6 +1737,8 @@ async function chatWithClientGeminiInternal(
   if (!finalResponse) {
     if (synthesizedFallback) {
       finalResponse = synthesizedFallback;
+    } else if (pendingActionRequest?.actionType === "CREATE_PROPOSAL") {
+      finalResponse = "Preparei a proposta abaixo para sua revisão:";
     } else if (pendingActionRequest?.summary) {
       finalResponse = pendingActionRequest.summary;
     } else {
@@ -1596,7 +1750,12 @@ async function chatWithClientGeminiInternal(
   const updatedHistory: IAMessage[] = [
     ...existingHistory,
     { role: "user", content: userMessage, timestamp: Date.now() },
-    { role: "assistant", content: finalResponse, timestamp: Date.now() },
+    {
+      role: "assistant",
+      content: finalResponse,
+      timestamp: Date.now(),
+      ...(pendingActionRequest ? { pendingActionRequest } : {}),
+    },
   ];
 
   // Mantém apenas as últimas 50 mensagens
