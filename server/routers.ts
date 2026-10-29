@@ -50,6 +50,7 @@ import { hermesRouter } from "./modules/admin/hermes";
 import { executeHermesTicketAction } from "./hermes-ticket-actions";
 import { executeHermesCrmAction } from "./hermes-crm-actions";
 import { executeHermesErpAction } from "./hermes-erp-actions";
+import { formatHermesError } from "./hermes-sanitize";
 
 type TicketStatus = "open" | "in_progress" | "waiting" | "closed";
 type ConversationStatus = "open" | "bot" | "closed";
@@ -377,7 +378,7 @@ function sessionBoundAssistantUserId(requestedUserId: string, sessionUserEmail: 
 
 const hermesTicketActionTypes = ["CREATE_TICKET", "UPDATE_TICKET_STATUS", "ASSIGN_TICKET", "ADD_TICKET_ACTIVITY"] as const;
 const hermesCrmActionTypes = ["CREATE_CLIENT", "UPDATE_CLIENT", "ADD_CLIENT_TIMELINE", "CREATE_PROPOSAL", "UPDATE_PROPOSAL_STATUS", "SEND_PROPOSAL_WHATSAPP"] as const;
-const hermesErpActionTypes = ["CREATE_PRODUCT", "UPDATE_PRODUCT", "LINK_PRODUCT_SUPPLIER", "UPDATE_SERVICE", "CREATE_SUPPLIER", "UPDATE_SUPPLIER", "REQUEST_PURCHASE", "SEND_SUPPLIER_MESSAGE"] as const;
+const hermesErpActionTypes = ["CREATE_PRODUCT", "UPDATE_PRODUCT", "LINK_PRODUCT_SUPPLIER", "UPDATE_SERVICE", "CREATE_SERVICE", "CREATE_SUPPLIER", "UPDATE_SUPPLIER", "REQUEST_PURCHASE", "SEND_SUPPLIER_MESSAGE"] as const;
 const hermesActionTypes = [...hermesTicketActionTypes, ...hermesCrmActionTypes, ...hermesErpActionTypes] as const;
 
 function isHermesTicketAction(actionType: string): actionType is typeof hermesTicketActionTypes[number] {
@@ -394,7 +395,7 @@ function assertAssistantActionPermission(client: MegaClient, userEmail: string, 
     : actionType === "CREATE_CLIENT" || actionType === "UPDATE_CLIENT" || actionType === "ADD_CLIENT_TIMELINE"
       ? ["crm", "clients"]
       : isHermesErpAction(actionType)
-        ? actionType === "UPDATE_SERVICE" ? ["services", "erp"]
+        ? actionType === "UPDATE_SERVICE" || actionType === "CREATE_SERVICE" ? ["services", "erp"]
           : actionType === "CREATE_SUPPLIER" || actionType === "UPDATE_SUPPLIER" || actionType === "REQUEST_PURCHASE" || actionType === "SEND_SUPPLIER_MESSAGE" ? ["suppliers", "purchases", "erp"]
             : ["products", "inventory", "erp"]
         : ["sales", "crm", "proposals"];
@@ -1923,15 +1924,16 @@ export const appRouter = router({
           return result;
         } catch (error) {
           releasePendingHermesAction(input.actionId);
-          const reason = error instanceof Error ? error.message : "Erro desconhecido";
+          const reason = formatHermesError(error);
+          const alreadyFriendly = reason.startsWith("Não foi possível");
           await appendAssistantMessageToHistory(
             ctx.tenantId,
             userId,
-            `❌ Não foi possível concluir a ação: ${reason}.`
+            alreadyFriendly ? `❌ ${reason.replace(/\.$/, "")}.` : `❌ Não foi possível concluir a ação: ${reason}.`
           ).catch(() => {});
           if (error instanceof TRPCError) throw error;
           console.error("[Assistant] Approved Hermes action failed.", { actionType: input.actionType, error: reason });
-          throw new TRPCError({ code: "BAD_REQUEST", message: `Não foi possível executar a ação aprovada: ${reason}.` });
+          throw new TRPCError({ code: "BAD_REQUEST", message: alreadyFriendly ? `${reason.replace(/\.$/, "")}.` : `Não foi possível executar a ação aprovada: ${reason}.` });
         }
       }),
 

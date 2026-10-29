@@ -9,6 +9,7 @@ import { ErpService } from "./modules/erp/service";
 import { canWriteErp } from "./modules/erp/contracts";
 import type { HermesCrmActionType } from "./gemini-client";
 import type { OperationalRole } from "./modules/erp/contracts";
+import { formatHermesError, friendlyFieldName, sanitizeHermesPayload } from "./hermes-sanitize";
 
 export type HermesCrmAction = { actionType: HermesCrmActionType; args: Record<string, unknown> };
 type Identity = { clientId: string; userId: string; userName: string; role: OperationalRole };
@@ -19,7 +20,7 @@ const quoteTemplates = new QuoteTemplatesService(saleService, new QuotePdfServic
 
 function required(args: Record<string, unknown>, key: string): string {
   const value = args[key];
-  if (typeof value !== "string" || !value.trim()) throw new Error(`HERMES_CRM_INVALID_${key.toUpperCase()}`);
+  if (typeof value !== "string" || !value.trim()) throw new Error(`Informe ${friendlyFieldName(key)} para concluir o cadastro`);
   return value.trim();
 }
 
@@ -108,22 +109,37 @@ async function resolveProductPublicId(actor: Identity, item: Record<string, unkn
   return created.publicId;
 }
 
-function clientInput(args: Record<string, unknown>) {
+function clientInput(raw: Record<string, unknown>) {
+  const args = sanitizeHermesPayload(raw, { name: "text", document: "text", phone: "text", email: "text", notes: "text" });
   const name = required(args, "name");
-  const document = typeof args.document === "string" ? args.document : "";
+  const document = String(args.document);
   return {
     customerType: document.replace(/\D/g, "").length === 14 ? "company" as const : "person" as const,
     companyName: name,
     responsibleName: "",
     cpfCnpj: document,
-    phone: typeof args.phone === "string" ? args.phone : "",
-    whatsapp: typeof args.phone === "string" ? args.phone : "",
-    email: typeof args.email === "string" ? args.email : "",
-    observations: typeof args.notes === "string" ? args.notes : "",
+    phone: String(args.phone),
+    whatsapp: String(args.phone),
+    email: String(args.email),
+    observations: String(args.notes),
   };
 }
 
 export async function executeHermesCrmAction(input: {
+  tenantId: string;
+  userId: string;
+  userName: string;
+  role: OperationalRole;
+  action: HermesCrmAction;
+}): Promise<{ success: true; message: string; entityId: string | number }> {
+  try {
+    return await runHermesCrmAction(input);
+  } catch (error) {
+    throw new Error(formatHermesError(error));
+  }
+}
+
+async function runHermesCrmAction(input: {
   tenantId: string;
   userId: string;
   userName: string;

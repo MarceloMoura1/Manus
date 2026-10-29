@@ -3785,7 +3785,7 @@ type HermesChatMessage = {
     id: string;
     toolName: string;
     type: "MUTATION";
-    actionType: "CREATE_TICKET" | "UPDATE_TICKET_STATUS" | "ASSIGN_TICKET" | "ADD_TICKET_ACTIVITY" | "CREATE_CLIENT" | "UPDATE_CLIENT" | "ADD_CLIENT_TIMELINE" | "CREATE_PROPOSAL" | "UPDATE_PROPOSAL_STATUS" | "SEND_PROPOSAL_WHATSAPP" | "CREATE_PRODUCT" | "UPDATE_PRODUCT" | "LINK_PRODUCT_SUPPLIER" | "UPDATE_SERVICE" | "CREATE_SUPPLIER" | "UPDATE_SUPPLIER" | "REQUEST_PURCHASE" | "SEND_SUPPLIER_MESSAGE";
+    actionType: "CREATE_TICKET" | "UPDATE_TICKET_STATUS" | "ASSIGN_TICKET" | "ADD_TICKET_ACTIVITY" | "CREATE_CLIENT" | "UPDATE_CLIENT" | "ADD_CLIENT_TIMELINE" | "CREATE_PROPOSAL" | "UPDATE_PROPOSAL_STATUS" | "SEND_PROPOSAL_WHATSAPP" | "CREATE_PRODUCT" | "UPDATE_PRODUCT" | "LINK_PRODUCT_SUPPLIER" | "UPDATE_SERVICE" | "CREATE_SERVICE" | "CREATE_SUPPLIER" | "UPDATE_SUPPLIER" | "REQUEST_PURCHASE" | "SEND_SUPPLIER_MESSAGE";
     args: Record<string, unknown>;
     status: "PENDING_APPROVAL";
     summary?: string;
@@ -3799,10 +3799,13 @@ function formatAssistantMessageContent(msg: { content?: string; pendingActionReq
   const content = msg.content?.trim() || "";
   const isToolLeak = /^[a-zA-Z0-9_]+\s*\(\{?[\s\S]*?\}?\);?$/i.test(content) ||
     /^(?:get_|create_|update_|delete_|add_|link_|send_|request_)[a-zA-Z0-9_]+\s*\(/i.test(content);
-  if (isToolLeak) {
-    return msg.pendingActionRequest
-      ? "Preparei a proposta abaixo para sua revisão:"
-      : "Consultei os dados no sistema para você.";
+  if (isToolLeak || content === "Sem resposta do modelo." || !content) {
+    if (msg.pendingActionRequest) {
+      return "Preparei a solicitação abaixo para sua aprovação:";
+    }
+    if (isToolLeak) {
+      return "Consultei os dados no sistema para você.";
+    }
   }
   return msg.content || "";
 }
@@ -4131,7 +4134,7 @@ function AIAssistantPage() {
               {msg.pendingActionRequest && (
                 <div className="mt-2 rounded-xl border border-sky-500/40 bg-slate-900/90 p-4 text-xs text-slate-100 shadow-sm">
                   <p className="font-semibold text-sky-200">Ação sugerida pelo Hermes que requer sua aprovação</p>
-                  <p className="mt-1 text-slate-300">{msg.pendingActionRequest.summary ?? `${msg.pendingActionRequest.actionType.includes("PROPOSAL") ? "Nova Proposta Comercial" : msg.pendingActionRequest.actionType.includes("CLIENT") ? "Proposta de Ação: Cadastro de Cliente" : msg.pendingActionRequest.actionType.includes("PRODUCT") ? "Produto ERP" : msg.pendingActionRequest.actionType.includes("SUPPLIER") ? "Fornecedor" : msg.pendingActionRequest.actionType === "REQUEST_PURCHASE" ? "Pedido de compra" : msg.pendingActionRequest.actionType === "UPDATE_SERVICE" ? "Serviço ERP" : msg.pendingActionRequest.toolName.replace(/_/g, " ")}`} — nenhuma alteração foi executada.</p>
+                  <p className="mt-1 text-slate-300">{msg.pendingActionRequest.summary ?? `${msg.pendingActionRequest.actionType.includes("PROPOSAL") ? "Nova Proposta Comercial" : msg.pendingActionRequest.actionType.includes("CLIENT") ? "Proposta de Ação: Cadastro de Cliente" : msg.pendingActionRequest.actionType.includes("PRODUCT") ? "Produto ERP" : msg.pendingActionRequest.actionType.includes("SUPPLIER") ? "Fornecedor" : msg.pendingActionRequest.actionType === "REQUEST_PURCHASE" ? "Pedido de compra" : msg.pendingActionRequest.actionType.includes("SERVICE") ? "Serviço ERP" : msg.pendingActionRequest.toolName.replace(/_/g, " ")}`} — nenhuma alteração foi executada.</p>
                   <dl className="mt-3 grid gap-1.5 rounded-lg border border-slate-700/80 bg-slate-950/60 p-2.5 text-slate-300">
                     {Object.entries(msg.pendingActionRequest.args).map(([key, value]) => (
                       <div key={key} className="flex items-start justify-between gap-3">

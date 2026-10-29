@@ -4,25 +4,25 @@ import { isValidCpf, isValidCnpj } from "@shared/br-documents";
 
 export const supplierPersonTypes = ["legal", "individual"] as const;
 export const supplierPublicId = z.string().uuid();
-const optionalText = (max: number) => z.string().trim().max(max).optional().transform(value => value || null);
-const optionalEmail = z.string().trim().max(254).optional().transform(value => value || null);
+const optionalText = (max: number) => z.string().trim().max(max).nullish().transform(value => value || null);
+const optionalEmail = z.string().trim().max(254).nullish().transform(value => value || null);
 
 export const supplierInput = z.object({
   legalName: z.string().trim().max(180),
   tradeName: optionalText(180),
   personType: z.enum(supplierPersonTypes),
-  taxId: z.string().trim().max(24).optional().transform(value => value || null),
+  taxId: z.string().trim().max(24).nullish().transform(value => value || null),
   stateRegistration: optionalText(40),
   email: optionalEmail,
   phone: optionalText(30),
   contactName: optionalText(120),
-  postalCode: z.string().trim().max(12).optional().transform(value => value || null),
+  postalCode: z.string().trim().max(12).nullish().transform(value => value || null),
   street: optionalText(180),
   addressNumber: optionalText(30),
   addressComplement: optionalText(120),
   district: optionalText(120),
   city: optionalText(120),
-  state: z.string().trim().max(2).optional().transform(value => value || null),
+  state: z.string().trim().max(2).nullish().transform(value => value || null),
   notes: optionalText(4_000),
 }).superRefine((value, context) => {
   const taxId = normalizeTaxId(value.taxId);

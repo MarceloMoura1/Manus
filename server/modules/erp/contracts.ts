@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const erpUnits = ["unit", "kg", "liter", "meter"] as const;
 export const stockMovementTypes = ["initial", "manual_in", "manual_out", "adjustment_in", "adjustment_out"] as const;
-const optionalText = (max: number) => z.string().trim().max(max).optional().transform(value => value || null);
+const optionalText = (max: number) => z.string().trim().max(max).nullish().transform(value => value || null);
 export const productPublicId = z.string().uuid();
 
 export const productInput = z.object({

@@ -8,8 +8,10 @@ import { purchaseDraftInput } from "./modules/erp/purchases/domain-contracts";
 import { PurchaseService } from "./modules/erp/purchases/service";
 import { serviceUpdateInput } from "./modules/erp/services/contracts";
 import { ServiceService } from "./modules/erp/services/service";
-import { supplierInput } from "./modules/erp/suppliers/contracts";
+import { supplierInput, normalizeSupplierInput, type SupplierInput } from "./modules/erp/suppliers/contracts";
 import { SupplierService } from "./modules/erp/suppliers/service";
+import { serviceInput } from "./modules/erp/services/contracts";
+import { formatHermesError, sanitizeHermesPayload } from "./hermes-sanitize";
 
 export type HermesErpAction = { actionType: HermesErpActionType; args: Record<string, unknown> };
 type Identity = { clientId: string; userId: string; role: OperationalRole; userName?: string };
@@ -18,24 +20,55 @@ const productSuppliers = new ProductSupplierService();
 const services = new ServiceService();
 const suppliers = new SupplierService();
 const purchases = new PurchaseService();
+const FIELD_NAMES: Record<string, string> = { name: "nome", document: "documento", supplierid: "fornecedor", productid: "produto", sku: "código (SKU)" };
 const required = (args: Record<string, unknown>, key: string) => {
-  const value = args[key]; if (typeof value !== "string" || !value.trim()) throw new Error(`HERMES_ERP_INVALID_${key.toUpperCase()}`); return value.trim();
+  const value = args[key]; if (typeof value !== "string" || !value.trim()) throw new Error(`Informe ${FIELD_NAMES[key.toLowerCase()] ?? key} para concluir o cadastro`); return value.trim();
 };
 const cents = (value: unknown, key: string) => {
-  const amount = Number(value); if (!Number.isFinite(amount) || amount < 0) throw new Error(`HERMES_ERP_INVALID_${key.toUpperCase()}`); return Math.round(amount * 100);
+  const amount = Number(value ?? 0); if (!Number.isFinite(amount) || amount < 0) throw new Error(`Valor inválido para ${key}`); return Math.round(amount * 100);
 };
 function actor(input: { tenantId: string; userId: string; userName: string; role: OperationalRole }): Identity {
   if (!input.tenantId || !input.userId) throw new Error("HERMES_ERP_IDENTITY_REQUIRED");
   return { clientId: input.tenantId, userId: input.userId, userName: input.userName, role: input.role };
 }
-function productCommand(value: Record<string, unknown>) {
-  return productInput.parse({ name: value.name, sku: value.sku, barcode: null, description: null, category: value.category ?? null, categoryPublicId: null, brandPublicId: null, unit: value.unit, costPriceCents: cents(value.costPrice, "cost_price"), salePriceCents: cents(value.salePrice, "sale_price"), minimumStock: String(value.initialStock ?? 0) });
+const textOrNull = (value: unknown) => { const text = typeof value === "string" ? value.trim() : ""; return text || null; };
+function productCommand(raw: Record<string, unknown>) {
+  const value = sanitizeHermesPayload(raw, { name: "text", sku: "text", category: "text", unit: "text", costPrice: "number", salePrice: "number", initialStock: "number" });
+  const sku = textOrNull(value.sku) ?? `PRD-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const unit = textOrNull(value.unit) ?? "unit";
+  return productInput.parse({ name: value.name, sku, barcode: null, description: null, category: textOrNull(value.category), categoryPublicId: null, brandPublicId: null, unit, costPriceCents: cents(value.costPrice, "preço de custo"), salePriceCents: cents(value.salePrice, "preço de venda"), minimumStock: String(value.initialStock ?? 0) });
 }
-function supplierCommand(value: Record<string, unknown>) {
-  const document = required(value, "document"); const digits = document.replace(/\D/g, "");
-  return supplierInput.parse({ legalName: required(value, "name"), tradeName: required(value, "name"), personType: digits.length === 14 ? "legal" : "individual", taxId: document, phone: typeof value.phone === "string" ? value.phone : null, email: typeof value.email === "string" ? value.email : null, contactName: typeof value.contactName === "string" ? value.contactName : null, stateRegistration: null, postalCode: null, street: null, addressNumber: null, addressComplement: null, district: null, city: null, state: null, notes: null });
+/** Fornecedor via Hermes: apenas o nome é obrigatório; demais campos são opcionais e aceitam null. */
+function supplierCommand(raw: Record<string, unknown>): SupplierInput {
+  const value = sanitizeHermesPayload(raw, { name: "text", document: "text", phone: "text", email: "text", contactName: "text", stateRegistration: "text", postalCode: "text", street: "text", addressNumber: "text", addressComplement: "text", district: "text", city: "text", state: "text", notes: "text" });
+  const legalName = required(value, "name");
+  const digits = String(value.document).replace(/\D/g, "").slice(0, 14);
+  const email = textOrNull(value.email);
+  const uf = String(value.state).trim().toUpperCase();
+  return normalizeSupplierInput({
+    legalName, tradeName: textOrNull(value.tradeName) ?? legalName,
+    personType: digits.length === 11 ? "individual" : "legal",
+    taxId: digits || null, stateRegistration: textOrNull(value.stateRegistration),
+    email: email && /^\S+@\S+\.\S+$/.test(email) ? email : null,
+    phone: textOrNull(value.phone), contactName: textOrNull(value.contactName),
+    postalCode: textOrNull(String(value.postalCode).replace(/\D/g, "")), street: textOrNull(value.street),
+    addressNumber: textOrNull(value.addressNumber), addressComplement: textOrNull(value.addressComplement),
+    district: textOrNull(value.district), city: textOrNull(value.city),
+    state: /^[A-Z]{2}$/.test(uf) ? uf : null, notes: textOrNull(value.notes),
+  });
+}
+function serviceCommand(raw: Record<string, unknown>) {
+  const value = sanitizeHermesPayload(raw, { name: "text", code: "text", category: "text", description: "text", price: "number", estimatedCost: "number" });
+  return serviceInput.parse({ name: required(value, "name"), code: textOrNull(value.code), category: textOrNull(value.category), price: Number(value.price) || 0, estimatedCost: Number(value.estimatedCost) || 0, description: textOrNull(value.description), isActive: true });
 }
 export async function executeHermesErpAction(input: { tenantId: string; userId: string; userName: string; role: OperationalRole; action: HermesErpAction }): Promise<{ success: true; message: string; entityId: string | number }> {
+  try {
+    return await runHermesErpAction(input);
+  } catch (error) {
+    throw new Error(formatHermesError(error));
+  }
+}
+async function runHermesErpAction(input: { tenantId: string; userId: string; userName: string; role: OperationalRole; action: HermesErpAction }): Promise<{ success: true; message: string; entityId: string | number }> {
   const identity = actor(input); const args = input.action.args;
   if (input.action.actionType === "CREATE_PRODUCT") {
     const product = await products.createProduct(identity, productCommand(args));
@@ -55,6 +88,10 @@ export async function executeHermesErpAction(input: { tenantId: string; userId: 
     const update = serviceUpdateInput.parse({ id: Number(args.serviceId), ...(args.fieldsToUpdate as Record<string, unknown>) });
     const { id, ...fields } = update; const service = await services.update(identity, id, fields);
     return { success: true, message: "Serviço atualizado com sucesso.", entityId: service.id };
+  }
+  if (input.action.actionType === "CREATE_SERVICE") {
+    const service = await services.create(identity, serviceCommand(args));
+    return { success: true, message: "Serviço criado com sucesso.", entityId: service.id };
   }
   if (input.action.actionType === "CREATE_SUPPLIER") {
     const supplier = await suppliers.create(identity, supplierCommand(args));

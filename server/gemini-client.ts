@@ -6,6 +6,7 @@
  */
 import { getPool } from "./db";
 import { nanoid } from "nanoid";
+import { dropEmptyArgs } from "./hermes-sanitize";
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
@@ -68,7 +69,7 @@ export type HermesToolType = "READ" | "MUTATION";
 export type HermesPermission = string;
 export type HermesTicketActionType = "CREATE_TICKET" | "UPDATE_TICKET_STATUS" | "ASSIGN_TICKET" | "ADD_TICKET_ACTIVITY";
 export type HermesCrmActionType = "CREATE_CLIENT" | "UPDATE_CLIENT" | "ADD_CLIENT_TIMELINE" | "CREATE_PROPOSAL" | "UPDATE_PROPOSAL_STATUS" | "SEND_PROPOSAL_WHATSAPP";
-export type HermesErpActionType = "CREATE_PRODUCT" | "UPDATE_PRODUCT" | "LINK_PRODUCT_SUPPLIER" | "UPDATE_SERVICE" | "CREATE_SUPPLIER" | "UPDATE_SUPPLIER" | "REQUEST_PURCHASE" | "SEND_SUPPLIER_MESSAGE";
+export type HermesErpActionType = "CREATE_PRODUCT" | "UPDATE_PRODUCT" | "LINK_PRODUCT_SUPPLIER" | "UPDATE_SERVICE" | "CREATE_SERVICE" | "CREATE_SUPPLIER" | "UPDATE_SUPPLIER" | "REQUEST_PURCHASE" | "SEND_SUPPLIER_MESSAGE";
 export type HermesActionType = HermesTicketActionType | HermesCrmActionType | HermesErpActionType;
 
 export interface GeminiFunctionDeclaration {
@@ -239,13 +240,16 @@ function crmClientLookupArgs(args: Record<string, unknown>): Record<string, unkn
 }
 
 function createClientArgs(args: Record<string, unknown>): Record<string, unknown> {
-  objectArgs(args); rejectUnknownArgs(args, ["name", "document", "phone", "email", "notes"]);
-  const email = stringArg(args, "email", { min: 3, max: 255, optional: true });
-  if (email && !/^\S+@\S+\.\S+$/.test(email)) throw new Error("E-mail inválido.");
+  objectArgs(args); args = dropEmptyArgs(args);
+  if (typeof args.companyName === "string" && !args.name) args.name = args.companyName;
+  if (typeof args.clientName === "string" && !args.name) args.name = args.clientName;
+  rejectUnknownArgs(args, ["name", "document", "phone", "email", "notes"]);
+  const rawEmail = stringArg(args, "email", { min: 1, max: 255, optional: true });
+  const email = rawEmail && /^\S+@\S+\.\S+$/.test(rawEmail) ? rawEmail : undefined;
   return {
     name: stringArg(args, "name", { min: 1, max: 255 })!,
-    ...(stringArg(args, "document", { min: 8, max: 20, optional: true }) ? { document: stringArg(args, "document", { min: 8, max: 20, optional: true }) } : {}),
-    ...(stringArg(args, "phone", { min: 8, max: 40, optional: true }) ? { phone: stringArg(args, "phone", { min: 8, max: 40, optional: true }) } : {}),
+    ...(stringArg(args, "document", { min: 1, max: 24, optional: true }) ? { document: stringArg(args, "document", { min: 1, max: 24, optional: true }) } : {}),
+    ...(stringArg(args, "phone", { min: 1, max: 40, optional: true }) ? { phone: stringArg(args, "phone", { min: 1, max: 40, optional: true }) } : {}),
     ...(email ? { email } : {}),
     ...(stringArg(args, "notes", { min: 1, max: 2_000, optional: true }) ? { notes: stringArg(args, "notes", { min: 1, max: 2_000, optional: true }) } : {}),
   };
@@ -289,7 +293,7 @@ function proposalDetailsArgs(args: Record<string, unknown>): Record<string, unkn
 }
 
 function createProposalArgs(args: Record<string, unknown>): Record<string, unknown> {
-  objectArgs(args); rejectUnknownArgs(args, ["clientId", "clientName", "items", "notes", "paymentTerms"]);
+  objectArgs(args); args = dropEmptyArgs(args); rejectUnknownArgs(args, ["clientId", "clientName", "items", "notes", "paymentTerms"]);
   const clientId = stringArg(args, "clientId", { min: 1, max: 80, optional: true });
   const clientName = stringArg(args, "clientName", { min: 2, max: 180, optional: true });
   if ((clientId ? 1 : 0) + (clientName ? 1 : 0) !== 1) throw new Error("Informe exatamente clientId ou clientName.");
@@ -336,31 +340,49 @@ function erpLookupArgs(args: Record<string, unknown>, fields: readonly string[])
   return result;
 }
 function productMutationArgs(args: Record<string, unknown>, update = false): Record<string, unknown> {
-  objectArgs(args); rejectUnknownArgs(args, update ? ["productId", "fieldsToUpdate"] : ["name", "sku", "category", "salePrice", "costPrice", "initialStock", "unit"]);
+  objectArgs(args);
   if (update) {
+    rejectUnknownArgs(args, ["productId", "fieldsToUpdate"]);
     const fields = args.fieldsToUpdate;
     if (!fields || typeof fields !== "object" || Array.isArray(fields) || !Object.keys(fields).length) throw new Error("fieldsToUpdate inválido.");
     const record = fields as Record<string, unknown>;
     rejectUnknownArgs(record, ["name", "sku", "barcode", "description", "category", "categoryPublicId", "brandPublicId", "unit", "costPriceCents", "salePriceCents", "minimumStock"]);
     return { productId: stringArg(args, "productId", { min: 1, max: 80 })!, fieldsToUpdate: record };
   }
-  const price = (key: string) => { const value = Number(args[key]); if (!Number.isFinite(value) || value < 0) throw new Error(`${key} inválido.`); return value; };
+  args = dropEmptyArgs(args);
+  if (args.price !== undefined && args.salePrice === undefined) {
+    args.salePrice = args.price;
+  }
+  rejectUnknownArgs(args, ["name", "sku", "category", "salePrice", "costPrice", "initialStock", "unit", "description", "price"]);
+  const price = (key: string) => { const value = Number(args[key] ?? 0); if (!Number.isFinite(value) || value < 0) throw new Error(`${key} inválido.`); return value; };
   const quantity = Number(args.initialStock ?? 0); if (!Number.isFinite(quantity) || quantity < 0) throw new Error("initialStock inválido.");
-  return { name: stringArg(args, "name", { min: 2, max: 180 })!, sku: stringArg(args, "sku", { min: 1, max: 80 })!, category: stringArg(args, "category", { min: 1, max: 120, optional: true }), salePrice: price("salePrice"), costPrice: price("costPrice"), initialStock: quantity, unit: enumArg(args, "unit", ["unit", "kg", "liter", "meter"] as const) };
+  const unit = args.unit === undefined ? "unit" : enumArg(args, "unit", ["unit", "kg", "liter", "meter"] as const);
+  const sku = stringArg(args, "sku", { min: 1, max: 80, optional: true }) ?? `PRD-${nanoid(8).replace(/[^A-Za-z0-9]/g, "X").toUpperCase()}`;
+  return { name: stringArg(args, "name", { min: 2, max: 180 })!, sku, category: stringArg(args, "category", { min: 1, max: 120, optional: true }), salePrice: price("salePrice"), costPrice: price("costPrice"), initialStock: quantity, unit };
 }
-function erpActionArgs(args: Record<string, unknown>, kind: "supplier" | "purchase" | "message" | "service" | "link"): Record<string, unknown> {
-  objectArgs(args);
-  const allowed = kind === "supplier" ? ["name", "document", "phone", "email", "contactName", "fieldsToUpdate", "supplierId"] : kind === "purchase" ? ["supplierId", "items", "notes"] : kind === "message" ? ["supplierId", "recipientPhone", "messageText"] : kind === "service" ? ["serviceId", "fieldsToUpdate"] : ["productId", "supplierId"];
+const SUPPLIER_OPTIONAL_TEXT_FIELDS = ["tradeName", "stateRegistration", "postalCode", "street", "addressNumber", "addressComplement", "district", "city", "state", "notes"] as const;
+function erpActionArgs(args: Record<string, unknown>, kind: "supplier" | "purchase" | "message" | "service" | "service-create" | "link"): Record<string, unknown> {
+  objectArgs(args); args = dropEmptyArgs(args);
+  if (kind === "supplier") {
+    if (typeof args.legalName === "string" && !args.name) args.name = args.legalName;
+    if (typeof args.tradeName === "string" && !args.name) args.name = args.tradeName;
+  }
+  const allowed = kind === "supplier" ? ["name", "document", "phone", "email", "contactName", ...SUPPLIER_OPTIONAL_TEXT_FIELDS, "fieldsToUpdate", "supplierId", "legalName"] : kind === "purchase" ? ["supplierId", "items", "notes"] : kind === "message" ? ["supplierId", "recipientPhone", "messageText"] : kind === "service" ? ["serviceId", "fieldsToUpdate"] : kind === "service-create" ? ["name", "code", "category", "price", "estimatedCost", "description"] : ["productId", "supplierId"];
   rejectUnknownArgs(args, allowed);
+  if (kind === "service-create") {
+    const money = (key: string) => { const value = Number(args[key] ?? 0); if (!Number.isFinite(value) || value < 0) throw new Error(`${key} inválido.`); return value; };
+    return { name: stringArg(args, "name", { min: 2, max: 255 })!, price: money("price"), estimatedCost: money("estimatedCost"), ...(stringArg(args, "code", { min: 1, max: 50, optional: true }) ? { code: stringArg(args, "code", { min: 1, max: 50, optional: true }) } : {}), ...(stringArg(args, "category", { min: 1, max: 100, optional: true }) ? { category: stringArg(args, "category", { min: 1, max: 100, optional: true }) } : {}), ...(stringArg(args, "description", { min: 1, max: 2_000, optional: true }) ? { description: stringArg(args, "description", { min: 1, max: 2_000, optional: true }) } : {}) };
+  }
   if (kind === "link") return { productId: stringArg(args, "productId", { min: 1, max: 80 })!, supplierId: stringArg(args, "supplierId", { min: 1, max: 80 })! };
   if (kind === "service") { if (!args.fieldsToUpdate || typeof args.fieldsToUpdate !== "object" || Array.isArray(args.fieldsToUpdate)) throw new Error("fieldsToUpdate inválido."); return { serviceId: Number(args.serviceId), fieldsToUpdate: args.fieldsToUpdate as Record<string, unknown> }; }
   if (kind === "message") return { supplierId: stringArg(args, "supplierId", { min: 1, max: 80 })!, recipientPhone: stringArg(args, "recipientPhone", { min: 8, max: 40 })!, messageText: stringArg(args, "messageText", { min: 1, max: 2_000 })! };
   if (kind === "purchase") { if (!Array.isArray(args.items) || !args.items.length || args.items.length > 100) throw new Error("items inválido."); return { supplierId: stringArg(args, "supplierId", { min: 1, max: 80 })!, items: args.items, ...(typeof args.notes === "string" ? { notes: stringArg(args, "notes", { min: 1, max: 4_000 }) } : {}) }; }
-  const update = args.fieldsToUpdate;
-  if (update !== undefined && (!update || typeof update !== "object" || Array.isArray(update) || !Object.keys(update).length)) throw new Error("fieldsToUpdate inválido.");
-  if (update) rejectUnknownArgs(update as Record<string, unknown>, ["name", "legalName", "document", "taxId", "phone", "email", "contactName", "tradeName", "notes"]);
-  const result = { ...(typeof args.supplierId === "string" ? { supplierId: stringArg(args, "supplierId", { min: 1, max: 80 }) } : {}), ...(update ? { fieldsToUpdate: update as Record<string, unknown> } : {}), ...(typeof args.name === "string" ? { name: stringArg(args, "name", { min: 2, max: 180 }) } : {}), ...(typeof args.document === "string" ? { document: stringArg(args, "document", { min: 11, max: 20 }) } : {}), ...(typeof args.phone === "string" ? { phone: stringArg(args, "phone", { min: 8, max: 40 }) } : {}), ...(typeof args.email === "string" ? { email: stringArg(args, "email", { min: 3, max: 255 }) } : {}), ...(typeof args.contactName === "string" ? { contactName: stringArg(args, "contactName", { min: 1, max: 120 }) } : {}) };
-  if (!result.supplierId && (!result.name || !result.document)) throw new Error("name e document são obrigatórios para criar fornecedor.");
+  const update = args.fieldsToUpdate === undefined ? undefined : args.fieldsToUpdate && typeof args.fieldsToUpdate === "object" && !Array.isArray(args.fieldsToUpdate) ? dropEmptyArgs(args.fieldsToUpdate as Record<string, unknown>) : null;
+  if (update !== undefined && (!update || !Object.keys(update).length)) throw new Error("fieldsToUpdate inválido.");
+  if (update) rejectUnknownArgs(update, ["name", "legalName", "document", "taxId", "phone", "email", "contactName", "tradeName", "notes"]);
+  const optionalText = (key: string, min: number, max: number) => (typeof args[key] === "string" ? { [key]: stringArg(args, key, { min, max }) } : {});
+  const result: Record<string, unknown> = { ...(typeof args.supplierId === "string" ? { supplierId: stringArg(args, "supplierId", { min: 1, max: 80 }) } : {}), ...(update ? { fieldsToUpdate: update } : {}), ...optionalText("name", 2, 180), ...optionalText("document", 1, 24), ...optionalText("phone", 1, 40), ...optionalText("email", 1, 255), ...optionalText("contactName", 1, 120), ...optionalText("tradeName", 1, 180), ...optionalText("stateRegistration", 1, 40), ...optionalText("postalCode", 1, 12), ...optionalText("street", 1, 180), ...optionalText("addressNumber", 1, 30), ...optionalText("addressComplement", 1, 120), ...optionalText("district", 1, 120), ...optionalText("city", 1, 120), ...optionalText("state", 1, 2), ...optionalText("notes", 1, 4_000) };
+  if (!result.supplierId && !result.name) throw new Error("Informe o nome do fornecedor para criar o cadastro.");
   if (result.supplierId && !result.fieldsToUpdate) throw new Error("fieldsToUpdate é obrigatório para atualizar fornecedor.");
   return result;
 }
@@ -442,6 +464,7 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
     validateArgs: addTicketActivityArgs,
   },
   { name: "get_crm_summary", type: "READ", requiredPermissions: ["crm", "clients"], declaration: { name: "get_crm_summary", description: "Retorna métricas básicas da carteira CRM do tenant.", parameters: { type: "OBJECT", properties: {}, required: [] } }, validateArgs: crmSummaryArgs },
+  { name: "list_crm_clients", type: "READ", requiredPermissions: ["crm", "clients"], declaration: { name: "list_crm_clients", description: "Lista clientes recentes do CRM ou busca por nome, telefone ou e-mail.", parameters: { type: "OBJECT", properties: { search: { type: "STRING", description: "Nome, telefone ou e-mail (opcional)" }, limit: { type: "INTEGER", description: "Máximo de resultados (1 a 20)" } }, required: [] } }, validateArgs: args => { objectArgs(args); args = dropEmptyArgs(args); rejectUnknownArgs(args, ["search", "limit"]); const search = stringArg(args, "search", { min: 1, max: 180, optional: true }); const limit = optionalLimit(args); return { ...(search ? { search } : {}), ...(limit ? { limit } : {}) }; } },
   { name: "get_client_360", type: "READ", requiredPermissions: ["crm", "clients"], declaration: { name: "get_client_360", description: "Retorna cadastro, chamados, conversas e timeline de um cliente CRM do tenant.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING" }, search: { type: "STRING" } }, required: [] } }, validateArgs: crmClientLookupArgs },
   { name: "create_client", type: "MUTATION", actionType: "CREATE_CLIENT", requiredPermissions: ["crm", "clients"], declaration: { name: "create_client", description: "Prepara a criação de cliente CRM; exige aprovação humana.", parameters: { type: "OBJECT", properties: { name: { type: "STRING" }, document: { type: "STRING" }, phone: { type: "STRING" }, email: { type: "STRING" }, notes: { type: "STRING" } }, required: ["name"] } }, validateArgs: createClientArgs },
   { name: "update_client", type: "MUTATION", actionType: "UPDATE_CLIENT", requiredPermissions: ["crm", "clients"], declaration: { name: "update_client", description: "Prepara atualização de cliente CRM; exige aprovação humana.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING" }, fieldsToUpdate: { type: "OBJECT", description: "Campos a atualizar", properties: { name: { type: "STRING" }, document: { type: "STRING" }, phone: { type: "STRING" }, email: { type: "STRING" }, notes: { type: "STRING" } } } }, required: ["clientId", "fieldsToUpdate"] } }, validateArgs: updateClientArgs },
@@ -454,14 +477,15 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
   { name: "get_erp_summary", type: "READ", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "get_erp_summary", description: "Retorna o resumo de produtos, estoque e serviços ativos do tenant.", parameters: { type: "OBJECT", properties: {}, required: [] } }, validateArgs: noArguments },
   { name: "get_product_details", type: "READ", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "get_product_details", description: "Retorna detalhes de produto por ID público ou SKU.", parameters: { type: "OBJECT", properties: { productId: { type: "STRING" }, sku: { type: "STRING" } }, required: [] } }, validateArgs: args => { const value = erpLookupArgs(args, ["productId", "sku"]); if ((value.productId ? 1 : 0) + (value.sku ? 1 : 0) !== 1) throw new Error("Informe exatamente productId ou sku."); return value; } },
   { name: "get_inventory_status", type: "READ", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "get_inventory_status", description: "Consulta saldos por status de estoque ou busca textual.", parameters: { type: "OBJECT", properties: { status: { type: "STRING" }, search: { type: "STRING" } }, required: [] } }, validateArgs: args => { objectArgs(args); rejectUnknownArgs(args, ["status", "search"]); const value: Record<string, unknown> = {}; if (typeof args.search === "string") value.search = stringArg(args, "search", { min: 1, max: 180 }); if (args.status !== undefined) value.status = enumArg(args, "status", ["empty", "low", "regular"] as const); return value; } },
-  { name: "create_product", type: "MUTATION", actionType: "CREATE_PRODUCT", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "create_product", description: "Prepara criação de produto; exige aprovação humana.", parameters: { type: "OBJECT", properties: { name: { type: "STRING" }, sku: { type: "STRING" }, category: { type: "STRING" }, salePrice: { type: "NUMBER" }, costPrice: { type: "NUMBER" }, initialStock: { type: "NUMBER" }, unit: { type: "STRING" } }, required: ["name", "sku", "salePrice", "costPrice", "unit"] } }, validateArgs: args => productMutationArgs(args) },
+  { name: "create_product", type: "MUTATION", actionType: "CREATE_PRODUCT", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "create_product", description: "Prepara criação de produto; exige aprovação humana.", parameters: { type: "OBJECT", properties: { name: { type: "STRING" }, sku: { type: "STRING" }, category: { type: "STRING" }, salePrice: { type: "NUMBER" }, costPrice: { type: "NUMBER" }, initialStock: { type: "NUMBER" }, unit: { type: "STRING" } }, required: ["name"] } }, validateArgs: args => productMutationArgs(args) },
   { name: "update_product", type: "MUTATION", actionType: "UPDATE_PRODUCT", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "update_product", description: "Prepara atualização de produto; exige aprovação humana.", parameters: { type: "OBJECT", properties: { productId: { type: "STRING" }, fieldsToUpdate: { type: "OBJECT", description: "Campos a atualizar", properties: { name: { type: "STRING" }, sku: { type: "STRING" }, barcode: { type: "STRING" }, description: { type: "STRING" }, category: { type: "STRING" }, categoryPublicId: { type: "STRING" }, brandPublicId: { type: "STRING" }, unit: { type: "STRING" }, costPriceCents: { type: "NUMBER" }, salePriceCents: { type: "NUMBER" }, minimumStock: { type: "NUMBER" } } } }, required: ["productId", "fieldsToUpdate"] } }, validateArgs: args => productMutationArgs(args, true) },
   { name: "link_product_supplier", type: "MUTATION", actionType: "LINK_PRODUCT_SUPPLIER", requiredPermissions: ["products", "suppliers", "erp"], declaration: { name: "link_product_supplier", description: "Prepara vínculo de fornecedor ao produto; exige aprovação humana.", parameters: { type: "OBJECT", properties: { productId: { type: "STRING" }, supplierId: { type: "STRING" } }, required: ["productId", "supplierId"] } }, validateArgs: args => erpActionArgs(args, "link") },
   { name: "get_services_list", type: "READ", requiredPermissions: ["services", "erp"], declaration: { name: "get_services_list", description: "Lista serviços, valores e status do tenant.", parameters: { type: "OBJECT", properties: { search: { type: "STRING" } }, required: [] } }, validateArgs: args => erpLookupArgs(args, ["search"]) },
   { name: "update_service", type: "MUTATION", actionType: "UPDATE_SERVICE", requiredPermissions: ["services", "erp"], declaration: { name: "update_service", description: "Prepara atualização de serviço; exige aprovação humana.", parameters: { type: "OBJECT", properties: { serviceId: { type: "INTEGER" }, fieldsToUpdate: { type: "OBJECT", description: "Campos a atualizar", properties: { name: { type: "STRING" }, code: { type: "STRING" }, category: { type: "STRING" }, price: { type: "NUMBER" }, estimatedCost: { type: "NUMBER" }, isActive: { type: "BOOLEAN" } } } }, required: ["serviceId", "fieldsToUpdate"] } }, validateArgs: args => erpActionArgs(args, "service") },
+  { name: "create_service", type: "MUTATION", actionType: "CREATE_SERVICE", requiredPermissions: ["services", "erp"], declaration: { name: "create_service", description: "Prepara o cadastro simplificado de um serviço no catálogo; exige apenas o nome (preço opcional, padrão 0). Exige aprovação humana.", parameters: { type: "OBJECT", properties: { name: { type: "STRING", description: "Nome do serviço (obrigatório)" }, price: { type: "NUMBER", description: "Preço em reais" }, estimatedCost: { type: "NUMBER" }, code: { type: "STRING" }, category: { type: "STRING" }, description: { type: "STRING" } }, required: ["name"] } }, validateArgs: args => erpActionArgs(args, "service-create") },
   { name: "get_sales_analytics", type: "READ", requiredPermissions: ["sales", "erp"], declaration: { name: "get_sales_analytics", description: "Retorna faturamento, pedidos e ticket médio no período solicitado.", parameters: { type: "OBJECT", properties: { period: { type: "STRING" }, startDate: { type: "STRING" }, endDate: { type: "STRING" } }, required: [] } }, validateArgs: args => { objectArgs(args); rejectUnknownArgs(args, ["period", "startDate", "endDate"]); const period = args.period === undefined ? "month" : enumArg(args, "period", ["today", "week", "month", "custom"] as const); const result: Record<string, unknown> = { period }; if (period === "custom") { result.startDate = stringArg(args, "startDate", { min: 10, max: 10 })!; result.endDate = stringArg(args, "endDate", { min: 10, max: 10 })!; } return result; } },
   { name: "get_suppliers_list", type: "READ", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "get_suppliers_list", description: "Busca fornecedores por nome, documento ou segmento.", parameters: { type: "OBJECT", properties: { search: { type: "STRING" } }, required: [] } }, validateArgs: args => erpLookupArgs(args, ["search"]) },
-  { name: "create_supplier", type: "MUTATION", actionType: "CREATE_SUPPLIER", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "create_supplier", description: "Prepara criação de fornecedor; exige aprovação humana.", parameters: { type: "OBJECT", properties: { name: { type: "STRING" }, document: { type: "STRING" }, phone: { type: "STRING" }, email: { type: "STRING" }, contactName: { type: "STRING" } }, required: ["name", "document"] } }, validateArgs: args => erpActionArgs(args, "supplier") },
+  { name: "create_supplier", type: "MUTATION", actionType: "CREATE_SUPPLIER", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "create_supplier", description: "Prepara o cadastro ágil de fornecedor; exige apenas o nome, os demais dados são opcionais. Exige aprovação humana.", parameters: { type: "OBJECT", properties: { name: { type: "STRING", description: "Nome ou razão social (obrigatório)" }, document: { type: "STRING", description: "CPF/CNPJ (opcional)" }, phone: { type: "STRING" }, email: { type: "STRING" }, contactName: { type: "STRING" }, tradeName: { type: "STRING" }, stateRegistration: { type: "STRING" }, postalCode: { type: "STRING" }, street: { type: "STRING" }, addressNumber: { type: "STRING" }, addressComplement: { type: "STRING" }, district: { type: "STRING" }, city: { type: "STRING" }, state: { type: "STRING" }, notes: { type: "STRING" } }, required: ["name"] } }, validateArgs: args => erpActionArgs(args, "supplier") },
   { name: "update_supplier", type: "MUTATION", actionType: "UPDATE_SUPPLIER", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "update_supplier", description: "Prepara atualização de fornecedor; exige aprovação humana.", parameters: { type: "OBJECT", properties: { supplierId: { type: "STRING" }, fieldsToUpdate: { type: "OBJECT", description: "Campos a atualizar", properties: { name: { type: "STRING" }, legalName: { type: "STRING" }, document: { type: "STRING" }, taxId: { type: "STRING" }, phone: { type: "STRING" }, email: { type: "STRING" }, contactName: { type: "STRING" }, tradeName: { type: "STRING" }, notes: { type: "STRING" } } } }, required: ["supplierId", "fieldsToUpdate"] } }, validateArgs: args => erpActionArgs(args, "supplier") },
   { name: "request_purchase_order", type: "MUTATION", actionType: "REQUEST_PURCHASE", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "request_purchase_order", description: "Prepara pedido de compra; exige aprovação humana.", parameters: { type: "OBJECT", properties: { supplierId: { type: "STRING" }, items: { type: "ARRAY", description: "Itens do pedido de compra", items: { type: "OBJECT", properties: { productId: { type: "STRING", description: "ID público do produto" }, quantity: { type: "NUMBER" }, targetCost: { type: "NUMBER", description: "Custo alvo unitário em reais" } }, required: ["productId", "quantity", "targetCost"] } }, notes: { type: "STRING" } }, required: ["supplierId", "items"] } }, validateArgs: args => erpActionArgs(args, "purchase") },
   { name: "send_supplier_message", type: "MUTATION", actionType: "SEND_SUPPLIER_MESSAGE", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "send_supplier_message", description: "Prepara mensagem a fornecedor; exige aprovação humana.", parameters: { type: "OBJECT", properties: { supplierId: { type: "STRING" }, recipientPhone: { type: "STRING" }, messageText: { type: "STRING" } }, required: ["supplierId", "recipientPhone", "messageText"] } }, validateArgs: args => erpActionArgs(args, "message") },
@@ -508,13 +532,18 @@ export function getAuthorizedHermesTool(name: string, permissions: readonly stri
 
 /** Descrição amigável de uma mutação pendente, usada no card de aprovação humana. */
 export function summarizePendingAction(actionType: HermesActionType, args: Record<string, unknown>): string {
-  if (actionType === "CREATE_CLIENT") return `Cadastrar o cliente "${String(args.name ?? "")}"${args.phone ? ` (telefone ${String(args.phone)})` : ""}.`;
+  const name = String(args.name ?? "").trim();
+  if (actionType === "CREATE_CLIENT") return `Cadastrar o cliente "${name}"${args.phone ? ` (telefone ${String(args.phone)})` : ""}.`;
+  if (actionType === "CREATE_SUPPLIER") return `Cadastrar o fornecedor "${name}".`;
+  if (actionType === "CREATE_PRODUCT") return `Cadastrar o produto "${name}".`;
+  if (actionType === "CREATE_SERVICE") return `Cadastrar o serviço "${name}".`;
+  if (actionType === "CREATE_TICKET") return `Abrir o chamado "${String(args.title ?? "")}".`;
   if (actionType === "CREATE_PROPOSAL") {
     const items = Array.isArray(args.items) ? args.items as Array<{ quantity?: number; unitPrice?: number }> : [];
     const total = items.reduce((sum, item) => sum + Number(item.quantity ?? 0) * Number(item.unitPrice ?? 0), 0);
     return `Criar proposta comercial para ${String(args.clientName ?? args.clientId ?? "o cliente")} com ${items.length} item(ns), total de R$ ${total.toFixed(2).replace(".", ",")}.`;
   }
-  return `Executar a ação ${actionType} mediante sua aprovação.`;
+  return "Executar a ação sugerida mediante sua aprovação.";
 }
 
 export function createPendingActionRequest(tool: HermesToolDefinition, args: Record<string, unknown>, owner?: PendingActionOwner): PendingActionRequest {
@@ -1164,6 +1193,25 @@ export async function executeClientFunction(
     return JSON.stringify({ resumo: { ...(rows[0] ?? { total: 0, active: 0, inactive: 0, leads: 0 }), newThisMonth: newRows[0]?.total ?? 0 }, ultimosClientes: latestRows });
   }
 
+  if (functionName === "list_crm_clients") {
+    const filters = (validatedArgs ?? {}) as { search?: string; limit?: number };
+    const limit = Math.min(Math.max(Number(filters.limit ?? 10) || 10, 1), 20);
+    const values: unknown[] = [clientId];
+    let predicate = "";
+    if (filters.search) {
+      predicate = " AND (company_name LIKE ? OR phone LIKE ? OR email LIKE ?)";
+      const query = `%${filters.search}%`;
+      values.push(query, query, query);
+    }
+    const [listRows] = await pool.execute(
+      `SELECT crm_client_id AS crmClientId, company_name AS name, phone, email, status, created_at AS createdAt
+         FROM megadesk_crm_clients WHERE client_id = ? AND lifecycle_state <> 'archived'${predicate}
+        ORDER BY created_at DESC LIMIT ${limit}`,
+      values,
+    ) as any[];
+    return JSON.stringify({ total: Array.isArray(listRows) ? listRows.length : 0, clientes: Array.isArray(listRows) ? listRows : [] });
+  }
+
   if (functionName === "get_client_360") {
     const lookup = validatedArgs as { clientId?: string; search?: string };
     const predicate = lookup.clientId ? "crm_client_id = ?" : "(company_name LIKE ? OR phone LIKE ? OR email LIKE ?)";
@@ -1182,6 +1230,7 @@ export async function executeClientFunction(
       const searchTarget = lookup.search ?? lookup.clientId ?? "";
       return JSON.stringify({
         found: false,
+        search: searchTarget,
         message: searchTarget ? `Cliente ${searchTarget} não encontrado no cadastro.` : "Cliente não encontrado no cadastro.",
       });
     }
@@ -1342,27 +1391,25 @@ function tokenUsageTotal(data: any, promptTokens: number, completionTokens: numb
 
 function buildSystemInstruction(allowedTools: readonly HermesToolDefinition[]): string {
   const names = allowedTools.map(tool => tool.name).join(", ") || "nenhuma";
-  return `Você é o Assistente IA da plataforma MegaDesk, especializado em ajudar a equipe de atendimento.
-Você é um assistente de CRM e ERP inteligente, atento e resolutivo.
+  return `Você é o "Hermes", o copiloto executivo do MegaDesk. É proativo, ágil, educado, objetivo e focado em resolução imediata das operações da empresa (Chamados, CRM/Clientes, Vendas/Propostas, Catálogo/Serviços, Fornecedores/Compras e Estoque).
 
-Você só pode usar as ferramentas explicitamente disponibilizadas nesta conversa: ${names}. Nunca alegue consultar dados de uma ferramenta que não esteja disponível.
-Para cadastrar cliente use create_client; para propostas comerciais use create_proposal (identifique o cliente com get_client_360 e os produtos com get_product_details antes). Ferramentas de escrita NÃO alteram dados: elas geram um card de aprovação humana. Nunca diga que algo foi criado antes da confirmação do usuário.
-Se consultar um cliente ou produto com get_client_360 ou get_product_details e o retorno indicar found: false, você pode sugerir o cadastro antes de prosseguir OU gerar a proposta em rascunho com o nome e itens informados usando create_proposal.
+PERSONALIDADE E DIRETRIZES:
+- Fale como um braço direito de operações: natural, conclusivo e acolhedor. Exemplo: "Encontrei o cadastro do cliente e preparei a proposta com a correia dentada a R$ 120,00 e a lavagem. Revise os detalhes abaixo para confirmarmos no sistema."
+- NUNCA aja como um robô que apenas repete comandos ou diz frases vazias ("Estou consultando...", "Um momento...").
+- NUNCA vaze nomes de funções internas, JSON, nomes de tabelas ou termos técnicos (como get_client_360, CREATE_SUPPLIER, Zod, SQL). Fale sempre sobre regras de negócio e ações práticas.
+- Você só pode usar as ferramentas explicitamente disponibilizadas nesta conversa: ${names}. Nunca alegue consultar dados de uma ferramenta indisponível.
 
-REGRA DE PREÇOS E PROPOSTAS:
-- Quando o usuário disser para alterar um valor, você DEVE alterar o valor especificado no item correspondente na chamada da ferramenta create_proposal.
-- Quando o usuário informar valores explicitamente no prompt (ex: "120 reais", "R$ 60", "troca por 120", "o valor da correia dentada é 120 reais"), atribua exatamente esse valor numérico a unitPrice do item citado.
-- Nunca zere valores informados pelo usuário. Mantenha os demais itens da proposta e seus preços anteriores preservados.
+CONTINUIDADE E MEMÓRIA DE CONVERSA:
+- Quando o usuário fizer correções sucessivas ("muda para 120", "o cliente é Pedro", "adiciona mais 1 item"), você NUNCA deve reiniciar o rascunho do zero. Resgate a proposta ou entidade em andamento na conversa, preserve todos os campos e itens anteriores e modifique estritamente o item solicitado.
+- Entenda linguagem coloquial e valores flexíveis: "120 conto", "60 pila", "coloca 120 reais", "muda o preço da lavagem pra 50" devem ser compreendidos e aplicados de imediato aos respectivos itens.
+- NUNCA zere valores informados pelo usuário. Mantenha os demais itens da proposta e seus preços anteriores preservados.
 
-REGRA CRÍTICA DE EXECUÇÃO DE FERRAMENTAS:
-Quando você decidir invocar qualquer ferramenta (functionCall), NUNCA gere mensagens preliminares ou textos de espera como 'Estou consultando o sistema...', 'Um momento...', 'Verificando...'.
-Emita EXCLUSIVAMENTE o bloco functionCall. O backend executará a ferramenta e devolverá o resultado na mesma sessão para que você formule a resposta final completa com os dados reais já consultados.
-Ao receber o resultado de uma ferramenta (functionResponse), forneça IMEDIATAMENTE a resposta final completa, amigável e resolutiva para o usuário com base nos dados retornados. NUNCA deixe a resposta vazia.
-Ao executar get_open_tickets, retorne imediatamente o resultado em texto claro: "Você possui X chamado(s) aberto(s): [listar títulos e números]" ou "Não há chamados abertos no momento." Nunca retorne "Sem resposta do modelo."
-Quando o usuário solicitar correções, ajustes de preço ou adições a um orçamento/proposta anterior, MANTENHA todos os dados já definidos (cliente, itens existentes) e altere apenas os campos solicitados (ex: atualizar o preço unitário do item indicado).
-
-Sempre responda em português brasileiro de forma clara, objetiva e profissional.
-Se não tiver dados suficientes, seja honesto e sugira como o usuário pode obter a informação.`;
+EXECUÇÃO DE FERRAMENTAS:
+- Ao decidir executar consultas (READ), NUNCA gere mensagens preliminares ou textos de espera. Emita EXCLUSIVAMENTE o bloco functionCall. O backend injetará o retorno na mesma requisição para você formular a resposta final completa.
+- Ao receber o resultado de uma consulta (READ), forneça IMEDIATAMENTE a resposta final completa e amigável para o usuário com base nos dados reais retornados. NUNCA deixe a resposta vazia nem diga "Sem resposta do modelo."
+- Ao executar get_open_tickets, retorne imediatamente o resultado em texto claro: "Você possui X chamado(s) aberto(s): [listar títulos e números]" ou "Não há chamados abertos no momento."
+- Quando a solicitação demandar uma criação ou alteração (MUTATION: create_proposal, create_client, create_supplier, create_product, create_service, create_ticket), emita a ferramenta apropriada com todos os dados inferidos. A interface abrirá o Card de Aprovação (HITL) para o usuário validar com 1 clique.
+- Sempre responda em português brasileiro de forma clara, prestativa e resolutiva.`;
 }
 
 const ACTION_STOPWORDS = new Set([
@@ -1371,7 +1418,7 @@ const ACTION_STOPWORDS = new Set([
   "atualiza", "atualizar", "atualize", "falei", "disse", "quero", "favor", "por", "para",
   "pra", "de", "do", "da", "dos", "das", "o", "a", "os", "as", "um", "uma", "uns", "umas",
   "valor", "preço", "preco", "custo", "é", "e", "em", "no", "na", "nos", "nas", "reais",
-  "real", "r$"
+  "real", "r$", "conto", "pila", "pilas"
 ]);
 
 export function extractPriceFromText(text: string): number | null {
@@ -1382,15 +1429,15 @@ export function extractPriceFromText(text: string): number | null {
     if (Number.isFinite(val) && val >= 0) return val;
   }
 
-  // 2. 120 reais or 120,00 reais
-  const reais = text.match(/(\d+(?:[.,]\d{1,2})?)\s*(?:reais|real)\b/i);
+  // 2. 120 reais, 120 conto, 120 pila
+  const reais = text.match(/(\d+(?:[.,]\d{1,2})?)\s*(?:reais|real|conto|pila|pilas)\b/i);
   if (reais && reais[1]) {
     const val = Number(reais[1].replace(",", "."));
     if (Number.isFinite(val) && val >= 0) return val;
   }
 
-  // 3. por / para / pra / de / = / : seguido de número
-  const prep = text.match(/(?:por|para|pra|de|em|a|=|:)\s*(\d+(?:[.,]\d{1,2})?)\b/i);
+  // 3. por / para / pra / de / = / : / custa / valor seguido de número
+  const prep = text.match(/(?:por|é|valor(?:\s+de)?|custa|pra|para|de|em|a|=|:)\s*(?:r\$\s*)?(\d+(?:[.,]\d{1,2})?)\s*(?:reais|real|conto|pila|pilas)?\b/i);
   if (prep && prep[1]) {
     const val = Number(prep[1].replace(",", "."));
     if (Number.isFinite(val) && val >= 0) return val;
@@ -1642,6 +1689,73 @@ function extractProposalDetailsFromMessage(
   }
 
   return { isProposal, clientName: clientName || "Cliente", items };
+}
+
+function extractEntityCreationFromMessage(
+  userMessage: string,
+  allowedTools: readonly HermesToolDefinition[],
+  owner?: PendingActionOwner
+): PendingActionRequest | null {
+  // 1. Fornecedor: "criar/cadastrar fornecedor chamado X"
+  const supplierMatch = userMessage.match(/(?:cria|criar|cadastra|cadastrar|novo|adiciona|adicionar|consegue\s+criar)\s+(?:um\s+)?fornecedor\s+(?:chamado\s+|de\s+nome\s+)?([A-ZÀ-Úa-zà-ú0-9\s.&'-]+)/i);
+  if (supplierMatch && supplierMatch[1]) {
+    const tool = allowedTools.find(t => t.name === "create_supplier");
+    if (tool) {
+      const name = supplierMatch[1].trim().replace(/[?!.,]+$/, "");
+      if (name.length >= 2) {
+        try {
+          return createPendingActionRequest(tool, { name }, owner);
+        } catch { /* segue */ }
+      }
+    }
+  }
+
+  // 2. Cliente: "criar/cadastrar cliente chamado X" (se não for proposta)
+  const isProposal = /\b(orçamento|orcamento|proposta|cotacao|cotação)\b/i.test(userMessage);
+  if (!isProposal) {
+    const clientMatch = userMessage.match(/(?:cria|criar|cadastra|cadastrar|novo|adiciona|adicionar|consegue\s+criar)\s+(?:um\s+)?cliente\s+(?:chamado\s+|de\s+nome\s+)?([A-ZÀ-Úa-zà-ú0-9\s.&'-]+)/i);
+    if (clientMatch && clientMatch[1]) {
+      const tool = allowedTools.find(t => t.name === "create_client");
+      if (tool) {
+        const name = clientMatch[1].trim().replace(/[?!.,]+$/, "");
+        if (name.length >= 2) {
+          try {
+            return createPendingActionRequest(tool, { name }, owner);
+          } catch { /* segue */ }
+        }
+      }
+    }
+  }
+
+  // 3. Serviço
+  const serviceMatch = userMessage.match(/(?:cria|criar|cadastra|cadastrar|novo|adiciona|adicionar|consegue\s+criar)\s+(?:um\s+)?serviço\s+(?:no\s+catálogo\s+)?(?:chamado\s+|de\s+nome\s+)?([A-ZÀ-Úa-zà-ú0-9\s.&'-]+)/i);
+  if (serviceMatch && serviceMatch[1]) {
+    const tool = allowedTools.find(t => t.name === "create_service");
+    if (tool) {
+      const name = serviceMatch[1].trim().replace(/[?!.,]+$/, "");
+      if (name.length >= 2) {
+        try {
+          return createPendingActionRequest(tool, { name }, owner);
+        } catch { /* segue */ }
+      }
+    }
+  }
+
+  // 4. Produto
+  const productMatch = userMessage.match(/(?:cria|criar|cadastra|cadastrar|novo|adiciona|adicionar|consegue\s+criar)\s+(?:um\s+)?produto\s+(?:chamado\s+|de\s+nome\s+)?([A-ZÀ-Úa-zà-ú0-9\s.&'-]+)/i);
+  if (productMatch && productMatch[1]) {
+    const tool = allowedTools.find(t => t.name === "create_product");
+    if (tool) {
+      const name = productMatch[1].trim().replace(/[?!.,]+$/, "");
+      if (name.length >= 2) {
+        try {
+          return createPendingActionRequest(tool, { name }, owner);
+        } catch { /* segue */ }
+      }
+    }
+  }
+
+  return null;
 }
 
 export function sanitizeModelResponseText(text: string): string {
@@ -1903,6 +2017,17 @@ async function chatWithClientGeminiInternal(
     }
   }
 
+  // Se o usuário solicitou cadastro de entidade (fornecedor, cliente, serviço, produto) e o modelo não emitiu functionCall
+  if (!pendingActionRequest) {
+    const entityAction = extractEntityCreationFromMessage(userMessage, allowedTools, { clientId, userId });
+    if (entityAction) {
+      pendingActionRequest = entityAction;
+      if (!functionCallsMade.includes(entityAction.toolName)) {
+        functionCallsMade.push(entityAction.toolName);
+      }
+    }
+  }
+
   const candidateParts = data?.candidates?.[0]?.content?.parts ?? [];
   let modelText = candidateParts
     .map((p: any) => (typeof p.text === "string" ? p.text.trim() : ""))
@@ -1926,13 +2051,44 @@ async function chatWithClientGeminiInternal(
   }
 
   let finalResponse = modelText;
-  if (!finalResponse) {
+
+  if (!finalResponse || finalResponse === "Sem resposta do modelo." || isPreliminaryWaitingText(finalResponse)) {
     if (synthesizedFallback) {
       finalResponse = synthesizedFallback;
-    } else if (pendingActionRequest?.actionType === "CREATE_PROPOSAL") {
-      finalResponse = "Preparei a proposta abaixo para sua revisão:";
-    } else if (pendingActionRequest?.summary) {
-      finalResponse = pendingActionRequest.summary;
+    } else if (pendingActionRequest) {
+      const rawTarget = pendingActionRequest.args.name ??
+        pendingActionRequest.args.legalName ??
+        pendingActionRequest.args.clientName ??
+        pendingActionRequest.args.title;
+      const targetName = typeof rawTarget === "string" ? rawTarget.trim() : "";
+
+      if (pendingActionRequest.actionType === "CREATE_PROPOSAL") {
+        finalResponse = "Preparei a proposta abaixo para sua revisão:";
+      } else if (pendingActionRequest.actionType === "CREATE_SUPPLIER") {
+        finalResponse = targetName
+          ? `Preparei o cadastro do fornecedor ${targetName} para sua aprovação:`
+          : "Preparei o cadastro do fornecedor para sua aprovação:";
+      } else if (pendingActionRequest.actionType === "CREATE_CLIENT") {
+        finalResponse = targetName
+          ? `Preparei o cadastro do cliente ${targetName} para sua aprovação:`
+          : "Preparei o cadastro do cliente para sua aprovação:";
+      } else if (pendingActionRequest.actionType === "CREATE_PRODUCT") {
+        finalResponse = targetName
+          ? `Preparei o cadastro do produto ${targetName} para sua aprovação:`
+          : "Preparei o cadastro do produto para sua aprovação:";
+      } else if (pendingActionRequest.actionType === "CREATE_SERVICE") {
+        finalResponse = targetName
+          ? `Preparei o cadastro do serviço ${targetName} para sua aprovação:`
+          : "Preparei o cadastro do serviço para sua aprovação:";
+      } else if (pendingActionRequest.actionType === "CREATE_TICKET") {
+        finalResponse = targetName
+          ? `Preparei a abertura do chamado "${targetName}" para sua aprovação:`
+          : "Preparei a abertura do chamado para sua aprovação:";
+      } else if (pendingActionRequest.summary) {
+        finalResponse = `Preparei a seguinte ação para sua aprovação: ${pendingActionRequest.summary}`;
+      } else {
+        finalResponse = "Preparei a ação solicitada para sua aprovação:";
+      }
     } else {
       finalResponse = "Sem resposta do modelo.";
     }

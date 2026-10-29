@@ -29,8 +29,11 @@ import {
   persistUserMessageImmediately,
   appendAssistantMessageToHistory,
   chatWithClientGemini,
+  extractPriceFromText,
+  updateItemsWithUserPrices,
   type HermesToolDefinition,
 } from "./gemini-client";
+import { formatHermesError } from "./hermes-sanitize";
 import { executeHermesTicketAction } from "./hermes-ticket-actions";
 
 // ─── Testes de estrutura de mensagem ─────────────────────────────────────────
@@ -322,6 +325,7 @@ describe("Hermes security controls", () => {
       "assign_ticket",
       "add_ticket_activity",
       "get_crm_summary",
+      "list_crm_clients",
       "get_client_360",
       "create_client",
       "update_client",
@@ -339,6 +343,7 @@ describe("Hermes security controls", () => {
       "link_product_supplier",
       "get_services_list",
       "update_service",
+      "create_service",
       "get_sales_analytics",
       "get_suppliers_list",
       "create_supplier",
@@ -352,7 +357,7 @@ describe("Hermes security controls", () => {
     expect(HERMES_TOOL_REGISTRY.filter(tool => tool.type === "MUTATION").map(tool => tool.actionType)).toEqual([
       "CREATE_TICKET", "UPDATE_TICKET_STATUS", "ASSIGN_TICKET", "ADD_TICKET_ACTIVITY",
       "CREATE_CLIENT", "UPDATE_CLIENT", "ADD_CLIENT_TIMELINE", "CREATE_PROPOSAL", "UPDATE_PROPOSAL_STATUS", "SEND_PROPOSAL_WHATSAPP",
-      "CREATE_PRODUCT", "UPDATE_PRODUCT", "LINK_PRODUCT_SUPPLIER", "UPDATE_SERVICE", "CREATE_SUPPLIER", "UPDATE_SUPPLIER", "REQUEST_PURCHASE", "SEND_SUPPLIER_MESSAGE",
+      "CREATE_PRODUCT", "UPDATE_PRODUCT", "LINK_PRODUCT_SUPPLIER", "UPDATE_SERVICE", "CREATE_SERVICE", "CREATE_SUPPLIER", "UPDATE_SUPPLIER", "REQUEST_PURCHASE", "SEND_SUPPLIER_MESSAGE",
     ]);
   });
 
@@ -678,6 +683,7 @@ describe("Hermes persistence, CRM tools and latency", () => {
     const clientRes = JSON.parse(await executeClientFunction("get_client_360", { search: "Pedro Ferrari" }, "tenant-a", ["crm"]));
     expect(clientRes).toEqual({
       found: false,
+      search: "Pedro Ferrari",
       message: "Cliente Pedro Ferrari não encontrado no cadastro.",
     });
 
@@ -1315,5 +1321,110 @@ describe("Hermes persistence, CRM tools and latency", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+describe("Hermes entity flexibilization, memory continuity and conversational parsing", () => {
+  it("handles flexible supplier creation with nullish optional fields and formats friendly errors without raw zod json", () => {
+    const supplierTool = HERMES_TOOL_REGISTRY.find(t => t.name === "create_supplier")!;
+    expect(supplierTool).toBeDefined();
+
+    // Aceita apenas o nome com todos os outros campos nulos/undefined
+    const validated = supplierTool.validateArgs({
+      name: "Elétrica Moura",
+      document: null,
+      email: null,
+      phone: null,
+      contactName: null,
+      tradeName: null,
+      stateRegistration: null,
+      postalCode: null,
+      street: null,
+      addressNumber: null,
+      addressComplement: null,
+      district: null,
+      city: null,
+      state: null,
+      notes: null,
+    });
+    expect(validated.name).toBe("Elétrica Moura");
+
+    // Valida conversão de erros brutos do Zod em texto amigável em português
+    const rawZodJson = JSON.stringify([
+      { expected: "string", received: "null", path: ["stateRegistration"], message: "expected string, received null" },
+      { expected: "string", received: "null", path: ["email"], message: "expected string, received null" },
+    ]);
+    const friendly = formatHermesError(new Error(rawZodJson));
+    expect(friendly).not.toContain("[ {");
+    expect(friendly).not.toContain("expected string");
+    expect(friendly).toContain("Não foi possível concluir o cadastro");
+    expect(friendly).toContain("inscrição estadual");
+    expect(friendly).toContain("e-mail");
+  });
+
+  it("extracts and updates proposal prices with colloquial expressions ('120 conto', '60 pila', 'coloca 120 reais') preserving items and client context", () => {
+    expect(extractPriceFromText("120 conto")).toBe(120);
+    expect(extractPriceFromText("60 pila")).toBe(60);
+    expect(extractPriceFromText("troca o valor da correia pra 120 reais")).toBe(120);
+    expect(extractPriceFromText("R$ 85,50")).toBe(85.5);
+
+    const initialItems = [
+      { productName: "troca da correia dentada", quantity: 1, unitPrice: 0 },
+      { productName: "lavagem de carro", quantity: 1, unitPrice: 50 },
+    ];
+
+    const updated1 = updateItemsWithUserPrices(initialItems, "coloca o valor da correia dentada por 120 conto");
+    expect(updated1[0].unitPrice).toBe(120);
+    expect(updated1[1].unitPrice).toBe(50); // preservado
+
+    const updated2 = updateItemsWithUserPrices(updated1, "muda a lavagem pra 60 pila");
+    expect(updated2[0].unitPrice).toBe(120); // preservado
+    expect(updated2[1].unitPrice).toBe(60);
+  });
+
+  it("opens CREATE_SUPPLIER card directly when user asks 'consegue criar um fornecedor chamado eletrica moura?'", async () => {
+    let callCount = 0;
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("megadesk_domain_clients")) {
+        return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      }
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) {
+        return [[{ total: 0 }]];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => {
+      callCount++;
+      // Gemini na 1ª tentativa devolve functionCall para create_supplier sem texto
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{
+            content: {
+              parts: [
+                { functionCall: { name: "create_supplier", args: { name: "Elétrica Moura" } } },
+              ],
+            },
+          }],
+          usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 20, totalTokenCount: 70 },
+        }),
+      };
+    });
+
+    try {
+      const result = await chatWithClientGemini("tenant-a", "user@example.invalid", "consegue criar um fornecedor chamado eletrica moura?", [], ["suppliers", "purchases", "erp"]);
+      expect(result.ok).toBe(true);
+      expect(result.pendingActionRequest).toBeDefined();
+      expect(result.pendingActionRequest?.actionType).toBe("CREATE_SUPPLIER");
+      expect(result.pendingActionRequest?.args.name).toBe("Elétrica Moura");
+      expect(result.response).not.toBe("Sem resposta do modelo.");
+      expect(result.response).toContain("Preparei o cadastro do fornecedor Elétrica Moura para sua aprovação:");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
+});
