@@ -2675,6 +2675,7 @@ REGRA ZERO HALLUCINATION — DADOS DE NEGÓCIO:
 REGRA ZERO PREÂMBULO EM TOOL CALLS:
 - Emita a functionCall imediatamente no primeiro turno. Não escreva "Vou verificar agora", "Um momento enquanto consulto" ou "Entendido, vou realizar essa verificação".
 - Não prometa consultar ou executar uma ferramenta em uma resposta textual. Se não houver functionCall efetiva, informe que a consulta não foi realizada.
+- Invoque ferramentas exclusivamente pelo Function Calling nativo da API. Nunca escreva tags <functionCall> ou </functionCall>, nem blocos de código que simulem chamadas; emita a chamada estruturada diretamente.
 
 ESTILO EXECUTIVO:
 - Responda em português brasileiro com tom sóbrio, direto e breve. Mostre somente fatos comprovados e o próximo passo operacional quando necessário.
@@ -3123,7 +3124,12 @@ function extractEntityCreationFromMessage(
 
 export function sanitizeModelResponseText(text: string): string {
   if (!text) return "";
-  const trimmed = text.trim();
+  // Pseudo-chamadas são texto do modelo, nunca conteúdo destinado à interface.
+  const withoutPseudoCalls = text
+    .replace(/<functionCall\b[^>]*>[\s\S]*?<\/functionCall\s*>/gi, "")
+    .replace(/<functionCall\b[^>]*>[\s\S]*$/gi, "")
+    .replace(/<\/functionCall\s*>/gi, "");
+  const trimmed = withoutPseudoCalls.trim();
   // Se for exclusivamente uma chamada de tool (ex: get_client_360({search: 'Pedro Ferrari'}) ou get_services_list({search: 'lavagem'}))
   if (/^[a-zA-Z0-9_]+\s*\(\{?[\s\S]*?\}?\);?$/i.test(trimmed)) {
     return "";
@@ -3133,7 +3139,7 @@ export function sanitizeModelResponseText(text: string): string {
     return "";
   }
   // Remove linhas que são chamadas de ferramentas isoladas
-  const lines = text.split("\n");
+  const lines = withoutPseudoCalls.split("\n");
   const filtered = lines.filter(line => {
     const l = line.trim();
     if (/^[a-zA-Z0-9_]+\s*\(\{?[\s\S]*?\}?\);?$/i.test(l)) return false;
@@ -3141,6 +3147,25 @@ export function sanitizeModelResponseText(text: string): string {
     return true;
   });
   return filtered.join("\n").trim();
+}
+
+function parseTextFunctionCalls(text: string, permissions: readonly string[]): Array<{ functionCall: { name: string; args: Record<string, unknown> } }> {
+  const calls: Array<{ functionCall: { name: string; args: Record<string, unknown> } }> = [];
+  for (const match of text.matchAll(/<functionCall>\s*([a-zA-Z0-9_]+)\s*([\s\S]*?)<\/functionCall\s*>/gi)) {
+    if (calls.length >= 8) break;
+    const tool = getAuthorizedHermesTool(match[1], permissions);
+    // Esta ferramenta é classificada como READ, mas grava preferências; texto livre não pode acioná-la.
+    if (!tool || tool.name === "set_user_preference") continue;
+    try {
+      const rawArgs: unknown = match[2].trim() ? JSON.parse(match[2]) : {};
+      if (!rawArgs || typeof rawArgs !== "object" || Array.isArray(rawArgs)) continue;
+      const args = tool.validateArgs(rawArgs as Record<string, unknown>);
+      calls.push({ functionCall: { name: tool.name, args } });
+    } catch {
+      // Argumentos inválidos não são executados e a tag é removida da resposta.
+    }
+  }
+  return calls;
 }
 
 function synthesizeDeterministicSingle(
@@ -3455,13 +3480,20 @@ async function chatWithClientGeminiInternal(
   let tokensUsed = tokenUsageTotal(data, promptTokens, completionTokens);
   let pendingActionRequest: PendingActionRequest | undefined;
   const executedReadResults: Array<{ name: string; args: Record<string, unknown>; output: any }> = [];
+  let sawTextFunctionCall = false;
 
   // 4. Processa function calls em loop (até 3 iterações consecutivas para multi-intent)
   let iterations = 0;
   while (iterations < 3) {
     const candidate = data?.candidates?.[0];
     const parts = candidate?.content?.parts ?? [];
-    const functionCallParts = parts.filter((p: any) => Boolean(p.functionCall));
+    const structuredCalls = parts.filter((p: any) => Boolean(p.functionCall));
+    const candidateText = parts.map((p: any) => typeof p.text === "string" ? p.text : "").join("\n");
+    const textCallTurn = structuredCalls.length === 0 && /<functionCall\b/i.test(candidateText);
+    if (textCallTurn) sawTextFunctionCall = true;
+    const functionCallParts = textCallTurn
+      ? parseTextFunctionCalls(candidateText, userPermissions)
+      : structuredCalls;
     if (functionCallParts.length === 0) break;
 
     iterations++;
@@ -3532,6 +3564,10 @@ async function chatWithClientGeminiInternal(
         },
       });
     }
+
+    // O provedor não emitiu uma chamada estruturada: não forjar um turno nativo.
+    // Os resultados reais serão formatados deterministicamente abaixo.
+    if (textCallTurn) break;
 
     requestBody.contents = [
       ...requestBody.contents,
@@ -3694,6 +3730,15 @@ async function chatWithClientGeminiInternal(
       : synthesizeDeterministicSingle(result, userMessage, readResults))
       .filter(Boolean).join("\n\n") || "Não foi possível consultar os dados solicitados no momento.";
   }
+
+  if (sawTextFunctionCall && !pendingActionRequest) {
+    finalResponse = executedReadResults.map(result => result.output?.success === false
+      ? "Não foi possível consultar os dados solicitados no momento."
+      : synthesizeDeterministicSingle(result, userMessage, executedReadResults))
+      .filter(Boolean).join("\n\n") || "Não foi possível executar a consulta solicitada.";
+  }
+  finalResponse = sanitizeModelResponseText(finalResponse)
+    || "Não foi possível obter uma resposta válida no momento.";
 
   // 5. Salva no histórico
   const updatedHistory: IAMessage[] = [

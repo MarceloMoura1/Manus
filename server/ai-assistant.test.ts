@@ -46,6 +46,103 @@ import {
 import { formatHermesError } from "./hermes-sanitize";
 import { executeHermesTicketAction } from "./hermes-ticket-actions";
 
+describe("Gemini text functionCall contingency", () => {
+  function mockTenantDatabase() {
+    const execute = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (sql.includes("megadesk_domain_clients")) {
+        return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      }
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) return [[{ total: 0 }]];
+      if (sql.includes("megadesk_domain_chamados") && sql.includes("COUNT(*)")) {
+        expect(params?.[0]).toBe("tenant-text-calls");
+        return [[{ total: 2, open: 2, in_progress: 0, waiting: 0, closed: 0 }]];
+      }
+      if (sql.includes("megadesk_domain_conversations") && sql.includes("COUNT(*)")) {
+        expect(params?.[0]).toBe("tenant-text-calls");
+        return [[{ total: 3, abertas: 2, fechadas: 1 }]];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    return execute;
+  }
+
+  async function chatWithTextResponse(text: string, permissions: string[]) {
+    const originalFetch = globalThis.fetch;
+    const request = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text }] } }],
+        usageMetadata: { promptTokenCount: 30, candidatesTokenCount: 15, totalTokenCount: 45 },
+      }),
+    }));
+    globalThis.fetch = request as any;
+    try {
+      const result = await chatWithClientGemini(
+        "tenant-text-calls", "operator@example.invalid",
+        "Me dê um panorama de chamados e conversas", [], permissions,
+      );
+      return { result, request };
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  it("executes authorized read tags in parallel and summarizes both real results without leaking tags", async () => {
+    const execute = mockTenantDatabase();
+    const { result, request } = await chatWithTextResponse(
+      '<functionCall>get_tickets_overview {"status":"open"}</functionCall>' +
+      '<functionCall>get_conversations_summary {}</functionCall>',
+      ["tickets", "conversations"],
+    );
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(result.functionCallsMade).toEqual(["get_tickets_overview", "get_conversations_summary"]);
+    expect(result.response).toContain("2 chamado(s)");
+    expect(result.response).toContain("3 conversa(s)");
+    expect(result.response).not.toContain("<functionCall>");
+    expect(execute.mock.calls.some(([sql]) => sql.includes("megadesk_domain_chamados"))).toBe(true);
+    expect(execute.mock.calls.some(([sql]) => sql.includes("megadesk_domain_conversations"))).toBe(true);
+  });
+
+  it("rejects unauthorized, unknown and malformed text calls without querying business data", async () => {
+    const execute = mockTenantDatabase();
+    const { result } = await chatWithTextResponse(
+      '<functionCall>get_tickets_overview {}</functionCall>' +
+      '<functionCall>unknown_tool {}</functionCall>' +
+      '<functionCall>get_conversations_summary {broken}</functionCall>',
+      ["conversations"],
+    );
+    expect(result.functionCallsMade).toEqual([]);
+    expect(result.response).not.toContain("functionCall");
+    expect(execute.mock.calls.some(([sql]) => sql.includes("megadesk_domain_chamados") || sql.includes("megadesk_domain_conversations"))).toBe(false);
+  });
+
+  it("turns a text mutation into pending approval without executing the ticket write", async () => {
+    const execute = mockTenantDatabase();
+    const { result } = await chatWithTextResponse(
+      '<functionCall>create_ticket {"customer":"Cliente Teste","title":"Falha de acesso"}</functionCall>',
+      ["tickets"],
+    );
+    expect(result.pendingActionRequest).toMatchObject({ actionType: "CREATE_TICKET", status: "PENDING_APPROVAL" });
+    expect(result.response).not.toContain("functionCall");
+    expect(execute.mock.calls.some(([sql]) => /INSERT\s+INTO\s+megadesk_domain_chamados/i.test(sql))).toBe(false);
+  });
+
+  it("strips an unclosed pseudo-tag from the final answer", async () => {
+    mockTenantDatabase();
+    const { result } = await chatWithTextResponse("<functionCall>get_tickets_overview {}", ["tickets"]);
+    expect(result.functionCallsMade).toEqual([]);
+    expect(result.response).not.toContain("functionCall");
+  });
+
+  it("instructs the model to use only native structured function calling", () => {
+    const prompt = buildSystemInstruction(getAllowedHermesTools(["tickets"]), {});
+    expect(prompt).toContain("Function Calling nativo da API");
+    expect(prompt).toContain("Nunca escreva tags <functionCall>");
+  });
+});
+
 // ─── Testes de estrutura de mensagem ─────────────────────────────────────────
 
 describe("IAMessage structure", () => {
