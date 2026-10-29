@@ -12,6 +12,8 @@ try {
 import { getPool, getUserHermesPreferences, saveUserHermesPreferences, type UserHermesPreferences } from "./db";
 import { nanoid } from "nanoid";
 import { dropEmptyArgs } from "./hermes-sanitize";
+import { evoGetStatus } from "./evolution/client";
+import { instanceNameFor } from "./evolution/session-store";
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
@@ -108,6 +110,27 @@ export function isConversationalGreeting(message: string): boolean {
   ];
 
   return conversationalPhrases.some(pattern => pattern.test(clean));
+}
+
+/** Identifica consultas operacionais que exigem uma leitura antes da resposta. */
+export function requiredBusinessReadTool(message: string): "get_suppliers_list" | "get_whatsapp_status" | null {
+  const normalized = message.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (/\b(whatsapp|whats|zap|evolution)\b/.test(normalized)
+    && /\b(status|conex[a-z]*|instanc[a-z]*|conectad[a-z]*|desconectad[a-z]*|online|offline)\b/.test(normalized)) {
+    return "get_whatsapp_status";
+  }
+  if (/\b(fornecedor[a-z]*|supplier[a-z]*)\b/.test(normalized)
+    && /\b(quais|qual|listar|liste|lista|consultar|consulta|buscar|busque|cadastrad[a-z]*|temos|mostre|mostrar|contato[a-z]*|telefone[a-z]*)\b/.test(normalized)
+    && !/\b(criar|crie|cadastrar|cadastre|atualizar|atualize|enviar|envie)\b/.test(normalized)) {
+    return "get_suppliers_list";
+  }
+  return null;
+}
+
+function asksForBusinessData(message: string): boolean {
+  const normalized = message.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return /\b(meu|meus|minha|minhas|nosso|nossos|nossa|nossas|qual|quais|quanto|quantos|quantas|liste|listar|mostre|mostrar|exiba|saldo|status|cadastrad[a-z]*|temos)\b/.test(normalized)
+    && /\b(client[a-z]*|forneced[a-z]*|produt[a-z]*|estoqu[a-z]*|propost[a-z]*|orcament[a-z]*|chamad[a-z]*|contato[a-z]*|whatsapp|venda[a-z]*|faturament[a-z]*|receita[a-z]*|pedid[a-z]*|servic[a-z]*)\b/.test(normalized);
 }
 
 export interface ChatResult {
@@ -1221,6 +1244,17 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
     validateArgs: conversationsSummaryArgs,
   },
   {
+    name: "get_whatsapp_status",
+    type: "READ",
+    requiredPermissions: ["conversations", "chat"],
+    declaration: {
+      name: "get_whatsapp_status",
+      description: "Consulta o estado atual da conexão WhatsApp do tenant na Evolution API. Use para perguntas sobre conexão, status ou instância do WhatsApp.",
+      parameters: { type: "OBJECT", properties: {}, required: [] },
+    },
+    validateArgs: noArguments,
+  },
+  {
     name: "extract_lead_from_conversation",
     type: "READ",
     requiredPermissions: ["conversations", "chat", "crm"],
@@ -1875,6 +1909,10 @@ export async function executeClientFunction(
     const search = validatedArgs as { query: string; focus?: string };
     return executeWebSearch(geminiKey, search.query, search.focus);
   }
+  if (functionName === "get_whatsapp_status") {
+    const status = await evoGetStatus(instanceNameFor(clientId));
+    return JSON.stringify({ status });
+  }
   const pool = getPool();
 
   if (functionName === "set_user_preference") {
@@ -2362,7 +2400,7 @@ export async function executeClientFunction(
       email: r.email || "",
       contactName: r.contactName || "",
     }));
-    return JSON.stringify({ total: suppliers.length, suppliers, fornecedores: rows });
+    return JSON.stringify({ total: suppliers.length, suppliers });
   }
 
   if (functionName === "get_conversations_summary") {
@@ -2623,16 +2661,26 @@ ${rulesList}
 
 REGRA ABSOLUTA DE PERSONALIDADE:
 Respeite rigorosamente a forma de tratamento solicitada acima em todas as saudações e frases.
-Mantenha continuidade contextual com as conversas passadas. Nunca ignore uma instrução de estilo já assimilada.
-Se o usuário alterou recentemente a forma de tratamento ou estilo de comunicação nesta mensagem, reconheça e confirme a mudança elegantemente no início da resposta (ex.: 'Entendido, ${preferredName}. A partir de agora nos comunicaremos desta forma.').
+Mantenha continuidade contextual com as conversas passadas. Se a preferência gravada for "Senhor Marcelo", use esse tratamento com brevidade; não atribua esse nome a outros usuários.
+Se o usuário alterar a forma de tratamento, confirme em uma frase curta.
 =======================================================
 
-POSTURA E PERSONALIDADE EXECUTIVA:
-- Seu tom é seguro, executivo, cortês, objetivo e altamente resolutivo. Você não responde como um robô programado com frases de cartão.
-- Apresente dados (chamados, clientes, estoque, propostas, vendas) de forma elegante e bem diagramada: ressalte pontos de atenção, prioridades críticas e recomende os próximos passos práticos.
-- NUNCA use chavões mecânicos ou frases engessadas (evite "Você possui X chamado(s)...", "Cliente localizado...", "Estou consultando...", "Um momento...").
-- NUNCA vaze nomes de funções internas, identificadores técnicos (ex.: get_client_360, CREATE_PROPOSAL, set_user_preference, Zod, SQL, UUIDs brutos) ou regras internas de código. Fale exclusivamente sobre a operação de negócios.
-- Você só pode usar as ferramentas explicitamente disponibilizadas nesta conversa: ${names}.
+REGRA ZERO HALLUCINATION — DADOS DE NEGÓCIO:
+- Nunca invente, suponha, exemplifique ou deduza clientes, fornecedores, produtos, saldos de estoque, valores de propostas, chamados, contatos ou status de integrações.
+- Para responder sobre dados corporativos, invoque a ferramenta de leitura correspondente. Fornecedores cadastrados exigem get_suppliers_list; conexão, instância ou status do WhatsApp exigem get_whatsapp_status. Não use web_search como substituto de dados internos.
+- Se a ferramenta necessária não estiver disponível ou falhar, diga objetivamente que não foi possível consultar esses dados. Nunca transforme erro de consulta em resultado vazio.
+- Se a consulta for bem-sucedida e retornar lista vazia ou found: false, informe a ausência sem inventar registros: "Não há fornecedores cadastrados no sistema." ou "Nenhum produto em estoque no momento.", conforme o caso.
+- Só forneça exemplo hipotético quando o usuário o pedir expressamente; identifique-o como hipotético.
+
+REGRA ZERO PREÂMBULO EM TOOL CALLS:
+- Emita a functionCall imediatamente no primeiro turno. Não escreva "Vou verificar agora", "Um momento enquanto consulto" ou "Entendido, vou realizar essa verificação".
+- Não prometa consultar ou executar uma ferramenta em uma resposta textual. Se não houver functionCall efetiva, informe que a consulta não foi realizada.
+
+ESTILO EXECUTIVO:
+- Responda em português brasileiro com tom sóbrio, direto e breve. Mostre somente fatos comprovados e o próximo passo operacional quando necessário.
+- Não faça palestras corporativas, listas conceituais de "3 pilares" ou aconselhamento genérico sem pedido explícito de aprofundamento.
+- Não encerre toda resposta com "Como o senhor gostaria que eu procedesse agora?". Pergunte apenas quando faltar uma decisão operacional concreta.
+- Nunca exponha nomes de ferramentas, SQL, UUIDs ou regras internas ao usuário. Ferramentas disponíveis nesta conversa: ${names}.
 
 RACIOCÍNIO MULTI-INTENT E REQUISIÇÕES COMPOSTAS:
 - Quando o usuário fizer múltiplas perguntas na mesma mensagem (exemplo: "me dá um resumo dos chamados abertos e o que tem no chamado 0003"), você DEVE responder a TODAS elas de forma completa e organizada no mesmo texto final.
@@ -2646,8 +2694,7 @@ CONTINUIDADE E MEMÓRIA DE CONVERSA:
 
 EXECUÇÃO DE FERRAMENTAS E FLUXO HITL:
 - Ao decidir executar consultas (READ) ou registrar preferências (set_user_preference), emita a functionCall correspondente sem mensagens preliminares.
-- Quando a solicitação demandar uma criação ou alteração (MUTATION: create_proposal, create_client, create_supplier, create_product, create_service, create_ticket), emita a ferramenta apropriada com todos os dados inferidos. A interface abrirá o Card de Aprovação (HITL) para o usuário validar com 1 clique.
-- Sempre responda em português brasileiro com clareza, proatividade e elegância executiva.`;
+- Quando a solicitação demandar criação ou alteração (MUTATION), use apenas dados fornecidos pelo usuário ou consultados por ferramentas. Emita a ferramenta apropriada para preparar o Card de Aprovação (HITL); nenhuma escrita ocorre antes da confirmação humana.`;
 }
 
 const ACTION_STOPWORDS = new Set([
@@ -3154,6 +3201,8 @@ function synthesizeDeterministicSingle(
     if (total === 0) {
       return "Não há chamados abertos no momento.";
     }
+    const urgent = Number(output?.urgentes ?? 0) || 0;
+    const urgentText = urgent > 0 ? `, ${urgent} urgente(s)` : "";
     if (Array.isArray(output?.chamados) && output.chamados.length > 0) {
       const validChamados = output.chamados
         .slice(0, 5)
@@ -3162,10 +3211,10 @@ function synthesizeDeterministicSingle(
         const list = validChamados
           .map((c: any) => `#${String(c.chamadoNumber ?? c.chamadoId ?? "").padStart(4, "0")}: "${c.title ?? "Sem título"}"`)
           .join("; ");
-        return `Você possui ${total} chamado(s) aberto(s): ${list}.`;
+        return `Há ${total} chamados abertos${urgentText}: ${list}.`;
       }
     }
-    return `Você possui ${total} chamado(s) aberto(s) no momento.`;
+    return `Há ${total} chamados abertos${urgentText}.`;
   }
 
   if (name === "get_client_360") {
@@ -3264,25 +3313,35 @@ function synthesizeDeterministicSingle(
   }
 
   if (name === "get_suppliers_list") {
-    const list = output?.fornecedores;
+    if (output?.success === false) return "Não foi possível consultar os fornecedores no momento.";
+    const list = output?.suppliers;
+    if (!Array.isArray(list)) return "Não foi possível confirmar a lista de fornecedores no momento.";
     const searchTerm = String(args.search ?? "").trim();
-    if (Array.isArray(list) && list.length > 0) {
+    if (list.length > 0) {
       if (list.length === 1) {
         const s = list[0];
-        const name = s.legalName || s.tradeName || "Fornecedor";
+        const name = s.name;
         const phone = s.phone ? `Telefone: ${s.phone}` : "Telefone não informado";
         const email = s.email ? `E-mail: ${s.email}` : "";
         const contact = s.contactName ? `Contato: ${s.contactName}` : "";
         const details = [phone, email, contact].filter(Boolean).join(", ");
-        return `Fornecedor localizado: ${name} (${details}).`;
+        return `${name} — ${details}.`;
       }
-      const names = list.slice(0, 5).map((s: any) => s.legalName || s.tradeName || "Fornecedor").join(", ");
+      const names = list.slice(0, 5).map((s: any) => s.name).filter(Boolean).join(", ");
       const extra = list.length > 5 ? ` e mais ${list.length - 5} fornecedor(es)` : "";
-      return `Temos os seguintes fornecedores cadastrados${searchTerm ? ` para "${searchTerm}"` : ""}: ${names}${extra}.`;
+      return `Fornecedores${searchTerm ? ` para "${searchTerm}"` : ""}: ${names}${extra}.`;
     }
     return searchTerm
-      ? `Nenhum fornecedor encontrado para "${searchTerm}". Deseja cadastrá-lo?`
-      : "Consultei os fornecedores no sistema e não encontrei nenhum fornecedor cadastrado no ERP.";
+      ? `Nenhum fornecedor encontrado para "${searchTerm}".`
+      : "Não há fornecedores cadastrados no sistema.";
+  }
+
+  if (name === "get_whatsapp_status") {
+    if (output?.success === false) return "Não foi possível consultar o status do WhatsApp no momento.";
+    if (output?.status === "connected") return "WhatsApp conectado.";
+    if (output?.status === "connecting") return "WhatsApp em conexão.";
+    if (output?.status === "disconnected") return "WhatsApp desconectado.";
+    return "Não foi possível confirmar o status do WhatsApp no momento.";
   }
 
   if (name === "get_sales_analytics") {
@@ -3467,7 +3526,7 @@ async function chatWithClientGeminiInternal(
           name: res.name,
           response: {
             output: res.output,
-            instrucao_resposta: "Analise os dados retornados acima. Se a solicitação do usuário ainda exigir consultas complementares (como detalhes de um chamado específico mencionado, ficha de cliente, produtos ou compras), chame a próxima ferramenta necessária. Se você já possui todas as informações para responder a todas as partes da pergunta do usuário, elabore sua resposta executiva completa, bem estruturada, acolhedora e elegante no mesmo texto. Nunca deixe perguntas sem resposta.",
+            instrucao_resposta: "Use somente dados efetivamente retornados pelas ferramentas. Se faltar consulta complementar, chame a ferramenta correspondente sem preâmbulo. Se a consulta falhou, informe a falha; se o resultado está vazio, informe ausência. Responda de forma breve e direta.",
             ...(res.output && typeof res.output === "object" && !Array.isArray(res.output) ? res.output : {}),
           },
         },
@@ -3487,6 +3546,19 @@ async function chatWithClientGeminiInternal(
     promptTokens += nextPromptTokens;
     completionTokens += nextCompletionTokens;
     tokensUsed += tokenUsageTotal(data, nextPromptTokens, nextCompletionTokens);
+  }
+
+  // A resposta textual do modelo não comprova uma consulta. Para intenções
+  // inequívocas, executa a leitura autorizada mesmo se o modelo a omitiu.
+  const requiredReadTool = requiredBusinessReadTool(userMessage);
+  if (requiredReadTool && !pendingActionRequest
+    && !executedReadResults.some(result => result.name === requiredReadTool)
+    && getAuthorizedHermesTool(requiredReadTool, userPermissions)) {
+    const rawResult = await executeClientFunction(requiredReadTool, {}, clientId, userPermissions, geminiKey, userId);
+    let output: unknown;
+    try { output = JSON.parse(rawResult); } catch { output = { success: false }; }
+    executedReadResults.push({ name: requiredReadTool, args: {}, output });
+    functionCallsMade.push(requiredReadTool);
   }
 
   // Se a intenção do usuário foi orçamento/proposta e a checagem READ terminou sem pendingActionRequest,
@@ -3607,6 +3679,20 @@ async function chatWithClientGeminiInternal(
   // Garantia absoluta: se get_open_tickets foi executado, sintetizar deterministicamente
   if (ticketsResult && (!finalResponse || isPreliminaryWaitingText(finalResponse))) {
     finalResponse = synthesizeDeterministicResponse([ticketsResult], userMessage) || "Não há chamados abertos no momento.";
+  }
+
+  if (!pendingActionRequest && requiredReadTool) {
+    const requiredResult = executedReadResults.find(result => result.name === requiredReadTool);
+    finalResponse = requiredResult
+      ? synthesizeDeterministicSingle(requiredResult, userMessage, executedReadResults)
+        || "Não foi possível confirmar os dados solicitados."
+      : "Você não possui permissão para consultar dados deste módulo.";
+  } else if (!pendingActionRequest && asksForBusinessData(userMessage)) {
+    const readResults = executedReadResults.filter(result => result.name !== "set_user_preference");
+    finalResponse = readResults.map(result => result.output?.success === false
+      ? "Não foi possível consultar os dados solicitados no momento."
+      : synthesizeDeterministicSingle(result, userMessage, readResults))
+      .filter(Boolean).join("\n\n") || "Não foi possível consultar os dados solicitados no momento.";
   }
 
   // 5. Salva no histórico

@@ -8,7 +8,12 @@ vi.mock("./db", async importOriginal => ({
   ...(await importOriginal<typeof import("./db")>()),
   getPool: vi.fn(),
 }));
+vi.mock("./evolution/client", async importOriginal => ({
+  ...(await importOriginal<typeof import("./evolution/client")>()),
+  evoGetStatus: vi.fn(),
+}));
 import { getPool, getUserHermesPreferences, saveUserHermesPreferences } from "./db";
+import { evoGetStatus } from "./evolution/client";
 import {
   HERMES_TOOL_REGISTRY,
   beginPendingHermesAction,
@@ -34,6 +39,7 @@ import {
   buildSystemInstruction,
   detectUserPreferencesFromMessage,
   isConversationalGreeting,
+  requiredBusinessReadTool,
   sanitizeFunctionDeclaration,
   type HermesToolDefinition,
 } from "./gemini-client";
@@ -355,6 +361,7 @@ describe("Hermes security controls", () => {
       "request_purchase_order",
       "send_supplier_message",
       "get_conversations_summary",
+      "get_whatsapp_status",
       "extract_lead_from_conversation",
       "set_user_preference",
       "get_erp_products",
@@ -365,6 +372,47 @@ describe("Hermes security controls", () => {
       "CREATE_CLIENT", "UPDATE_CLIENT", "ADD_CLIENT_TIMELINE", "CREATE_PROPOSAL", "UPDATE_PROPOSAL_STATUS", "SEND_PROPOSAL_WHATSAPP",
       "CREATE_PRODUCT", "UPDATE_PRODUCT", "LINK_PRODUCT_SUPPLIER", "UPDATE_SERVICE", "CREATE_SERVICE", "CREATE_SUPPLIER", "UPDATE_SUPPLIER", "REQUEST_PURCHASE", "SEND_SUPPLIER_MESSAGE",
     ]);
+  });
+
+  it("routes business status questions to the required tenant read tool", () => {
+    expect(requiredBusinessReadTool("Qual o status da conexão do WhatsApp?"))
+      .toBe("get_whatsapp_status");
+    expect(requiredBusinessReadTool("Quais fornecedores temos cadastrados?"))
+      .toBe("get_suppliers_list");
+    expect(requiredBusinessReadTool("Crie um fornecedor chamado Teste"))
+      .toBeNull();
+    expect(getAuthorizedHermesTool("get_whatsapp_status", ["conversations"])?.type).toBe("READ");
+    expect(getAuthorizedHermesTool("get_whatsapp_status", ["ai-assistant"])).toBeNull();
+  });
+
+  it("reads the tenant's real supplier table and returns an explicit empty list", async () => {
+    const execute = vi.fn(async () => [[]]);
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    const result = JSON.parse(await executeClientFunction("get_suppliers_list", {}, "tenant-a", ["suppliers"]));
+    expect(result).toEqual({ total: 0, suppliers: [] });
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("FROM erp_suppliers WHERE client_id=?"), ["tenant-a"]);
+  });
+
+  it("reports supplier query failures without claiming the catalog is empty", async () => {
+    const execute = vi.fn(async () => { throw new Error("database unavailable"); });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    const raw = await executeClientFunction("get_suppliers_list", {}, "tenant-a", ["suppliers"]);
+    expect(JSON.parse(raw)).toMatchObject({ success: false });
+  });
+
+  it("queries the Evolution connection for the authenticated tenant without touching the SQL pool", async () => {
+    vi.mocked(evoGetStatus).mockResolvedValueOnce("disconnected");
+    vi.mocked(getPool).mockClear();
+    const result = JSON.parse(await executeClientFunction("get_whatsapp_status", {}, "tenant-a", ["conversations"]));
+    expect(result).toEqual({ status: "disconnected" });
+    expect(evoGetStatus).toHaveBeenCalledWith("megadesk-tenant-a");
+    expect(vi.mocked(getPool)).not.toHaveBeenCalled();
+  });
+
+  it("does not turn an Evolution status failure into a connected response", async () => {
+    vi.mocked(evoGetStatus).mockRejectedValueOnce(new Error("provider unavailable"));
+    const raw = await executeClientFunction("get_whatsapp_status", {}, "tenant-a", ["conversations"]);
+    expect(JSON.parse(raw)).toMatchObject({ success: false });
   });
 
   it("does not expose or authorize a sales tool without an ERP/sales permission", () => {
@@ -1153,7 +1201,7 @@ describe("Hermes persistence, CRM tools and latency", () => {
       expect(result.ok).toBe(true);
       expect(result.functionCallsMade).toContain("get_open_tickets");
       expect(result.response).not.toContain("Estou consultando");
-      expect(result.response).toContain("Atualmente existem 5 chamados abertos");
+      expect(result.response).toBe("Há 5 chamados abertos, 2 urgente(s).");
 
       // Confirma que o model turn emitido não incluiu a frase preliminar "Estou consultando"
       const secondCallContents = capturedBodies[1].contents;
@@ -1508,7 +1556,7 @@ describe("Hermes persistence, CRM tools and latency", () => {
       expect(result.functionCallsMade).toContain("get_open_tickets");
       expect(result.response).not.toContain("Estou consultando");
       expect(result.response).not.toBe("Sem resposta do modelo.");
-      expect(result.response).toContain("Você possui 2 chamado(s) aberto(s)");
+      expect(result.response).toContain("Há 2 chamados abertos, 1 urgente(s)");
       expect(result.response).toContain('#0001: "Erro no Login"');
     } finally {
       globalThis.fetch = originalFetch;
@@ -1614,6 +1662,75 @@ describe("Hermes entity flexibilization, memory continuity and conversational pa
       expect(result.pendingActionRequest?.args.name).toBe("Elétrica Moura");
       expect(result.response).not.toBe("Sem resposta do modelo.");
       expect(result.response).toContain("Preparei o cadastro do fornecedor Elétrica Moura para sua aprovação:");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does not deliver invented suppliers when the model skips the required read", async () => {
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("megadesk_domain_clients")) return [[{ integrations_json: JSON.stringify({ geminiKey: "test-key", geminiQuotaMensal: 50000 }) }]];
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) return [[{ total: 0 }]];
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: "Temos o fornecedor fictício XYZ." }] } }], usageMetadata: { totalTokenCount: 8 } }),
+    })) as typeof fetch;
+
+    try {
+      const result = await chatWithClientGemini("tenant-a", "user@example.invalid", "Quais fornecedores temos cadastrados?", [], ["suppliers"]);
+      expect(result.response).toBe("Não há fornecedores cadastrados no sistema.");
+      expect(result.functionCallsMade).toContain("get_suppliers_list");
+      expect(execute.mock.calls.some(([sql]) => sql.includes("FROM erp_suppliers WHERE client_id=?"))).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("answers WhatsApp connection questions from Evolution even when the model invents a status", async () => {
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("megadesk_domain_clients")) return [[{ integrations_json: JSON.stringify({ geminiKey: "test-key", geminiQuotaMensal: 50000 }) }]];
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) return [[{ total: 0 }]];
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    vi.mocked(evoGetStatus).mockResolvedValueOnce("disconnected");
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: "WhatsApp conectado e funcionando." }] } }], usageMetadata: { totalTokenCount: 8 } }),
+    })) as typeof fetch;
+
+    try {
+      const result = await chatWithClientGemini("tenant-a", "user@example.invalid", "Qual o status da conexão do WhatsApp?", [], ["conversations"]);
+      expect(result.response).toBe("WhatsApp desconectado.");
+      expect(result.functionCallsMade).toContain("get_whatsapp_status");
+      expect(evoGetStatus).toHaveBeenCalledWith("megadesk-tenant-a");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does not publish corporate figures when no read tool was executed", async () => {
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("megadesk_domain_clients")) return [[{ integrations_json: JSON.stringify({ geminiKey: "test-key", geminiQuotaMensal: 50000 }) }]];
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) return [[{ total: 0 }]];
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: "O faturamento da nossa empresa foi R$ 1 milhão." }] } }], usageMetadata: { totalTokenCount: 8 } }),
+    })) as typeof fetch;
+
+    try {
+      const result = await chatWithClientGemini("tenant-a", "user@example.invalid", "Qual o faturamento das nossas vendas?", [], ["sales"]);
+      expect(result.response).toBe("Não foi possível consultar os dados solicitados no momento.");
+      expect(result.response).not.toContain("1 milhão");
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -2029,6 +2146,8 @@ describe("Hermes entity flexibilization, memory continuity and conversational pa
       const suppRes = JSON.parse(rawSuppliers);
       expect(suppRes.total).toBe(1);
       expect(suppRes.suppliers[0].name).toBe("Distribuidora de Peças Ltda");
+      expect(execute.mock.calls[0]?.[0]).toContain("FROM erp_suppliers WHERE client_id=?");
+      expect(execute.mock.calls[0]?.[1]).toEqual(["tenant-a", "%Distribuidora%", "%Distribuidora%", "%Distribuidora%"]);
 
       const createSupplierTool = HERMES_TOOL_REGISTRY.find(t => t.name === "create_supplier")!;
       const suppReq = createPendingActionRequest(createSupplierTool, { name: "Auto Peças Sul", phone: "1144445555" });
@@ -2270,6 +2389,10 @@ describe("Hermes entity flexibilization, memory continuity and conversational pa
       expect(sysCustom).toContain("• nossa empresa prioriza clientes VIP");
       expect(sysCustom).toContain("• nunca conceder mais de 10% de desconto sem autorização");
       expect(sysCustom).toContain("Respeite rigorosamente a forma de tratamento solicitada acima");
+      expect(sysCustom).toContain("REGRA ZERO HALLUCINATION");
+      expect(sysCustom).toContain("REGRA ZERO PREÂMBULO EM TOOL CALLS");
+      expect(sysCustom).toContain("ESTILO EXECUTIVO");
+      expect(sysCustom).toContain("Se a ferramenta necessária não estiver disponível ou falhar");
     });
 
     it("registers set_user_preference as a READ tool without requiring HITL card confirmation", () => {
