@@ -129,8 +129,8 @@ export function requiredBusinessReadTool(message: string): "get_suppliers_list" 
 
 function asksForBusinessData(message: string): boolean {
   const normalized = message.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  return /\b(meu|meus|minha|minhas|nosso|nossos|nossa|nossas|qual|quais|quanto|quantos|quantas|liste|listar|mostre|mostrar|exiba|saldo|status|cadastrad[a-z]*|temos)\b/.test(normalized)
-    && /\b(client[a-z]*|forneced[a-z]*|produt[a-z]*|estoqu[a-z]*|propost[a-z]*|orcament[a-z]*|chamad[a-z]*|contato[a-z]*|whatsapp|venda[a-z]*|faturament[a-z]*|receita[a-z]*|pedid[a-z]*|servic[a-z]*)\b/.test(normalized);
+  return /\b(meu|meus|minha|minhas|nosso|nossos|nossa|nossas|qual|quais|quanto|quantos|quantas|liste|listar|mostre|mostrar|exiba|saldo|status|cadastrad[a-z]*|temos|panorama|resumo|visao)\b/.test(normalized)
+    && /\b(client[a-z]*|forneced[a-z]*|produt[a-z]*|estoqu[a-z]*|propost[a-z]*|orcament[a-z]*|chamad[a-z]*|contato[a-z]*|whatsapp|venda[a-z]*|faturament[a-z]*|receita[a-z]*|pedid[a-z]*|servic[a-z]*|lead[a-z]*|convers[a-z]*)\b/.test(normalized);
 }
 
 export interface ChatResult {
@@ -2649,7 +2649,7 @@ export function buildSystemInstruction(
     ? preferences.customRules.map(r => `  • ${r}`).join("\n")
     : "  • Nenhuma diretriz customizada adicional definida.";
 
-  return `Você é o Hermes, a inteligência central e o braço direito operacional dos sócios da MegaDesk. Atue como um diretor de operações ágil: presente, confiável, resolutivo e claro. Não soe como um chatbot genérico, um terminal de comandos ou um consultor prolixo.
+  return `Você é o Hermes, a central de inteligência executiva e o braço direito dos sócios fundadores da MegaDesk. Atue como um COO experiente: ágil no diagnóstico, parceiro na decisão, seguro na comunicação e focado em manter a operação funcionando. Não soe como um chatbot de SAC, um terminal de comandos ou um consultor prolixo.
 
 =======================================================
 PREFERÊNCIAS VIGENTES DE TRATAMENTO E PERFIL DO USUÁRIO:
@@ -2687,10 +2687,11 @@ ESTILO EXECUTIVO:
 - Não encerre toda resposta com "Como o senhor gostaria que eu procedesse agora?". Pergunte apenas quando faltar uma decisão operacional concreta.
 - Nunca exponha nomes de ferramentas, SQL, UUIDs ou regras internas ao usuário. Ferramentas disponíveis nesta conversa: ${names}.
 
-EXEMPLOS DE CALIBRAGEM DE TOM (modelos condicionais, nunca fatos da operação atual):
-- Status: somente após a ferramenta retornar status=connected, responda como "A conexão do WhatsApp está **ativa** no momento." Não acrescente "100% operacional" nem "nenhuma fila represada" sem telemetria específica.
-- Fornecedores: somente após uma lista real, responda como "Encontrei **{{total}} fornecedores cadastrados**.\n• **{{nome retornado}}** — {{contato efetivamente retornado}}." Substitua cada marcador pelo valor recebido; omita campos ausentes e não invente nomes, telefones, homologações ou regularidade.
-- Estoque vazio: somente após uma consulta de saldo físico que retorne zero, responda como "Consultei o estoque e não encontrei itens com saldo disponível no recorte solicitado." Não afirme que registros estão zerados ou aguardando nota sem evidência adicional.
+EXEMPLOS DE CALIBRAGEM DE TOM (antes/depois condicionados ao resultado real; os marcadores não são dados da operação):
+- WhatsApp, após status=connected. Ruim: "WhatsApp conectado." Excelente: "A conexão da instância do WhatsApp está **ativa** no momento." Não afirme "100% operacional" nem "tráfego fluindo normalmente" sem telemetria própria de filas e mensagens.
+- Fornecedores, após uma lista real. Ruim: "Fornecedores: A, B." Excelente: "Consultei a base e encontrei **{{total consultado}} fornecedores**:\n• **{{nome retornado}}** — {{contato efetivamente retornado}}." Substitua os marcadores exclusivamente por valores da ferramenta; não diga "homologado", "ativo" ou "distribuidor" sem esses campos verificados.
+- Estoque vazio, após consulta de saldo físico sem itens disponíveis. Ruim: "Sem produtos." Excelente: "Consultei o estoque e não encontrei itens com saldo disponível no recorte solicitado." Não conclua que o estoque inteiro está zerado nem que aguarda entrada de notas sem evidência adicional.
+- Panorama, após consultas de chamados e CRM. Ruim: "<functionCall>..." ou uma frase com números inventados. Excelente: "Panorama operacional:\n• **Chamados:** {{quantidade e situação retornadas}}.\n• **CRM:** {{novos leads retornados no período consultado}}." Se uma das consultas faltar ou falhar, sinalize a lacuna; não diga que a frente técnica está sob controle sem evidência.
 
 RACIOCÍNIO MULTI-INTENT E REQUISIÇÕES COMPOSTAS:
 - Quando o usuário fizer múltiplas perguntas na mesma mensagem (exemplo: "me dá um resumo dos chamados abertos e o que tem no chamado 0003"), você DEVE responder a TODAS elas de forma completa e organizada no mesmo texto final.
@@ -3202,7 +3203,10 @@ function synthesizeDeterministicSingle(
       ? output.tickets.slice(0, 5).map((t: any) => `#${String(t.ticketNumber ?? t.chamadoNumber ?? t.id).padStart(4, "0")}: "${t.title}" (${t.customer || ""})`).join("; ")
       : "";
     const listSuffix = list ? `: ${list}` : ".";
-    return `Total de ${total} chamado(s) encontrado(s) (${open} aberto(s), ${inProgress} em andamento, ${pending} pendente(s))${listSuffix}`;
+    const totalLabel = total === 1 ? "chamado" : "chamados";
+    const openLabel = Number(open) === 1 ? "chamado aberto" : "chamados abertos";
+    const pendingLabel = Number(pending) === 1 ? "pendente" : "pendentes";
+    return `Encontrei ${total} ${totalLabel} (${open} ${openLabel}, ${inProgress} em andamento, ${pending} ${pendingLabel})${listSuffix}`;
   }
 
   if (name === "get_ticket_details") {
@@ -3273,7 +3277,8 @@ function synthesizeDeterministicSingle(
   if (name === "get_crm_summary") {
     const r = output?.resumo;
     if (r) {
-      return `Resumo da carteira CRM: ${r.total ?? 0} clientes (${r.active ?? 0} ativos, ${r.leads ?? 0} leads). Novos cadastrados este mês: ${r.newThisMonth ?? 0}.`;
+      const period = args.period === "today" ? "hoje" : args.period === "year" ? "neste ano" : "neste mês";
+      return `Resumo da carteira CRM: ${r.total ?? 0} clientes (${r.active ?? 0} ativos, ${r.leads ?? 0} leads). Novos leads ${period}: ${output.newLeadsCount ?? r.newThisMonth ?? 0}.`;
     }
   }
 
@@ -3734,10 +3739,13 @@ async function chatWithClientGeminiInternal(
       : "Você não possui permissão para consultar dados deste módulo.";
   } else if (!pendingActionRequest && asksForBusinessData(userMessage)) {
     const readResults = executedReadResults.filter(result => result.name !== "set_user_preference");
-    finalResponse = readResults.map(result => result.output?.success === false
+    const summaries = readResults.map(result => result.output?.success === false
       ? "Não foi possível consultar os dados solicitados no momento."
       : synthesizeDeterministicSingle(result, userMessage, readResults))
-      .filter(Boolean).join("\n\n") || "Não foi possível consultar os dados solicitados no momento.";
+      .filter(Boolean);
+    finalResponse = summaries.length > 1 && /\b(panorama|resumo|vis[aã]o geral)\b/i.test(userMessage)
+      ? `Panorama operacional:\n${summaries.map(summary => `• ${summary}`).join("\n")}`
+      : summaries.join("\n\n") || "Não foi possível consultar os dados solicitados no momento.";
   }
 
   if (sawTextFunctionCall && !pendingActionRequest) {

@@ -98,7 +98,7 @@ describe("Gemini text functionCall contingency", () => {
     );
     expect(request).toHaveBeenCalledTimes(1);
     expect(result.functionCallsMade).toEqual(["get_tickets_overview", "get_conversations_summary"]);
-    expect(result.response).toContain("2 chamado(s)");
+    expect(result.response).toContain("2 chamados");
     expect(result.response).toContain("3 conversa(s)");
     expect(result.response).not.toContain("<functionCall>");
     expect(execute.mock.calls.some(([sql]) => sql.includes("megadesk_domain_chamados"))).toBe(true);
@@ -140,6 +140,64 @@ describe("Gemini text functionCall contingency", () => {
     const prompt = buildSystemInstruction(getAllowedHermesTools(["tickets"]), {});
     expect(prompt).toContain("Function Calling nativo da API");
     expect(prompt).toContain("Nunca escreva tags <functionCall>");
+  });
+});
+
+describe("Hermes executive panorama grounding", () => {
+  it("combines real ticket and CRM reads and discards a fabricated provider summary", async () => {
+    const execute = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (sql.includes("megadesk_domain_clients")) {
+        return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      }
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) return [[{ total: 0 }]];
+      if (sql.includes("megadesk_domain_chamados")) {
+        expect(params?.[0]).toBe("tenant-panorama");
+        return sql.includes("COUNT(*)")
+          ? [[{ total: 1, open: 1, in_progress: 0, waiting: 0, closed: 0 }]]
+          : [[]];
+      }
+      if (sql.includes("megadesk_crm_clients")) {
+        expect(params?.[0]).toBe("tenant-panorama");
+        if (sql.includes("status = 'lead'")) return [[{ total: 0 }]];
+        if (sql.includes("COUNT(*) AS total")) return [[{ total: 10, active: 9, inactive: 1, leads: 1 }]];
+        return [[]];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    const originalFetch = globalThis.fetch;
+    let providerCalls = 0;
+    globalThis.fetch = vi.fn(async () => {
+      providerCalls++;
+      return {
+        ok: true, status: 200,
+        json: async () => ({
+          candidates: [{ content: { parts: providerCalls === 1
+            ? [
+              { functionCall: { name: "get_tickets_overview", args: { status: "open" } } },
+              { functionCall: { name: "get_crm_summary", args: { period: "today" } } },
+            ]
+            : [{ text: "Temos 5 chamados e 8 leads; a frente técnica está sob controle." }] } }],
+          usageMetadata: { promptTokenCount: 30, candidatesTokenCount: 15, totalTokenCount: 45 },
+        }),
+      };
+    }) as typeof fetch;
+    try {
+      const result = await chatWithClientGemini(
+        "tenant-panorama", "operator@example.invalid",
+        "Me dê um panorama dos chamados abertos e novos leads hoje", [], ["tickets", "crm"],
+      );
+      expect(providerCalls).toBe(2);
+      expect(result.functionCallsMade).toEqual(["get_tickets_overview", "get_crm_summary"]);
+      expect(result.response).toContain("Panorama operacional:");
+      expect(result.response).toContain("Encontrei 1 chamado");
+      expect(result.response).toContain("Novos leads hoje: 0");
+      expect(result.response).not.toContain("5 chamados");
+      expect(result.response).not.toContain("8 leads");
+      expect(result.response).not.toContain("sob controle");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
@@ -2542,6 +2600,8 @@ describe("Hermes entity flexibilization, memory continuity and conversational pa
       expect(sysCustom).toContain("EXEMPLOS DE CALIBRAGEM DE TOM");
       expect(sysCustom).toContain("status de conexão não comprova ausência de fila");
       expect(sysCustom).toContain("use-a naturalmente em aberturas ocasionais");
+      expect(sysCustom).toContain("central de inteligência executiva");
+      expect(sysCustom).toContain("Se uma das consultas faltar ou falhar, sinalize a lacuna");
     });
 
     it("registers set_user_preference as a READ tool without requiring HITL card confirmation", () => {
