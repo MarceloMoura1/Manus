@@ -4562,3 +4562,24 @@ export const megadeskAdminHermesMessages = mysqlTable(
 export type MegadeskAdminHermesMessage = typeof megadeskAdminHermesMessages.$inferSelect;
 export type MegadeskAdminHermesMessageInsert = typeof megadeskAdminHermesMessages.$inferInsert;
 
+export const megadeskDomainIaUserPreferences = mysqlTable(
+  "megadesk_domain_ia_user_preferences",
+  {
+    tenantId: varchar("tenant_id", { length: 191 }).notNull(),
+    userId: varchar("user_id", { length: 191 }).notNull(),
+    preferredName: varchar("preferred_name", { length: 100 }),
+    honorific: varchar("honorific", { length: 50 }),
+    communicationStyle: varchar("communication_style", { length: 100 }),
+    customRulesJson: text("custom_rules_json"),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .onUpdateNow()
+      .notNull(),
+  },
+  table => [
+    index("idx_ia_user_preferences_tenant_user").on(table.tenantId, table.userId),
+  ]
+);
+
+export type MegadeskDomainIaUserPreference = typeof megadeskDomainIaUserPreferences.$inferSelect;
+export type MegadeskDomainIaUserPreferenceInsert = typeof megadeskDomainIaUserPreferences.$inferInsert;

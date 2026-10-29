@@ -61,7 +61,7 @@ export const REQUIRED_MAIN_TABLES = [
 	"megadesk_ticket_statuses", "megadesk_crm_timeline", "megadesk_domain_conversations_messages",
 	"megadesk_conversation_pending_receipts",
 	"megadesk_evolution_sessions", "megadesk_domain_ia_conversations",
-	"megadesk_domain_ia_conversation_history", "megadesk_ia_token_usage",
+	"megadesk_domain_ia_conversation_history", "megadesk_ia_token_usage", "megadesk_domain_ia_user_preferences",
 	"megadesk_tenant_provisioning_requests", "megadesk_operational_sessions",
 	"erp_products", "erp_stock_balances", "erp_stock_movements",
 	"erp_inventory_items", "erp_inventory_item_balances",
@@ -1060,4 +1060,156 @@ export function createLazyDatabase<T extends object>(initialize: () => T): T {
 /** Defers DATABASE_URL access until the first actual database operation. */
 export function getLazyDb(): Database {
   return createLazyDatabase(getDb);
+}
+
+export interface UserHermesPreferences {
+  tenantId: string;
+  userId: string;
+  preferredName?: string | null;
+  honorific?: string | null;
+  communicationStyle?: string | null;
+  customRules?: string[];
+  updatedAt?: Date;
+}
+
+let userPreferencesTableChecked = false;
+
+export async function ensureUserPreferencesTable(customPool?: any): Promise<void> {
+  if (userPreferencesTableChecked) return;
+  try {
+    const pool = customPool ?? getPool();
+    if (!pool?.execute) return;
+    await pool.execute(`
+      CREATE TABLE IF NOT EXISTS megadesk_domain_ia_user_preferences (
+        tenant_id VARCHAR(191) NOT NULL,
+        user_id VARCHAR(191) NOT NULL,
+        preferred_name VARCHAR(100) NULL,
+        honorific VARCHAR(50) NULL,
+        communication_style VARCHAR(100) NULL,
+        custom_rules_json TEXT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (tenant_id, user_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    userPreferencesTableChecked = true;
+  } catch (err) {
+    console.warn("[Hermes Memory] Aviso ao verificar tabela de preferências do usuário:", err);
+  }
+}
+
+export async function getUserHermesPreferences(tenantId: string, userId: string, customPool?: any): Promise<UserHermesPreferences> {
+  const normalizedTenant = tenantId.trim();
+  const normalizedUser = userId.trim().toLowerCase();
+  try {
+    const pool = customPool ?? getPool();
+    if (!pool?.execute) {
+      return {
+        tenantId: normalizedTenant,
+        userId: normalizedUser,
+        preferredName: null,
+        honorific: null,
+        communicationStyle: null,
+        customRules: [],
+      };
+    }
+    await ensureUserPreferencesTable(pool);
+    const [rows] = await pool.execute(
+      `SELECT tenant_id, user_id, preferred_name, honorific, communication_style, custom_rules_json, updated_at
+         FROM megadesk_domain_ia_user_preferences
+        WHERE tenant_id = ? AND user_id = ? LIMIT 1`,
+      [normalizedTenant, normalizedUser]
+    ) as any[];
+
+    if (!rows || rows.length === 0) {
+      return {
+        tenantId: normalizedTenant,
+        userId: normalizedUser,
+        preferredName: null,
+        honorific: null,
+        communicationStyle: null,
+        customRules: [],
+      };
+    }
+
+    const row = rows[0];
+    let customRules: string[] = [];
+    if (row.custom_rules_json) {
+      try {
+        const parsed = typeof row.custom_rules_json === "string" ? JSON.parse(row.custom_rules_json) : row.custom_rules_json;
+        if (Array.isArray(parsed)) customRules = parsed.filter((item: unknown) => typeof item === "string");
+      } catch {}
+    }
+
+    return {
+      tenantId: row.tenant_id,
+      userId: row.user_id,
+      preferredName: row.preferred_name || null,
+      honorific: row.honorific || null,
+      communicationStyle: row.communication_style || null,
+      customRules,
+      updatedAt: row.updated_at ? new Date(row.updated_at) : undefined,
+    };
+  } catch (error: any) {
+    return {
+      tenantId: normalizedTenant,
+      userId: normalizedUser,
+      preferredName: null,
+      honorific: null,
+      communicationStyle: null,
+      customRules: [],
+    };
+  }
+}
+
+export async function saveUserHermesPreferences(
+  tenantId: string,
+  userId: string,
+  preferences: Partial<UserHermesPreferences>,
+  customPool?: any
+): Promise<void> {
+  const normalizedTenant = tenantId.trim();
+  const normalizedUser = userId.trim().toLowerCase();
+  try {
+    const pool = customPool ?? getPool();
+    if (!pool?.execute) return;
+    await ensureUserPreferencesTable(pool);
+
+    const current = await getUserHermesPreferences(normalizedTenant, normalizedUser, pool);
+    const preferredName = preferences.preferredName !== undefined ? preferences.preferredName : current.preferredName;
+    const honorific = preferences.honorific !== undefined ? preferences.honorific : current.honorific;
+    const communicationStyle = preferences.communicationStyle !== undefined ? preferences.communicationStyle : current.communicationStyle;
+
+    const mergedRules = [...(current.customRules || [])];
+    if (preferences.customRules && Array.isArray(preferences.customRules)) {
+      for (const rule of preferences.customRules) {
+        const trimmed = rule.trim();
+        if (trimmed && !mergedRules.includes(trimmed)) {
+          mergedRules.push(trimmed);
+        }
+      }
+    }
+
+    const customRulesJson = JSON.stringify(mergedRules);
+    await pool.execute(
+      `INSERT INTO megadesk_domain_ia_user_preferences
+        (tenant_id, user_id, preferred_name, honorific, communication_style, custom_rules_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE
+        preferred_name = VALUES(preferred_name),
+        honorific = VALUES(honorific),
+        communication_style = VALUES(communication_style),
+        custom_rules_json = VALUES(custom_rules_json),
+        updated_at = NOW()`,
+      [
+        normalizedTenant,
+        normalizedUser,
+        preferredName || null,
+        honorific || null,
+        communicationStyle || null,
+        customRulesJson,
+      ]
+    );
+  } catch (err) {
+    console.warn("[Hermes Memory] Aviso ao salvar preferências do usuário:", err);
+  }
 }

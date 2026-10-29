@@ -4,7 +4,7 @@
  * Mantém histórico de conversa no banco de dados.
  * Suporta function calling para consultar dados do ERP/conversas/chamados.
  */
-import { getPool } from "./db";
+import { getPool, getUserHermesPreferences, saveUserHermesPreferences, type UserHermesPreferences } from "./db";
 import { nanoid } from "nanoid";
 import { dropEmptyArgs } from "./hermes-sanitize";
 
@@ -1146,6 +1146,35 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
     validateArgs: extractLeadArgs,
   },
   {
+    name: "set_user_preference",
+    type: "READ",
+    requiredPermissions: ["ai-assistant"],
+    declaration: {
+      name: "set_user_preference",
+      description: "Salva ou atualiza as preferências de comunicação, tratamento, nome e regras customizadas do usuário no perfil permanente.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          preferredName: { type: "STRING", description: "Como o usuário prefere ser chamado (ex: 'Senhor Marcelo', 'Marcelo', 'Chefe')" },
+          honorific: { type: "STRING", description: "Pronome ou forma de tratamento ('Senhor', 'Senhora', 'Você', 'Doutor', etc.)" },
+          communicationStyle: { type: "STRING", description: "Estilo de comunicação ('direto', 'formal', 'descontraído', 'executivo', etc.)" },
+          customRule: { type: "STRING", description: "Regra operacional, diretriz ou preferência de rotina informada pelo usuário" }
+        },
+        required: []
+      }
+    },
+    validateArgs: args => {
+      objectArgs(args);
+      rejectUnknownArgs(args, ["preferredName", "honorific", "communicationStyle", "customRule"]);
+      return {
+        ...(typeof args.preferredName === "string" ? { preferredName: stringArg(args, "preferredName", { min: 1, max: 100 }) } : {}),
+        ...(typeof args.honorific === "string" ? { honorific: stringArg(args, "honorific", { min: 1, max: 50 }) } : {}),
+        ...(typeof args.communicationStyle === "string" ? { communicationStyle: stringArg(args, "communicationStyle", { min: 1, max: 100 }) } : {}),
+        ...(typeof args.customRule === "string" ? { customRule: stringArg(args, "customRule", { min: 1, max: 1_000 }) } : {}),
+      };
+    }
+  },
+  {
     name: "get_erp_products",
     type: "READ",
     requiredPermissions: ["products", "erp"],
@@ -1738,6 +1767,7 @@ export async function executeClientFunction(
   clientId: string,
   permissions: readonly string[],
   geminiKey?: string,
+  userId?: string,
 ): Promise<string> {
   try {
     const tool = getAuthorizedHermesTool(functionName, permissions);
@@ -1752,6 +1782,23 @@ export async function executeClientFunction(
     return executeWebSearch(geminiKey, search.query, search.focus);
   }
   const pool = getPool();
+
+  if (functionName === "set_user_preference") {
+    const prefs = validatedArgs as { preferredName?: string; honorific?: string; communicationStyle?: string; customRule?: string };
+    if (userId) {
+      await saveUserHermesPreferences(clientId, userId, {
+        preferredName: prefs.preferredName,
+        honorific: prefs.honorific,
+        communicationStyle: prefs.communicationStyle,
+        customRules: prefs.customRule ? [prefs.customRule] : undefined,
+      }, pool);
+    }
+    return JSON.stringify({
+      success: true,
+      message: "Preferências de usuário atualizadas com sucesso.",
+      updated: prefs,
+    });
+  }
 
   if (functionName === "get_sales_summary") {
     const [rows] = await pool.execute(
@@ -2383,15 +2430,114 @@ function tokenUsageTotal(data: any, promptTokens: number, completionTokens: numb
   return Number.isFinite(total) && total >= 0 ? Math.floor(total) : promptTokens + completionTokens;
 }
 
-function buildSystemInstruction(allowedTools: readonly HermesToolDefinition[]): string {
+export function detectUserPreferencesFromMessage(message: string): Partial<UserHermesPreferences> | null {
+  const text = message.trim();
+  const result: Partial<UserHermesPreferences> = {};
+  let detected = false;
+
+  // 1. Honorifics / Formas de tratamento
+  const honorificMatch = text.match(/(?:(?:agora\s+)?(?:me\s+chame\s+de|me\s+trate\s+por|trate-me\s+por|pode\s+me\s+chamar\s+de))\s+(senhor\s+[a-zà-ú]+|senhora\s+[a-zà-ú]+|senhor|senhora|sr\.?|sra\.?|doutor|doutora|dr\.?|dra\.?|voc[êe]|chefe)\b/i);
+  if (honorificMatch && honorificMatch[1]) {
+    const raw = honorificMatch[1].trim();
+    if (/^senhor\s+/i.test(raw)) {
+      result.honorific = "Senhor";
+      result.preferredName = raw.charAt(0).toUpperCase() + raw.slice(1);
+    } else if (/^senhora\s+/i.test(raw)) {
+      result.honorific = "Senhora";
+      result.preferredName = raw.charAt(0).toUpperCase() + raw.slice(1);
+    } else if (/^senhor$/i.test(raw) || /^sr\.?$/i.test(raw)) {
+      result.honorific = "Senhor";
+      result.preferredName = "Senhor";
+    } else if (/^senhora$/i.test(raw) || /^sra\.?$/i.test(raw)) {
+      result.honorific = "Senhora";
+      result.preferredName = "Senhora";
+    } else if (/^doutor$/i.test(raw) || /^dr\.?$/i.test(raw)) {
+      result.honorific = "Doutor";
+      result.preferredName = "Doutor";
+    } else if (/^doutora$/i.test(raw) || /^dra\.?$/i.test(raw)) {
+      result.honorific = "Doutora";
+      result.preferredName = "Doutora";
+    } else if (/^voc[êe]$/i.test(raw)) {
+      result.honorific = "Você";
+    } else if (/^chefe$/i.test(raw)) {
+      result.honorific = "Chefe";
+      result.preferredName = "Chefe";
+    }
+    detected = true;
+  }
+
+  // 2. Nome preferido
+  const nameMatch = text.match(/(?:(?:me\s+chame\s+(?:pelo\s+nome|de)|meu\s+nome\s+[ée]|pode\s+me\s+chamar\s+(?:pelo\s+nome|de)))\s+([A-ZÀ-Úa-zà-ú]+(?:\s+[A-ZÀ-Úa-zà-ú]+)?)\b/i);
+  if (nameMatch && nameMatch[1]) {
+    const candidate = nameMatch[1].trim();
+    const isHonorific = /^(senhor|senhora|sr|sra|doutor|doutora|dr|dra|você|voce|chefe)$/i.test(candidate);
+    if (!isHonorific) {
+      result.preferredName = candidate.charAt(0).toUpperCase() + candidate.slice(1);
+      detected = true;
+    }
+  }
+
+  // 3. Estilo de comunicação
+  if (/(?:seja\s+mais\s+direto|fale\s+mais\s+direto|seja\s+mais\s+objetivo|respostas\s+mais\s+curtas|respostas\s+diretas)/i.test(text)) {
+    result.communicationStyle = "direto e objetivo";
+    detected = true;
+  } else if (/(?:seja\s+mais\s+formal|fale\s+de\s+forma\s+mais\s+formal|tom\s+formal|linguagem\s+formal)/i.test(text)) {
+    result.communicationStyle = "formal e cortês";
+    detected = true;
+  } else if (/(?:seja\s+mais\s+descontra[ií]do|fale\s+de\s+forma\s+descontra[ií]da|tom\s+descontra[ií]do)/i.test(text)) {
+    result.communicationStyle = "descontraído e ágil";
+    detected = true;
+  } else if (/(?:seja\s+mais\s+detalhado|estilo\s+executivo\s+detalhado|respostas\s+mais\s+detalhadas)/i.test(text)) {
+    result.communicationStyle = "executivo detalhado";
+    detected = true;
+  }
+
+  // 4. Regras customizadas
+  const ruleMatch = text.match(/(?:lembre-se\s+que|lembre\s+que|n[aã]o\s+se\s+esque[çc]a\s+que)\s+(.+)/i);
+  if (ruleMatch && ruleMatch[1]) {
+    const rawRule = ruleMatch[1].trim().replace(/[.!?]+$/, "");
+    if (rawRule.length >= 3) {
+      result.customRules = [rawRule];
+      detected = true;
+    }
+  }
+
+  return detected ? result : null;
+}
+
+export function buildSystemInstruction(
+  allowedTools: readonly HermesToolDefinition[],
+  preferences?: UserHermesPreferences
+): string {
   const names = allowedTools.map(tool => tool.name).join(", ") || "nenhuma";
+  const preferredName = preferences?.preferredName || "Operador";
+  const honorific = preferences?.honorific || "Você";
+  const communicationStyle = preferences?.communicationStyle || "executivo e resolutivo";
+  const rulesList = preferences?.customRules && preferences.customRules.length > 0
+    ? preferences.customRules.map(r => `  • ${r}`).join("\n")
+    : "  • Nenhuma diretriz customizada adicional definida.";
+
   return `Você é o Hermes, o braço direito operacional e copiloto de negócios do MegaDesk.
+
+=======================================================
+PREFERÊNCIAS VIGENTES DE TRATAMENTO E PERFIL DO USUÁRIO:
+- Como chamar o usuário: ${preferredName}
+- Pronome / Forma de tratamento: ${honorific}
+- Estilo de comunicação ativo: ${communicationStyle}
+- Diretrizes personalizadas acumuladas:
+${rulesList}
+
+REGRA ABSOLUTA DE PERSONALIDADE:
+Respeite rigorosamente a forma de tratamento solicitada acima em todas as saudações e frases.
+Mantenha continuidade contextual com as conversas passadas. Nunca ignore uma instrução de estilo já assimilada.
+Se o usuário alterou recentemente a forma de tratamento ou estilo de comunicação nesta mensagem, reconheça e confirme a mudança elegantemente no início da resposta (ex.: 'Entendido, ${preferredName}. A partir de agora nos comunicaremos desta forma.').
+=======================================================
 
 POSTURA E PERSONALIDADE EXECUTIVA:
 - Seu tom é seguro, executivo, cortês, objetivo e altamente resolutivo. Você não responde como um robô programado com frases de cartão.
 - Apresente dados (chamados, clientes, estoque, propostas, vendas) de forma elegante e bem diagramada: ressalte pontos de atenção, prioridades críticas e recomende os próximos passos práticos.
 - NUNCA use chavões mecânicos ou frases engessadas (evite "Você possui X chamado(s)...", "Cliente localizado...", "Estou consultando...", "Um momento...").
-- NUNCA vaze nomes de funções internas, identificadores técnicos (ex.: get_client_360, CREATE_PROPOSAL, Zod, SQL, UUIDs brutos) ou regras internas de código. Fale exclusivamente sobre a operação de negócios.
+- NUNCA vaze nomes de funções internas, identificadores técnicos (ex.: get_client_360, CREATE_PROPOSAL, set_user_preference, Zod, SQL, UUIDs brutos) ou regras internas de código. Fale exclusivamente sobre a operação de negócios.
 - Você só pode usar as ferramentas explicitamente disponibilizadas nesta conversa: ${names}.
 
 RACIOCÍNIO MULTI-INTENT E REQUISIÇÕES COMPOSTAS:
@@ -2405,7 +2551,7 @@ CONTINUIDADE E MEMÓRIA DE CONVERSA:
 - NUNCA zere valores informados pelo usuário. Mantenha os demais itens da proposta e seus preços anteriores preservados.
 
 EXECUÇÃO DE FERRAMENTAS E FLUXO HITL:
-- Ao decidir executar consultas (READ), emita a functionCall correspondente sem mensagens preliminares.
+- Ao decidir executar consultas (READ) ou registrar preferências (set_user_preference), emita a functionCall correspondente sem mensagens preliminares.
 - Quando a solicitação demandar uma criação ou alteração (MUTATION: create_proposal, create_client, create_supplier, create_product, create_service, create_ticket), emita a ferramenta apropriada com todos os dados inferidos. A interface abrirá o Card de Aprovação (HITL) para o usuário validar com 1 clique.
 - Sempre responda em português brasileiro com clareza, proatividade e elegância executiva.`;
 }
@@ -2863,6 +3009,11 @@ function synthesizeDeterministicSingle(
 ): string | null {
   const { name, args, output } = result;
 
+  if (name === "set_user_preference") {
+    const target = (output?.updated?.preferredName || output?.updated?.honorific || args.preferredName || args.honorific || "Operador") as string;
+    return `Entendido, ${target}. A partir de agora nos comunicaremos desta forma. Como posso ajudar com as operações hoje?`;
+  }
+
   if (name === "get_tickets_overview") {
     const rawTotal = output?.total ?? output?.resumo?.total ?? output?.tickets?.length ?? output?.chamados?.length ?? 0;
     const total = Number(rawTotal) || 0;
@@ -3108,12 +3259,35 @@ async function chatWithClientGeminiInternal(
   // Adiciona a mensagem atual do usuário
   contents.push({ role: "user", parts: [{ text: userMessage }] });
 
+  // Pool para operações de banco
+  let pool: any = null;
+  try {
+    pool = getPool();
+  } catch {}
+
+  // 2.1 Assimilação de preferências do usuário
+  const detectedPrefs = detectUserPreferencesFromMessage(userMessage);
+  if (detectedPrefs) {
+    try {
+      await saveUserHermesPreferences(clientId, userId, detectedPrefs, pool);
+    } catch {}
+  }
+  const userPreferences = await getUserHermesPreferences(clientId, userId, pool);
+  if (detectedPrefs) {
+    if (detectedPrefs.preferredName) userPreferences.preferredName = detectedPrefs.preferredName;
+    if (detectedPrefs.honorific) userPreferences.honorific = detectedPrefs.honorific;
+    if (detectedPrefs.communicationStyle) userPreferences.communicationStyle = detectedPrefs.communicationStyle;
+    if (detectedPrefs.customRules && detectedPrefs.customRules.length > 0) {
+      userPreferences.customRules = Array.from(new Set([...(userPreferences.customRules || []), ...detectedPrefs.customRules]));
+    }
+  }
+
   // 3. Primeira chamada ao Gemini
   const allowedTools = getAllowedHermesTools(userPermissions);
   const requestBody: GeminiRequest = {
     contents,
     ...(allowedTools.length > 0 ? { tools: [{ functionDeclarations: allowedTools.map(tool => tool.declaration) }] } : {}),
-    systemInstruction: { parts: [{ text: buildSystemInstruction(allowedTools) }] },
+    systemInstruction: { parts: [{ text: buildSystemInstruction(allowedTools, userPreferences) }] },
     generationConfig: { temperature: 0.4, maxOutputTokens: 1024 },
   };
 
@@ -3159,7 +3333,7 @@ async function chatWithClientGeminiInternal(
       // Ferramenta READ: executa localmente no banco com tolerância estrita a erros
       let funcResult: string;
       try {
-        funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId, userPermissions, geminiKey);
+        funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId, userPermissions, geminiKey, userId);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Falha ao executar ferramenta local.";
         funcResult = JSON.stringify({ success: false, error: message });
@@ -3265,6 +3439,10 @@ async function chatWithClientGeminiInternal(
   let finalResponse = modelText;
 
   if (!finalResponse || isPreliminaryWaitingText(finalResponse)) {
+    if (detectedPrefs) {
+      const salutation = userPreferences.preferredName || userPreferences.honorific || "Operador";
+      finalResponse = `Entendido, ${salutation}. A partir de agora nos comunicaremos desta forma.`;
+    } else 
     if (synthesizedFallback) {
       finalResponse = synthesizedFallback;
     } else if (pendingActionRequest) {

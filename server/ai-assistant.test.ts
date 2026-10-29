@@ -8,7 +8,7 @@ vi.mock("./db", async importOriginal => ({
   ...(await importOriginal<typeof import("./db")>()),
   getPool: vi.fn(),
 }));
-import { getPool } from "./db";
+import { getPool, getUserHermesPreferences, saveUserHermesPreferences } from "./db";
 import {
   HERMES_TOOL_REGISTRY,
   beginPendingHermesAction,
@@ -31,6 +31,8 @@ import {
   chatWithClientGemini,
   extractPriceFromText,
   updateItemsWithUserPrices,
+  buildSystemInstruction,
+  detectUserPreferencesFromMessage,
   type HermesToolDefinition,
 } from "./gemini-client";
 import { formatHermesError } from "./hermes-sanitize";
@@ -352,6 +354,7 @@ describe("Hermes security controls", () => {
       "send_supplier_message",
       "get_conversations_summary",
       "extract_lead_from_conversation",
+      "set_user_preference",
       "get_erp_products",
       "web_search",
     ]);
@@ -2013,6 +2016,226 @@ describe("Hermes entity flexibilization, memory continuity and conversational pa
         );
         expect(result.ok).toBe(true);
         expect(result.response).toContain("O processamento demorou mais que o esperado");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
+  describe("Hermes persistent user preferences and adaptive persona", () => {
+    it("detects honorifics, preferred names, communication styles and custom rules deterministically", () => {
+      // Honorific 'Senhor'
+      const pref1 = detectUserPreferencesFromMessage("agora me chame de senhor");
+      expect(pref1).not.toBeNull();
+      expect(pref1?.honorific).toBe("Senhor");
+      expect(pref1?.preferredName).toBe("Senhor");
+
+      // Honorific 'Senhor Marcelo'
+      const pref2 = detectUserPreferencesFromMessage("me chame de Senhor Marcelo");
+      expect(pref2).not.toBeNull();
+      expect(pref2?.honorific).toBe("Senhor");
+      expect(pref2?.preferredName).toBe("Senhor Marcelo");
+
+      // Preferred name only
+      const pref3 = detectUserPreferencesFromMessage("me chame pelo nome Marcelo");
+      expect(pref3).not.toBeNull();
+      expect(pref3?.preferredName).toBe("Marcelo");
+
+      // Communication style: direct
+      const pref4 = detectUserPreferencesFromMessage("seja mais direto por favor");
+      expect(pref4).not.toBeNull();
+      expect(pref4?.communicationStyle).toBe("direto e objetivo");
+
+      // Communication style: formal
+      const pref5 = detectUserPreferencesFromMessage("fale de forma mais formal com a gente");
+      expect(pref5).not.toBeNull();
+      expect(pref5?.communicationStyle).toBe("formal e cortês");
+
+      // Custom rule
+      const pref6 = detectUserPreferencesFromMessage("lembre-se que nossa empresa prioriza clientes VIP");
+      expect(pref6).not.toBeNull();
+      expect(pref6?.customRules).toEqual(["nossa empresa prioriza clientes VIP"]);
+
+      // Unrelated operational message returns null
+      const nonPref = detectUserPreferencesFromMessage("quantos produtos temos em estoque?");
+      expect(nonPref).toBeNull();
+    });
+
+    it("injects user preferences dynamically into system instruction", () => {
+      const allowedTools = getAllowedHermesTools(["ai-assistant"]);
+      const sysDefault = buildSystemInstruction(allowedTools);
+      expect(sysDefault).toContain("PREFERÊNCIAS VIGENTES DE TRATAMENTO E PERFIL DO USUÁRIO");
+      expect(sysDefault).toContain("- Como chamar o usuário: Operador");
+      expect(sysDefault).toContain("- Pronome / Forma de tratamento: Você");
+      expect(sysDefault).toContain("- Estilo de comunicação ativo: executivo e resolutivo");
+
+      const sysCustom = buildSystemInstruction(allowedTools, {
+        preferredName: "Senhor Marcelo",
+        honorific: "Senhor",
+        communicationStyle: "formal e cortês",
+        customRules: ["nossa empresa prioriza clientes VIP", "nunca conceder mais de 10% de desconto sem autorização"],
+      });
+      expect(sysCustom).toContain("- Como chamar o usuário: Senhor Marcelo");
+      expect(sysCustom).toContain("- Pronome / Forma de tratamento: Senhor");
+      expect(sysCustom).toContain("- Estilo de comunicação ativo: formal e cortês");
+      expect(sysCustom).toContain("• nossa empresa prioriza clientes VIP");
+      expect(sysCustom).toContain("• nunca conceder mais de 10% de desconto sem autorização");
+      expect(sysCustom).toContain("Respeite rigorosamente a forma de tratamento solicitada acima");
+    });
+
+    it("registers set_user_preference as a READ tool without requiring HITL card confirmation", () => {
+      const prefTool = HERMES_TOOL_REGISTRY.find(t => t.name === "set_user_preference");
+      expect(prefTool).toBeDefined();
+      expect(prefTool?.type).toBe("READ");
+      expect(prefTool?.requiredPermissions).toEqual(["ai-assistant"]);
+      expect(prefTool?.declaration.parameters?.properties).toHaveProperty("preferredName");
+      expect(prefTool?.declaration.parameters?.properties).toHaveProperty("honorific");
+      expect(prefTool?.declaration.parameters?.properties).toHaveProperty("communicationStyle");
+      expect(prefTool?.declaration.parameters?.properties).toHaveProperty("customRule");
+    });
+
+    it("executes set_user_preference directly via executeClientFunction and saves to database", async () => {
+      const execute = vi.fn(async (sql: string) => {
+        if (sql.includes("CREATE TABLE IF NOT EXISTS megadesk_domain_ia_user_preferences")) {
+          return [{}];
+        }
+        if (sql.includes("SELECT") && sql.includes("megadesk_domain_ia_user_preferences")) {
+          return [[]];
+        }
+        if (sql.includes("INSERT INTO megadesk_domain_ia_user_preferences")) {
+          return [{ affectedRows: 1 }];
+        }
+        return [[]];
+      });
+      vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+      const resultStr = await executeClientFunction(
+        "set_user_preference",
+        {
+          preferredName: "Senhor Roberto",
+          honorific: "Senhor",
+          communicationStyle: "executivo direto",
+          customRule: "sempre confirmar faturamento por email",
+        },
+        "tenant-test",
+        ["ai-assistant"],
+        undefined,
+        "user-test-123"
+      );
+
+      const result = JSON.parse(resultStr);
+      expect(result.success).toBe(true);
+      expect(result.updated.preferredName).toBe("Senhor Roberto");
+      expect(result.updated.honorific).toBe("Senhor");
+      expect(execute).toHaveBeenCalledWith(
+        expect.stringContaining("INSERT INTO megadesk_domain_ia_user_preferences"),
+        expect.arrayContaining(["tenant-test", "user-test-123", "Senhor Roberto", "Senhor", "executivo direto"])
+      );
+    });
+
+    it("persists and reads user preferences with getUserHermesPreferences and saveUserHermesPreferences", async () => {
+      let savedRow: any = null;
+      const execute = vi.fn(async (sql: string, params?: any[]) => {
+        if (sql.includes("CREATE TABLE IF NOT EXISTS")) {
+          return [{}];
+        }
+        if (sql.includes("SELECT") && sql.includes("megadesk_domain_ia_user_preferences")) {
+          if (savedRow) return [[savedRow]];
+          return [[]];
+        }
+        if (sql.includes("INSERT INTO megadesk_domain_ia_user_preferences")) {
+          savedRow = {
+            tenant_id: params?.[0],
+            user_id: params?.[1],
+            preferred_name: params?.[2],
+            honorific: params?.[3],
+            communication_style: params?.[4],
+            custom_rules_json: params?.[5],
+          };
+          return [{ affectedRows: 1 }];
+        }
+        return [[]];
+      });
+      const mockPool = { execute } as any;
+      vi.mocked(getPool).mockReturnValue(mockPool);
+
+      // Default when empty
+      const initial = await getUserHermesPreferences("tenant-alpha", "user-456", mockPool);
+      expect(initial.preferredName).toBeNull();
+      expect(initial.honorific).toBeNull();
+      expect(initial.customRules).toEqual([]);
+
+      // Save preference
+      await saveUserHermesPreferences("tenant-alpha", "user-456", {
+        preferredName: "Marcelo",
+        honorific: "Você",
+        communicationStyle: "direto",
+        customRules: ["foco no pós-venda"],
+      }, mockPool);
+
+      const fetched = await getUserHermesPreferences("tenant-alpha", "user-456", mockPool);
+      expect(fetched.preferredName).toBe("Marcelo");
+      expect(fetched.honorific).toBe("Você");
+      expect(fetched.communicationStyle).toBe("direto");
+      expect(fetched.customRules).toEqual(["foco no pós-venda"]);
+    });
+
+    it("assimilates preference immediately in chatWithClientGemini and confirms politely", async () => {
+      const originalFetch = globalThis.fetch;
+      const execute = vi.fn(async (sql: string) => {
+        if (sql.includes("CREATE TABLE IF NOT EXISTS megadesk_domain_ia_user_preferences")) {
+          return [{}];
+        }
+        if (sql.includes("SELECT") && sql.includes("megadesk_domain_ia_user_preferences")) {
+          return [[]];
+        }
+        if (sql.includes("INSERT INTO megadesk_domain_ia_user_preferences")) {
+          return [{ affectedRows: 1 }];
+        }
+        if (sql.includes("megadesk_domain_clients")) {
+          return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+        }
+        return [[]];
+      });
+      vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+      // Gemini replies confirming
+      globalThis.fetch = vi.fn(async (_url: any, init: any) => {
+        const body = JSON.parse(init.body);
+        // Verify system instruction contains Senhor
+        const sysText = body.systemInstruction.parts[0].text;
+        expect(sysText).toContain("- Como chamar o usuário: Senhor");
+        expect(sysText).toContain("- Pronome / Forma de tratamento: Senhor");
+
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: "Entendido, Senhor. A partir de agora nos comunicaremos desta forma. Como posso ajudar nas operações hoje?" }],
+                  role: "model",
+                },
+                finishReason: "STOP",
+              },
+            ],
+            usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 30, totalTokenCount: 150 },
+          }),
+        } as any;
+      });
+
+      try {
+        const result = await chatWithClientGemini(
+          "tenant-pref",
+          "user-chief@example.com",
+          "agora me chame de senhor",
+          [],
+          ["ai-assistant"]
+        );
+
+        expect(result.ok).toBe(true);
+        expect(result.response).toContain("Entendido, Senhor");
       } finally {
         globalThis.fetch = originalFetch;
       }
