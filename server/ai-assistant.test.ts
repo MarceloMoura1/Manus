@@ -33,6 +33,8 @@ import {
   updateItemsWithUserPrices,
   buildSystemInstruction,
   detectUserPreferencesFromMessage,
+  isConversationalGreeting,
+  sanitizeFunctionDeclaration,
   type HermesToolDefinition,
 } from "./gemini-client";
 import { formatHermesError } from "./hermes-sanitize";
@@ -856,6 +858,95 @@ describe("Hermes persistence, CRM tools and latency", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it("identifies conversational greetings vs business queries with isConversationalGreeting", () => {
+    // Saudações puras devem retornar true
+    expect(isConversationalGreeting("olá")).toBe(true);
+    expect(isConversationalGreeting("oi")).toBe(true);
+    expect(isConversationalGreeting("bom dia")).toBe(true);
+    expect(isConversationalGreeting("boa tarde, tudo bem?")).toBe(true);
+    expect(isConversationalGreeting("quem é você?")).toBe(true);
+    expect(isConversationalGreeting("obrigado")).toBe(true);
+
+    // Consultas de negócio devem retornar false (necessitam ferramentas)
+    expect(isConversationalGreeting("quais chamados estão abertos?")).toBe(false);
+    expect(isConversationalGreeting("cadastrar o cliente João")).toBe(false);
+    expect(isConversationalGreeting("faça um orçamento pro cliente Pedro Ferrari")).toBe(false);
+    expect(isConversationalGreeting("como está o estoque de produtos?")).toBe(false);
+    expect(isConversationalGreeting("olá, quais são os clientes cadastrados?")).toBe(false);
+  });
+
+  it("applies conversational fast-path: sends prompt without tools for greetings", async () => {
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("megadesk_domain_clients")) {
+        return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      }
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) {
+        return [[{ total: 0 }]];
+      }
+      if (sql.includes("megadesk_domain_ia_conversation_history") || sql.includes("megadesk_domain_ia_conversations") || sql.includes("megadesk_ia_token_usage")) {
+        return [[]];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+    let sentPayload: any = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (_url: any, init: any) => {
+      sentPayload = JSON.parse(init.body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{
+            content: {
+              parts: [{ text: "Olá! Como posso ajudar você hoje?" }]
+            }
+          }],
+          usageMetadata: { promptTokenCount: 15, candidatesTokenCount: 10, totalTokenCount: 25 }
+        })
+      } as any;
+    }) as any;
+
+    try {
+      const result = await chatWithClientGemini("tenant-a", "user@example.invalid", "Olá, bom dia!", [], ["tickets", "crm", "sales"]);
+      expect(result.ok).toBe(true);
+      expect(result.response).toContain("Olá!");
+      // No fast-path de saudação, o payload NÃO deve incluir o catálogo de ferramentas
+      expect(sentPayload.tools).toBeUndefined();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("hardens and sanitizes OpenAPI schemas via sanitizeFunctionDeclaration", () => {
+    const rawDeclaration = {
+      name: "test_tool",
+      description: "Test description",
+      parameters: {
+        type: "OBJECT" as const,
+        properties: {
+          tags: {
+            type: "array", // minúsculo
+            // sem items
+          },
+          details: {
+            type: "object",
+            // sem properties
+          }
+        },
+        required: []
+      }
+    };
+
+    const sanitized = sanitizeFunctionDeclaration(rawDeclaration as any);
+    expect(sanitized.parameters.type).toBe("OBJECT");
+    expect((sanitized.parameters.properties.tags as any).type).toBe("ARRAY");
+    expect((sanitized.parameters.properties.tags as any).items).toEqual({ type: "STRING" });
+    expect((sanitized.parameters.properties.details as any).type).toBe("OBJECT");
+    expect((sanitized.parameters.properties.details as any).properties).toEqual({});
   });
   it("propagates provider network failures without hiding them", async () => {
     const failing = vi.fn(async () => { throw new Error("network down"); });

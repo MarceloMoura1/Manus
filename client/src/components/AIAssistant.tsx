@@ -100,8 +100,9 @@ export function AIAssistant({ isOpen, onClose, platform }: AIAssistantProps) {
         ))}
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-gray-100 text-gray-900 px-4 py-2 rounded-lg rounded-bl-none">
-              <Loader2 className="w-5 h-5 animate-spin" />
+            <div className="bg-gray-100 text-gray-900 px-4 py-2 rounded-lg rounded-bl-none flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+              <span className="text-xs text-gray-600">Hermes está consultando os dados da operação...</span>
             </div>
           </div>
         )}

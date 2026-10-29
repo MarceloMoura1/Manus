@@ -4017,12 +4017,12 @@ function AIAssistantPage() {
     setSending(true);
     scrollToBottom("smooth");
 
-    // Watchdog de segurança no client: se o servidor não responder em 30 segundos, destrava a interface
+    // Watchdog de segurança no client: se o servidor não responder em 50 segundos, destrava a interface
     if (watchdogTimerRef.current) clearTimeout(watchdogTimerRef.current);
     watchdogTimerRef.current = setTimeout(() => {
       setSending(prev => {
         if (prev) {
-          console.warn("[Home Chat] Watchdog timeout acionado após 30s de espera.");
+          console.warn("[Home Chat] Watchdog timeout acionado após 50s de espera.");
           setMessages(m => [
             ...m,
             {
@@ -4036,7 +4036,8 @@ function AIAssistantPage() {
         }
         return false;
       });
-    }, 30000);
+      watchdogTimerRef.current = null;
+    }, 50000);
 
     try {
       const result = await chatMutation.mutateAsync({ clientId, userId, message: text });
@@ -4050,15 +4051,18 @@ function AIAssistantPage() {
       };
       setMessages(prev => [...prev, assistantMsg]);
     } catch {
-      setMessages(prev => [
-        ...prev,
-        {
-          id: "err-" + Date.now(),
-          role: "assistant",
-          content: "⚠️ Tive uma instabilidade ao processar seu pedido. Por favor, tente novamente.",
-          timestamp: Date.now(),
-        },
-      ]);
+      // Mensagens de erro só aparecem se o watchdog ainda estiver ativo (não expirou)
+      if (watchdogTimerRef.current) {
+        setMessages(prev => [
+          ...prev,
+          {
+            id: "err-" + Date.now(),
+            role: "assistant",
+            content: "⚠️ Tive uma instabilidade ao processar seu pedido. Por favor, tente novamente.",
+            timestamp: Date.now(),
+          },
+        ]);
+      }
     } finally {
       if (watchdogTimerRef.current) {
         clearTimeout(watchdogTimerRef.current);
@@ -4262,7 +4266,7 @@ function AIAssistantPage() {
                     <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
                     <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                   </span>
-                  <span className="font-medium text-slate-600">Hermes está digitando…</span>
+                  <span className="font-medium text-slate-600">Hermes está consultando os dados da operação...</span>
                 </span>
               </div>
             </div>

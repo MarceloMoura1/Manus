@@ -17,7 +17,7 @@ const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
 export const MAX_GEMINI_PROMPT_HISTORY_MESSAGES = 6;
-export const GEMINI_REQUEST_TIMEOUT_MS = 12_000;
+export const GEMINI_REQUEST_TIMEOUT_MS = 35_000;
 
 function normalizeGeminiApiKey(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -82,6 +82,34 @@ export function selectGeminiPromptHistory(history: readonly IAMessage[]): IAMess
   return history.slice(-MAX_GEMINI_PROMPT_HISTORY_MESSAGES).map(serializeMessageForPrompt);
 }
 
+/**
+ * Detecta se a mensagem é puramente conversacional/saudação, sem intenção operacional.
+ * Permite fast-path (< 1.5s) enviando tools: undefined ao Gemini.
+ */
+export function isConversationalGreeting(message: string): boolean {
+  if (!message || typeof message !== "string") return false;
+  const clean = message.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  // Se a mensagem mencionar entidades ou ações de negócio, NÃO é puramente conversacional
+  const businessPattern = /\b(chamad|ticket|suport|atendiment|client|crm|lead|propost|orcament|cotac|prec|cust|valor|vend|fatur|produt|servic|estoqu|inventari|sku|forneced|compr|pedid|regra|prefer|nome|chame|estilo|whatsapp|zap|convers|busc|consult|list|relatori|cadastr|cri|atualiz|alter|delet|remov|status|cancel|aprov|fech|abert)/i;
+  if (businessPattern.test(clean)) {
+    return false;
+  }
+
+  // Padrões de saudações, despedidas e gentilezas cotidianas
+  const conversationalPhrases = [
+    /^(ol[a|e]|oi[e]?|hey|hello|hi)\b/,
+    /^(bom dia|boa tarde|boa noite)\b/,
+    /\b(tudo bem|tudo bom|como vai|como voce esta|como esta|e ai)\b/,
+    /\b(quem e voce|o que voce faz|quem e vc|qual o seu papel|ajuda|help)\b/,
+    /\b(obrigad[oa]|valeu|agradecid[oa]|tks|thanks|gratidao)\b/,
+    /\b(tchau|ate logo|ate mais|ate breve|falou)\b/,
+    /\b(ok|beleza|entendi|perfeito|certo|show)\b/,
+  ];
+
+  return conversationalPhrases.some(pattern => pattern.test(clean));
+}
+
 export interface ChatResult {
   ok: boolean;
   response: string;
@@ -102,6 +130,46 @@ export interface GeminiFunctionDeclaration {
   name: string;
   description: string;
   parameters: { type: "OBJECT"; properties: Record<string, unknown>; required: string[] };
+}
+
+/**
+ * Sanitiza e blinda a declaração de função para a API REST do Gemini (OpenAPI schema subset).
+ * Garante que:
+ * 1. Todos os tipos sejam em maiúsculas (OBJECT, ARRAY, STRING, NUMBER, BOOLEAN, INTEGER).
+ * 2. Toda propriedade com type: "ARRAY" possua items definido validamente.
+ * 3. Todo objeto aninhado possua properties válido.
+ */
+export function sanitizeFunctionDeclaration(declaration: GeminiFunctionDeclaration): GeminiFunctionDeclaration {
+  const clone = JSON.parse(JSON.stringify(declaration)) as GeminiFunctionDeclaration;
+
+  const sanitizeSchemaNode = (node: any) => {
+    if (!node || typeof node !== "object") return;
+
+    if (typeof node.type === "string") {
+      node.type = node.type.toUpperCase();
+    }
+
+    if (node.type === "ARRAY") {
+      if (!node.items || typeof node.items !== "object") {
+        node.items = { type: "STRING" };
+      } else {
+        sanitizeSchemaNode(node.items);
+      }
+    }
+
+    if (node.type === "OBJECT") {
+      if (!node.properties || typeof node.properties !== "object") {
+        node.properties = {};
+      } else {
+        for (const child of Object.values(node.properties)) {
+          sanitizeSchemaNode(child);
+        }
+      }
+    }
+  };
+
+  sanitizeSchemaNode(clone.parameters);
+  return clone;
 }
 
 export interface HermesToolDefinition {
@@ -3308,12 +3376,14 @@ async function chatWithClientGeminiInternal(
     }
   }
 
-  // 3. Primeira chamada ao Gemini
+  // 3. Primeira chamada ao Gemini (com fast-path para saudações e conversas puras)
   const allowedTools = getAllowedHermesTools(userPermissions);
+  const isConversational = isConversationalGreeting(userMessage);
+  const activeTools = isConversational ? [] : allowedTools;
   const requestBody: GeminiRequest = {
     contents,
-    ...(allowedTools.length > 0 ? { tools: [{ functionDeclarations: allowedTools.map(tool => tool.declaration) }] } : {}),
-    systemInstruction: { parts: [{ text: buildSystemInstruction(allowedTools, userPreferences) }] },
+    ...(activeTools.length > 0 ? { tools: [{ functionDeclarations: activeTools.map(tool => sanitizeFunctionDeclaration(tool.declaration)) }] } : {}),
+    systemInstruction: { parts: [{ text: buildSystemInstruction(activeTools, userPreferences) }] },
     generationConfig: { temperature: 0.3, maxOutputTokens: 800 },
   };
 
