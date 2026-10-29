@@ -482,10 +482,30 @@ export async function getChamadoWithActivities(
       )
       .limit(1);
 
-    if (chamado.length === 0) {
+    let c = chamado[0];
+    if (!c) {
+      const parsedNum = Number(chamadoId);
+      if (Number.isInteger(parsedNum) && parsedNum > 0) {
+        const byNum = await db
+          .select()
+          .from(megadeskDomainChamados)
+          .where(
+            and(
+              eq(megadeskDomainChamados.chamadoNumber, parsedNum),
+              eq(megadeskDomainChamados.clientId, clientId)
+            )
+          )
+          .limit(1);
+        c = byNum[0];
+      }
+    }
+
+    if (!c) {
       console.log(`[WARN] Chamado não encontrado: ${chamadoId} para cliente ${clientId}`);
       return null;
     }
+
+    const resolvedChamadoId = c.chamadoId;
 
     let activities: any[] = [];
     try {
@@ -494,7 +514,7 @@ export async function getChamadoWithActivities(
         .from(megadeskDomainChamadoActivities)
         .where(
           and(
-            eq(megadeskDomainChamadoActivities.chamadoId, chamadoId),
+            eq(megadeskDomainChamadoActivities.chamadoId, resolvedChamadoId),
             eq(megadeskDomainChamadoActivities.clientId, clientId)
           )
         )
@@ -508,9 +528,8 @@ export async function getChamadoWithActivities(
       }
     }
 
-    const collaborators = await getCollaborators(chamadoId, clientId);
+    const collaborators = await getCollaborators(resolvedChamadoId, clientId);
 
-    const c = chamado[0];
     const legacyPrimaryAssigneeIds = await resolveLegacyPrimaryAssigneeIds(clientId, [c]);
     return {
       id: c.chamadoId, // eslint-disable-line

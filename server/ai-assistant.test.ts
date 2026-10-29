@@ -351,6 +351,7 @@ describe("Hermes security controls", () => {
       "request_purchase_order",
       "send_supplier_message",
       "get_conversations_summary",
+      "extract_lead_from_conversation",
       "get_erp_products",
       "web_search",
     ]);
@@ -451,7 +452,7 @@ describe("Hermes security controls", () => {
     vi.mocked(getPool).mockReturnValue({ execute } as any);
     const response = JSON.parse(await executeClientFunction("get_client_360", { clientId: "crm-a" }, "tenant-a", ["clients"]));
     expect(response.cliente.crmClientId).toBe("crm-a");
-    expect(execute).toHaveBeenCalledTimes(4);
+    expect(execute).toHaveBeenCalledTimes(6);
     for (const [, values] of execute.mock.calls) expect(values).toEqual(expect.arrayContaining(["tenant-a"]));
   });
 
@@ -1602,5 +1603,291 @@ describe("Hermes entity flexibilization, memory continuity and conversational pa
   });
 
 });
+
+
+  describe("Hermes Cross-Module Function Registry and Resilient Handlers", () => {
+    it("Module 1 - get_tickets_overview returns unified schema with tickets array", async () => {
+      const execute = vi.fn(async (sql: string) => {
+        if (sql.includes("COUNT(*) AS total") && sql.includes("open")) {
+          return [[{ total: 2, open: 1, in_progress: 1, waiting: 0, closed: 0 }]];
+        }
+        if (sql.includes("FROM megadesk_domain_chamados")) {
+          return [[
+            { chamadoId: "chamado-1", chamadoNumber: 1, title: "Problema no ar condicionado", customerName: "Empresa ABC", status: "open", priority: "high", createdAt: new Date() },
+            { chamadoId: "chamado-2", chamadoNumber: 2, title: "Troca de óleo", customerName: "Empresa XYZ", status: "in_progress", priority: "medium", createdAt: new Date() },
+          ]];
+        }
+        return [[]];
+      });
+      vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+      const raw = await executeClientFunction("get_tickets_overview", { search: "Empresa" }, "tenant-a", ["tickets"]);
+      const res = JSON.parse(raw);
+      expect(res.total).toBe(2);
+      expect(res.open).toBe(1);
+      expect(res.inProgress).toBe(1);
+      expect(Array.isArray(res.tickets)).toBe(true);
+      expect(res.tickets[0].ticketNumber).toBe(1);
+      expect(res.tickets[0].customer).toBe("Empresa ABC");
+    });
+
+    it("Module 1 - get_ticket_details returns unified details schema", async () => {
+      const execute = vi.fn(async (sql: string) => {
+        if (sql.includes("FROM megadesk_domain_chamados")) {
+          return [[{
+            chamadoId: "chamado-1", chamadoNumber: 1, title: "Chamado 1", observations: "Desc",
+            customerName: "Cliente A", status: "open", priority: "high",
+            assignedTo: "Operador Carlos", resolutionNotes: null
+          }]];
+        }
+        if (sql.includes("FROM megadesk_domain_chamado_activities")) {
+          return [[{ activityId: "act-1", actionType: "CREATED", description: "Criado", attendant: "Admin", createdAt: new Date() }]];
+        }
+        return [[]];
+      });
+      vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+      const raw = await executeClientFunction("get_ticket_details", { ticketNumber: 1 }, "tenant-a", ["tickets"]);
+      const res = JSON.parse(raw);
+      expect(res.id).toBe("chamado-1");
+      expect(res.customer).toBe("Cliente A");
+      expect(res.assignedOperator).toBe("Operador Carlos");
+      expect(Array.isArray(res.timeline)).toBe(true);
+    });
+
+    it("Module 1 - creates and updates tickets with HITL pending action", () => {
+      const createTool = HERMES_TOOL_REGISTRY.find(t => t.name === "create_ticket")!;
+      const createReq = createPendingActionRequest(createTool, {
+        customer: "Transportadora Alpha",
+        title: "Falha mecânica",
+        description: "Motor falhando",
+        priority: "urgent",
+        category: "suporte"
+      });
+      expect(createReq.actionType).toBe("CREATE_TICKET");
+      expect(createReq.status).toBe("PENDING_APPROVAL");
+      expect(createReq.summary).toContain("Transportadora Alpha");
+
+      const updateTool = HERMES_TOOL_REGISTRY.find(t => t.name === "update_ticket_status")!;
+      const updateReq = createPendingActionRequest(updateTool, {
+        ticketNumber: "10",
+        newStatus: "resolved",
+        resolutionNote: "Substituído cabo de ignição"
+      });
+      expect(updateReq.actionType).toBe("UPDATE_TICKET_STATUS");
+      expect(updateReq.status).toBe("PENDING_APPROVAL");
+
+      const assignTool = HERMES_TOOL_REGISTRY.find(t => t.name === "assign_ticket")!;
+      const assignReq = createPendingActionRequest(assignTool, {
+        ticketNumber: "10",
+        operatorName: "Carlos Mecânico"
+      });
+      expect(assignReq.actionType).toBe("ASSIGN_TICKET");
+      expect(assignReq.status).toBe("PENDING_APPROVAL");
+    });
+
+    it("Module 2 - get_client_360 and get_crm_summary return unified schema", async () => {
+      const execute = vi.fn(async (sql: string) => {
+        if (sql.includes("FROM megadesk_crm_clients") && sql.includes("crm_client_id = ?")) {
+          return [[{ crmClientId: "crm-1", name: "Maria Silva", cpfCnpj: "12345678901", phone: "11988887777", email: "maria@example.com", status: "active" }]];
+        }
+        if (sql.includes("FROM megadesk_crm_clients") && sql.includes("COUNT(*) AS total")) {
+          return [[{ total: 5, active: 4, inactive: 1, leads: 2 }]];
+        }
+        if (sql.includes("FROM megadesk_crm_clients")) {
+          return [[{ crmClientId: "crm-1", name: "Maria Silva", cpfCnpj: "12345678901", phone: "11988887777", email: "maria@example.com", status: "active" }]];
+        }
+        if (sql.includes("FROM megadesk_domain_chamados")) {
+          return [[{ chamadoId: "c-1", chamadoNumber: 1, title: "Ticket 1", status: "open", priority: "medium", updatedAt: new Date() }]];
+        }
+        if (sql.includes("FROM erp_sale_orders") && sql.includes("quote")) return [[{ activeCount: 2 }]];
+        if (sql.includes("FROM erp_sale_orders") && sql.includes("sale")) return [[{ saleCount: 3 }]];
+        return [[]];
+      });
+      vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+      const raw = await executeClientFunction("get_client_360", { search: "Maria" }, "tenant-a", ["clients"]);
+      const res = JSON.parse(raw);
+      expect(res.found).toBe(true);
+      expect(res.client.name).toBe("Maria Silva");
+      expect(res.client.openTickets).toBe(1);
+      expect(res.client.activeProposals).toBe(2);
+      expect(res.client.totalPurchases).toBe(3);
+
+      const rawSummary = await executeClientFunction("get_crm_summary", { period: "month" }, "tenant-a", ["crm"]);
+      const summaryRes = JSON.parse(rawSummary);
+      expect(summaryRes.totalClients).toBe(5);
+      expect(summaryRes.activeCustomersCount).toBe(4);
+    });
+
+    it("Module 2 - create_client, update_client and add_client_timeline_event emit HITL requests", () => {
+      const createClientTool = HERMES_TOOL_REGISTRY.find(t => t.name === "create_client")!;
+      const clientReq = createPendingActionRequest(createClientTool, { name: "Empresa Beta", document: "12.345.678/0001-90", phone: "11999991111" });
+      expect(clientReq.actionType).toBe("CREATE_CLIENT");
+
+      const updateClientTool = HERMES_TOOL_REGISTRY.find(t => t.name === "update_client")!;
+      const updateReq = createPendingActionRequest(updateClientTool, { name: "Empresa Beta", phone: "11999992222", notes: "Novo contato" });
+      expect(updateReq.actionType).toBe("UPDATE_CLIENT");
+
+      const timelineTool = HERMES_TOOL_REGISTRY.find(t => t.name === "add_client_timeline_event")!;
+      const timelineReq = createPendingActionRequest(timelineTool, { name: "Empresa Beta", title: "Ligação de alinhamento", description: "Alinhado prazo" });
+      expect(timelineReq.actionType).toBe("ADD_CLIENT_TIMELINE");
+    });
+
+    it("Module 3 - get_proposals_summary and get_proposal_details return unified schemas", async () => {
+      const execute = vi.fn(async (sql: string) => {
+        if (sql.includes("COUNT(*) AS total") && sql.includes("drafts")) {
+          return [[{ total: 1, totalCents: 15000, drafts: 1, negotiation: 0, approved: 0, lost: 0 }]];
+        }
+        if (sql.includes("FROM erp_sale_orders o") && !sql.includes("COUNT(*)")) {
+          return [[{ id: "prop-1", orderNumber: "O-10", clientName: "João", totalCents: 15000, status: "draft", createdAt: new Date() }]];
+        }
+        if (sql.includes("FROM erp_sale_orders") && sql.includes("LIMIT 1")) {
+          return [[{ id: "prop-1", orderNumber: "O-10", clientName: "João", totalCents: 15000, status: "draft", paymentTerms: "30 dias", deliveryForecast: null }]];
+        }
+        if (sql.includes("FROM erp_sale_order_items")) {
+          return [[{ name: "Item 1", quantity: 1, unitPriceCents: 15000, totalCents: 15000 }]];
+        }
+        return [[]];
+      });
+      vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+      const raw = await executeClientFunction("get_proposals_summary", { status: "draft" }, "tenant-a", ["proposals"]);
+      const res = JSON.parse(raw);
+      expect(res.total).toBe(1);
+      expect(res.totalValue).toBe(150);
+      expect(res.proposals[0].orderNumber).toBe("O-10");
+
+      const rawDetails = await executeClientFunction("get_proposal_details", { orderNumber: "O-10" }, "tenant-a", ["proposals"]);
+      const detailsRes = JSON.parse(rawDetails);
+      expect(detailsRes.orderNumber).toBe("O-10");
+      expect(detailsRes.clientName).toBe("João");
+      expect(Array.isArray(detailsRes.items)).toBe(true);
+    });
+
+    it("Module 3 - create_proposal, update_proposal_status and send_proposal_whatsapp emit HITL requests", () => {
+      const proposalTool = HERMES_TOOL_REGISTRY.find(t => t.name === "create_proposal")!;
+      const proposalReq = createPendingActionRequest(proposalTool, {
+        clientName: "Auto Mecânica Ramos",
+        items: [
+          { productName: "lavagem de carro", quantity: 1, unitPrice: 60 },
+          { productName: "troca da correia dentada", quantity: 1, unitPrice: 120 }
+        ]
+      });
+      expect(proposalReq.actionType).toBe("CREATE_PROPOSAL");
+      expect(proposalReq.summary).toContain("R$ 180,00");
+
+      const updateTool = HERMES_TOOL_REGISTRY.find(t => t.name === "update_proposal_status")!;
+      const updateReq = createPendingActionRequest(updateTool, {
+        orderNumber: "O-18",
+        newStatus: "approved",
+        convertToSale: true
+      });
+      expect(updateReq.actionType).toBe("UPDATE_PROPOSAL_STATUS");
+
+      const whatsappTool = HERMES_TOOL_REGISTRY.find(t => t.name === "send_proposal_whatsapp")!;
+      const whatsappReq = createPendingActionRequest(whatsappTool, {
+        orderNumber: "O-18",
+        phone: "11988887777"
+      });
+      expect(whatsappReq.actionType).toBe("SEND_PROPOSAL_WHATSAPP");
+    });
+
+    it("Module 4 - get_erp_products, get_services_list and create mutations", async () => {
+      const execute = vi.fn(async (sql: string) => {
+        if (sql.includes("FROM erp_products") || sql.includes("FROM megadesk_erp_products")) {
+          return [[{ id: "prd-1", name: "Óleo 5W30", sku: "OLEO-1", stock: 10, minStock: 2, salePriceCents: 5000, costPriceCents: 3000 }]];
+        }
+        if (sql.includes("FROM erp_services") || sql.includes("FROM megadesk_erp_services")) {
+          return [[{ id: 1, name: "Alinhamento 3D", priceCents: 10000, isActive: 1 }]];
+        }
+        return [[]];
+      });
+      vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+      const rawProds = await executeClientFunction("get_erp_products", { search: "Óleo" }, "tenant-a", ["products"]);
+      const prodsRes = JSON.parse(rawProds);
+      expect(prodsRes.total).toBe(1);
+      expect(prodsRes.items[0].name).toBe("Óleo 5W30");
+
+      const rawServices = await executeClientFunction("get_services_list", { search: "Alinhamento" }, "tenant-a", ["services"]);
+      const servicesRes = JSON.parse(rawServices);
+      expect(servicesRes.total).toBe(1);
+      expect(servicesRes.services[0].name).toBe("Alinhamento 3D");
+
+      const createProdTool = HERMES_TOOL_REGISTRY.find(t => t.name === "create_product")!;
+      const prodReq = createPendingActionRequest(createProdTool, { name: "Pastilha de Freio", salePrice: 120, costPrice: 70, initialStock: 5 });
+      expect(prodReq.actionType).toBe("CREATE_PRODUCT");
+
+      const createServiceTool = HERMES_TOOL_REGISTRY.find(t => t.name === "create_service")!;
+      const serviceReq = createPendingActionRequest(createServiceTool, { name: "Balanceamento", defaultPrice: 40 });
+      expect(serviceReq.actionType).toBe("CREATE_SERVICE");
+    });
+
+    it("Module 5 - get_suppliers_list, create_supplier, update_supplier and request_purchase_order", async () => {
+      const execute = vi.fn(async (sql: string) => {
+        if (sql.includes("FROM erp_suppliers") || sql.includes("FROM megadesk_erp_suppliers")) {
+          return [[{ publicId: "sup-1", legalName: "Distribuidora de Peças Ltda", tradeName: "Distribuidora", taxId: "11222333000199", phone: "1133334444", email: "contato@distribuidora.com", contactName: "Roberto" }]];
+        }
+        return [[]];
+      });
+      vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+      const rawSuppliers = await executeClientFunction("get_suppliers_list", { search: "Distribuidora" }, "tenant-a", ["suppliers"]);
+      const suppRes = JSON.parse(rawSuppliers);
+      expect(suppRes.total).toBe(1);
+      expect(suppRes.suppliers[0].name).toBe("Distribuidora de Peças Ltda");
+
+      const createSupplierTool = HERMES_TOOL_REGISTRY.find(t => t.name === "create_supplier")!;
+      const suppReq = createPendingActionRequest(createSupplierTool, { name: "Auto Peças Sul", phone: "1144445555" });
+      expect(suppReq.actionType).toBe("CREATE_SUPPLIER");
+
+      const updateSupplierTool = HERMES_TOOL_REGISTRY.find(t => t.name === "update_supplier")!;
+      const updateSuppReq = createPendingActionRequest(updateSupplierTool, { name: "Auto Peças Sul", phone: "1144446666" });
+      expect(updateSuppReq.actionType).toBe("UPDATE_SUPPLIER");
+
+      const purchaseTool = HERMES_TOOL_REGISTRY.find(t => t.name === "request_purchase_order")!;
+      const purchaseReq = createPendingActionRequest(purchaseTool, {
+        supplierName: "Auto Peças Sul",
+        items: [{ productName: "Filtro de Ar", quantity: 10, targetCost: 25 }]
+      });
+      expect(purchaseReq.actionType).toBe("REQUEST_PURCHASE");
+    });
+
+    it("Module 6 - get_conversations_summary and extract_lead_from_conversation", async () => {
+      const execute = vi.fn(async (sql: string) => {
+        if (sql.includes("COUNT(*) as total") && sql.includes("abertas")) {
+          return [[{ total: 1, abertas: 1, fechadas: 0 }]];
+        }
+        if (sql.includes("FROM megadesk_domain_conversations")) {
+          return [[{
+            conversation_id: "conv-1", customer_name: "Juliana Santos", phone: "11977778888",
+            last_message: "Gostaria de um orçamento para troca de pneus e revisão do HB20",
+            updated_at: new Date(), unreadCount: 0
+          }]];
+        }
+        if (sql.includes("FROM megadesk_domain_messages")) {
+          return [[{
+            messageId: "msg-1", content: "Meu nome é Juliana Santos, meu carro é um HB20 placa ABC-1234, preciso de 4 pneus aro 15 e alinhamento",
+            sender: "contact", createdAt: new Date()
+          }]];
+        }
+        return [[]];
+      });
+      vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+      const rawConv = await executeClientFunction("get_conversations_summary", { search: "Juliana" }, "tenant-a", ["conversations"]);
+      const convRes = JSON.parse(rawConv);
+      expect(convRes.total).toBe(1);
+      expect(convRes.conversations[0].contactName).toBe("Juliana Santos");
+
+      const rawLead = await executeClientFunction("extract_lead_from_conversation", { conversationId: "conv-1" }, "tenant-a", ["conversations"]);
+      const leadRes = JSON.parse(rawLead);
+      expect(leadRes.found).toBe(true);
+      expect(leadRes.lead.contactName).toBe("Juliana Santos");
+      expect(leadRes.lead.phone).toBe("11977778888");
+      expect(leadRes.lead.suggestedItems.length).toBeGreaterThan(0);
+    });
+  });
 
 });

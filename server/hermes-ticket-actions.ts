@@ -46,6 +46,16 @@ function stringValue(args: Record<string, unknown>, key: string): string {
   return value.trim();
 }
 
+function resolveTicketRef(args: Record<string, unknown>): string {
+  if (args.ticketNumber !== undefined && args.ticketNumber !== null && String(args.ticketNumber).trim()) {
+    return String(args.ticketNumber).trim();
+  }
+  if (typeof args.ticketId === "string" && args.ticketId.trim()) {
+    return args.ticketId.trim();
+  }
+  throw new Error("HERMES_ACTION_INVALID_TICKETID");
+}
+
 function exactCustomerMatch(reference: string, customers: CrmCustomer[]): CrmCustomer | null {
   const normalized = reference.trim().toLocaleLowerCase();
   const matches = customers.filter(customer =>
@@ -77,16 +87,17 @@ function canonicalCustomerName(customer: CrmCustomer): string {
     : customer.companyName.trim();
 }
 
-function toDomainPriority(priority: string): "baixa" | "media" | "alta" | "critica" {
+function toDomainPriority(priority?: string): "baixa" | "media" | "alta" | "critica" {
+  if (!priority) return "media";
   const priorities = { low: "baixa", medium: "media", high: "alta", urgent: "critica" } as const;
   const mapped = priorities[priority as keyof typeof priorities];
-  if (!mapped) throw new Error("HERMES_ACTION_INVALID_PRIORITY");
-  return mapped;
+  return mapped ?? "media";
 }
 
 function toDomainStatus(status: string): "open" | "in_progress" | "waiting" | "closed" {
   if (status === "resolved") return "closed";
-  if (status === "open" || status === "in_progress" || status === "closed") return status;
+  if (status === "pending") return "waiting";
+  if (status === "open" || status === "in_progress" || status === "closed" || status === "waiting") return status;
   throw new Error("HERMES_ACTION_INVALID_STATUS");
 }
 
@@ -104,16 +115,26 @@ export async function executeHermesTicketAction(
   const args = input.action.args;
 
   if (input.action.actionType === "CREATE_TICKET") {
-    const customer = await resolveCustomer(input.clientId, stringValue(args, "clientNameOuId"), dependencies);
-    const category = typeof args.category === "string" && args.category.trim() ? `\n\nCategoria: ${args.category.trim()}` : "";
+    const customerRef = typeof args.customer === "string" && args.customer.trim()
+      ? args.customer.trim()
+      : typeof args.clientNameOuId === "string" && args.clientNameOuId.trim()
+      ? args.clientNameOuId.trim()
+      : "";
+    if (!customerRef) throw new Error("HERMES_ACTION_INVALID_CUSTOMER");
+    const customer = await resolveCustomer(input.clientId, customerRef, dependencies);
+    const title = stringValue(args, "title");
+    const description = typeof args.description === "string" ? args.description.trim() : "";
+    const priority = typeof args.priority === "string" && args.priority.trim() ? args.priority.trim() : "medium";
+    const categoryName = typeof args.category === "string" && args.category.trim() ? args.category.trim() : "suporte";
+    const category = `\n\nCategoria: ${categoryName}`;
     const chamado = await dependencies.createChamadoWithActivity({
       clientId: input.clientId,
       customerId: customer.crmClientId,
       customerName: canonicalCustomerName(customer),
       company: customer.companyName.trim(),
-      title: stringValue(args, "title"),
-      observations: `${stringValue(args, "description")}${category}`,
-      priority: toDomainPriority(stringValue(args, "priority")),
+      title,
+      observations: `${description}${category}`,
+      priority: toDomainPriority(priority),
       assignedTo: actor.userName,
       assignedToUserId: actor.userId,
       customerPhone: customer.phone ?? null,
@@ -124,28 +145,49 @@ export async function executeHermesTicketAction(
     return { success: true, message: `Chamado #${chamado.number} criado com sucesso.`, entityId: chamado.id };
   }
 
-  const chamadoId = stringValue(args, "ticketId");
+  const ticketRef = resolveTicketRef(args);
+  const current = await dependencies.getChamadoWithActivities(ticketRef, input.clientId);
+  if (!current) throw new Error("HERMES_ACTION_TICKET_NOT_FOUND");
+  const chamadoId = current.id;
+
   if (input.action.actionType === "UPDATE_TICKET_STATUS") {
-    const current = await dependencies.getChamadoWithActivities(chamadoId, input.clientId);
-    if (!current) throw new Error("HERMES_ACTION_TICKET_NOT_FOUND");
-    const resolutionNotes = typeof args.resolutionNotes === "string" && args.resolutionNotes.trim()
-      ? `${current.observations?.trim() ? `${current.observations.trim()}\n\n` : ""}Resolução: ${args.resolutionNotes.trim()}`
+    const note = typeof args.resolutionNote === "string" && args.resolutionNote.trim()
+      ? args.resolutionNote.trim()
+      : typeof args.resolutionNotes === "string" && args.resolutionNotes.trim()
+      ? args.resolutionNotes.trim()
+      : "";
+    const resolutionNotes = note
+      ? `${current.observations?.trim() ? `${current.observations.trim()}\n\n` : ""}Resolução: ${note}`
       : undefined;
+    const newStatus = stringValue(args, "newStatus");
     await dependencies.updateChamadoWithActivity({
       chamadoId,
       clientId: input.clientId,
       actor,
       mode: "status",
-      updates: { status: toDomainStatus(stringValue(args, "newStatus")), ...(resolutionNotes ? { observations: resolutionNotes } : {}) },
+      updates: { status: toDomainStatus(newStatus), ...(resolutionNotes ? { observations: resolutionNotes } : {}) },
     });
     return { success: true, message: "Status do chamado atualizado com sucesso.", entityId: chamadoId };
   }
 
   if (input.action.actionType === "ASSIGN_TICKET") {
-    const assignee = await input.resolveAssignee(stringValue(args, "assigneeNameOuId"));
+    const assigneeRef = typeof args.operatorName === "string" && args.operatorName.trim()
+      ? args.operatorName.trim()
+      : typeof args.operatorId === "string" && args.operatorId.trim()
+      ? args.operatorId.trim()
+      : typeof args.assigneeNameOuId === "string" && args.assigneeNameOuId.trim()
+      ? args.assigneeNameOuId.trim()
+      : "";
+    if (!assigneeRef) throw new Error("HERMES_ACTION_INVALID_ASSIGNEE");
+    const assignee = await input.resolveAssignee(assigneeRef);
     if (!assignee) throw new Error("HERMES_ACTION_ASSIGNEE_NOT_FOUND_OR_AMBIGUOUS");
     const activeAssignee = await dependencies.getActiveClientUser(input.clientId, assignee.userId) as CanonicalActor | null;
     if (!activeAssignee) throw new Error("HERMES_ACTION_ASSIGNEE_NOT_ACTIVE");
+    const reason = typeof args.reason === "string" && args.reason.trim()
+      ? args.reason.trim()
+      : typeof args.transferReason === "string" && args.transferReason.trim()
+      ? args.transferReason.trim()
+      : "";
     await dependencies.updateChamadoWithActivity({
       chamadoId,
       clientId: input.clientId,
@@ -154,7 +196,7 @@ export async function executeHermesTicketAction(
       updates: {
         assignedTo: activeAssignee.userName,
         assignedToUserId: activeAssignee.userId,
-        ...(typeof args.transferReason === "string" && args.transferReason.trim() ? { forwardObservation: args.transferReason.trim() } : {}),
+        ...(reason ? { forwardObservation: reason } : {}),
       },
     });
     return { success: true, message: `Chamado encaminhado para ${activeAssignee.userName}.`, entityId: chamadoId };

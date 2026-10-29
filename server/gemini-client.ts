@@ -166,7 +166,7 @@ function openTicketsArgs(args: Record<string, unknown>): Record<string, unknown>
 
 function ticketOverviewArgs(args: Record<string, unknown>): Record<string, unknown> {
   objectArgs(args); rejectUnknownArgs(args, ["status", "search", "limit"]);
-  const status = args.status === undefined ? undefined : enumArg(args, "status", ["open", "in_progress", "waiting", "closed"] as const);
+  const status = args.status === undefined ? undefined : enumArg(args, "status", ["open", "in_progress", "pending", "waiting", "resolved", "closed"] as const);
   const search = stringArg(args, "search", { min: 1, max: 180, optional: true });
   const limit = optionalLimit(args);
   return { ...(status ? { status } : {}), ...(search ? { search } : {}), ...(limit ? { limit } : {}) };
@@ -182,38 +182,64 @@ function webSearchArgs(args: Record<string, unknown>): Record<string, unknown> {
 function ticketDetailsArgs(args: Record<string, unknown>): Record<string, unknown> {
   objectArgs(args); rejectUnknownArgs(args, ["ticketId", "ticketNumber"]);
   const ticketId = stringArg(args, "ticketId", { min: 1, max: 80, optional: true });
-  const ticketNumber = args.ticketNumber === undefined ? undefined : Number(args.ticketNumber);
-  if (ticketNumber !== undefined && (!Number.isInteger(ticketNumber) || ticketNumber < 1)) throw new Error("ticketNumber inválido.");
-  if ((ticketId ? 1 : 0) + (ticketNumber ? 1 : 0) !== 1) throw new Error("Informe exatamente ticketId ou ticketNumber.");
-  return ticketId ? { ticketId } : { ticketNumber };
+  const rawNum = args.ticketNumber;
+  const ticketNumber = (rawNum !== undefined && rawNum !== null && String(rawNum).trim())
+    ? (!isNaN(Number(rawNum)) ? Number(rawNum) : String(rawNum).trim())
+    : undefined;
+  if (!ticketId && ticketNumber === undefined) throw new Error("Informe ticketId ou ticketNumber.");
+  return {
+    ...(ticketId ? { ticketId } : {}),
+    ...(ticketNumber !== undefined ? { ticketNumber } : {}),
+  };
 }
 
 function createTicketArgs(args: Record<string, unknown>): Record<string, unknown> {
-  objectArgs(args); rejectUnknownArgs(args, ["title", "description", "priority", "clientNameOuId", "category"]);
+  objectArgs(args); rejectUnknownArgs(args, ["title", "description", "priority", "clientNameOuId", "customer", "category"]);
+  const customer = stringArg(args, "customer", { min: 1, max: 180, optional: true })
+    ?? stringArg(args, "clientNameOuId", { min: 1, max: 180, optional: true });
+  if (!customer) throw new Error("Parâmetro obrigatório ausente: customer.");
   return {
     title: stringArg(args, "title", { min: 1, max: 500 })!,
-    description: stringArg(args, "description", { min: 1, max: 2_000 })!,
-    priority: enumArg(args, "priority", ["low", "medium", "high", "urgent"] as const),
-    clientNameOuId: stringArg(args, "clientNameOuId", { min: 1, max: 180 })!,
-    ...(stringArg(args, "category", { min: 1, max: 120, optional: true }) ? { category: stringArg(args, "category", { min: 1, max: 120, optional: true }) } : {}),
+    description: stringArg(args, "description", { min: 0, max: 2_000, optional: true }) ?? "",
+    priority: args.priority ? enumArg(args, "priority", ["low", "medium", "high", "urgent"] as const) : "medium",
+    customer,
+    clientNameOuId: customer,
+    category: stringArg(args, "category", { min: 1, max: 120, optional: true }) ?? "suporte",
   };
 }
 
 function updateTicketStatusArgs(args: Record<string, unknown>): Record<string, unknown> {
-  objectArgs(args); rejectUnknownArgs(args, ["ticketId", "newStatus", "resolutionNotes"]);
+  objectArgs(args); rejectUnknownArgs(args, ["ticketId", "ticketNumber", "newStatus", "resolutionNote", "resolutionNotes"]);
+  const rawId = stringArg(args, "ticketId", { min: 1, max: 80, optional: true })
+    ?? (args.ticketNumber !== undefined && args.ticketNumber !== null ? String(args.ticketNumber).trim() : undefined);
+  if (!rawId) throw new Error("Informe ticketId ou ticketNumber.");
+  const note = stringArg(args, "resolutionNote", { min: 0, max: 2_000, optional: true })
+    ?? stringArg(args, "resolutionNotes", { min: 0, max: 2_000, optional: true });
   return {
-    ticketId: stringArg(args, "ticketId", { min: 1, max: 80 })!,
-    newStatus: enumArg(args, "newStatus", ["open", "in_progress", "resolved", "closed"] as const),
-    ...(stringArg(args, "resolutionNotes", { min: 1, max: 2_000, optional: true }) ? { resolutionNotes: stringArg(args, "resolutionNotes", { min: 1, max: 2_000, optional: true }) } : {}),
+    ticketId: rawId,
+    ticketNumber: args.ticketNumber !== undefined ? args.ticketNumber : (!isNaN(Number(rawId)) ? Number(rawId) : undefined),
+    newStatus: enumArg(args, "newStatus", ["open", "in_progress", "pending", "resolved", "closed", "waiting"] as const),
+    ...(note ? { resolutionNote: note, resolutionNotes: note } : {}),
   };
 }
 
 function assignTicketArgs(args: Record<string, unknown>): Record<string, unknown> {
-  objectArgs(args); rejectUnknownArgs(args, ["ticketId", "assigneeNameOuId", "transferReason"]);
+  objectArgs(args); rejectUnknownArgs(args, ["ticketId", "ticketNumber", "assigneeNameOuId", "operatorName", "operatorId", "transferReason", "reason"]);
+  const rawId = stringArg(args, "ticketId", { min: 1, max: 80, optional: true })
+    ?? (args.ticketNumber !== undefined && args.ticketNumber !== null ? String(args.ticketNumber).trim() : undefined);
+  if (!rawId) throw new Error("Informe ticketId ou ticketNumber.");
+  const operator = stringArg(args, "operatorName", { min: 1, max: 180, optional: true })
+    ?? stringArg(args, "operatorId", { min: 1, max: 80, optional: true })
+    ?? stringArg(args, "assigneeNameOuId", { min: 1, max: 180, optional: true });
+  if (!operator) throw new Error("Informe operatorName, operatorId ou assigneeNameOuId.");
+  const reason = stringArg(args, "reason", { min: 0, max: 2_000, optional: true })
+    ?? stringArg(args, "transferReason", { min: 0, max: 2_000, optional: true });
   return {
-    ticketId: stringArg(args, "ticketId", { min: 1, max: 80 })!,
-    assigneeNameOuId: stringArg(args, "assigneeNameOuId", { min: 1, max: 180 })!,
-    ...(stringArg(args, "transferReason", { min: 1, max: 2_000, optional: true }) ? { transferReason: stringArg(args, "transferReason", { min: 1, max: 2_000, optional: true }) } : {}),
+    ticketId: rawId,
+    ticketNumber: args.ticketNumber !== undefined ? args.ticketNumber : (!isNaN(Number(rawId)) ? Number(rawId) : undefined),
+    operatorName: operator,
+    assigneeNameOuId: operator,
+    ...(reason ? { reason, transferReason: reason } : {}),
   };
 }
 
@@ -228,15 +254,17 @@ function addTicketActivityArgs(args: Record<string, unknown>): Record<string, un
 }
 
 function crmSummaryArgs(args: Record<string, unknown>): Record<string, unknown> {
-  objectArgs(args); rejectUnknownArgs(args, []); return {};
+  objectArgs(args); rejectUnknownArgs(args, ["period"]);
+  const period = args.period === undefined ? undefined : enumArg(args, "period", ["today", "month", "year"] as const);
+  return { ...(period ? { period } : {}) };
 }
 
 function crmClientLookupArgs(args: Record<string, unknown>): Record<string, unknown> {
   objectArgs(args); rejectUnknownArgs(args, ["clientId", "search"]);
   const clientId = stringArg(args, "clientId", { min: 1, max: 80, optional: true });
-  const search = stringArg(args, "search", { min: 2, max: 180, optional: true });
-  if ((clientId ? 1 : 0) + (search ? 1 : 0) !== 1) throw new Error("Informe exatamente clientId ou search.");
-  return clientId ? { clientId } : { search };
+  const search = stringArg(args, "search", { min: 1, max: 180, optional: true });
+  if (!clientId && !search) throw new Error("Informe clientId ou search.");
+  return { ...(clientId ? { clientId } : {}), ...(search ? { search } : {}) };
 }
 
 function createClientArgs(args: Record<string, unknown>): Record<string, unknown> {
@@ -256,23 +284,45 @@ function createClientArgs(args: Record<string, unknown>): Record<string, unknown
 }
 
 function updateClientArgs(args: Record<string, unknown>): Record<string, unknown> {
-  objectArgs(args); rejectUnknownArgs(args, ["clientId", "fieldsToUpdate"]);
-  const fields = args.fieldsToUpdate;
-  if (!fields || typeof fields !== "object" || Array.isArray(fields)) throw new Error("fieldsToUpdate inválido.");
-  const allowed = ["name", "document", "phone", "email", "notes"];
-  const record = fields as Record<string, unknown>;
-  rejectUnknownArgs(record, allowed);
-  if (!Object.keys(record).length) throw new Error("fieldsToUpdate não pode estar vazio.");
-  const normalized = createClientArgs({ name: typeof record.name === "string" ? record.name : "Atualização", ...record });
-  delete normalized.name;
-  return { clientId: stringArg(args, "clientId", { min: 1, max: 80 })!, fieldsToUpdate: normalized };
+  objectArgs(args);
+  rejectUnknownArgs(args, ["clientId", "name", "phone", "email", "notes", "document", "fieldsToUpdate"]);
+  const clientId = stringArg(args, "clientId", { min: 1, max: 80, optional: true });
+  const name = stringArg(args, "name", { min: 1, max: 180, optional: true });
+  if (!clientId && !name) throw new Error("Informe clientId ou name do cliente para atualizar.");
+  const rawFields = (args.fieldsToUpdate && typeof args.fieldsToUpdate === "object" && !Array.isArray(args.fieldsToUpdate))
+    ? args.fieldsToUpdate as Record<string, unknown>
+    : {};
+  const merged: Record<string, unknown> = { ...args, ...rawFields };
+  delete merged.fieldsToUpdate;
+  delete merged.clientId;
+  const fieldsToUpdate: Record<string, unknown> = {};
+  if (typeof merged.name === "string" && merged.name.trim()) fieldsToUpdate.name = merged.name.trim();
+  if (typeof merged.document === "string" && merged.document.trim()) fieldsToUpdate.document = merged.document.trim();
+  if (typeof merged.phone === "string" && merged.phone.trim()) fieldsToUpdate.phone = merged.phone.trim();
+  if (typeof merged.email === "string" && merged.email.trim()) fieldsToUpdate.email = merged.email.trim();
+  if (typeof merged.notes === "string" && merged.notes.trim()) fieldsToUpdate.notes = merged.notes.trim();
+  return {
+    ...(clientId ? { clientId } : {}),
+    ...(name ? { name } : {}),
+    ...fieldsToUpdate,
+    fieldsToUpdate: Object.keys(fieldsToUpdate).length > 0 ? fieldsToUpdate : { notes: "Atualizado via Hermes" },
+  };
 }
 
 function clientTimelineArgs(args: Record<string, unknown>): Record<string, unknown> {
-  objectArgs(args); rejectUnknownArgs(args, ["clientId", "title", "description", "eventType"]);
+  objectArgs(args); rejectUnknownArgs(args, ["clientId", "name", "title", "description", "eventType"]);
+  const clientId = stringArg(args, "clientId", { min: 1, max: 80, optional: true });
+  const name = stringArg(args, "name", { min: 1, max: 180, optional: true });
+  if (!clientId && !name) throw new Error("Informe clientId ou name do cliente.");
+  const title = stringArg(args, "title", { min: 1, max: 180 })!;
+  const description = stringArg(args, "description", { min: 0, max: 2_000, optional: true }) ?? "";
+  const eventType = args.eventType !== undefined ? enumArg(args, "eventType", ["call", "note", "meeting"] as const) : "note";
   return {
-    clientId: stringArg(args, "clientId", { min: 1, max: 80 })!, title: stringArg(args, "title", { min: 1, max: 180 })!,
-    description: stringArg(args, "description", { min: 1, max: 2_000 })!, eventType: enumArg(args, "eventType", ["call", "note", "meeting"] as const),
+    ...(clientId ? { clientId } : {}),
+    ...(name ? { name } : {}),
+    title,
+    description,
+    eventType,
   };
 }
 
@@ -280,23 +330,25 @@ function proposalSummaryArgs(args: Record<string, unknown>): Record<string, unkn
   objectArgs(args); rejectUnknownArgs(args, ["status", "sellerId", "period"]);
   const status = args.status === undefined ? undefined : enumArg(args, "status", ["draft", "negotiation", "approved", "lost"] as const);
   const sellerId = stringArg(args, "sellerId", { min: 1, max: 80, optional: true });
-  const period = args.period === undefined ? undefined : enumArg(args, "period", ["7", "30", "90"] as const);
+  const period = args.period === undefined ? undefined : stringArg(args, "period", { min: 1, max: 20, optional: true });
   return { ...(status ? { status } : {}), ...(sellerId ? { sellerId } : {}), ...(period ? { period } : {}) };
 }
 
 function proposalDetailsArgs(args: Record<string, unknown>): Record<string, unknown> {
-  objectArgs(args); rejectUnknownArgs(args, ["proposalId", "proposalNumber"]);
+  objectArgs(args); rejectUnknownArgs(args, ["proposalId", "orderNumber", "proposalNumber"]);
   const proposalId = stringArg(args, "proposalId", { min: 1, max: 80, optional: true });
-  const proposalNumber = stringArg(args, "proposalNumber", { min: 1, max: 80, optional: true });
-  if ((proposalId ? 1 : 0) + (proposalNumber ? 1 : 0) !== 1) throw new Error("Informe exatamente proposalId ou proposalNumber.");
-  return proposalId ? { proposalId } : { proposalNumber };
+  const orderNumber = stringArg(args, "orderNumber", { min: 1, max: 80, optional: true })
+    ?? stringArg(args, "proposalNumber", { min: 1, max: 80, optional: true });
+  if (!proposalId && !orderNumber) throw new Error("Informe proposalId ou orderNumber.");
+  return { ...(proposalId ? { proposalId } : {}), ...(orderNumber ? { orderNumber, proposalNumber: orderNumber } : {}) };
 }
 
 function createProposalArgs(args: Record<string, unknown>): Record<string, unknown> {
   objectArgs(args); args = dropEmptyArgs(args); rejectUnknownArgs(args, ["clientId", "clientName", "items", "notes", "paymentTerms"]);
   const clientId = stringArg(args, "clientId", { min: 1, max: 80, optional: true });
   const clientName = stringArg(args, "clientName", { min: 2, max: 180, optional: true });
-  if ((clientId ? 1 : 0) + (clientName ? 1 : 0) !== 1) throw new Error("Informe exatamente clientId ou clientName.");
+  if (clientId && clientName) throw new Error("Informe apenas um identificador de cliente (clientId ou clientName).");
+  if (!clientId && !clientName) throw new Error("Informe clientName ou clientId.");
   if (!Array.isArray(args.items) || args.items.length < 1 || args.items.length > 100) throw new Error("items inválido.");
   const items = args.items.map(item => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Item inválido.");
@@ -314,28 +366,65 @@ function createProposalArgs(args: Record<string, unknown>): Record<string, unkno
     const unitPrice = Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : 0;
     return {
       ...(productId ? { productId } : {}),
-      productName: productName ?? description ?? (productId ? `Produto ${productId}` : "Item Avulso"),
+      productName: productName ?? description ?? (productId ? "Produto " + productId : "Item Avulso"),
       ...(description ? { description } : {}),
       quantity,
       unitPrice,
     };
   });
-  return { ...(clientId ? { clientId } : { clientName }), items, ...(stringArg(args, "notes", { min: 1, max: 4_000, optional: true }) ? { notes: stringArg(args, "notes", { min: 1, max: 4_000, optional: true }) } : {}), ...(stringArg(args, "paymentTerms", { min: 1, max: 500, optional: true }) ? { paymentTerms: stringArg(args, "paymentTerms", { min: 1, max: 500, optional: true }) } : {}) };
+  return { ...(clientId ? { clientId } : { clientName: clientName }), items, ...(stringArg(args, "notes", { min: 1, max: 4_000, optional: true }) ? { notes: stringArg(args, "notes", { min: 1, max: 4_000, optional: true }) } : {}), ...(stringArg(args, "paymentTerms", { min: 1, max: 500, optional: true }) ? { paymentTerms: stringArg(args, "paymentTerms", { min: 1, max: 500, optional: true }) } : {}) };
 }
 
 function proposalStatusArgs(args: Record<string, unknown>): Record<string, unknown> {
-  objectArgs(args); rejectUnknownArgs(args, ["proposalId", "newStatus", "reason", "convertToSale"]);
+  objectArgs(args); rejectUnknownArgs(args, ["proposalId", "orderNumber", "newStatus", "reason", "convertToSale"]);
+  const proposalId = stringArg(args, "proposalId", { min: 1, max: 80, optional: true })
+    ?? stringArg(args, "orderNumber", { min: 1, max: 80, optional: true });
+  if (!proposalId) throw new Error("Informe proposalId ou orderNumber.");
   return {
-    proposalId: stringArg(args, "proposalId", { min: 1, max: 80 })!,
-    newStatus: enumArg(args, "newStatus", ["draft", "negotiation", "approved", "rejected", "expired", "sale", "converted"] as const),
+    proposalId,
+    ...(args.orderNumber ? { orderNumber: stringArg(args, "orderNumber") } : {}),
+    newStatus: enumArg(args, "newStatus", ["draft", "negotiation", "approved", "rejected", "expired", "sale", "converted", "lost"] as const),
     ...(args.convertToSale ? { convertToSale: Boolean(args.convertToSale) } : {}),
     ...(stringArg(args, "reason", { min: 1, max: 500, optional: true }) ? { reason: stringArg(args, "reason", { min: 1, max: 500, optional: true }) } : {}),
   };
 }
 
 function proposalWhatsappArgs(args: Record<string, unknown>): Record<string, unknown> {
-  objectArgs(args); rejectUnknownArgs(args, ["proposalId", "recipientPhone", "customMessage"]);
-  return { proposalId: stringArg(args, "proposalId", { min: 1, max: 80 })!, recipientPhone: stringArg(args, "recipientPhone", { min: 8, max: 40 })!, ...(stringArg(args, "customMessage", { min: 1, max: 2_000, optional: true }) ? { customMessage: stringArg(args, "customMessage", { min: 1, max: 2_000, optional: true }) } : {}) };
+  objectArgs(args); rejectUnknownArgs(args, ["proposalId", "orderNumber", "phone", "recipientPhone", "customMessage"]);
+  const proposalId = stringArg(args, "proposalId", { min: 1, max: 80, optional: true })
+    ?? stringArg(args, "orderNumber", { min: 1, max: 80, optional: true });
+  if (!proposalId) throw new Error("Informe proposalId ou orderNumber.");
+  const phone = stringArg(args, "phone", { min: 8, max: 40, optional: true })
+    ?? stringArg(args, "recipientPhone", { min: 8, max: 40, optional: true });
+  return {
+    proposalId,
+    ...(args.orderNumber ? { orderNumber: stringArg(args, "orderNumber") } : {}),
+    ...(phone ? { phone, recipientPhone: phone } : {}),
+    ...(stringArg(args, "customMessage", { min: 1, max: 2_000, optional: true }) ? { customMessage: stringArg(args, "customMessage", { min: 1, max: 2_000, optional: true }) } : {}),
+  };
+}
+
+function conversationsSummaryArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["status", "search"]);
+  const status = args.status === undefined ? undefined : enumArg(args, "status", ["open", "closed", "all"] as const);
+  const search = stringArg(args, "search", { min: 1, max: 180, optional: true });
+  return { ...(status ? { status } : {}), ...(search ? { search } : {}) };
+}
+
+function extractLeadArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["conversationId", "phone", "search"]);
+  const conversationId = stringArg(args, "conversationId", { min: 1, max: 80, optional: true });
+  const phone = stringArg(args, "phone", { min: 1, max: 40, optional: true });
+  const search = stringArg(args, "search", { min: 1, max: 180, optional: true });
+  return { ...(conversationId ? { conversationId } : {}), ...(phone ? { phone } : {}), ...(search ? { search } : {}) };
+}
+
+function erpProductsArgs(args: Record<string, unknown>): Record<string, unknown> {
+  objectArgs(args); rejectUnknownArgs(args, ["search", "filter", "status"]);
+  const search = stringArg(args, "search", { min: 1, max: 180, optional: true });
+  const filter = stringArg(args, "filter", { min: 1, max: 40, optional: true })
+    ?? stringArg(args, "status", { min: 1, max: 40, optional: true });
+  return { ...(search ? { search } : {}), ...(filter ? { filter } : {}) };
 }
 
 function erpLookupArgs(args: Record<string, unknown>, fields: readonly string[]): Record<string, unknown> {
@@ -358,12 +447,13 @@ function productMutationArgs(args: Record<string, unknown>, update = false): Rec
   if (args.price !== undefined && args.salePrice === undefined) {
     args.salePrice = args.price;
   }
-  rejectUnknownArgs(args, ["name", "sku", "category", "salePrice", "costPrice", "initialStock", "unit", "description", "price"]);
-  const price = (key: string) => { const value = Number(args[key] ?? 0); if (!Number.isFinite(value) || value < 0) throw new Error(`${key} inválido.`); return value; };
+  rejectUnknownArgs(args, ["name", "sku", "category", "salePrice", "costPrice", "initialStock", "minStock", "unit", "description", "price"]);
+  const price = (key: string) => { const value = Number(args[key] ?? 0); if (!Number.isFinite(value) || value < 0) throw new Error(key + " inválido."); return value; };
   const quantity = Number(args.initialStock ?? 0); if (!Number.isFinite(quantity) || quantity < 0) throw new Error("initialStock inválido.");
+  const minStock = Number(args.minStock ?? 0); if (!Number.isFinite(minStock) || minStock < 0) throw new Error("minStock inválido.");
   const unit = args.unit === undefined ? "unit" : enumArg(args, "unit", ["unit", "kg", "liter", "meter"] as const);
-  const sku = stringArg(args, "sku", { min: 1, max: 80, optional: true }) ?? `PRD-${nanoid(8).replace(/[^A-Za-z0-9]/g, "X").toUpperCase()}`;
-  return { name: stringArg(args, "name", { min: 2, max: 180 })!, sku, category: stringArg(args, "category", { min: 1, max: 120, optional: true }), salePrice: price("salePrice"), costPrice: price("costPrice"), initialStock: quantity, unit };
+  const sku = stringArg(args, "sku", { min: 1, max: 80, optional: true }) ?? ("PRD-" + nanoid(8).replace(/[^A-Za-z0-9]/g, "X").toUpperCase());
+  return { name: stringArg(args, "name", { min: 2, max: 180 })!, sku, category: stringArg(args, "category", { min: 1, max: 120, optional: true }), salePrice: price("salePrice"), costPrice: price("costPrice"), initialStock: quantity, minStock, unit };
 }
 const SUPPLIER_OPTIONAL_TEXT_FIELDS = ["tradeName", "stateRegistration", "postalCode", "street", "addressNumber", "addressComplement", "district", "city", "state", "notes"] as const;
 function erpActionArgs(args: Record<string, unknown>, kind: "supplier" | "supplier-update" | "purchase" | "message" | "service" | "service-create" | "link"): Record<string, unknown> {
@@ -374,7 +464,7 @@ function erpActionArgs(args: Record<string, unknown>, kind: "supplier" | "suppli
   }
   const allowed = (kind === "supplier" || kind === "supplier-update")
     ? ["name", "document", "phone", "email", "contactName", ...SUPPLIER_OPTIONAL_TEXT_FIELDS, "fieldsToUpdate", "supplierId", "legalName"]
-    : kind === "purchase" ? ["supplierId", "items", "notes"] : kind === "message" ? ["supplierId", "recipientPhone", "messageText"] : kind === "service" ? ["serviceId", "fieldsToUpdate"] : kind === "service-create" ? ["name", "code", "category", "price", "estimatedCost", "description"] : ["productId", "supplierId"];
+    : kind === "purchase" ? ["supplierId", "supplierName", "items", "notes"] : kind === "message" ? ["supplierId", "recipientPhone", "messageText"] : kind === "service" ? ["serviceId", "fieldsToUpdate"] : kind === "service-create" ? ["name", "code", "category", "price", "defaultPrice", "estimatedCost", "description"] : ["productId", "supplierId"];
   rejectUnknownArgs(args, allowed);
   if (kind === "supplier-update") {
     const rawUpdate: Record<string, unknown> = (args.fieldsToUpdate && typeof args.fieldsToUpdate === "object" && !Array.isArray(args.fieldsToUpdate))
@@ -397,13 +487,50 @@ function erpActionArgs(args: Record<string, unknown>, kind: "supplier" | "suppli
     };
   }
   if (kind === "service-create") {
-    const money = (key: string) => { const value = Number(args[key] ?? 0); if (!Number.isFinite(value) || value < 0) throw new Error(`${key} inválido.`); return value; };
-    return { name: stringArg(args, "name", { min: 2, max: 255 })!, price: money("price"), estimatedCost: money("estimatedCost"), ...(stringArg(args, "code", { min: 1, max: 50, optional: true }) ? { code: stringArg(args, "code", { min: 1, max: 50, optional: true }) } : {}), ...(stringArg(args, "category", { min: 1, max: 100, optional: true }) ? { category: stringArg(args, "category", { min: 1, max: 100, optional: true }) } : {}), ...(stringArg(args, "description", { min: 1, max: 2_000, optional: true }) ? { description: stringArg(args, "description", { min: 1, max: 2_000, optional: true }) } : {}) };
+    const rawPrice = args.defaultPrice !== undefined ? args.defaultPrice : args.price;
+    const money = (val: unknown, key: string) => { const value = Number(val ?? 0); if (!Number.isFinite(value) || value < 0) throw new Error(key + " inválido."); return value; };
+    return {
+      name: stringArg(args, "name", { min: 2, max: 255 })!,
+      price: money(rawPrice, "price"),
+      defaultPrice: money(rawPrice, "defaultPrice"),
+      estimatedCost: money(args.estimatedCost, "estimatedCost"),
+      ...(stringArg(args, "code", { min: 1, max: 50, optional: true }) ? { code: stringArg(args, "code", { min: 1, max: 50, optional: true }) } : {}),
+      ...(stringArg(args, "category", { min: 1, max: 100, optional: true }) ? { category: stringArg(args, "category", { min: 1, max: 100, optional: true }) } : {}),
+      ...(stringArg(args, "description", { min: 0, max: 2_000, optional: true }) ? { description: stringArg(args, "description", { min: 0, max: 2_000, optional: true }) } : {}),
+    };
   }
   if (kind === "link") return { productId: stringArg(args, "productId", { min: 1, max: 80 })!, supplierId: stringArg(args, "supplierId", { min: 1, max: 80 })! };
   if (kind === "service") { if (!args.fieldsToUpdate || typeof args.fieldsToUpdate !== "object" || Array.isArray(args.fieldsToUpdate)) throw new Error("fieldsToUpdate inválido."); return { serviceId: Number(args.serviceId), fieldsToUpdate: args.fieldsToUpdate as Record<string, unknown> }; }
   if (kind === "message") return { supplierId: stringArg(args, "supplierId", { min: 1, max: 80 })!, recipientPhone: stringArg(args, "recipientPhone", { min: 8, max: 40 })!, messageText: stringArg(args, "messageText", { min: 1, max: 2_000 })! };
-  if (kind === "purchase") { if (!Array.isArray(args.items) || !args.items.length || args.items.length > 100) throw new Error("items inválido."); return { supplierId: stringArg(args, "supplierId", { min: 1, max: 80 })!, items: args.items, ...(typeof args.notes === "string" ? { notes: stringArg(args, "notes", { min: 1, max: 4_000 }) } : {}) }; }
+  if (kind === "purchase") {
+    if (!Array.isArray(args.items) || !args.items.length || args.items.length > 100) throw new Error("items inválido.");
+    const supplierId = typeof args.supplierId === "string" ? stringArg(args, "supplierId", { min: 1, max: 80, optional: true }) : undefined;
+    const supplierName = typeof args.supplierName === "string" ? stringArg(args, "supplierName", { min: 1, max: 180, optional: true }) : undefined;
+    if (!supplierId && !supplierName) throw new Error("Informe o ID ou nome do fornecedor.");
+    const items = args.items.map(item => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Item inválido.");
+      const it = item;
+      const productId = typeof it.productId === "string" ? stringArg(it, "productId", { min: 1, max: 80, optional: true }) : undefined;
+      const productName = typeof it.productName === "string" ? stringArg(it, "productName", { min: 1, max: 180, optional: true }) : undefined;
+      if (!productId && !productName) throw new Error("Informe o productId ou productName do item.");
+      const rawQty = Number(it.quantity ?? 1);
+      const quantity = Number.isFinite(rawQty) && rawQty > 0 ? rawQty : 1;
+      const rawCost = Number(it.targetCost ?? 0);
+      const targetCost = Number.isFinite(rawCost) && rawCost >= 0 ? rawCost : 0;
+      return {
+        ...(productId ? { productId } : {}),
+        productName: productName ?? (productId ? "Produto " + productId : "Item"),
+        quantity,
+        targetCost,
+      };
+    });
+    return {
+      ...(supplierId ? { supplierId } : {}),
+      ...(supplierName ? { supplierName } : {}),
+      items,
+      ...(typeof args.notes === "string" ? { notes: stringArg(args, "notes", { min: 1, max: 4_000 }) } : {}),
+    };
+  }
   const update = args.fieldsToUpdate === undefined ? undefined : args.fieldsToUpdate && typeof args.fieldsToUpdate === "object" && !Array.isArray(args.fieldsToUpdate) ? dropEmptyArgs(args.fieldsToUpdate as Record<string, unknown>) : null;
   if (update !== undefined && (!update || !Object.keys(update).length)) throw new Error("fieldsToUpdate inválido.");
   if (update) rejectUnknownArgs(update, ["name", "legalName", "document", "taxId", "phone", "email", "contactName", "tradeName", "notes"]);
@@ -448,14 +575,37 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
     name: "get_tickets_overview",
     type: "READ",
     requiredPermissions: ["tickets", "support"],
-    declaration: { name: "get_tickets_overview", description: "Retorna totais e chamados recentes do tenant; permite filtrar por status e texto.", parameters: { type: "OBJECT", properties: { status: { type: "STRING" }, search: { type: "STRING" }, limit: { type: "INTEGER" } }, required: [] } },
+    declaration: {
+      name: "get_tickets_overview",
+      description: "Retorna métricas consolidadas dos chamados do cliente no sistema (total, abertos, em andamento, pendentes) e lista recente.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          status: { type: "STRING", enum: ["open", "in_progress", "pending", "resolved", "closed"] },
+          search: { type: "STRING", description: "Busca textual em títulos, clientes ou número do chamado formatado" },
+          limit: { type: "INTEGER" }
+        },
+        required: []
+      }
+    },
     validateArgs: ticketOverviewArgs,
   },
   {
     name: "get_ticket_details",
     type: "READ",
     requiredPermissions: ["tickets", "support"],
-    declaration: { name: "get_ticket_details", description: "Retorna dados, responsável, atividades e mensagens de um chamado do tenant.", parameters: { type: "OBJECT", properties: { ticketId: { type: "STRING" }, ticketNumber: { type: "INTEGER" } }, required: [] } },
+    declaration: {
+      name: "get_ticket_details",
+      description: "Retorna a ficha completa de um chamado específico (dados, responsável, timeline e notas).",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          ticketId: { type: "STRING", description: "ID interno do chamado" },
+          ticketNumber: { type: "STRING", description: "Número sequencial visível do chamado (ex: '0003' ou '3')" }
+        },
+        required: []
+      }
+    },
     validateArgs: ticketDetailsArgs,
   },
   {
@@ -463,7 +613,21 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
     type: "MUTATION",
     actionType: "CREATE_TICKET",
     requiredPermissions: ["tickets", "support"],
-    declaration: { name: "create_ticket", description: "Prepara a criação de chamado; só executa após aprovação explícita.", parameters: { type: "OBJECT", properties: { title: { type: "STRING" }, description: { type: "STRING" }, priority: { type: "STRING", enum: ["low", "medium", "high", "urgent"] }, clientNameOuId: { type: "STRING" }, category: { type: "STRING" } }, required: ["title", "description", "priority", "clientNameOuId"] } },
+    declaration: {
+      name: "create_ticket",
+      description: "Abre um novo chamado de suporte mediante aprovação humana.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          customer: { type: "STRING", description: "Nome ou identificador do cliente" },
+          title: { type: "STRING", description: "Assunto do chamado" },
+          description: { type: "STRING", description: "Detalhamento do problema" },
+          priority: { type: "STRING", enum: ["low", "medium", "high", "urgent"] },
+          category: { type: "STRING", description: "Categoria do atendimento" }
+        },
+        required: ["customer", "title"]
+      }
+    },
     validateArgs: createTicketArgs,
   },
   {
@@ -471,7 +635,20 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
     type: "MUTATION",
     actionType: "UPDATE_TICKET_STATUS",
     requiredPermissions: ["tickets", "support"],
-    declaration: { name: "update_ticket_status", description: "Prepara a mudança de status de um chamado; só executa após aprovação explícita.", parameters: { type: "OBJECT", properties: { ticketId: { type: "STRING" }, newStatus: { type: "STRING", enum: ["open", "in_progress", "resolved", "closed"] }, resolutionNotes: { type: "STRING" } }, required: ["ticketId", "newStatus"] } },
+    declaration: {
+      name: "update_ticket_status",
+      description: "Altera o estado de um chamado ou realiza o encerramento; exige aprovação humana.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          ticketNumber: { type: "STRING", description: "Número ou ID do chamado" },
+          ticketId: { type: "STRING", description: "ID interno do chamado" },
+          newStatus: { type: "STRING", enum: ["in_progress", "pending", "resolved", "closed"] },
+          resolutionNote: { type: "STRING", description: "Motivo ou descrição da solução" }
+        },
+        required: ["newStatus"]
+      }
+    },
     validateArgs: updateTicketStatusArgs,
   },
   {
@@ -479,7 +656,21 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
     type: "MUTATION",
     actionType: "ASSIGN_TICKET",
     requiredPermissions: ["tickets", "support"],
-    declaration: { name: "assign_ticket", description: "Prepara o encaminhamento de chamado; só executa após aprovação explícita.", parameters: { type: "OBJECT", properties: { ticketId: { type: "STRING" }, assigneeNameOuId: { type: "STRING" }, transferReason: { type: "STRING" } }, required: ["ticketId", "assigneeNameOuId"] } },
+    declaration: {
+      name: "assign_ticket",
+      description: "Atribui ou transfere o chamado para um operador específico; exige aprovação humana.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          ticketNumber: { type: "STRING", description: "Número ou ID do chamado" },
+          ticketId: { type: "STRING", description: "ID interno do chamado" },
+          operatorName: { type: "STRING", description: "Nome do operador responsável" },
+          operatorId: { type: "STRING", description: "ID do operador" },
+          reason: { type: "STRING", description: "Motivo da transferência" }
+        },
+        required: []
+      }
+    },
     validateArgs: assignTicketArgs,
   },
   {
@@ -490,45 +681,487 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
     declaration: { name: "add_ticket_activity", description: "Prepara uma atividade em chamado; só executa após aprovação explícita.", parameters: { type: "OBJECT", properties: { ticketId: { type: "STRING" }, noteContent: { type: "STRING" }, isInternal: { type: "BOOLEAN" } }, required: ["ticketId", "noteContent"] } },
     validateArgs: addTicketActivityArgs,
   },
-  { name: "get_crm_summary", type: "READ", requiredPermissions: ["crm", "clients"], declaration: { name: "get_crm_summary", description: "Retorna métricas básicas da carteira CRM do tenant.", parameters: { type: "OBJECT", properties: {}, required: [] } }, validateArgs: crmSummaryArgs },
+  {
+    name: "get_crm_summary",
+    type: "READ",
+    requiredPermissions: ["crm", "clients"],
+    declaration: {
+      name: "get_crm_summary",
+      description: "Métricas de volume e funil da base de clientes no período solicitado.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          period: { type: "STRING", enum: ["today", "month", "year"], description: "Período das métricas" }
+        },
+        required: []
+      }
+    },
+    validateArgs: crmSummaryArgs
+  },
   { name: "list_crm_clients", type: "READ", requiredPermissions: ["crm", "clients"], declaration: { name: "list_crm_clients", description: "Lista clientes recentes do CRM ou busca por nome, telefone ou e-mail.", parameters: { type: "OBJECT", properties: { search: { type: "STRING", description: "Nome, telefone ou e-mail (opcional)" }, limit: { type: "INTEGER", description: "Máximo de resultados (1 a 20)" } }, required: [] } }, validateArgs: args => { objectArgs(args); args = dropEmptyArgs(args); rejectUnknownArgs(args, ["search", "limit"]); const search = stringArg(args, "search", { min: 1, max: 180, optional: true }); const limit = optionalLimit(args); return { ...(search ? { search } : {}), ...(limit ? { limit } : {}) }; } },
-  { name: "get_client_360", type: "READ", requiredPermissions: ["crm", "clients"], declaration: { name: "get_client_360", description: "Retorna cadastro, chamados, conversas e timeline de um cliente CRM do tenant.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING" }, search: { type: "STRING" } }, required: [] } }, validateArgs: crmClientLookupArgs },
-  { name: "create_client", type: "MUTATION", actionType: "CREATE_CLIENT", requiredPermissions: ["crm", "clients"], declaration: { name: "create_client", description: "Prepara a criação de cliente CRM; exige aprovação humana.", parameters: { type: "OBJECT", properties: { name: { type: "STRING" }, document: { type: "STRING" }, phone: { type: "STRING" }, email: { type: "STRING" }, notes: { type: "STRING" } }, required: ["name"] } }, validateArgs: createClientArgs },
-  { name: "update_client", type: "MUTATION", actionType: "UPDATE_CLIENT", requiredPermissions: ["crm", "clients"], declaration: { name: "update_client", description: "Prepara atualização de cliente CRM; exige aprovação humana.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING" }, fieldsToUpdate: { type: "OBJECT", description: "Campos a atualizar", properties: { name: { type: "STRING" }, document: { type: "STRING" }, phone: { type: "STRING" }, email: { type: "STRING" }, notes: { type: "STRING" } } } }, required: ["clientId", "fieldsToUpdate"] } }, validateArgs: updateClientArgs },
-  { name: "add_client_timeline_event", type: "MUTATION", actionType: "ADD_CLIENT_TIMELINE", requiredPermissions: ["crm", "clients"], declaration: { name: "add_client_timeline_event", description: "Prepara evento de timeline CRM; exige aprovação humana.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING" }, title: { type: "STRING" }, description: { type: "STRING" }, eventType: { type: "STRING", enum: ["call", "note", "meeting"] } }, required: ["clientId", "title", "description", "eventType"] } }, validateArgs: clientTimelineArgs },
-  { name: "get_proposals_summary", type: "READ", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "get_proposals_summary", description: "Retorna métricas de propostas comerciais do tenant.", parameters: { type: "OBJECT", properties: { status: { type: "STRING" }, sellerId: { type: "STRING" }, period: { type: "STRING" } }, required: [] } }, validateArgs: proposalSummaryArgs },
-  { name: "get_proposal_details", type: "READ", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "get_proposal_details", description: "Retorna proposta, cliente e itens do tenant.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, proposalNumber: { type: "STRING" } }, required: [] } }, validateArgs: proposalDetailsArgs },
-  { name: "create_proposal", type: "MUTATION", actionType: "CREATE_PROPOSAL", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "create_proposal", description: "Prepara proposta comercial; exige aprovação humana.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING", description: "ID do cliente CRM (obtido via get_client_360). Use este OU clientName." }, clientName: { type: "STRING", description: "Nome do cliente CRM; deve identificar um único cliente." }, items: { type: "ARRAY", description: "Itens ou serviços da proposta. Aceita productId de catálogo ou descrição/nome avulso.", items: { type: "OBJECT", properties: { productId: { type: "STRING", description: "ID do produto no catálogo (opcional)" }, productName: { type: "STRING", description: "Nome do produto ou serviço" }, description: { type: "STRING", description: "Descrição do item ou serviço avulso" }, quantity: { type: "NUMBER", description: "Quantidade (padrão 1 se omitido)" }, unitPrice: { type: "NUMBER", description: "Preço unitário em reais (padrão 0 para rascunho se omitido)" } }, required: [] } }, notes: { type: "STRING" }, paymentTerms: { type: "STRING" } }, required: ["items"] } }, validateArgs: createProposalArgs },
-  { name: "update_proposal_status", type: "MUTATION", actionType: "UPDATE_PROPOSAL_STATUS", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "update_proposal_status", description: "Prepara mudança de status comercial ou conversão em venda de uma proposta; exige aprovação humana.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, newStatus: { type: "STRING", enum: ["draft", "negotiation", "approved", "rejected", "expired", "sale", "converted"] }, convertToSale: { type: "BOOLEAN", description: "Se verdadeiro, converte a proposta aprovada diretamente em venda/pedido no ERP." }, reason: { type: "STRING" } }, required: ["proposalId", "newStatus"] } }, validateArgs: proposalStatusArgs },
-  { name: "send_proposal_whatsapp", type: "MUTATION", actionType: "SEND_PROPOSAL_WHATSAPP", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "send_proposal_whatsapp", description: "Prepara envio de proposta por WhatsApp; exige aprovação humana.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, recipientPhone: { type: "STRING" }, customMessage: { type: "STRING" } }, required: ["proposalId", "recipientPhone"] } }, validateArgs: proposalWhatsappArgs },
+  {
+    name: "get_client_360",
+    type: "READ",
+    requiredPermissions: ["crm", "clients"],
+    declaration: {
+      name: "get_client_360",
+      description: "Consulta a visão 360° do cliente em todas as pontas do sistema (chamados, propostas, faturamento, conversas).",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          search: { type: "STRING", description: "Nome, CPF/CNPJ, e-mail ou telefone do cliente" },
+          clientId: { type: "STRING", description: "ID do cliente no CRM" }
+        },
+        required: []
+      }
+    },
+    validateArgs: crmClientLookupArgs
+  },
+  {
+    name: "create_client",
+    type: "MUTATION",
+    actionType: "CREATE_CLIENT",
+    requiredPermissions: ["crm", "clients"],
+    declaration: {
+      name: "create_client",
+      description: "Cadastra novo cliente ou lead comercial; exige aprovação humana.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          name: { type: "STRING", description: "Nome ou razão social" },
+          document: { type: "STRING", description: "CPF ou CNPJ formatado" },
+          phone: { type: "STRING" },
+          email: { type: "STRING" },
+          notes: { type: "STRING" }
+        },
+        required: ["name"]
+      }
+    },
+    validateArgs: createClientArgs
+  },
+  {
+    name: "update_client",
+    type: "MUTATION",
+    actionType: "UPDATE_CLIENT",
+    requiredPermissions: ["crm", "clients"],
+    declaration: {
+      name: "update_client",
+      description: "Atualiza dados cadastrais de contato ou observações do cliente; exige aprovação humana.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          clientId: { type: "STRING", description: "ID do cliente no CRM (opcional se name for informado)" },
+          name: { type: "STRING", description: "Nome do cliente para localizar ou atualizar" },
+          phone: { type: "STRING" },
+          email: { type: "STRING" },
+          notes: { type: "STRING" }
+        },
+        required: []
+      }
+    },
+    validateArgs: updateClientArgs
+  },
+  {
+    name: "add_client_timeline_event",
+    type: "MUTATION",
+    actionType: "ADD_CLIENT_TIMELINE",
+    requiredPermissions: ["crm", "clients"],
+    declaration: {
+      name: "add_client_timeline_event",
+      description: "Registra evento (ligação, visita, alinhamento) na linha do tempo do cliente; exige aprovação humana.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          clientId: { type: "STRING", description: "ID do cliente no CRM (opcional se name for informado)" },
+          name: { type: "STRING", description: "Nome do cliente" },
+          title: { type: "STRING", description: "Título do evento" },
+          description: { type: "STRING", description: "Detalhamento do evento" },
+          eventType: { type: "STRING", enum: ["call", "meeting", "note"] }
+        },
+        required: ["title"]
+      }
+    },
+    validateArgs: clientTimelineArgs
+  },
+  {
+    name: "get_proposals_summary",
+    type: "READ",
+    requiredPermissions: ["sales", "crm", "proposals"],
+    declaration: {
+      name: "get_proposals_summary",
+      description: "Resumo financeiro e contagem das propostas comerciais no sistema.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          status: { type: "STRING", enum: ["draft", "negotiation", "approved", "lost"] },
+          sellerId: { type: "STRING" },
+          period: { type: "STRING" }
+        },
+        required: []
+      }
+    },
+    validateArgs: proposalSummaryArgs
+  },
+  {
+    name: "get_proposal_details",
+    type: "READ",
+    requiredPermissions: ["sales", "crm", "proposals"],
+    declaration: {
+      name: "get_proposal_details",
+      description: "Ficha completa de um orçamento específico por número ou ID.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          orderNumber: { type: "STRING", description: "Número visível do orçamento (ex: 'O-18')" },
+          proposalId: { type: "STRING", description: "ID público da proposta" }
+        },
+        required: []
+      }
+    },
+    validateArgs: proposalDetailsArgs
+  },
+  {
+    name: "create_proposal",
+    type: "MUTATION",
+    actionType: "CREATE_PROPOSAL",
+    requiredPermissions: ["sales", "crm", "proposals"],
+    declaration: {
+      name: "create_proposal",
+      description: "Monta e emite proposta comercial/orçamento; exige aprovação humana.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          clientName: { type: "STRING", description: "Nome do cliente comercial" },
+          clientId: { type: "STRING", description: "ID do cliente no CRM (opcional)" },
+          items: {
+            type: "ARRAY",
+            description: "Itens ou serviços da proposta com quantidade e preço unitário.",
+            items: {
+              type: "OBJECT",
+              properties: {
+                productName: { type: "STRING", description: "Nome do produto ou serviço" },
+                productId: { type: "STRING", description: "ID do produto no catálogo (opcional)" },
+                quantity: { type: "NUMBER", description: "Quantidade" },
+                unitPrice: { type: "NUMBER", description: "Preço unitário em reais" }
+              },
+              required: ["productName", "quantity", "unitPrice"]
+            }
+          },
+          notes: { type: "STRING" },
+          paymentTerms: { type: "STRING" }
+        },
+        required: ["items"]
+      }
+    },
+    validateArgs: createProposalArgs
+  },
+  {
+    name: "update_proposal_status",
+    type: "MUTATION",
+    actionType: "UPDATE_PROPOSAL_STATUS",
+    requiredPermissions: ["sales", "crm", "proposals"],
+    declaration: {
+      name: "update_proposal_status",
+      description: "Altera status da proposta ou converte diretamente em venda no ERP; exige aprovação humana.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          proposalId: { type: "STRING", description: "ID ou número da proposta" },
+          orderNumber: { type: "STRING", description: "Número visível da proposta (ex: 'O-18')" },
+          newStatus: { type: "STRING", enum: ["draft", "negotiation", "approved", "rejected", "expired", "sale", "converted", "lost"] },
+          convertToSale: { type: "BOOLEAN", description: "Converte o orçamento diretamente em venda no ERP" },
+          reason: { type: "STRING" }
+        },
+        required: ["newStatus"]
+      }
+    },
+    validateArgs: proposalStatusArgs
+  },
+  {
+    name: "send_proposal_whatsapp",
+    type: "MUTATION",
+    actionType: "SEND_PROPOSAL_WHATSAPP",
+    requiredPermissions: ["sales", "crm", "proposals"],
+    declaration: {
+      name: "send_proposal_whatsapp",
+      description: "Dispara mensagem formatada com o orçamento para o WhatsApp do cliente; exige aprovação humana.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          orderNumber: { type: "STRING", description: "Número visível do orçamento (ex: 'O-18')" },
+          proposalId: { type: "STRING", description: "ID público da proposta" },
+          phone: { type: "STRING", description: "Telefone do cliente (opcional; obtém do cadastro se omitido)" },
+          customMessage: { type: "STRING", description: "Mensagem personalizada opcional" }
+        },
+        required: []
+      }
+    },
+    validateArgs: proposalWhatsappArgs
+  },
   { name: "get_erp_summary", type: "READ", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "get_erp_summary", description: "Retorna o resumo de produtos, estoque e serviços ativos do tenant.", parameters: { type: "OBJECT", properties: {}, required: [] } }, validateArgs: noArguments },
-  { name: "get_product_details", type: "READ", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "get_product_details", description: "Retorna detalhes de produto por ID público ou SKU.", parameters: { type: "OBJECT", properties: { productId: { type: "STRING" }, sku: { type: "STRING" } }, required: [] } }, validateArgs: args => { const value = erpLookupArgs(args, ["productId", "sku"]); if ((value.productId ? 1 : 0) + (value.sku ? 1 : 0) !== 1) throw new Error("Informe exatamente productId ou sku."); return value; } },
-  { name: "get_inventory_status", type: "READ", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "get_inventory_status", description: "Consulta saldos por status de estoque ou busca textual.", parameters: { type: "OBJECT", properties: { status: { type: "STRING" }, search: { type: "STRING" } }, required: [] } }, validateArgs: args => { objectArgs(args); rejectUnknownArgs(args, ["status", "search"]); const value: Record<string, unknown> = {}; if (typeof args.search === "string") value.search = stringArg(args, "search", { min: 1, max: 180 }); if (args.status !== undefined) value.status = enumArg(args, "status", ["empty", "low", "regular"] as const); return value; } },
-  { name: "create_product", type: "MUTATION", actionType: "CREATE_PRODUCT", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "create_product", description: "Prepara criação de produto; exige aprovação humana.", parameters: { type: "OBJECT", properties: { name: { type: "STRING" }, sku: { type: "STRING" }, category: { type: "STRING" }, salePrice: { type: "NUMBER" }, costPrice: { type: "NUMBER" }, initialStock: { type: "NUMBER" }, unit: { type: "STRING" } }, required: ["name"] } }, validateArgs: args => productMutationArgs(args) },
+  {
+    name: "get_product_details",
+    type: "READ",
+    requiredPermissions: ["products", "inventory", "erp"],
+    declaration: {
+      name: "get_product_details",
+      description: "Ficha técnica completa de produto por ID ou SKU.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          productId: { type: "STRING" },
+          sku: { type: "STRING" }
+        },
+        required: []
+      }
+    },
+    validateArgs: args => { const value = erpLookupArgs(args, ["productId", "sku"]); if ((value.productId ? 1 : 0) + (value.sku ? 1 : 0) !== 1) throw new Error("Informe exatamente productId ou sku."); return value; }
+  },
+  {
+    name: "get_inventory_status",
+    type: "READ",
+    requiredPermissions: ["products", "inventory", "erp"],
+    declaration: {
+      name: "get_inventory_status",
+      description: "Consulta saldos por status de estoque ou busca textual.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          status: { type: "STRING" },
+          search: { type: "STRING" }
+        },
+        required: []
+      }
+    },
+    validateArgs: args => { objectArgs(args); rejectUnknownArgs(args, ["status", "search"]); const value: Record<string, unknown> = {}; if (typeof args.search === "string") value.search = stringArg(args, "search", { min: 1, max: 180 }); if (args.status !== undefined) value.status = enumArg(args, "status", ["empty", "low", "regular"] as const); return value; }
+  },
+  {
+    name: "create_product",
+    type: "MUTATION",
+    actionType: "CREATE_PRODUCT",
+    requiredPermissions: ["products", "inventory", "erp"],
+    declaration: {
+      name: "create_product",
+      description: "Cadastra novo produto físico no catálogo; exige aprovação humana.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          name: { type: "STRING", description: "Nome do produto (obrigatório)" },
+          sku: { type: "STRING", description: "Código SKU (opcional, gerado automaticamente)" },
+          salePrice: { type: "NUMBER", description: "Preço de venda em reais" },
+          costPrice: { type: "NUMBER", description: "Preço de custo em reais" },
+          initialStock: { type: "NUMBER", description: "Estoque inicial" },
+          minStock: { type: "NUMBER", description: "Estoque mínimo" },
+          unit: { type: "STRING" }
+        },
+        required: ["name"]
+      }
+    },
+    validateArgs: args => productMutationArgs(args)
+  },
   { name: "update_product", type: "MUTATION", actionType: "UPDATE_PRODUCT", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "update_product", description: "Prepara atualização de produto; exige aprovação humana.", parameters: { type: "OBJECT", properties: { productId: { type: "STRING" }, fieldsToUpdate: { type: "OBJECT", description: "Campos a atualizar", properties: { name: { type: "STRING" }, sku: { type: "STRING" }, barcode: { type: "STRING" }, description: { type: "STRING" }, category: { type: "STRING" }, categoryPublicId: { type: "STRING" }, brandPublicId: { type: "STRING" }, unit: { type: "STRING" }, costPriceCents: { type: "NUMBER" }, salePriceCents: { type: "NUMBER" }, minimumStock: { type: "NUMBER" } } } }, required: ["productId", "fieldsToUpdate"] } }, validateArgs: args => productMutationArgs(args, true) },
   { name: "link_product_supplier", type: "MUTATION", actionType: "LINK_PRODUCT_SUPPLIER", requiredPermissions: ["products", "suppliers", "erp"], declaration: { name: "link_product_supplier", description: "Prepara vínculo de fornecedor ao produto; exige aprovação humana.", parameters: { type: "OBJECT", properties: { productId: { type: "STRING" }, supplierId: { type: "STRING" } }, required: ["productId", "supplierId"] } }, validateArgs: args => erpActionArgs(args, "link") },
-  { name: "get_services_list", type: "READ", requiredPermissions: ["services", "erp"], declaration: { name: "get_services_list", description: "Lista serviços, valores e status do tenant.", parameters: { type: "OBJECT", properties: { search: { type: "STRING" } }, required: [] } }, validateArgs: args => erpLookupArgs(args, ["search"]) },
+  {
+    name: "get_services_list",
+    type: "READ",
+    requiredPermissions: ["services", "erp"],
+    declaration: {
+      name: "get_services_list",
+      description: "Consulta a lista de serviços e mão de obra disponíveis no catálogo.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          search: { type: "STRING", description: "Busca por descrição ou nome de serviço" }
+        },
+        required: []
+      }
+    },
+    validateArgs: args => erpLookupArgs(args, ["search"])
+  },
   { name: "update_service", type: "MUTATION", actionType: "UPDATE_SERVICE", requiredPermissions: ["services", "erp"], declaration: { name: "update_service", description: "Prepara atualização de serviço; exige aprovação humana.", parameters: { type: "OBJECT", properties: { serviceId: { type: "INTEGER" }, fieldsToUpdate: { type: "OBJECT", description: "Campos a atualizar", properties: { name: { type: "STRING" }, code: { type: "STRING" }, category: { type: "STRING" }, price: { type: "NUMBER" }, estimatedCost: { type: "NUMBER" }, isActive: { type: "BOOLEAN" } } } }, required: ["serviceId", "fieldsToUpdate"] } }, validateArgs: args => erpActionArgs(args, "service") },
-  { name: "create_service", type: "MUTATION", actionType: "CREATE_SERVICE", requiredPermissions: ["services", "erp"], declaration: { name: "create_service", description: "Prepara o cadastro simplificado de um serviço no catálogo; exige apenas o nome (preço opcional, padrão 0). Exige aprovação humana.", parameters: { type: "OBJECT", properties: { name: { type: "STRING", description: "Nome do serviço (obrigatório)" }, price: { type: "NUMBER", description: "Preço em reais" }, estimatedCost: { type: "NUMBER" }, code: { type: "STRING" }, category: { type: "STRING" }, description: { type: "STRING" } }, required: ["name"] } }, validateArgs: args => erpActionArgs(args, "service-create") },
+  {
+    name: "create_service",
+    type: "MUTATION",
+    actionType: "CREATE_SERVICE",
+    requiredPermissions: ["services", "erp"],
+    declaration: {
+      name: "create_service",
+      description: "Cadastra novo serviço no catálogo do ERP; exige aprovação humana.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          name: { type: "STRING", description: "Nome do serviço (obrigatório)" },
+          defaultPrice: { type: "NUMBER", description: "Preço padrão em reais" },
+          description: { type: "STRING", description: "Descrição do serviço" }
+        },
+        required: ["name"]
+      }
+    },
+    validateArgs: args => erpActionArgs(args, "service-create")
+  },
   { name: "get_sales_analytics", type: "READ", requiredPermissions: ["sales", "erp"], declaration: { name: "get_sales_analytics", description: "Retorna faturamento, pedidos e ticket médio no período solicitado.", parameters: { type: "OBJECT", properties: { period: { type: "STRING" }, startDate: { type: "STRING" }, endDate: { type: "STRING" } }, required: [] } }, validateArgs: args => { objectArgs(args); rejectUnknownArgs(args, ["period", "startDate", "endDate"]); const period = args.period === undefined ? "month" : enumArg(args, "period", ["today", "week", "month", "custom"] as const); const result: Record<string, unknown> = { period }; if (period === "custom") { result.startDate = stringArg(args, "startDate", { min: 10, max: 10 })!; result.endDate = stringArg(args, "endDate", { min: 10, max: 10 })!; } return result; } },
-  { name: "get_suppliers_list", type: "READ", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "get_suppliers_list", description: "Busca fornecedores por nome, documento ou segmento.", parameters: { type: "OBJECT", properties: { search: { type: "STRING" } }, required: [] } }, validateArgs: args => erpLookupArgs(args, ["search"]) },
-  { name: "create_supplier", type: "MUTATION", actionType: "CREATE_SUPPLIER", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "create_supplier", description: "Prepara o cadastro ágil de fornecedor; exige apenas o nome, os demais dados são opcionais. Exige aprovação humana.", parameters: { type: "OBJECT", properties: { name: { type: "STRING", description: "Nome ou razão social (obrigatório)" }, document: { type: "STRING", description: "CPF/CNPJ (opcional)" }, phone: { type: "STRING" }, email: { type: "STRING" }, contactName: { type: "STRING" }, tradeName: { type: "STRING" }, stateRegistration: { type: "STRING" }, postalCode: { type: "STRING" }, street: { type: "STRING" }, addressNumber: { type: "STRING" }, addressComplement: { type: "STRING" }, district: { type: "STRING" }, city: { type: "STRING" }, state: { type: "STRING" }, notes: { type: "STRING" } }, required: ["name"] } }, validateArgs: args => erpActionArgs(args, "supplier") },
-  { name: "update_supplier", type: "MUTATION", actionType: "UPDATE_SUPPLIER", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "update_supplier", description: "Prepara a atualização de dados de fornecedor (telefone, e-mail, observações, etc.); localiza por nome ou supplierId. Exige aprovação humana.", parameters: { type: "OBJECT", properties: { supplierId: { type: "STRING", description: "ID público do fornecedor (opcional se name for informado)" }, name: { type: "STRING", description: "Nome ou razão social do fornecedor para localizar ou atualizar" }, phone: { type: "STRING", description: "Novo telefone do fornecedor" }, email: { type: "STRING", description: "Novo e-mail do fornecedor" }, contactName: { type: "STRING", description: "Nome do contato no fornecedor" }, notes: { type: "STRING", description: "Anotações ou observações" }, fieldsToUpdate: { type: "OBJECT", description: "Campos a atualizar (opcional caso campos sejam informados diretamente)", properties: { name: { type: "STRING" }, legalName: { type: "STRING" }, document: { type: "STRING" }, taxId: { type: "STRING" }, phone: { type: "STRING" }, email: { type: "STRING" }, contactName: { type: "STRING" }, tradeName: { type: "STRING" }, notes: { type: "STRING" } } } }, required: [] } }, validateArgs: args => erpActionArgs(args, "supplier-update") },
-  { name: "request_purchase_order", type: "MUTATION", actionType: "REQUEST_PURCHASE", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "request_purchase_order", description: "Prepara pedido de compra; exige aprovação humana.", parameters: { type: "OBJECT", properties: { supplierId: { type: "STRING" }, items: { type: "ARRAY", description: "Itens do pedido de compra", items: { type: "OBJECT", properties: { productId: { type: "STRING", description: "ID público do produto" }, quantity: { type: "NUMBER" }, targetCost: { type: "NUMBER", description: "Custo alvo unitário em reais" } }, required: ["productId", "quantity", "targetCost"] } }, notes: { type: "STRING" } }, required: ["supplierId", "items"] } }, validateArgs: args => erpActionArgs(args, "purchase") },
+  {
+    name: "get_suppliers_list",
+    type: "READ",
+    requiredPermissions: ["suppliers", "purchases", "erp"],
+    declaration: {
+      name: "get_suppliers_list",
+      description: "Consulta os fornecedores homologados da empresa por nome, razão social ou CNPJ.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          search: { type: "STRING", description: "Nome fantasia, razão social ou CNPJ" }
+        },
+        required: []
+      }
+    },
+    validateArgs: args => erpLookupArgs(args, ["search"])
+  },
+  {
+    name: "create_supplier",
+    type: "MUTATION",
+    actionType: "CREATE_SUPPLIER",
+    requiredPermissions: ["suppliers", "purchases", "erp"],
+    declaration: {
+      name: "create_supplier",
+      description: "Cadastro rápido de fornecedor; exige apenas o nome, os demais dados são opcionais. Exige aprovação humana.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          name: { type: "STRING", description: "Nome ou razão social (obrigatório)" },
+          document: { type: "STRING", description: "CPF ou CNPJ formatado (opcional)" },
+          phone: { type: "STRING" },
+          email: { type: "STRING" },
+          contactName: { type: "STRING" },
+          notes: { type: "STRING" }
+        },
+        required: ["name"]
+      }
+    },
+    validateArgs: args => erpActionArgs(args, "supplier")
+  },
+  {
+    name: "update_supplier",
+    type: "MUTATION",
+    actionType: "UPDATE_SUPPLIER",
+    requiredPermissions: ["suppliers", "purchases", "erp"],
+    declaration: {
+      name: "update_supplier",
+      description: "Atualiza dados cadastrais de fornecedor existente (telefone, e-mail, contato, notas); localiza por nome ou supplierId. Exige aprovação humana.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          supplierId: { type: "STRING", description: "ID público do fornecedor" },
+          name: { type: "STRING", description: "Nome ou razão social do fornecedor para localizar" },
+          phone: { type: "STRING" },
+          email: { type: "STRING" },
+          contactName: { type: "STRING" },
+          notes: { type: "STRING" },
+          fieldsToUpdate: {
+            type: "OBJECT",
+            description: "Campos de contato para atualização",
+            properties: {
+              phone: { type: "STRING" },
+              email: { type: "STRING" },
+              contactName: { type: "STRING" },
+              notes: { type: "STRING" }
+            }
+          }
+        },
+        required: []
+      }
+    },
+    validateArgs: args => erpActionArgs(args, "supplier-update")
+  },
+  {
+    name: "request_purchase_order",
+    type: "MUTATION",
+    actionType: "REQUEST_PURCHASE",
+    requiredPermissions: ["suppliers", "purchases", "erp"],
+    declaration: {
+      name: "request_purchase_order",
+      description: "Gera solicitação/ordem de compra para reposição de mercadoria; exige aprovação humana.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          supplierName: { type: "STRING", description: "Nome do fornecedor" },
+          supplierId: { type: "STRING", description: "ID do fornecedor (opcional se supplierName informado)" },
+          items: {
+            type: "ARRAY",
+            description: "Itens da solicitação de compra",
+            items: {
+              type: "OBJECT",
+              properties: {
+                productName: { type: "STRING", description: "Nome do produto" },
+                productId: { type: "STRING", description: "ID público do produto (opcional)" },
+                quantity: { type: "NUMBER", description: "Quantidade" },
+                targetCost: { type: "NUMBER", description: "Custo alvo unitário em reais" }
+              },
+              required: ["quantity"]
+            }
+          },
+          notes: { type: "STRING" }
+        },
+        required: ["items"]
+      }
+    },
+    validateArgs: args => erpActionArgs(args, "purchase")
+  },
   { name: "send_supplier_message", type: "MUTATION", actionType: "SEND_SUPPLIER_MESSAGE", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "send_supplier_message", description: "Prepara mensagem a fornecedor; exige aprovação humana.", parameters: { type: "OBJECT", properties: { supplierId: { type: "STRING" }, recipientPhone: { type: "STRING" }, messageText: { type: "STRING" } }, required: ["supplierId", "recipientPhone", "messageText"] } }, validateArgs: args => erpActionArgs(args, "message") },
   {
     name: "get_conversations_summary",
     type: "READ",
     requiredPermissions: ["conversations", "chat"],
-    declaration: { name: "get_conversations_summary", description: "Retorna o resumo de conversas dos últimos 7 dias, incluindo abertas e fechadas.", parameters: { type: "OBJECT", properties: {}, required: [] } },
-    validateArgs: noArguments,
+    declaration: {
+      name: "get_conversations_summary",
+      description: "Consulta atendimentos e conversas recentes do WhatsApp.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          status: { type: "STRING", enum: ["open", "closed", "all"] },
+          search: { type: "STRING", description: "Nome do contato ou telefone" }
+        },
+        required: []
+      }
+    },
+    validateArgs: conversationsSummaryArgs,
+  },
+  {
+    name: "extract_lead_from_conversation",
+    type: "READ",
+    requiredPermissions: ["conversations", "chat", "crm"],
+    declaration: {
+      name: "extract_lead_from_conversation",
+      description: "Analisa histórico recente de chat e extrai dados cadastrais de cliente (nome, documento, veículo, serviços solicitados) para geração direta de orçamentos.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          conversationId: { type: "STRING", description: "ID da conversa" },
+          phone: { type: "STRING", description: "Telefone do contato" },
+          search: { type: "STRING", description: "Nome do contato ou telefone" }
+        },
+        required: []
+      }
+    },
+    validateArgs: extractLeadArgs,
   },
   {
     name: "get_erp_products",
     type: "READ",
     requiredPermissions: ["products", "erp"],
-    declaration: { name: "get_erp_products", description: "Retorna a lista de produtos cadastrados no ERP do cliente com estoque.", parameters: { type: "OBJECT", properties: {}, required: [] } },
-    validateArgs: noArguments,
+    declaration: {
+      name: "get_erp_products",
+      description: "Consulta catálogo e saldos de produtos físicos em estoque.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          search: { type: "STRING", description: "Nome ou SKU do item" },
+          filter: { type: "STRING", enum: ["all", "out_of_stock", "low_stock"] }
+        },
+        required: []
+      }
+    },
+    validateArgs: erpProductsArgs,
   },
   {
     name: "web_search",
@@ -573,7 +1206,10 @@ export function summarizePendingAction(actionType: HermesActionType, args: Recor
   }
   if (actionType === "CREATE_PRODUCT") return `Cadastrar o produto "${name}".`;
   if (actionType === "CREATE_SERVICE") return `Cadastrar o serviço "${name}".`;
-  if (actionType === "CREATE_TICKET") return `Abrir o chamado "${String(args.title ?? "")}".`;
+  if (actionType === "CREATE_TICKET") {
+    const cust = args.customer ? ` para ${String(args.customer)}` : "";
+    return `Abrir o chamado "${String(args.title ?? "")}"${cust}.`;
+  }
   if (actionType === "UPDATE_PROPOSAL_STATUS") {
     const isSale = args.newStatus === "sale" || args.newStatus === "converted" || Boolean(args.convertToSale);
     if (isSale) return `Aprovar e converter a proposta ${String(args.proposalId ?? "")} em venda no ERP.`;
@@ -1161,13 +1797,15 @@ export async function executeClientFunction(
     const where = ["clientId = ?"];
     const values: unknown[] = [clientId];
     if (filters.status) {
+      const statusMap: Record<string, string> = { resolved: "closed", pending: "waiting" };
+      const normalizedStatus = statusMap[filters.status] ?? filters.status;
       where.push("status = ?");
-      values.push(filters.status);
+      values.push(normalizedStatus);
     }
     if (filters.search) {
-      where.push("(title LIKE ? OR customerName LIKE ? OR company LIKE ? OR CAST(chamadoNumber AS CHAR) LIKE ?)");
+      where.push("(title LIKE ? OR customerName LIKE ? OR company LIKE ? OR CAST(chamadoNumber AS CHAR) LIKE ? OR LPAD(CAST(chamadoNumber AS CHAR), 4, '0') LIKE ?)");
       const query = `%${filters.search}%`;
-      values.push(query, query, query, query);
+      values.push(query, query, query, query, query);
     }
     const [totalsRows] = await pool.execute(
       `SELECT COUNT(*) AS total,
@@ -1179,18 +1817,37 @@ export async function executeClientFunction(
       values,
     ) as any[];
     const [recentRows] = await pool.execute(
-      `SELECT chamadoId, chamadoNumber, title, customerName, company, status, priority, assignedTo, updatedAt
+      `SELECT chamadoId, chamadoNumber, title, customerName, company, status, priority, assignedTo, createdAt, updatedAt
          FROM megadesk_domain_chamados WHERE ${where.join(" AND ")}
         ORDER BY updatedAt DESC, chamadoNumber DESC LIMIT ?`,
       [...values, filters.limit ?? 10],
     ) as any[];
-    return JSON.stringify({ resumo: totalsRows[0] ?? { total: 0, open: 0, in_progress: 0, waiting: 0, closed: 0 }, chamados: recentRows });
+    const totals = totalsRows[0] ?? { total: 0, open: 0, in_progress: 0, waiting: 0, closed: 0 };
+    const tickets = (Array.isArray(recentRows) ? recentRows : []).map(r => ({
+      id: r.chamadoId,
+      ticketNumber: r.chamadoNumber,
+      title: r.title,
+      customer: r.customerName || r.company || "",
+      status: r.status,
+      priority: r.priority,
+      createdAt: r.createdAt || r.updatedAt,
+    }));
+    return JSON.stringify({
+      total: Number(totals.total ?? 0),
+      open: Number(totals.open ?? 0),
+      inProgress: Number(totals.in_progress ?? 0),
+      pending: Number(totals.waiting ?? 0),
+      tickets,
+      resumo: totals,
+      chamados: recentRows,
+    });
   }
 
   if (functionName === "get_ticket_details") {
-    const selector = validatedArgs as { ticketId?: string; ticketNumber?: number };
-    const predicate = selector.ticketId ? "chamadoId = ?" : "chamadoNumber = ?";
-    const value = selector.ticketId ?? selector.ticketNumber;
+    const selector = validatedArgs as { ticketId?: string; ticketNumber?: number | string };
+    const num = selector.ticketNumber !== undefined && !isNaN(Number(selector.ticketNumber)) ? Number(selector.ticketNumber) : undefined;
+    const predicate = num !== undefined ? "chamadoNumber = ?" : "chamadoId = ?";
+    const value = num !== undefined ? num : (selector.ticketId ?? selector.ticketNumber);
     const [ticketRows] = await pool.execute(
       `SELECT chamadoId, chamadoNumber, customerId, customerName, company, title, observations, status, priority, assignedTo, assigned_to_user_id AS assignedToUserId, createdAt, updatedAt
          FROM megadesk_domain_chamados WHERE clientId = ? AND ${predicate} LIMIT 1`,
@@ -1207,10 +1864,40 @@ export async function executeClientFunction(
         WHERE client_id = ? AND chamado_id = ? ORDER BY created_at DESC, activity_id DESC LIMIT 50`,
       [clientId, ticket.chamadoId],
     ) as any[];
-    return JSON.stringify({ chamado: ticket, atividades: activityRows });
+    const actList = Array.isArray(activityRows) ? activityRows : [];
+    const timeline = actList.map(r => ({
+      date: r.createdAt,
+      action: r.description,
+      author: r.attendant,
+    }));
+    const notes = actList
+      .filter(r => r.actionType === "note" || String(r.description).startsWith("[Nota"))
+      .map(r => String(r.description));
+    return JSON.stringify({
+      id: ticket.chamadoId,
+      ticketNumber: ticket.chamadoNumber,
+      title: ticket.title,
+      description: ticket.observations,
+      customer: ticket.customerName || ticket.company || "",
+      status: ticket.status,
+      priority: ticket.priority,
+      assignedOperator: ticket.assignedTo || "",
+      timeline,
+      notes,
+      chamado: ticket,
+      atividades: actList,
+    });
   }
 
   if (functionName === "get_crm_summary") {
+    const filters = (validatedArgs ?? {}) as { period?: string };
+    const period = filters.period || "month";
+    const periodClause = period === "today"
+      ? "DATE(created_at) = CURDATE()"
+      : period === "year"
+      ? "created_at >= DATE_FORMAT(CURDATE(), '%Y-01-01')"
+      : "created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')";
+
     const [rows] = await pool.execute(
       `SELECT COUNT(*) AS total,
               SUM(lifecycle_state = 'active') AS active,
@@ -1220,18 +1907,39 @@ export async function executeClientFunction(
         WHERE client_id = ? AND lifecycle_state <> 'archived'`,
       [clientId],
     ) as any[];
-    const [newRows] = await pool.execute(
+    const [periodLeadsRows] = await pool.execute(
       `SELECT COUNT(*) AS total FROM megadesk_crm_clients
-        WHERE client_id = ? AND lifecycle_state <> 'archived' AND created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')`,
+        WHERE client_id = ? AND lifecycle_state <> 'archived' AND status = 'lead' AND ${periodClause}`,
       [clientId],
     ) as any[];
+    const [statusRows] = await pool.execute(
+      `SELECT status, COUNT(*) AS cnt FROM megadesk_crm_clients
+        WHERE client_id = ? AND lifecycle_state <> 'archived' GROUP BY status`,
+      [clientId],
+    ) as any[];
+    const statusDistribution: Record<string, number> = {};
+    if (Array.isArray(statusRows)) {
+      for (const sr of statusRows) {
+        if (sr.status) statusDistribution[sr.status] = Number(sr.cnt ?? 0);
+      }
+    }
     const [latestRows] = await pool.execute(
       `SELECT crm_client_id AS crmClientId, company_name AS name, phone, email, created_at AS createdAt
          FROM megadesk_crm_clients WHERE client_id = ? AND lifecycle_state <> 'archived'
         ORDER BY created_at DESC LIMIT 5`,
       [clientId],
     ) as any[];
-    return JSON.stringify({ resumo: { ...(rows[0] ?? { total: 0, active: 0, inactive: 0, leads: 0 }), newThisMonth: newRows[0]?.total ?? 0 }, ultimosClientes: latestRows });
+    const totalClients = Number(rows[0]?.total ?? 0);
+    const activeCustomersCount = Number(rows[0]?.active ?? 0);
+    const newLeadsCount = Number(periodLeadsRows[0]?.total ?? rows[0]?.leads ?? 0);
+    return JSON.stringify({
+      totalClients,
+      newLeadsCount,
+      activeCustomersCount,
+      statusDistribution,
+      resumo: { ...(rows[0] ?? { total: 0, active: 0, inactive: 0, leads: 0 }), newThisMonth: newLeadsCount },
+      ultimosClientes: latestRows,
+    });
   }
 
   if (functionName === "list_crm_clients") {
@@ -1255,12 +1963,16 @@ export async function executeClientFunction(
 
   if (functionName === "get_client_360") {
     const lookup = validatedArgs as { clientId?: string; search?: string };
-    const predicate = lookup.clientId ? "crm_client_id = ?" : "(company_name LIKE ? OR phone LIKE ? OR email LIKE ?)";
+    const predicate = lookup.clientId
+      ? "crm_client_id = ?"
+      : "(company_name LIKE ? OR responsible_name LIKE ? OR phone LIKE ? OR email LIKE ? OR cpf_cnpj LIKE ?)";
     const lookupValue = lookup.clientId ?? `%${lookup.search}%`;
-    const clientValues = lookup.clientId ? [clientId, lookupValue] : [clientId, lookupValue, lookupValue, lookupValue];
+    const clientValues = lookup.clientId
+      ? [clientId, lookupValue]
+      : [clientId, lookupValue, lookupValue, lookupValue, lookupValue, lookupValue];
     const [clientRows] = await pool.execute(
       `SELECT crm_client_id AS crmClientId, company_name AS name, responsible_name AS responsibleName,
-              phone, whatsapp, email, status, lifecycle_state AS lifecycleState, observations, created_at AS createdAt, updated_at AS updatedAt
+              cpf_cnpj AS cpfCnpj, phone, whatsapp, email, status, lifecycle_state AS lifecycleState, observations, created_at AS createdAt, updated_at AS updatedAt
          FROM megadesk_crm_clients
         WHERE client_id = ? AND lifecycle_state <> 'archived' AND ${predicate}
         ORDER BY updated_at DESC LIMIT 1`,
@@ -1290,43 +2002,105 @@ export async function executeClientFunction(
     const [conversationRows] = await pool.execute(
       `SELECT conversation_id AS conversationId, status, last_message AS lastMessage, updated_at AS updatedAt
          FROM megadesk_domain_conversations
-        WHERE client_id = ? AND crm_client_id = ? ORDER BY updated_at DESC LIMIT 20`,
+        WHERE client_id = ? AND (customer_name = ? OR phone = ? OR phone = ?) ORDER BY updated_at DESC LIMIT 20`,
+      [clientId, crmClient.name, crmClient.phone, crmClient.whatsapp],
+    ) as any[];
+    const [proposalRows] = await pool.execute(
+      `SELECT COUNT(*) AS activeCount FROM erp_sale_orders
+        WHERE client_id = ? AND crm_client_id = ? AND document_type = 'quote' AND commercial_status IN ('draft', 'negotiation')`,
       [clientId, crmClient.crmClientId],
     ) as any[];
-    return JSON.stringify({ cliente: crmClient, timeline: timelineRows, chamados: ticketRows, conversas: conversationRows });
+    const [saleRows] = await pool.execute(
+      `SELECT COUNT(*) AS saleCount FROM erp_sale_orders
+        WHERE client_id = ? AND crm_client_id = ? AND document_type = 'sale' AND status <> 'cancelled'`,
+      [clientId, crmClient.crmClientId],
+    ) as any[];
+    const openTicketsCount = (Array.isArray(ticketRows) ? ticketRows : []).filter(t => t.status === "open" || t.status === "in_progress" || t.status === "waiting").length;
+    const activeProposalsCount = Number(proposalRows?.[0]?.activeCount ?? 0);
+    const totalPurchasesCount = Number(saleRows?.[0]?.saleCount ?? 0);
+    const lastInteractions = [
+      ...(Array.isArray(timelineRows) ? timelineRows.map(t => `${t.type}: ${t.description}`) : []),
+      ...(Array.isArray(conversationRows) ? conversationRows.map(c => `WhatsApp: ${c.lastMessage}`) : []),
+    ].slice(0, 5);
+
+    return JSON.stringify({
+      found: true,
+      client: {
+        id: crmClient.crmClientId,
+        name: crmClient.name,
+        document: crmClient.cpfCnpj ?? "",
+        phone: crmClient.phone ?? "",
+        email: crmClient.email ?? "",
+        status: crmClient.status ?? "active",
+        openTickets: openTicketsCount,
+        activeProposals: activeProposalsCount,
+        totalPurchases: totalPurchasesCount,
+        lastInteractions,
+      },
+      cliente: crmClient,
+      timeline: timelineRows,
+      chamados: ticketRows,
+      conversas: conversationRows,
+    });
   }
 
   if (functionName === "get_proposals_summary") {
     const filters = validatedArgs as { status?: string; sellerId?: string; period?: string };
-    const where = ["client_id = ?", "document_type = 'quote'"];
+    const where = ["o.client_id = ?", "o.document_type = 'quote'"];
     const values: unknown[] = [clientId];
-    if (filters.status) { where.push("commercial_status = ?"); values.push(filters.status); }
-    if (filters.sellerId) { where.push("seller_user_id = ?"); values.push(filters.sellerId); }
-    if (filters.period) { where.push("created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)"); values.push(Number(filters.period)); }
+    if (filters.status) { where.push("o.commercial_status = ?"); values.push(filters.status); }
+    if (filters.sellerId) { where.push("o.seller_user_id = ?"); values.push(filters.sellerId); }
+    if (filters.period) { where.push("o.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)"); values.push(Number(filters.period)); }
     const [rows] = await pool.execute(
-      `SELECT COUNT(*) AS total, COALESCE(SUM(total_cents), 0) AS totalCents,
-              SUM(commercial_status = 'draft') AS drafts, SUM(commercial_status = 'negotiation') AS negotiation,
-              SUM(commercial_status = 'approved') AS approved, SUM(commercial_status = 'lost') AS lost
-         FROM erp_sale_orders WHERE ${where.join(" AND ")}`,
+      `SELECT COUNT(*) AS total, COALESCE(SUM(o.total_cents), 0) AS totalCents,
+              SUM(o.commercial_status = 'draft') AS drafts, SUM(o.commercial_status = 'negotiation') AS negotiation,
+              SUM(o.commercial_status = 'approved') AS approved, SUM(o.commercial_status = 'lost') AS lost
+         FROM erp_sale_orders o WHERE ${where.join(" AND ")}`,
       values,
     ) as any[];
-    return JSON.stringify({ resumo: rows[0] ?? { total: 0, totalCents: 0, drafts: 0, negotiation: 0, approved: 0, lost: 0 } });
+    const [proposalListRows] = await pool.execute(
+      `SELECT o.public_id AS id, o.order_number AS orderNumber, c.company_name AS clientName,
+              o.total_cents AS totalCents, o.commercial_status AS status, o.created_at AS createdAt
+         FROM erp_sale_orders o
+         LEFT JOIN megadesk_crm_clients c ON c.crm_client_id = o.crm_client_id AND c.client_id = o.client_id
+        WHERE ${where.join(" AND ")} ORDER BY o.created_at DESC LIMIT 50`,
+      values,
+    ) as any[];
+    const resumo = rows[0] ?? { total: 0, totalCents: 0, drafts: 0, negotiation: 0, approved: 0, lost: 0 };
+    const proposals = (Array.isArray(proposalListRows) ? proposalListRows : []).map(p => ({
+      id: p.id,
+      orderNumber: p.orderNumber,
+      clientName: p.clientName || "Cliente",
+      totalValue: Number(p.totalCents ?? 0) / 100,
+      status: p.status,
+      createdAt: p.createdAt,
+    }));
+    return JSON.stringify({
+      total: Number(resumo.total ?? 0),
+      totalValue: Number(resumo.totalCents ?? 0) / 100,
+      draftCount: Number(resumo.drafts ?? 0),
+      negotiationCount: Number(resumo.negotiation ?? 0),
+      approvedCount: Number(resumo.approved ?? 0),
+      proposals,
+      resumo,
+    });
   }
 
   if (functionName === "get_proposal_details") {
-    const lookup = validatedArgs as { proposalId?: string; proposalNumber?: string };
+    const lookup = validatedArgs as { proposalId?: string; orderNumber?: string; proposalNumber?: string };
     const predicate = lookup.proposalId ? "o.public_id = ?" : "o.order_number = ?";
+    const targetVal = lookup.proposalId ?? lookup.orderNumber ?? lookup.proposalNumber;
     const [orderRows] = await pool.execute(
       `SELECT o.id, o.public_id AS publicId, o.order_number AS orderNumber, o.commercial_status AS commercialStatus,
               o.total_cents AS totalCents, o.notes, o.payment_terms_snapshot AS paymentTerms, o.created_at AS createdAt,
               c.crm_client_id AS crmClientId, c.company_name AS clientName, c.phone AS clientPhone
          FROM erp_sale_orders o JOIN megadesk_crm_clients c ON c.crm_client_id = o.crm_client_id AND c.client_id = o.client_id
         WHERE o.client_id = ? AND o.document_type = 'quote' AND ${predicate} LIMIT 1`,
-      [clientId, lookup.proposalId ?? lookup.proposalNumber],
+      [clientId, targetVal],
     ) as any[];
     const proposal = orderRows[0];
     if (!proposal) {
-      const target = lookup.proposalId ?? lookup.proposalNumber ?? "";
+      const target = targetVal ?? "";
       return JSON.stringify({ found: false, message: target ? `Proposta ${target} não encontrada no sistema.` : "Proposta não encontrada no sistema." });
     }
     const [itemRows] = await pool.execute(
@@ -1335,7 +2109,24 @@ export async function executeClientFunction(
          FROM erp_sale_order_items WHERE sale_order_id = ? ORDER BY id ASC`,
       [proposal.id],
     ) as any[];
-    return JSON.stringify({ proposta: proposal, itens: itemRows });
+    const items = (Array.isArray(itemRows) ? itemRows : []).map(i => ({
+      name: i.productName || i.sku || "Item",
+      quantity: Number(i.quantity ?? 1),
+      unitPrice: Number(i.unitPriceCents ?? 0) / 100,
+      total: Number(i.lineTotalCents ?? 0) / 100,
+    }));
+    return JSON.stringify({
+      id: proposal.publicId,
+      orderNumber: proposal.orderNumber,
+      clientName: proposal.clientName,
+      status: proposal.commercialStatus,
+      totalValue: Number(proposal.totalCents ?? 0) / 100,
+      items,
+      paymentTerms: proposal.paymentTerms || "",
+      deliveryForecast: "",
+      proposta: proposal,
+      itens: itemRows,
+    });
   }
 
   if (functionName === "get_erp_summary") {
@@ -1353,7 +2144,21 @@ export async function executeClientFunction(
       return JSON.stringify({ found: false, message: target ? `Produto ${target} não encontrado no cadastro.` : "Produto não encontrado no cadastro." });
     }
     const [auditRows] = await pool.execute(`SELECT action,summary,created_at createdAt FROM erp_product_audit_logs WHERE client_id=? AND product_id=(SELECT id FROM erp_products WHERE client_id=? AND public_id=? LIMIT 1) ORDER BY created_at DESC LIMIT 20`, [clientId, clientId, rows[0].publicId]) as any[];
-    return JSON.stringify({ produto: rows[0], timeline: auditRows });
+    const p = rows[0];
+    return JSON.stringify({
+      id: p.publicId,
+      name: p.name,
+      sku: p.sku,
+      category: p.category || "",
+      salePrice: Number(p.salePriceCents ?? 0) / 100,
+      costPrice: Number(p.costPriceCents ?? 0) / 100,
+      stock: Number(p.quantity ?? 0),
+      minStock: Number(p.minimumStock ?? 0),
+      supplierName: p.supplierName || "",
+      history: auditRows,
+      produto: p,
+      timeline: auditRows,
+    });
   }
 
   if (functionName === "get_inventory_status") {
@@ -1364,13 +2169,28 @@ export async function executeClientFunction(
     if (filters.status === "low") where.push("quantity > 0 AND quantity <= minimum_stock");
     if (filters.status === "regular") where.push("quantity > minimum_stock");
     const [rows] = await pool.execute(`SELECT public_id publicId,name,sku,quantity,minimum_stock minimumStock,unit FROM erp_products WHERE ${where.join(" AND ")} ORDER BY name LIMIT 100`, values) as any[];
-    return JSON.stringify({ itens: rows });
+    const items = (Array.isArray(rows) ? rows : []).map(r => ({
+      id: r.publicId,
+      name: r.name,
+      sku: r.sku,
+      stock: Number(r.quantity ?? 0),
+      minStock: Number(r.minimumStock ?? 0),
+      salePrice: 0,
+      costPrice: 0,
+    }));
+    return JSON.stringify({ total: items.length, items, itens: rows });
   }
 
   if (functionName === "get_services_list") {
     const query = (validatedArgs as { search?: string }).search;
     const [rows] = await pool.execute(`SELECT id,name,code,category,price,estimated_cost estimatedCost,is_active isActive FROM megadesk_erp_services WHERE client_id=? ${query ? "AND (name LIKE ? OR code LIKE ? OR category LIKE ?)" : ""} ORDER BY name LIMIT 100`, query ? [clientId, `%${query}%`, `%${query}%`, `%${query}%`] : [clientId]) as any[];
-    return JSON.stringify({ servicos: rows });
+    const services = (Array.isArray(rows) ? rows : []).map(r => ({
+      id: r.id,
+      name: r.name,
+      defaultPrice: Number(r.price ?? 0),
+      active: Boolean(r.isActive),
+    }));
+    return JSON.stringify({ total: services.length, services, servicos: rows });
   }
 
   if (functionName === "get_sales_analytics") {
@@ -1384,31 +2204,155 @@ export async function executeClientFunction(
   if (functionName === "get_suppliers_list") {
     const query = (validatedArgs as { search?: string }).search;
     const [rows] = await pool.execute(`SELECT public_id publicId,legal_name legalName,trade_name tradeName,tax_id taxId,phone,email,contact_name contactName,active FROM erp_suppliers WHERE client_id=? ${query ? "AND (legal_name LIKE ? OR trade_name LIKE ? OR tax_id LIKE ?)" : ""} ORDER BY legal_name LIMIT 100`, query ? [clientId, `%${query}%`, `%${query}%`, `%${query}%`] : [clientId]) as any[];
-    return JSON.stringify({ fornecedores: rows });
+    const suppliers = (Array.isArray(rows) ? rows : []).map(r => ({
+      id: r.publicId,
+      name: r.legalName || r.tradeName || "",
+      document: r.taxId || "",
+      phone: r.phone || "",
+      email: r.email || "",
+      contactName: r.contactName || "",
+    }));
+    return JSON.stringify({ total: suppliers.length, suppliers, fornecedores: rows });
   }
 
   if (functionName === "get_conversations_summary") {
-    const [rows] = await pool.execute(
+    const filters = (validatedArgs ?? {}) as { status?: string; search?: string };
+    const where = ["client_id = ?"];
+    const values: unknown[] = [clientId];
+    if (filters.status && filters.status !== "all") {
+      where.push("status = ?");
+      values.push(filters.status);
+    }
+    if (filters.search) {
+      where.push("(customer_name LIKE ? OR phone LIKE ? OR company LIKE ?)");
+      const q = `%${filters.search}%`;
+      values.push(q, q, q);
+    }
+    const [countRows] = await pool.execute(
       `SELECT COUNT(*) as total,
-       SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as abertas,
-       SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as fechadas
-       FROM megadesk_domain_conversations 
-       WHERE client_id = ? AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)`,
-      [clientId]
+              SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as abertas,
+              SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as fechadas
+         FROM megadesk_domain_conversations
+        WHERE ${where.join(" AND ")}`,
+      values,
     ) as any[];
-    const data = rows[0] ?? { total: 0, abertas: 0, fechadas: 0 };
-    return JSON.stringify({ conversas_7dias: data.total, abertas: data.abertas, fechadas: data.fechadas });
+    const [listRows] = await pool.execute(
+      `SELECT conversation_id, customer_name, phone, company, status, last_message, updated_at
+         FROM megadesk_domain_conversations
+        WHERE ${where.join(" AND ")}
+        ORDER BY updated_at DESC LIMIT 20`,
+      values,
+    ) as any[];
+    const counts = countRows[0] ?? { total: 0, abertas: 0, fechadas: 0 };
+    const conversations = (Array.isArray(listRows) ? listRows : []).map(r => ({
+      id: r.conversation_id,
+      contactName: r.customer_name || r.company || "",
+      phone: r.phone || "",
+      lastMessage: r.last_message || "",
+      updatedAt: r.updated_at,
+      unreadCount: 0,
+    }));
+    return JSON.stringify({
+      total: Number(counts.total ?? 0),
+      conversations,
+      conversas_7dias: Number(counts.total ?? 0),
+      abertas: Number(counts.abertas ?? 0),
+      fechadas: Number(counts.fechadas ?? 0),
+    });
+  }
+
+  if (functionName === "extract_lead_from_conversation") {
+    const filters = (validatedArgs ?? {}) as { conversationId?: string; phone?: string; search?: string };
+    const where = ["client_id = ?"];
+    const values: unknown[] = [clientId];
+    if (filters.conversationId) {
+      where.push("conversation_id = ?");
+      values.push(filters.conversationId);
+    } else if (filters.phone) {
+      where.push("phone LIKE ?");
+      values.push(`%${filters.phone.replace(/\D/g, "")}%`);
+    } else if (filters.search) {
+      where.push("(customer_name LIKE ? OR phone LIKE ?)");
+      values.push(`%${filters.search}%`, `%${filters.search}%`);
+    }
+    const [rows] = await pool.execute(
+      `SELECT conversation_id, customer_name, phone, company, status, last_message, messages_json
+         FROM megadesk_domain_conversations
+        WHERE ${where.join(" AND ")}
+        ORDER BY updated_at DESC LIMIT 1`,
+      values,
+    ) as any[];
+    const conv = rows[0];
+    if (!conv) {
+      return JSON.stringify({ found: false, message: "Nenhuma conversa encontrada para os critérios informados." });
+    }
+
+    let allText = `${conv.customer_name || ""} ${conv.last_message || ""}`;
+    try {
+      const parsed = typeof conv.messages_json === "string" ? JSON.parse(conv.messages_json) : conv.messages_json;
+      if (Array.isArray(parsed)) {
+        allText += " " + parsed.map((m: any) => m.text || m.body || m.message || "").join(" ");
+      }
+    } catch {}
+
+    const docMatch = allText.match(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/);
+    const document = docMatch ? docMatch[0] : "";
+    const vehicleRegex = /\b(?:carro|veículo|veiculo|moto|caminhão|placa|modelo|gol|onix|civic|corolla|hb20|hilux|palio|uno|fox|fit|ka|sandero|prisma|compass|renegade|creta|toro|strada|saveiro|kwid|polo|tracker|kicks|argo|mobi|etios|yaris|versa|cruze|spin|duster|ecosport|ranger|s10|amarok|l200|frontier)\b[^\n,.]*/i;
+    const vehicleMatch = allText.match(vehicleRegex);
+    const vehicle = vehicleMatch ? vehicleMatch[0].trim() : "";
+
+    const serviceKeywords = ["lavagem", "troca de óleo", "troca de oleo", "correia dentada", "revisão", "revisao", "alinhamento", "balanceamento", "freio", "pastilha", "pneu", "suspensão", "suspensao", "embreagem", "filtro", "vela", "bateria", "ar condicionado", "elétrica", "eletrica", "mecânica", "mecanica"];
+    const requestedServices: string[] = [];
+    for (const kw of serviceKeywords) {
+      if (new RegExp(`\\b${kw}\\b`, "i").test(allText)) {
+        requestedServices.push(kw);
+      }
+    }
+
+    const lead = {
+      name: conv.customer_name || conv.company || "Lead",
+      contactName: conv.customer_name || conv.company || "Lead",
+      phone: conv.phone || "",
+      document,
+      vehicle,
+      requestedServices,
+      suggestedItems: requestedServices,
+      summary: `Lead ${conv.customer_name || conv.phone}: ${requestedServices.length ? requestedServices.join(", ") : "Atendimento geral"}`,
+    };
+
+    return JSON.stringify({ found: true, lead });
   }
 
   if (functionName === "get_erp_products") {
+    const filters = (validatedArgs ?? {}) as { search?: string; filter?: string };
+    const where = ["client_id = ?", "active <> -1"];
+    const values: unknown[] = [clientId];
+    if (filters.search) {
+      where.push("(name LIKE ? OR sku LIKE ?)");
+      values.push(`%${filters.search}%`, `%${filters.search}%`);
+    }
+    if (filters.filter === "out_of_stock") where.push("quantity <= 0");
+    if (filters.filter === "low_stock") where.push("quantity > 0 AND quantity <= minimum_stock");
     const [rows] = await pool.execute(
-      `SELECT JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.name')) as nome,
-       JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.stock')) as estoque
-       FROM megadesk_domain_operational_records 
-       WHERE client_id = ? AND record_type = 'product' LIMIT 10`,
-      [clientId]
+      `SELECT public_id AS id, name, sku, quantity AS stock, minimum_stock AS minStock,
+              sale_price_cents AS salePriceCents, cost_price_cents AS costPriceCents
+         FROM erp_products WHERE ${where.join(" AND ")} ORDER BY name LIMIT 100`,
+      values,
     ) as any[];
-    return JSON.stringify({ produtos: rows });
+    const items = (Array.isArray(rows) ? rows : []).map(r => ({
+      id: r.id,
+      name: r.name,
+      sku: r.sku,
+      stock: Number(r.stock ?? 0),
+      minStock: Number(r.minStock ?? 0),
+      salePrice: Number(r.salePriceCents ?? 0) / 100,
+      costPrice: Number(r.costPriceCents ?? 0) / 100,
+    }));
+    return JSON.stringify({
+      total: items.length,
+      items,
+      produtos: items.map(it => ({ nome: it.name, estoque: it.stock })),
+    });
   }
 
     return JSON.stringify({ success: false, error: "Função não reconhecida" });
@@ -1907,6 +2851,46 @@ function synthesizeDeterministicResponse(
 
   const lastResult = executedReadResults[executedReadResults.length - 1];
   const { name, args, output } = lastResult;
+
+  if (name === "get_tickets_overview") {
+    const rawTotal = output?.total ?? output?.resumo?.total ?? output?.tickets?.length ?? output?.chamados?.length ?? 0;
+    const total = Number(rawTotal) || 0;
+    if (total === 0) {
+      return "Não foram encontrados chamados no sistema para os critérios consultados.";
+    }
+    const open = output?.open ?? output?.resumo?.open ?? 0;
+    const inProgress = output?.inProgress ?? output?.resumo?.in_progress ?? 0;
+    const pending = output?.pending ?? output?.resumo?.waiting ?? 0;
+    const list = Array.isArray(output?.tickets) && output.tickets.length > 0
+      ? output.tickets.slice(0, 5).map((t: any) => `#${String(t.ticketNumber ?? t.chamadoNumber ?? t.id).padStart(4, "0")}: "${t.title}" (${t.customer || ""})`).join("; ")
+      : "";
+    const listSuffix = list ? `: ${list}` : ".";
+    return `Total de ${total} chamado(s) encontrado(s) (${open} aberto(s), ${inProgress} em andamento, ${pending} pendente(s))${listSuffix}`;
+  }
+
+  if (name === "get_ticket_details") {
+    if (output?.found === false) {
+      return output.message || "Chamado não encontrado no sistema.";
+    }
+    const t = output?.chamado || output;
+    if (t) {
+      const num = String(t.ticketNumber ?? t.chamadoNumber ?? t.id ?? "").padStart(4, "0");
+      return `Chamado #${num} - "${t.title}" (Cliente: ${t.customer || t.customerName || t.company || "Não informado"}, Status: ${t.status}, Prioridade: ${t.priority}). Responsável: ${t.assignedOperator || t.assignedTo || "Não atribuído"}.`;
+    }
+  }
+
+  if (name === "extract_lead_from_conversation") {
+    if (output?.found === false) {
+      return output.message || "Não foram encontrados dados de lead no histórico recente desta conversa.";
+    }
+    const lead = output?.lead;
+    if (lead) {
+      const services = Array.isArray(lead.requestedServices) && lead.requestedServices.length > 0
+        ? lead.requestedServices.join(", ")
+        : "Nenhum serviço identificado";
+      return `Identifiquei os seguintes dados na conversa:\n- Nome: ${lead.name || "Não informado"}\n- Telefone: ${lead.phone || "Não informado"}\n- Documento: ${lead.document || "Não informado"}\n- Veículo: ${lead.vehicle || "Não informado"}\n- Serviços/Itens: ${services}.\n\nDeseja que eu crie uma proposta comercial ou cadastre o cliente?`;
+    }
+  }
 
   if (name === "get_open_tickets") {
     const rawTotal = output?.total ?? output?.chamados_abertos ?? output?.resumo?.total ?? output?.chamados?.length ?? 0;

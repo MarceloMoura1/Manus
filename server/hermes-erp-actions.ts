@@ -58,8 +58,10 @@ function supplierCommand(raw: Record<string, unknown>): SupplierInput {
   });
 }
 function serviceCommand(raw: Record<string, unknown>) {
-  const value = sanitizeHermesPayload(raw, { name: "text", code: "text", category: "text", description: "text", price: "number", estimatedCost: "number" });
-  return serviceInput.parse({ name: required(value, "name"), code: textOrNull(value.code), category: textOrNull(value.category), price: Number(value.price) || 0, estimatedCost: Number(value.estimatedCost) || 0, description: textOrNull(value.description), isActive: true });
+  const value = sanitizeHermesPayload(raw, { name: "text", code: "text", category: "text", description: "text", price: "number", defaultPrice: "number", estimatedCost: "number" });
+  const rawPrice = value.defaultPrice !== undefined ? value.defaultPrice : value.price;
+  const price = Number(rawPrice ?? 0);
+  return serviceInput.parse({ name: required(value, "name"), code: textOrNull(value.code), category: textOrNull(value.category), price: Number.isFinite(price) && price >= 0 ? price : 0, estimatedCost: Number(value.estimatedCost) || 0, description: textOrNull(value.description), isActive: true });
 }
 export async function executeHermesErpAction(input: { tenantId: string; userId: string; userName: string; role: OperationalRole; action: HermesErpAction }): Promise<{ success: true; message: string; entityId: string | number }> {
   try {
@@ -150,8 +152,86 @@ async function runHermesErpAction(input: { tenantId: string; userId: string; use
     return { success: true, message: `Fornecedor '${supplier.legalName}' atualizado com sucesso.`, entityId: supplier.publicId };
   }
   if (input.action.actionType === "REQUEST_PURCHASE") {
-    const items = args.items as Array<Record<string, unknown>>;
-    const order = await purchases.create(identity, purchaseDraftInput.parse({ supplierPublicId: required(args, "supplierId"), responsibleUserId: input.userId, notes: typeof args.notes === "string" ? args.notes : null, expectedDate: null, discountCents: 0, freightCents: 0, otherExpensesCents: 0, paymentTerms: null, installments: [], idempotencyKey: randomUUID(), items: items.map(item => ({ productPublicId: required(item, "productId"), inventoryItemPublicId: null, quantity: String(item.quantity), unitCostCents: cents(item.targetCost, "target_cost"), discountCents: 0 })) }));
+    let supplierId = typeof args.supplierId === "string" ? args.supplierId.trim() : "";
+    const supplierName = typeof args.supplierName === "string" ? args.supplierName.trim() : "";
+    if (!supplierId && supplierName) {
+      const searchRes = await suppliers.list(identity, {
+        search: supplierName,
+        sort: "createdAt",
+        direction: "desc",
+        page: 1,
+        pageSize: 10,
+        state: undefined,
+      });
+      const found = searchRes.items.find(s =>
+        s.legalName.toLowerCase().includes(supplierName.toLowerCase()) ||
+        (s.tradeName && s.tradeName.toLowerCase().includes(supplierName.toLowerCase()))
+      ) || searchRes.items[0];
+      if (found) {
+        supplierId = found.publicId;
+      }
+    }
+    if (!supplierId) {
+      throw new Error(`Fornecedor '${supplierName || ""}' não localizado para o pedido de compra.`);
+    }
+
+    const rawItems = Array.isArray(args.items) ? args.items as Array<Record<string, unknown>> : [];
+    if (!rawItems.length) throw new Error("Informe os itens do pedido de compra.");
+
+    const resolvedItems = await Promise.all(rawItems.map(async item => {
+      let productPublicId = typeof item.productId === "string" ? item.productId.trim() : "";
+      const productName = typeof item.productName === "string" ? item.productName.trim() : "";
+      if (!productPublicId && productName) {
+        const foundProds = await products.listProducts(identity, {
+          search: productName,
+          stock: "all",
+          sort: "name",
+          direction: "asc",
+          page: 1,
+          pageSize: 5,
+        });
+        const matched = foundProds.items.find(p => p.name.toLowerCase() === productName.toLowerCase()) || foundProds.items[0];
+        if (matched) {
+          productPublicId = matched.publicId;
+        } else {
+          const created = await products.createProduct(identity, {
+            name: productName,
+            sku: `PRD-${randomUUID().slice(0, 8).toUpperCase()}`,
+            category: "Insumos",
+            unit: "unit",
+            costPriceCents: cents(item.targetCost ?? 0, "custo"),
+            salePriceCents: 0,
+            minimumStock: "0.000",
+            description: null,
+            barcode: null,
+          });
+          productPublicId = created.publicId;
+        }
+      }
+      if (!productPublicId) throw new Error("Informe o produto ou nome do item para o pedido de compra.");
+      const qty = Number(item.quantity ?? 1);
+      return {
+        productPublicId,
+        inventoryItemPublicId: null,
+        quantity: String(Number.isFinite(qty) && qty > 0 ? qty : 1),
+        unitCostCents: cents(item.targetCost ?? 0, "custo"),
+        discountCents: 0,
+      };
+    }));
+
+    const order = await purchases.create(identity, purchaseDraftInput.parse({
+      supplierPublicId: supplierId,
+      responsibleUserId: input.userId,
+      notes: typeof args.notes === "string" ? args.notes : null,
+      expectedDate: null,
+      discountCents: 0,
+      freightCents: 0,
+      otherExpensesCents: 0,
+      paymentTerms: null,
+      installments: [],
+      idempotencyKey: randomUUID(),
+      items: resolvedItems,
+    }));
     return { success: true, message: "Pedido de compra criado em rascunho.", entityId: order.publicId };
   }
   if (input.action.actionType === "SEND_SUPPLIER_MESSAGE") {

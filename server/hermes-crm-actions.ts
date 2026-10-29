@@ -176,25 +176,56 @@ async function runHermesCrmAction(input: {
     return { success: true, message: `Cliente "${payload.companyName}" cadastrado com sucesso.`, entityId: created.crmClientId };
   }
   if (input.action.actionType === "UPDATE_CLIENT") {
-    const clientId = required(args, "clientId");
+    let clientId = typeof args.clientId === "string" && args.clientId.trim() ? args.clientId.trim() : "";
+    const clientName = typeof args.name === "string" && args.name.trim() ? args.name.trim() : (typeof args.clientName === "string" && args.clientName.trim() ? args.clientName.trim() : "");
+    if (!clientId && clientName) {
+      const [rows] = await getPool().execute(
+        `SELECT crm_client_id AS crmClientId FROM megadesk_crm_clients
+          WHERE client_id = ? AND lifecycle_state <> 'archived' AND (LOWER(company_name) = LOWER(?) OR LOWER(company_name) LIKE LOWER(?)) LIMIT 1`,
+        [input.tenantId, clientName, `%${clientName}%`],
+      ) as any[];
+      if (Array.isArray(rows) && rows[0]?.crmClientId) {
+        clientId = String(rows[0].crmClientId);
+      }
+    }
+    if (!clientId) throw new Error("Informe o ID ou nome do cliente para atualizar.");
     const current = await getCrmClientById(clientId, input.tenantId);
     if (!current || current.lifecycleState === "archived") throw new Error("HERMES_CRM_CLIENT_NOT_AVAILABLE");
-    const fields = args.fieldsToUpdate as Record<string, unknown>;
+    const rawFields = (args.fieldsToUpdate && typeof args.fieldsToUpdate === "object" && !Array.isArray(args.fieldsToUpdate))
+      ? args.fieldsToUpdate as Record<string, unknown>
+      : {};
+    const fields: Record<string, unknown> = { ...args, ...rawFields };
     const update: Record<string, unknown> = {};
-    if (typeof fields.name === "string") update.companyName = fields.name;
-    if (typeof fields.document === "string") update.cpfCnpj = fields.document;
-    if (typeof fields.phone === "string") { update.phone = fields.phone; update.whatsapp = fields.phone; }
-    if (typeof fields.email === "string") update.email = fields.email;
-    if (typeof fields.notes === "string") update.observations = fields.notes;
+    if (typeof fields.name === "string" && fields.name.trim()) update.companyName = fields.name.trim();
+    if (typeof fields.document === "string") update.cpfCnpj = fields.document.trim();
+    if (typeof fields.phone === "string") { update.phone = fields.phone.trim(); update.whatsapp = fields.phone.trim(); }
+    if (typeof fields.email === "string") update.email = fields.email.trim();
+    if (typeof fields.notes === "string") update.observations = fields.notes.trim();
     await updateCrmClient(clientId, input.tenantId, update);
     await addCrmTimeline(clientId, input.tenantId, { type: "edit", description: `Cadastro atualizado via Hermes por ${input.userName}.`, author: input.userName });
-    return { success: true, message: "Cliente atualizado com sucesso.", entityId: clientId };
+    return { success: true, message: `Cliente "${update.companyName || current.companyName}" atualizado com sucesso.`, entityId: clientId };
   }
   if (input.action.actionType === "ADD_CLIENT_TIMELINE") {
-    const clientId = required(args, "clientId");
+    let clientId = typeof args.clientId === "string" && args.clientId.trim() ? args.clientId.trim() : "";
+    const clientName = typeof args.name === "string" && args.name.trim() ? args.name.trim() : (typeof args.clientName === "string" && args.clientName.trim() ? args.clientName.trim() : "");
+    if (!clientId && clientName) {
+      const [rows] = await getPool().execute(
+        `SELECT crm_client_id AS crmClientId FROM megadesk_crm_clients
+          WHERE client_id = ? AND lifecycle_state <> 'archived' AND (LOWER(company_name) = LOWER(?) OR LOWER(company_name) LIKE LOWER(?)) LIMIT 1`,
+        [input.tenantId, clientName, `%${clientName}%`],
+      ) as any[];
+      if (Array.isArray(rows) && rows[0]?.crmClientId) {
+        clientId = String(rows[0].crmClientId);
+      }
+    }
+    if (!clientId) throw new Error("Informe o ID ou nome do cliente para adicionar evento à timeline.");
     const current = await getCrmClientById(clientId, input.tenantId);
     if (!current || current.lifecycleState === "archived") throw new Error("HERMES_CRM_CLIENT_NOT_AVAILABLE");
-    await addCrmTimeline(clientId, input.tenantId, { type: required(args, "eventType"), description: `${required(args, "title")}: ${required(args, "description")}`, author: input.userName });
+    const eventType = typeof args.eventType === "string" && args.eventType.trim() ? args.eventType.trim() : "note";
+    const title = typeof args.title === "string" && args.title.trim() ? args.title.trim() : "Evento";
+    const description = typeof args.description === "string" ? args.description.trim() : "";
+    const formattedDesc = description ? `${title}: ${description}` : title;
+    await addCrmTimeline(clientId, input.tenantId, { type: eventType, description: formattedDesc, author: input.userName });
     return { success: true, message: "Evento adicionado à timeline do cliente.", entityId: clientId };
   }
   if (input.action.actionType === "CREATE_PROPOSAL") {
@@ -341,11 +372,42 @@ async function runHermesCrmAction(input: {
     };
   }
   if (input.action.actionType === "SEND_PROPOSAL_WHATSAPP") {
-    const proposalId = required(args, "proposalId");
+    const rawProposalId = String(args.proposalId ?? args.orderNumber ?? "").trim();
+    if (!rawProposalId) throw new Error("Informe o ID ou número da proposta.");
+    let proposalId = rawProposalId;
+    let current = await saleService.detail(actor, proposalId).catch(() => null);
+    if (!current) {
+      const list = await saleService.list(actor, {
+        search: rawProposalId,
+        kind: "all",
+        includeArchived: false,
+        sort: "createdAt",
+        direction: "desc",
+        page: 1,
+        pageSize: 5,
+      });
+      const match = list.items.find(item => item.orderNumber === rawProposalId || item.publicId === rawProposalId) || list.items[0];
+      if (match) {
+        proposalId = match.publicId;
+        current = await saleService.detail(actor, proposalId);
+      }
+    }
+    if (!current) throw new Error("Orçamento não encontrado.");
+
+    let phone = typeof args.phone === "string" && args.phone.trim() ? args.phone.trim() : (typeof args.recipientPhone === "string" && args.recipientPhone.trim() ? args.recipientPhone.trim() : "");
+    if (!phone && current.crmClientId) {
+      const crmClient = await getCrmClientById(current.crmClientId, input.tenantId);
+      phone = crmClient?.phone ?? crmClient?.whatsapp ?? "";
+    }
+    if (!phone) throw new Error("Telefone do destinatário não informado e não encontrado no cadastro do cliente.");
+
     await quoteTemplates.sendQuoteWhatsApp(actor, {
-      publicId: proposalId, phone: required(args, "recipientPhone"), customMessage: typeof args.customMessage === "string" ? args.customMessage : undefined, idempotencyKey: randomUUID(),
+      publicId: proposalId,
+      phone,
+      customMessage: typeof args.customMessage === "string" ? args.customMessage : undefined,
+      idempotencyKey: randomUUID(),
     });
-    return { success: true, message: "Proposta enviada por WhatsApp.", entityId: proposalId };
+    return { success: true, message: `Proposta enviada por WhatsApp para ${phone}.`, entityId: proposalId };
   }
   throw new Error("HERMES_CRM_ACTION_NOT_ALLOWED");
 }
