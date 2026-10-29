@@ -1,4 +1,9 @@
 import "dotenv/config";
+import dns from "node:dns";
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch {}
+
 import express from "express";
 import { createServer } from "http";
 import net from "net";

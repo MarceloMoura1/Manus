@@ -4,6 +4,11 @@
  * Mantém histórico de conversa no banco de dados.
  * Suporta function calling para consultar dados do ERP/conversas/chamados.
  */
+import dns from "node:dns";
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch {}
+
 import { getPool, getUserHermesPreferences, saveUserHermesPreferences, type UserHermesPreferences } from "./db";
 import { nanoid } from "nanoid";
 import { dropEmptyArgs } from "./hermes-sanitize";
@@ -11,8 +16,8 @@ import { dropEmptyArgs } from "./hermes-sanitize";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
-export const MAX_GEMINI_PROMPT_HISTORY_MESSAGES = 10;
-export const GEMINI_REQUEST_TIMEOUT_MS = 25_000;
+export const MAX_GEMINI_PROMPT_HISTORY_MESSAGES = 6;
+export const GEMINI_REQUEST_TIMEOUT_MS = 12_000;
 
 function normalizeGeminiApiKey(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -37,17 +42,38 @@ export function serializeMessageForPrompt(msg: IAMessage): IAMessage {
     const action = msg.pendingActionRequest;
     if (action.actionType === "CREATE_PROPOSAL") {
       const clientName = String(action.args.clientName ?? action.args.clientId ?? "Cliente");
-      const items = Array.isArray(action.args.items)
+      let items = Array.isArray(action.args.items)
         ? (action.args.items as Array<Record<string, unknown>>)
             .map(it => `${Number(it.quantity ?? 1)}x ${String(it.productName ?? it.description ?? "Item")} (R$ ${Number(it.unitPrice ?? 0).toFixed(2).replace(".", ",")})`)
             .join(", ")
         : "";
+      if (items.length > 300) {
+        items = `${items.slice(0, 297)}...`;
+      }
       const proposalContext = `[Proposta em rascunho anterior: Cliente: ${clientName}, Itens: ${items || "Nenhum"}].`;
       content = content ? `${content}\n\n${proposalContext}` : proposalContext;
     } else if (action.summary) {
-      content = content ? `${content}\n\n[Ação anterior: ${action.summary}]` : `[Ação anterior: ${action.summary}]`;
+      let summary = action.summary;
+      if (summary.length > 300) {
+        summary = `${summary.slice(0, 297)}...`;
+      }
+      content = content ? `${content}\n\n[Ação anterior: ${summary}]` : `[Ação anterior: ${summary}]`;
     }
   }
+
+  // Sanitize: Nas mensagens anteriores enviadas ao Gemini, trunque saídas de ferramentas que contenham listas grandes para no máximo 300 caracteres
+  if (msg.role === "assistant" && content && content.length > 300) {
+    const hasLargeListOrToolData =
+      /[\n\r]\s*[-*•\d]/.test(content) ||
+      content.startsWith("{") ||
+      content.startsWith("[") ||
+      content.includes("[Ação anterior:") ||
+      content.includes("[Proposta em rascunho anterior:");
+    if (hasLargeListOrToolData) {
+      content = `${content.slice(0, 297)}...`;
+    }
+  }
+
   return { ...msg, content };
 }
 
@@ -1321,7 +1347,7 @@ export function cancelPendingHermesAction(input: { actionId: string; actionType:
 // ─── Helpers de chamada HTTP Gemini ──────────────────────────────────────────
 
 interface GeminiContent {
-  role: "user" | "model" | "function";
+  role: "user" | "model";
   parts: Array<{ text?: string; functionCall?: any; functionResponse?: any }>;
 }
 
@@ -3288,7 +3314,7 @@ async function chatWithClientGeminiInternal(
     contents,
     ...(allowedTools.length > 0 ? { tools: [{ functionDeclarations: allowedTools.map(tool => tool.declaration) }] } : {}),
     systemInstruction: { parts: [{ text: buildSystemInstruction(allowedTools, userPreferences) }] },
-    generationConfig: { temperature: 0.4, maxOutputTokens: 1024 },
+    generationConfig: { temperature: 0.3, maxOutputTokens: 800 },
   };
 
   let providerResponse = await callGeminiWithEnvironmentFallback(geminiKey, requestBody);
@@ -3301,74 +3327,87 @@ async function chatWithClientGeminiInternal(
   let pendingActionRequest: PendingActionRequest | undefined;
   const executedReadResults: Array<{ name: string; args: Record<string, unknown>; output: any }> = [];
 
-  // 4. Processa function calls em loop (até 5 iterações consecutivas para multi-intent)
+  // 4. Processa function calls em loop (até 3 iterações consecutivas para multi-intent)
   let iterations = 0;
-  while (iterations < 5) {
+  while (iterations < 3) {
     const candidate = data?.candidates?.[0];
     const parts = candidate?.content?.parts ?? [];
     const functionCallParts = parts.filter((p: any) => Boolean(p.functionCall));
     if (functionCallParts.length === 0) break;
 
     iterations++;
-    let hitMutation = false;
     const modelParts: any[] = [];
     const functionResponseParts: any[] = [];
 
+    // Se houver ferramentas MUTATION, processa a primeira mutação como HITL e encerra o loop
+    const mutationFcp = functionCallParts.find((fcp: any) => {
+      const tool = getAuthorizedHermesTool(fcp.functionCall?.name, userPermissions);
+      return tool?.type === "MUTATION";
+    });
+
+    if (mutationFcp) {
+      const fc = mutationFcp.functionCall;
+      functionCallsMade.push(fc.name);
+      const authorizedTool = getAuthorizedHermesTool(fc.name, userPermissions)!;
+      let mutationArgs = fc.args ?? {};
+      if (fc.name === "create_proposal") {
+        mutationArgs = enforceUserProvidedPrices(mutationArgs, userMessage, existingHistory);
+      }
+      pendingActionRequest = createPendingActionRequest(authorizedTool, mutationArgs, { clientId, userId });
+      break;
+    }
+
+    // Executa todas as ferramentas READ em paralelo com Promise.all
     for (const fcp of functionCallParts) {
       const fc = fcp.functionCall;
       functionCallsMade.push(fc.name);
-
-      const authorizedTool = getAuthorizedHermesTool(fc.name, userPermissions);
-      if (authorizedTool?.type === "MUTATION") {
-        let mutationArgs = fc.args ?? {};
-        if (fc.name === "create_proposal") {
-          mutationArgs = enforceUserProvidedPrices(mutationArgs, userMessage, existingHistory);
-        }
-        // Ferramentas de mutação geram solicitação pendente para aprovação humana (HITL)
-        pendingActionRequest = createPendingActionRequest(authorizedTool, mutationArgs, { clientId, userId });
-        hitMutation = true;
-        break;
-      }
-
-      // Ferramenta READ: executa localmente no banco com tolerância estrita a erros
-      let funcResult: string;
-      try {
-        funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId, userPermissions, geminiKey, userId);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Falha ao executar ferramenta local.";
-        funcResult = JSON.stringify({ success: false, error: message });
-      }
-
-      let parsedOutput: unknown;
-      try {
-        parsedOutput = JSON.parse(funcResult);
-      } catch {
-        parsedOutput = funcResult;
-      }
-
-      executedReadResults.push({ name: fc.name, args: fc.args ?? {}, output: parsedOutput });
-
       modelParts.push({ functionCall: fc });
+    }
+
+    const toolExecutionResults = await Promise.all(
+      functionCallParts.map(async (fcp: any) => {
+        const fc = fcp.functionCall;
+        let funcResult: string;
+        try {
+          funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId, userPermissions, geminiKey, userId);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Falha ao executar ferramenta local.";
+          funcResult = JSON.stringify({ success: false, error: message });
+        }
+
+        let parsedOutput: unknown;
+        try {
+          parsedOutput = JSON.parse(funcResult);
+        } catch {
+          parsedOutput = funcResult;
+        }
+
+        return {
+          name: fc.name,
+          args: fc.args ?? {},
+          output: parsedOutput,
+        };
+      })
+    );
+
+    for (const res of toolExecutionResults) {
+      executedReadResults.push(res);
       functionResponseParts.push({
         functionResponse: {
-          name: fc.name,
+          name: res.name,
           response: {
-            output: parsedOutput,
+            output: res.output,
             instrucao_resposta: "Analise os dados retornados acima. Se a solicitação do usuário ainda exigir consultas complementares (como detalhes de um chamado específico mencionado, ficha de cliente, produtos ou compras), chame a próxima ferramenta necessária. Se você já possui todas as informações para responder a todas as partes da pergunta do usuário, elabore sua resposta executiva completa, bem estruturada, acolhedora e elegante no mesmo texto. Nunca deixe perguntas sem resposta.",
-            ...(parsedOutput && typeof parsedOutput === "object" && !Array.isArray(parsedOutput) ? parsedOutput : {}),
+            ...(res.output && typeof res.output === "object" && !Array.isArray(res.output) ? res.output : {}),
           },
         },
       });
     }
 
-    if (hitMutation) {
-      break;
-    }
-
     requestBody.contents = [
       ...requestBody.contents,
       { role: "model", parts: modelParts },
-      { role: "function", parts: functionResponseParts },
+      { role: "user", parts: functionResponseParts },
     ];
     providerResponse = await callGeminiWithEnvironmentFallback(geminiKey, requestBody);
     data = providerResponse.data;

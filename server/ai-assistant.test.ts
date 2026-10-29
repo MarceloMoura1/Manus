@@ -608,8 +608,8 @@ describe("Hermes security controls", () => {
 });
 
 describe("Hermes persistence, CRM tools and latency", () => {
-  it("limits the provider sliding window to 10 messages", () => {
-    expect(MAX_GEMINI_PROMPT_HISTORY_MESSAGES).toBe(10);
+  it("limits the provider sliding window to 6 messages", () => {
+    expect(MAX_GEMINI_PROMPT_HISTORY_MESSAGES).toBe(6);
   });
 
   it("persists the user message immediately before any provider call", async () => {
@@ -698,7 +698,7 @@ describe("Hermes persistence, CRM tools and latency", () => {
     });
   });
 
-  it("executes multi-turn loop: sends READ tool result with role 'function' and completes conversation", async () => {
+  it("executes multi-turn loop: sends READ tool result with role 'user' and completes conversation", async () => {
     const execute = vi.fn(async (sql: string) => {
       if (sql.includes("megadesk_domain_clients")) {
         return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
@@ -762,12 +762,97 @@ describe("Hermes persistence, CRM tools and latency", () => {
       expect(result.functionCallsMade).toContain("get_client_360");
       expect(result.response).toContain("Não encontrei o cliente Pedro Ferrari");
 
-      // Validar que o payload da 2ª chamada continha role: "function" com functionResponse
+      // Validar que o payload da 2ª chamada continha role: "user" com functionResponse
       const secondCallContents = receivedPayloads[1].contents;
-      const functionTurn = secondCallContents.find((c: any) => c.role === "function");
+      const functionTurn = secondCallContents.find((c: any) => c.parts?.[0]?.functionResponse);
       expect(functionTurn).toBeDefined();
+      expect(functionTurn.role).toBe("user");
       expect(functionTurn.parts[0].functionResponse.name).toBe("get_client_360");
       expect(functionTurn.parts[0].functionResponse.response.found).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("executes multiple tool calls in parallel and returns role: user with all functionResponses", async () => {
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("megadesk_domain_clients")) {
+        return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      }
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) {
+        return [[{ total: 0 }]];
+      }
+      if (sql.includes("megadesk_domain_ia_conversation_history") || sql.includes("megadesk_domain_ia_conversations") || sql.includes("megadesk_ia_token_usage")) {
+        return [[]];
+      }
+      if (sql.includes("megadesk_tickets")) {
+        return [[{ id: "tk-1", title: "Chamado 1", status: "open" }]];
+      }
+      if (sql.includes("products")) {
+        return [[{ id: "prod-1", name: "Produto 1", stock_quantity: 10 }]];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+    let callCount = 0;
+    const receivedPayloads: any[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (_url: any, init: any) => {
+      callCount++;
+      const body = JSON.parse(init.body);
+      receivedPayloads.push(body);
+      if (callCount === 1) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [{
+              content: {
+                parts: [
+                  { functionCall: { name: "get_tickets_overview", args: { status: "open" } } },
+                  { functionCall: { name: "get_inventory_status", args: { status: "empty" } } },
+                ]
+              }
+            }],
+            usageMetadata: { promptTokenCount: 60, candidatesTokenCount: 20, totalTokenCount: 80 }
+          })
+        } as any;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{
+            content: {
+              parts: [{
+                text: "Aqui está o resumo dos chamados e estoque."
+              }]
+            }
+          }],
+          usageMetadata: { promptTokenCount: 90, candidatesTokenCount: 30, totalTokenCount: 120 }
+        })
+      } as any;
+    }) as any;
+
+    try {
+      const result = await chatWithClientGemini("tenant-a", "user@example.invalid", "qual o status geral?", [], ["tickets", "inventory"]);
+      expect(callCount).toBe(2);
+      expect(result.ok).toBe(true);
+      expect(result.functionCallsMade).toContain("get_tickets_overview");
+      expect(result.functionCallsMade).toContain("get_inventory_status");
+
+      // Validar payload da 2ª chamada: deve conter role: "user" com ambos os functionResponse no mesmo turno
+      const secondCallContents = receivedPayloads[1].contents;
+      const modelTurn = secondCallContents.find((c: any) => c.role === "model");
+      expect(modelTurn).toBeDefined();
+      expect(modelTurn.parts).toHaveLength(2);
+
+      const userFunctionTurn = secondCallContents.find((c: any) => c.role === "user" && c.parts?.some((p: any) => p.functionResponse));
+      expect(userFunctionTurn).toBeDefined();
+      expect(userFunctionTurn.parts).toHaveLength(2);
+      expect(userFunctionTurn.parts[0].functionResponse.name).toBe("get_tickets_overview");
+      expect(userFunctionTurn.parts[1].functionResponse.name).toBe("get_inventory_status");
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -1096,6 +1181,19 @@ describe("Hermes persistence, CRM tools and latency", () => {
     expect(promptHistory[1].content).toContain("[Proposta em rascunho anterior: Cliente: Pedro Ferrari");
     expect(promptHistory[1].content).toContain("1x lavagem de carro (R$ 0,00)");
     expect(promptHistory[1].content).toContain("1x troca da correia dentada (R$ 0,00)");
+  });
+
+  it("truncates large list or tool outputs in selectGeminiPromptHistory to 300 characters", () => {
+    const longTicketList = "Chamados abertos:\n" + Array.from({ length: 30 }, (_, i) => `${i + 1}. Chamado #${i + 100} com descrição longa de teste`).join("\n");
+    const history = [
+      { role: "user" as const, content: "quais chamados estão abertos?" },
+      { role: "assistant" as const, content: longTicketList },
+    ];
+
+    const promptHistory = selectGeminiPromptHistory(history);
+    expect(promptHistory).toHaveLength(2);
+    expect(promptHistory[1].content.length).toBeLessThanOrEqual(300);
+    expect(promptHistory[1].content.endsWith("...")).toBe(true);
   });
 
   it("retains proposal context and updates price when user adjusts an existing proposal", async () => {
