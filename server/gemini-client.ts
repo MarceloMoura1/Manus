@@ -3432,7 +3432,7 @@ function normalizeTicketIntent(value: string): string {
 
 function isTicketCreationRequest(value: string): boolean {
   const text = normalizeTicketIntent(value);
-  return /\b(?:abrir|abra|criar|crie|cadastrar|registrar|fazer|novo)\s+(?:(?:um|uma|o|a)\s+)?(?:chamado|ticket)\b/.test(text)
+  return /\b(?:abrir|abra|abre|criar|crie|cria|cadastrar|registrar|fazer|novo)\s+(?:(?:um|uma|o|a)\s+)?(?:chamado|ticket)\b/.test(text)
     || /\babertura\s+de\s+(?:um\s+)?(?:chamado|ticket)\b/.test(text);
 }
 
@@ -3463,32 +3463,67 @@ function ticketCreationDraft(message: string, history: readonly IAMessage[]): { 
     && /\b(?:chamado|ticket)\b/.test(normalizedMessage);
   const currentIntent = isTicketCreationRequest(message) || correction;
   const awaitingSlots = previousTicketIndex >= 0 && recent.slice(previousTicketIndex + 1).some(item =>
-    item.role === "assistant" && /Para preparar o chamado/i.test(item.content));
-  if (!currentIntent && !(awaitingSlots && (ticketSlotIn(message, "title") || ticketSlotIn(message, "description") || ticketCustomerIn(message)))) return null;
+    item.role === "assistant" && /(Para preparar o chamado|Qual é o assunto e a descrição do chamado|informe .* para eu preparar o registro)/i.test(item.content));
+  const awaitingCustomerChoice = previousTicketIndex >= 0 && recent.slice(previousTicketIndex + 1).some(item =>
+    item.role === "assistant" && /(Localizei mais de um cliente|Para qual deles deseja abrir o chamado|Não localizei nenhum cliente)/i.test(item.content));
+  const currentCustomer = ticketCustomerIn(message)
+    ?? (awaitingCustomerChoice && message.trim().length > 0 ? message.trim().replace(/[?!.,;]+$/, "") : null);
+  if (!currentIntent && !(awaitingSlots && (ticketSlotIn(message, "title") || ticketSlotIn(message, "description") || currentCustomer)) && !awaitingCustomerChoice) return null;
 
   const relevant = previousTicketIndex >= 0 && (!currentIntent || correction) ? recent.slice(previousTicketIndex) : [];
   const userMessages = relevant.filter(item => item.role === "user").map(item => item.content);
-  const customer = ticketCustomerIn(message) ?? [...userMessages].reverse().map(ticketCustomerIn).find(Boolean) ?? null;
+  const customer = currentCustomer ?? [...userMessages].reverse().map(ticketCustomerIn).find(Boolean) ?? null;
   const title = ticketSlotIn(message, "title") ?? [...userMessages].reverse().map(item => ticketSlotIn(item, "title")).find(Boolean) ?? null;
   const description = ticketSlotIn(message, "description") ?? [...userMessages].reverse().map(item => ticketSlotIn(item, "description")).find(Boolean) ?? null;
   const priority = ticketPriorityIn(message) ?? [...userMessages].reverse().map(ticketPriorityIn).find(Boolean) ?? null;
   return { customer, title, description, priority, correction };
 }
 
-async function verifyTicketCustomer(pool: any, clientId: string, customer: string): Promise<"found" | "missing" | "ambiguous" | "unavailable"> {
-  if (!pool) return "unavailable";
+type TicketCustomerResolution =
+  | { status: "found"; customerName: string }
+  | { status: "missing" }
+  | { status: "ambiguous"; options: string[] }
+  | { status: "unavailable" };
+
+function ticketCustomerDisplayName(candidate: Record<string, unknown>, fallback: string): string {
+  const companyName = typeof candidate.companyName === "string" ? candidate.companyName.trim() : "";
+  const responsibleName = typeof candidate.responsibleName === "string" ? candidate.responsibleName.trim() : "";
+  return companyName || responsibleName || fallback;
+}
+
+async function resolveTicketCustomer(pool: any, clientId: string, customer: string): Promise<TicketCustomerResolution> {
+  if (!pool) return { status: "unavailable" };
   try {
     const [rows] = await pool.execute(
-      `SELECT crm_client_id AS crmClientId FROM megadesk_crm_clients
+      `SELECT crm_client_id AS crmClientId, company_name AS companyName, responsible_name AS responsibleName
+         FROM megadesk_crm_clients
         WHERE client_id = ? AND lifecycle_state = 'active'
-          AND (LOWER(company_name) = LOWER(?) OR LOWER(responsible_name) = LOWER(?) OR crm_client_id = ?)
-        LIMIT 2`,
+          AND (crm_client_id = ?
+            OR LOCATE(LOWER(?), LOWER(company_name)) > 0
+            OR LOCATE(LOWER(?), LOWER(responsible_name)) > 0)
+        ORDER BY company_name, crm_client_id LIMIT 10`,
       [clientId, customer, customer, customer],
     ) as any[];
-    if (!Array.isArray(rows)) return "unavailable";
-    return rows.length === 1 ? "found" : rows.length === 0 ? "missing" : "ambiguous";
+    if (!Array.isArray(rows)) return { status: "unavailable" };
+    const candidates = rows.filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object"));
+    if (candidates.length === 0) return { status: "missing" };
+
+    const normalizedCustomer = normalizeTicketIntent(customer);
+    const exactCandidates = candidates.filter(candidate =>
+      candidate.crmClientId === customer
+      || normalizeTicketIntent(ticketCustomerDisplayName(candidate, customer)) === normalizedCustomer
+      || (typeof candidate.responsibleName === "string" && normalizeTicketIntent(candidate.responsibleName) === normalizedCustomer),
+    );
+    const selected = exactCandidates.length === 1 ? exactCandidates[0] : candidates.length === 1 ? candidates[0] : null;
+    if (selected) return { status: "found", customerName: ticketCustomerDisplayName(selected, customer) };
+
+    const options = Array.from(new Set(candidates
+      .map(candidate => ticketCustomerDisplayName(candidate, customer))
+      .filter(Boolean)))
+      .slice(0, 5);
+    return { status: "ambiguous", options };
   } catch {
-    return "unavailable";
+    return { status: "unavailable" };
   }
 }
 
@@ -3554,20 +3589,29 @@ async function chatWithClientGeminiInternal(
     } else if (!customer) {
       response = "Para preparar o chamado, informe o nome do cliente.";
     } else {
-      const customerStatus = await verifyTicketCustomer(pool, clientId, customer);
-      if (customerStatus === "unavailable") {
+      const customerResolution = await resolveTicketCustomer(pool, clientId, customer);
+      if (customerResolution.status === "unavailable") {
         response = "Não consegui confirmar o cadastro do cliente agora. Tente novamente em instantes.";
-      } else if (customerStatus === "missing") {
-        response = `Não encontrei o cliente ${customer} no cadastro ativo. Confirme o nome antes de abrir o chamado.`;
-      } else if (customerStatus === "ambiguous") {
-        response = `Há mais de um cadastro para ${customer}. Informe o identificador exato do cliente antes de abrir o chamado.`;
+      } else if (customerResolution.status === "missing") {
+        response = `Não localizei nenhum cliente com o nome '${customer}' na nossa base do CRM. Deseja cadastrá-lo primeiro ou verificar o nome completo?`;
+      } else if (customerResolution.status === "ambiguous") {
+        const options = customerResolution.options.length > 0
+          ? customerResolution.options.map(option => `[${option}]`).join(" e ")
+          : "cadastros com esse nome";
+        response = `Localizei mais de um cliente com esse nome: ${options}. Para qual deles deseja abrir o chamado?`;
       } else if (!title || !description) {
+        const resolvedCustomer = customerResolution.customerName;
+        if (!title && !description) {
+          response = `Localizei o cadastro de ${resolvedCustomer}. Qual é o assunto e a descrição do chamado para eu preparar o registro?`;
+        } else {
         const missing = [!title ? "assunto" : "", !description ? "descrição do problema" : ""].filter(Boolean).join(" e ");
-        response = `${correction ? "Entendido, vamos abrir um chamado. " : ""}Para preparar o chamado para ${customer}, informe ${missing}. Depois apresento o card para sua aprovação.`;
+          response = `${correction ? "Entendido, vamos abrir um chamado. " : ""}Localizei o cadastro de ${resolvedCustomer}. Informe ${missing} para eu preparar o registro.`;
+        }
       } else {
-        pendingActionRequest = createPendingActionRequest(ticketTool, { customer, title, description,
+        const resolvedCustomer = customerResolution.customerName;
+        pendingActionRequest = createPendingActionRequest(ticketTool, { customer: resolvedCustomer, title, description,
           ...(priority ? { priority } : {}) }, { clientId, userId });
-        response = `Preparei o chamado "${title}" para ${customer}. Confirme o card para executar a abertura.`;
+        response = `Preparei o chamado "${title}" para ${resolvedCustomer}. Confirme o card para executar a abertura.`;
       }
     }
     await saveConversationHistory(clientId, userId, [

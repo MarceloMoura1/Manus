@@ -56,14 +56,26 @@ function resolveTicketRef(args: Record<string, unknown>): string {
   throw new Error("HERMES_ACTION_INVALID_TICKETID");
 }
 
-function exactCustomerMatch(reference: string, customers: CrmCustomer[]): CrmCustomer | null {
-  const normalized = reference.trim().toLocaleLowerCase();
-  const matches = customers.filter(customer =>
+function normalizeCustomerReference(value: string): string {
+  return value.trim().toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function resolveCandidateCustomer(reference: string, customers: CrmCustomer[]): CrmCustomer | null {
+  const normalized = normalizeCustomerReference(reference);
+  const activeCustomers = customers.filter(customer => customer.lifecycleState === "active");
+  const exactMatches = activeCustomers.filter(customer =>
     customer.crmClientId === reference
-    || customer.companyName.trim().toLocaleLowerCase() === normalized
-    || customer.responsibleName.trim().toLocaleLowerCase() === normalized,
+    || normalizeCustomerReference(customer.companyName) === normalized
+    || normalizeCustomerReference(customer.responsibleName) === normalized,
   );
-  return matches.length === 1 ? matches[0] : null;
+  if (exactMatches.length === 1) return exactMatches[0];
+  if (exactMatches.length > 1) return null;
+
+  const partialMatches = activeCustomers.filter(customer =>
+    normalizeCustomerReference(customer.companyName).includes(normalized)
+    || normalizeCustomerReference(customer.responsibleName).includes(normalized),
+  );
+  return partialMatches.length === 1 ? partialMatches[0] : null;
 }
 
 async function resolveCustomer(
@@ -74,7 +86,7 @@ async function resolveCustomer(
   const direct = await dependencies.getCrmClientById(reference, clientId) as CrmCustomer | null;
   if (direct?.lifecycleState === "active") return direct;
   const candidates = await dependencies.listCrmClients(clientId, reference, "active") as CrmCustomer[];
-  const matched = exactCustomerMatch(reference, candidates);
+  const matched = resolveCandidateCustomer(reference, candidates);
   if (!matched || matched.lifecycleState !== "active") {
     throw new Error("HERMES_ACTION_CUSTOMER_NOT_FOUND_OR_AMBIGUOUS");
   }

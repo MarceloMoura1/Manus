@@ -144,13 +144,18 @@ describe("Gemini text functionCall contingency", () => {
 });
 
 describe("Hermes ticket creation intent and guided slots", () => {
-  function mockTicketDatabase(customerRows: unknown[] = [{ crmClientId: "crm-antonio" }]) {
+  function mockTicketDatabase(
+    customerRows: unknown[] = [{ crmClientId: "crm-antonio" }],
+    expectedCustomer = "Antonio",
+  ) {
     const execute = vi.fn(async (sql: string, params?: unknown[]) => {
       if (sql.includes("megadesk_domain_clients")) return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
       if (sql.includes("COALESCE(SUM(tokens_used), 0)")) return [[{ total: 0 }]];
       if (sql.includes("FROM megadesk_crm_clients")) {
-        expect(params).toEqual(["tenant-ticket-intent", "Antonio", "Antonio", "Antonio"]);
+        expect(params).toEqual(["tenant-ticket-intent", expectedCustomer, expectedCustomer, expectedCustomer]);
         expect(sql).toContain("lifecycle_state = 'active'");
+        expect(sql).toContain("LOCATE(LOWER(?)");
+        expect(sql).not.toContain("status =");
         return [customerRows];
       }
       return [[]];
@@ -165,11 +170,36 @@ describe("Hermes ticket creation intent and guided slots", () => {
     try {
       const result = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
         "consegue criar um chamado para o cliente Antonio?", [], ["tickets", "crm"]);
-      expect(result.response).toContain("assunto e descrição");
+      expect(result.response).toContain("Qual é o assunto e a descrição do chamado");
       expect(result.pendingActionRequest).toBeUndefined();
       expect(result.functionCallsMade).toEqual([]);
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(execute.mock.calls.some(([sql]) => sql.includes("megadesk_domain_chamados") || sql.includes("get_crm_summary"))).toBe(false);
+    } finally { fetchSpy.mockRestore(); }
+  });
+
+  it("finds a single active CRM lead by partial, case-insensitive name and preserves its canonical name", async () => {
+    const execute = mockTicketDatabase([
+      { crmClientId: "crm-pedro", companyName: "Pedro Ferrari", responsibleName: "", status: "lead" },
+    ], "PEDRO");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Gemini must not run"));
+    try {
+      const initial = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
+        "consegue criar um chamado para o cliente PEDRO?", [], ["tickets"]);
+      expect(initial.response).toBe("Localizei o cadastro de Pedro Ferrari. Qual é o assunto e a descrição do chamado para eu preparar o registro?");
+      expect(initial.pendingActionRequest).toBeUndefined();
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      const completed = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
+        "Assunto: Falha no acesso; Descrição: O portal recusa a senha", [
+          { role: "user", content: "consegue criar um chamado para o cliente PEDRO?" },
+          { role: "assistant", content: initial.response },
+        ], ["tickets"]);
+      expect(completed.pendingActionRequest).toMatchObject({
+        actionType: "CREATE_TICKET",
+        args: { customer: "Pedro Ferrari", title: "Falha no acesso", description: "O portal recusa a senha" },
+      });
+      expect(execute.mock.calls.some(([sql]) => sql.includes("status ="))).toBe(false);
     } finally { fetchSpy.mockRestore(); }
   });
 
@@ -184,8 +214,8 @@ describe("Hermes ticket creation intent and guided slots", () => {
       ];
       const result = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
         "é pra abrir um chamado", history, ["tickets", "crm"]);
-      expect(result.response).toContain("chamado para Antonio");
-      expect(result.response).toContain("assunto e descrição");
+      expect(result.response).toContain("Localizei o cadastro de Antonio");
+      expect(result.response).toContain("Qual é o assunto e a descrição do chamado");
       expect(result.response).not.toContain("Consulta realizada com sucesso");
       expect(result.pendingActionRequest).toBeUndefined();
       expect(fetchSpy).not.toHaveBeenCalled();
@@ -220,19 +250,45 @@ describe("Hermes ticket creation intent and guided slots", () => {
     const noCustomer = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
       "criar chamado para o cliente Antonio. Assunto: Falha. Descrição: Não abre", [], ["tickets"]);
     expect(noCustomer.pendingActionRequest).toBeUndefined();
-    expect(noCustomer.response).toContain("Não encontrei o cliente Antonio");
+    expect(noCustomer.response).toContain("Não localizei nenhum cliente com o nome 'Antonio'");
     expect(missing.mock.calls.some(([sql]) => sql.includes("megadesk_crm_clients"))).toBe(true);
 
-    mockTicketDatabase([{ crmClientId: "a" }, { crmClientId: "b" }]);
+    mockTicketDatabase([
+      { crmClientId: "a", companyName: "Antonio Silva", responsibleName: "" },
+      { crmClientId: "b", companyName: "Antonio Souza", responsibleName: "" },
+    ]);
     const ambiguous = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
       "criar chamado para o cliente Antonio. Assunto: Falha. Descrição: Não abre", [], ["tickets"]);
     expect(ambiguous.pendingActionRequest).toBeUndefined();
-    expect(ambiguous.response).toContain("mais de um cadastro");
+    expect(ambiguous.response).toContain("Localizei mais de um cliente com esse nome");
 
     const noPermission = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
       "criar chamado para o cliente Antonio. Assunto: Falha. Descrição: Não abre", [], ["crm"]);
     expect(noPermission.pendingActionRequest).toBeUndefined();
     expect(noPermission.response).toContain("não possui permissão");
+  });
+
+  it("lists matching active CRM customers for disambiguation and retries the selected full name", async () => {
+    mockTicketDatabase([
+      { crmClientId: "crm-antonio-silva", companyName: "Antonio Silva", responsibleName: "" },
+      { crmClientId: "crm-antonio-souza", companyName: "Antonio Souza", responsibleName: "" },
+    ]);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Gemini must not run"));
+    try {
+      const ambiguous = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
+        "criar chamado para o cliente Antonio", [], ["tickets"]);
+      expect(ambiguous.pendingActionRequest).toBeUndefined();
+      expect(ambiguous.response).toBe("Localizei mais de um cliente com esse nome: [Antonio Silva] e [Antonio Souza]. Para qual deles deseja abrir o chamado?");
+
+      mockTicketDatabase([{ crmClientId: "crm-antonio-souza", companyName: "Antonio Souza", responsibleName: "" }], "Antonio Souza");
+      const selected = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
+        "Antonio Souza", [
+          { role: "user", content: "criar chamado para o cliente Antonio" },
+          { role: "assistant", content: ambiguous.response },
+        ], ["tickets"]);
+      expect(selected.response).toBe("Localizei o cadastro de Antonio Souza. Qual é o assunto e a descrição do chamado para eu preparar o registro?");
+      expect(selected.pendingActionRequest).toBeUndefined();
+    } finally { fetchSpy.mockRestore(); }
   });
 
   it("requires a nonempty description even for a native model create_ticket call", () => {
@@ -887,6 +943,34 @@ describe("Hermes security controls", () => {
 
     expect(result).toEqual({ success: true, message: "Chamado #7 criado com sucesso.", entityId: "ticket-1" });
     expect(createChamadoWithActivity).toHaveBeenCalledWith(expect.objectContaining({ clientId: "tenant-a", priority: "critica", observations: expect.stringContaining("Categoria: Acesso") }));
+  });
+
+  it("resolves a uniquely matching active CRM lead at approval time when the ticket uses a partial customer name", async () => {
+    const createChamadoWithActivity = vi.fn(async () => ({ id: "ticket-pedro", number: 8 }));
+    const listCrmClients = vi.fn(async () => ([{
+      crmClientId: "crm-pedro", lifecycleState: "active", companyName: "Pedro Ferrari", responsibleName: "",
+      customerType: "person", phone: null, email: null, cpfCnpj: null,
+    }]));
+    const result = await executeHermesTicketAction({
+      clientId: "tenant-a",
+      actorUserId: "operator-1",
+      action: { actionType: "CREATE_TICKET", args: { customer: "Pedro", title: "Sem acesso", description: "Portal recusa a senha" } },
+      resolveAssignee: vi.fn(),
+    }, {
+      getActiveClientUser: vi.fn(async () => ({ userId: "operator-1", userName: "Operadora" })),
+      getChamadoWithActivities: vi.fn(),
+      getCrmClientById: vi.fn(async () => null),
+      listCrmClients,
+      createChamadoWithActivity,
+      updateChamadoWithActivity: vi.fn(),
+      registerManualTicketActivity: vi.fn(),
+    } as any);
+
+    expect(result.entityId).toBe("ticket-pedro");
+    expect(listCrmClients).toHaveBeenCalledWith("tenant-a", "Pedro", "active");
+    expect(createChamadoWithActivity).toHaveBeenCalledWith(expect.objectContaining({
+      customerId: "crm-pedro", customerName: "Pedro Ferrari",
+    }));
   });
 
   it("fails closed before ticket writes when the canonical actor is not active", async () => {
