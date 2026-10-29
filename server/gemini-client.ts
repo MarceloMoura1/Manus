@@ -317,7 +317,7 @@ function createTicketArgs(args: Record<string, unknown>): Record<string, unknown
   if (!customer) throw new Error("Parâmetro obrigatório ausente: customer.");
   return {
     title: stringArg(args, "title", { min: 1, max: 500 })!,
-    description: stringArg(args, "description", { min: 0, max: 2_000, optional: true }) ?? "",
+    description: stringArg(args, "description", { min: 1, max: 2_000 })!,
     priority: args.priority ? enumArg(args, "priority", ["low", "medium", "high", "urgent"] as const) : "medium",
     customer,
     clientNameOuId: customer,
@@ -742,7 +742,7 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
           priority: { type: "STRING", enum: ["low", "medium", "high", "urgent"] },
           category: { type: "STRING", description: "Categoria do atendimento" }
         },
-        required: ["customer", "title"]
+        required: ["customer", "title", "description"]
       }
     },
     validateArgs: createTicketArgs,
@@ -2678,6 +2678,11 @@ REGRA ZERO PREÂMBULO EM TOOL CALLS:
 - Não prometa consultar ou executar uma ferramenta em uma resposta textual. Se não houver functionCall efetiva, informe que a consulta não foi realizada.
 - Invoque ferramentas exclusivamente pelo Function Calling nativo da API. Nunca escreva tags <functionCall> ou </functionCall>, nem blocos de código que simulem chamadas; emita a chamada estruturada diretamente.
 
+DISTINÇÃO DE ENTIDADES E CORREÇÕES DO OPERADOR:
+- "Abrir/criar chamado" ou "ticket de suporte" significa criar um chamado, nunca cadastrar um cliente. O cliente mencionado é o destinatário do chamado. Confira o cadastro no tenant e peça assunto e descrição se faltarem; só então prepare o card de aprovação de create_ticket.
+- "Criar cliente" ou "cadastrar lead" significa registrar uma pessoa ou empresa somente quando isso for solicitado explicitamente. "Proposta", "orçamento" e "venda" pertencem ao fluxo comercial; peça itens e valores ausentes antes de preparar uma proposta.
+- Após "não, é um chamado", "é pra abrir um chamado" ou correção semelhante, retome os dados fornecidos pelo usuário, reconheça o equívoco brevemente e faça somente a próxima pergunta necessária. Não consulte resumos de CRM ou chamados sem pedido de consulta.
+
 ESTILO EXECUTIVO:
 - Responda em português brasileiro com presença executiva, calor humano discreto e clareza. Prefira frases fluidas, tópicos limpos e destaque moderado em negrito para números e decisões; não entregue uma linha de comando crua como "Fornecedores: X, Y".
 - Trate o operador pela preferência gravada. Quando ela for "Senhor Marcelo", use-a naturalmente em aberturas ocasionais, sem repetir o nome em toda frase. Com outros usuários, respeite o tratamento deles.
@@ -3086,7 +3091,7 @@ function extractEntityCreationFromMessage(
 
   // 3. Cliente: "criar/cadastrar cliente chamado X" (se não for proposta)
   const isProposal = /\b(orçamento|orcamento|proposta|cotacao|cotação)\b/i.test(userMessage);
-  if (!isProposal) {
+  if (!isProposal && !isTicketCreationRequest(userMessage)) {
     const clientMatch = userMessage.match(/(?:cria|criar|cadastra|cadastrar|novo|adiciona|adicionar|consegue\s+criar)\s+(?:um\s+)?cliente\s+(?:chamado\s+|de\s+nome\s+)?([A-ZÀ-Úa-zà-ú0-9\s.&'-]+)/i);
     if (clientMatch && clientMatch[1]) {
       const tool = allowedTools.find(t => t.name === "create_client");
@@ -3397,10 +3402,6 @@ function synthesizeDeterministicSingle(
     return `Resumo de conversas no atendimento: ${total} conversa(s) no total (${abertas} aberta(s)).`;
   }
 
-  if (executedReadResults.length > 0) {
-    return "Consulta realizada com sucesso no sistema, mas não há detalhes adicionais para exibir no momento.";
-  }
-
   return null;
 }
 
@@ -3423,6 +3424,72 @@ function synthesizeDeterministicResponse(
 
   const lastResult = executedReadResults[executedReadResults.length - 1];
   return synthesizeDeterministicSingle(lastResult, userMessage, executedReadResults);
+}
+
+function normalizeTicketIntent(value: string): string {
+  return value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function isTicketCreationRequest(value: string): boolean {
+  const text = normalizeTicketIntent(value);
+  return /\b(?:abrir|abra|criar|crie|cadastrar|registrar|fazer|novo)\s+(?:(?:um|uma|o|a)\s+)?(?:chamado|ticket)\b/.test(text)
+    || /\babertura\s+de\s+(?:um\s+)?(?:chamado|ticket)\b/.test(text);
+}
+
+function ticketCustomerIn(value: string): string | null {
+  const match = value.match(/\b(?:para|pra|pro)\s+(?:o|a)?\s*cliente\s+([^?!.,;\n]+?)(?=\s+(?:com\s+)?(?:assunto|t[ií]tulo|descri[cç][aã]o|problema|prioridade)\b|$|[?!.,;\n])/i)
+    ?? value.match(/^\s*cliente\s*:?\s*([^?!.,;\n]+?)(?=$|[?!.,;\n])/i);
+  return match?.[1]?.trim() || null;
+}
+
+function ticketSlotIn(value: string, slot: "title" | "description"): string | null {
+  const marker = slot === "title" ? "(?:assunto|t[ií]tulo)" : "(?:descri[cç][aã]o|problema|relato)";
+  const match = value.match(new RegExp(`\\b${marker}\\s*(?::|é|eh|=)\\s*([\\s\\S]+?)(?=\\s*(?:[;\\n]|\\be\\s+)?\\s*(?:assunto|t[ií]tulo|descri[cç][aã]o|problema|relato)\\s*(?::|é|eh|=)|$)`, "i"));
+  return match?.[1]?.trim().replace(/[;\s]+$/, "") || null;
+}
+
+function ticketPriorityIn(value: string): "low" | "medium" | "high" | "urgent" | null {
+  const match = normalizeTicketIntent(value).match(/\bprioridade\s*(?::|e|=)?\s*(baixa|media|alta|urgente|low|medium|high|urgent)\b/);
+  if (!match) return null;
+  return ({ baixa: "low", media: "medium", alta: "high", urgente: "urgent",
+    low: "low", medium: "medium", high: "high", urgent: "urgent" } as const)[match[1] as "baixa" | "media" | "alta" | "urgente" | "low" | "medium" | "high" | "urgent"];
+}
+
+function ticketCreationDraft(message: string, history: readonly IAMessage[]): { customer: string | null; title: string | null; description: string | null; priority: "low" | "medium" | "high" | "urgent" | null; correction: boolean } | null {
+  const recent = history.slice(-8);
+  const previousTicketIndex = recent.findLastIndex(item => item.role === "user" && isTicketCreationRequest(item.content));
+  const normalizedMessage = normalizeTicketIntent(message.trim());
+  const correction = /^(?:nao\b|e\s+(?:pra|para|um)\b|era\b|errou\b)/.test(normalizedMessage)
+    && /\b(?:chamado|ticket)\b/.test(normalizedMessage);
+  const currentIntent = isTicketCreationRequest(message) || correction;
+  const awaitingSlots = previousTicketIndex >= 0 && recent.slice(previousTicketIndex + 1).some(item =>
+    item.role === "assistant" && /Para preparar o chamado/i.test(item.content));
+  if (!currentIntent && !(awaitingSlots && (ticketSlotIn(message, "title") || ticketSlotIn(message, "description") || ticketCustomerIn(message)))) return null;
+
+  const relevant = previousTicketIndex >= 0 && (!currentIntent || correction) ? recent.slice(previousTicketIndex) : [];
+  const userMessages = relevant.filter(item => item.role === "user").map(item => item.content);
+  const customer = ticketCustomerIn(message) ?? [...userMessages].reverse().map(ticketCustomerIn).find(Boolean) ?? null;
+  const title = ticketSlotIn(message, "title") ?? [...userMessages].reverse().map(item => ticketSlotIn(item, "title")).find(Boolean) ?? null;
+  const description = ticketSlotIn(message, "description") ?? [...userMessages].reverse().map(item => ticketSlotIn(item, "description")).find(Boolean) ?? null;
+  const priority = ticketPriorityIn(message) ?? [...userMessages].reverse().map(ticketPriorityIn).find(Boolean) ?? null;
+  return { customer, title, description, priority, correction };
+}
+
+async function verifyTicketCustomer(pool: any, clientId: string, customer: string): Promise<"found" | "missing" | "ambiguous" | "unavailable"> {
+  if (!pool) return "unavailable";
+  try {
+    const [rows] = await pool.execute(
+      `SELECT crm_client_id AS crmClientId FROM megadesk_crm_clients
+        WHERE client_id = ? AND lifecycle_state = 'active'
+          AND (LOWER(company_name) = LOWER(?) OR LOWER(responsible_name) = LOWER(?) OR crm_client_id = ?)
+        LIMIT 2`,
+      [clientId, customer, customer, customer],
+    ) as any[];
+    if (!Array.isArray(rows)) return "unavailable";
+    return rows.length === 1 ? "found" : rows.length === 0 ? "missing" : "ambiguous";
+  } catch {
+    return "unavailable";
+  }
 }
 
 async function chatWithClientGeminiInternal(
@@ -3476,6 +3543,42 @@ async function chatWithClientGeminiInternal(
 
   // 3. Primeira chamada ao Gemini (com fast-path para saudações e conversas puras)
   const allowedTools = getAllowedHermesTools(userPermissions);
+  const ticketDraft = ticketCreationDraft(userMessage, existingHistory);
+  if (ticketDraft) {
+    const ticketTool = allowedTools.find(tool => tool.name === "create_ticket");
+    const { customer, title, description, priority, correction } = ticketDraft;
+    let response: string;
+    let pendingActionRequest: PendingActionRequest | undefined;
+    if (!ticketTool) {
+      response = "Você não possui permissão para abrir chamados.";
+    } else if (!customer) {
+      response = "Para preparar o chamado, informe o nome do cliente.";
+    } else {
+      const customerStatus = await verifyTicketCustomer(pool, clientId, customer);
+      if (customerStatus === "unavailable") {
+        response = "Não consegui confirmar o cadastro do cliente agora. Tente novamente em instantes.";
+      } else if (customerStatus === "missing") {
+        response = `Não encontrei o cliente ${customer} no cadastro ativo. Confirme o nome antes de abrir o chamado.`;
+      } else if (customerStatus === "ambiguous") {
+        response = `Há mais de um cadastro para ${customer}. Informe o identificador exato do cliente antes de abrir o chamado.`;
+      } else if (!title || !description) {
+        const missing = [!title ? "assunto" : "", !description ? "descrição do problema" : ""].filter(Boolean).join(" e ");
+        response = `${correction ? "Entendido, vamos abrir um chamado. " : ""}Para preparar o chamado para ${customer}, informe ${missing}. Depois apresento o card para sua aprovação.`;
+      } else {
+        pendingActionRequest = createPendingActionRequest(ticketTool, { customer, title, description,
+          ...(priority ? { priority } : {}) }, { clientId, userId });
+        response = `Preparei o chamado "${title}" para ${customer}. Confirme o card para executar a abertura.`;
+      }
+    }
+    await saveConversationHistory(clientId, userId, [
+      ...existingHistory,
+      { role: "user" as const, content: userMessage, timestamp: Date.now() },
+      { role: "assistant" as const, content: response, timestamp: Date.now(), ...(pendingActionRequest ? { pendingActionRequest } : {}) },
+    ].slice(-50));
+    const conversationId = await logIAConversation(clientId, userId, userMessage, response, 0);
+    return { ok: true, response, tokensUsed: 0, conversationId,
+      functionCallsMade: pendingActionRequest ? ["create_ticket"] : [], pendingActionRequest };
+  }
   const isConversational = isConversationalGreeting(userMessage);
   const activeTools = isConversational ? [] : allowedTools;
   const requestBody: GeminiRequest = {
@@ -3720,7 +3823,7 @@ async function chatWithClientGeminiInternal(
         finalResponse = "Preparei a ação solicitada para sua aprovação:";
       }
     } else if (executedReadResults.length > 0) {
-      finalResponse = "Consulta realizada com sucesso no sistema, mas não há detalhes adicionais para exibir no momento.";
+      finalResponse = "A consulta não trouxe detalhes suficientes para responder ao pedido. Pode especificar o dado que precisa?";
     } else {
       finalResponse = "Não consegui processar a resposta neste momento. Pode repetir ou detalhar sua solicitação?";
     }

@@ -121,7 +121,7 @@ describe("Gemini text functionCall contingency", () => {
   it("turns a text mutation into pending approval without executing the ticket write", async () => {
     const execute = mockTenantDatabase();
     const { result } = await chatWithTextResponse(
-      '<functionCall>create_ticket {"customer":"Cliente Teste","title":"Falha de acesso"}</functionCall>',
+      '<functionCall>create_ticket {"customer":"Cliente Teste","title":"Falha de acesso","description":"Não consegue entrar"}</functionCall>',
       ["tickets"],
     );
     expect(result.pendingActionRequest).toMatchObject({ actionType: "CREATE_TICKET", status: "PENDING_APPROVAL" });
@@ -140,6 +140,119 @@ describe("Gemini text functionCall contingency", () => {
     const prompt = buildSystemInstruction(getAllowedHermesTools(["tickets"]), {});
     expect(prompt).toContain("Function Calling nativo da API");
     expect(prompt).toContain("Nunca escreva tags <functionCall>");
+  });
+});
+
+describe("Hermes ticket creation intent and guided slots", () => {
+  function mockTicketDatabase(customerRows: unknown[] = [{ crmClientId: "crm-antonio" }]) {
+    const execute = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (sql.includes("megadesk_domain_clients")) return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) return [[{ total: 0 }]];
+      if (sql.includes("FROM megadesk_crm_clients")) {
+        expect(params).toEqual(["tenant-ticket-intent", "Antonio", "Antonio", "Antonio"]);
+        expect(sql).toContain("lifecycle_state = 'active'");
+        return [customerRows];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    return execute;
+  }
+
+  it("asks for title and description after checking the tenant customer, without invoking Gemini or creating a client", async () => {
+    const execute = mockTicketDatabase();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Gemini must not run"));
+    try {
+      const result = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
+        "consegue criar um chamado para o cliente Antonio?", [], ["tickets", "crm"]);
+      expect(result.response).toContain("assunto e descrição");
+      expect(result.pendingActionRequest).toBeUndefined();
+      expect(result.functionCallsMade).toEqual([]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(execute.mock.calls.some(([sql]) => sql.includes("megadesk_domain_chamados") || sql.includes("get_crm_summary"))).toBe(false);
+    } finally { fetchSpy.mockRestore(); }
+  });
+
+  it("recovers Antonio after a canceled wrong client card and accepts correction without CRM summaries", async () => {
+    const execute = mockTicketDatabase();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Gemini must not run"));
+    try {
+      const history = [
+        { role: "user" as const, content: "consegue criar um chamado para o cliente Antonio?" },
+        { role: "assistant" as const, content: "Preparei o cadastro do cliente Antonio." },
+        { role: "assistant" as const, content: "Ação cancelada pelo usuário." },
+      ];
+      const result = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
+        "é pra abrir um chamado", history, ["tickets", "crm"]);
+      expect(result.response).toContain("chamado para Antonio");
+      expect(result.response).toContain("assunto e descrição");
+      expect(result.response).not.toContain("Consulta realizada com sucesso");
+      expect(result.pendingActionRequest).toBeUndefined();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(execute.mock.calls.some(([sql]) => sql.includes("megadesk_domain_chamados"))).toBe(false);
+    } finally { fetchSpy.mockRestore(); }
+  });
+
+  it("collects both slots across turns and prepares only a ticket approval card", async () => {
+    const execute = mockTicketDatabase();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Gemini must not run"));
+    try {
+      const history = [
+        { role: "user" as const, content: "criar um chamado para o cliente Antonio com prioridade urgente" },
+        { role: "assistant" as const, content: "Para preparar o chamado para Antonio, informe assunto e descrição do problema." },
+        { role: "user" as const, content: "Assunto: Falha no acesso" },
+        { role: "assistant" as const, content: "Para preparar o chamado para Antonio, informe descrição do problema." },
+      ];
+      const result = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
+        "Descrição: O portal não aceita a senha", history, ["tickets", "crm"]);
+      expect(result.pendingActionRequest).toMatchObject({
+        actionType: "CREATE_TICKET", status: "PENDING_APPROVAL",
+        args: { customer: "Antonio", title: "Falha no acesso", description: "O portal não aceita a senha", priority: "urgent" },
+      });
+      expect(result.functionCallsMade).toEqual(["create_ticket"]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(execute.mock.calls.some(([sql]) => /INSERT\s+INTO\s+megadesk_domain_chamados/i.test(sql))).toBe(false);
+    } finally { fetchSpy.mockRestore(); }
+  });
+
+  it("does not prepare a card for missing or ambiguous customers or without ticket permission", async () => {
+    const missing = mockTicketDatabase([]);
+    const noCustomer = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
+      "criar chamado para o cliente Antonio. Assunto: Falha. Descrição: Não abre", [], ["tickets"]);
+    expect(noCustomer.pendingActionRequest).toBeUndefined();
+    expect(noCustomer.response).toContain("Não encontrei o cliente Antonio");
+    expect(missing.mock.calls.some(([sql]) => sql.includes("megadesk_crm_clients"))).toBe(true);
+
+    mockTicketDatabase([{ crmClientId: "a" }, { crmClientId: "b" }]);
+    const ambiguous = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
+      "criar chamado para o cliente Antonio. Assunto: Falha. Descrição: Não abre", [], ["tickets"]);
+    expect(ambiguous.pendingActionRequest).toBeUndefined();
+    expect(ambiguous.response).toContain("mais de um cadastro");
+
+    const noPermission = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
+      "criar chamado para o cliente Antonio. Assunto: Falha. Descrição: Não abre", [], ["crm"]);
+    expect(noPermission.pendingActionRequest).toBeUndefined();
+    expect(noPermission.response).toContain("não possui permissão");
+  });
+
+  it("requires a nonempty description even for a native model create_ticket call", () => {
+    const tool = HERMES_TOOL_REGISTRY.find(item => item.name === "create_ticket")!;
+    expect(tool.declaration.parameters.required).toEqual(["customer", "title", "description"]);
+    expect(() => createPendingActionRequest(tool, { customer: "Antonio", title: "Falha" })).toThrow();
+  });
+
+  it("preserves explicit client registration when 'chamado' describes the client's name", async () => {
+    mockTicketDatabase();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [] } }], usageMetadata: { totalTokenCount: 0 } }),
+    } as any);
+    try {
+      const result = await chatWithClientGemini("tenant-ticket-intent", "operator@example.invalid",
+        "criar cliente chamado Antonio", [], ["crm"]);
+      expect(fetchSpy).toHaveBeenCalled();
+      expect(result.pendingActionRequest?.actionType).toBe("CREATE_CLIENT");
+    } finally { fetchSpy.mockRestore(); }
   });
 });
 
