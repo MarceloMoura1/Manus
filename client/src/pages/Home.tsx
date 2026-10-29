@@ -3871,16 +3871,23 @@ function AIAssistantPage() {
     }
   }, [geminiConfig]);
 
-  // Carregar histórico do banco uma única vez na carga inicial
+  // Carregar histórico do banco
   const { data: historyData } = trpc.assistant.getHistory.useQuery(
     { clientId, userId },
-    { enabled: !!clientId && !!userId && !historyLoaded, refetchOnWindowFocus: false, refetchOnMount: "always" }
+    { enabled: !!clientId && !!userId, refetchOnWindowFocus: false, refetchOnMount: "always" }
   );
 
-  // Inicializa o chat como lista sequencial append-only a partir do banco
+  const trpcUtils = trpc.useUtils?.() ?? (trpc as any).useContext?.();
+
+  // Inicializa e hidrata o chat a partir do histórico do banco
   React.useEffect(() => {
-    if (historyLoaded || !historyData?.history) return;
-    const rawHistory = historyData.history as Array<{ role: "user" | "assistant"; content: string; timestamp?: number }>;
+    if (!historyData?.history) return;
+    const rawHistory = historyData.history as Array<{
+      role: "user" | "assistant";
+      content: string;
+      timestamp?: number;
+      pendingActionRequest?: any;
+    }>;
 
     let lastTs = 0;
     const initialList: ChatMessage[] = rawHistory.map((m, idx) => {
@@ -3899,17 +3906,29 @@ function AIAssistantPage() {
         role: m.role,
         content: m.content,
         timestamp: ts,
+        pendingActionRequest: m.pendingActionRequest,
       };
     });
 
-    // Ordenação estrita realizada uma única vez na carga inicial
     initialList.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
-    setMessages(initialList);
+    setMessages(prev => {
+      // Se estiver em processo de envio local, não descarta a mensagem do usuário que ainda não voltou do server
+      if (prev.length > 0 && sending) {
+        return prev;
+      }
+      return initialList;
+    });
     setHistoryLoaded(true);
-  }, [historyData, historyLoaded]);
+  }, [historyData, sending]);
 
-  const historyUtils = trpc.useUtils();
-  const chatMutation = trpc.assistant.clientChat.useMutation();
+  const chatMutation = trpc.assistant.clientChat.useMutation({
+    onSuccess: () => {
+      void trpcUtils.assistant.getHistory.invalidate();
+    },
+    onSettled: () => {
+      void trpcUtils.assistant.getHistory.invalidate();
+    },
+  });
   const clearHistoryMutation = trpc.assistant.clearHistory.useMutation();
   const executeActionMutation = trpc.assistant.executeAction.useMutation();
   const cancelActionMutation = trpc.assistant.cancelAction.useMutation();
@@ -3935,7 +3954,7 @@ function AIAssistantPage() {
         content: `✓ [Ação Concluída] ${result.message}${entityIdPart}`,
         timestamp: Date.now(),
       }]);
-      void historyUtils.assistant.getHistory.invalidate({ clientId, userId });
+      void trpcUtils.assistant.getHistory.invalidate();
       scrollToBottom("smooth");
     } catch (error: any) {
       updatePendingActionCard(request.id, { actionState: "FAILED", actionMessage: error?.message ?? "Não foi possível executar a ação." });
@@ -3953,7 +3972,7 @@ function AIAssistantPage() {
         content: "❌ Ação cancelada pelo usuário.",
         timestamp: Date.now(),
       }]);
-      void historyUtils.assistant.getHistory.invalidate({ clientId, userId });
+      void trpcUtils.assistant.getHistory.invalidate();
       scrollToBottom("smooth");
     } catch (error: any) {
       updatePendingActionCard(request.id, { actionState: "FAILED", actionMessage: error?.message ?? "Não foi possível cancelar a ação." });
@@ -4014,7 +4033,7 @@ function AIAssistantPage() {
   const handleClearHistory = async () => {
     if (!confirm("Limpar todo o histórico de conversa com o Assistente IA?")) return;
     await clearHistoryMutation.mutateAsync({ clientId, userId });
-    historyUtils.assistant.getHistory.setData({ clientId, userId }, { ok: true, history: [] });
+    trpcUtils.assistant.getHistory.setData({ clientId, userId }, { ok: true, history: [] });
     setMessages([]);
     setHistoryLoaded(false);
   };

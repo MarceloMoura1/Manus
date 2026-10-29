@@ -216,10 +216,79 @@ async function runHermesCrmAction(input: {
     const requested = required(args, "newStatus");
     if (requested === "draft") throw new Error("HERMES_CRM_DRAFT_STATUS_NOT_EXECUTABLE");
     const toStatus = requested === "rejected" || requested === "expired" ? "lost" : requested;
-    if (toStatus !== "negotiation" && toStatus !== "approved" && toStatus !== "lost") throw new Error("HERMES_CRM_STATUS_NOT_SUPPORTED");
-    const proposalId = required(args, "proposalId");
-    await saleService.commercialTransition(actor, { publicId: proposalId, toStatus, reason: typeof args.reason === "string" ? args.reason : null });
-    return { success: true, message: "Status comercial da proposta atualizado.", entityId: proposalId };
+    if (toStatus !== "negotiation" && toStatus !== "approved" && toStatus !== "lost" && toStatus !== "sale" && toStatus !== "converted") {
+      throw new Error("HERMES_CRM_STATUS_NOT_SUPPORTED");
+    }
+
+    const rawProposalId = required(args, "proposalId");
+    let proposalId = rawProposalId;
+    let current = await saleService.detail(actor, proposalId).catch(() => null);
+    if (!current) {
+      const list = await saleService.list(actor, {
+        search: rawProposalId,
+        kind: "all",
+        includeArchived: false,
+        sort: "createdAt",
+        direction: "desc",
+        page: 1,
+        pageSize: 5,
+      });
+      const match = list.items.find(item => item.orderNumber === rawProposalId || item.publicId === rawProposalId) || list.items[0];
+      if (match) {
+        proposalId = match.publicId;
+        current = await saleService.detail(actor, proposalId);
+      }
+    }
+    if (!current) throw new Error("Orçamento não encontrado.");
+
+    const isSaleConversion = toStatus === "sale" || toStatus === "converted" || Boolean(args.convertToSale);
+
+    // Passo 1: se estiver em draft e o destino exigir etapas seguintes, avança para negotiation
+    if (current.commercialStatus === "draft") {
+      await saleService.commercialTransition(actor, {
+        publicId: proposalId,
+        toStatus: "negotiation",
+        reason: typeof args.reason === "string" ? args.reason : "Transição intermediária via Hermes",
+      });
+      current = await saleService.detail(actor, proposalId);
+    }
+
+    // Passo 2: se o alvo for approved ou conversão em venda
+    if (toStatus === "approved" || isSaleConversion) {
+      if (current.commercialStatus === "negotiation") {
+        await saleService.commercialTransition(actor, {
+          publicId: proposalId,
+          toStatus: "approved",
+          reason: typeof args.reason === "string" ? args.reason : "Aprovação comercial via Hermes",
+        });
+        current = await saleService.detail(actor, proposalId);
+      }
+    } else if (toStatus === "lost") {
+      if (current.commercialStatus === "negotiation") {
+        await saleService.commercialTransition(actor, {
+          publicId: proposalId,
+          toStatus: "lost",
+          reason: typeof args.reason === "string" ? args.reason : "Cancelamento comercial via Hermes",
+        });
+        current = await saleService.detail(actor, proposalId);
+      }
+    }
+
+    // Passo 3: se for conversão em venda
+    if (isSaleConversion) {
+      const converted = await saleService.convertQuote(actor, proposalId, randomUUID());
+      return {
+        success: true,
+        message: `Proposta ${current.orderNumber} convertida em venda com sucesso (${converted.orderNumber}).`,
+        entityId: converted.publicId,
+      };
+    }
+
+    return {
+      success: true,
+      message: `Status comercial da proposta ${current.orderNumber} atualizado para ${toStatus}.`,
+      entityId: proposalId,
+    };
   }
   if (input.action.actionType === "SEND_PROPOSAL_WHATSAPP") {
     const proposalId = required(args, "proposalId");

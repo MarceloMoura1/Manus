@@ -1425,6 +1425,81 @@ describe("Hermes entity flexibilization, memory continuity and conversational pa
       globalThis.fetch = originalFetch;
     }
   });
+  it("registers update_supplier with flexible flat arguments", () => {
+    const tool = getAuthorizedHermesTool("update_supplier", ["suppliers"]);
+    expect(tool).not.toBeNull();
+    expect(tool?.actionType).toBe("UPDATE_SUPPLIER");
+    const validated = tool?.validateArgs({ name: "Elétrica Moura", phone: "11988887777" });
+    expect(validated).toMatchObject({
+      name: "Elétrica Moura",
+      phone: "11988887777",
+      fieldsToUpdate: {
+        name: "Elétrica Moura",
+        phone: "11988887777",
+      },
+    });
+  });
+
+  it("extracts UPDATE_SUPPLIER pending action when user asks to add phone to supplier", async () => {
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("megadesk_domain_clients")) {
+        return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      }
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) {
+        return [[{ total: 0 }]];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{
+            content: { parts: [{ text: "" }] },
+          }],
+          usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 20, totalTokenCount: 70 },
+        }),
+      };
+    });
+
+    try {
+      const result = await chatWithClientGemini(
+        "tenant-a",
+        "user@example.invalid",
+        "cadastrar telefone (11) 98888-7777 no fornecedor Elétrica Moura",
+        [],
+        ["suppliers", "purchases", "erp"]
+      );
+      expect(result.ok).toBe(true);
+      expect(result.pendingActionRequest).toBeDefined();
+      expect(result.pendingActionRequest?.actionType).toBe("UPDATE_SUPPLIER");
+      expect(result.pendingActionRequest?.args.name).toBe("Elétrica Moura");
+      expect(result.pendingActionRequest?.args.phone).toBe("(11) 98888-7777");
+      expect(result.response).toContain("Preparei a atualização do fornecedor Elétrica Moura para sua aprovação:");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("validates update_proposal_status with convertToSale and sale/converted statuses", () => {
+    const tool = getAuthorizedHermesTool("update_proposal_status", ["sales"]);
+    expect(tool).not.toBeNull();
+    const validated = tool?.validateArgs({
+      proposalId: "prop-xyz",
+      newStatus: "sale",
+      convertToSale: true,
+    });
+    expect(validated).toMatchObject({
+      proposalId: "prop-xyz",
+      newStatus: "sale",
+      convertToSale: true,
+    });
+  });
+
 });
 
 });

@@ -98,9 +98,56 @@ async function runHermesErpAction(input: { tenantId: string; userId: string; use
     return { success: true, message: "Fornecedor criado com sucesso.", entityId: supplier.publicId };
   }
   if (input.action.actionType === "UPDATE_SUPPLIER") {
-    const current = await suppliers.detail(identity, required(args, "supplierId")); const fields = args.fieldsToUpdate as Record<string, unknown>;
-    const supplier = await suppliers.update(identity, current.publicId, supplierInput.parse({ ...current, ...fields, legalName: fields.name ?? fields.legalName ?? current.legalName, taxId: fields.document ?? fields.taxId ?? current.taxId, personType: current.personType }));
-    return { success: true, message: "Fornecedor atualizado com sucesso.", entityId: supplier.publicId };
+    let supplierId = typeof args.supplierId === "string" ? args.supplierId.trim() : "";
+    if (!supplierId && args.name) {
+      const searchRes = await suppliers.list(identity, {
+        search: String(args.name).trim(),
+        sort: "createdAt",
+        direction: "desc",
+        page: 1,
+        pageSize: 10,
+        state: undefined,
+      });
+      const found = searchRes.items.find(s =>
+        s.legalName.toLowerCase().includes(String(args.name).trim().toLowerCase()) ||
+        (s.tradeName && s.tradeName.toLowerCase().includes(String(args.name).trim().toLowerCase()))
+      ) || searchRes.items[0];
+      if (found) {
+        supplierId = found.publicId;
+      }
+    }
+    if (!supplierId) {
+      throw new Error(`Fornecedor '${args.name || ""}' não localizado para atualização.`);
+    }
+    const current = await suppliers.detail(identity, supplierId);
+    const rawFields = (args.fieldsToUpdate && typeof args.fieldsToUpdate === "object" && !Array.isArray(args.fieldsToUpdate))
+      ? args.fieldsToUpdate as Record<string, unknown>
+      : {};
+    const fields = { ...args, ...rawFields };
+    delete fields.fieldsToUpdate;
+    delete fields.supplierId;
+
+    const merged: Record<string, unknown> = {
+      name: fields.name ?? fields.legalName ?? current.legalName,
+      tradeName: fields.tradeName ?? current.tradeName,
+      document: fields.document ?? fields.taxId ?? current.taxId,
+      stateRegistration: fields.stateRegistration ?? current.stateRegistration,
+      email: fields.email ?? current.email,
+      phone: fields.phone ?? current.phone,
+      contactName: fields.contactName ?? current.contactName,
+      postalCode: fields.postalCode ?? current.postalCode,
+      street: fields.street ?? current.street,
+      addressNumber: fields.addressNumber ?? current.addressNumber,
+      addressComplement: fields.addressComplement ?? current.addressComplement,
+      district: fields.district ?? current.district,
+      city: fields.city ?? current.city,
+      state: fields.state ?? current.state,
+      notes: fields.notes ?? current.notes,
+    };
+
+    const updatePayload = supplierCommand(merged);
+    const supplier = await suppliers.update(identity, current.publicId, updatePayload);
+    return { success: true, message: `Fornecedor '${supplier.legalName}' atualizado com sucesso.`, entityId: supplier.publicId };
   }
   if (input.action.actionType === "REQUEST_PURCHASE") {
     const items = args.items as Array<Record<string, unknown>>;

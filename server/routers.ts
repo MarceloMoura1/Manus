@@ -1872,6 +1872,8 @@ export const appRouter = router({
           getAuthorizedHermesTool,
           releasePendingHermesAction,
           appendAssistantMessageToHistory,
+          loadConversationHistory,
+          saveConversationHistory,
         } = await import("./gemini-client");
         const userId = ctx.userEmail?.trim().toLowerCase();
         if (!userId) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão de usuário ausente." });
@@ -1915,22 +1917,19 @@ export const appRouter = router({
           completePendingHermesAction(input.actionId);
           const entityIdPart = "entityId" in result && result.entityId ? ` (ID: #${result.entityId})` : "";
           const confirmationText = `✓ [Ação Concluída] ${result.message}${entityIdPart}`;
-          await appendAssistantMessageToHistory(
-            ctx.tenantId,
-            userId,
-            confirmationText
-          );
+          const currentHistory = await loadConversationHistory(ctx.tenantId, userId);
+          const updatedHistory = [...currentHistory, { role: "assistant" as const, content: confirmationText, timestamp: Date.now() }].slice(-50);
+          await saveConversationHistory(ctx.tenantId, userId, updatedHistory);
           audit("MegaDesk", `Hermes executou ${pending.actionType} após aprovação humana (HITL) por ${user.id}; registro ${"entityId" in result ? String(result.entityId) : "n/a"}`, ctx.tenantId);
           return result;
         } catch (error) {
           releasePendingHermesAction(input.actionId);
           const reason = formatHermesError(error);
           const alreadyFriendly = reason.startsWith("Não foi possível");
-          await appendAssistantMessageToHistory(
-            ctx.tenantId,
-            userId,
-            alreadyFriendly ? `❌ ${reason.replace(/\.$/, "")}.` : `❌ Não foi possível concluir a ação: ${reason}.`
-          ).catch(() => {});
+          const failMsg = alreadyFriendly ? `❌ ${reason.replace(/\.$/, "")}.` : `❌ Não foi possível concluir a ação: ${reason}.`;
+          const currentHistory = await loadConversationHistory(ctx.tenantId, userId).catch(() => []);
+          const updatedHistory = [...currentHistory, { role: "assistant" as const, content: failMsg, timestamp: Date.now() }].slice(-50);
+          await saveConversationHistory(ctx.tenantId, userId, updatedHistory).catch(() => {});
           if (error instanceof TRPCError) throw error;
           console.error("[Assistant] Approved Hermes action failed.", { actionType: input.actionType, error: reason });
           throw new TRPCError({ code: "BAD_REQUEST", message: alreadyFriendly ? `${reason.replace(/\.$/, "")}.` : `Não foi possível executar a ação aprovada: ${reason}.` });
@@ -1944,7 +1943,7 @@ export const appRouter = router({
         actionId: z.string().regex(/^action-[A-Za-z0-9_-]{8,}$/),
       }).strict())
       .mutation(async ({ input, ctx }) => {
-        const { cancelPendingHermesAction, appendAssistantMessageToHistory } = await import("./gemini-client");
+        const { cancelPendingHermesAction, loadConversationHistory, saveConversationHistory } = await import("./gemini-client");
         const userId = ctx.userEmail?.trim().toLowerCase();
         if (!userId) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sessão de usuário ausente." });
         await hydrateSyncState();
@@ -1952,11 +1951,10 @@ export const appRouter = router({
         assertAssistantActionPermission(client, userId, input.actionType);
         try {
           cancelPendingHermesAction({ ...input, clientId: ctx.tenantId, userId });
-          await appendAssistantMessageToHistory(
-            ctx.tenantId,
-            userId,
-            "❌ Ação cancelada pelo usuário."
-          );
+          const cancelMsg = "❌ Ação cancelada pelo usuário.";
+          const currentHistory = await loadConversationHistory(ctx.tenantId, userId);
+          const updatedHistory = [...currentHistory, { role: "assistant" as const, content: cancelMsg, timestamp: Date.now() }].slice(-50);
+          await saveConversationHistory(ctx.tenantId, userId, updatedHistory);
           return { success: true, message: "Ação cancelada. Nenhuma alteração foi executada." };
         } catch {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Ação pendente ausente, expirada ou não autorizada." });

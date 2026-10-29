@@ -324,8 +324,13 @@ function createProposalArgs(args: Record<string, unknown>): Record<string, unkno
 }
 
 function proposalStatusArgs(args: Record<string, unknown>): Record<string, unknown> {
-  objectArgs(args); rejectUnknownArgs(args, ["proposalId", "newStatus", "reason"]);
-  return { proposalId: stringArg(args, "proposalId", { min: 1, max: 80 })!, newStatus: enumArg(args, "newStatus", ["draft", "negotiation", "approved", "rejected", "expired"] as const), ...(stringArg(args, "reason", { min: 1, max: 500, optional: true }) ? { reason: stringArg(args, "reason", { min: 1, max: 500, optional: true }) } : {}) };
+  objectArgs(args); rejectUnknownArgs(args, ["proposalId", "newStatus", "reason", "convertToSale"]);
+  return {
+    proposalId: stringArg(args, "proposalId", { min: 1, max: 80 })!,
+    newStatus: enumArg(args, "newStatus", ["draft", "negotiation", "approved", "rejected", "expired", "sale", "converted"] as const),
+    ...(args.convertToSale ? { convertToSale: Boolean(args.convertToSale) } : {}),
+    ...(stringArg(args, "reason", { min: 1, max: 500, optional: true }) ? { reason: stringArg(args, "reason", { min: 1, max: 500, optional: true }) } : {}),
+  };
 }
 
 function proposalWhatsappArgs(args: Record<string, unknown>): Record<string, unknown> {
@@ -361,14 +366,36 @@ function productMutationArgs(args: Record<string, unknown>, update = false): Rec
   return { name: stringArg(args, "name", { min: 2, max: 180 })!, sku, category: stringArg(args, "category", { min: 1, max: 120, optional: true }), salePrice: price("salePrice"), costPrice: price("costPrice"), initialStock: quantity, unit };
 }
 const SUPPLIER_OPTIONAL_TEXT_FIELDS = ["tradeName", "stateRegistration", "postalCode", "street", "addressNumber", "addressComplement", "district", "city", "state", "notes"] as const;
-function erpActionArgs(args: Record<string, unknown>, kind: "supplier" | "purchase" | "message" | "service" | "service-create" | "link"): Record<string, unknown> {
+function erpActionArgs(args: Record<string, unknown>, kind: "supplier" | "supplier-update" | "purchase" | "message" | "service" | "service-create" | "link"): Record<string, unknown> {
   objectArgs(args); args = dropEmptyArgs(args);
   if (kind === "supplier") {
     if (typeof args.legalName === "string" && !args.name) args.name = args.legalName;
     if (typeof args.tradeName === "string" && !args.name) args.name = args.tradeName;
   }
-  const allowed = kind === "supplier" ? ["name", "document", "phone", "email", "contactName", ...SUPPLIER_OPTIONAL_TEXT_FIELDS, "fieldsToUpdate", "supplierId", "legalName"] : kind === "purchase" ? ["supplierId", "items", "notes"] : kind === "message" ? ["supplierId", "recipientPhone", "messageText"] : kind === "service" ? ["serviceId", "fieldsToUpdate"] : kind === "service-create" ? ["name", "code", "category", "price", "estimatedCost", "description"] : ["productId", "supplierId"];
+  const allowed = (kind === "supplier" || kind === "supplier-update")
+    ? ["name", "document", "phone", "email", "contactName", ...SUPPLIER_OPTIONAL_TEXT_FIELDS, "fieldsToUpdate", "supplierId", "legalName"]
+    : kind === "purchase" ? ["supplierId", "items", "notes"] : kind === "message" ? ["supplierId", "recipientPhone", "messageText"] : kind === "service" ? ["serviceId", "fieldsToUpdate"] : kind === "service-create" ? ["name", "code", "category", "price", "estimatedCost", "description"] : ["productId", "supplierId"];
   rejectUnknownArgs(args, allowed);
+  if (kind === "supplier-update") {
+    const rawUpdate: Record<string, unknown> = (args.fieldsToUpdate && typeof args.fieldsToUpdate === "object" && !Array.isArray(args.fieldsToUpdate))
+      ? { ...args.fieldsToUpdate as Record<string, unknown> }
+      : {};
+    for (const key of ["name", "legalName", "document", "taxId", "phone", "email", "contactName", "tradeName", "notes"]) {
+      if (typeof args[key] === "string" && rawUpdate[key] === undefined) {
+        rawUpdate[key] = args[key];
+      }
+    }
+    const update = dropEmptyArgs(rawUpdate);
+    const supplierId = typeof args.supplierId === "string" ? stringArg(args, "supplierId", { min: 1, max: 80 }) : undefined;
+    const name = typeof args.name === "string" ? stringArg(args, "name", { min: 1, max: 180 }) : (typeof args.legalName === "string" ? stringArg(args, "legalName", { min: 1, max: 180 }) : undefined);
+    if (!supplierId && !name) throw new Error("Informe o nome ou ID do fornecedor para atualizar.");
+    return {
+      ...(supplierId ? { supplierId } : {}),
+      ...(name ? { name } : {}),
+      fieldsToUpdate: update,
+      ...update,
+    };
+  }
   if (kind === "service-create") {
     const money = (key: string) => { const value = Number(args[key] ?? 0); if (!Number.isFinite(value) || value < 0) throw new Error(`${key} inválido.`); return value; };
     return { name: stringArg(args, "name", { min: 2, max: 255 })!, price: money("price"), estimatedCost: money("estimatedCost"), ...(stringArg(args, "code", { min: 1, max: 50, optional: true }) ? { code: stringArg(args, "code", { min: 1, max: 50, optional: true }) } : {}), ...(stringArg(args, "category", { min: 1, max: 100, optional: true }) ? { category: stringArg(args, "category", { min: 1, max: 100, optional: true }) } : {}), ...(stringArg(args, "description", { min: 1, max: 2_000, optional: true }) ? { description: stringArg(args, "description", { min: 1, max: 2_000, optional: true }) } : {}) };
@@ -472,7 +499,7 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
   { name: "get_proposals_summary", type: "READ", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "get_proposals_summary", description: "Retorna métricas de propostas comerciais do tenant.", parameters: { type: "OBJECT", properties: { status: { type: "STRING" }, sellerId: { type: "STRING" }, period: { type: "STRING" } }, required: [] } }, validateArgs: proposalSummaryArgs },
   { name: "get_proposal_details", type: "READ", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "get_proposal_details", description: "Retorna proposta, cliente e itens do tenant.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, proposalNumber: { type: "STRING" } }, required: [] } }, validateArgs: proposalDetailsArgs },
   { name: "create_proposal", type: "MUTATION", actionType: "CREATE_PROPOSAL", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "create_proposal", description: "Prepara proposta comercial; exige aprovação humana.", parameters: { type: "OBJECT", properties: { clientId: { type: "STRING", description: "ID do cliente CRM (obtido via get_client_360). Use este OU clientName." }, clientName: { type: "STRING", description: "Nome do cliente CRM; deve identificar um único cliente." }, items: { type: "ARRAY", description: "Itens ou serviços da proposta. Aceita productId de catálogo ou descrição/nome avulso.", items: { type: "OBJECT", properties: { productId: { type: "STRING", description: "ID do produto no catálogo (opcional)" }, productName: { type: "STRING", description: "Nome do produto ou serviço" }, description: { type: "STRING", description: "Descrição do item ou serviço avulso" }, quantity: { type: "NUMBER", description: "Quantidade (padrão 1 se omitido)" }, unitPrice: { type: "NUMBER", description: "Preço unitário em reais (padrão 0 para rascunho se omitido)" } }, required: [] } }, notes: { type: "STRING" }, paymentTerms: { type: "STRING" } }, required: ["items"] } }, validateArgs: createProposalArgs },
-  { name: "update_proposal_status", type: "MUTATION", actionType: "UPDATE_PROPOSAL_STATUS", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "update_proposal_status", description: "Prepara mudança de status comercial; exige aprovação humana.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, newStatus: { type: "STRING", enum: ["draft", "negotiation", "approved", "rejected", "expired"] }, reason: { type: "STRING" } }, required: ["proposalId", "newStatus"] } }, validateArgs: proposalStatusArgs },
+  { name: "update_proposal_status", type: "MUTATION", actionType: "UPDATE_PROPOSAL_STATUS", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "update_proposal_status", description: "Prepara mudança de status comercial ou conversão em venda de uma proposta; exige aprovação humana.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, newStatus: { type: "STRING", enum: ["draft", "negotiation", "approved", "rejected", "expired", "sale", "converted"] }, convertToSale: { type: "BOOLEAN", description: "Se verdadeiro, converte a proposta aprovada diretamente em venda/pedido no ERP." }, reason: { type: "STRING" } }, required: ["proposalId", "newStatus"] } }, validateArgs: proposalStatusArgs },
   { name: "send_proposal_whatsapp", type: "MUTATION", actionType: "SEND_PROPOSAL_WHATSAPP", requiredPermissions: ["sales", "crm", "proposals"], declaration: { name: "send_proposal_whatsapp", description: "Prepara envio de proposta por WhatsApp; exige aprovação humana.", parameters: { type: "OBJECT", properties: { proposalId: { type: "STRING" }, recipientPhone: { type: "STRING" }, customMessage: { type: "STRING" } }, required: ["proposalId", "recipientPhone"] } }, validateArgs: proposalWhatsappArgs },
   { name: "get_erp_summary", type: "READ", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "get_erp_summary", description: "Retorna o resumo de produtos, estoque e serviços ativos do tenant.", parameters: { type: "OBJECT", properties: {}, required: [] } }, validateArgs: noArguments },
   { name: "get_product_details", type: "READ", requiredPermissions: ["products", "inventory", "erp"], declaration: { name: "get_product_details", description: "Retorna detalhes de produto por ID público ou SKU.", parameters: { type: "OBJECT", properties: { productId: { type: "STRING" }, sku: { type: "STRING" } }, required: [] } }, validateArgs: args => { const value = erpLookupArgs(args, ["productId", "sku"]); if ((value.productId ? 1 : 0) + (value.sku ? 1 : 0) !== 1) throw new Error("Informe exatamente productId ou sku."); return value; } },
@@ -486,7 +513,7 @@ export const HERMES_TOOL_REGISTRY: readonly HermesToolDefinition[] = [
   { name: "get_sales_analytics", type: "READ", requiredPermissions: ["sales", "erp"], declaration: { name: "get_sales_analytics", description: "Retorna faturamento, pedidos e ticket médio no período solicitado.", parameters: { type: "OBJECT", properties: { period: { type: "STRING" }, startDate: { type: "STRING" }, endDate: { type: "STRING" } }, required: [] } }, validateArgs: args => { objectArgs(args); rejectUnknownArgs(args, ["period", "startDate", "endDate"]); const period = args.period === undefined ? "month" : enumArg(args, "period", ["today", "week", "month", "custom"] as const); const result: Record<string, unknown> = { period }; if (period === "custom") { result.startDate = stringArg(args, "startDate", { min: 10, max: 10 })!; result.endDate = stringArg(args, "endDate", { min: 10, max: 10 })!; } return result; } },
   { name: "get_suppliers_list", type: "READ", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "get_suppliers_list", description: "Busca fornecedores por nome, documento ou segmento.", parameters: { type: "OBJECT", properties: { search: { type: "STRING" } }, required: [] } }, validateArgs: args => erpLookupArgs(args, ["search"]) },
   { name: "create_supplier", type: "MUTATION", actionType: "CREATE_SUPPLIER", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "create_supplier", description: "Prepara o cadastro ágil de fornecedor; exige apenas o nome, os demais dados são opcionais. Exige aprovação humana.", parameters: { type: "OBJECT", properties: { name: { type: "STRING", description: "Nome ou razão social (obrigatório)" }, document: { type: "STRING", description: "CPF/CNPJ (opcional)" }, phone: { type: "STRING" }, email: { type: "STRING" }, contactName: { type: "STRING" }, tradeName: { type: "STRING" }, stateRegistration: { type: "STRING" }, postalCode: { type: "STRING" }, street: { type: "STRING" }, addressNumber: { type: "STRING" }, addressComplement: { type: "STRING" }, district: { type: "STRING" }, city: { type: "STRING" }, state: { type: "STRING" }, notes: { type: "STRING" } }, required: ["name"] } }, validateArgs: args => erpActionArgs(args, "supplier") },
-  { name: "update_supplier", type: "MUTATION", actionType: "UPDATE_SUPPLIER", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "update_supplier", description: "Prepara atualização de fornecedor; exige aprovação humana.", parameters: { type: "OBJECT", properties: { supplierId: { type: "STRING" }, fieldsToUpdate: { type: "OBJECT", description: "Campos a atualizar", properties: { name: { type: "STRING" }, legalName: { type: "STRING" }, document: { type: "STRING" }, taxId: { type: "STRING" }, phone: { type: "STRING" }, email: { type: "STRING" }, contactName: { type: "STRING" }, tradeName: { type: "STRING" }, notes: { type: "STRING" } } } }, required: ["supplierId", "fieldsToUpdate"] } }, validateArgs: args => erpActionArgs(args, "supplier") },
+  { name: "update_supplier", type: "MUTATION", actionType: "UPDATE_SUPPLIER", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "update_supplier", description: "Prepara a atualização de dados de fornecedor (telefone, e-mail, observações, etc.); localiza por nome ou supplierId. Exige aprovação humana.", parameters: { type: "OBJECT", properties: { supplierId: { type: "STRING", description: "ID público do fornecedor (opcional se name for informado)" }, name: { type: "STRING", description: "Nome ou razão social do fornecedor para localizar ou atualizar" }, phone: { type: "STRING", description: "Novo telefone do fornecedor" }, email: { type: "STRING", description: "Novo e-mail do fornecedor" }, contactName: { type: "STRING", description: "Nome do contato no fornecedor" }, notes: { type: "STRING", description: "Anotações ou observações" }, fieldsToUpdate: { type: "OBJECT", description: "Campos a atualizar (opcional caso campos sejam informados diretamente)", properties: { name: { type: "STRING" }, legalName: { type: "STRING" }, document: { type: "STRING" }, taxId: { type: "STRING" }, phone: { type: "STRING" }, email: { type: "STRING" }, contactName: { type: "STRING" }, tradeName: { type: "STRING" }, notes: { type: "STRING" } } } }, required: [] } }, validateArgs: args => erpActionArgs(args, "supplier-update") },
   { name: "request_purchase_order", type: "MUTATION", actionType: "REQUEST_PURCHASE", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "request_purchase_order", description: "Prepara pedido de compra; exige aprovação humana.", parameters: { type: "OBJECT", properties: { supplierId: { type: "STRING" }, items: { type: "ARRAY", description: "Itens do pedido de compra", items: { type: "OBJECT", properties: { productId: { type: "STRING", description: "ID público do produto" }, quantity: { type: "NUMBER" }, targetCost: { type: "NUMBER", description: "Custo alvo unitário em reais" } }, required: ["productId", "quantity", "targetCost"] } }, notes: { type: "STRING" } }, required: ["supplierId", "items"] } }, validateArgs: args => erpActionArgs(args, "purchase") },
   { name: "send_supplier_message", type: "MUTATION", actionType: "SEND_SUPPLIER_MESSAGE", requiredPermissions: ["suppliers", "purchases", "erp"], declaration: { name: "send_supplier_message", description: "Prepara mensagem a fornecedor; exige aprovação humana.", parameters: { type: "OBJECT", properties: { supplierId: { type: "STRING" }, recipientPhone: { type: "STRING" }, messageText: { type: "STRING" } }, required: ["supplierId", "recipientPhone", "messageText"] } }, validateArgs: args => erpActionArgs(args, "message") },
   {
@@ -532,12 +559,26 @@ export function getAuthorizedHermesTool(name: string, permissions: readonly stri
 
 /** Descrição amigável de uma mutação pendente, usada no card de aprovação humana. */
 export function summarizePendingAction(actionType: HermesActionType, args: Record<string, unknown>): string {
-  const name = String(args.name ?? "").trim();
+  const name = String(args.name ?? args.legalName ?? "").trim();
   if (actionType === "CREATE_CLIENT") return `Cadastrar o cliente "${name}"${args.phone ? ` (telefone ${String(args.phone)})` : ""}.`;
   if (actionType === "CREATE_SUPPLIER") return `Cadastrar o fornecedor "${name}".`;
+  if (actionType === "UPDATE_SUPPLIER") {
+    const rawFields = (args.fieldsToUpdate && typeof args.fieldsToUpdate === "object") ? args.fieldsToUpdate as Record<string, unknown> : args;
+    const parts: string[] = [];
+    if (rawFields.phone) parts.push(`telefone: ${rawFields.phone}`);
+    if (rawFields.email) parts.push(`e-mail: ${rawFields.email}`);
+    if (rawFields.notes) parts.push(`anotação: "${rawFields.notes}"`);
+    const details = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+    return `Atualizar o fornecedor "${name || String(args.supplierId ?? "selecionado")}"${details}.`;
+  }
   if (actionType === "CREATE_PRODUCT") return `Cadastrar o produto "${name}".`;
   if (actionType === "CREATE_SERVICE") return `Cadastrar o serviço "${name}".`;
   if (actionType === "CREATE_TICKET") return `Abrir o chamado "${String(args.title ?? "")}".`;
+  if (actionType === "UPDATE_PROPOSAL_STATUS") {
+    const isSale = args.newStatus === "sale" || args.newStatus === "converted" || Boolean(args.convertToSale);
+    if (isSale) return `Aprovar e converter a proposta ${String(args.proposalId ?? "")} em venda no ERP.`;
+    return `Atualizar status da proposta ${String(args.proposalId ?? "")} para "${String(args.newStatus ?? "")}".`;
+  }
   if (actionType === "CREATE_PROPOSAL") {
     const items = Array.isArray(args.items) ? args.items as Array<{ quantity?: number; unitPrice?: number }> : [];
     const total = items.reduce((sum, item) => sum + Number(item.quantity ?? 0) * Number(item.unitPrice ?? 0), 0);
@@ -922,7 +963,7 @@ export async function getClientGeminiToken(clientId: string): Promise<string | n
 export async function loadConversationHistory(clientId: string, userId: string): Promise<IAMessage[]> {
   const pool = getPool();
   const [rows] = await pool.execute(
-    "SELECT messages_json FROM megadesk_domain_ia_conversation_history WHERE client_id = ? AND user_id = ? LIMIT 1",
+    "SELECT messages_json FROM megadesk_domain_ia_conversation_history WHERE client_id = ? AND user_id = ? ORDER BY updated_at DESC LIMIT 1",
     [clientId, userId]
   ) as any[];
   if (!rows || rows.length === 0) return [];
@@ -1696,7 +1737,37 @@ function extractEntityCreationFromMessage(
   allowedTools: readonly HermesToolDefinition[],
   owner?: PendingActionOwner
 ): PendingActionRequest | null {
-  // 1. Fornecedor: "criar/cadastrar fornecedor chamado X"
+  // 1. Atualizar fornecedor (ex: "cadastrar telefone na Elétrica Moura", "cadastrar telefone (11) 98888-7777 no fornecedor Elétrica Moura")
+  const updateSupplierMatch = userMessage.match(/(?:atualizar?|cadastrar?|adicionar?|alterar?|mudar?)\s+(?:o\s+)?(?:telefone|contato|email|e-mail|anotação|observação|dados)(?:[\s\S]*?)(?:no|do|para\s+o|na|da|para|pro|pra)\s+(?:fornecedor\s+)?([A-ZÀ-Úa-zà-ú0-9\s.&'-]+)/i) ||
+    userMessage.match(/(?:atualizar?|alterar?|editar?)\s+(?:o\s+)?fornecedor\s+([A-ZÀ-Úa-zà-ú0-9\s.&'-]+)/i);
+  if (updateSupplierMatch && updateSupplierMatch[1]) {
+    const tool = allowedTools.find(t => t.name === "update_supplier");
+    if (tool) {
+      let rawName = updateSupplierMatch[1].trim().replace(/[?!.,]+$/, "");
+      const phoneMatch = userMessage.match(/(?:\(?\d{2}\)?\s*)?\d{4,5}[-\s]?\d{4}/);
+      const emailMatch = userMessage.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      const phone = phoneMatch ? phoneMatch[0].trim() : undefined;
+      const email = emailMatch ? emailMatch[0].trim() : undefined;
+      if (phone) {
+        rawName = rawName.replace(phone, "").trim().replace(/\s+(?:com\s+o\s+número|número|tel|telefone)$/i, "");
+      }
+      if (rawName.length >= 2) {
+        try {
+          return createPendingActionRequest(tool, {
+            name: rawName,
+            ...(phone ? { phone } : {}),
+            ...(email ? { email } : {}),
+            fieldsToUpdate: {
+              ...(phone ? { phone } : {}),
+              ...(email ? { email } : {}),
+            },
+          }, owner);
+        } catch { /* segue */ }
+      }
+    }
+  }
+
+  // 1b. Fornecedor: "criar/cadastrar fornecedor chamado X"
   const supplierMatch = userMessage.match(/(?:cria|criar|cadastra|cadastrar|novo|adiciona|adicionar|consegue\s+criar)\s+(?:um\s+)?fornecedor\s+(?:chamado\s+|de\s+nome\s+)?([A-ZÀ-Úa-zà-ú0-9\s.&'-]+)/i);
   if (supplierMatch && supplierMatch[1]) {
     const tool = allowedTools.find(t => t.name === "create_supplier");
@@ -1868,6 +1939,28 @@ function synthesizeDeterministicResponse(
       const price = ((p.salePriceCents ?? 0) / 100).toFixed(2).replace(".", ",");
       return `Produto: ${p.name} (SKU: ${p.sku}). Preço de venda: R$ ${price}. Estoque: ${p.quantity ?? 0} ${p.unit || "un"}.`;
     }
+  }
+
+  if (name === "get_suppliers_list") {
+    const list = output?.fornecedores;
+    const searchTerm = String(args.search ?? "").trim();
+    if (Array.isArray(list) && list.length > 0) {
+      if (list.length === 1) {
+        const s = list[0];
+        const name = s.legalName || s.tradeName || "Fornecedor";
+        const phone = s.phone ? `Telefone: ${s.phone}` : "Telefone não informado";
+        const email = s.email ? `E-mail: ${s.email}` : "";
+        const contact = s.contactName ? `Contato: ${s.contactName}` : "";
+        const details = [phone, email, contact].filter(Boolean).join(", ");
+        return `Fornecedor localizado: ${name} (${details}).`;
+      }
+      const names = list.slice(0, 5).map((s: any) => s.legalName || s.tradeName || "Fornecedor").join(", ");
+      const extra = list.length > 5 ? ` e mais ${list.length - 5} fornecedor(es)` : "";
+      return `Encontrei ${list.length} fornecedor(es)${searchTerm ? ` para "${searchTerm}"` : ""}: ${names}${extra}.`;
+    }
+    return searchTerm
+      ? `Nenhum fornecedor encontrado para "${searchTerm}". Deseja cadastrá-lo?`
+      : "Nenhum fornecedor cadastrado encontrado no ERP.";
   }
 
   return null;
@@ -2068,6 +2161,12 @@ async function chatWithClientGeminiInternal(
         finalResponse = targetName
           ? `Preparei o cadastro do fornecedor ${targetName} para sua aprovação:`
           : "Preparei o cadastro do fornecedor para sua aprovação:";
+      } else if (pendingActionRequest.actionType === "UPDATE_SUPPLIER") {
+        finalResponse = targetName
+          ? `Preparei a atualização do fornecedor ${targetName} para sua aprovação:`
+          : "Preparei a atualização do fornecedor para sua aprovação:";
+      } else if (pendingActionRequest.actionType === "UPDATE_PROPOSAL_STATUS") {
+        finalResponse = "Preparei a atualização da proposta comercial para sua aprovação:";
       } else if (pendingActionRequest.actionType === "CREATE_CLIENT") {
         finalResponse = targetName
           ? `Preparei o cadastro do cliente ${targetName} para sua aprovação:`
