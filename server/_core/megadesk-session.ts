@@ -247,9 +247,10 @@ export function clearOperationalSessionCookie(response: Response, request: Reque
 
 export function operationalAllowedOrigins(): Set<string> {
   const configured = process.env.MEGADESK_ALLOWED_ORIGINS?.split(",").map(value => value.trim()).filter(Boolean) ?? [];
+  const defaultOrigins = ["https://app.megadesk.online", "https://admin.megadesk.online"];
   if (configured.length) return new Set(configured);
-  if (process.env.NODE_ENV === "production") return new Set();
-  return new Set(["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"]);
+  if (process.env.NODE_ENV === "production") return new Set(defaultOrigins);
+  return new Set(["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000", ...defaultOrigins]);
 }
 
 export function assertOperationalCsrf(req: Pick<Request, "headers">): void {
