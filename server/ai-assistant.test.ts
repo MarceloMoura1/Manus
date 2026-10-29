@@ -1500,6 +1500,107 @@ describe("Hermes entity flexibilization, memory continuity and conversational pa
     });
   });
 
+  it("does not generate a CREATE_PROPOSAL card when user asks to approve a proposal", async () => {
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("megadesk_domain_clients")) {
+        return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      }
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) {
+        return [[{ total: 0 }]];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{
+            content: { parts: [{ text: "Vou verificar a proposta solicitada." }] },
+          }],
+          usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 20, totalTokenCount: 70 },
+        }),
+      };
+    });
+
+    try {
+      const result = await chatWithClientGemini(
+        "tenant-a",
+        "user@example.invalid",
+        "aprova essa proposta e gera como venda",
+        [],
+        ["sales", "crm", "proposals"]
+      );
+      expect(result.ok).toBe(true);
+      expect(result.pendingActionRequest?.actionType).not.toBe("CREATE_PROPOSAL");
+      expect(result.response).not.toBe("Sem resposta do modelo.");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("synthesizes deterministic message for get_erp_products without Sem resposta do modelo", async () => {
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("megadesk_domain_clients")) {
+        return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+      }
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) {
+        return [[{ total: 0 }]];
+      }
+      if (sql.includes("record_type = 'product'")) {
+        return [[]];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+    let callIndex = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => {
+      callIndex++;
+      if (callIndex === 1) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [{
+              content: { parts: [{ functionCall: { name: "get_erp_products", args: {} } }] },
+            }],
+            usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 20, totalTokenCount: 70 },
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{
+            content: { parts: [{ text: "" }] },
+          }],
+          usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 0, totalTokenCount: 50 },
+        }),
+      };
+    });
+
+    try {
+      const result = await chatWithClientGemini(
+        "tenant-a",
+        "user@example.invalid",
+        "quais produtos temos em estoque?",
+        [],
+        ["products", "erp"]
+      );
+      expect(result.ok).toBe(true);
+      expect(result.response).not.toBe("Sem resposta do modelo.");
+      expect(result.response).toContain("Consultei o estoque no sistema e não encontrei nenhum produto físico com saldo disponível no momento.");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
 });
 
 });

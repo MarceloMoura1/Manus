@@ -971,6 +971,24 @@ export class SaleRepository {
     return { customer: customers[0], products };
   }
 
+  private isServiceItem(
+    category: string | null | undefined,
+    sku: string | null | undefined,
+    name: string | null | undefined
+  ): boolean {
+    if (category && /^(?:servi[çc]os?|services?)$/i.test(category.trim())) return true;
+    if (sku && /^SRV[-:]/i.test(sku.trim())) return true;
+    if (
+      name &&
+      /\b(?:serviço|servico|lavagem|troca(?:\s+d[aeo])?|mão de obra|mao de obra|alinhamento|balanceamento|revisão|revisao|instalação|instalacao|manutenção|manutencao|limpeza|higienização|higienizacao|conserto|reparo|funilaria|pintura|consultoria|assessoria|diagnóstico|diagnostico|visita|atendimento)\b/i.test(
+        name
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   private async assertOrderStockAvailable(
     connection: PoolConnection,
     clientId: string,
@@ -978,15 +996,21 @@ export class SaleRepository {
   ) {
     const [items] = await connection.execute<RowDataPacket[]>(
       `SELECT i.inventory_item_id,i.quantity,i.product_name_snapshot,
-              ii.id resolved_inventory_item_id,ii.active inventory_item_active
+              ii.id resolved_inventory_item_id,ii.active inventory_item_active,
+              p.category product_category, p.sku product_sku
        FROM erp_sale_order_items i
        LEFT JOIN erp_inventory_items ii
          ON ii.id=i.inventory_item_id AND ii.client_id=?
+       LEFT JOIN erp_products p
+         ON p.id=i.product_id AND p.client_id=?
        WHERE i.sale_order_id=? ORDER BY i.inventory_item_id`,
-      [clientId, orderId]
+      [clientId, clientId, orderId]
     );
     const unavailable: string[] = [];
     for (const item of items) {
+      if (this.isServiceItem(item.product_category, item.product_sku, item.product_name_snapshot)) {
+        continue;
+      }
       if (!item.resolved_inventory_item_id || !Number(item.inventory_item_active)) {
         unavailable.push(`${String(item.product_name_snapshot)} (item indisponível)`);
         continue;

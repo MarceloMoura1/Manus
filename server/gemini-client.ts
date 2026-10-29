@@ -1447,7 +1447,7 @@ CONTINUIDADE E MEMÓRIA DE CONVERSA:
 
 EXECUÇÃO DE FERRAMENTAS:
 - Ao decidir executar consultas (READ), NUNCA gere mensagens preliminares ou textos de espera. Emita EXCLUSIVAMENTE o bloco functionCall. O backend injetará o retorno na mesma requisição para você formular a resposta final completa.
-- Ao receber o resultado de uma consulta (READ), forneça IMEDIATAMENTE a resposta final completa e amigável para o usuário com base nos dados reais retornados. NUNCA deixe a resposta vazia nem diga "Sem resposta do modelo."
+- Ao receber o resultado de uma consulta (READ), forneça IMEDIATAMENTE a resposta final completa e amigável para o usuário com base nos dados reais retornados. NUNCA deixe a resposta vazia.
 - Ao executar get_open_tickets, retorne imediatamente o resultado em texto claro: "Você possui X chamado(s) aberto(s): [listar títulos e números]" ou "Não há chamados abertos no momento."
 - Quando a solicitação demandar uma criação ou alteração (MUTATION: create_proposal, create_client, create_supplier, create_product, create_service, create_ticket), emita a ferramenta apropriada com todos os dados inferidos. A interface abrirá o Card de Aprovação (HITL) para o usuário validar com 1 clique.
 - Sempre responda em português brasileiro de forma clara, prestativa e resolutiva.`;
@@ -1657,12 +1657,25 @@ function extractProposalDetailsFromMessage(
   clientName: string;
   items: Array<{ productName: string; quantity: number; unitPrice: number }>;
 } {
+  // NUNCA cria uma ação de CREATE_PROPOSAL se a mensagem do usuário contiver verbos de aprovação, consulta, venda ou status
+  const isApprovalOrQueryOrStatus = /\b(aprova|aprovar|aprove|aprovad[ao]|status|venda|vendas|converter|converta|conversao|conversão|gerar\s+venda|consultar?|qual|quais|ver|listar?|buscar?|como\s+est[aá]|exibir?)\b/i.test(userMessage);
+  if (isApprovalOrQueryOrStatus) {
+    return { isProposal: false, clientName: "", items: [] };
+  }
+
   const lastProposal = findLastProposalInHistory(existingHistory);
   const isAdjustment = Boolean(
     lastProposal &&
     /\b(valor|preço|preco|custo|ajuste|corrija|altere|mude|troque|coloque|bote|adicione|atualize|reais)\b/i.test(userMessage)
   );
-  const isProposal = isAdjustment || /\b(orçamento|orcamento|proposta|cotacao|cotação)\b/i.test(userMessage);
+
+  // A criação automática de proposta só pode ser acionada se o usuário explicitamente pedir "fazer orçamento", "criar proposta", "novo orçamento"
+  const explicitCreationPattern = /\b(?:fazer|faça|faca|criar|crie|novo|nova|gerar|gere|preparar?|monte|montar)\s+(?:um\s+|uma\s+)?(?:orçamento|orcamento|proposta|cotacao|cotação)\b/i;
+  const isExplicitCreation = explicitCreationPattern.test(userMessage);
+
+  if (!isAdjustment && !isExplicitCreation) {
+    return { isProposal: false, clientName: "", items: [] };
+  }
 
   // 1. Extrai nome do cliente a partir de get_client_360 executado, da mensagem ou da proposta anterior
   let clientName = "";
@@ -1725,17 +1738,22 @@ function extractProposalDetailsFromMessage(
     items = updateItemsWithUserPrices(lastProposal.items, userMessage);
   }
 
-  if (items.length === 0) {
-    items = [{ productName: "Serviço solicitado", quantity: 1, unitPrice: 0 }];
+  // A criação automática de proposta só pode ser acionada com cliente OU itens definidos
+  const hasValidClient = Boolean(clientName && clientName.toLowerCase() !== "cliente");
+  const hasValidItems = items.length > 0 && items.some(it => it.productName && it.productName !== "Serviço solicitado");
+
+  if (!hasValidClient && !hasValidItems) {
+    return { isProposal: false, clientName: "", items: [] };
   }
 
-  return { isProposal, clientName: clientName || "Cliente", items };
+  return { isProposal: true, clientName: clientName || "Cliente", items: items.length > 0 ? items : [{ productName: "Serviço solicitado", quantity: 1, unitPrice: 0 }] };
 }
 
 function extractEntityCreationFromMessage(
   userMessage: string,
   allowedTools: readonly HermesToolDefinition[],
-  owner?: PendingActionOwner
+  owner?: PendingActionOwner,
+  existingHistory: readonly IAMessage[] = []
 ): PendingActionRequest | null {
   // 1. Atualizar fornecedor (ex: "cadastrar telefone na Elétrica Moura", "cadastrar telefone (11) 98888-7777 no fornecedor Elétrica Moura")
   const updateSupplierMatch = userMessage.match(/(?:atualizar?|cadastrar?|adicionar?|alterar?|mudar?)\s+(?:o\s+)?(?:telefone|contato|email|e-mail|anotação|observação|dados)(?:[\s\S]*?)(?:no|do|para\s+o|na|da|para|pro|pra)\s+(?:fornecedor\s+)?([A-ZÀ-Úa-zà-ú0-9\s.&'-]+)/i) ||
@@ -1781,7 +1799,37 @@ function extractEntityCreationFromMessage(
     }
   }
 
-  // 2. Cliente: "criar/cadastrar cliente chamado X" (se não for proposta)
+  // 2. Proposta comercial: aprovar ou converter em venda (ex: "aprova essa proposta", "aprova a proposta O-18", "aprova e gera como venda")
+  const isApprovalOrSaleIntent = /\b(aprova|aprovar|aprove|aprovad[ao]|converter|converta|conversao|conversão|gerar\s+venda)\b/i.test(userMessage);
+  if (isApprovalOrSaleIntent && /\b(proposta|orçamento|orcamento|venda|pedido)\b/i.test(userMessage)) {
+    const tool = allowedTools.find(t => t.name === "update_proposal_status");
+    if (tool) {
+      let proposalTarget = "";
+      const codeMatch = userMessage.match(/\b([A-Za-z]?-\d+|\d+)\b/);
+      if (codeMatch && !/^(19|20)\d\d$/.test(codeMatch[1])) {
+        proposalTarget = codeMatch[1];
+      }
+      if (!proposalTarget) {
+        const lastProp = findLastProposalInHistory(existingHistory);
+        if (lastProp) {
+          proposalTarget = lastProp.clientName || "proposta atual";
+        }
+      }
+      if (proposalTarget) {
+        const isSale = /\b(venda|vendas|converter|converta|conversao|conversão|gerar\s+venda)\b/i.test(userMessage);
+        try {
+          return createPendingActionRequest(tool, {
+            proposalId: proposalTarget,
+            newStatus: isSale ? "sale" : "approved",
+            convertToSale: isSale,
+            reason: isSale ? "Aprovação e conversão em venda solicitada pelo usuário" : "Aprovação comercial solicitada pelo usuário",
+          }, owner);
+        } catch { /* segue */ }
+      }
+    }
+  }
+
+  // 3. Cliente: "criar/cadastrar cliente chamado X" (se não for proposta)
   const isProposal = /\b(orçamento|orcamento|proposta|cotacao|cotação)\b/i.test(userMessage);
   if (!isProposal) {
     const clientMatch = userMessage.match(/(?:cria|criar|cadastra|cadastrar|novo|adiciona|adicionar|consegue\s+criar)\s+(?:um\s+)?cliente\s+(?:chamado\s+|de\s+nome\s+)?([A-ZÀ-Úa-zà-ú0-9\s.&'-]+)/i);
@@ -1798,7 +1846,7 @@ function extractEntityCreationFromMessage(
     }
   }
 
-  // 3. Serviço
+  // 4. Serviço
   const serviceMatch = userMessage.match(/(?:cria|criar|cadastra|cadastrar|novo|adiciona|adicionar|consegue\s+criar)\s+(?:um\s+)?serviço\s+(?:no\s+catálogo\s+)?(?:chamado\s+|de\s+nome\s+)?([A-ZÀ-Úa-zà-ú0-9\s.&'-]+)/i);
   if (serviceMatch && serviceMatch[1]) {
     const tool = allowedTools.find(t => t.name === "create_service");
@@ -1812,7 +1860,7 @@ function extractEntityCreationFromMessage(
     }
   }
 
-  // 4. Produto
+  // 5. Produto
   const productMatch = userMessage.match(/(?:cria|criar|cadastra|cadastrar|novo|adiciona|adicionar|consegue\s+criar)\s+(?:um\s+)?produto\s+(?:chamado\s+|de\s+nome\s+)?([A-ZÀ-Úa-zà-ú0-9\s.&'-]+)/i);
   if (productMatch && productMatch[1]) {
     const tool = allowedTools.find(t => t.name === "create_product");
@@ -1924,10 +1972,44 @@ function synthesizeDeterministicResponse(
   if (name === "get_erp_products") {
     const prods = output?.produtos;
     if (Array.isArray(prods) && prods.length > 0) {
-      const list = prods.map((p: any) => `${p.nome} (Estoque: ${p.estoque ?? 0})`).join(", ");
-      return `Produtos cadastrados no ERP: ${list}.`;
+      const list = prods.map((p: any) => `${p.nome} (${p.estoque ?? 0} em estoque)`).join(", ");
+      return `Temos os seguintes produtos em estoque: ${list}.`;
     }
-    return "Nenhum produto cadastrado com estoque encontrado no ERP.";
+    return "Consultei o estoque no sistema e não encontrei nenhum produto físico com saldo disponível no momento.";
+  }
+
+  if (name === "get_inventory_status") {
+    const itens = output?.itens;
+    if (Array.isArray(itens) && itens.length > 0) {
+      const list = itens.slice(0, 5).map((p: any) => `${p.name} (SKU: ${p.sku}, Estoque: ${p.quantity ?? 0} ${p.unit || "un"})`).join("; ");
+      const extra = itens.length > 5 ? ` e mais ${itens.length - 5} item(ns)` : "";
+      return `Status de estoque: ${list}${extra}.`;
+    }
+    return "Consultei o estoque no sistema e não encontrei nenhum produto físico com saldo disponível no momento.";
+  }
+
+  if (name === "get_erp_summary") {
+    const p = output?.produtos;
+    const s = output?.servicosAtivos ?? 0;
+    if (p) {
+      return `Resumo do ERP: ${p.total ?? 0} produto(s) cadastrado(s) (${p.active ?? 0} ativos, ${p.empty ?? 0} zerados) e ${s} serviço(s) ativo(s).`;
+    }
+  }
+
+  if (name === "get_services_list") {
+    const list = output?.servicos;
+    const searchTerm = String(args.search ?? "").trim();
+    if (Array.isArray(list) && list.length > 0) {
+      const names = list.slice(0, 5).map((s: any) => {
+        const price = s.price ? ` (R$ ${Number(s.price).toFixed(2).replace(".", ",")})` : "";
+        return `${s.name}${price}`;
+      }).join(", ");
+      const extra = list.length > 5 ? ` e mais ${list.length - 5} serviço(s)` : "";
+      return `Temos os seguintes serviços no catálogo${searchTerm ? ` para "${searchTerm}"` : ""}: ${names}${extra}.`;
+    }
+    return searchTerm
+      ? `Nenhum serviço encontrado para "${searchTerm}".`
+      : "Consultei os serviços no sistema e não encontrei nenhum serviço cadastrado no catálogo.";
   }
 
   if (name === "get_product_details") {
@@ -1956,11 +2038,29 @@ function synthesizeDeterministicResponse(
       }
       const names = list.slice(0, 5).map((s: any) => s.legalName || s.tradeName || "Fornecedor").join(", ");
       const extra = list.length > 5 ? ` e mais ${list.length - 5} fornecedor(es)` : "";
-      return `Encontrei ${list.length} fornecedor(es)${searchTerm ? ` para "${searchTerm}"` : ""}: ${names}${extra}.`;
+      return `Temos os seguintes fornecedores cadastrados${searchTerm ? ` para "${searchTerm}"` : ""}: ${names}${extra}.`;
     }
     return searchTerm
       ? `Nenhum fornecedor encontrado para "${searchTerm}". Deseja cadastrá-lo?`
-      : "Nenhum fornecedor cadastrado encontrado no ERP.";
+      : "Consultei os fornecedores no sistema e não encontrei nenhum fornecedor cadastrado no ERP.";
+  }
+
+  if (name === "get_sales_analytics") {
+    const a = output?.analise;
+    if (a) {
+      const rev = ((a.revenueCents ?? 0) / 100).toFixed(2).replace(".", ",");
+      return `Análise de vendas: ${a.orders ?? 0} pedido(s), receita total de R$ ${rev}.`;
+    }
+  }
+
+  if (name === "get_conversations_summary") {
+    const total = output?.total ?? 0;
+    const abertas = output?.abertas ?? 0;
+    return `Resumo de conversas no atendimento: ${total} conversa(s) no total (${abertas} aberta(s)).`;
+  }
+
+  if (executedReadResults.length > 0) {
+    return "Consulta realizada com sucesso no sistema, mas não há detalhes adicionais para exibir no momento.";
   }
 
   return null;
@@ -2110,9 +2210,9 @@ async function chatWithClientGeminiInternal(
     }
   }
 
-  // Se o usuário solicitou cadastro de entidade (fornecedor, cliente, serviço, produto) e o modelo não emitiu functionCall
+  // Se o usuário solicitou cadastro de entidade (fornecedor, cliente, serviço, produto, proposta) e o modelo não emitiu functionCall
   if (!pendingActionRequest) {
-    const entityAction = extractEntityCreationFromMessage(userMessage, allowedTools, { clientId, userId });
+    const entityAction = extractEntityCreationFromMessage(userMessage, allowedTools, { clientId, userId }, existingHistory);
     if (entityAction) {
       pendingActionRequest = entityAction;
       if (!functionCallsMade.includes(entityAction.toolName)) {
@@ -2145,7 +2245,7 @@ async function chatWithClientGeminiInternal(
 
   let finalResponse = modelText;
 
-  if (!finalResponse || finalResponse === "Sem resposta do modelo." || isPreliminaryWaitingText(finalResponse)) {
+  if (!finalResponse || isPreliminaryWaitingText(finalResponse)) {
     if (synthesizedFallback) {
       finalResponse = synthesizedFallback;
     } else if (pendingActionRequest) {
@@ -2166,7 +2266,10 @@ async function chatWithClientGeminiInternal(
           ? `Preparei a atualização do fornecedor ${targetName} para sua aprovação:`
           : "Preparei a atualização do fornecedor para sua aprovação:";
       } else if (pendingActionRequest.actionType === "UPDATE_PROPOSAL_STATUS") {
-        finalResponse = "Preparei a atualização da proposta comercial para sua aprovação:";
+        const isSale = pendingActionRequest.args.convertToSale || pendingActionRequest.args.newStatus === "sale" || pendingActionRequest.args.newStatus === "converted";
+        finalResponse = isSale
+          ? "Preparei a aprovação e conversão da proposta comercial em venda para sua confirmação:"
+          : "Preparei a atualização da proposta comercial para sua aprovação:";
       } else if (pendingActionRequest.actionType === "CREATE_CLIENT") {
         finalResponse = targetName
           ? `Preparei o cadastro do cliente ${targetName} para sua aprovação:`
@@ -2188,13 +2291,15 @@ async function chatWithClientGeminiInternal(
       } else {
         finalResponse = "Preparei a ação solicitada para sua aprovação:";
       }
+    } else if (executedReadResults.length > 0) {
+      finalResponse = "Consulta realizada com sucesso no sistema, mas não há detalhes adicionais para exibir no momento.";
     } else {
-      finalResponse = "Sem resposta do modelo.";
+      finalResponse = "Não consegui processar a resposta neste momento. Pode repetir ou detalhar sua solicitação?";
     }
   }
 
-  // Garantia absoluta: se get_open_tickets foi executado, nunca retornar "Sem resposta do modelo."
-  if (ticketsResult && (finalResponse === "Sem resposta do modelo." || !finalResponse)) {
+  // Garantia absoluta: se get_open_tickets foi executado, sintetizar deterministicamente
+  if (ticketsResult && (!finalResponse || isPreliminaryWaitingText(finalResponse))) {
     finalResponse = synthesizeDeterministicResponse([ticketsResult], userMessage) || "Não há chamados abertos no momento.";
   }
 

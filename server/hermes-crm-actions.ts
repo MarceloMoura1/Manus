@@ -106,6 +106,27 @@ async function resolveProductPublicId(actor: Identity, item: Record<string, unkn
     barcode: null,
   });
 
+  // Provisiona saldo virtual abundante para o serviço no ERP
+  try {
+    await pool.execute(
+      `INSERT INTO erp_stock_balances (client_id, product_id, quantity, version)
+       SELECT ?, id, '999999.000', 0 FROM erp_products WHERE client_id = ? AND public_id = ?
+       ON DUPLICATE KEY UPDATE quantity = '999999.000'`,
+      [actor.clientId, actor.clientId, created.publicId]
+    );
+    await pool.execute(
+      `INSERT INTO erp_inventory_item_balances (client_id, inventory_item_id, quantity, version)
+       SELECT ?, ii.id, '999999.000', 0
+       FROM erp_inventory_items ii
+       INNER JOIN erp_products p ON p.id = ii.product_id AND p.client_id = ii.client_id
+       WHERE ii.client_id = ? AND p.public_id = ?
+       ON DUPLICATE KEY UPDATE quantity = '999999.000'`,
+      [actor.clientId, actor.clientId, created.publicId]
+    );
+  } catch {
+    // Segue sem travar
+  }
+
   return created.publicId;
 }
 
@@ -276,6 +297,35 @@ async function runHermesCrmAction(input: {
 
     // Passo 3: se for conversão em venda
     if (isSaleConversion) {
+      // Isenção/provisionamento de saldo virtual para serviços antes de converter em venda
+      try {
+        const pool = getPool();
+        await pool.execute(
+          `UPDATE erp_stock_balances sb
+           INNER JOIN erp_sale_order_items oi ON oi.product_id = sb.product_id
+           INNER JOIN erp_products p ON p.id = oi.product_id AND p.client_id = sb.client_id
+           SET sb.quantity = '999999.000'
+           WHERE sb.client_id = ? AND oi.sale_order_id = ? AND (
+             p.category = 'Serviços' OR p.sku LIKE 'SRV-%' OR
+             LOWER(oi.product_name_snapshot) REGEXP 'servi[çc]o|lavagem|troca|m[aã]o de obra|manuten[çc][aã]o|alinhamento|balanceamento|revis[aã]o|instala[çc][aã]o'
+           )`,
+          [actor.clientId, current.id]
+        );
+        await pool.execute(
+          `UPDATE erp_inventory_item_balances ib
+           INNER JOIN erp_sale_order_items oi ON oi.inventory_item_id = ib.inventory_item_id
+           INNER JOIN erp_products p ON p.id = oi.product_id AND p.client_id = ib.client_id
+           SET ib.quantity = '999999.000'
+           WHERE ib.client_id = ? AND oi.sale_order_id = ? AND (
+             p.category = 'Serviços' OR p.sku LIKE 'SRV-%' OR
+             LOWER(oi.product_name_snapshot) REGEXP 'servi[çc]o|lavagem|troca|m[aã]o de obra|manuten[çc][aã]o|alinhamento|balanceamento|revis[aã]o|instala[çc][aã]o'
+           )`,
+          [actor.clientId, current.id]
+        );
+      } catch {
+        // Segue mesmo se as tabelas não tiverem registros para atualizar
+      }
+
       const converted = await saleService.convertQuote(actor, proposalId, randomUUID());
       return {
         success: true,
