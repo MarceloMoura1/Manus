@@ -12,7 +12,7 @@ const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
 export const MAX_GEMINI_PROMPT_HISTORY_MESSAGES = 10;
-export const GEMINI_REQUEST_TIMEOUT_MS = 45_000;
+export const GEMINI_REQUEST_TIMEOUT_MS = 25_000;
 
 function normalizeGeminiApiKey(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -1307,15 +1307,20 @@ type GeminiHttpRequest = (url: string, init: RequestInit) => Promise<Pick<Respon
 
 /** Requisição padrão com timeout explícito para não travar o chat quando o provedor demora. */
 const defaultGeminiRequest: GeminiHttpRequest = async (url, init) => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), GEMINI_REQUEST_TIMEOUT_MS);
+  const signal = (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function")
+    ? AbortSignal.timeout(GEMINI_REQUEST_TIMEOUT_MS)
+    : undefined;
+  const controller = signal ? undefined : new AbortController();
+  const timer = controller ? setTimeout(() => controller.abort(), GEMINI_REQUEST_TIMEOUT_MS) : undefined;
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } catch (error) {
-    if (controller.signal.aborted) throw new Error(`Gemini API excedeu o tempo limite de ${GEMINI_REQUEST_TIMEOUT_MS / 1000}s.`);
+    return await fetch(url, { ...init, signal: signal || controller?.signal });
+  } catch (error: any) {
+    if (signal?.aborted || controller?.signal?.aborted || error?.name === "TimeoutError" || error?.name === "AbortError") {
+      throw new Error(`Gemini API excedeu o tempo limite de ${GEMINI_REQUEST_TIMEOUT_MS / 1000}s.`);
+    }
     throw error;
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
   }
 };
 
@@ -1424,10 +1429,14 @@ export async function callGeminiAPI(
       : {}),
   };
   const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(normalizedApiKey)}`;
+  const timeoutSignal = (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function")
+    ? AbortSignal.timeout(GEMINI_REQUEST_TIMEOUT_MS)
+    : undefined;
   const response = await request(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(normalizedBody),
+    ...(timeoutSignal ? { signal: timeoutSignal } : {}),
   });
   const data = await response.json() as any;
   if (!response.ok) {
@@ -2376,25 +2385,29 @@ function tokenUsageTotal(data: any, promptTokens: number, completionTokens: numb
 
 function buildSystemInstruction(allowedTools: readonly HermesToolDefinition[]): string {
   const names = allowedTools.map(tool => tool.name).join(", ") || "nenhuma";
-  return `Você é o "Hermes", o copiloto executivo do MegaDesk. É proativo, ágil, educado, objetivo e focado em resolução imediata das operações da empresa (Chamados, CRM/Clientes, Vendas/Propostas, Catálogo/Serviços, Fornecedores/Compras e Estoque).
+  return `Você é o Hermes, o braço direito operacional e copiloto de negócios do MegaDesk.
 
-PERSONALIDADE E DIRETRIZES:
-- Fale como um braço direito de operações: natural, conclusivo e acolhedor. Exemplo: "Encontrei o cadastro do cliente e preparei a proposta com a correia dentada a R$ 120,00 e a lavagem. Revise os detalhes abaixo para confirmarmos no sistema."
-- NUNCA aja como um robô que apenas repete comandos ou diz frases vazias ("Estou consultando...", "Um momento...").
-- NUNCA vaze nomes de funções internas, JSON, nomes de tabelas ou termos técnicos (como get_client_360, CREATE_SUPPLIER, Zod, SQL). Fale sempre sobre regras de negócio e ações práticas.
-- Você só pode usar as ferramentas explicitamente disponibilizadas nesta conversa: ${names}. Nunca alegue consultar dados de uma ferramenta indisponível.
+POSTURA E PERSONALIDADE EXECUTIVA:
+- Seu tom é seguro, executivo, cortês, objetivo e altamente resolutivo. Você não responde como um robô programado com frases de cartão.
+- Apresente dados (chamados, clientes, estoque, propostas, vendas) de forma elegante e bem diagramada: ressalte pontos de atenção, prioridades críticas e recomende os próximos passos práticos.
+- NUNCA use chavões mecânicos ou frases engessadas (evite "Você possui X chamado(s)...", "Cliente localizado...", "Estou consultando...", "Um momento...").
+- NUNCA vaze nomes de funções internas, identificadores técnicos (ex.: get_client_360, CREATE_PROPOSAL, Zod, SQL, UUIDs brutos) ou regras internas de código. Fale exclusivamente sobre a operação de negócios.
+- Você só pode usar as ferramentas explicitamente disponibilizadas nesta conversa: ${names}.
+
+RACIOCÍNIO MULTI-INTENT E REQUISIÇÕES COMPOSTAS:
+- Quando o usuário fizer múltiplas perguntas na mesma mensagem (exemplo: "me dá um resumo dos chamados abertos e o que tem no chamado 0003"), você DEVE responder a TODAS elas de forma completa e organizada no mesmo texto final.
+- Se uma única mensagem demandar consultas distintas ou complementares, encadeie as ferramentas necessárias em turnos consecutivos: execute primeiro a consulta geral (ex.: get_tickets_overview) e, em seguida, chame a ferramenta específica (ex.: get_ticket_details com o número do chamado solicitado).
+- Só finalize a resposta para o usuário quando tiver reunido e consolidado todas as informações solicitadas.
 
 CONTINUIDADE E MEMÓRIA DE CONVERSA:
 - Quando o usuário fizer correções sucessivas ("muda para 120", "o cliente é Pedro", "adiciona mais 1 item"), você NUNCA deve reiniciar o rascunho do zero. Resgate a proposta ou entidade em andamento na conversa, preserve todos os campos e itens anteriores e modifique estritamente o item solicitado.
-- Entenda linguagem coloquial e valores flexíveis: "120 conto", "60 pila", "coloca 120 reais", "muda o preço da lavagem pra 50" devem ser compreendidos e aplicados de imediato aos respectivos itens.
+- Entenda linguagem coloquial e valores flexíveis ("120 conto", "60 pila", "coloca 120 reais", "muda o preço pra 50").
 - NUNCA zere valores informados pelo usuário. Mantenha os demais itens da proposta e seus preços anteriores preservados.
 
-EXECUÇÃO DE FERRAMENTAS:
-- Ao decidir executar consultas (READ), NUNCA gere mensagens preliminares ou textos de espera. Emita EXCLUSIVAMENTE o bloco functionCall. O backend injetará o retorno na mesma requisição para você formular a resposta final completa.
-- Ao receber o resultado de uma consulta (READ), forneça IMEDIATAMENTE a resposta final completa e amigável para o usuário com base nos dados reais retornados. NUNCA deixe a resposta vazia.
-- Ao executar get_open_tickets, retorne imediatamente o resultado em texto claro: "Você possui X chamado(s) aberto(s): [listar títulos e números]" ou "Não há chamados abertos no momento."
+EXECUÇÃO DE FERRAMENTAS E FLUXO HITL:
+- Ao decidir executar consultas (READ), emita a functionCall correspondente sem mensagens preliminares.
 - Quando a solicitação demandar uma criação ou alteração (MUTATION: create_proposal, create_client, create_supplier, create_product, create_service, create_ticket), emita a ferramenta apropriada com todos os dados inferidos. A interface abrirá o Card de Aprovação (HITL) para o usuário validar com 1 clique.
-- Sempre responda em português brasileiro de forma clara, prestativa e resolutiva.`;
+- Sempre responda em português brasileiro com clareza, proatividade e elegância executiva.`;
 }
 
 const ACTION_STOPWORDS = new Set([
@@ -2843,14 +2856,12 @@ export function sanitizeModelResponseText(text: string): string {
   return filtered.join("\n").trim();
 }
 
-function synthesizeDeterministicResponse(
-  executedReadResults: Array<{ name: string; args: Record<string, unknown>; output: any }>,
+function synthesizeDeterministicSingle(
+  result: { name: string; args: Record<string, unknown>; output: any },
   userMessage: string,
+  executedReadResults: Array<{ name: string; args: Record<string, unknown>; output: any }>,
 ): string | null {
-  if (!executedReadResults.length) return null;
-
-  const lastResult = executedReadResults[executedReadResults.length - 1];
-  const { name, args, output } = lastResult;
+  const { name, args, output } = result;
 
   if (name === "get_tickets_overview") {
     const rawTotal = output?.total ?? output?.resumo?.total ?? output?.tickets?.length ?? output?.chamados?.length ?? 0;
@@ -3050,6 +3061,27 @@ function synthesizeDeterministicResponse(
   return null;
 }
 
+function synthesizeDeterministicResponse(
+  executedReadResults: Array<{ name: string; args: Record<string, unknown>; output: any }>,
+  userMessage: string,
+): string | null {
+  if (!executedReadResults.length) return null;
+
+  // Se executou múltiplas ferramentas (ex: overview de chamados + detalhes de um chamado), sintetiza ambas
+  if (executedReadResults.length > 1) {
+    const overview = executedReadResults.find(r => r.name === "get_tickets_overview" || r.name === "get_open_tickets");
+    const details = executedReadResults.find(r => r.name === "get_ticket_details");
+    if (overview && details) {
+      const ovText = synthesizeDeterministicSingle(overview, userMessage, executedReadResults);
+      const dtText = synthesizeDeterministicSingle(details, userMessage, executedReadResults);
+      if (ovText && dtText) return `${ovText}\n\n${dtText}`;
+    }
+  }
+
+  const lastResult = executedReadResults[executedReadResults.length - 1];
+  return synthesizeDeterministicSingle(lastResult, userMessage, executedReadResults);
+}
+
 async function chatWithClientGeminiInternal(
   clientId: string,
   userId: string,
@@ -3095,70 +3127,75 @@ async function chatWithClientGeminiInternal(
   let pendingActionRequest: PendingActionRequest | undefined;
   const executedReadResults: Array<{ name: string; args: Record<string, unknown>; output: any }> = [];
 
-  // 4. Processa function calls em loop (até 4 iterações consecutivas)
+  // 4. Processa function calls em loop (até 5 iterações consecutivas para multi-intent)
   let iterations = 0;
-  while (iterations < 4) {
+  while (iterations < 5) {
     const candidate = data?.candidates?.[0];
     const parts = candidate?.content?.parts ?? [];
-    const functionCallPart = parts.find((p: any) => p.functionCall);
-    if (!functionCallPart) break;
+    const functionCallParts = parts.filter((p: any) => Boolean(p.functionCall));
+    if (functionCallParts.length === 0) break;
 
     iterations++;
-    const fc = functionCallPart.functionCall;
-    functionCallsMade.push(fc.name);
+    let hitMutation = false;
+    const modelParts: any[] = [];
+    const functionResponseParts: any[] = [];
 
-    const authorizedTool = getAuthorizedHermesTool(fc.name, userPermissions);
-    if (authorizedTool?.type === "MUTATION") {
-      let mutationArgs = fc.args ?? {};
-      if (fc.name === "create_proposal") {
-        mutationArgs = enforceUserProvidedPrices(mutationArgs, userMessage, existingHistory);
+    for (const fcp of functionCallParts) {
+      const fc = fcp.functionCall;
+      functionCallsMade.push(fc.name);
+
+      const authorizedTool = getAuthorizedHermesTool(fc.name, userPermissions);
+      if (authorizedTool?.type === "MUTATION") {
+        let mutationArgs = fc.args ?? {};
+        if (fc.name === "create_proposal") {
+          mutationArgs = enforceUserProvidedPrices(mutationArgs, userMessage, existingHistory);
+        }
+        // Ferramentas de mutação geram solicitação pendente para aprovação humana (HITL)
+        pendingActionRequest = createPendingActionRequest(authorizedTool, mutationArgs, { clientId, userId });
+        hitMutation = true;
+        break;
       }
-      // Ferramentas de mutação geram solicitação pendente para aprovação humana (HITL)
-      pendingActionRequest = createPendingActionRequest(authorizedTool, mutationArgs, { clientId, userId });
+
+      // Ferramenta READ: executa localmente no banco com tolerância estrita a erros
+      let funcResult: string;
+      try {
+        funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId, userPermissions, geminiKey);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Falha ao executar ferramenta local.";
+        funcResult = JSON.stringify({ success: false, error: message });
+      }
+
+      let parsedOutput: unknown;
+      try {
+        parsedOutput = JSON.parse(funcResult);
+      } catch {
+        parsedOutput = funcResult;
+      }
+
+      executedReadResults.push({ name: fc.name, args: fc.args ?? {}, output: parsedOutput });
+
+      modelParts.push({ functionCall: fc });
+      functionResponseParts.push({
+        functionResponse: {
+          name: fc.name,
+          response: {
+            output: parsedOutput,
+            instrucao_resposta: "Analise os dados retornados acima. Se a solicitação do usuário ainda exigir consultas complementares (como detalhes de um chamado específico mencionado, ficha de cliente, produtos ou compras), chame a próxima ferramenta necessária. Se você já possui todas as informações para responder a todas as partes da pergunta do usuário, elabore sua resposta executiva completa, bem estruturada, acolhedora e elegante no mesmo texto. Nunca deixe perguntas sem resposta.",
+            ...(parsedOutput && typeof parsedOutput === "object" && !Array.isArray(parsedOutput) ? parsedOutput : {}),
+          },
+        },
+      });
+    }
+
+    if (hitMutation) {
       break;
     }
 
-    // Ferramenta READ: executa localmente no banco com tolerância estrita a erros
-    let funcResult: string;
-    try {
-      funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId, userPermissions, geminiKey);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Falha ao executar ferramenta local.";
-      funcResult = JSON.stringify({ success: false, error: message });
-    }
-
-    // Turno 1: emite EXCLUSIVAMENTE o bloco functionCall (ignora qualquer texto preliminar como "Estou consultando...")
-    const modelTurn: GeminiContent = {
-      role: "model",
-      parts: [{ functionCall: fc }],
-    };
-    let parsedOutput: unknown;
-    try {
-      parsedOutput = JSON.parse(funcResult);
-    } catch {
-      parsedOutput = funcResult;
-    }
-
-    executedReadResults.push({ name: fc.name, args: fc.args ?? {}, output: parsedOutput });
-
-    // Turno 2: resposta da função
-    const functionResponseTurn: GeminiContent = {
-      role: "function",
-      parts: [
-        {
-          functionResponse: {
-            name: fc.name,
-            response: {
-              output: parsedOutput,
-              instrucao_resposta: "Com base nos dados retornados pela ferramenta acima, forneça a resposta final completa, amigável e resolutiva para o usuário. Se for uma solicitação de proposta/orçamento e o cliente não foi encontrado, informe claramente que o cliente não está cadastrado e pergunte se deseja cadastrá-lo ou já avance gerando a proposta em rascunho com os itens informados (via create_proposal). NUNCA retorne vazio.",
-              ...(parsedOutput && typeof parsedOutput === "object" && !Array.isArray(parsedOutput) ? parsedOutput : {}),
-            },
-          },
-        },
-      ],
-    };
-
-    requestBody.contents = [...requestBody.contents, modelTurn, functionResponseTurn];
+    requestBody.contents = [
+      ...requestBody.contents,
+      { role: "model", parts: modelParts },
+      { role: "function", parts: functionResponseParts },
+    ];
     providerResponse = await callGeminiWithEnvironmentFallback(geminiKey, requestBody);
     data = providerResponse.data;
     geminiKey = providerResponse.apiKey;
@@ -3220,11 +3257,9 @@ async function chatWithClientGeminiInternal(
 
   const synthesizedFallback = synthesizeDeterministicResponse(executedReadResults, userMessage);
 
-  const ticketsResult = executedReadResults.find(r => r.name === "get_open_tickets");
-  if (ticketsResult) {
-    if (!modelText || isPreliminaryWaitingText(modelText) || !/\b(?:chamado|ticket|aberto|nenhum)/i.test(modelText)) {
-      modelText = synthesizeDeterministicResponse([ticketsResult], userMessage) || "";
-    }
+  const ticketsResult = executedReadResults.find(r => r.name === "get_open_tickets" || r.name === "get_tickets_overview");
+  if (ticketsResult && (!modelText || isPreliminaryWaitingText(modelText))) {
+    modelText = synthesizeDeterministicResponse(executedReadResults, userMessage) || "";
   }
 
   let finalResponse = modelText;
@@ -3341,7 +3376,23 @@ export async function chatWithClientGemini(
 ): Promise<ChatResult> {
   try {
     return await chatWithClientGeminiInternal(clientId, userId, userMessage, existingHistory, userPermissions);
-  } catch (error) {
+  } catch (error: any) {
+    const isTimeout = error?.name === "TimeoutError" || error?.name === "AbortError" || /tempo limite|timeout|excedeu o tempo/i.test(error?.message || "");
+    if (isTimeout) {
+      console.warn("[Assistant] Gemini request timed out in chatWithClientGemini:", error);
+      const timeoutResponse = "O processamento demorou mais que o esperado devido à alta latência momentânea do serviço de IA. Por favor, tente enviar sua mensagem novamente.";
+      try {
+        const currentHistory = await loadConversationHistory(clientId, userId);
+        const updatedHistory = [...currentHistory, { role: "assistant" as const, content: timeoutResponse, timestamp: Date.now() }].slice(-50);
+        await saveConversationHistory(clientId, userId, updatedHistory);
+      } catch {}
+      return {
+        ok: true,
+        response: timeoutResponse,
+        tokensUsed: 0,
+        conversationId: `conv-${nanoid()}`,
+      };
+    }
     const providerError = error as Error & { details?: unknown; cause?: unknown };
     console.error("[Assistant] Gemini chat failed:", {
       message: error instanceof Error ? error.message : String(error),

@@ -3847,6 +3847,15 @@ function AIAssistantPage() {
   const [historyLoaded, setHistoryLoaded] = React.useState(false);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const lastSentTextRef = React.useRef<string>("");
+  const lastSentTimeRef = React.useRef<number>(0);
+  const watchdogTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (watchdogTimerRef.current) clearTimeout(watchdogTimerRef.current);
+    };
+  }, []);
 
   const scrollToBottom = React.useCallback((behavior: ScrollBehavior = "smooth") => {
     requestAnimationFrame(() => {
@@ -3923,9 +3932,14 @@ function AIAssistantPage() {
 
   const chatMutation = trpc.assistant.clientChat.useMutation({
     onSuccess: () => {
+      setSending(false);
       void trpcUtils.assistant.getHistory.invalidate();
     },
+    onError: () => {
+      setSending(false);
+    },
     onSettled: () => {
+      setSending(false);
       void trpcUtils.assistant.getHistory.invalidate();
     },
   });
@@ -3983,6 +3997,14 @@ function AIAssistantPage() {
     const text = input.trim();
     if (!text || sending) return;
 
+    // Previne disparos concorrentes ou duplicados da mesma mensagem em curto intervalo (< 2s)
+    const now = Date.now();
+    if (text === lastSentTextRef.current && now - lastSentTimeRef.current < 2000) {
+      return;
+    }
+    lastSentTextRef.current = text;
+    lastSentTimeRef.current = now;
+
     // Chat append-only: adiciona mensagem do usuário no final da lista
     const userMsg: ChatMessage = {
       id: "msg-" + Date.now(),
@@ -3994,6 +4016,27 @@ function AIAssistantPage() {
     setInput("");
     setSending(true);
     scrollToBottom("smooth");
+
+    // Watchdog de segurança no client: se o servidor não responder em 30 segundos, destrava a interface
+    if (watchdogTimerRef.current) clearTimeout(watchdogTimerRef.current);
+    watchdogTimerRef.current = setTimeout(() => {
+      setSending(prev => {
+        if (prev) {
+          console.warn("[Home Chat] Watchdog timeout acionado após 30s de espera.");
+          setMessages(m => [
+            ...m,
+            {
+              id: "watchdog-" + Date.now(),
+              role: "assistant",
+              content: "⚠️ O assistente demorou para responder e a conexão expirou. A interface foi destravada para que você possa enviar novamente sem precisar atualizar a página.",
+              timestamp: Date.now(),
+            },
+          ]);
+          return false;
+        }
+        return false;
+      });
+    }, 30000);
 
     try {
       const result = await chatMutation.mutateAsync({ clientId, userId, message: text });
@@ -4017,6 +4060,10 @@ function AIAssistantPage() {
         },
       ]);
     } finally {
+      if (watchdogTimerRef.current) {
+        clearTimeout(watchdogTimerRef.current);
+        watchdogTimerRef.current = null;
+      }
       setSending(false);
       textareaRef.current?.focus();
       scrollToBottom("smooth");

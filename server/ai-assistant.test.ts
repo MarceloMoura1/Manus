@@ -1888,6 +1888,135 @@ describe("Hermes entity flexibilization, memory continuity and conversational pa
       expect(leadRes.lead.phone).toBe("11977778888");
       expect(leadRes.lead.suggestedItems.length).toBeGreaterThan(0);
     });
+
+    it("executes multi-intent chained tools in consecutive turns for compound user requests", async () => {
+      let callCount = 0;
+      const originalFetch = globalThis.fetch;
+      const execute = vi.fn(async (sql: string) => {
+        if (sql.includes("megadesk_domain_clients")) {
+          return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+        }
+        if (sql.includes("COUNT(*) AS total") && sql.includes("open")) {
+          return [[{ total: 1, open: 1, in_progress: 0, waiting: 0, closed: 0 }]];
+        }
+        if (sql.includes("FROM megadesk_domain_chamados") && sql.includes("chamadoNumber = ?")) {
+          return [[{
+            chamadoId: "chamado-3", chamadoNumber: 3, title: "Falha na ignição do motor", observations: "Velas desgastadas",
+            customerName: "Transportadora Alpha", status: "open", priority: "urgent",
+            assignedTo: "Carlos Mecânico", resolutionNotes: null
+          }]];
+        }
+        if (sql.includes("FROM megadesk_domain_chamados")) {
+          return [[
+            { chamadoId: "chamado-3", chamadoNumber: 3, title: "Falha na ignição do motor", customerName: "Transportadora Alpha", status: "open", priority: "urgent", createdAt: new Date() }
+          ]];
+        }
+        if (sql.includes("FROM megadesk_domain_chamado_activities")) {
+          return [[{ activityId: "act-1", actionType: "CREATED", description: "Chamado aberto", attendant: "Sistema", createdAt: new Date() }]];
+        }
+        return [[]];
+      });
+      vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+      globalThis.fetch = vi.fn(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              candidates: [{
+                content: {
+                  parts: [{
+                    functionCall: { name: "get_tickets_overview", args: { status: "open" } }
+                  }]
+                }
+              }],
+              usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 20, totalTokenCount: 70 }
+            })
+          };
+        }
+        if (callCount === 2) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              candidates: [{
+                content: {
+                  parts: [{
+                    functionCall: { name: "get_ticket_details", args: { ticketNumber: "0003" } }
+                  }]
+                }
+              }],
+              usageMetadata: { promptTokenCount: 80, candidatesTokenCount: 25, totalTokenCount: 105 }
+            })
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [{
+              content: {
+                parts: [{
+                  text: "Atualmente temos 1 chamado aberto no suporte. Quanto ao chamado #0003, trata-se de 'Falha na ignição do motor' para a Transportadora Alpha com prioridade urgente, atribuído ao Carlos Mecânico."
+                }]
+              }
+            }],
+            usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 40, totalTokenCount: 160 }
+          })
+        };
+      }) as any;
+
+      try {
+        const result = await chatWithClientGemini(
+          "tenant-a",
+          "user@example.invalid",
+          "me dá um resumo dos chamados abertos e o que tem no chamado 0003",
+          [],
+          ["tickets", "support"]
+        );
+        expect(result.ok).toBe(true);
+        expect(callCount).toBe(3);
+        expect(result.functionCallsMade).toEqual(["get_tickets_overview", "get_ticket_details"]);
+        expect(result.response).toContain("1 chamado aberto");
+        expect(result.response).toContain("Falha na ignição do motor");
+        expect(result.response).toContain("Transportadora Alpha");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("handles Gemini timeout safely without throwing and unblocks client with ok: true", async () => {
+      const originalFetch = globalThis.fetch;
+      const execute = vi.fn(async (sql: string) => {
+        if (sql.includes("megadesk_domain_clients")) {
+          return [[{ integrations_json: JSON.stringify({ geminiKey: "test-gemini-key", geminiQuotaMensal: 50000 }) }]];
+        }
+        return [[]];
+      });
+      vi.mocked(getPool).mockReturnValue({ execute } as any);
+
+      globalThis.fetch = vi.fn(async () => {
+        const err = new Error("Gemini API excedeu o tempo limite de 25s.");
+        err.name = "TimeoutError";
+        throw err;
+      }) as any;
+
+      try {
+        const result = await chatWithClientGemini(
+          "tenant-a",
+          "user@example.invalid",
+          "pergunta que vai dar timeout",
+          [],
+          ["ai-assistant"]
+        );
+        expect(result.ok).toBe(true);
+        expect(result.response).toContain("O processamento demorou mais que o esperado");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
   });
 
 });
