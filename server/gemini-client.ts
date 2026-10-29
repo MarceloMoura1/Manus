@@ -2649,7 +2649,7 @@ export function buildSystemInstruction(
     ? preferences.customRules.map(r => `  • ${r}`).join("\n")
     : "  • Nenhuma diretriz customizada adicional definida.";
 
-  return `Você é o Hermes, o braço direito operacional e copiloto de negócios do MegaDesk.
+  return `Você é o Hermes, a inteligência central e o braço direito operacional dos sócios da MegaDesk. Atue como um diretor de operações ágil: presente, confiável, resolutivo e claro. Não soe como um chatbot genérico, um terminal de comandos ou um consultor prolixo.
 
 =======================================================
 PREFERÊNCIAS VIGENTES DE TRATAMENTO E PERFIL DO USUÁRIO:
@@ -2669,8 +2669,9 @@ REGRA ZERO HALLUCINATION — DADOS DE NEGÓCIO:
 - Nunca invente, suponha, exemplifique ou deduza clientes, fornecedores, produtos, saldos de estoque, valores de propostas, chamados, contatos ou status de integrações.
 - Para responder sobre dados corporativos, invoque a ferramenta de leitura correspondente. Fornecedores cadastrados exigem get_suppliers_list; conexão, instância ou status do WhatsApp exigem get_whatsapp_status. Não use web_search como substituto de dados internos.
 - Se a ferramenta necessária não estiver disponível ou falhar, diga objetivamente que não foi possível consultar esses dados. Nunca transforme erro de consulta em resultado vazio.
-- Se a consulta for bem-sucedida e retornar lista vazia ou found: false, informe a ausência sem inventar registros: "Não há fornecedores cadastrados no sistema." ou "Nenhum produto em estoque no momento.", conforme o caso.
+- Se a consulta for bem-sucedida e retornar lista vazia ou found: false, informe a ausência com naturalidade e precisão. Uma lista vazia de produtos cadastrados não comprova, por si só, saldo físico zero; use a ferramenta de estoque para falar de disponibilidade.
 - Só forneça exemplo hipotético quando o usuário o pedir expressamente; identifique-o como hipotético.
+- Não amplie o alcance de um resultado: status de conexão não comprova ausência de fila; um cadastro encontrado não comprova homologação; uma lista vazia não comprova entradas de nota pendentes.
 
 REGRA ZERO PREÂMBULO EM TOOL CALLS:
 - Emita a functionCall imediatamente no primeiro turno. Não escreva "Vou verificar agora", "Um momento enquanto consulto" ou "Entendido, vou realizar essa verificação".
@@ -2678,10 +2679,18 @@ REGRA ZERO PREÂMBULO EM TOOL CALLS:
 - Invoque ferramentas exclusivamente pelo Function Calling nativo da API. Nunca escreva tags <functionCall> ou </functionCall>, nem blocos de código que simulem chamadas; emita a chamada estruturada diretamente.
 
 ESTILO EXECUTIVO:
-- Responda em português brasileiro com tom sóbrio, direto e breve. Mostre somente fatos comprovados e o próximo passo operacional quando necessário.
+- Responda em português brasileiro com presença executiva, calor humano discreto e clareza. Prefira frases fluidas, tópicos limpos e destaque moderado em negrito para números e decisões; não entregue uma linha de comando crua como "Fornecedores: X, Y".
+- Trate o operador pela preferência gravada. Quando ela for "Senhor Marcelo", use-a naturalmente em aberturas ocasionais, sem repetir o nome em toda frase. Com outros usuários, respeite o tratamento deles.
+- Varie aberturas apenas depois de uma ação realmente concluída, quando ajudarem a leitura: "Panorama na mão:", "Verificação concluída:". Nunca use "Na escuta" como preâmbulo antes de uma ferramenta.
+- Se houver um próximo passo concreto e autorizado, proponha-o em uma frase breve; nunca afirme que já o executou. Uma ação de escrita continua exigindo o Card de Aprovação.
 - Não faça palestras corporativas, listas conceituais de "3 pilares" ou aconselhamento genérico sem pedido explícito de aprofundamento.
 - Não encerre toda resposta com "Como o senhor gostaria que eu procedesse agora?". Pergunte apenas quando faltar uma decisão operacional concreta.
 - Nunca exponha nomes de ferramentas, SQL, UUIDs ou regras internas ao usuário. Ferramentas disponíveis nesta conversa: ${names}.
+
+EXEMPLOS DE CALIBRAGEM DE TOM (modelos condicionais, nunca fatos da operação atual):
+- Status: somente após a ferramenta retornar status=connected, responda como "A conexão do WhatsApp está **ativa** no momento." Não acrescente "100% operacional" nem "nenhuma fila represada" sem telemetria específica.
+- Fornecedores: somente após uma lista real, responda como "Encontrei **{{total}} fornecedores cadastrados**.\n• **{{nome retornado}}** — {{contato efetivamente retornado}}." Substitua cada marcador pelo valor recebido; omita campos ausentes e não invente nomes, telefones, homologações ou regularidade.
+- Estoque vazio: somente após uma consulta de saldo físico que retorne zero, responda como "Consultei o estoque e não encontrei itens com saldo disponível no recorte solicitado." Não afirme que registros estão zerados ou aguardando nota sem evidência adicional.
 
 RACIOCÍNIO MULTI-INTENT E REQUISIÇÕES COMPOSTAS:
 - Quando o usuário fizer múltiplas perguntas na mesma mensagem (exemplo: "me dá um resumo dos chamados abertos e o que tem no chamado 0003"), você DEVE responder a TODAS elas de forma completa e organizada no mesmo texto final.
@@ -3343,29 +3352,29 @@ function synthesizeDeterministicSingle(
     if (!Array.isArray(list)) return "Não foi possível confirmar a lista de fornecedores no momento.";
     const searchTerm = String(args.search ?? "").trim();
     if (list.length > 0) {
-      if (list.length === 1) {
-        const s = list[0];
-        const name = s.name;
-        const phone = s.phone ? `Telefone: ${s.phone}` : "Telefone não informado";
-        const email = s.email ? `E-mail: ${s.email}` : "";
-        const contact = s.contactName ? `Contato: ${s.contactName}` : "";
-        const details = [phone, email, contact].filter(Boolean).join(", ");
-        return `${name} — ${details}.`;
-      }
-      const names = list.slice(0, 5).map((s: any) => s.name).filter(Boolean).join(", ");
-      const extra = list.length > 5 ? ` e mais ${list.length - 5} fornecedor(es)` : "";
-      return `Fornecedores${searchTerm ? ` para "${searchTerm}"` : ""}: ${names}${extra}.`;
+      const lines = list.slice(0, 5).map((supplier: any) => {
+        const name = String(supplier.name ?? "").trim() || "Nome não informado";
+        const contacts = [
+          supplier.contactName ? `Contato: ${supplier.contactName}` : "",
+          supplier.phone ? `Telefone: ${supplier.phone}` : "",
+          supplier.email ? `E-mail: ${supplier.email}` : "",
+        ].filter(Boolean);
+        return `• **${name}** — ${contacts.join(", ") || "contato não informado"}`;
+      });
+      const remaining = list.length > 5 ? `\nHá mais ${list.length - 5} cadastro(s) neste resultado.` : "";
+      const label = list.length === 1 ? "fornecedor" : "fornecedores";
+      return `Consultei a base${searchTerm ? ` para "${searchTerm}"` : ""} e encontrei **${list.length} ${label}**:\n${lines.join("\n")}${remaining}`;
     }
     return searchTerm
-      ? `Nenhum fornecedor encontrado para "${searchTerm}".`
-      : "Não há fornecedores cadastrados no sistema.";
+      ? `Consultei a base e não encontrei fornecedores para "${searchTerm}".`
+      : "Consultei a base e ainda não há fornecedores cadastrados. Se precisar, posso preparar o primeiro cadastro para sua aprovação.";
   }
 
   if (name === "get_whatsapp_status") {
     if (output?.success === false) return "Não foi possível consultar o status do WhatsApp no momento.";
-    if (output?.status === "connected") return "WhatsApp conectado.";
-    if (output?.status === "connecting") return "WhatsApp em conexão.";
-    if (output?.status === "disconnected") return "WhatsApp desconectado.";
+    if (output?.status === "connected") return "A conexão do WhatsApp está **ativa** no momento.";
+    if (output?.status === "connecting") return "A instância do WhatsApp está **em conexão**. Aguarde a confirmação do estado antes de enviar mensagens.";
+    if (output?.status === "disconnected") return "A instância do WhatsApp está **desconectada**. É preciso restabelecer a conexão antes de enviar mensagens.";
     return "Não foi possível confirmar o status do WhatsApp no momento.";
   }
 

@@ -1779,8 +1779,35 @@ describe("Hermes entity flexibilization, memory continuity and conversational pa
 
     try {
       const result = await chatWithClientGemini("tenant-a", "user@example.invalid", "Quais fornecedores temos cadastrados?", [], ["suppliers"]);
-      expect(result.response).toBe("Não há fornecedores cadastrados no sistema.");
+      expect(result.response).toBe("Consultei a base e ainda não há fornecedores cadastrados. Se precisar, posso preparar o primeiro cadastro para sua aprovação.");
       expect(result.functionCallsMade).toContain("get_suppliers_list");
+      expect(execute.mock.calls.some(([sql]) => sql.includes("FROM erp_suppliers WHERE client_id=?"))).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("presents only supplier names and contacts returned by the tenant query", async () => {
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("megadesk_domain_clients")) return [[{ integrations_json: JSON.stringify({ geminiKey: "test-key", geminiQuotaMensal: 50000 }) }]];
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) return [[{ total: 0 }]];
+      if (sql.includes("FROM erp_suppliers WHERE client_id=?")) {
+        return [[{ publicId: "supplier-1", legalName: "Fornecedor Teste", phone: "11999990000", email: null, contactName: null }]];
+      }
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: "O fornecedor inventado está homologado." }] } }], usageMetadata: { totalTokenCount: 8 } }),
+    })) as typeof fetch;
+    try {
+      const result = await chatWithClientGemini("tenant-a", "user@example.invalid", "Quais fornecedores temos cadastrados?", [], ["suppliers"]);
+      expect(result.response).toContain("**1 fornecedor**");
+      expect(result.response).toContain("**Fornecedor Teste** — Telefone: 11999990000");
+      expect(result.response).not.toContain("inventado");
+      expect(result.response).not.toContain("homologado");
       expect(execute.mock.calls.some(([sql]) => sql.includes("FROM erp_suppliers WHERE client_id=?"))).toBe(true);
     } finally {
       globalThis.fetch = originalFetch;
@@ -1803,9 +1830,31 @@ describe("Hermes entity flexibilization, memory continuity and conversational pa
 
     try {
       const result = await chatWithClientGemini("tenant-a", "user@example.invalid", "Qual o status da conexão do WhatsApp?", [], ["conversations"]);
-      expect(result.response).toBe("WhatsApp desconectado.");
+      expect(result.response).toBe("A instância do WhatsApp está **desconectada**. É preciso restabelecer a conexão antes de enviar mensagens.");
       expect(result.functionCallsMade).toContain("get_whatsapp_status");
       expect(evoGetStatus).toHaveBeenCalledWith("megadesk-tenant-a");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does not infer queue health from a connected WhatsApp status", async () => {
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes("megadesk_domain_clients")) return [[{ integrations_json: JSON.stringify({ geminiKey: "test-key", geminiQuotaMensal: 50000 }) }]];
+      if (sql.includes("COALESCE(SUM(tokens_used), 0)")) return [[{ total: 0 }]];
+      return [[]];
+    });
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    vi.mocked(evoGetStatus).mockResolvedValueOnce("connected");
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: "Conectado e sem filas represadas." }] } }], usageMetadata: { totalTokenCount: 8 } }),
+    })) as typeof fetch;
+    try {
+      const result = await chatWithClientGemini("tenant-a", "user@example.invalid", "Qual o status da conexão do WhatsApp?", [], ["conversations"]);
+      expect(result.response).toBe("A conexão do WhatsApp está **ativa** no momento.");
+      expect(result.response).not.toContain("fila");
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -2490,6 +2539,9 @@ describe("Hermes entity flexibilization, memory continuity and conversational pa
       expect(sysCustom).toContain("REGRA ZERO PREÂMBULO EM TOOL CALLS");
       expect(sysCustom).toContain("ESTILO EXECUTIVO");
       expect(sysCustom).toContain("Se a ferramenta necessária não estiver disponível ou falhar");
+      expect(sysCustom).toContain("EXEMPLOS DE CALIBRAGEM DE TOM");
+      expect(sysCustom).toContain("status de conexão não comprova ausência de fila");
+      expect(sysCustom).toContain("use-a naturalmente em aberturas ocasionais");
     });
 
     it("registers set_user_preference as a READ tool without requiring HITL card confirmation", () => {
