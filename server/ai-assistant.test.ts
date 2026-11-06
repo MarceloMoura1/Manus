@@ -31,6 +31,8 @@ import {
   DEFAULT_GEMINI_MODEL,
   MAX_GEMINI_PROMPT_HISTORY_MESSAGES,
   selectGeminiPromptHistory,
+  sanitizePromptHistoryForGemini,
+  sanitizeModelResponseText,
   persistUserMessageImmediately,
   appendAssistantMessageToHistory,
   chatWithClientGemini,
@@ -1945,6 +1947,71 @@ describe("Hermes persistence, CRM tools and latency", () => {
     expect(promptHistory).toHaveLength(2);
     expect(promptHistory[1].content.length).toBeLessThanOrEqual(300);
     expect(promptHistory[1].content.endsWith("...")).toBe(true);
+  });
+
+  describe("sanitizePromptHistoryForGemini", () => {
+    it("converts raw past function calls and tool artifacts into clean text messages", () => {
+      const history = [
+        { role: "user" as const, content: "listar chamados" },
+        {
+          role: "assistant" as const,
+          content: "default_api:get_tickets_overview({})",
+        },
+        {
+          role: "assistant" as const,
+          content: "<function_calls><invoke name=\"default_api:get_tickets_overview\"></invoke></function_calls>",
+        },
+        {
+          role: "assistant" as const,
+          content: "Encontrei 3 chamados abertos no sistema.",
+        },
+      ];
+
+      const sanitized = sanitizePromptHistoryForGemini(history);
+      // As chamadas cruas sem texto humano devem ser descartadas
+      expect(sanitized).toHaveLength(2);
+      expect(sanitized[0]).toEqual({ role: "user", content: "listar chamados" });
+      expect(sanitized[1]).toEqual({ role: "assistant", content: "Encontrei 3 chamados abertos no sistema." });
+    });
+
+    it("summarizes assistant messages that only have pendingActionRequest without human text", () => {
+      const history = [
+        { role: "user" as const, content: "abrir chamado para Pedro" },
+        {
+          role: "assistant" as const,
+          content: "",
+          pendingActionRequest: {
+            id: "act-1",
+            toolName: "solicitar_abertura_chamado",
+            type: "MUTATION" as const,
+            actionType: "CREATE_TICKET" as const,
+            args: { customer: "Pedro", subject: "Dúvida" },
+            summary: "Abertura de chamado para Pedro com assunto 'Dúvida'",
+            status: "PENDING_APPROVAL" as const,
+          },
+        },
+      ];
+
+      const sanitized = sanitizePromptHistoryForGemini(history as any);
+      expect(sanitized).toHaveLength(2);
+      expect(sanitized[1].role).toBe("assistant");
+      expect(sanitized[1].content).toMatch(/\[Ação (?:executada|anterior): Abertura de chamado para Pedro/);
+    });
+
+    it("strips raw JSON and pseudo-tags while keeping surrounding text", () => {
+      const history = [
+        {
+          role: "assistant" as const,
+          content: "Aqui está o chamado:\n<tool_call>{\"name\": \"get_tickets\"}</tool_call>\nChamado #42 resolvido.",
+        },
+      ];
+
+      const sanitized = sanitizePromptHistoryForGemini(history);
+      expect(sanitized).toHaveLength(1);
+      expect(sanitized[0].content).toContain("Aqui está o chamado:");
+      expect(sanitized[0].content).toContain("Chamado #42 resolvido.");
+      expect(sanitized[0].content).not.toContain("<tool_call>");
+    });
   });
 
   it("retains proposal context and updates price when user adjusts an existing proposal", async () => {

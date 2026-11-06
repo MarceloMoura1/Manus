@@ -108,6 +108,48 @@ export function selectGeminiPromptHistory(history: readonly IAMessage[]): IAMess
 }
 
 /**
+ * Converte e sanitiza rigorosamente o histórico anterior para o Vercel AI SDK / Gemini,
+ * garantindo mensagens puramente textuais { role, content: string } sem objetos estruturados
+ * de chamadas passadas (functionCall, toolCall, toolResult) que geram HTTP 400 por falta de thought_signature.
+ */
+export function sanitizePromptHistoryForGemini(
+  history: readonly IAMessage[]
+): Array<{ role: "user" | "assistant"; content: string }> {
+  return selectGeminiPromptHistory(history)
+    .map((msg: any) => {
+      const role: "user" | "assistant" = msg.role === "assistant" ? "assistant" : "user";
+      let content = "";
+      if (typeof msg.content === "string") {
+        content = msg.content;
+      } else if (msg.content && typeof msg.content.text === "string") {
+        content = msg.content.text;
+      } else if (typeof msg.text === "string") {
+        content = msg.text;
+      }
+
+      content = sanitizeModelResponseText(content).trim();
+
+      if (!content && role === "assistant") {
+        if (msg.pendingActionRequest?.summary) {
+          content = `[Ação executada: ${msg.pendingActionRequest.summary}]`;
+        } else if (msg.pendingActionRequest?.actionType) {
+          content = `[Ação executada: ${msg.pendingActionRequest.actionType}]`;
+        }
+      }
+
+      if (!content) {
+        return null;
+      }
+
+      return {
+        role,
+        content,
+      };
+    })
+    .filter((msg): msg is { role: "user" | "assistant"; content: string } => msg !== null);
+}
+
+/**
  * Detecta se a mensagem é puramente conversacional/saudação, sem intenção operacional.
  * Permite fast-path (< 1.5s) enviando tools: undefined ao Gemini.
  */
@@ -3164,29 +3206,43 @@ function extractEntityCreationFromMessage(
 
 export function sanitizeModelResponseText(text: string): string {
   if (!text) return "";
-  // Pseudo-chamadas são texto do modelo, nunca conteúdo destinado à interface.
+  // Pseudo-chamadas e tags de tools
   const withoutPseudoCalls = text
     .replace(/<functionCall\b[^>]*>[\s\S]*?<\/functionCall\s*>/gi, "")
     .replace(/<functionCall\b[^>]*>[\s\S]*$/gi, "")
-    .replace(/<\/functionCall\s*>/gi, "");
+    .replace(/<\/functionCall\s*>/gi, "")
+    .replace(/<function_calls?\b[^>]*>[\s\S]*?<\/function_calls?\s*>/gi, "")
+    .replace(/<function_calls?\b[^>]*>[\s\S]*$/gi, "")
+    .replace(/<\/function_calls?\s*>/gi, "")
+    .replace(/<tool_call\b[^>]*>[\s\S]*?<\/tool_call\s*>/gi, "")
+    .replace(/<tool_call\b[^>]*>[\s\S]*$/gi, "")
+    .replace(/<\/tool_call\s*>/gi, "")
+    .replace(/<tool_results?\b[^>]*>[\s\S]*?<\/tool_results?\s*>/gi, "")
+    .replace(/<tool_results?\b[^>]*>[\s\S]*$/gi, "")
+    .replace(/<\/tool_results?\s*>/gi, "");
+
   const trimmed = withoutPseudoCalls.trim();
-  // Se for exclusivamente uma chamada de tool (ex: get_client_360({search: 'Pedro Ferrari'}) ou get_services_list({search: 'lavagem'}))
-  if (/^[a-zA-Z0-9_]+\s*\(\{?[\s\S]*?\}?\);?$/i.test(trimmed)) {
+  // Se for exclusivamente uma chamada de tool (ex: default_api:get_tickets_overview({}) ou get_client_360({search: 'Pedro Ferrari'}))
+  if (/^(?:default_api:)?[a-zA-Z0-9_]+\s*\(\{?[\s\S]*?\}?\);?$/i.test(trimmed)) {
     return "";
   }
   // Se for código em bloco json ou similar
-  if (/^```(?:json)?\s*\{[\s\S]*?"(?:name|function|tool)":/i.test(trimmed)) {
+  if (/^```(?:json)?\s*\{[\s\S]*?"(?:name|function|tool|functionCall|toolCall)":/i.test(trimmed)) {
+    return "";
+  }
+  // Se for JSON bruto contendo functionCall/toolCall
+  if (/^\s*\{\s*"(?:functionCall|toolCall|name|tool_calls)"\s*:/i.test(trimmed)) {
     return "";
   }
   // Remove linhas que são chamadas de ferramentas isoladas
   const lines = withoutPseudoCalls.split("\n");
   const filtered = lines.filter(line => {
     const l = line.trim();
-    if (/^[a-zA-Z0-9_]+\s*\(\{?[\s\S]*?\}?\);?$/i.test(l)) return false;
-    if (/^(?:get_|create_|update_|delete_|add_|link_|send_|request_)[a-zA-Z0-9_]+\s*\(/i.test(l)) return false;
+    if (/^(?:default_api:)?[a-zA-Z0-9_]+\s*\(\{?[\s\S]*?\}?\);?$/i.test(l)) return false;
+    if (/^(?:default_api:)?(?:get_|create_|update_|delete_|add_|link_|send_|request_)[a-zA-Z0-9_]+\s*\(/i.test(l)) return false;
     return true;
   });
-  return filtered.join("\n").trim();
+  return filtered.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function parseTextFunctionCalls(text: string, permissions: readonly string[]): Array<{ functionCall: { name: string; args: Record<string, unknown> } }> {
@@ -3468,15 +3524,6 @@ async function chatWithClientGeminiInternal(
   }
   let geminiKey = iaStatus.geminiKey!;
 
-  // 2. Monta o histórico no formato REST do Gemini
-  const contents: GeminiContent[] = selectGeminiPromptHistory(existingHistory).map((msg) => ({
-    role: msg.role === "user" ? "user" : "model",
-    parts: [{ text: msg.content }],
-  }));
-
-  // Adiciona a mensagem atual do usuário
-  contents.push({ role: "user", parts: [{ text: userMessage }] });
-
   // Pool para operações de banco
   let pool: any = null;
   try {
@@ -3535,10 +3582,7 @@ async function chatWithClientGeminiInternal(
   }
 
   const promptMessages = [
-    ...selectGeminiPromptHistory(existingHistory).map((msg) => ({
-      role: (msg.role === "user" ? "user" : "assistant") as "user" | "assistant",
-      content: msg.content,
-    })),
+    ...sanitizePromptHistoryForGemini(existingHistory),
     { role: "user" as const, content: userMessage },
   ];
 
