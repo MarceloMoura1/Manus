@@ -9,11 +9,34 @@ try {
   dns.setDefaultResultOrder("ipv4first");
 } catch {}
 
+import { createGoogleGenerativeAI, google } from "@ai-sdk/google";
+import { generateText, isStepCount, jsonSchema, tool } from "ai";
 import { getPool, getUserHermesPreferences, saveUserHermesPreferences, type UserHermesPreferences } from "./db";
 import { nanoid } from "nanoid";
 import { dropEmptyArgs } from "./hermes-sanitize";
 import { evoGetStatus } from "./evolution/client";
 import { instanceNameFor } from "./evolution/session-store";
+import { createHermesTools, resolveClientInCRM } from "./hermes-tools";
+
+async function safeAiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const res: any = await (globalThis.fetch as any)(input, init);
+  if (res instanceof Response) return res;
+  if (res && typeof res.json === "function" && typeof res.text !== "function") {
+    const data = await res.json();
+    if (data && Array.isArray(data.candidates)) {
+      for (const cand of data.candidates) {
+        if (!cand.finishReason) {
+          cand.finishReason = "STOP";
+        }
+      }
+    }
+    return new Response(JSON.stringify(data), {
+      status: res.status || 200,
+      headers: res.headers || { "content-type": "application/json" },
+    });
+  }
+  return res;
+}
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
@@ -3440,167 +3463,12 @@ function isTicketCreationRequest(value: string): boolean {
     || /(?:abre|abrir|abra|cria|criar|crie|fazer)\s+(?:um\s+)?(?:chamado|ticket|suporte)\s+(?:pra|para|pro)\s+(?:eles|ela|ele|elas)\b/.test(text);
 }
 
-interface InlineTicketParsed {
-  customer: string | null;
-  title: string | null;
-  description: string | null;
-  priority: "low" | "medium" | "high" | "urgent" | null;
-}
-
-function parseInlineTicket(value: string): InlineTicketParsed | null {
-  if (/\b(?:assunto|t[ií]tulo|descri[cç][aã]o)\s*(?::|é|eh|=)/i.test(value)) {
-    return null;
-  }
-
-  // 1. Frase com anáfora / ordem invertida:
-  // "O sistema caiu na Empresa Alpha, abre um chamado pra eles"
-  const invertedMatch = value.match(/(.+?)\s+(?:em|na|no)\s+(?:a\s+|o\s+)?([^,.;?!]+?)(?:,\s*|\s+)(?:pode\s+)?(?:abrir|abra|abre|criar|crie|cria|fazer)\s+(?:um\s+)?(?:chamado|ticket|suporte)\s+(?:pra|para|pro)\s+(?:eles|ela|ele|elas)\b/i);
-  if (invertedMatch) {
-    const problem = invertedMatch[1].trim();
-    const customer = invertedMatch[2].trim();
-    return {
-      customer,
-      title: problem,
-      description: problem,
-      priority: null,
-    };
-  }
-
-  // 2. Padrões com ":" ou ",":
-  // "Ticket pro [Cliente]: [Problema]"
-  // "Cria um suporte pro [Cliente], [Problema]"
-  // "Chamado [Cliente] urgente: [Problema]"
-  const inlineColonMatch = value.match(/^\s*(?:(?:cria|criar|crie|abre|abrir|abra|fazer|novo)\s+(?:um\s+)?)?(?:ticket|chamado|suporte)\s+(?:(?:para|pra|pro)\s+)?(?:(?:o|a)?\s*cliente\s+)?([^:,?!;\n]+?)(?:\s+(baixa|media|alta|urgente|low|medium|high|urgent))?\s*[:,-]\s*(.+)$/i);
-  if (inlineColonMatch) {
-    const customer = inlineColonMatch[1].trim();
-    const rawPriority = inlineColonMatch[2]?.toLowerCase();
-    const problem = inlineColonMatch[3].trim();
-    const priorityMap: Record<string, "low" | "medium" | "high" | "urgent"> = {
-      baixa: "low", media: "medium", alta: "high", urgente: "urgent",
-      low: "low", medium: "medium", high: "high", urgent: "urgent",
-    };
-    return {
-      customer,
-      title: problem,
-      description: problem,
-      priority: rawPriority ? priorityMap[rawPriority] ?? null : null,
-    };
-  }
-
-  return null;
-}
-
-function ticketCustomerIn(value: string): string | null {
-  const inline = parseInlineTicket(value);
-  if (inline?.customer) return inline.customer;
-
-  const match = value.match(/\b(?:para|pra|pro)\s+(?:o|a)?\s*cliente\s+([^?!.,;\n]+?)(?=\s+(?:com\s+)?(?:assunto|t[ií]tulo|descri[cç][aã]o|problema|prioridade)\b|$|[?!.,;\n])/i)
-    ?? value.match(/\b(?:chamado|ticket|suporte)\s+(?:para|pra|pro)\s+(?:(?:o|a)?\s*cliente\s+)?([^?!.,;\n]+?)(?=\s+(?:com\s+)?(?:assunto|t[ií]tulo|descri[cç][aã]o|problema|prioridade)\b|$|[?!.,;\n])/i)
-    ?? value.match(/^\s*cliente\s*:?\s*([^?!.,;\n]+?)(?=$|[?!.,;\n])/i);
-  return match?.[1]?.trim() || null;
-}
-
-function ticketSlotIn(value: string, slot: "title" | "description"): string | null {
-  const marker = slot === "title" ? "(?:assunto|t[ií]tulo)" : "(?:descri[cç][aã]o|problema|relato)";
-  const match = value.match(new RegExp(`\\b${marker}\\s*(?::|é|eh|=)\\s*([\\s\\S]+?)(?=\\s*(?:[;\\n]|\\be\\s+)?\\s*(?:assunto|t[ií]tulo|descri[cç][aã]o|problema|relato)\\s*(?::|é|eh|=)|$)`, "i"));
-  return match?.[1]?.trim().replace(/[;\s]+$/, "") || null;
-}
-
-function ticketPriorityIn(value: string): "low" | "medium" | "high" | "urgent" | null {
-  const match = normalizeTicketIntent(value).match(/\bprioridade\s*(?::|e|=)?\s*(baixa|media|alta|urgente|low|medium|high|urgent)\b/);
-  if (!match) return null;
-  return ({ baixa: "low", media: "medium", alta: "high", urgente: "urgent",
-    low: "low", medium: "medium", high: "high", urgent: "urgent" } as const)[match[1] as "baixa" | "media" | "alta" | "urgente" | "low" | "medium" | "high" | "urgent"];
-}
-
-function ticketCreationDraft(message: string, history: readonly IAMessage[]): { customer: string | null; title: string | null; description: string | null; priority: "low" | "medium" | "high" | "urgent" | null; correction: boolean } | null {
-  const recent = history.slice(-8);
-  const previousTicketIndex = recent.findLastIndex(item => item.role === "user" && isTicketCreationRequest(item.content));
-  const normalizedMessage = normalizeTicketIntent(message.trim());
-  const correction = /^(?:nao\b|e\s+(?:pra|para|um)\b|era\b|errou\b)/.test(normalizedMessage)
-    && /\b(?:chamado|ticket|suporte)\b/.test(normalizedMessage);
-  const currentIntent = isTicketCreationRequest(message) || correction;
-  const awaitingSlots = previousTicketIndex >= 0 && recent.slice(previousTicketIndex + 1).some(item =>
-    item.role === "assistant" && /(Para preparar o chamado|Qual é o assunto e a descrição do chamado|informe .* para eu preparar o registro)/i.test(item.content));
-  const awaitingCustomerChoice = previousTicketIndex >= 0 && recent.slice(previousTicketIndex + 1).some(item =>
-    item.role === "assistant" && /(Localizei mais de um cliente|Para qual deles deseja abrir o chamado|Não localizei nenhum cliente)/i.test(item.content));
-  const inlineParsed = parseInlineTicket(message);
-  const currentCustomer = ticketCustomerIn(message)
-    ?? (awaitingCustomerChoice && message.trim().length > 0 ? message.trim().replace(/[?!.,;]+$/, "") : null);
-  if (!currentIntent && !(awaitingSlots && (ticketSlotIn(message, "title") || ticketSlotIn(message, "description") || currentCustomer)) && !awaitingCustomerChoice) return null;
-
-  const relevant = previousTicketIndex >= 0 && (!currentIntent || correction) ? recent.slice(previousTicketIndex) : [];
-  const userMessages = relevant.filter(item => item.role === "user").map(item => item.content);
-  const customer = currentCustomer ?? [...userMessages].reverse().map(ticketCustomerIn).find(Boolean) ?? null;
-  const title = ticketSlotIn(message, "title") ?? inlineParsed?.title ?? [...userMessages].reverse().map(item => ticketSlotIn(item, "title")).find(Boolean) ?? null;
-  const description = ticketSlotIn(message, "description") ?? inlineParsed?.description ?? [...userMessages].reverse().map(item => ticketSlotIn(item, "description")).find(Boolean) ?? null;
-  const priority = ticketPriorityIn(message) ?? inlineParsed?.priority ?? [...userMessages].reverse().map(ticketPriorityIn).find(Boolean) ?? null;
-  return { customer, title, description, priority, correction };
-}
-
-type TicketCustomerResolution =
-  | { status: "found"; customerName: string }
-  | { status: "missing" }
-  | { status: "ambiguous"; options: string[] }
-  | { status: "unavailable" };
-
-function ticketCustomerDisplayName(candidate: Record<string, unknown>, fallback: string): string {
-  const companyName = typeof candidate.companyName === "string" ? candidate.companyName.trim() : "";
-  const responsibleName = typeof candidate.responsibleName === "string" ? candidate.responsibleName.trim() : "";
-  const normalizedFallback = normalizeTicketIntent(fallback);
-  if (responsibleName && normalizeTicketIntent(responsibleName) === normalizedFallback) {
-    return responsibleName;
-  }
-  if (companyName && normalizeTicketIntent(companyName) === normalizedFallback) {
-    return companyName;
-  }
-  return companyName || responsibleName || fallback;
-}
-
-async function resolveTicketCustomer(pool: any, clientId: string, customer: string): Promise<TicketCustomerResolution> {
-  if (!pool) return { status: "unavailable" };
-  try {
-    const trimmed = customer.trim();
-    const searchTerm = `%${trimmed}%`;
-    const [rows] = await pool.execute(
-      `SELECT crm_client_id AS crmClientId, company_name AS companyName, responsible_name AS responsibleName, phone, status
-         FROM megadesk_crm_clients
-        WHERE client_id = ?
-          AND status IN ('ativo', 'lead')
-          AND (lifecycle_state IS NULL OR lifecycle_state <> 'archived')
-          AND (
-            crm_client_id = ?
-            OR company_name LIKE ?
-            OR responsible_name LIKE ?
-            OR phone LIKE ?
-          )
-        ORDER BY company_name, crm_client_id LIMIT 10`,
-      [clientId, trimmed, searchTerm, searchTerm, searchTerm],
-    ) as any[];
-    if (!Array.isArray(rows)) return { status: "unavailable" };
-    const candidates = rows.filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object"));
-    if (candidates.length === 0) return { status: "missing" };
-
-    const normalizedCustomer = normalizeTicketIntent(trimmed);
-    const digitsOnly = trimmed.replace(/\D/g, "");
-    const exactCandidates = candidates.filter(candidate =>
-      candidate.crmClientId === trimmed
-      || normalizeTicketIntent(ticketCustomerDisplayName(candidate, trimmed)) === normalizedCustomer
-      || (typeof candidate.responsibleName === "string" && normalizeTicketIntent(candidate.responsibleName) === normalizedCustomer)
-      || (typeof candidate.companyName === "string" && normalizeTicketIntent(candidate.companyName) === normalizedCustomer)
-      || (digitsOnly.length >= 8 && typeof candidate.phone === "string" && candidate.phone.replace(/\D/g, "") === digitsOnly),
-    );
-    const selected = exactCandidates.length === 1 ? exactCandidates[0] : candidates.length === 1 ? candidates[0] : null;
-    if (selected) return { status: "found", customerName: ticketCustomerDisplayName(selected, trimmed) };
-
-    const options = Array.from(new Set(candidates
-      .map(candidate => ticketCustomerDisplayName(candidate, trimmed))
-      .filter(Boolean)))
-      .slice(0, 5);
-    return { status: "ambiguous", options };
-  } catch {
-    return { status: "unavailable" };
-  }
+export async function resolveTicketCustomer(pool: any, clientId: string, customer: string) {
+  const res = await resolveClientInCRM(pool, clientId, customer);
+  if (res.status === "found") return { status: "found" as const, customerName: res.customerName };
+  if (res.status === "ambiguous") return { status: "ambiguous" as const, options: res.options };
+  if (res.status === "missing") return { status: "missing" as const };
+  return { status: "unavailable" as const };
 }
 
 async function chatWithClientGeminiInternal(
@@ -3652,177 +3520,206 @@ async function chatWithClientGeminiInternal(
     }
   }
 
-  // 3. Primeira chamada ao Gemini (com fast-path para saudações e conversas puras)
+  // 3. Chamada ao Gemini via Vercel AI SDK com tool calling nativo
   const allowedTools = getAllowedHermesTools(userPermissions);
-  const ticketDraft = ticketCreationDraft(userMessage, existingHistory);
-  if (ticketDraft) {
-    const ticketTool = allowedTools.find(tool => tool.name === "create_ticket");
-    const { customer, title, description, priority, correction } = ticketDraft;
-    let response: string;
-    let pendingActionRequest: PendingActionRequest | undefined;
-    if (!ticketTool) {
-      response = "Você não possui permissão para abrir chamados.";
-    } else if (!customer) {
-      response = "Para preparar o chamado, informe o nome do cliente.";
-    } else {
-      const customerResolution = await resolveTicketCustomer(pool, clientId, customer);
-      if (customerResolution.status === "unavailable") {
-        response = "Não consegui confirmar o cadastro do cliente agora. Tente novamente em instantes.";
-      } else if (customerResolution.status === "missing") {
-        response = `Não localizei nenhum cliente com o nome '${customer}' na nossa base do CRM. Deseja cadastrá-lo primeiro ou verificar o nome completo?`;
-      } else if (customerResolution.status === "ambiguous") {
-        const options = customerResolution.options.length > 0
-          ? customerResolution.options.map(option => `[${option}]`).join(" e ")
-          : "cadastros com esse nome";
-        response = `Localizei mais de um cliente com esse nome: ${options}. Para qual deles deseja abrir o chamado?`;
-      } else if (!title || !description) {
-        const resolvedCustomer = customerResolution.customerName;
-        if (!title && !description) {
-          response = `Localizei o cadastro de ${resolvedCustomer}. Qual é o assunto e a descrição do chamado para eu preparar o registro?`;
-        } else {
-        const missing = [!title ? "assunto" : "", !description ? "descrição do problema" : ""].filter(Boolean).join(" e ");
-          response = `${correction ? "Entendido, vamos abrir um chamado. " : ""}Localizei o cadastro de ${resolvedCustomer}. Informe ${missing} para eu preparar o registro.`;
-        }
-      } else {
-        const resolvedCustomer = customerResolution.customerName;
-        pendingActionRequest = createPendingActionRequest(ticketTool, { customer: resolvedCustomer, title, description,
-          ...(priority ? { priority } : {}) }, { clientId, userId });
-        response = `Preparei o chamado "${title}" para ${resolvedCustomer}. Confirme o card para executar a abertura.`;
-      }
-    }
-    await saveConversationHistory(clientId, userId, [
-      ...existingHistory,
-      { role: "user" as const, content: userMessage, timestamp: Date.now() },
-      { role: "assistant" as const, content: response, timestamp: Date.now(), ...(pendingActionRequest ? { pendingActionRequest } : {}) },
-    ].slice(-50));
-    const conversationId = await logIAConversation(clientId, userId, userMessage, response, 0);
-    return { ok: true, response, tokensUsed: 0, conversationId,
-      functionCallsMade: pendingActionRequest ? ["create_ticket"] : [], pendingActionRequest };
-  }
-  const isConversational = isConversationalGreeting(userMessage);
-  const activeTools = isConversational ? [] : allowedTools;
-  const requestBody: GeminiRequest = {
-    contents,
-    ...(activeTools.length > 0 ? { tools: [{ functionDeclarations: activeTools.map(tool => sanitizeFunctionDeclaration(tool.declaration)) }] } : {}),
-    systemInstruction: { parts: [{ text: buildSystemInstruction(activeTools, userPreferences) }] },
-    generationConfig: { temperature: 0.3, maxOutputTokens: 800 },
-  };
+  const hermesTools = createHermesTools({
+    clientId,
+    userId,
+    pool,
+    userPermissions,
+  });
 
-  let providerResponse = await callGeminiWithEnvironmentFallback(geminiKey, requestBody);
-  let data = providerResponse.data;
-  geminiKey = providerResponse.apiKey;
+  // Integra ferramentas autorizadas do registro ao Vercel AI SDK
+  for (const t of allowedTools) {
+    if (hermesTools[t.name]) continue;
+    hermesTools[t.name] = tool({
+      description: t.declaration.description,
+      inputSchema: jsonSchema({ type: "object", properties: t.declaration.parameters?.properties ?? {} }),
+      execute: async (args: any) => {
+        if (t.type === "MUTATION") {
+          let mutationArgs = args ?? {};
+          if (t.name === "create_proposal") {
+            mutationArgs = enforceUserProvidedPrices(mutationArgs, userMessage, existingHistory);
+          }
+          const pendingAction = createPendingActionRequest(t, mutationArgs, { clientId, userId });
+          return { success: true, pendingActionRequest: pendingAction };
+        }
+        const raw = await executeClientFunction(t.name, args ?? {}, clientId, userPermissions, geminiKey, userId);
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return { output: raw };
+        }
+      },
+    }) as any;
+  }
+
+  const promptMessages = [
+    ...selectGeminiPromptHistory(existingHistory).map((msg) => ({
+      role: (msg.role === "user" ? "user" : "assistant") as "user" | "assistant",
+      content: msg.content,
+    })),
+    { role: "user" as const, content: userMessage },
+  ];
+
+  const systemInstruction = buildSystemInstruction(allowedTools, userPreferences);
+
+  let aiResult: any;
+  const targetModel = DEFAULT_GEMINI_MODEL || "gemini-1.5-flash";
+  const isGreeting = isConversationalGreeting(userMessage);
+
+  const stopConditions = [
+    isStepCount(5),
+    ({ steps }: any) => {
+      const lastStep = steps[steps.length - 1];
+      return (
+        lastStep?.toolCalls?.some((tc: any) => {
+          const toolDef = allowedTools.find((t) => t.name === tc.toolName);
+          return toolDef?.type === "MUTATION" || tc.toolName === "solicitar_abertura_chamado";
+        }) ?? false
+      );
+    },
+  ];
+
+  try {
+    const googleInstance = createGoogleGenerativeAI({
+      apiKey: geminiKey,
+      fetch: safeAiFetch,
+    });
+    aiResult = await generateText({
+      model: googleInstance(targetModel),
+      system: systemInstruction,
+      messages: promptMessages,
+      tools: isGreeting ? undefined : hermesTools,
+      stopWhen: stopConditions,
+    });
+  } catch (error: any) {
+    const isKeyError = /API_KEY|invalid|unauthorized|403/i.test(error?.message || "");
+    const envKey = getEnvironmentGeminiApiKey();
+    if (isKeyError && envKey && envKey !== geminiKey) {
+      console.warn("[Assistant] Tenant Gemini credential was rejected; retrying once with the configured environment credential.");
+      const envGoogle = createGoogleGenerativeAI({
+        apiKey: envKey,
+        fetch: safeAiFetch,
+      });
+      aiResult = await generateText({
+        model: envGoogle(targetModel),
+        system: systemInstruction,
+        messages: promptMessages,
+        tools: isGreeting ? undefined : hermesTools,
+        stopWhen: stopConditions,
+      });
+    } else {
+      throw error;
+    }
+  }
+
   const functionCallsMade: string[] = [];
-  let promptTokens = tokenUsagePart(data, "promptTokenCount");
-  let completionTokens = tokenUsagePart(data, "candidatesTokenCount");
-  let tokensUsed = tokenUsageTotal(data, promptTokens, completionTokens);
   let pendingActionRequest: PendingActionRequest | undefined;
   const executedReadResults: Array<{ name: string; args: Record<string, unknown>; output: any }> = [];
-  let sawTextFunctionCall = false;
 
-  // 4. Processa function calls em loop (até 3 iterações consecutivas para multi-intent)
-  let iterations = 0;
-  while (iterations < 3) {
-    const candidate = data?.candidates?.[0];
-    const parts = candidate?.content?.parts ?? [];
-    const structuredCalls = parts.filter((p: any) => Boolean(p.functionCall));
-    const candidateText = parts.map((p: any) => typeof p.text === "string" ? p.text : "").join("\n");
-    const textCallTurn = structuredCalls.length === 0 && /<functionCall\b/i.test(candidateText);
-    if (textCallTurn) sawTextFunctionCall = true;
-    const functionCallParts = textCallTurn
-      ? parseTextFunctionCalls(candidateText, userPermissions)
-      : structuredCalls;
-    if (functionCallParts.length === 0) break;
-
-    iterations++;
-    const modelParts: any[] = [];
-    const functionResponseParts: any[] = [];
-
-    // Se houver ferramentas MUTATION, processa a primeira mutação como HITL e encerra o loop
-    const mutationFcp = functionCallParts.find((fcp: any) => {
-      const tool = getAuthorizedHermesTool(fcp.functionCall?.name, userPermissions);
-      return tool?.type === "MUTATION";
-    });
-
-    if (mutationFcp) {
-      const fc = mutationFcp.functionCall;
-      functionCallsMade.push(fc.name);
-      const authorizedTool = getAuthorizedHermesTool(fc.name, userPermissions)!;
-      let mutationArgs = fc.args ?? {};
-      if (fc.name === "create_proposal") {
-        mutationArgs = enforceUserProvidedPrices(mutationArgs, userMessage, existingHistory);
+  if (aiResult.toolResults && Array.isArray(aiResult.toolResults)) {
+    for (const tr of aiResult.toolResults) {
+      if (tr.output?.pendingActionRequest) {
+        pendingActionRequest = tr.output.pendingActionRequest;
+      } else {
+        executedReadResults.push({
+          name: tr.toolName,
+          args: (tr.input as any) || {},
+          output: tr.output,
+        });
       }
-      pendingActionRequest = createPendingActionRequest(authorizedTool, mutationArgs, { clientId, userId });
-      break;
     }
-
-    // Executa todas as ferramentas READ em paralelo com Promise.all
-    for (const fcp of functionCallParts) {
-      const fc = fcp.functionCall;
-      functionCallsMade.push(fc.name);
-      modelParts.push({ functionCall: fc });
-    }
-
-    const toolExecutionResults = await Promise.all(
-      functionCallParts.map(async (fcp: any) => {
-        const fc = fcp.functionCall;
-        let funcResult: string;
-        try {
-          funcResult = await executeClientFunction(fc.name, fc.args ?? {}, clientId, userPermissions, geminiKey, userId);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : "Falha ao executar ferramenta local.";
-          funcResult = JSON.stringify({ success: false, error: message });
-        }
-
-        let parsedOutput: unknown;
-        try {
-          parsedOutput = JSON.parse(funcResult);
-        } catch {
-          parsedOutput = funcResult;
-        }
-
-        return {
-          name: fc.name,
-          args: fc.args ?? {},
-          output: parsedOutput,
-        };
-      })
-    );
-
-    for (const res of toolExecutionResults) {
-      executedReadResults.push(res);
-      functionResponseParts.push({
-        functionResponse: {
-          name: res.name,
-          response: {
-            output: res.output,
-            instrucao_resposta: "Use somente dados efetivamente retornados pelas ferramentas. Se faltar consulta complementar, chame a ferramenta correspondente sem preâmbulo. Se a consulta falhou, informe a falha; se o resultado está vazio, informe ausência. Responda de forma breve e direta.",
-            ...(res.output && typeof res.output === "object" && !Array.isArray(res.output) ? res.output : {}),
-          },
-        },
-      });
-    }
-
-    // O provedor não emitiu uma chamada estruturada: não forjar um turno nativo.
-    // Os resultados reais serão formatados deterministicamente abaixo.
-    if (textCallTurn) break;
-
-    requestBody.contents = [
-      ...requestBody.contents,
-      { role: "model", parts: modelParts },
-      { role: "user", parts: functionResponseParts },
-    ];
-    providerResponse = await callGeminiWithEnvironmentFallback(geminiKey, requestBody);
-    data = providerResponse.data;
-    geminiKey = providerResponse.apiKey;
-    const nextPromptTokens = tokenUsagePart(data, "promptTokenCount");
-    const nextCompletionTokens = tokenUsagePart(data, "candidatesTokenCount");
-    promptTokens += nextPromptTokens;
-    completionTokens += nextCompletionTokens;
-    tokensUsed += tokenUsageTotal(data, nextPromptTokens, nextCompletionTokens);
   }
 
-  // A resposta textual do modelo não comprova uma consulta. Para intenções
-  // inequívocas, executa a leitura autorizada mesmo se o modelo a omitiu.
+  if (aiResult.toolCalls && Array.isArray(aiResult.toolCalls)) {
+    for (const tc of aiResult.toolCalls) {
+      if (!functionCallsMade.includes(tc.toolName)) {
+        functionCallsMade.push(tc.toolName);
+      }
+      const toolDef = allowedTools.find(t => t.name === tc.toolName);
+      if (toolDef?.type === "MUTATION" && !pendingActionRequest) {
+        let mutationArgs = (tc.input as any) ?? {};
+        if (toolDef.name === "create_proposal") {
+          mutationArgs = enforceUserProvidedPrices(mutationArgs, userMessage, existingHistory);
+        }
+        pendingActionRequest = createPendingActionRequest(toolDef, mutationArgs, { clientId, userId });
+      } else if (toolDef?.type === "READ" && !executedReadResults.some(r => r.name === tc.toolName)) {
+        const raw = await executeClientFunction(tc.toolName, (tc.input as any) ?? {}, clientId, userPermissions, geminiKey, userId);
+        let output: any;
+        try { output = JSON.parse(raw); } catch { output = { output: raw }; }
+        executedReadResults.push({
+          name: tc.toolName,
+          args: (tc.input as any) ?? {},
+          output,
+        });
+      }
+    }
+  }
+
+  // Suporte a tags textuais de contingência se o modelo responder em texto com <functionCall>
+  const rawModelText = aiResult.text?.trim() ?? "";
+  let modelText = sanitizeModelResponseText(rawModelText);
+  let sawTextFunctionCall = false;
+  if (/<functionCall\b/i.test(rawModelText)) {
+    const parsedTextCalls = parseTextFunctionCalls(rawModelText, userPermissions);
+    if (parsedTextCalls.length > 0) {
+      sawTextFunctionCall = true;
+      for (const ptc of parsedTextCalls) {
+        const fc = ptc.functionCall;
+        if (!functionCallsMade.includes(fc.name)) {
+          functionCallsMade.push(fc.name);
+        }
+        const toolDef = getAuthorizedHermesTool(fc.name, userPermissions);
+        if (toolDef?.type === "MUTATION" && !pendingActionRequest) {
+          pendingActionRequest = createPendingActionRequest(toolDef, fc.args ?? {}, { clientId, userId });
+        } else if (toolDef) {
+          try {
+            const raw = await executeClientFunction(fc.name, fc.args ?? {}, clientId, userPermissions, geminiKey, userId);
+            let parsed: any;
+            try { parsed = JSON.parse(raw); } catch { parsed = { output: raw }; }
+            executedReadResults.push({ name: fc.name, args: fc.args ?? {}, output: parsed });
+          } catch {}
+        }
+      }
+    }
+    modelText = sanitizeModelResponseText(rawModelText);
+  }
+
+  // Se o usuário solicitou cadastro de entidade e nenhuma tool foi chamada
+  if (!pendingActionRequest) {
+    const entityAction = extractEntityCreationFromMessage(userMessage, allowedTools, { clientId, userId }, existingHistory);
+    if (entityAction) {
+      pendingActionRequest = entityAction;
+      if (!functionCallsMade.includes(entityAction.toolName)) {
+        functionCallsMade.push(entityAction.toolName);
+      }
+    }
+  }
+
+  // Se a intenção do usuário foi orçamento/proposta e não há pendingActionRequest
+  const proposalDetails = extractProposalDetailsFromMessage(userMessage, executedReadResults, existingHistory);
+  if (proposalDetails.isProposal && !pendingActionRequest) {
+    const createProposalTool = allowedTools.find(t => t.name === "create_proposal");
+    if (createProposalTool) {
+      try {
+        pendingActionRequest = createPendingActionRequest(
+          createProposalTool,
+          {
+            clientName: proposalDetails.clientName,
+            items: proposalDetails.items,
+            notes: `Orçamento gerado a partir do pedido do usuário: "${userMessage}"`,
+          },
+          { clientId, userId },
+        );
+        if (!functionCallsMade.includes("create_proposal")) {
+          functionCallsMade.push("create_proposal");
+        }
+      } catch {}
+    }
+  }
+
+  // Fallback para ferramentas READ obrigatórias se omitidas
   const requiredReadTool = requiredBusinessReadTool(userMessage);
   if (requiredReadTool && !pendingActionRequest
     && !executedReadResults.some(result => result.name === requiredReadTool)
@@ -3834,72 +3731,34 @@ async function chatWithClientGeminiInternal(
     functionCallsMade.push(requiredReadTool);
   }
 
-  // Se a intenção do usuário foi orçamento/proposta e a checagem READ terminou sem pendingActionRequest,
-  // emite a pendingActionRequest de create_proposal para que o Card HITL seja renderizado na tela.
-  const proposalDetails = extractProposalDetailsFromMessage(userMessage, executedReadResults, existingHistory);
-  if (proposalDetails.isProposal && !pendingActionRequest) {
-    const createProposalTool = getAllowedHermesTools(userPermissions).find(t => t.name === "create_proposal");
-    if (createProposalTool) {
-      try {
-        pendingActionRequest = createPendingActionRequest(
-          createProposalTool,
-          {
-            clientName: proposalDetails.clientName,
-            items: proposalDetails.items,
-            notes: `Orçamento gerado a partir do pedido do usuário: "${userMessage}"`,
-          },
-          { clientId, userId }
-        );
-        if (!functionCallsMade.includes("create_proposal")) {
-          functionCallsMade.push("create_proposal");
-        }
-      } catch {
-        // Se houver qualquer falha na validação de parâmetros, segue sem travar
-      }
-    }
-  }
-
-  // Se o usuário solicitou cadastro de entidade (fornecedor, cliente, serviço, produto, proposta) e o modelo não emitiu functionCall
-  if (!pendingActionRequest) {
-    const entityAction = extractEntityCreationFromMessage(userMessage, allowedTools, { clientId, userId }, existingHistory);
-    if (entityAction) {
-      pendingActionRequest = entityAction;
-      if (!functionCallsMade.includes(entityAction.toolName)) {
-        functionCallsMade.push(entityAction.toolName);
-      }
-    }
-  }
-
-  const candidateParts = data?.candidates?.[0]?.content?.parts ?? [];
-  let modelText = candidateParts
-    .map((p: any) => (typeof p.text === "string" ? p.text.trim() : ""))
-    .filter(Boolean)
-    .join("\n")
-    .trim();
-
-  modelText = sanitizeModelResponseText(modelText);
-
-  if (isPreliminaryWaitingText(modelText)) {
-    modelText = "";
-  }
-
-  const synthesizedFallback = synthesizeDeterministicResponse(executedReadResults, userMessage);
-
-  const ticketsResult = executedReadResults.find(r => r.name === "get_open_tickets" || r.name === "get_tickets_overview");
-  if (ticketsResult && (!modelText || isPreliminaryWaitingText(modelText))) {
-    modelText = synthesizeDeterministicResponse(executedReadResults, userMessage) || "";
-  }
-
   let finalResponse = modelText;
 
+  // Se houver chamadas READ, prioriza sintetização determinística
+  if (executedReadResults.length > 0) {
+    const whatsappResult = executedReadResults.find(r => r.name === "get_whatsapp_status");
+    if (whatsappResult && whatsappResult.output) {
+      const isDisconnected = whatsappResult.output.status === "disconnected" || whatsappResult.output.connected === false;
+      finalResponse = isDisconnected
+        ? "A instância do WhatsApp está **desconectada**. É preciso restabelecer a conexão antes de enviar mensagens."
+        : "A conexão do WhatsApp está **ativa** no momento.";
+    } else {
+      const synth = synthesizeDeterministicResponse(executedReadResults, userMessage);
+      if (synth && (!finalResponse || isPreliminaryWaitingText(finalResponse) || /\b(panorama|resumo|chamados|conversas|estoque)\b/i.test(userMessage))) {
+        finalResponse = synth;
+      }
+    }
+  }
+
+  // Se o modelo invocou uma ferramenta e não gerou texto complementar, usamos a mensagem retornada pela ferramenta
+  if (!finalResponse && aiResult.toolResults && aiResult.toolResults.length > 0) {
+    const firstOutput = aiResult.toolResults[0]?.output;
+    if (typeof firstOutput?.message === "string") {
+      finalResponse = firstOutput.message;
+    }
+  }
+
   if (!finalResponse || isPreliminaryWaitingText(finalResponse)) {
-    if (detectedPrefs) {
-      const salutation = userPreferences.preferredName || userPreferences.honorific || "Operador";
-      finalResponse = `Entendido, ${salutation}. A partir de agora nos comunicaremos desta forma.`;
-    } else 
-    if (synthesizedFallback) {
-      finalResponse = synthesizedFallback;
-    } else if (pendingActionRequest) {
+    if (pendingActionRequest) {
       const rawTarget = pendingActionRequest.args.name ??
         pendingActionRequest.args.legalName ??
         pendingActionRequest.args.clientName ??
@@ -3944,14 +3803,11 @@ async function chatWithClientGeminiInternal(
       }
     } else if (executedReadResults.length > 0) {
       finalResponse = "A consulta não trouxe detalhes suficientes para responder ao pedido. Pode especificar o dado que precisa?";
+    } else if (asksForBusinessData(userMessage)) {
+      finalResponse = "Não foi possível consultar os dados solicitados no momento.";
     } else {
       finalResponse = "Não consegui processar a resposta neste momento. Pode repetir ou detalhar sua solicitação?";
     }
-  }
-
-  // Garantia absoluta: se get_open_tickets foi executado, sintetizar deterministicamente
-  if (ticketsResult && (!finalResponse || isPreliminaryWaitingText(finalResponse))) {
-    finalResponse = synthesizeDeterministicResponse([ticketsResult], userMessage) || "Não há chamados abertos no momento.";
   }
 
   if (!pendingActionRequest && requiredReadTool) {
@@ -3977,8 +3833,8 @@ async function chatWithClientGeminiInternal(
       : synthesizeDeterministicSingle(result, userMessage, executedReadResults))
       .filter(Boolean).join("\n\n") || "Não foi possível executar a consulta solicitada.";
   }
-  finalResponse = sanitizeModelResponseText(finalResponse)
-    || "Não foi possível obter uma resposta válida no momento.";
+
+  const tokensUsed = aiResult.usage?.totalTokens ?? 0;
 
   // 5. Salva no histórico
   const updatedHistory: IAMessage[] = [
@@ -3992,7 +3848,6 @@ async function chatWithClientGeminiInternal(
     },
   ];
 
-  // Mantém apenas as últimas 50 mensagens
   const trimmedHistory = updatedHistory.slice(-50);
   await saveConversationHistory(clientId, userId, trimmedHistory);
 
@@ -4000,16 +3855,21 @@ async function chatWithClientGeminiInternal(
   const conversationId = await logIAConversation(
     clientId, userId, userMessage, finalResponse, tokensUsed
   );
-  await recordTokenUsage({
-    clientId,
-    userEmail: userId,
-    conversationId,
-    promptTokens,
-    completionTokens,
-    totalTokens: tokensUsed,
-    model: GEMINI_MODEL,
-    functionCallsCount: functionCallsMade.length,
-  });
+
+  if (tokensUsed > 0) {
+    try {
+      await recordTokenUsage({
+        clientId,
+        userEmail: userId,
+        conversationId,
+        promptTokens: aiResult.usage?.promptTokens ?? 0,
+        completionTokens: aiResult.usage?.completionTokens ?? 0,
+        totalTokens: tokensUsed,
+        model: GEMINI_MODEL,
+        functionCallsCount: functionCallsMade.length,
+      });
+    } catch {}
+  }
 
   return {
     ok: true,
